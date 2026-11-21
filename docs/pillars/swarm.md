@@ -93,19 +93,13 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
 
 ## Event driven engine
 
-Each swarm runs one of two engines, chosen by its `engine` setting:
-
-| Engine | Who starts lane agents |
-|---|---|
-| `legacy` (default) | The minute tick spawns, reaps and acknowledges agents itself. |
-| `events` | The hub offers ready tasks on the NATS JetStream bus and hives pull them. |
+Every swarm runs the `events` engine: the hub offers ready tasks on the NATS JetStream bus and hives pull them.
+The `engine` setting takes only `events`, its default; any other value is refused, and every stored swarm reads as
+`events`.
 
 ```bash
 agentihooks swarm <slug> set engine=events
-agentihooks swarm <slug> set engine=legacy   # switch back
 ```
-
-Swarms created before the setting existed read as `legacy`. Any other value is refused.
 
 ### The life of a task
 
@@ -159,7 +153,7 @@ hive the execution stop with the retirement reason (see
 [Retiring a hub admitted agent](hives.md#retiring-a-hub-admitted-agent)). The tick still
 runs master failover and recovery, the orphan pass that reopens a claimed task whose claimant has no agent record
 and no claim, pane evidence, exits, verification, the dispatcher, master
-scaling and the promotion and release watches for both engines. Master agents are reaped by the tick under either engine.
+scaling and the promotion and release watches. Master agents are reaped by the tick.
 
 The hub offers eng, ci and plan tasks, and the spoke code is the same for every lane. With
 `AGENTIHOOKS_DEPLOYMENT=distributed`, a workstation runs the master lane spoke and the eng, ci and plan spokes with
