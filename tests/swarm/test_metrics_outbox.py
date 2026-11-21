@@ -1,12 +1,16 @@
 import json
 import sqlite3
 import threading
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 from scripts.swarm import metrics_outbox
+from scripts.swarm_ledger.repository import sqlite
 
 DAY_MS, Outbox, Settings, Table = (
     metrics_outbox.DAY_MS,
@@ -143,6 +147,27 @@ def test_the_spool_waits_on_a_busy_lock(tmp_path, sink, monkeypatch):
     Outbox(tmp_path / "o.sqlite", SINK, sink.send).close()
     assert seen == [{"timeout": metrics_outbox.LOCK_TIMEOUT_S}]
     assert metrics_outbox.LOCK_TIMEOUT_S == 10
+
+
+@pytest.mark.feature("metrics-outbox-and-recall-store-wait-out-another-write-lock")
+def test_a_new_spool_waits_out_another_connections_write_lock_before_it_turns_on_wal(
+    tmp_path: Path, sink: Sink, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "outbox.sqlite"
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    pauses: list[float] = []
+
+    def pause(seconds: float) -> None:
+        pauses.append(seconds)
+        holder.execute("ROLLBACK")
+
+    monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=pause))
+    Outbox(path, SINK, sink.send).close()
+    holder.close()
+    assert pauses == [0.05]
+    with closing(sqlite3.connect(path)) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone() == ("wal",)
 
 
 def test_the_table_is_created_once_before_its_first_insert(box, sink):
