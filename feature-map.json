@@ -9295,6 +9295,16 @@
       ]
     },
     {
+      "id": "branch-rule-empty-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2717",
+      "behaviour": "When branch rule confirmation receives an empty pull request read, it keeps the hold and writes an unread diagnostic naming the empty read and possible GitHub backoff or rate limiting.",
+      "seam": "scripts.swarm.waits.required_green at the branch rule confirmation pull request read",
+      "tests": [
+        "tests/swarm/test_waits.py::test_required_green_names_an_empty_pull_request_read"
+      ]
+    },
+    {
       "id": "merge-pass-hold-reasons",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2649",
