@@ -4957,6 +4957,17 @@
       ]
     },
     {
+      "id": "ledger-size-small-refused-with-swarm",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2668",
+      "behaviour": "A size change to small on a ledger that a swarm works is refused with a warning naming the swarm and the ledger keeps its size, because a small ledger writes no outbox rows and its swarm would stop receiving ledger events; on a ledger no swarm works the size changes to small.",
+      "seam": "scripts.swarm_ledger.ledger_size.apply through the SQLite ledger repository apply_ops size_set operation, with the swarm store reached through the ledger swarm port",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_size.py::test_size_small_is_refused_on_a_ledger_its_swarm_works_and_the_size_stays_swarm",
+        "tests/swarm_ledger/test_ledger_size.py::test_size_small_is_set_on_a_ledger_no_swarm_works"
+      ]
+    },
+    {
       "id": "ledger-write-timeout",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-api-timeouts",
