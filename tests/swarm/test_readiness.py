@@ -162,7 +162,7 @@ def test_publish_opens_every_lane_queue_even_with_no_offer_so_the_plan_stream_ex
     bus.queue = queue
     policy = QueuePolicy(max_deliver=3)
     assert readiness.publish(bus, snapshot(doc([])), NOW, policy) == []
-    assert opened == [(readiness.queue_name(SLUG, lane), policy) for lane in ("eng", "ci", "plan")]
+    assert opened == [(readiness.queue_name(SLUG, lane), policy) for lane in ("eng", "ci", "review", "plan")]
 
 
 def test_publish_offers_a_plan_task_to_the_plan_queue_it_opened(bus: Bus) -> None:
