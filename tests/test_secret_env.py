@@ -13,9 +13,6 @@ from hooks.context import credential_guard
 from scripts import secret_env
 from scripts.cli_delegates import delegated_cli
 
-pytestmark = pytest.mark.feature("cluster-secret-private-env")
-
-
 def _args(target: Path) -> list[str]:
     return ["example", "service", "token.key", "SERVICE_TOKEN", str(target)]
 
@@ -37,16 +34,19 @@ def _cluster(monkeypatch: pytest.MonkeyPatch, value: str, code: int = 0) -> Mock
     ],
     ids=["transfer", "file-read", "secret-read", "nested-read"],
 )
+@pytest.mark.feature("cluster-secret-private-env")
 def test_guard_keeps_the_transfer_and_reader_boundaries(suffix: str, blocked: bool) -> None:
     command = "agentihooks secret-env example service token.key SERVICE_TOKEN ~/.agentihooks/private.env"
     verdict = credential_guard.decide({"tool_name": "Bash", "tool_input": {"command": command + suffix}})
     assert (verdict is not None) is blocked
 
 
+@pytest.mark.feature("cluster-secret-private-env")
 def test_the_cli_delegates_the_transfer() -> None:
     assert delegated_cli(["secret-env"]) is secret_env.main
 
 
+@pytest.mark.feature("cluster-secret-private-env")
 def test_transfer_creates_a_private_file_without_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -79,6 +79,7 @@ def test_transfer_creates_a_private_file_without_output(
     assert capsys.readouterr() == ("", "")
 
 
+@pytest.mark.feature("cluster-secret-private-env")
 def test_transfer_replaces_duplicate_assignments_and_preserves_other_lines(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -107,6 +108,7 @@ def test_transfer_replaces_duplicate_assignments_and_preserves_other_lines(
         "inside-symlink",
     ],
 )
+@pytest.mark.feature("cluster-secret-private-env")
 def test_transfer_refuses_unsafe_targets_before_reading_the_cluster(
     kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -138,6 +140,7 @@ def test_transfer_refuses_unsafe_targets_before_reading_the_cluster(
 
 
 @pytest.mark.parametrize("index,value", [(0, "--bad"), (1, "--bad"), (2, 'bad"key'), (3, "BAD-NAME")])
+@pytest.mark.feature("cluster-secret-private-env")
 def test_transfer_refuses_invalid_identifiers(
     index: int, value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -151,6 +154,7 @@ def test_transfer_refuses_invalid_identifiers(
 
 
 @pytest.mark.parametrize("failure", ["exit", "timeout", "missing", "invalid", "multiline", "nul"])
+@pytest.mark.feature("cluster-secret-private-env")
 def test_failed_retrieval_never_writes_or_exposes_values(
     failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -174,10 +178,11 @@ def test_failed_retrieval_never_writes_or_exposes_values(
 
 
 @pytest.mark.parametrize("value", ["", "caf\u00e9 synthetic"])
+@pytest.mark.feature("cluster-secret-private-env")
 def test_transfer_appends_to_a_relative_file(value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     target = tmp_path / "private.env"
-    target.write_text("OTHER=café\n", encoding="utf-8")
+    target.write_text("# preserved\n\nOTHER='café'\n", encoding="utf-8")
 
     def text_encoding(encoding: str | None, _stacklevel: int = 2) -> str:
         return "latin-1" if encoding is None else encoding
@@ -185,10 +190,11 @@ def test_transfer_appends_to_a_relative_file(value: str, tmp_path: Path, monkeyp
     monkeypatch.setattr(io, "text_encoding", text_encoding)
     _cluster(monkeypatch, value)
     assert secret_env.main(_args(Path("private.env"))) == 0
-    assert target.read_text(encoding="utf-8") == f"OTHER=café\nSERVICE_TOKEN={shlex.quote(value)}\n"
+    assert target.read_text(encoding="utf-8") == f"# preserved\n\nOTHER='café'\nSERVICE_TOKEN={shlex.quote(value)}\n"
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 
+@pytest.mark.feature("cluster-secret-private-env")
 def test_transfer_uses_the_default_agentihooks_home(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
     state = Path.home() / ".agentihooks"
@@ -199,6 +205,7 @@ def test_transfer_uses_the_default_agentihooks_home(monkeypatch: pytest.MonkeyPa
     assert target.read_text() == "SERVICE_TOKEN=synthetic-value\n"
 
 
+@pytest.mark.feature("cluster-secret-private-env")
 def test_failed_replace_preserves_the_file_and_cleans_the_private_temporary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -207,13 +214,15 @@ def test_failed_replace_preserves_the_file_and_cleans_the_private_temporary(
     target.write_text("OTHER=keep\n")
     _cluster(monkeypatch, "synthetic-value")
     monkeypatch.setattr(secret_env.os, "replace", Mock(side_effect=OSError("synthetic-value")))
+    before = set(tmp_path.iterdir())
     assert secret_env.main(_args(target)) == 1
     assert target.read_text() == "OTHER=keep\n"
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["private.env"]
+    assert set(tmp_path.iterdir()) == before
     assert capsys.readouterr() == ("", "Secret transfer failed.\n")
 
 
 @pytest.mark.parametrize("quote", ["'", '"'])
+@pytest.mark.feature("cluster-secret-private-env")
 def test_existing_multiline_values_are_refused_without_changes(
     quote: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -227,6 +236,7 @@ def test_existing_multiline_values_are_refused_without_changes(
     assert capsys.readouterr() == ("", "Secret transfer failed.\n")
 
 
+@pytest.mark.feature("cluster-secret-private-env")
 def test_apostrophes_round_trip_through_the_host_loader(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -250,6 +260,7 @@ def test_apostrophes_round_trip_through_the_host_loader(
         "synthetic 'value' " + chr(96),
     ],
 )
+@pytest.mark.feature("cluster-secret-private-env")
 def test_unrepresentable_values_are_refused_without_changes(
     value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -262,6 +273,56 @@ def test_unrepresentable_values_are_refused_without_changes(
     assert capsys.readouterr() == ("", "Secret transfer failed.\n")
 
 
+@pytest.mark.parametrize(
+    "original",
+    [
+        'OTHER="first \\" sample\nSERVICE_TOKEN=inside\nlast"\nSERVICE_TOKEN=old\n',
+        'OTHER=prefix"open\nSERVICE_TOKEN=inside\nlast"\nSERVICE_TOKEN=old\n',
+        'OTHER=first\\\n"open\nSERVICE_TOKEN=inside\nlast"\nSERVICE_TOKEN=old\n',
+        "not-an-assignment\nSERVICE_TOKEN=old\n",
+    ],
+    ids=["escaped-quote", "unquoted-quote", "continuation", "unsupported-line"],
+)
+@pytest.mark.feature("cluster-secret-private-env")
+def test_ambiguous_existing_content_is_refused_without_changes(
+    original: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    target = tmp_path / "private.env"
+    target.write_text(original)
+    _cluster(monkeypatch, "replacement")
+    assert secret_env.main(_args(target)) == 1
+    assert target.read_text() == original
+    assert capsys.readouterr() == ("", "Secret transfer failed.\n")
+
+
+@pytest.mark.feature("cluster-secret-private-env")
+def test_unicode_line_separators_are_refused_without_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    target = tmp_path / "private.env"
+    target.write_text("OTHER=keep\n")
+    _cluster(monkeypatch, "synthetic\u2028value")
+    assert secret_env.main(_args(target)) == 1
+    assert target.read_text() == "OTHER=keep\n"
+    assert capsys.readouterr() == ("", "Secret transfer failed.\n")
+
+
+@pytest.mark.feature("cluster-secret-private-env")
+def test_transfer_sets_exact_owner_permissions_despite_umask(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    target = tmp_path / "private.env"
+    _cluster(monkeypatch, "synthetic-value")
+    previous = secret_env.os.umask(0o777)
+    try:
+        assert secret_env.main(_args(target)) == 0
+    finally:
+        secret_env.os.umask(previous)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+@pytest.mark.feature("cluster-secret-private-env")
 def test_usage_is_fixed_and_does_not_read_the_cluster(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

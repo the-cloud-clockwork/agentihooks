@@ -3321,6 +3321,9 @@
         "tests/test_secret_env.py::test_existing_multiline_values_are_refused_without_changes",
         "tests/test_secret_env.py::test_apostrophes_round_trip_through_the_host_loader",
         "tests/test_secret_env.py::test_unrepresentable_values_are_refused_without_changes",
+        "tests/test_secret_env.py::test_ambiguous_existing_content_is_refused_without_changes",
+        "tests/test_secret_env.py::test_unicode_line_separators_are_refused_without_changes",
+        "tests/test_secret_env.py::test_transfer_sets_exact_owner_permissions_despite_umask",
         "tests/test_secret_env.py::test_usage_is_fixed_and_does_not_read_the_cluster"
       ]
     },

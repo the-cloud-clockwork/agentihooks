@@ -46,7 +46,7 @@ def _read_value(namespace: str, secret: str, key: str) -> str:
     if result.returncode:
         raise ValueError
     value = base64.b64decode(result.stdout, validate=True).decode("utf-8")
-    if any(character in value for character in "\r\n\x00"):
+    if "\x00" in value or "".join(value.splitlines()) != value:
         raise ValueError
     return value
 
@@ -59,12 +59,26 @@ def _quote(value: str) -> str:
     raise ValueError
 
 
-def _write_variable(target: Path, variable: str, value: str) -> None:
-    original = target.read_text(encoding="utf-8") if target.exists() else ""
-    for match in re.finditer(r"(?m)^[ \t]*(?:export[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*(['\"])(.*)$", original):
-        if match.group(1) not in match.group(2):
+def _existing_lines(target: Path) -> list[str]:
+    lines = target.read_text(encoding="utf-8").splitlines() if target.exists() else []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = re.fullmatch(r"(?:export[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*=(.*)", stripped)
+        if match is None:
             raise ValueError
-    lines = original.splitlines()
+        value = match.group(1).strip()
+        if value.startswith(("'", '"')):
+            if not re.fullmatch(r"""(?:'[^']*'|"[^"\\]*")[ \t]*(?:#.*)?""", value):
+                raise ValueError
+        elif any(character in value for character in "'\"\\"):
+            raise ValueError
+    return lines
+
+
+def _write_variable(target: Path, variable: str, value: str) -> None:
+    lines = _existing_lines(target)
     pattern = re.compile(rf"^\s*(?:export\s+)?{variable}\s*=")
     matches = [index for index, line in enumerate(lines) if pattern.match(line)]
     position = matches[0] if matches else len(lines)
@@ -74,6 +88,7 @@ def _write_variable(target: Path, variable: str, value: str) -> None:
     temporary = Path(name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            os.fchmod(stream.fileno(), 0o600)
             stream.write("\n".join(kept) + "\n")
         os.replace(temporary, target)
     finally:
