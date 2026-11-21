@@ -250,6 +250,23 @@ def test_every_slot_runs_a_unit_at_once(scheduler: str, jobs: queue.Queue, tmp_p
     assert [found(jobs, f"h1:test:{key}").outcome for key in keys] == ["passed"] * 40
 
 
+@pytest.mark.feature("lab-worker-sink-backlog")
+def test_the_sink_listens_with_room_for_forty_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
+    backlogs: list[int] = []
+    activate = ThreadingHTTPServer.server_activate
+
+    def observed(server: ThreadingHTTPServer) -> None:
+        backlogs.append(server.request_queue_size)
+        activate(server)
+
+    monkeypatch.setattr(ThreadingHTTPServer, "server_activate", observed)
+    upload = Sink()
+    upload.server.server_close()
+
+    assert len(backlogs) == 1
+    assert backlogs[0] >= 40
+
+
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_a_full_pod_waits_for_its_first_unit_to_end_while_the_second_still_runs(
     scheduler: str, lab: Counted, jobs: queue.Queue, tmp_path: Path
