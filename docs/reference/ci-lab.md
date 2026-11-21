@@ -1144,7 +1144,8 @@ its done criteria name are not recorded:
 | A venv build fails with `uv venv for <tree> ended with code` or `uv pip install for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
 | The worker log reads `ci-lab worker: unit <job> crashed: FileNotFoundError(2, 'No such file or directory')` and the traceback's last line names `<tree>/.github/test-requirements.lock` | The head does not track the test requirements lock, so `executors.lockfile_digest` cannot key the unit's venv. The unit never reports, its lease expires, and the [retry policy](#retry-policy) requeues it once and marks it lost on the second expiry | `git ls-tree <head> .github/test-requirements.lock` prints nothing; see [Which venv a unit gets](#which-venv-a-unit-gets) |
 | The same crash, with the traceback naming `<tree>/uv.lock` | The worker runs an image older than pull request 12536, which hashed the untracked `uv.lock`; every unit crashes this way | `kubectl -n ci-lab get deploy ci-lab-worker -o jsonpath='{.spec.template.spec.containers[0].image}'`, then roll the workers onto a release that carries the fix |
-| `ci_lab_cache_misses_total{cache="uv"}` rises with each new worker pod, and the first unit of a head on each pod starts with a venv build | The head's `.github/test-requirements.lock` differs from the lock the worker image baked, so each pod builds `/work/venvs/<digest>` once | Compare the two digests as in [Verify the venv keying](#verify-the-venv-keying); an image built from a commit with the same lock runs those units on the baked venv |
+| `ci_lab_cache_misses_total{cache="uv"}` rises once per pod for each lock digest the worker image did not bake | Those heads' `.github/test-requirements.lock` differs from the lock the image baked, so each pod builds `/work/venvs/<digest>` once for it; a pod whose baked marker matches a head's lock records no uv miss for it | Compare the two digests as in [Verify the venv keying](#verify-the-venv-keying); an image built from a commit with the same lock runs those units on the baked venv |
+| A venv build fails with `uv venv for <tree> ended with code None` or `uv pip install for <tree> ended with code None` | The step ran past the unit time limit, `Pod.timeout`, 1800 seconds, and the sandbox killed it | The kept build log the error names; no marker is written, so the next unit with that digest builds again |
 | Uploads time out or are refused | The MinIO egress rule does not match the object store's pods | `minio.namespace`, `minio.pods` and `minio.port` against `kubectl get pods -n <namespace> --show-labels` |
 | A sandboxed unit fails at bubblewrap with `Operation not permitted` | The pod runs under a seccomp profile that refuses namespace calls, or the node kernel restricts user namespaces | The pod's `seccompProfile`, then the namespace probe in the [sandbox verify](#unit-sandbox) steps on the node |
 | A worker pod is evicted for ephemeral storage | `/work`, `/tmp` and the logs passed 20 GiB | `kubectl -n ci-lab get events --field-selector reason=Evicted` |
@@ -4376,8 +4377,8 @@ Limitations:
 `venvs.venv_for(lockfile_digest, tree, root, build)` returns the baked image venv when its
 marker holds the digest. The executors pass the sha256 of the head's tracked
 `.github/test-requirements.lock` (`venvs.LOCKFILE`), the file the image hashes into that marker;
-`uv.lock` is not tracked and is never read. Otherwise it builds `root/<digest>` once, under a lock
-per digest, by running uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time
+`uv.lock` is not tracked and is never read. Otherwise it builds `root/<digest>` once (`root` is
+`Pod.venvs`, `/work/venvs` on the worker Deployment), under a lock per digest, by running uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time
 limit). The executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
 
 | Part | Value |
@@ -4425,21 +4426,20 @@ project with `--constraint .github/test-requirements.lock --excludes .github/tes
 into `/opt/agentihooks-venv`, then runs
 `sha256sum .github/test-requirements.lock | cut -d ' ' -f 1 > /opt/agentihooks-venv/lockfile.sha256`.
 The `CI lab image` workflow runs `docker/ci-lab/smoke.sh <image> <digest>` with the sha256 of the
-lock it built from, and the smoke fails when the baked marker holds any other digest. A head
-whose lock matches the commit the image was built from therefore runs on the baked venv, and any
-other lock costs one build per pod.
+lock it built from, and the smoke fails when the baked marker holds any other digest. A push to
+`dev` that changes `.github/test-requirements.lock` or `.github/test-excludes.txt` runs that
+workflow and publishes the `dev` tag, which the chart's `worker.image.tag` names with
+`imagePullPolicy: Always`, so worker pods created after it carry a venv baked from the new lock.
+A head whose lock matches the commit the image was built from therefore runs on the baked venv,
+and any other lock costs one build per pod.
 
-`uv.lock` takes no part: the repository does not track it (`.gitignore` lists it), and no lab
-code reads it. Until pull request 12536 the executors hashed `uv.lock`, so on a head without one
-every leased unit, static units included, crashed with `FileNotFoundError` before it ran.
-
-A change to `.github/test-requirements.lock` changes both keys at once. The worker computes a new
-digest and builds a new venv on each pod that leases one of the head's units, and the scheduler,
-which keys each unit's `toolchain.lockfile` on the git blob id of the same file in
-`MirrorExpander.expand`, gives every unit of that head a new key, so no verdict stored under the
-old lock answers it. The two values differ: the scheduler key is the git blob id of the file and
-the worker marker is the sha256 of its bytes. A head without the lock is still expanded, with an
-empty `lockfile` input, and its units then crash on the worker as the last row above shows.
+A change to `.github/test-requirements.lock` changes every key of the head's units. The worker
+computes a new digest and builds a new venv on each pod that leases one of them. The scheduler
+keys the `toolchain.lockfile` input of static, test and mutant units on the git blob id of the
+same file in `MirrorExpander.expand`, and the `runtime` of stats units on the sha256 of its bytes
+through `stats_cache.runtime_digest`, so no verdict stored under the old lock answers them. A head
+without the lock is still expanded, with an empty `lockfile` input and a null stats `runtime`, and
+its units then crash on the worker as the last row above shows.
 
 #### Verify the venv keying
 
