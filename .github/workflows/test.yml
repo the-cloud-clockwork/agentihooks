@@ -1316,12 +1316,13 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           COLLECTION_JOB: test-count (${{ matrix.python-version }})
+          COLLECTION_STEP: Upload the early collection
         run: |
           while :; do
             state="$(python -m scripts.ci_budget.rate_limit --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
-              --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion)\"")" || state=""
+              --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion) \([.steps[]? | select(.name == \"$COLLECTION_STEP\") | .conclusion][0])\"")" || state=""
             case "$state" in
-              "completed success") exit 0 ;;
+              "completed success"* | *" success") exit 0 ;;
               completed*) echo '::error::The early collection did not succeed.'; exit 1 ;;
             esac
             sleep 15
