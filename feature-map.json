@@ -11767,6 +11767,16 @@
       "tests": [
         "tests/tick/test_engine_joined_budget.py::test_the_step_finished_line_logs_the_live_budget_the_engine_joined_on"
       ]
+    },
+    {
+      "id": "prepare-unpushed-branch-fresh-cut",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-prepare-missing-branch-fresh-cut",
+      "behaviour": "Swarm prepare continues from the branch the task records when origin holds it or the task records a pull request; when an earlier life recorded a branch it never pushed and no pull request, prepare cuts the task worktree fresh from dev and records the new branch instead of failing to fetch the missing one.",
+      "seam": "scripts.swarm.publish.prepare and the worktree command it runs",
+      "tests": [
+        "tests/swarm/test_publish.py::test_prepare_cuts_fresh_dev_when_the_recorded_branch_was_never_pushed"
+      ]
     }
   ],
   "unmapped_rules": [
