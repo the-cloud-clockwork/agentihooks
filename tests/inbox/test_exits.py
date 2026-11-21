@@ -812,6 +812,49 @@ def test_a_quota_notice_ends_with_the_life_it_was_sent_to(redis, seat):
     assert inbox.pending_mail("sw-eng-2") == []
 
 
+@pytest.mark.feature("hive-drain-order-one-life")
+@pytest.mark.parametrize("seat", ["", "eng-1@sw"])
+def test_a_hive_hand_off_order_ends_with_the_life_it_was_sent_to(redis: Any, seat: str) -> None:
+    from scripts.hive import remove
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    drain = inbox.send(remove.SENDER, "sw-eng-1", remove.ORDER.format(hive="hive-three", slug="sw"))
+    roll = inbox.send(remove.SENDER, "sw-eng-1", remove.ROLL.format(hive="hive-three", slug="sw"))
+    taken = inbox.send(remove.SENDER, "eng-1@sw", remove.ROLL.format(hive="hive-three", slug="sw"))
+    inbox.deliver(roll.id, "sw-eng-1")
+    inbox.deliver(taken.id, "sw-eng-1")
+    exits.settle(inbox, "sw-eng-1", seat, "handed off its seat")
+    for item in (drain, roll, taken):
+        after = inbox.get(item.id)
+        assert (after.state, after.reason) == (
+            "done",
+            "done: sw-eng-1 handed off its seat; its hive hand off order ended with it",
+        )
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    assert inbox.pending_mail("sw-eng-2") == []
+
+
+@pytest.mark.feature("hive-drain-order-one-life")
+def test_an_operator_message_that_is_no_hive_order_still_moves_to_the_seat_on_exit(redis: Any) -> None:
+    from scripts.hive import remove
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    roll = remove.ROLL.format(hive="hive-three", slug="sw")
+    sent = [
+        inbox.send(remove.SENDER, "sw-eng-1", "Rebase onto dev before you push."),
+        inbox.send(remove.SENDER, "sw-eng-1", roll + " Rebase onto dev first."),
+        inbox.send("swarm", "sw-eng-1", roll),
+    ]
+    exits.settle(inbox, "sw-eng-1", "eng-1@sw", "handed off its seat")
+    for item in sent:
+        after = inbox.get(item.id)
+        assert (after.address, after.state) == ("eng-1@sw", "pending")
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    assert sorted(item.id for item in inbox.pending_mail("sw-eng-2")) == sorted(item.id for item in sent)
+
+
 @pytest.mark.parametrize("seat", ["", "eng-1@sw"])
 def test_an_early_quota_warning_ends_with_the_life_it_warned(redis, seat):
     from scripts.swarm import capacity, quota_handoff
