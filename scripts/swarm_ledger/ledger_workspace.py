@@ -49,7 +49,7 @@ def scaffold(slug: str, task: dict, doc: dict | None = None) -> Path:
     return path
 
 
-def steering(task: dict, doc: dict | None = None) -> str:
+def steering(task: dict[str, Any], doc: dict[str, Any] | None = None) -> str:
     lines = [f"# {task['id']}: {task.get('title', '')}", ""]
     if task.get("description"):
         lines += [task["description"], ""]

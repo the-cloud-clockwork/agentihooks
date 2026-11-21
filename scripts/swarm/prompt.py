@@ -753,8 +753,9 @@ def enhance_steps(me: str, led: str, phase: str, target: str) -> list[str]:
         "description.",
         "Work it end to end, then stop:",
         "1. Read steering.md: the target task's record and the project and mission intent.",
-        f"2. Read task {target} and the code it names with scouter sub agents: the code areas and their callers, "
-        "the tests and feature map entries that cover them, and what might break. Edit no code.",
+        f"2. Read task {target} with {led} get tasks/{target}, then have scouter sub agents read the code it names: "
+        "the code areas and their callers, the tests and feature map entries that cover them, and what might break. "
+        "Edit no code.",
         f"3. Write one plan section for task {target} in plan.md in your work folder: a slice anchor line "
         "<!-- slice: <anchor> --> above its heading, the seams the tests observe, the six recon headings What will "
         "be built, Code areas touched, What might break, Regression tests, Resources needed and Protection plan, the "
@@ -769,7 +770,9 @@ def enhance_steps(me: str, led: str, phase: str, target: str) -> list[str]:
 
 def target_lines(task: dict[str, Any], tasks: list[dict[str, Any]]) -> list[str]:
     """Return the steering block of an enhancement plan task: its target's id, title, phase, territory, description."""
-    row = next((row for row in tasks if row.get("id") == task["enhances"]), {})
+    row: dict[str, Any] = next((row for row in tasks if row.get("id") == task["enhances"]), {})
+    if not row:
+        return ["Enhancement target", f"- Task: {task['enhances']} is not in the ledger: block this task.", ""]
     return [
         "Enhancement target",
         f"- Task: {task['enhances']}: {row.get('title', '')}",

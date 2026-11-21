@@ -46,6 +46,7 @@ DOC: dict[str, Any] = {
 }
 STEPS = (
     "enhances task t-login",
+    "get tasks/t-login",
     "scouter sub agents",
     "Edit no code.",
     "<!-- slice: <anchor> -->",
@@ -99,3 +100,10 @@ def test_enhancement_steering_pastes_target_title_description_territory_and_phas
     ]
     assert "\n".join(block) in text
     assert text.index("Enhancement target") < text.index("Project intent")
+
+
+@pytest.mark.feature("planner-enhancement-prompt")
+def test_enhancement_steering_names_a_target_missing_from_the_ledger() -> None:
+    text = ledger_workspace.steering(ENHANCEMENT, {**DOC, "tasks": [ENHANCEMENT, PHASE_PLAN]})
+
+    assert "- Task: t-login is not in the ledger: block this task." in text
