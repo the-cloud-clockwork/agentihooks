@@ -263,7 +263,7 @@ def _written(store, tmp_path):
     return keys, sorted(store.redis.acl_users()), sorted(path.name for path in tmp_path.iterdir())
 
 
-def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, tmp_path):
+def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store: Any, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
     known = str(tmp_path / "known_hosts")
 
@@ -312,7 +312,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
     assert bao.opener.requests == [("DELETE", "https://bao.example/v1/secret/metadata/k8s/agentihooks-hive-anton-9")]
 
 
-def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp_path):
+def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store: Any, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
     host = _host(Clock(store, member, 2), run, tmp_path)
     remove.remove(store, bao, plan, host)
@@ -543,7 +543,7 @@ def test_a_hive_remove_drain_records_its_owner_reason_and_deadline(store, tmp_pa
     )
 
 
-def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
+def test_a_dry_run_prints_every_step_first_and_writes_nothing(store: Any, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
     host = _host(Clock(store, member, 99), run, tmp_path)
     before = _written(store, tmp_path)
@@ -793,7 +793,9 @@ def _orders(store, seat):
     return [item for inbox in InboxStore(store.redis).worlds() for item in inbox.inbox(seat)]
 
 
-def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_are_gone(store, tmp_path):
+def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_are_gone(
+    store: Any, tmp_path: Path
+) -> None:
     member = _member(store)
     _agent(store, member)
     clock = Clock(store, member, 2)
@@ -812,7 +814,7 @@ def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_a
     assert "even while you wait on checks, a merge or a reply" in orders[0].text
 
 
-def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
+def test_a_stopping_hive_with_no_agents_orders_nothing(store: Any, tmp_path: Path) -> None:
     member = _member(store)
     clock = Clock(store, member, 99)
 
@@ -880,7 +882,7 @@ class Successor:
     def __init__(self, store):
         self.store, self.now, self.slept = store, 0.0, 0
 
-    def sleep(self, seconds):
+    def sleep(self, seconds: float) -> None:
         self.slept += 1
         self.now += seconds
         for agent in self.store.agents(SLUG):
@@ -905,7 +907,7 @@ def test_a_release_roll_ends_its_drain_one_poll_after_its_agents_obey_the_order_
 
 
 class Answering(Successor):
-    def sleep(self, seconds):
+    def sleep(self, seconds: float) -> None:
         for item in _orders(self.store, "engineer@1"):
             InboxStore(self.store.redis).close(item.id, "engineer@1", "done", "handed off")
         super().sleep(seconds)
@@ -920,8 +922,8 @@ def _removed(member: str) -> str:
 
 
 def test_a_release_roll_withdraws_every_unanswered_order_when_its_drain_ends_so_a_later_occupant_reads_none(
-    store, tmp_path
-):
+    store: Any, tmp_path: Path
+) -> None:
     member = _member(store)
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
@@ -976,7 +978,7 @@ def test_a_release_roll_order_reaches_only_the_agent_on_the_draining_hive_and_cl
     assert _orders(store, seat) == []
 
 
-def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store, tmp_path):
+def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store: Any, tmp_path: Path) -> None:
     member = _member(store)
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
@@ -987,7 +989,9 @@ def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store, 
     assert [(item.state, item.reason) for item in _orders(store, "ci@1")] == [("cancelled", _withdrawn(member))]
 
 
-def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(store, tmp_path, monkeypatch):
+def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(
+    store: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.handoff import envelope
 
     member = _member(store)
@@ -1031,8 +1035,8 @@ def test_a_hive_remove_drain_keeps_the_outcome_of_an_order_its_agent_answered(st
 
 
 def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_at_the_deadline(
-    store, tmp_path, monkeypatch
-):
+    store: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.handoff import envelope
 
     member = _member(store)
