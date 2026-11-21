@@ -563,3 +563,23 @@ STEPS = (
 
 for _step in STEPS:
     registry.register(_step)
+
+
+def _autoscaler_alert(tick: Any, get: Callable[[str], Any]) -> list[str]:
+    """Return the actions of the autoscaler alert step, given the tick module and a reader of the pass state."""
+    return []
+
+
+registry.register(
+    CallStep(
+        "autoscaler alert",
+        "reopen passes",
+        _autoscaler_alert,
+        needs=RESUMED,
+        reads=DOC,
+        writes=frozenset(),
+        lane=Lane("slow"),
+        effects=frozenset(),
+        feature="swarm-autoscaler-scale-up-alert",
+    )
+)
