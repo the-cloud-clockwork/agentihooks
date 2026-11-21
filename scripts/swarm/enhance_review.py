@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from scripts.inbox.seats import seat_address
+from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
 from scripts.inbox.store import InboxStore
 from scripts.swarm import slice_check, thin_task
 from scripts.swarm.store import ASSIST, FULL, MANUAL, MASTER, AgentRecord, SwarmError
@@ -52,8 +52,9 @@ def close(slug: str, row: dict[str, Any], autonomy: str) -> Closing | None:
     if not target_id:
         return None
     doc, load = plan_read.fetched(slug, os.environ)
-    target: dict[str, Any] = next((t for t in (doc or {}).get("tasks", []) if t["id"] == target_id), {})
-    if doc is None or not (target.get("plan_slice") and target.get("plan_lines")):
+    tasks: list[dict[str, Any]] = doc["tasks"] if doc else []
+    target = next((t for t in tasks if t["id"] == target_id), None)
+    if doc is None or target is None or not (target.get("plan_slice") and target.get("plan_lines")):
         raise SwarmError(UNSLICED.format(task=row["id"], target=target_id))
     try:
         problems = thin_task.section_complete(plan_read.exact(doc, target, load))

@@ -1,6 +1,7 @@
 """The deterministic check of a planner's slice: one plain-words line per problem, never a refusal by itself."""
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,7 +21,7 @@ class Limits:
     flag_confidence: float = 0.7
 
     @classmethod
-    def from_env(cls, env):
+    def from_env(cls, env: Mapping[str, str]) -> "Limits":
         return cls(
             int(env.get("AGENTIHOOKS_PLAN_MAX_TASKS", 12)),
             int(env.get("AGENTIHOOKS_PLAN_MAX_AREAS", 6)),
