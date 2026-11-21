@@ -53,15 +53,15 @@ RECON_FIRST = (
     "Before your first edit, in this order:",
     "- Still valid scouter: launch the scouter sub agent to check, with evidence, that the task and the "
     "architecture it assumes still hold on current dev. Outdated or not feasible: build nothing, send its finding "
-    'to the master by inbox and block the task with {me} block "<evidence>".',
+    'to the front door master with the msg send command above and block the task with {me} block "<evidence>".',
     "- Recon plan: launch scouter sub agents of more than one kind and, from their results, write recon.md in your "
     "task work folder: at most 500 lines, six non empty headings in this order: What will be built, Code areas "
     "touched, What might break, Regression tests, Resources needed, Protection plan. The regression tests and "
     "feature map entries it adds for touched behaviour land in your pull request, written against the current code "
     "before you modify it. A successor reads the recon.md its predecessor left.",
     "- Traced plan: a planner sub agent writes plan.md in your task work folder, one piece per line "
-    "(- what | area, area | why); with no sub agent tool, write it yourself. Then run {me} "
-    "trace-plan: the build gate refuses every edit and commit before a passing verdict.",
+    "(- what | area, area | why); with no sub agent tool, write it yourself. Then run {me} trace-plan: the build "
+    "gate refuses an edit or commit before a passing verdict and outside the kept areas and your task's territory.",
 )
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
