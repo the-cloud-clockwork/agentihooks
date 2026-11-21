@@ -269,6 +269,21 @@ def publishing_root(
         raise PublicationRefusal(primary, refusal_branch(primary, task), str(exc)) from exc
 
 
+def session_root(slug: str, cwd: Path) -> Path | None:
+    """The root publishing_root selects from *cwd* for this session's claimed task, or None on any failure."""
+    try:
+        from scripts.swarm.runtime import REPO_VARIABLE
+
+        environ = os.environ
+        agent = AgentRecord(
+            environ["AGENTIHOOKS_AGENT_NAME"], environ["AGENTIHOOKS_SWARM_LANE"], environ["AGENTIHOOKS_SWARM_TASK"]
+        )
+        task = task_row(slug, agent, LedgerClient())
+        return publishing_root(environ.get(REPO_VARIABLE) or str(cwd), task, agent, cwd)[0]
+    except Exception:
+        return None
+
+
 def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     record, resolved = {}, []
     for value in task.get("repositories") or []:

@@ -137,6 +137,15 @@ def test_publish_lookup_failure_keeps_the_guard_closed(
 
 
 @pytest.mark.feature("conditions-publish-task-worktree")
+def test_an_unexpected_publisher_failure_keeps_todays_resolution(
+    checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(publish, "publishing_root", Mock(side_effect=ImportError("unexpected")))
+    assert _guard(_wrapped(FILE), checkouts["primary"]) == conditions.GATE_MESSAGE
+    assert _guard(_wrapped(FILE), checkouts["current"]) is None
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
 @pytest.mark.parametrize(
     ("variable", "value"),
     [("AGENTIHOOKS_SWARM", "other-swarm"), ("AGENTIHOOKS_AGENT_NAME", ""), ("AGENTIHOOKS_SWARM_LANE", None)],

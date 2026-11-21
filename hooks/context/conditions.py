@@ -988,31 +988,13 @@ def _publish_operands(words: list[str]) -> tuple[str, list[str]] | None:
 def _publish_root(slug: str, cwd: str | None) -> Path | None:
     """The root swarm publish selects for this session: its worktree, else the task's recorded worktree.
 
-    Another swarm, no session folder, a missing agent identity or a failed task or worktree lookup gives None.
+    Another swarm, no session folder or any failure in the publisher's own lookup gives None.
     """
+    if not cwd or os.environ.get("AGENTIHOOKS_SWARM") != slug:
+        return None
     from scripts.swarm import publish
-    from scripts.swarm.runtime import REPO_VARIABLE
 
-    environ = os.environ
-    if not cwd or environ.get("AGENTIHOOKS_SWARM") != slug:
-        return None
-    try:
-        agent = publish.AgentRecord(
-            environ["AGENTIHOOKS_AGENT_NAME"], environ["AGENTIHOOKS_SWARM_LANE"], environ["AGENTIHOOKS_SWARM_TASK"]
-        )
-        task = publish.task_row(slug, agent, publish.LedgerClient())
-        return publish.publishing_root(environ.get(REPO_VARIABLE) or cwd, task, agent, Path(cwd))[0]
-    except (
-        LookupError,
-        TypeError,
-        AttributeError,
-        publish.SwarmError,
-        OSError,
-        subprocess.SubprocessError,
-        ValueError,
-        RuntimeError,
-    ):
-        return None
+    return publish.session_root(slug, Path(cwd))
 
 
 def _read_only_shell(command: str, cwd: str | None = None) -> bool:
