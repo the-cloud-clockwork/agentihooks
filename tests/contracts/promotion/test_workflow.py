@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 NON_GATING: dict[str, str] = {
-    "access-audit.yml": "audits collaborators and installed apps and notifies the operator; it grades no revision",
+    "access-audit.yml": "audits collaborators and installed apps and alerts only on unapproved or unreadable access",
     "chart-release.yml": "follows each worker image run and packages and publishes a chart only after a release",
     "ci-lab-image.yml": "builds, smokes and publishes the CI lab image",
     "count-record.yml": "records the dev suite test count that later pull request bases read",
