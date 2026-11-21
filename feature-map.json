@@ -713,6 +713,34 @@
       ]
     },
     {
+      "id": "conditions-publish-task-worktree",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-conditions-guard-publish-worktree",
+      "behaviour": "A swarm publish behind the GitHub app wrapper that names a condition file has its file names resolved by the conditions guard in the worktree swarm publish commits in: the session worktree first, else the task's recorded worktree, so a staged condition file there on a feature branch is admitted. Live condition layers and dev checkouts stay refused for it. Bare publish keeps its read only admission and the staged check resolves a bare call the same way. Other commands, adjacent shell writes and any failure in the publisher's task, identity or worktree lookup keep today's session folder resolution.",
+      "seam": "conditions.write_guard through publish.publishing_root",
+      "tests": [
+        "tests/hooks/test_conditions_publish.py::test_publish_resolves_relative_conditions_in_the_recorded_worktree",
+        "tests/hooks/test_conditions_publish.py::test_publish_uses_the_session_worktree_before_the_recorded_worktree",
+        "tests/hooks/test_conditions_publish.py::test_publish_keeps_live_and_dev_condition_paths_refused",
+        "tests/hooks/test_conditions_publish.py::test_publish_keeps_a_live_layer_inside_the_selected_worktree_refused",
+        "tests/hooks/test_conditions_publish.py::test_other_commands_keep_session_directory_resolution",
+        "tests/hooks/test_conditions_publish.py::test_publish_text_inside_another_command_keeps_current_resolution",
+        "tests/hooks/test_conditions_publish.py::test_publish_does_not_exempt_an_adjacent_condition_write",
+        "tests/hooks/test_conditions_publish.py::test_publish_lookup_failure_keeps_the_guard_closed",
+        "tests/hooks/test_conditions_publish.py::test_publish_through_the_github_app_wrapper_uses_the_task_worktree",
+        "tests/hooks/test_conditions_publish.py::test_read_only_commands_keep_their_existing_admission",
+        "tests/hooks/test_conditions_publish.py::test_publish_without_condition_paths_does_not_read_task_state",
+        "tests/hooks/test_conditions_publish.py::test_publish_outside_the_repository_uses_the_swarm_repository",
+        "tests/hooks/test_conditions_publish.py::test_publish_for_another_session_keeps_the_guard_closed",
+        "tests/hooks/test_conditions_publish.py::test_publish_without_a_session_folder_keeps_the_guard_closed",
+        "tests/hooks/test_conditions_publish.py::test_publish_call_reads_the_slug_and_file_names",
+        "tests/hooks/test_conditions_publish.py::test_publish_checks_every_named_file_in_the_task_worktree",
+        "tests/hooks/test_conditions_publish.py::test_an_unexpected_publisher_failure_keeps_todays_resolution",
+        "tests/hooks/test_conditions_publish.py::test_a_publisher_that_cannot_load_keeps_todays_resolution",
+        "tests/hooks/test_conditions_publish.py::test_publish_without_the_swarm_repository_setting_uses_the_session_folder"
+      ]
+    },
+    {
       "id": "hive-service-start-ensures-serena-router",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-serena-before-launch",
@@ -1712,6 +1740,20 @@
         "tests/swarm/test_managed_lifecycle.py::test_a_foreign_managed_server_has_unknown_process_liveness",
         "tests/swarm/test_managed_lifecycle.py::test_a_local_managed_server_keeps_its_matching_binding",
         "tests/swarm/test_managed_lifecycle.py::test_a_dead_local_managed_server_still_has_a_process_mismatch"
+      ]
+    },
+    {
+      "id": "live-binding-process-provenance",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2739",
+      "behaviour": "A live binding process mismatch keeps who saw the process absent and what owned it. The stored process difference carries the observer, the host the fact names or else the recording host, and the owner, the codex transport record's transport and host or else the agent record's transport and hive. A hive report binding with the process absent names the hive host that observed it. The process finding shows both, and a record stored before them still renders its flag alone.",
+      "seam": "scripts.swarm.live_binding.record and findings, and scripts.hive.daemon.execution_report through scripts.swarm.live_binding.observed",
+      "tests": [
+        "tests/swarm/test_managed_lifecycle.py::test_a_process_absence_another_hive_observed_keeps_that_hive_and_the_transport_owner",
+        "tests/swarm/test_live_binding.py::test_a_pane_process_absence_names_this_observer_and_the_agents_hive",
+        "tests/swarm/test_live_binding.py::test_a_process_mismatch_stored_before_provenance_still_renders_its_flag",
+        "tests/swarm/test_live_binding.py::test_only_a_fact_with_the_process_absent_names_its_observer",
+        "tests/hive/test_reports.py::test_a_hub_admitted_workers_process_absence_keeps_the_hive_host_that_observed_it"
       ]
     },
     {

@@ -723,6 +723,7 @@ def _pane_ids(herdr: "HerdrRuntime") -> list[str] | None:
 def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> dict:
     from dataclasses import asdict
 
+    from scripts.swarm import live_binding
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(redis)
@@ -736,7 +737,7 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
     report["started_at"] = started_ms()
     admitted = [agent for _, agent in records if not agent.runtime_target and agent.hive == local_id]
     if admitted:
-        bound = herdr.bindings(admitted)
+        bound = live_binding.observed(herdr.bindings(admitted))
         report["admitted"] = {
             agent.execution_id: {
                 "generation": agent.generation,
@@ -749,7 +750,7 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
         return report
     report["process_namespace"] = local_namespace()
     report["pane_ids"] = _pane_ids(herdr)
-    facts = herdr.bindings([agent for _, agent in hosted])
+    facts = live_binding.observed(herdr.bindings([agent for _, agent in hosted]))
     report["panes"] = herdr.conversations() or {}
     for slug, agent in hosted:
         report["executions"][agent.execution_id] = {
