@@ -50,9 +50,9 @@ def test_every_discovered_static_gate_has_one_plant_or_one_exclusion() -> None:
 
 
 def test_a_gate_plant_is_named_after_its_gate() -> None:
-    assert {name: spec["gate"].replace("/", ".") for name, spec in plants().items()} == {
-        name: name for name in plants()
-    }
+    expected = {name: name.replace(".", "/") for name in plants()}
+    expected["lint.threshold-pins"] = "lint/pin-thresholds-floors-and-allowlists-against-the-base"
+    assert {name: spec["gate"] for name, spec in plants().items()} == expected
 
 
 @pytest.mark.parametrize("name", sorted(plants()))

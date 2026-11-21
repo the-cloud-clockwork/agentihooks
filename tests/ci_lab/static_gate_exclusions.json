@@ -54,5 +54,21 @@
   "semgrep/charts/guard-rules-hold-on-their-fixtures-and-at-their-computed-floors": {
     "needs": ["network"],
     "reason": "fetches the base branch from origin before it grades"
+  },
+  "test-count/install-dependencies": {
+    "needs": ["step env", "network"],
+    "reason": "its cache condition reads the earlier venv action output and its fallback installs dependencies from PyPI"
+  },
+  "test-count/fetch-the-base-suite-count-recorded-on-dev": {
+    "needs": ["step env", "secret", "network", "earlier step"],
+    "reason": "reads the app token action outcome and token output and downloads the recorded suite count artifact from GitHub"
+  },
+  "test-count/hold-the-base-revision-s-test-count": {
+    "needs": ["step env", "earlier step"],
+    "reason": "reads the day action output and suite collection, review and base count records prepared earlier in the job"
+  },
+  "test-count/record-the-head-count-for-the-next-queue-group": {
+    "needs": ["step env", "earlier step"],
+    "reason": "requires the merge group event and an earlier collected suite count, while plant grades use the pull request event"
   }
 }
