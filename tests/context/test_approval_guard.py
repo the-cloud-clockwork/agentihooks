@@ -1,5 +1,6 @@
 """Agent sessions cannot approve a pull request: every approval form is refused, comments and change requests pass."""
 
+import shlex
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
@@ -25,6 +26,12 @@ def _bash(command: str, cwd: str = "") -> dict[str, object]:
     return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
 
 
+def _nested(command: str, depth: int) -> str:
+    for _ in range(depth):
+        command = f"bash -c {shlex.quote(command)}"
+    return command
+
+
 @pytest.mark.feature("agent-sessions-cannot-approve-pull-requests")
 @pytest.mark.parametrize(
     "command",
@@ -41,6 +48,9 @@ def _bash(command: str, cwd: str = "") -> dict[str, object]:
         "env GH_PROMPT_DISABLED=1 gh pr review 12 --approve",
         "bash -c 'gh pr review 12 --approve'",
         "cd /tmp && gh pr review 12 --approve",
+        "echo 12 | xargs -n 1 gh pr review --approve",
+        "find . -name x -exec gh pr review 12 --approve ';'",
+        _nested("gh pr review 12 --approve", 10),
     ],
 )
 def test_gh_pr_review_with_approve_is_refused(command: str) -> None:
@@ -75,10 +85,12 @@ def test_a_rest_review_with_an_approve_event_is_refused(command: str) -> None:
         "gh api repos/o/r/pulls/12/reviews --input review.json",
         "gh api repos/o/r/pulls/12/reviews --input=review.json",
         "curl -X POST https://api.github.com/repos/o/r/pulls/12/reviews -d @review.json",
+        "gh api repos/o/r/pulls/12/reviews -F event=@event.txt",
     ],
 )
 def test_a_rest_review_whose_input_file_approves_is_refused(tmp_path: Path, command: str) -> None:
     (tmp_path / "review.json").write_text('{"event": "APPROVE", "body": "ok"}')
+    (tmp_path / "event.txt").write_text("APPROVE\n")
     with pytest.raises(BlockAction, match=REFUSED):
         hook_manager._check_shell_guards(_bash(command, str(tmp_path)))
 
@@ -148,6 +160,9 @@ def test_a_github_mcp_review_with_an_approve_event_is_refused(tool_name: str, to
         "gh api repos/o/r/pulls/12/reviews -f event=COMMENT -f body='event: approve'",
         "gh api repos/o/r/pulls/12/reviews -f body=APPROVE -f event=COMMENT",
         "gh api repos/o/r/pulls/12/reviews -f event=COMMENT -f body='event=APPROVE'",
+        "echo 'event=APPROVE' && gh api repos/o/r/pulls/12/reviews -f event=COMMENT",
+        "gh api repos/o/r/pulls/12/reviews/99/comments -f body='event=APPROVE'",
+        "gh api repos/o/r/pulls/12/reviews -F event=@missing.txt",
         'gh api graphql -f query=\'mutation($b: String!) { addPullRequestReview(input: {pullRequestId: "PR_1",'
         " event: COMMENT, body: $b}) { clientMutationId } }' -f b=APPROVE",
         "gh api repos/o/r/pulls/12/reviews --input missing.json",
@@ -166,8 +181,16 @@ def test_comments_change_requests_and_mentions_pass(command: str) -> None:
 
 
 @pytest.mark.feature("agent-sessions-cannot-approve-pull-requests")
-def test_an_unparseable_command_approves_nothing() -> None:
-    assert refusal(_bash("gh pr review 12 --approve 'unterminated")) is None
+@pytest.mark.parametrize(
+    ("command", "refused"),
+    [
+        (_nested("gh pr review 12 --approve", 11), True),
+        (_nested("gh api repos/o/r/pulls/12/reviews -f event=APPROVE", 11), True),
+        (_nested("gh pr review 12 --comment -b ok", 11), False),
+    ],
+)
+def test_a_command_too_deep_to_parse_is_refused_when_it_names_an_approval(command: str, refused: bool) -> None:
+    assert (refusal(_bash(command)) is not None) is refused
 
 
 @pytest.mark.feature("agent-sessions-cannot-approve-pull-requests")

@@ -17,15 +17,15 @@ REFUSAL = (
     "comment or request changes instead."
 )
 
-_SHORT_APPROVE = re.compile(r"-[A-Za-z]*a[A-Za-z]*")
+_SHORT_FLAGS = re.compile(r"-[A-Za-z]+")
 _REVIEWS = re.compile(r"pulls/[^/]+/reviews\b")
 _GRAPHQL = re.compile(r"(?:^|/)graphql$")
 _MUTATION = re.compile(r"\b(?:add|submit)PullRequestReview\b")
-_FIELD = re.compile(r"(?i)^(?:--(?:raw-)?field=|-[fF])?event=approve$")
+_FIELD = re.compile(r"(?i)^(?:--(?:raw-)?field=|-f)?event=(.*)$")
 _BODY = re.compile(r"""(?i)\\?["']event\\?["']\s*:\s*\\?["']approve\\?["']""")
 _INLINE = re.compile(r"(?i)\bevent\s*:\s*approve\b")
 _VARIABLE = re.compile(r"\bevent\s*:\s*\$(\w+)")
-_FILE = re.compile(r"^(?:--input=(.+)|(?:.*?=)?@(.+))")
+_FILE = re.compile(r"^(?:--input=(.+)|(?:[^=@]*=)?@(.+))")
 _STDIN = frozenset({"-", "@-"})
 
 
@@ -35,13 +35,23 @@ def _subcommand(words: list[str]) -> list[str]:
     return [word for before, word in pairs if not word.startswith("-") and before not in ("-R", "--repo")][:2]
 
 
+def _read(paths: list[Path]) -> list[str]:
+    """Return the text of each path that is a regular file."""
+    return [path.read_bytes().decode("latin-1") for path in paths if path.is_file()]
+
+
 def _files(words: list[str], cwd: str) -> list[str]:
     """Return the text of each regular file a call reads its body or a field from: the --input file, and a field or
     a curl data option whose value starts with @."""
     names = [after for before, after in zip(words, words[1:]) if before == "--input"]
     names += [found[1] or found[2] for found in map(_FILE.search, words) if found]
-    paths = [Path(cwd, name) for name in names]
-    return [path.read_bytes().decode("latin-1") for path in paths if path.is_file()]
+    return _read([Path(cwd, name) for name in names])
+
+
+def _events(words: list[str], cwd: str) -> list[str]:
+    """Return the value of each event field a call sets, and the text of each file a value given as @file names."""
+    values = [found[1] for found in map(_FIELD.match, words) if found]
+    return values + _read([Path(cwd, value[1:]) for value in values if value.startswith("@")])
 
 
 def _text(words: list[str], command: str, cwd: str) -> str:
@@ -66,26 +76,40 @@ def _api_approves(words: list[str], command: str, cwd: str) -> bool:
     if any(_GRAPHQL.search(word) for word in words) and _MUTATION.search(text):
         return _graphql_approves(text)
     reviews = any(_REVIEWS.search(word) for word in words)
-    return reviews and (any(_FIELD.match(word) for word in words) or _BODY.search(text) is not None)
+    approves = any(value.strip().upper() == "APPROVE" for value in _events(words, cwd))
+    return reviews and (approves or _BODY.search(text) is not None)
+
+
+def _call(words: list[str]) -> list[str]:
+    """Return a simple command from its first gh or curl word on, named by its program, so xargs, find -exec and other
+    launchers are judged on the call they run; empty when neither program runs."""
+    for at, word in enumerate(words):
+        if Path(word).name in ("gh", "curl"):
+            return [Path(word).name, *words[at + 1 :]]
+    return []
 
 
 def _approves(words: list[str], command: str, cwd: str) -> bool:
     """Return whether one simple command approves a pull request through gh pr review, a review endpoint or the
     GraphQL review mutations."""
-    program = Path(words[0]).name
-    if program == "gh" and _subcommand(words) == ["pr", "review"]:
-        return any(word.partition("=")[0] == "--approve" or _SHORT_APPROVE.fullmatch(word) for word in words)
-    if program == "curl" or (program == "gh" and _subcommand(words)[:1] == ["api"]):
-        return _api_approves(words, command, cwd)
+    call = _call(words)
+    if call[:1] == ["gh"] and _subcommand(call) == ["pr", "review"]:
+        return any(
+            word.partition("=")[0] == "--approve" or (_SHORT_FLAGS.fullmatch(word) and "a" in word) for word in call
+        )
+    if call[:1] == ["curl"] or (call[:1] == ["gh"] and _subcommand(call)[:1] == ["api"]):
+        return _api_approves(call, command, cwd)
     return False
 
 
 def _bash_approves(command: str, cwd: str) -> bool:
-    """Return whether a shell command approves a pull request; a command the shell cannot parse runs nothing."""
+    """Return whether a shell command approves a pull request; a command the shell guards cannot parse is refused when
+    its text names both a review and an approval."""
     try:
         found = commands(command)
     except ValueError:
-        return False
+        lowered = command.lower()
+        return "review" in lowered and "approve" in lowered
     return any(_approves(words, command, cwd) for words in found)
 
 
