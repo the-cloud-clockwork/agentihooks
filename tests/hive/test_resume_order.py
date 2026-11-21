@@ -254,6 +254,24 @@ def test_one_poll_starts_every_unanswered_resume_order(redis: Any) -> None:
     assert [call.args[0] for call in consumer.offbeat.call_args_list] == [first, second]
 
 
+@pytest.mark.feature("hive-resume-start-failure")
+def test_a_resume_order_process_that_cannot_start_is_answered_failed_by_the_command_poll(
+    redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import orders
+
+    first, second = _order(), replace(_order(), id="resume:x:1:2")
+    orders.Orders(redis).command(HIVE, first)
+    orders.Orders(redis).command(HIVE, second)
+    monkeypatch.setattr(orders.subprocess, "Popen", Mock(side_effect=OSError(11, "Resource temporarily unavailable")))
+    consumer = orders.Consumer(redis, HIVE, cast(Any, Mock()))
+    assert consumer.poll_commands() == 2
+    failed = {"status": "failed", "target": {"host_id": HIVE}, "failure": "error: BlockingIOError"}
+    assert [_ack(redis, first), _ack(redis, second)] == [failed, failed]
+    assert consumer.poll_commands() == 2
+    assert redis.xlen(orders.Orders(redis).commands(HIVE)) == 0
+
+
 @pytest.mark.feature("hub-dead-resume")
 def test_the_resume_order_process_runs_the_order_on_its_own_redis(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.hive import orders, resume_order
