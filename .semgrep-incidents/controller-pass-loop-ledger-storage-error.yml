@@ -1,0 +1,21 @@
+rules:
+  - id: controller-pass-loop-ledger-storage-error
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The controller pass loop runs a pass outside a handler that takes both LedgerUnreachable and sqlite3.Error. The
+      in process ledger repository raises a dropped Postgres connection as sqlite3.DatabaseError, which neither the
+      ledger client nor the tick ledger adapter catches, so it leaves main and the controller exits with code 1. On 20
+      November Postgres ended the leader controller session at its idle in transaction limit and the leader exited
+      this way. Catch sqlite3.Error beside LedgerUnreachable and run the next pass one tick later.
+    paths:
+      include:
+        - /scripts/swarm/controller.py
+        - controller-pass-loop-ledger-storage-error.py
+    patterns:
+      - pattern: _finishing(...)
+      - pattern-not-inside: |
+          try:
+              ...
+          except (LedgerUnreachable, sqlite3.Error) as $EXC:
+              ...
