@@ -111,6 +111,35 @@ def test_claim_gate_still_holds_a_frozen_or_watched_task():
     assert freeze.claim_gate(row, watched_doc, hierarchy.project(watched_doc)[0], "")
 
 
+@pytest.mark.feature("swarm-focus-plan-work")
+def test_a_plan_task_of_a_phase_holding_focused_work_passes_the_focus() -> None:
+    plan = task("plan-p1", lane="plan", kind="plan")
+    assert held(plan, record("tasks/t9", "focus"), tasks=[ELSEWHERE])
+    assert not held(plan, record("tasks/t2", "focus"), tasks=[task("t2"), ELSEWHERE])
+
+
+@pytest.mark.parametrize("target", ["tasks/t3", "tasks/t2"])
+@pytest.mark.feature("swarm-focus-plan-work")
+def test_an_enhancement_task_passes_the_focus_when_its_target_is_admitted(target: str) -> None:
+    work = [task("t2", phase="p2", depends_on=["t3"]), task("t3")]
+    enhancement = task("enhance-t3", lane="plan", kind="plan", enhances="t3")
+    assert not held(enhancement, record(target, "focus"), tasks=work)
+
+
+@pytest.mark.feature("swarm-focus-plan-work")
+def test_a_focus_still_holds_the_work_beside_the_plan_work_it_admits() -> None:
+    focus, focused = record("tasks/t2", "focus"), task("t2")
+    plan = task("plan-p1", lane="plan", kind="plan", depends_on=["t9"])
+    assert held(task("t4"), focus, tasks=[focused])
+    assert held(task("plan-p2", lane="plan", kind="plan", phase="p2"), focus, tasks=[focused])
+    assert held(
+        task("enhance-t5", lane="plan", phase="p2", enhances="t5"), focus, tasks=[focused, task("t5", phase="p2")]
+    )
+    assert held(ELSEWHERE, focus, tasks=[focused, plan])
+    phaseless = {"id": "plan-x", "lane": "plan", "state": "open"}
+    assert held(phaseless, record("tasks/t6", "focus"), tasks=[{"id": "t6", "lane": "eng", "state": "open"}])
+
+
 def test_a_cycle_in_the_parent_links_ends_the_walk():
     row = task()
     graph = {
