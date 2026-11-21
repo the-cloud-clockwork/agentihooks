@@ -22,6 +22,7 @@ _REVIEWS = re.compile(r"pulls/[^/]+/reviews\b")
 _GRAPHQL = re.compile(r"(?:^|/)graphql$")
 _MUTATION = re.compile(r"\b(?:add|submit)PullRequestReview\b")
 _FIELD = re.compile(r"(?i)^(?:--(?:raw-)?field=|-f)?event=(.*)$")
+_WORDS = re.compile(r"\w+")
 _BODY = re.compile(r"""(?i)\\?["']event\\?["']\s*:\s*\\?["']approve\\?["']""")
 _INLINE = re.compile(r"(?i)\bevent\s*:\s*approve\b")
 _VARIABLE = re.compile(r"\bevent\s*:\s*\$(\w+)")
@@ -47,10 +48,12 @@ def _files(words: list[str], cwd: str) -> list[str]:
     return _read([Path(cwd, name) for name in names])
 
 
-def _events(words: list[str], cwd: str) -> list[str]:
-    """Return the value of each event field a call sets, and the text of each file a value given as @file names."""
+def _events(words: list[str], command: str, cwd: str) -> list[str]:
+    """Return the value of each event field a call sets, the text of each file a value given as @file names, and every
+    word of the command line when a value given as @- reads the event from stdin."""
     values = [found[1] for found in map(_FIELD.match, words) if found]
-    return values + _read([Path(cwd, value[1:]) for value in values if value.startswith("@")])
+    stdin = _WORDS.findall(command) if "@-" in values else []
+    return values + stdin + _read([Path(cwd, value[1:]) for value in values if value.startswith("@")])
 
 
 def _text(words: list[str], command: str, cwd: str) -> str:
@@ -76,7 +79,7 @@ def _api_approves(words: list[str], command: str, cwd: str) -> bool:
     if any(_GRAPHQL.search(word) for word in words) and _MUTATION.search(text):
         return _graphql_approves(text)
     reviews = any(_REVIEWS.search(word) for word in words)
-    approves = any(value.strip().upper() == "APPROVE" for value in _events(words, cwd))
+    approves = any(value.strip().upper() == "APPROVE" for value in _events(words, command, cwd))
     return reviews and (approves or _BODY.search(text) is not None)
 
 

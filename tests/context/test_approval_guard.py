@@ -69,6 +69,7 @@ def test_gh_pr_review_with_approve_is_refused(command: str) -> None:
         'echo "{\\"event\\":\\"APPROVE\\"}" | gh api repos/o/r/pulls/12/reviews --input -',
         'echo \'{"event":"APPROVE"}\' | curl -X POST https://api.github.com/repos/o/r/pulls/12/reviews -d @-',
         'echo \'{"event":"APPROVE"}\' | gh api repos/o/r/pulls/12/reviews --input=-',
+        "echo APPROVE | gh api repos/o/r/pulls/12/reviews -F event=@-",
         'echo \'{"event":"APPROVE"}\' | curl https://api.github.com/repos/o/r/pulls/12/reviews --data-binary=@-',
         'gh api repos/o/r/pulls/12/reviews --input - <<\'EOF\'\n{"event": "APPROVE", "body": "ok"}\nEOF',
         'echo \'{"event":"APPROVE"}\' | gh api repos/o/r/pulls/12/reviews --input -',
@@ -166,6 +167,7 @@ def test_a_github_mcp_review_with_an_approve_event_is_refused(tool_name: str, to
         "echo 'event=APPROVE' && gh api repos/o/r/pulls/12/reviews -f event=COMMENT",
         "gh api repos/o/r/pulls/12/reviews/99/comments -f body='event=APPROVE'",
         "gh api repos/o/r/pulls/12/reviews -F event=@missing.txt",
+        "echo COMMENT | gh api repos/o/r/pulls/12/reviews -F event=@-",
         'gh api graphql -f query=\'mutation($b: String!) { addPullRequestReview(input: {pullRequestId: "PR_1",'
         " event: COMMENT, body: $b}) { clientMutationId } }' -f b=APPROVE",
         "gh api repos/o/r/pulls/12/reviews --input missing.json",
