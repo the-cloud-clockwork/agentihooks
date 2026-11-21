@@ -6,8 +6,6 @@ import yaml
 
 from scripts.ci_mutation.evidence import main, stage
 
-pytestmark = pytest.mark.feature("mutation-stats-failure-upload-set")
-
 _ROOT = Path(__file__).resolve().parents[1]
 _INPUTS = (
     "hooks/subject.py",
@@ -67,6 +65,7 @@ def _inputs(tmp_path: Path, nested: bool = True) -> tuple[Path, Path, Path, list
 
 
 @pytest.mark.parametrize("nested", [True, False], ids=["plan-parts", "matrix-part"])
+@pytest.mark.feature("mutation-stats-failure-upload-set")
 def test_failed_statistics_upload_contains_one_trimmed_workspace(tmp_path: Path, nested: bool) -> None:
     root, source, destination, workspaces = _inputs(tmp_path, nested)
 
@@ -79,6 +78,7 @@ def test_failed_statistics_upload_contains_one_trimmed_workspace(tmp_path: Path,
     assert sum(map(len, files.values())) < sum(map(len, _files(source).values())) / 2
 
 
+@pytest.mark.feature("mutation-stats-failure-upload-set")
 def test_staging_preserves_every_parts_diagnostics_and_the_producer_workspace(tmp_path: Path) -> None:
     root, source, destination, workspaces = _inputs(tmp_path)
     before = _files(source)
@@ -94,6 +94,7 @@ def test_staging_preserves_every_parts_diagnostics_and_the_producer_workspace(tm
     assert _files(source) == before
 
 
+@pytest.mark.feature("mutation-stats-failure-upload-set")
 def test_failure_before_workspace_setup_keeps_available_diagnostics(tmp_path: Path) -> None:
     source = tmp_path / "stats"
     _write(source / "run.log", "setup failed\n")
@@ -106,6 +107,7 @@ def test_failure_before_workspace_setup_keeps_available_diagnostics(tmp_path: Pa
     assert _files(destination) == _files(source)
 
 
+@pytest.mark.feature("mutation-stats-failure-upload-set")
 def test_failure_before_output_exists_does_not_create_evidence(tmp_path: Path) -> None:
     destination = tmp_path / "evidence"
 
@@ -114,6 +116,7 @@ def test_failure_before_output_exists_does_not_create_evidence(tmp_path: Path) -
     assert not destination.exists()
 
 
+@pytest.mark.feature("mutation-stats-failure-upload-set")
 def test_command_line_uses_the_statistics_failure_upload_selection(tmp_path: Path) -> None:
     root, source, destination, workspaces = _inputs(tmp_path)
 
@@ -125,6 +128,7 @@ def test_command_line_uses_the_statistics_failure_upload_selection(tmp_path: Pat
 
 
 @pytest.mark.parametrize("job", ["mutation-plan", "mutation-stats"])
+@pytest.mark.feature("mutation-stats-failure-upload-set")
 def test_both_statistics_failure_uploads_use_the_trimmed_evidence_set(job: str) -> None:
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     steps = workflow["jobs"][job]["steps"]
@@ -141,6 +145,7 @@ def test_both_statistics_failure_uploads_use_the_trimmed_evidence_set(job: str) 
     assert upload["with"]["retention-days"] == 7
 
 
+@pytest.mark.feature("mutation-stats-failure-upload-set")
 def test_successful_statistics_and_shard_evidence_keep_their_existing_upload_sets() -> None:
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     for job, name in (
