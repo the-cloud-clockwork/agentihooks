@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -7,8 +8,9 @@ from typing import Any
 import pytest
 
 from scripts import dep_manifest
-from scripts.ci_lab import digests, executors, expand_tests
+from scripts.ci_lab import digests, executors, expand_tests, scheduler
 from scripts.ci_lab.digests import Toolchain
+from scripts.ci_lab.objects import LocalObjects, manifest_folder
 from scripts.ci_lab.units import Unit
 
 ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"
@@ -404,5 +406,53 @@ def test_an_unlisted_test_module_unit_rekeys_on_every_measured_and_shared_file(
     before = _unlisted(repository)
     (repository / path).write_text("changed\n")
     after = _unlisted(repository)
+    assert [unit.members for unit in after] == [(NEW,)]
+    assert (before != after) is rekeyed
+
+
+@pytest.mark.feature("lab-unlisted-module-outside-notes")
+@pytest.mark.parametrize(
+    ("path", "content", "rekeyed"),
+    [
+        ("docs/guide.md", b"changed\n", True),
+        ("assets/reference.json", b"changed\n", True),
+        ("assets/later.txt", b"added\n", True),
+        ("docs/guide.md", None, True),
+        ("docs/unnoted.md", b"changed\n", False),
+        ("assets/other.json", b"changed\n", False),
+    ],
+    ids=["first-note", "second-note", "added", "removed", "unnoted", "other-module"],
+)
+def test_a_stored_note_rekeys_an_unlisted_module_only_on_its_outside_files(
+    tmp_path: Path, path: str, content: bytes | None, rekeyed: bool
+) -> None:
+    repo = "/example/project"
+    objects = LocalObjects(tmp_path / "objects")
+    packed = dep_manifest.pack(copy.deepcopy(MANIFEST))
+    objects.write_once(f"{manifest_folder('example/project')}base.json", json.dumps(packed).encode())
+    scheduler.note_outside(objects, repo, "base", (NEW, FIRST), ["docs/guide.md"])
+    scheduler.note_outside(
+        objects, repo, "base", (NEW,), ["assets/reference.json", "assets/later.txt", "docs/guide.md"]
+    )
+    scheduler.note_outside(objects, repo, "base", ("tests/test_unrelated.py",), ["assets/other.json"])
+    manifest = scheduler.StoredManifests(objects)(repo, ["base"])
+    assert manifest is not None
+    first = {**MANIFEST["tests"][FIRST], "outside": ["docs/guide.md"]}
+    assert manifest["tests"] == {**MANIFEST["tests"], FIRST: first}
+    tree = {name: text.encode() for name, text in FILES.items()}
+    tree.update(
+        {
+            NEW: b"def test_new():\n    pass\n",
+            "assets/reference.json": b"reference\n",
+            "assets/other.json": b"other\n",
+            "docs/unnoted.md": b"unnoted\n",
+        }
+    )
+    before = expand_tests.unlisted_units(manifest, tree, [NEW], TOOLCHAIN)
+    if content is None:
+        del tree[path]
+    else:
+        tree[path] = content
+    after = expand_tests.unlisted_units(manifest, tree, [NEW], TOOLCHAIN)
     assert [unit.members for unit in after] == [(NEW,)]
     assert (before != after) is rekeyed
