@@ -165,10 +165,7 @@ def slow() -> Iterator[Slow]:
 
 @pytest.fixture
 def scheduler(lab: Counted, sink: Sink) -> Iterator[str]:
-    import fakeredis
-
-    routes = lease_api.ControlRoutes(fakeredis.FakeRedis(decode_responses=True), "", lambda: 0)
-    server = lease_api.serve("127.0.0.1", 0, lab, Signer(sink.url), routes)
+    server = lease_api.serve("127.0.0.1", 0, lab, Signer(sink.url))
     _serving(server)
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()

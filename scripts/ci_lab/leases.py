@@ -3,16 +3,23 @@
 import hmac
 import secrets
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from scripts.ci_lab.outcomes import COMPLETED
 from scripts.ci_lab.pods import Pods, unmanaged
 from scripts.ci_lab.queue import Queue
 from scripts.ci_lab.units import Unit
 
-__all__ = ["REQUEUES", "Grant", "Leases", "release"]
+__all__ = ["REQUEUES", "Grant", "Leases", "Manifests", "release", "unstored"]
 
 REQUEUES = 1
+
+Manifests = Callable[[Unit], str]
+
+
+def unstored(unit: Unit) -> str:
+    """The manifests port where no object store holds batch manifests: a lease carries none."""
+    return ""
 
 
 @dataclass(frozen=True)
@@ -35,6 +42,7 @@ class Leases:
     sleep: Callable[[int], None]
     poll_ms: int
     pods: Pods = unmanaged
+    manifests: Manifests = unstored
 
     def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[Grant]:
         """Grant fitting pending jobs, polling until some are granted or the wait ends; the worker's offer is its free
@@ -66,13 +74,12 @@ class Leases:
             token = secrets.token_hex(16)
             now = self.clock()
             expires_ms = now + self.ttl_ms
-            if not job.requirement.capabilities <= capabilities or not self.queue.claim(
-                job, worker, token, expires_ms, now
-            ):
+            if not job.requirement.capabilities <= capabilities:
                 continue
-            grants.append(
-                Grant(job_id, token, job.head, job.unit, job.requirement.slots, expires_ms, job.base, job.grader)
-            )
+            unit = replace(job.unit, manifest=self.manifests(job.unit))
+            if not self.queue.claim(job, worker, token, expires_ms, now):
+                continue
+            grants.append(Grant(job_id, token, job.head, unit, job.requirement.slots, expires_ms, job.base, job.grader))
             free_slots -= job.requirement.slots
         return grants
 

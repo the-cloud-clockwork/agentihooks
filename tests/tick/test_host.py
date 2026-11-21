@@ -256,7 +256,7 @@ def test_the_relay_migrates_the_outbox_then_relays_live_agents_to_the_page(monke
     monkeypatch.setattr(host, "import_module", lambda name: _cli(calls))
     monkeypatch.setattr(timing, "call", call)
     box: dict[str, Any] = {}
-    state = _pass(box, store=store, inbox="inbox")
+    state = _pass(box, store=store, inbox="inbox", judging={})
     found = actions(engine.run_group("wrapper relay", Context(_State(state), Deadline.after(60.0))))
     assert found == []
     assert calls == [

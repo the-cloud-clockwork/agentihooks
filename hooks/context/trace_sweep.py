@@ -126,8 +126,8 @@ def _stores(root: Path) -> tuple[list[Path], list[Path]]:
         enforcement._get_user_bundle_path(),
     ):
         if bundle is not None:
-            stores.append(bundle / "enforcements.json")
-            condition_dirs.append(bundle / ".claude" / "conditions")
+            stores.append(profile_chain.layer_root(bundle) / "enforcements.json")
+            condition_dirs.append(profile_chain.layer_root(bundle) / ".claude" / "conditions")
     stores += [p / "enforcements.json" for p in profiles] + [r / ".agentihooks" / "enforcements.json" for r in repos]
     condition_dirs += [p / ".claude" / "conditions" for p in profiles] + [
         r / ".agentihooks" / "conditions" for r in repos

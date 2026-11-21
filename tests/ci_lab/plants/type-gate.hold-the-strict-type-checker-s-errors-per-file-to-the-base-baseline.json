@@ -1,0 +1,11 @@
+{
+  "gate": "type-gate/hold-the-strict-type-checker-s-errors-per-file-to-the-base-baseline",
+  "reason": "type errors, more than",
+  "edits": [
+    {
+      "path": "scripts/ci_lab/head_notice.py",
+      "before": "def signature(secret: bytes, body: bytes) -> str:",
+      "after": "def signature(secret: bytes, body: bytes) -> int:"
+    }
+  ]
+}

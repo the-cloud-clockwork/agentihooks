@@ -46,6 +46,7 @@ agentihooks bundle pull
 
 ```
 my-tools/                                   <- the bundle directory
+├── bundle.yml                              # OPTIONAL — layer: the directory this bundle ships from (default .)
 ├── enforcements.json                       # Bundle-global enforcements (optional "matcher" per entry)
 ├── .claude/                                # Bundle-global assets (layer 2 of 3-layer merge)
 │   ├── .mcp.json                           # Bundle MCP servers
@@ -71,6 +72,24 @@ my-tools/                                   <- the bundle directory
     └── restricted/
         └── ...                              # Same structure
 ```
+
+## Bundle manifest
+
+A bundle root, shared bundle or user bundle may commit a `bundle.yml` that names the directory its content ships from:
+
+```yaml
+layer: profiles/core
+```
+
+Everything the tree above places at the bundle root is then read from that directory instead: `.claude/` (skills, agents, commands, rules, conditions, classifiers, `CLAUDE.md`, `settings.overrides.json`, `.mcp.json`), `.codex/`, `.copilot/`, `manifestos/`, `deps.json`, `enforcements.json`, `workflows/`, `lifecycle.json` and `serena/`. Profiles are still found under the bundle root's `profiles/`. The root's own `.claude/` and `CLAUDE.md` stay in the repository for working on the bundle itself and reach no install.
+
+- No `bundle.yml`, no `layer` key, or `layer: .` reads the bundle root, exactly as before.
+- A named layer reads its shared doctrine only from `<layer>/.claude/CLAUDE.md`; the bundle root's `CLAUDE.md` is never used in its place.
+- A layer that resolves outside the bundle root, an absolute path or a value that is not a string prints a warning and the bundle root is used.
+- A chain profile whose directory is the layer, such as `profiles/core` chained as `core`, adds only its persona `CLAUDE.md` and `profile.yml`. Its `.claude/`, settings, MCP, `.codex/` and `.copilot/` already arrive through the layer, so each hook group, doctrine block and rule lands once.
+- Changing `bundle.yml` rebuilds the condition index on the next tool call. Run `agentihooks init` to apply it to installed features and settings.
+
+`agentihooks bundle layer [--shared|--user]` prints the resolved directory of the linked bundle, and `agentihooks bundle list` shows it as `Layer:`.
 
 ## How It Works
 
