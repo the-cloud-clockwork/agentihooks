@@ -55,6 +55,17 @@
       ]
     },
     {
+      "id": "swarm-image-lab-dependencies",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-image-lab-deps",
+      "behaviour": "The swarm image installs the pinned test and mutation dependencies needed by every CI lab module, including the executors and mutation expansion the scheduler imports at call time. Image smoke discovers every lab module of the installed wheel, imports each one and fails on the first missing dependency.",
+      "seam": "Swarm image hashed dependency lock and the installed image lab module smoke",
+      "tests": [
+        "tests/test_swarm_lab_imports.py::test_swarm_image_smoke_imports_every_discovered_lab_module_and_refuses_a_missing_dependency",
+        "tests/test_swarm_lab_imports.py::test_swarm_image_smoke_reaches_every_lab_module_on_disk"
+      ]
+    },
+    {
       "id": "swarm-progress-data",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-bundle-ledger-leftovers",

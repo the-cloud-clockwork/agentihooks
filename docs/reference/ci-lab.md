@@ -40,7 +40,7 @@ Both services run from the installed wheel, which ships `hooks`, `scripts` and `
 |---|---|---|
 | `tests/ci_lab/test_wheel_imports.py` | Pull request tests | Any module of `scripts.ci_lab`, or `scripts.ci_test_plan`, imports the `tests` package |
 | `shipped-code-imports-tests` | Semgrep incident rules | New code under `scripts` or `hooks` imports the `tests` package |
-| Import the lab scheduler's modules inside the swarm image | Swarm container smoke | The built swarm image cannot import the scheduler, interaction, test expansion or the CI test planner |
+| Import the lab scheduler's modules inside the swarm image | Swarm container smoke | The built swarm image cannot import a module of `scripts.ci_lab`, the executors and mutation expansion the scheduler loads at call time included, or the CI test planner |
 
 `docker/ci-lab/smoke.sh` also imports the worker's executors, test runner and pricing inside the
 built CI lab image.
