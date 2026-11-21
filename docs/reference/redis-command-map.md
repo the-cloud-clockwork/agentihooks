@@ -360,7 +360,7 @@ with its role and entry points. A new role also needs a matching
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `<consumer> issues <COMMAND> but Redis user <user> does not grant it` | The user in `users.acl.template` lacks the command, or denies it with `-command` | Add `+<command>` to that user's line in antoncore, or remove the code path from that consumer in agentihooks |
-| `ci-lab does not grant <COMMAND>, sent by <units>` | The ci lab code sends a command the `ci-lab` line in `users.acl.template` lacks | Add `+<command>` to the `ci-lab` line in antoncore, or remove the call from the lab code |
+| `ci-lab does not grant <COMMAND>, sent by <units>` | The ci lab code sends a command the `ci-lab` line in `users.acl.template` lacks | Add `+<command>` to the `ci-lab` line in `users.acl.template`, or remove the call from the lab code |
 | `<consumer> writes its <label> key <key> outside the keys of Redis user <user>` | No `~pattern` on the user matches the scheduler key | Widen the user's key pattern, or keep the scheduler key under the user's prefix |
 | `test_the_map_was_published_for_the_deployment_anton_runs` fails | The overlay's deployment changed, or a consumer role has no `redis.roles` entry | Pass the overlay's deployment, or add the role |
 | Step fails with `N skipped` | `SWARM_REDIS_COMMANDS` was unset or the map step did not run | Read the `Publish the Redis commands each agentihooks consumer issues` step log |
