@@ -47,9 +47,9 @@ def holds(task: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], graph
 
 
 def thin(task: dict[str, Any]) -> str:
-    """Why the thin check holds an eng or ci task back: it needs enhancement until its plan task closes, unless the
-    task is exempt from the thin check."""
-    if task.get("enhancement") != "needed" or task.get("lane", LAB_LANE) not in THIN_LANES or thin_task.exempt(task):
+    """Why the thin check holds an eng or ci task back: it needs enhancement until its plan task closes and marks it
+    planned, even once the planner has given it a plan slice."""
+    if task.get("enhancement") != "needed" or task.get("lane", LAB_LANE) not in THIN_LANES:
         return ""
     return THIN.format(thin_task.ENHANCE.format(task["id"]))
 
