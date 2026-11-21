@@ -186,7 +186,7 @@ After the coverage merge, `sonar` runs `python -m scripts.dep_manifest build` on
 
 `python -m scripts.dep_manifest invalidated` lists the tests a diff invalidates, from the manifest's commit to a head:
 
-- a change under `.github/`, to `pyproject.toml`, `uv.lock` or the stored durations, or to Python outside `hooks/`, `scripts/` and `tests/` invalidates every test;
+- a change under `.github/`, to `pyproject.toml` or the stored durations, or to Python outside `hooks/`, `scripts/` and `tests/` invalidates every test;
 - a changed function or module level unit under `hooks/` or `scripts/` invalidates the tests that ran it;
 - a test module invalidates its own tests; any other Python file under `tests/` invalidates every test;
 - any other file invalidates the tests that opened it;
@@ -328,7 +328,7 @@ The `split` job's plan step runs on `merge_group`, on `workflow_dispatch`, and o
 
 - the base branch is `dev` and the head branch lives in this repository; a fork pull request plans nothing;
 - the grader, a detached worktree of `origin/dev`, has `scripts/ci_test_plan.py`;
-- the grader also has `scripts/reused_coverage.py`, or `tests/reused_coverage.py` when the grader predates the move into `scripts`. A grader without either cannot carry reused coverage, so the step prints `The grader cannot carry reused tests' coverage into Sonar; every test runs.` and plans no reuse. Merge group runs skip this check. A dispatch's grader is its own head, so it runs the check and the coverage filter from the head.
+- the grader also has `scripts/reused_coverage.py`. The check also accepts `tests/reused_coverage.py`, but no grader of this workflow carries it, and `Keep the reused tests' dev coverage` runs only the scripts copy. A grader without either cannot carry reused coverage, so the step prints `The grader cannot carry reused tests' coverage into Sonar; every test runs.` and plans no reuse. Merge group runs skip this check. A dispatch's grader is its own head, so it runs the check and the coverage filter from the head.
 
 The planner runs from the grader, never from the head, so a pull request cannot widen what it reuses. It mints the CI App token with `actions: read` to read dev's runs and artifacts.
 
@@ -344,7 +344,7 @@ On every 3.12 unit shard of a full scope run that reuses at least one test, outs
 
 1. **Token.** `Mint the token that reads the dev coverage` mints the CI App token with `actions: read`.
 2. **Download.** `Download this shard's dev coverage` downloads the same shard's `coverage-3.12-<shard>` artifact from the record run into the runner's temporary folder.
-3. **Filter and remap.** `Keep the reused tests' dev coverage` adds the grader as a worktree (`origin/dev` for a pull request, the head for a dispatch) and runs `python -m scripts.reused_coverage` from it (`tests.reused_coverage` when the grader predates the move into `scripts`), so the filter that moves dev coverage is protected code.
+3. **Filter and remap.** `Keep the reused tests' dev coverage` adds the grader as a worktree (`origin/dev` for a pull request, the head for a dispatch) and runs `python -m scripts.reused_coverage` from it, so the filter that moves dev coverage is protected code.
 
 `scripts.reused_coverage` writes `reused-coverage/.coverage` and adds page captures to the shard's `js-coverage/`:
 
@@ -641,7 +641,7 @@ gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$RUN/artifacts?per_pa
 
 - Open evidence: the scratch pull request that shows head 2 reusing tests that passed on head 1, and head 3 reusing from a cancelled head 2.
 - Hypotheses not yet observed: the arcs flushed at each context switch survive a killed worker, the record step finishes inside GitHub's cancellation window, and an earlier `refs/pull/<n>/merge` commit can still be fetched by its sha. A commit that cannot be fetched is a barrier for its run and every older one.
-- A change to a global input between a record's commit and the head invalidates every record, as `dep_manifest.global_input` decides: anything under `.github/` except, for these version 2 manifests, workflow files other than `test.yml` and `test.yml` changes that leave the unit jobs' execution unchanged; `pyproject.toml`; `uv.lock`; any path starting `.test_durations`; and any `.py` file outside `hooks/`, `scripts/` and `tests/`. 75 of 460 dev commits over 3 days touched `.github/`, `pyproject.toml` or `uv.lock`.
+- A change to a global input between a record's commit and the head invalidates every record, as `dep_manifest.global_input` decides: anything under `.github/` except, for these version 2 manifests, workflow files other than `test.yml` and `test.yml` changes that leave the unit jobs' execution unchanged; `pyproject.toml`; any path starting `.test_durations`; and any `.py` file outside `hooks/`, `scripts/` and `tests/`. 75 of 460 dev commits over 3 days touched `.github/`, `pyproject.toml` or `uv.lock`.
 - The venv cache key carries the UTC day, so a record from an earlier day never matches. Records expire after 7 days.
 - Selected legs now wait for `test-count`'s early collection, up to 4 minutes, before running tests.
 - Selected legs carry no dev coverage for tests the dev plan reuses. Those tests depend on no changed unit, so coverage on changed lines is unaffected; the run's overall coverage figure drops.

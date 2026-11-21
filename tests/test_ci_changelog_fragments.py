@@ -159,9 +159,7 @@ def test_lint_grades_the_pull_request_branch_with_the_protected_grader() -> None
     assert step["if"] == "${{ !cancelled() }}"
     assert step["env"] == {"BRANCH": "${{ github.head_ref || github.ref_name }}"}
     assert step["run"] == (
-        'if [[ -f "$RUNNER_TEMP/grader/scripts/ci_changelog_fragments.py" ]]; then\n'
-        '  cd "$RUNNER_TEMP/grader"\n'
-        "fi\n"
+        'cd "$RUNNER_TEMP/grader"\n'
         "python -m scripts.ci_changelog_fragments"
         ' --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" --branch "$BRANCH"\n'
     )

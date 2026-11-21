@@ -8,12 +8,13 @@ so no agent relies on running swarm wait.
 """
 
 import re
+import time
 from collections.abc import Callable
 from typing import Any
 
 from scripts.gates.progress import Progress
 from scripts.swarm import idle, lab_wait, merge_queue, waits
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import AgentRecord, SwarmError
 
 TRIGGERS = re.compile(
     r"(?:^|[;&|(\n]\s*)(?:gh\s+pr\s+(?:create|ready)\b|agentihooks\s+swarm\s+\S+\s+(?:publish|merge\s+queue)\b)"
@@ -48,7 +49,20 @@ def mark(redis: Any, slug: str, agent: str, at: int, repo: str, branch: str, hea
     redis.hset(key, mapping=pushed)
 
 
-def read(redis, slug: str, agent: str) -> dict | None:
+def lab_pushed(redis: Any, slug: str, agent: AgentRecord, head: str, url: str) -> None:
+    at = int(time.time() * 1000)
+    mark(redis, slug, agent.name, at, "", f"{GRADE_REFS}{agent.task}", head)
+    idle.declare_wait(redis, slug, agent.name, at + waits.CHECKED_MINUTES * 60_000, REASON, at, waits.on("lab", url))
+
+
+def holds_lab(held: dict[str, Any], head: str | None, now_ms: int) -> bool:
+    if not head:
+        return False
+    on = held.get("on") or {}
+    return on.get("kind") == "lab" and on.get("target", "").endswith(f"/grades/{head}") and held["until"] > now_ms
+
+
+def read(redis: Any, slug: str, agent: str) -> dict[str, Any] | None:
     raw = redis.hgetall(Progress(redis, slug).key(agent))
     return raw if raw.get("pushed_at") else None
 
@@ -145,13 +159,15 @@ def enforce_pass(
         pushed = read(store.redis, slug, agent.name)
         if agent.state == "finished" or not pushed or agent.task not in rows:
             continue
+        held = idle.wait(store.redis, slug, agent.name) or {}
+        if holds_lab(held, pushed.get("pushed_head"), now_ms):
+            continue
         lookup = either(forge, lab, pushed.get("pushed_head") or "")
         url = pull_of(store.redis, slug, agent.name, pushed, rows[agent.task], now_ms, lookup)
         pull = github(url) if url and waits.PULL_URL.fullmatch(url) else None
         if pull is None and not (url and lab_wait.GRADE_URL.fullmatch(url)):
             continue
         clear(store.redis, slug, agent.name)
-        held = idle.wait(store.redis, slug, agent.name) or {}
         on = held.get("on") or {}
         closed = pull is not None and pull.state != "OPEN"
         if closed or (on.get("kind") in COVERS and on.get("target") == url and held["until"] > now_ms):

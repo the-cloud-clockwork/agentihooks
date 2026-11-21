@@ -20,7 +20,9 @@ from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, RECORDS, BindingStore, TransportRecord, decode
 from scripts.profiles import binding
 from scripts.routing import envs
+from scripts.swarm import launch_endings
 from scripts.swarm.store import APP_SERVER_TRANSPORT, MASTER, AgentRecord, RedisStore
+from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2 import masters
 
 if TYPE_CHECKING:
@@ -187,23 +189,57 @@ def admit(store: RedisStore, launch: Launch, deps: Deps) -> AgentRecord:
     if launch.execution_id:
         return adopt(store, launch, chosen, hive_id())
     agent = replace(launch.agent, harness="codex", transport=chosen, hive=hive_id(), runtime_target=target)
-    return store.start_execution(launch.slug, agent, launch.previous_execution_id)
+    started = store.start_execution(launch.slug, agent, launch.previous_execution_id)
+    ledger_workspace.launched_on(store, launch.slug, started.task, started.hive)
+    return started
+
+
+def _adoption_failure(
+    store: RedisStore,
+    launch: Launch,
+    agent: AgentRecord,
+    current: AgentRecord | None,
+    expected: tuple[str, str, str, str],
+) -> LaunchFailure:
+    comparisons = [
+        ("execution_id", current.execution_id if current else None, launch.execution_id),
+        *zip(
+            ("state", "harness", "transport", "hive"),
+            (agent.state, agent.harness, agent.transport, agent.hive),
+            expected,
+        ),
+    ]
+    details = "; ".join(
+        f"{field}: seat={seat_value!r}, launch={launch_value!r}"
+        for field, seat_value, launch_value in comparisons
+        if seat_value != launch_value
+    )
+    reason = (
+        NOT_ADMITTED.format(launch.execution_id)
+        + ": "
+        + (details or "atomic bind refused with no differing field in the refreshed snapshot")
+    )
+    launch_endings.record_refusal(store, launch.slug, launch.execution_id, reason, agent.generation)
+    return LaunchFailure("execution", reason)
 
 
 def adopt(store: RedisStore, launch: Launch, chosen: str, hive: str) -> AgentRecord:
     agent = store.execution_registry.get(launch.slug, launch.execution_id)
     current = store.execution_occupants(launch.slug).get(launch.agent.seat)
+    expected = ("starting", "", "", hive) if agent.state == "starting" else ("launching", "codex", chosen, hive)
     if (
         current is None
         or current.execution_id != agent.execution_id
         or (agent.state, agent.harness, agent.transport, agent.hive)
         not in (("launching", "codex", chosen, hive), ("starting", "", "", hive))
     ):
-        raise LaunchFailure("execution", NOT_ADMITTED.format(launch.execution_id))
+        raise _adoption_failure(store, launch, agent, current, expected)
     if agent.state == "starting":
         bound = {"harness": "codex", "transport": chosen}
         if not store.execution_registry.set_launch(launch.slug, agent.execution_id, bound, only_from="starting"):
-            raise LaunchFailure("execution", NOT_ADMITTED.format(launch.execution_id))
+            agent = store.execution_registry.get(launch.slug, launch.execution_id)
+            current = store.execution_occupants(launch.slug).get(launch.agent.seat)
+            raise _adoption_failure(store, launch, agent, current, expected)
         agent = replace(agent, **bound)
     return replace(agent, model=launch.agent.model, effort=launch.agent.effort)
 

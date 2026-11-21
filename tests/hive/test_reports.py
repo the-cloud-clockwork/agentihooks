@@ -104,6 +104,18 @@ def test_remote_host_is_another_hive_than_this_one(remote):
     assert remote.reports.host(replace(remote.agent, runtime_backend="kubernetes")) == ""
 
 
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_the_work_folder_host_is_the_host_target_else_the_hive_on_the_record(remote: SimpleNamespace) -> None:
+    named = remote.reports.workspace_host
+    assert named(replace(remote.agent, hive="elsewhere")) == HIVE
+    assert named(replace(remote.agent, runtime_target={})) == HIVE
+    assert named(replace(remote.agent, runtime_target={"pid": 12, "pid_start": 34})) == HIVE
+    assert named(replace(remote.agent, runtime_target={}, hive="controller")) == ""
+    assert named(replace(remote.agent, runtime_target={"host_id": "controller"}, hive="elsewhere")) == ""
+    assert named(replace(remote.agent, runtime_target={}, hive="")) == ""
+    assert named(replace(remote.agent, runtime_backend="kubernetes")) == HIVE
+
+
 def test_a_remote_claude_worker_is_seen_live_from_its_hive_report(remote):
     _publish(remote, typed="half a line", provider_error="overloaded", provider_error_id="529")
     runtime, agent = remote.runtime, remote.agent

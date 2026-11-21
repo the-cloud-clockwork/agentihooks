@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_hook.py:scripts.swarm_ledger.ledger_hook.x_touched:38b221d18d2ba5ae2c74e72922d994dd31e1a75e514fddbc474a96b1ffecebf6": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: the fallback is reached only for a None or empty command; expanded of 'XXXX' tokenises to one token that is neither agentihooks before api or ledger nor ledger.py, so touched stays False as for an empty string."
+  }
+}

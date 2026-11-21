@@ -345,6 +345,8 @@ workers:
   prefer: ""
   # Capabilities this hive declares at every start, such as anton; a hive placement need names one to steer a run here.
   capabilities: []
+  # True for a hive pinned to one release: the hub keeps admitting it after the hub moves to a newer release.
+  pinned: false
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
     tag: dev

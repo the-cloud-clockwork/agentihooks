@@ -1352,7 +1352,7 @@ Each tick with an active window records elapsed and remaining minutes in the swa
 | `window-gate` | Gate log | Claims | Agents in flight |
 |---|---|---|---|
 | `log only` (default) | one `observe` row naming the agents it would ask | continue | not asked |
-| `deny` | one `deny` row | the legacy spawn loop and the hub admission of the event engine start no new claim until `swarm set` changes the window | each gets an inbox item to push, write a Handoff v2, run `swarm <id> handoff` and stop |
+| `deny` | one `deny` row | hub admission starts no new claim until `swarm set` changes the window (see [Pulling work from the hub](hives.md#pulling-work-from-the-hub)); the tick spawn loop that also held claims here was removed by pull request [#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) | each gets an inbox item to push, write a Handoff v2, run `swarm <id> handoff` and stop |
 | `skip` | none | continue | not asked |
 
 In every mode the cutoff publishes a final handoff as a Handoff v2 body: window bounds and gate mode under Intent, task counts by state under Done, each agent in flight with its task under Stopped at, the next step, and each in flight task under Read first. It goes to the watchdog inbox address (`AGENTIHOOKS_WATCHDOG_ADDRESS`, default `master-watchdog`) as written. The ledger gets a notice that fits the notifications window's 280 characters: the cutoff, gate mode, where the full handoff went, task counts by state, each agent in flight with its task (their count when the names do not fit) and the next step. A failed publish is retried on the next tick; the watchdog item is sent once, while the ledger notice can repeat when recording the publish fails after it. A new start or length is a new window: its alert and cutoff run again.
@@ -7530,6 +7530,19 @@ live tick. Each early end counts against the value it missed; an early end on an
 at one, and a full pass clears it. Once the count reaches `AGENTIHOOKS_HEALTH_EARLY_ENDS` (3), `agentihooks swarm
 <id> status` shows one `early end` finding that names the value and the count. The finding is information only and
 stops nothing.
+
+### Harness pin findings
+
+A lane whose `agent` is `claude` or `codex` gets seats from that harness only, however many free seats the other
+harness has. Each capacity pass stores every pinned lane with its quota decision: the pin, the time a pass first saw
+it, the other harness's free quota seats, and the ready lane tasks the pass placed nowhere while the lane sat below its
+ceiling. The swarm config keeps no time for a pin, so its age counts from the first pass that saw it; changing or
+clearing the pin starts the age again.
+
+`agentihooks swarm <id> status` shows one quota line per pinned lane under quota capacity, and raises one `harness
+pin` finding for a pinned lane whose other harness has free seats while ready tasks wait. The finding names the lane,
+the pin and its age, the free seats and the waiting tasks. It reports only: the pin stays until someone sets the lane
+agent back to `auto`.
 
 ### Spawn stall findings
 
