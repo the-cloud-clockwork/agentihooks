@@ -413,7 +413,7 @@ def _escalate(watch: Watch, rows: dict[str, Any]) -> list[str]:
             inbox.settle(row["item"], SENDER, DONE, moot)
         if moot or not is_open:
             watch.store.redis.hdel(key, tid)
-            if not moot:
+            if row["case"] != UNCLAIMED:
                 watch.store.redis.hset(_key(watch, ANSWERED), tid, raw)
             continue
         if row.get("escalated") or _minutes(watch, row["at"]) < 2 * row["limit"]:

@@ -925,7 +925,7 @@ def test_the_same_stall_answered_once_is_not_shown_again() -> None:
 
 @pytest.mark.feature("swarm-stall-watch-answered-alert-not-resent")
 def test_an_answered_stall_alert_is_not_sent_again_until_the_stall_grows() -> None:
-    """After the master answers a stall alert the watch sends nothing while that stall lasts, and alerts on a new one."""
+    """An answered stall alert is not sent again while that stall lasts; a new stall alerts."""
     swarm = Swarm(GREEN)
     swarm.store.update(SLUG, gates={})
     swarm.tick(START)
