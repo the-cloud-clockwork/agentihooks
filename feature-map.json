@@ -10043,14 +10043,28 @@
       "id": "lab-token-mint-status",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2702",
-      "behaviour": "A GitHub App token mint refusal preserves the HTTP response status and its fixed message. The lab manifest reader treats mint server errors and unanswered mint requests as transient, keeps the head through the existing quiet window and grades it after recovery. Client refusals drop the head. The same waiting envelope survives repeated transient failures and no retry runs before the window ends.",
+      "behaviour": "A GitHub App token mint refusal preserves the HTTP response status and names it in its message. The lab manifest reader treats mint server errors and unanswered mint requests as transient, keeps the head through the existing quiet window and grades it after recovery. Client refusals drop the head. The same waiting envelope survives repeated transient failures and no retry runs before the window ends.",
       "seam": "scripts.github_app.GitHubAppAuth.get_token and scripts.ci_lab.manifests.Actions over mocked HTTP, then Scheduler.tick through MirrorExpander, StoredManifests and the real token mint",
       "tests": [
-        "tests/test_github_app.py::test_rejected_exchange_preserves_the_http_status_without_changing_its_message",
+        "tests/test_github_app.py::test_rejected_exchange_preserves_the_http_status_and_names_it_in_its_message",
         "tests/test_github_app.py::test_a_refusal_without_an_http_status_keeps_its_message",
         "tests/ci_lab/test_manifests.py::test_actions_classifies_the_real_token_mint_refusal_by_its_http_status",
         "tests/ci_lab/test_manifests.py::test_actions_keeps_a_mint_scope_refusal_permanent",
         "tests/ci_lab/test_scheduler_manifest_fetch.py::test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_recovery"
+      ]
+    },
+    {
+      "id": "lab-relay-app-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-app-refusal",
+      "behaviour": "The CI lab relay survives a GitHub App token refusal: when the App refuses the push, check runs or pull requests token of a pending grade ref head, the relay tick records the head held for a later pass with the refusal, keeps the head pending, holds that repository's relays for the scheduler's post hold, relays them on the first tick after it ends and still relays the pending heads of other repositories in the same tick, so the scheduler process keeps running. The refusal names the permissions the token asked for and GitHub's answer status, so a refused checks write token never reads as a contents problem.",
+      "seam": "scripts.ci_lab.relay.Relay.tick over recording ports whose push raises scripts.github_app.GitAuthRefused, and scripts.github_app.GitHubAppAuth.get_token over mocked HTTP",
+      "tests": [
+        "tests/ci_lab/test_relay.py::test_a_relay_whose_app_token_is_refused_stays_pending_and_another_repository_still_relays",
+        "tests/ci_lab/test_relay.py::test_a_refused_repository_relays_nothing_until_the_post_hold_ends_while_another_repository_relays",
+        "tests/ci_lab/test_relay.py::test_a_token_refused_after_the_push_relays_again_after_the_hold_posting_each_check_run_once",
+        "tests/test_github_app.py::test_a_refused_checks_token_names_checks_write_and_the_answer_status",
+        "tests/test_github_app.py::test_a_refused_push_token_names_contents_write_and_workflows_write"
       ]
     },
     {
