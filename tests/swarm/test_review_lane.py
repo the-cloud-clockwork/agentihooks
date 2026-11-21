@@ -15,7 +15,7 @@ from tests.swarm.test_tick import FakeLedger
 from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.test_plan_kind import add
 
-pytestmark = [pytest.mark.unit, pytest.mark.feature("swarm-review-lane")]
+pytestmark = pytest.mark.unit
 
 PAIRING = "^review tasks must use the review lane, and the review lane accepts only review tasks$"
 
@@ -56,6 +56,7 @@ def _scaled(config: SwarmConfig) -> tuple[SwarmConfig, dict]:
     return scaled, decision
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_reviewer_names_round_trip_to_the_review_lane() -> None:
     name = naming.build("reviewer", "abcdef", 1)
     assert name == "reviewer@abcdef-0001"
@@ -65,11 +66,13 @@ def test_reviewer_names_round_trip_to_the_review_lane() -> None:
     assert naming.lane_of(name) == "review"
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_review_seats_are_numbered_like_worker_seats() -> None:
     assert naming.seat_label("eng", 2) == "eng-2"
     assert naming.seat_label("review", 2) == "review-2"
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_a_template_carries_the_review_lane_with_its_cap_profile_and_kind() -> None:
     template = templates.parse({"name": "review-proof"})
     assert template.lanes["eng"].kind == templates.AUTO
@@ -77,12 +80,14 @@ def test_a_template_carries_the_review_lane_with_its_cap_profile_and_kind() -> N
     assert (lane.cap, lane.profile, lane.kind) == (1, "reviewer", "review")
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_a_template_from_a_swarm_config_keeps_each_worker_cap() -> None:
     config = SwarmConfig("caps-proof", "/repo", 4, 2, max_plan=3)
     caps = {key: lane.cap for key, lane in templates.from_config("caps-proof", config).lanes.items()}
     assert (caps["eng"], caps["ci"], caps["plan"], caps["master"]) == (4, 2, 3, 1)
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_a_template_from_a_swarm_config_carries_the_review_cap() -> None:
     config = SwarmConfig("review-proof", "/repo", 2, 1, max_review=3)
     template = templates.from_config("review-proof", config)
@@ -95,33 +100,39 @@ def test_a_template_from_a_swarm_config_carries_the_review_cap() -> None:
     }
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_existing_swarm_configs_have_no_review_seat(store: RedisStore) -> None:
     assert SwarmConfig("review-proof", "/repo", 2, 1).max_review == 0
     store.redis.hdel(store.key("sw", "config"), "max_review")
     assert store.config("sw").max_review == 0
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_a_stored_swarm_config_keeps_its_review_cap(store: RedisStore) -> None:
     store.update("sw", max_review=2)
     assert store.config("sw").max_review == 2
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_capacity_reads_each_worker_lane_cap_from_its_config_field() -> None:
     configured = capacity._configured(SwarmConfig("sw", "/repo", 4, 2, max_plan=3))
     assert (configured["eng"], configured["ci"], configured["plan"]) == (4, 2, 3)
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_capacity_reads_the_review_cap_from_the_swarm_config() -> None:
     config = SwarmConfig("sw", "/repo", 4, 2, max_plan=3, max_review=2)
     assert capacity._configured(config) == {"eng": 4, "ci": 2, "plan": 3, "review": 2}
     assert capacity.caps({}, config) == {"eng": 4, "ci": 2, "plan": 3, "review": 2}
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_autoscale_sizes_only_the_engineering_ci_and_plan_lanes() -> None:
     _, decision = _scaled(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto"))
     assert set(decision["ceilings"]) == {"eng", "ci", "plan"}
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_autoscale_keeps_the_configured_review_cap() -> None:
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto", max_review=2)
     scaled, decision = _scaled(config)
@@ -129,15 +140,18 @@ def test_autoscale_keeps_the_configured_review_cap() -> None:
     assert set(decision["ceilings"]) == {"eng", "ci", "plan"}
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_ready_work_lists_each_task_only_on_its_own_lane(store: RedisStore) -> None:
     assert _ready(store, [{"id": "e1"}, {"id": "c1", "lane": "ci"}]) == {"eng": ["e1"], "ci": ["c1"]}
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_ready_work_lists_an_open_review_task_on_the_review_lane(store: RedisStore) -> None:
     found = _ready(store, [{"id": "r1", "lane": "review", "kind": "review"}, {"id": "e1"}])
     assert found == {"eng": ["e1"], "review": ["r1"]}
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_a_drained_swarm_runs_again_for_a_new_review_task(store: RedisStore) -> None:
     store.update("sw", state="drained")
     ledger = FakeLedger([{"id": "r1", "lane": "review", "kind": "review"}])
@@ -153,23 +167,27 @@ def test_a_drained_swarm_runs_again_for_a_new_review_task(store: RedisStore) -> 
     assert store.config("sw").state == "running"
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_the_ledger_refuses_a_lane_outside_the_swarm_lanes(review_ledger: str) -> None:
     with pytest.raises(ValueError, match="^lane must be one of"):
         add(review_ledger, "bad", lane="unknown")
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_the_ledger_stores_a_review_lane_review_task(review_ledger: str) -> None:
     state, rejected = add(review_ledger, "review-1", lane="review", kind="review")
     assert rejected == []
     assert [(task["id"], task["lane"], task["kind"]) for task in state["tasks"]] == [("review-1", "review", "review")]
 
 
+@pytest.mark.feature("swarm-review-lane")
 @pytest.mark.parametrize(("lane", "kind"), [("review", "code"), ("eng", "review"), ("ci", "review")])
 def test_the_review_lane_accepts_only_review_tasks(review_ledger: str, lane: str, kind: str) -> None:
     with pytest.raises(ValueError, match=PAIRING):
         add(review_ledger, "bad", lane=lane, kind=kind)
 
 
+@pytest.mark.feature("swarm-review-lane")
 def test_the_task_command_takes_the_review_lane() -> None:
     from scripts.swarm_ledger import ledger
 
