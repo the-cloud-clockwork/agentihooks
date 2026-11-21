@@ -26,6 +26,17 @@ step and to `proof.md` per piece of evidence.
   when it expires. Act on every OPERATOR line about your task, then
   `agentihooks api --slug <slug> --as <name> ack`.
 
+## Recon
+
+After the still valid scouter and before the plan, follow the
+recon-before-edit rule: scouter sub agents check the code areas and their
+callers, the regression tests and the feature map, the resources and
+production data sizes, and what might break, and you write `recon.md` in your
+task work folder from their results. Its Regression tests section names the
+protecting tests and feature map entries that land in your pull request,
+passing on the current code before the modification. Done when `recon.md`
+holds the six headings in order, each non empty.
+
 ## Plan
 
 Before your first edit, a planner sub-agent writes `plan.md` in your task

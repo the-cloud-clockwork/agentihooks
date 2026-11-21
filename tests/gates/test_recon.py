@@ -1,5 +1,6 @@
 """The recon gate: a swarm engineer or CI agent writes recon.md in its task work folder before its first code edit."""
 
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -76,7 +77,7 @@ def test_it_is_a_gate_named_recon_that_ships_log_only_and_judges_the_build_gates
 @pytest.mark.feature("recon-gate")
 def test_a_missing_recon_plan_refuses_the_first_code_edit_naming_the_file_and_the_headings(world: World):
     decision = world.decide()
-    assert not decision.allowed
+    assert decision.allowed is False
     assert decision.reason == (
         f"recon gate: {world.path}: no recon plan yet. Before the first code edit write it with these headings in "
         "this order, each followed by its content, at most 500 lines: ## What will be built, ## Code areas touched, "
@@ -99,6 +100,12 @@ def test_a_valid_recon_plan_lets_the_edit_through_and_logs_one_pass_per_text(wor
         "tool": "Edit",
         "reason": f"valid recon plan: {world.path}",
     }
+    held = Verdicts(SLUG, "recon", world.gates).read(TASK) or {}
+    assert (held["verdict"], held["reason"], held["digest"]) == (
+        "pass",
+        f"valid recon plan: {world.path}",
+        hashlib.sha256(VALID.encode()).hexdigest(),
+    )
     world.write(VALID + "a later line\n")
     assert world.decide().allowed
     assert [row["kind"] for row in world.rows()] == ["count", "count"]
@@ -109,7 +116,7 @@ def test_a_valid_recon_plan_lets_the_edit_through_and_logs_one_pass_per_text(wor
 def test_each_missing_heading_is_named_in_the_refusal(world: World, missing: str):
     world.write(recon_text(*(heading for heading in HEADINGS if heading != missing)))
     decision = world.decide()
-    assert not decision.allowed
+    assert decision.allowed is False
     assert decision.reason == refusal(world.path, f'the heading "{missing}" is missing')
     assert world.rows() == []
 
@@ -119,7 +126,7 @@ def test_an_empty_heading_is_named_in_the_refusal(world: World):
     text = VALID.replace("## What might break\na line of content\n", "## What might break\n\n   \n")
     world.write(text)
     decision = world.decide()
-    assert not decision.allowed
+    assert decision.allowed is False
     assert decision.reason == refusal(world.path, 'the heading "## What might break" has no content')
 
 
@@ -142,7 +149,7 @@ def test_more_than_five_hundred_lines_is_refused_and_five_hundred_pass(world: Wo
     assert problem(VALID + filler) == ""
     world.write(VALID + filler + "x\n")
     decision = world.decide()
-    assert not decision.allowed
+    assert decision.allowed is False
     assert decision.reason == refusal(world.path, "it holds 501 lines, more than 500")
 
 
@@ -164,6 +171,9 @@ def test_hash_lines_inside_a_fenced_block_are_content_not_headings():
     text = VALID.replace(f"{HEADINGS[1]}\na line of content\n", f"{HEADINGS[1]}\n{sample}")
     assert problem(text) == ""
     assert sections(text)[1] == (HEADINGS[1], sample.splitlines())
+    indented = "  ```\n# a comment at the margin\n  ```\n"
+    text = VALID.replace(f"{HEADINGS[1]}\na line of content\n", f"{HEADINGS[1]}\n{indented}")
+    assert sections(text)[1] == (HEADINGS[1], indented.splitlines())
     assert problem(VALID.replace(f"{HEADINGS[1]}\na line of content\n", f"{HEADINGS[1]}\n# a shell comment\n")) == (
         'the heading "## Code areas touched" has no content'
     )

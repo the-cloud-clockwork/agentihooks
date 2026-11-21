@@ -46,6 +46,16 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
   `agentihooks msg close <id> blocked "<what>"` or
   `agentihooks msg close <id> cancel "<why>"`.
 
+## Recon
+
+Before your first edit, after the still valid scouter, follow the
+recon-before-edit rule: scouter sub agents check the jobs, workflows and
+scripts the change touches and their callers, the tests and feature map
+entries that cover them, the runners, images and resources the pipeline uses,
+and what might break, and you write `recon.md` in your task work folder from
+their results. Done when `recon.md` holds the six headings in order, each non
+empty.
+
 ## Work
 
 1. Reproduce first: the failing job's log, or the build time measured from
