@@ -10950,6 +10950,17 @@
       ]
     },
     {
+      "id": "lab-worker-sink-backlog",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sink-backlog",
+      "behaviour": "The lab worker test upload sink listens with room for forty concurrent connections before accepting report and log uploads.",
+      "seam": "tests.ci_lab.test_worker Sink server activation",
+      "tests": [
+        "tests/ci_lab/test_worker.py::test_the_sink_listens_with_room_for_forty_uploads"
+      ]
+    },
+    {
       "id": "lab-worker-pod-loop",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-worker",
