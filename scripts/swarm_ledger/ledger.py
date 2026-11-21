@@ -1122,7 +1122,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     task.add_argument(
         "--covers-job",
-        default="",
         help="the failed dev job or unit test this task fixes, exactly as the promotion alert names it; "
         "the promotion watch files no task for it while this task is open",
     )

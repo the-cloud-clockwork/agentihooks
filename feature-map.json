@@ -8272,7 +8272,8 @@
         "tests/swarm_ledger/test_covers_job_field.py::test_a_task_added_or_set_with_covers_job_keeps_the_job",
         "tests/swarm_ledger/test_covers_job_field.py::test_covers_job_must_be_a_string",
         "tests/swarm_ledger/test_covers_job_field.py::test_the_task_add_operation_schema_accepts_covers_job",
-        "tests/swarm_ledger/test_covers_job_field.py::test_task_add_and_set_mark_the_job_a_task_covers"
+        "tests/swarm_ledger/test_covers_job_field.py::test_task_add_and_set_mark_the_job_a_task_covers",
+        "tests/swarm_ledger/test_covers_job_field.py::test_task_help_says_the_covers_job_value_must_match_the_alert"
       ]
     },
     {

@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.swarm_ledger import ledger_tasks
+from scripts.swarm_ledger import ledger, ledger_tasks
 from scripts.swarm_ledger.api import schemas
 from tests.swarm_ledger import test_artifact_lifecycle as lifecycle
 from tests.swarm_ledger.test_artifact_lifecycle import AGENT, add_task, storage
@@ -8,6 +8,10 @@ from tests.swarm_ledger.test_artifact_lifecycle import package_modules as packag
 from tests.swarm_ledger.test_artifact_lifecycle import slug as slug
 
 JOB = "swarm-image / smoke"
+COVERS_HELP = (
+    "the failed dev job or unit test this task fixes, exactly as the promotion alert names it; "
+    "the promotion watch files no task for it while this task is open"
+)
 
 
 @pytest.mark.feature("promotion-covering-task-holds-cause")
@@ -41,3 +45,11 @@ def test_task_add_and_set_mark_the_job_a_task_covers() -> None:
     assert commands.run(["task", "add", "c9", "Fix", "--covers-job", JOB])["covers_job"] == JOB
     assert "covers_job" not in commands.run(["task", "add", "c9", "Fix"])
     assert commands.run(["task", "set", "c9", f"covers_job={JOB}"])["fields"] == {"covers_job": JOB}
+
+
+@pytest.mark.feature("promotion-covering-task-holds-cause")
+def test_task_help_says_the_covers_job_value_must_match_the_alert(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(["--slug", "cli", "--as", AGENT, "task", "--help"])
+    shown = " ".join(capsys.readouterr().out.split())
+    assert f"--covers-job COVERS_JOB {COVERS_HELP} --quote QUOTE" in shown
