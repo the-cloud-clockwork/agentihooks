@@ -256,6 +256,7 @@ class TestEntry:
             "one-push",
             "push-stop",
             "quiet",
+            "recon",
             "reruns",
             "subagents",
             "watch",

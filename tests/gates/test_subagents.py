@@ -6,9 +6,11 @@ import pytest
 
 from scripts.gates import Call, Gate, Who, entry, modes
 from scripts.gates.budget import Budget
+from scripts.gates.recon import HEADINGS, RECON
 from scripts.gates.subagents import SubagentBudget, refusal
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ledger_workspace
 from tests.swarm.client_class import client_class
 from tests.swarm.review_ledger import ReviewLedger
 
@@ -104,6 +106,48 @@ def test_a_session_outside_a_swarm_task_is_never_counted(tmp_path):
     for who in (Who(), Who(name="master@1-1", swarm="demo", lane="master"), Who(swarm="demo", task="t1")):
         assert gate.decide(launch(), who, state(tmp_path)).allowed
     assert rows(tmp_path) == []
+
+
+FREE = "recon scouter launch for task t1, not counted before its recon plan is valid"
+
+
+def write_recon() -> None:
+    folder = ledger_workspace.folder("demo", "t1")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / RECON).write_text("".join(f"{heading}\nx\n" for heading in HEADINGS))
+
+
+@pytest.mark.feature("subagent-recon-scouters")
+def test_recon_scouters_before_a_valid_recon_plan_leave_the_review_readers_their_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorded: list[str] = []
+    monkeypatch.setattr("scripts.gates.subagents.record_on_ledger", lambda who, readers: recorded.extend(readers))
+    gate = SubagentBudget()
+    assert all(gate.decide(launch("scouter"), ME, state(tmp_path)).allowed for _ in range(9))
+    assert Budget("demo", "subagents", tmp_path).spent("t1", "launches") == 0
+    assert [(r["gate"], r["kind"], r["tool"], r["reason"]) for r in rows(tmp_path)] == [
+        ("subagents", "count", "Agent", FREE)
+    ] * 9
+    write_recon()
+    readers = [gate.decide(launch(reader), ME, state(tmp_path)) for reader in ("standards-reader", "spec-reader")]
+    assert [d.allowed for d in readers] == [True, True]
+    assert recorded == ["standards-reader", "spec-reader"]
+    assert gate.decide(launch("scouter"), ME, state(tmp_path)).allowed
+    assert rows(tmp_path)[-1]["reason"] == "sub-agent launches 3 of 8 for task t1"
+
+
+@pytest.mark.feature("subagent-recon-scouters")
+def test_only_scouter_launches_before_a_valid_recon_plan_go_uncounted(tmp_path: Path) -> None:
+    gate = SubagentBudget(launches=1, continuations=1)
+    assert gate.decide(launch("Explore"), ME, state(tmp_path)).allowed
+    assert not gate.decide(launch("general-purpose"), ME, state(tmp_path)).allowed
+    assert gate.decide(launch("scouter"), ME, state(tmp_path)).allowed
+    assert gate.decide(launch("scouter", tool="Task"), ME, state(tmp_path)).allowed
+    assert gate.decide(Call("SendMessage", {"subagent_type": "scouter"}), ME, state(tmp_path)).allowed
+    assert not gate.decide(Call("SendMessage", {"subagent_type": "scouter"}), ME, state(tmp_path)).allowed
+    write_recon()
+    assert not gate.decide(launch("scouter"), ME, state(tmp_path)).allowed
 
 
 def test_the_refusal_names_the_spend_the_cap_and_the_way_out():

@@ -3,9 +3,10 @@
 import sys
 from typing import TYPE_CHECKING
 
-from scripts.gates import lift, log
+from scripts.gates import lift, log, recon
 from scripts.gates.base import Call, Decision, Who
 from scripts.gates.budget import Budget
+from scripts.swarm_ledger import ledger_workspace
 
 if TYPE_CHECKING:
     from scripts.gates.verdicts import Verdicts
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
 LAUNCH_TOOLS = frozenset({"Agent", "Task"})
 CONTINUE_TOOLS = frozenset({"SendMessage"})
 READERS = ("standards-reader", "spec-reader")
+SCOUTER = "scouter"
 
 
 def refusal(slug, task, counter, cap):
@@ -34,6 +36,16 @@ class SubagentBudget:
 
     def decide(self, call: Call, who: Who, state: "Verdicts") -> Decision:
         if not (who.pinned and who.task):
+            return Decision()
+        kind = call.tool_input.get("subagent_type")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        if (
+            call.tool in LAUNCH_TOOLS
+            and kind == SCOUTER
+            and not recon.valid(ledger_workspace.folder(who.swarm, who.task))
+        ):
+            reason = f"recon scouter launch for task {who.task}, not counted before its recon plan is valid"
+            row = log.Row.of(self.name, "count", who, call.tool, reason)  # pyright: ignore[reportUnknownMemberType]
+            log.append(state.slug, row, state.home)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             return Decision()
         counter, cap = (
             ("launches", self.launches) if call.tool in LAUNCH_TOOLS else ("continuations", self.continuations)

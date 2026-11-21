@@ -509,6 +509,67 @@ def test_required_changelog_fragment_is_kept_without_scope_comment(ask, areas, k
     assert record["verdict"] == ("pass" if kept else "fail")
 
 
+NAMED = "scripts/receipt.py\nfeature-map.json\ntests/receipt/test_replay.py\nfeature-map.d/receipt.json\ntests/../scripts/receipt.py"
+
+
+@pytest.mark.feature("trace-plan-recon-protection")
+@pytest.mark.parametrize(
+    ("areas", "kept"),
+    [
+        (("feature-map.json", "tests/receipt/test_replay.py"), True),
+        (("./tests/receipt/test_replay.py",), True),
+        (("tests/receipt",), True),
+        (("feature-map.d/receipt.json",), True),
+        (("antoncore:tests/receipt/test_replay.py",), True),
+        (("tests/receipt/test_other.py",), False),
+        (("feature-map.json", "scripts/receipt.py"), False),
+        (("scripts/receipt.py",), False),
+        (("tests/../scripts/receipt.py",), False),
+        (("docs/feature-map.json",), False),
+    ],
+)
+def test_a_protection_piece_the_recon_plan_names_is_kept_whatever_the_classifier_says(ask, areas, kept):
+    ask(0.95, 0.0, 0.95)
+    pieces = [
+        piece("Repair receipt replay", "scripts/receipt.py"),
+        piece("Register the replay guard tests in the feature map", *areas),
+        piece("Add an unrelated user guide", "docs/guide.md"),
+    ]
+    record = trace_plan.trace(pieces, INTENT, None, now_ms=5, named=NAMED)
+    assert [row["kept"] for row in record["pieces"]] == [True, kept, True]
+    assert record["verdict"] == "pass"
+    assert record["recon"] == hashlib.sha256(NAMED.encode()).hexdigest()
+
+
+@pytest.mark.feature("trace-plan-recon-protection")
+def test_without_a_recon_plan_naming_it_the_protection_piece_is_judged_by_the_classifier(ask):
+    ask(0.95, 0.0, 0.95)
+    pieces = [piece("a"), piece("Register the guard tests", "tests/receipt/test_replay.py"), piece("c")]
+    record = trace_plan.trace(pieces, INTENT, None, now_ms=5)
+    assert [row["kept"] for row in record["pieces"]] == [True, False, True]
+    assert "recon" not in record
+
+
+@pytest.mark.feature("trace-plan-recon-protection")
+def test_the_protection_ruling_reaches_the_classifier_rule_and_asks_no_coverage():
+    fresh = [piece("Register the guard tests", "tests/receipt/test_replay.py")]
+    ruled = trace_plan._params(fresh, 0, False, ["c-1"], NAMED)
+    judged = trace_plan._params(fresh, 0, False, ["c-1"])
+    assert (ruled["pieces"][0]["ruling"], ruled["covers"]) == (True, [])
+    assert (judged["pieces"][0]["ruling"], len(judged["covers"])) == (False, 1)
+
+
+@pytest.mark.feature("trace-plan-recon-protection")
+def test_a_piece_appended_after_the_recon_plan_changed_retraces_every_piece(ask):
+    ask(0.95, 0.0)
+    passed = trace_plan.trace([piece("a"), piece("b", "tests/x.py")], INTENT, None)
+    fake = ask(0.95, 0.0, 0.95)
+    later = trace_plan.trace([piece("a"), piece("b", "tests/x.py"), piece("c")], INTENT, passed, named="tests/x.py")
+    [(_, questions, _)] = fake.calls
+    assert list(questions) == ["piece_0", "piece_1", "piece_2", "size"]
+    assert [row["kept"] for row in later["pieces"]] == [True, True, True]
+
+
 @pytest.mark.parametrize(("p_yes", "kept"), [(0.3, True), (0.29, False), (0.0, False), (1.0, True)])
 def test_a_piece_under_three_tenths_is_cut(ask, p_yes, kept):
     ask(p_yes, 0.9, 0.9)
@@ -834,6 +895,31 @@ def test_a_new_authorization_retraces_an_unchanged_plan(monkeypatch, tmp_path):
     assert len(fake.calls) == 1 and [row["kept"] for row in record["pieces"]] == [True, True, True]
     assert trace_plan.run(folder, state, ledger, WHO, "observe", home=home, now_ms=13)[0] == record
     assert len(fake.calls) == 1
+
+
+@pytest.mark.feature("trace-plan-recon-protection")
+def test_a_changed_recon_plan_retraces_an_unchanged_plan_once_and_keeps_its_protection_piece(ask, tmp_path):
+    folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
+    write_plan(
+        folder,
+        "- Repair receipt replay | scripts/receipt.py | the task needs it\n"
+        "- Register the guard tests | tests/receipt/test_replay.py | protect the replay\n"
+        "- a dog bed | doghouse/bed | the dog sleeps on it\n",
+    )
+    fake = ask(0.95, 0.0, 0.95)
+    record, _ = run(folder, ledger, home)
+    assert [row["kept"] for row in record["pieces"]] == [True, False, True]
+    assert "recon" not in record
+    (folder / "recon.md").write_text(
+        "## Code areas touched\nscripts/receipt.py\n## What might break\nreplay\n## Regression tests\n"
+        "tests/receipt/test_replay.py\n"
+    )
+    record, _ = run(folder, ledger, home, now_ms=12)
+    assert len(fake.calls) == 2
+    assert [row["kept"] for row in record["pieces"]] == [True, True, True]
+    assert record["recon"] == hashlib.sha256(b"scripts/receipt.py\ntests/receipt/test_replay.py").hexdigest()
+    assert run(folder, ledger, home, now_ms=13)[0] == record
+    assert len(fake.calls) == 2
 
 
 def test_a_retrace_for_a_new_authorization_counts_no_new_failed_plan(monkeypatch, tmp_path):
