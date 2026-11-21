@@ -58,6 +58,7 @@
   "semgrep.yml/scan": "light",
   "startup-stages.yml/measure": "standard",
   "swarm-image.yml/publish": "standard",
+  "swarm-image.yml/release": "standard",
   "swarm-node-base.yml/copy": "standard",
   "swarm-node-image.yml/hive": "standard",
   "swarm-node-image.yml/image": "standard",

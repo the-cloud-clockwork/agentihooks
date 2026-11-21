@@ -339,14 +339,11 @@ def test_a_record_write_refused_after_the_pane_resumed_retires_that_pane_before_
 ) -> None:
     store, _, rt = up
     old = earlier(store)
-    put = RedisStore.put_agent
 
     def refused(self: RedisStore, slug: str, agent: AgentRecord) -> None:
-        if agent.name == old:
-            raise SwarmError("stale or changed execution identity")
-        put(self, slug, agent)
+        raise SwarmError("stale or changed execution identity")
 
-    monkeypatch.setattr(RedisStore, "put_agent", refused)
+    monkeypatch.setattr(RedisStore, "revive_agent", refused)
     asked = answers(monkeypatch, "1", "y")
     assert run("sw", "master", "up") == 0
     assert asked == [master_launch.CHOOSE, master_launch.OFFER]

@@ -152,8 +152,11 @@ round trip gives:
 | `str`, `int`, `float`, `bool`, `None` | Shared, since they cannot change |
 | Anything else: a tuple, a dict with a non string key, a subclass | Encoded and parsed on its own, as before |
 
-`apply_ops` copies the stored entry this way before applying operations, and
-copies the written entry again for the caller unless it passes
+`apply_ops` applies operations to the writer copy the previous write left
+([Writer copy rebuild](#writer-copy-rebuild)). Only when there is none does it
+copy the stored entry this way, sharing its stamp records instead of copying
+them. It copies the written entry again for the caller
+unless it passes
 `copy_state=False`. On the recorded 8.2 MB corpus the structural copy took 34 ms
 of thread CPU against 79 ms for encode and parse.
 
@@ -182,7 +185,9 @@ order and number, returns the previous fragment itself, so an unchanged
 subtree costs one identity check per part. A value `orjson` cannot write, such
 as an integer outside 64 bits, takes its signature from the strict encoder.
 Stamp records were already reused by identity
-([pull request 8441](https://github.com/the-cloud-clockwork/agentihooks/pull/8441)).
+([pull request 8441](https://github.com/the-cloud-clockwork/agentihooks/pull/8441)),
+and a write encodes only the stamp records it replaced or added
+([Writer copy rebuild](#writer-copy-rebuild)).
 
 Identity reuse is safe because a stored fragment value is never changed in
 place: a write applies its operations to a separate writer copy of thawed
@@ -217,6 +222,186 @@ a document whose state shares one row and the title with the previous one,
 counts every `orjson.dumps` call and fails unless the only one is for the
 changed row, the shared fragments are the previous objects, and the joined text
 equals a fresh encode of the whole state.
+
+### Writer copy rebuild
+
+A write leaves two things for the next write on the same process: the new
+fragment tree and a writer copy, the private state the next write applies its
+operations to. `Entry.for_write()` hands the writer copy over once. When there
+is none, it builds a fresh copy whose stamp map shares its records with the
+stored state.
+
+`writer_copy.written(state, previous)` builds both from the state the
+operations produced and the previous tree. `_write` calls it inside the
+transaction `apply_ops` opens, so it runs while the write holds that ledger's
+locks: the process lock for the ledger and, on the
+[shared database](shared-ledger-database.md#the-writer-lock), the shared
+writer lock with the ledger's own advisory lock (`lock_ledger`). On a SQLite
+folder the transaction holds the `BEGIN IMMEDIATE` write lock of the database
+file. Every other write of that ledger waits until it finishes, and on SQLite so
+does every write to another ledger in the same file.
+
+`written` runs three steps:
+
+1. `fragments.document(state, previous)` builds the new tree, reusing previous
+   fragments as [Stored fragment reuse](#stored-fragment-reuse) describes.
+2. `writer_copy.detached(tree, previous, state)` keeps the stored tree and the
+   writer copy apart. A fragment built in this write gets one thawed copy of its
+   value for the tree and another for the writer copy, so the next write's
+   operations never reach a stored value, except the stamp records step 3
+   shares. A fragment reused from the previous tree keeps its stored value, and
+   the writer copy keeps its own.
+3. When the stored `_meta.stamps` is a map of record fragments, the writer
+   copy's `_meta.stamps` becomes a shallow copy of it, so the two share every
+   stamp record. Otherwise the writer copy keeps the copy step 2 made.
+
+A task write replaces one or two stamp records, and a busy ledger holds tens of
+thousands of them. Before
+[pull request 12050](https://github.com/the-cloud-clockwork/agentihooks/pull/12050)
+steps 1 and 2 both walked every record: `fragments.document` called `stamp`
+once per record, and `detached` recursed into every child of every mapping,
+changed or not. Now both rebuild only the records the write replaced or added.
+
+#### Finding the replaced records
+
+`fragments.replaced(new, old)` compares two mappings by key order and object
+identity:
+
+- It returns `None` when `new` does not start with `old`'s keys in `old`'s
+  order: a key was dropped, the keys were reordered, or a key was inserted
+  before the stored ones.
+- Otherwise it returns `old`'s keys whose value in `new` is a different object,
+  then the keys `new` adds after `old`'s, in order.
+
+The scan uses `islice`, `compress` and `map(operator.is_not, ...)`, so it runs
+in C and makes no Python call per kept record. It compares identity only, so a
+replaced record equal to the stored one is still named; the encode step then
+finds it equal and keeps the stored fragment. With
+`old = {"a": first, "b": second}`:
+
+| `new` | `replaced(new, old)` |
+|---|---|
+| `{"a": first, "b": second}` | `[]` |
+| `{"a": first, "b": {"rev": 1}}` | `["b"]`, though the new record equals `second` |
+| `{"a": {"rev": 1}, "b": second, "c": first}` | `["a", "c"]` |
+| `{"b": second, "a": first}` | `None`: the stored order moved |
+| `{"a": first}` | `None`: `b` was dropped |
+
+#### Rebuilding the stamps fragment
+
+`fragments.meta_part` sends a `_meta.stamps` mapping to `fragments.stamps(value,
+previous)`:
+
+| Case | What it builds |
+|---|---|
+| No previous stamps fragment, or a previous one that is not a map of record fragments, such as a scalar or a leaf | The whole map: one `stamp` call per record, each record encoded |
+| `replaced` returns `None` | The whole map in the new order. A kept record's fragment is reused by identity, but each record still costs one Python call |
+| Every named record comes back as its stored fragment, or none is named | The stored stamps fragment itself |
+| Otherwise | A new fragment holding copies of the stored parts and values, with a fresh `leaf` for each replaced or added record |
+
+`writer_copy.detached` handles every mapping fragment the same way. It copies
+the mapping's parts, values and writer dict, which runs in C, and recurses only
+into the keys `replaced` names between the new and the previous parts. When
+`replaced` returns `None` it recurses into every key. Unchanged children carry
+over with no recursive copy. A list still walks every item, so a changed tasks
+list costs one `detached` call per task.
+
+Both rely on the rule the stamp records already followed: a write replaces a
+stamp record with a new object and never edits one in place. The writer copy
+shares its stamp records with the stored state. An in-place edit changes the
+writer copy and the stored state together, so the write neither encodes nor
+writes that record, and the database keeps the old value.
+
+#### Measured cost
+
+All figures come from pull request 12050, on a scratch copy of the
+rig-grade-swarm ledger with 5964 tasks, 75966 stamp records and 62 MB, imported
+into a SQLite repository. The harness called `apply_ops` the way the API does:
+three single task writes, the second under `cProfile`, then a burst of 20
+concurrent task writes. The host ran at a load average of 12 to 23, so each
+measurement is a pair: the harness on dev at `1b19d6f0ef`, the code before the
+change, then on the code after it. The table shows the two pairs whose after
+run used the merged code, which the pull request labels C and D. The pull
+request also lists a first profile on dev alone and two pairs, A and B, whose
+after run used an earlier cut that looped over the records in Python.
+
+| Run | Single write CPU, s (unprofiled, profiled, unprofiled) | Burst max lock wait, s | Burst median lock wait, s |
+|---|---|---|---|
+| First pair, before | 0.87, 1.22, 1.64 | 17.21 | 7.38 |
+| First pair, after | 0.33, 0.62, 0.33 | 9.19 | 4.26 |
+| Second pair, before, during a load spike | 1.96, 3.08, 2.64 | 32.50 | 17.84 |
+| Second pair, after | 0.63, 0.70, 0.48 | 11.04 | 5.84 |
+
+- In the profiled write before the change, `writer_copy.written` took 1.225 of
+  1.720 s and `detached` made 81954 calls. After it, `written` took 0.205 and
+  0.247 s in the two profiled writes, and `detached` made 5972 calls, one per
+  task in the changed tasks list.
+- On a ledger of stamp records only, with one record replaced per write, the
+  pull request's `stamps_scale.py` harness took the median of seven writes. The
+  stamps rebuild took 0.51 and 0.61 s at 76000 records and 1.60 and 1.59 s at
+  152000 before the change. After it, it took 0.10 and 0.11 s at 76000 and
+  0.17 and 0.22 s at 152000. The remaining cost is the scan and a few dict
+  copies, all in C.
+- 14 writes at a fixed clock, a comment add and an update that changes nothing
+  among them, produced identical stored text, cached state, writer copy, stored
+  field rows and reloaded text before and after the change.
+
+The change left these passes over the whole ledger in every write: task leaf
+hashing in `fragments.document` (about 0.08 s on that copy),
+`hierarchy.sync`, `outbox.changed`, `ledger_core.earliest` and the derive
+passes in `mutation.apply`.
+
+#### Profile one rebuild
+
+This script times one writer copy rebuild on a synthetic ledger of 76000 stamp
+records and 6000 tasks, after a write that changes one task and replaces one
+stamp record. Save it as `profile_write.py` outside the checkout and run it
+from the checkout root with `PYTHONPATH=. python profile_write.py`, so it
+imports that checkout's code. Under `python -I` the path is ignored and an
+installed copy of the package is profiled instead.
+
+```python
+import cProfile
+import pstats
+
+from scripts.swarm_ledger.repository import writer_copy
+
+records = {f"tasks/t{n}/done": {"at": n, "rev": 1, "by": "swarm"} for n in range(76000)}
+state = {"_meta": {"rev": 1, "stamps": records}, "tasks": [{"id": f"t{n}", "state": "open"} for n in range(6000)]}
+stored, writer = writer_copy.written(state, None)
+
+writer["_meta"]["rev"] = 2
+writer["tasks"][0]["state"] = "claimed"
+writer["_meta"]["stamps"]["tasks/t0/done"] = {"at": 99, "rev": 2, "by": "engineer"}
+
+profile = cProfile.Profile()
+profile.runcall(writer_copy.written, writer, stored)
+stats = pstats.Stats(profile)
+print(f"{stats.total_calls} calls, {stats.total_tt:.3f} s")
+stats.sort_stats("cumulative").print_stats(r"writer_copy|fragments", 6)
+```
+
+Two runs of each on one host gave, Before on dev at `157164982`, the parent of
+the commit that merged pull request 12050, and After on dev at `848f98e4d`:
+
+| Code | Calls | `detached` calls | `written`, s |
+|---|---|---|---|
+| Before pull request 12050 | 352149 | 82005 | 0.312, 0.529 |
+| After | 48172 | 6006 | 0.067, 0.051 |
+
+The call counts are exact for this input. The times move with host load.
+
+#### Guards
+
+| Guard | What it holds |
+|---|---|
+| `tests/swarm_ledger/test_writer_stamp_cost.py` | One write makes as many Python calls on 4000 kept stamp records as on 2000. The rebuilt writer copy stores what a fresh encoding of the written state stores. Kept records reuse their fragments, and an unchanged map or an equal replaced record keeps the stored stamps fragment. Reordered, added and dropped records build a new fragment in the new order, and a write that reorders the ledger and its stamp records stores the new order in both the stored tree and the writer copy. A scalar or leaf stamps value before the write leads to a full encode. A write leaves the stored fragments and the state it started from unchanged |
+| Feature map entry `ledger-write-stamp-cost` | The behaviour and its seams: `writer_copy.written` and `detached`, `fragments.document`, `stamps` and `replaced` |
+
+The call count test read red on the code before the change with
+`assert 8088 == 4088`
+([Proofs run 44327740072](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44327740072)):
+before the change each extra stamp record added two Python calls.
 
 ### Measuring operations writes
 
@@ -279,6 +464,9 @@ The [ledger load gate](ledger-load-gate.md) stayed green
 | Operations CPU median stayed near 0.43 s | The server still runs code from before pull request 5136. Restart it on current code and read a fresh hour. |
 | Refresh CPU per cross pod write near 0.045 s on a large ledger | The pod still runs code from before pull request 8569, or every refresh is a whole rebuild. Check the release, then check that writers record their changed rows: an unrecorded generation bump forces a whole rebuild on every other pod ([writer floor](shared-ledger-database.md#the-writer-floor)). |
 | Wall p95 high while CPU median is low | The time is spent outside the request thread's CPU: read `lock_wait_seconds` and `other_wall_seconds` in the [request metrics](ledger-request-metrics.md#summary-view) before blaming the write path. |
+| A task write spends about a second of CPU on a ledger with tens of thousands of stamp records, and bursts of task writes wait ten seconds or more for the ledger's lock | The writing process runs code from before pull request 12050 and rebuilds every stamp record under the lock. Every writer runs the write in its own process ([Who writes and how](ledger-write-path.md#who-writes-and-how)), so check the release of every process that writes the ledger: the ledger API service, agents' ledger commands, the tick, the hub and the controller. Hive Pods run their own release; `agentihooks hive list` shows it, as the [write path troubleshooting](ledger-write-path.md#troubleshooting) describes. To check a checkout, run the [profile](#profile-one-rebuild) on it: about 82000 `detached` calls instead of about 6000 mean the old code |
+| One write takes much longer than a task write on the same ledger | It dropped or reordered stamp records, or inserted one ahead of the stored keys, so `replaced` returned `None` and the stamps rebuild walked every record. This is expected for such a write. A task write that only replaces records or adds them at the end takes the short stamps path, while the whole ledger passes listed under [Measured cost](#measured-cost) still run |
+| A stamp record changed in the writer's state but the database and the page keep the old one | Code edited the record in place. Assign a new record to its key instead: `stamps[key] = {**stamps[key], "rev": 2}` |
 
 ## What limits it
 
@@ -286,6 +474,7 @@ The [ledger load gate](ledger-load-gate.md) stayed green
 |---|---|
 | Resolved | Every op rewrote the whole document. On a copy of the largest live ledger one chat line wrote 16.6 MB and took 0.73 s; now it writes about 150 KB of database pages and takes 0.09 s, and twenty writes from four threads wait 0.41 s at the median instead of 1.90 s. |
 | Resolved | Each operations write built the page stream view and encoded the whole ledger on the request thread. Both now stay off it ([Write thread and stream publication](#write-thread-and-stream-publication)). |
+| Resolved | Each write rebuilt every stamp record of the stored tree and the writer copy while it held the ledger's lock: about one second of CPU per task write on a copy of a ledger with 75966 records, and burst lock waits up to 17.21 s, 32.5 s under a load spike. It now rebuilds only the records it replaced or added: 0.33 to 0.63 s per write and burst lock waits up to 9.19 s, 11.04 s under the load spike, on the same copy ([Writer copy rebuild](#writer-copy-rebuild)). |
 | Resolved | Whole-document polling, replaced by the event stream: idle tabs and watchers transfer only heartbeats, and a change sends a patch of the changed items. |
 | P1 | One monolithic inline script with no module boundaries; behaviour cannot be tested in isolation from the page. |
 | P1 | HTML built by placeholder substitution in Python, with escaping done by hand at each call site. |

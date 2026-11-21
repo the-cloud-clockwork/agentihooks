@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/plant_publish.py:scripts.ci_lab.plant_publish.x__commit:5107879c52d1657a450761252ee772827968cef6bafd62428984e72154fb9bcf": {
+    "reader": "Standards",
+    "reason": "prepare's validated names cannot introduce another paragraph into its fixed commit messages. Splitting at most twice therefore returns the same message as splitting once."
+  }
+}
