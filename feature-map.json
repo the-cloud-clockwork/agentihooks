@@ -8442,6 +8442,16 @@
       ]
     },
     {
+      "id": "promotion-dev-push-workflows-non-gating",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2690",
+      "behaviour": "Every workflow that runs on a dev push outside the Tests run, through a push trigger whose branch filters admit dev or a workflow_run chained after such a workflow, is named with its reason on the explicit non gating list, because promotion grades only the jobs of the Tests run and a gate placed in any other workflow would never hold the release.",
+      "seam": "the on triggers of every workflow under .github/workflows against NON_GATING in tests/contracts/promotion/test_workflow.py",
+      "tests": [
+        "tests/contracts/promotion/test_workflow.py::test_every_dev_push_workflow_outside_tests_sits_on_the_non_gating_list"
+      ]
+    },
+    {
       "id": "promotion-unstable-snapshot-ignores-dev-commit",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-promotion-wait-settled-run",
