@@ -5801,6 +5801,16 @@
       ]
     },
     {
+      "id": "merge-queue-grades-size-limits-on-the-combined-tree",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-size-gate-merged-result",
+      "behaviour": "The unit suite grades the checked out tree against its own size allowlist, so a merge group whose combined tree puts a file or function over a size limit without an allowance, or leaves the allowlist different from the measurement, fails before it reaches dev, even when each pull request kept the file under the limit on its own.",
+      "seam": "scripts.size_limits.measure and scripts.size_limits.grade, called by the unit suite on the merge group head",
+      "tests": [
+        "tests/test_size_limits.py::test_the_checked_out_tree_holds_the_size_limits"
+      ]
+    },
+    {
       "id": "ledger-hives-panel",
       "origin": "inventory",
       "behaviour": "The hives panel shows each hive's requested columns and writes max agents, exclusion and flags as the operator, naming the reason for a refused write.",
