@@ -1889,6 +1889,20 @@
       ]
     },
     {
+      "id": "hub-admission-pinned-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/crew-261120-204605-fix-3",
+      "behaviour": "A hive whose chart sets workers.pinned renders HIVE_PINNED yes, its worker start registers pinned yes on the hive record with hive set on every start, and the hub release floor then admits that hive's events admission requests whatever release it reports, so a hive pinned to one release keeps taking launches after the hub moves to a newer release; a record with pinned no, any other value or none keeps the release floor, hive set refuses a pinned value other than yes or no, and a pod from a chart without the setting writes no pin.",
+      "seam": "Admission.admit for a hive spoke request, fed by the pinned field the worker start writes with hive set from HIVE_PINNED",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_pinned_hive_on_an_older_release",
+        "tests/hub/test_admission.py::test_the_hub_refuses_a_hive_not_marked_pinned_yes_on_an_older_release",
+        "tests/hive/test_registry.py::test_hive_set_records_whether_the_hive_is_pinned",
+        "tests/deployment/test_worker_hive.py::test_the_charted_pin_is_registered_on_every_start",
+        "tests/deployment/test_worker_hive.py::test_a_pod_from_a_chart_without_the_pin_setting_writes_no_pin"
+      ]
+    },
+    {
       "id": "hub-admission-carries-ledger-intent",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-churn",
@@ -11544,6 +11558,38 @@
       "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint job's dependency audit step",
       "tests": [
         "tests/test_ci_dependency_audit.py::test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home"
+      ]
+    },
+    {
+      "id": "execution-put-unchanged-skips-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2797",
+      "behaviour": "A valid managed execution put on the per-record Redis layout compares the seat head and execution row, applies the shared locked-path transforms, and checks both revisions and any held controller lease again before returning unchanged without a write lock or fenced document read. Document storage, changed or moved records, invalid inputs and binding or Pod UID conflicts keep the existing locked path. A lease that becomes stale during the check also falls back to that path.",
+      "seam": "scripts.swarm.execution.ExecutionRegistry.put over fencing.records and fencing.write",
+      "tests": [
+        "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_skips_the_write_lock_and_the_fenced_document_read",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_changed_put_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_unmanaged_legacy_put_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_binding_or_uid_conflict_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_invalid_rejects_an_unknown_runtime_backend",
+        "tests/swarm/test_execution_unchanged_put.py::test_invalid_accepts_a_valid_kubernetes_target",
+        "tests/swarm/test_execution_unchanged_put.py::test_invalid_rejects_an_incomplete_kubernetes_target",
+        "tests/swarm/test_execution_unchanged_put.py::test_invalid_rejects_a_seat_outside_the_swarm",
+        "tests/swarm/test_execution_unchanged_put.py::test_binding_conflict_flags_a_changed_identity_field",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_forces_a_locally_finished_record_through_the_fast_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_syncs_launch_binding_fields_on_a_read_before_ack",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_unchanged_put_with_a_bound_pod_uid_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_fenced_head_with_no_matching_execution_row_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_initial_seat_head_mismatch_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_immutable_record_change_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_invalid_rejects_a_non_dict_runtime_target",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_stale_controller_epoch_raises_the_same_way_on_both_paths",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_occupant_that_moves_between_the_check_reads_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_invalid_put_under_a_stale_epoch_raises_the_locked_paths_error",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_row_that_changes_between_the_check_reads_still_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_document_layout_put_does_not_precheck_the_whole_document",
+        "tests/swarm/test_execution_unchanged_put.py::test_a_lease_that_moves_during_the_check_takes_the_locked_path",
+        "tests/swarm/test_execution_unchanged_put.py::test_an_ended_record_is_retained_unless_revival_is_explicit"
       ]
     },
     {
