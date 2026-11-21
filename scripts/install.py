@@ -6331,7 +6331,6 @@ def main() -> None:
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
     sub.add_parser("recall", help="Recall archive of ledgers and swarms: search|get|timeline|sources, reindex, eval")
     sub.add_parser("plan", help="Read only your task's plan chunk: read [--task ID] [--phase ID]")
-    sub.add_parser("forge", help="Read a pull or merge request, or post a review comment: read|post NUMBER")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"
     )
