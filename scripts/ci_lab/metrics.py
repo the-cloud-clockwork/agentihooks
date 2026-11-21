@@ -242,7 +242,7 @@ def observe_rate(registry: Registry, headers: Mapping[str, str]) -> None:
     """Set the GitHub calls left in the rate window from an answer's x-ratelimit-remaining header when it holds a
     whole number."""
     remaining = headers.get(RATE_REMAINING)
-    if remaining is not None and remaining.isdigit():
+    if remaining is not None and remaining.isdecimal():
         registry.set(contract.GITHUB_RATE_REMAINING, int(remaining))
 
 

@@ -286,7 +286,7 @@ and the GitHub calls left, on one `scripts.ci_lab.metrics.Registry` the `Schedul
 | `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `cache="verdict"`: each verdict store lookup a grade's placement makes; `cache="git"` and `cache="uv"`: the lookups a finished attempt's report carries under `caches` |
 | `ci_lab_heads_graded_total` | Each grade a pass closes, by class and conclusion |
 | `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | Each expired lease a pass requeues or marks lost |
-| `ci_lab_mirror_age_seconds` | `metrics.observe_mirror` at each scrape: the seconds since the epoch second in the `fetched-at` stamp under `CI_LAB_GIT_MIRROR`, never below zero; no sample while the stamp is missing or holds no whole number. The node cache writes that stamp; the scheduler's own fetch writes none |
+| `ci_lab_mirror_age_seconds` | `metrics.observe_mirror` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the epoch second in the `fetched-at` stamp under `CI_LAB_GIT_MIRROR`, never below zero; no sample while the stamp is missing or holds no whole number. The node cache writes that stamp; the scheduler's own fetch writes none |
 | `ci_lab_github_rate_remaining` | `metrics.observe_rate` on every check runs answer the scheduler's and the relay's `Checks` posters get, retries and refusals included: its `x-ratelimit-remaining` header when that holds a whole number; an answer without one keeps the last value |
 
 A worker unit's report carries `caches` from `scripts.ci_lab.caches.report`: per revision it
@@ -636,7 +636,7 @@ them:
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
 | `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `Scheduler._place` counts the `verdict` cache and `metrics.observe_unit` counts the `git` and `uv` lookups a unit report carries, so the alert and panel wait only on a running scheduler |
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | `shadow.Shadow` counts it in a registry of its own and has no live caller, so the alert cannot fire |
-| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_unit` sets the unit duration for each finished attempt whose report carries `seconds`, `metrics.observe_mirror` the mirror age at each scrape and `metrics.observe_rate` the GitHub calls left from each check runs answer |
+| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_unit` sets the unit duration for each finished attempt whose report carries `seconds`, `metrics.observe_mirror` the mirror age at each read of the metrics port and `metrics.observe_rate` the GitHub calls left from each check runs answer |
 
 `Scheduler._reap` counts `ci_lab_units_redelivered_total` and `ci_lab_units_lost_total` on the
 registry the metrics port serves, one for each expired lease it requeues or marks lost. No alert or
@@ -1125,7 +1125,7 @@ its done criteria name are not recorded:
 | Egress only to DNS, the scheduler and MinIO | The live probe on a CI node described under [Network](#network) |
 | Three workers on one node, with `kubectl describe node` near 15 of 16 CPU requested | Not recorded; the figure in the verify steps above is computed |
 | A worker git hit from the node mirror | Not recorded |
-| The scheduler exporting `ci_lab_mirror_age_seconds` | Pull request 12866: `metrics.observe_mirror` sets it at each scrape, red on Proofs run 44882491151 with the writer planted out; a live sample is not recorded |
+| The scheduler exporting `ci_lab_mirror_age_seconds` | `metrics.observe_mirror` sets it at each read of the metrics port; a live sample on a CI node is not recorded |
 
 ### Troubleshooting
 

@@ -10,9 +10,8 @@ import requests
 from scripts.ci_lab.checks import Checks, PostRefused
 from tests.ci_lab.test_checks import LIMITED, OUTPUT, Token, answer
 from tests.ci_lab.test_scheduler import HEAD_A, SLUG, Run, scrape
-from tests.ci_lab.test_scheduler import lab as _lab
+from tests.ci_lab.test_scheduler import lab as lab
 
-lab = _lab
 MIRROR_AGE = "ci_lab_mirror_age_seconds"
 RATE_REMAINING = "ci_lab_github_rate_remaining"
 
@@ -56,7 +55,9 @@ def test_the_exposition_reports_the_github_calls_left_from_each_check_runs_answe
     unreported = answer(200, {"id": 7})
     refused = answer(422, headers={"x-ratelimit-remaining": "4997"})
     garbled = answer(201, {"id": 8}, headers={"x-ratelimit-remaining": "many"})
-    monkeypatch.setattr(requests, "request", Mock(side_effect=[limited, accepted, unreported, refused, garbled]))
+    superscript = answer(201, {"id": 9}, headers={"x-ratelimit-remaining": "²"})
+    answers = [limited, accepted, unreported, refused, garbled, superscript]
+    monkeypatch.setattr(requests, "request", Mock(side_effect=answers))
 
     def sleep(_seconds: float) -> None:
         waited.append(samples(scrape(run, 1000), RATE_REMAINING))
@@ -72,4 +73,6 @@ def test_the_exposition_reports_the_github_calls_left_from_each_check_runs_answe
         poster.post(HEAD_A, "lint", "completed", "success", OUTPUT, False)
     assert samples(scrape(run, 1000), RATE_REMAINING) == [f"{RATE_REMAINING} 4997.0"]
     assert poster.post(HEAD_A, "x", "queued", None, OUTPUT, False) == 8
+    assert samples(scrape(run, 1000), RATE_REMAINING) == [f"{RATE_REMAINING} 4997.0"]
+    assert poster.post(HEAD_A, "y", "queued", None, OUTPUT, False) == 9
     assert samples(scrape(run, 1000), RATE_REMAINING) == [f"{RATE_REMAINING} 4997.0"]
