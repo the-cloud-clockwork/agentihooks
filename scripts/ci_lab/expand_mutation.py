@@ -74,7 +74,8 @@ def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -
     paths = tracked(root)
     present = [path for path in paths if (root / path).is_file()]
     sources = {path: file_digest(root / path) for path in present if path in CONFIGURATION or path.startswith(RUNNER)}
-    stored = StoredStats(root, root, dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, runtime_digest(root)))), {})
+    runtime = runtime_digest(root)
+    stored = StoredStats(root, root, dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, runtime))), {})
     modules = {module_name(Path(path)): path for path in paths if Path(path).suffix == ".py"}
     inputs = StatsInputs(root, modules, resources_of([path for path in present if path not in UNKEYED]), {})
     units: list[Unit] = []
