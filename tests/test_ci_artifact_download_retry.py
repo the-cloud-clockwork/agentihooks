@@ -108,6 +108,26 @@ def test_every_shared_mutation_stats_download_runs_the_action_that_closes_each_b
     )
 
 
+@pytest.mark.feature("merged-mutation-artifact-downloads-close-blob-answers")
+def test_every_same_run_merging_download_uses_the_action_that_closes_each_blob_answer() -> None:
+    downloads = {
+        (job, step["name"]): (step["uses"], step["with"])
+        for job, spec in _jobs().items()
+        for step in spec.get("steps") or []
+        if "pattern" in step.get("with", {})
+        and not {"name", "run-id"}.intersection(step["with"])
+        and (step["with"].get("merge-multiple") is True or step.get("uses") == PATTERN_DOWNLOAD)
+    }
+    assert {(job, inputs["pattern"], inputs["path"]) for (job, _), (_, inputs) in downloads.items()} >= {
+        ("mutation-replan", "mutation-probe-*", ".mutation-stats"),
+        ("mutation-shard", "mutation-test-stats-cache-*", ".mutation-stats-cache"),
+        ("mutation", "mutation-killers-*", ".mutation-stats/killers"),
+    }
+    assert all(
+        action == PATTERN_DOWNLOAD and set(inputs) == {"pattern", "path"} for action, inputs in downloads.values()
+    )
+
+
 def _download_steps(node: object) -> list[str]:
     if isinstance(node, dict):
         uses = node.get("uses")

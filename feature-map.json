@@ -11161,6 +11161,16 @@
         "tests/test_type_gate.py::test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_graded_source",
         "tests/test_type_gate.py::test_the_gate_checks_four_runs_at_once"
       ]
+    },
+    {
+      "id": "merged-mutation-artifact-downloads-close-blob-answers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2729",
+      "behaviour": "The Tests workflow downloads merging mutation probe results, test statistics caches and mutation killers with the pattern action, which closes each blob response before retrying. Both initial and retry calls keep their existing destination and conditions.",
+      "seam": "Tests mutation replan, mutation shard and mutation artifact downloads",
+      "tests": [
+        "tests/test_ci_artifact_download_retry.py::test_every_same_run_merging_download_uses_the_action_that_closes_each_blob_answer"
+      ]
     }
   ],
   "unmapped_rules": [
