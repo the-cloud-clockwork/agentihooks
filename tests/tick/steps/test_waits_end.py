@@ -5,7 +5,7 @@ from typing import Any, NoReturn
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, idle, tick, timing, waits
+from scripts.swarm import cli, idle, pr_wait, tick, timing, waits
 from scripts.swarm.store import AgentRecord
 from scripts.tick import engine, pool
 from scripts.tick.deadline import Deadline
@@ -125,7 +125,7 @@ def test_a_failing_waits_end_pass_leaves_the_end_checked_waits_read(
 
 
 @pytest.mark.feature("tick-waits-end-isolates-agent-failures")
-@pytest.mark.parametrize("failure", ["read", "resolve"])
+@pytest.mark.parametrize("failure", ["read", "resolve", "push"])
 def test_a_raising_wait_does_not_stop_other_agents_or_pass_completion(
     merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failure: str
 ) -> None:
@@ -140,9 +140,12 @@ def test_a_raising_wait_does_not_stop_other_agents_or_pass_completion(
     resolve_wait = waits.resolution
     bad_wait = read_wait(store.redis, "sw", bad)
     pending_wait = read_wait(store.redis, "sw", pending)
+    if failure == "push":
+        pr_wait.mark(store.redis, "sw", bad, NOW, "the-cloud-clockwork/agentihooks", "bad", "head")
+        merging.rows["t2"]["pr_url"] = URL
 
     def read(redis: Any, slug: str, name: str) -> Any:
-        if name == bad and failure == "read":
+        if name == bad and failure in {"read", "push"}:
             raise ValueError("broken wait record")
         return read_wait(redis, slug, name)
 
@@ -160,7 +163,7 @@ def test_a_raising_wait_does_not_stop_other_agents_or_pass_completion(
         "slug": "sw",
         "rows": {**merging.rows, "done": {"id": "done", "state": "done"}, "pending": {"state": "claimed"}},
         "inbox": inbox,
-        "view": {}.get,
+        "view": merging.pulls.get,
     }
     step = copy(next(step for step in report.STEPS if step.name == WAITS_END))
     step.interval_s = 0.0
