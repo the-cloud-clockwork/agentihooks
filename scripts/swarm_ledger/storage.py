@@ -6,6 +6,7 @@ from pathlib import Path
 from scripts.swarm_ledger.repository import LedgerRepository, host_entries, postgres, sqlite
 
 DATABASE = sqlite.DATABASE
+WalSwitch = sqlite.WalSwitch
 Error = sqlite3.Error
 Missing = sqlite.Missing
 
