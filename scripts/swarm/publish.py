@@ -324,7 +324,7 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
             root = None if retired else existing(repository, scoped, agent)
             if root is None:
                 command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
-                if scoped.get("branch") and remote_head(repository, scoped["branch"]):
+                if scoped.get("branch") and (scoped.get("pr_url") or remote_head(repository, scoped["branch"])):
                     command.extend(["--from", f"origin/{scoped['branch']}"])
                 output = execute(command, repository)
                 root = Path(output.splitlines()[-1])
