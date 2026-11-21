@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.xǁNatsConsumerǁ_fetch:4b64993d94eeedaee9f05d3612ba5236e83026ae8ae3167d40c0d44d6ab4a3a7": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: parts starts at zero per fetched batch and is read only for truthiness. Assigning one preserves zero exactly when no part was skipped and nonzero otherwise. The count never escapes the function."
+  }
+}
