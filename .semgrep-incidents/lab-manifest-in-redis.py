@@ -28,6 +28,11 @@ def slot_document(kind: str, text: str) -> dict[str, str]:
     return {"kind": kind, "manifest": text}
 
 
+def keyword_record(unit: Any) -> dict[str, Any]:
+    # ruleid: lab-manifest-in-redis
+    return dict(kind=unit.kind, key=unit.key, manifest=unit.manifest)
+
+
 def placed_slot(unit: Any) -> Any:
     # ok: lab-manifest-in-redis
     return Slot(unit.kind, unit.key, list(unit.members))

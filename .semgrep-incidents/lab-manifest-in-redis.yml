@@ -14,5 +14,6 @@ rules:
     pattern-either:
       - pattern: |
           {..., "manifest": $VALUE, ...}
+      - pattern: dict(..., manifest=$VALUE, ...)
       - pattern: Slot(..., manifest=$VALUE, ...)
       - pattern: $CLIENT.hset($KEY, "manifest", ...)
