@@ -414,6 +414,7 @@ LISTING = (
     f"https://api.github.com/repos/example/repo/commits/{HEAD}/check-runs?check_name=lab%2Flint&filter=all&per_page=100"
 )
 DISPATCHES = "https://api.github.com/repos/example/repo/dispatches"
+DISPATCH_BODY = 64 * 1024
 STAMP = "2026-11-20T08:00:00Z"
 EXTERNAL = f"lab:{HEAD}"
 BODY = {
@@ -597,6 +598,24 @@ def test_a_shadow_move_without_a_conclusion_dispatches_its_own_name_and_no_concl
 
 
 @pytest.mark.feature("lab-check-dispatch")
+def test_a_dispatch_of_a_large_grade_lists_the_unit_keys_within_half_the_check_run_text_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    large = replace(OUTPUT, units=tuple(Unit("tests", f"batch-{index:05d}", ()) for index in range(3000)))
+    poster, request, _ = dispatcher(monkeypatch, answer(204))
+    poster.post(HEAD, "lint", "completed", "success", large, False)
+    body = request.call_args.kwargs["json"]
+    sent = body["client_payload"]["output"]
+    assert checks.DISPATCH_TEXT == 32767
+    assert sent == checks.render(large, checks.DISPATCH_TEXT)
+    assert len(sent["text"]) <= checks.DISPATCH_TEXT
+    assert "Unit keys: 1486 of 3000 listed" in sent["summary"]
+    assert len(json.dumps(body)) < DISPATCH_BODY
+    whole = {**body, "client_payload": {**body["client_payload"], "output": checks.render(large)}}
+    assert len(json.dumps(whole)) >= DISPATCH_BODY
+
+
+@pytest.mark.feature("lab-check-dispatch")
 @pytest.mark.parametrize(
     ("shadow", "seeded", "other"), [(False, "lab/lint", "lab-shadow/lint"), (True, "lab-shadow/lint", "lab/lint")]
 )
@@ -612,6 +631,7 @@ def test_a_seeded_dispatch_is_not_sent_again(
     request.assert_not_called()
 
 
+@pytest.mark.feature("lab-check-dispatch")
 @pytest.mark.parametrize("refused", [answer(200), answer(201), answer(422, text="Invalid request"), answer(404)])
 def test_a_dispatch_github_does_not_accept_raises_and_records_no_status(
     monkeypatch: pytest.MonkeyPatch, refused: Mock
@@ -623,6 +643,7 @@ def test_a_dispatch_github_does_not_accept_raises_and_records_no_status(
     assert poster.status((HEAD, "lab/lint", "run-7")) is None
 
 
+@pytest.mark.feature("lab-check-dispatch")
 def test_a_rate_limited_dispatch_waits_like_the_ci_budget_then_sends(monkeypatch: pytest.MonkeyPatch) -> None:
     limited = answer(403, text=LIMITED, headers={"x-ratelimit-reset": "1120"})
     poster, request, sleep = dispatcher(monkeypatch, limited, answer(204))
@@ -631,6 +652,7 @@ def test_a_rate_limited_dispatch_waits_like_the_ci_budget_then_sends(monkeypatch
     assert request.call_count == 2
 
 
+@pytest.mark.feature("lab-check-dispatch")
 def test_the_dispatch_token_request_carries_only_contents_write(monkeypatch: pytest.MonkeyPatch) -> None:
     app_env(monkeypatch)
     source = Dispatches("example/repo").auth

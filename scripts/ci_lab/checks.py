@@ -34,6 +34,7 @@ __all__ = [
     "AUTHORITATIVE",
     "CONCLUSIONS",
     "DISPATCHED",
+    "DISPATCH_TEXT",
     "EVENT",
     "PERMISSIONS",
     "SHADOW",
@@ -69,6 +70,7 @@ NO_CONTENT = 204
 STATUSES = ("queued", "in_progress", "completed")
 CONCLUSIONS = frozenset({"action_required", "cancelled", "failure", "neutral", "skipped", "success", "timed_out"})
 TEXT_LIMIT = 65535
+DISPATCH_TEXT = TEXT_LIMIT // 2
 LOG_TAIL = 4096
 LOGS_LIMIT = TEXT_LIMIT // 2
 TIMEOUT = 30
@@ -145,11 +147,11 @@ def name(gate: str, shadow: bool) -> str:
     return f"{SHADOW if shadow else AUTHORITATIVE}/{gate}"
 
 
-def render(output: Output) -> dict[str, str]:
+def render(output: Output, limit: int = TEXT_LIMIT) -> dict[str, str]:
     """Return the check run output: the run id, grader revision and details link, the log tail of each failed unit
-    and every unit key."""
+    and every unit key that fits beside them in limit characters of text, GitHub's check run limit by default."""
     logs = _logs(output)
-    text, listed = _listing(output, TEXT_LIMIT - len(logs))
+    text, listed = _listing(output, limit - len(logs))
     facts = [
         f"Run: {output.run}",
         f"Grader revision: {output.grader}",
@@ -375,7 +377,7 @@ class Dispatches:
             "name": key[1],
             "status": status,
             "details_url": output.details,
-            "output": render(output),
+            "output": render(output, DISPATCH_TEXT),
         }
         if conclusion is not None:
             payload["conclusion"] = conclusion

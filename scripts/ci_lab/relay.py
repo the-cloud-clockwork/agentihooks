@@ -171,9 +171,9 @@ def output(state: State, check: str, lab: str) -> Output:
 def relay(state: State, branch: str, ports: Ports, lab: str) -> list[str]:
     """Relay a closed grade: a green one pushes the sha to the branch, posts every check run completed that is not
     already, and opens the draft pull request, in that order; a red one relays nothing and names its failed units. Each
-    check run the relay posts is saved on the grade's state under its check run name as its poster answers, and seeds the
-    poster before the next relay of the grade, so a relay retried after a restart creates no second check run; the ids
-    the scheduler stores under gate names for its own posts never seed it."""
+    check run the relay posts is saved on the grade's state under its check run name as its poster answers, and seeds
+    the poster before the next relay of the grade, so a relay retried after a restart creates no second check run; the
+    ids the scheduler stores under gate names for its own posts never seed it."""
     if state.conclusion != SUCCESS:
         units = ", ".join(failed(state)) or "none"
         return [f"held {state.head} for {branch}: grade {state.run} is {state.conclusion}, failed units {units}"]
