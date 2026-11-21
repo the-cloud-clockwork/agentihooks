@@ -26,7 +26,7 @@ def start_dropping_behind_an_or(registry: Any, slug: str, current: Any, previous
 
 def start_keeping(registry: Any, slug: str, current: Any, previous: Any) -> None:
     # ok: successor-start-drops-live-predecessor
-    removed = previous.name if previous and previous.state == "ended" and previous.name != current.name else ""
+    removed = previous.name if previous and previous.state != "finished" and previous.name != current.name else ""
     registry._project(slug, (current.name,), current, removed=removed)
 
 

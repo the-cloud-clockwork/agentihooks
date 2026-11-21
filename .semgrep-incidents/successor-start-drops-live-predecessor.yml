@@ -4,10 +4,10 @@ rules:
     severity: ERROR
     message: >-
       An execution start removes the previous seat occupant's agent projection without checking that its execution
-      ended. The removal writes no history row, retires no name and ends no process, and the tick reap only walks that
-      projection, so a finished predecessor still running is never ended and keeps running untracked after its
-      successor starts. Remove the previous occupant only when its state is ended, and leave every other predecessor
-      for the reap to retire and drop.
+      has not finished. The removal writes no history row, retires no name and ends no process, and the tick reap only
+      walks that projection, so a finished predecessor still running is never ended and keeps running untracked after
+      its successor starts. Remove the previous occupant only when its state is not finished, and leave a finished
+      predecessor for the reap to retire and drop.
     patterns:
       - pattern-either:
           - pattern: |
@@ -21,18 +21,18 @@ rules:
           - pattern: $X._project(..., removed=$PREV.name, ...)
           - pattern: $X.project_agent(..., removed=$PREV.name, ...)
       - pattern-not: |
-          $REMOVED = $PREV.name if $PREV and $PREV.state == "ended" else ""
+          $REMOVED = $PREV.name if $PREV and $PREV.state != "finished" else ""
           ...
           $X._project(..., removed=$REMOVED, ...)
       - pattern-not: |
-          $REMOVED = $PREV.name if $PREV and $PREV.state == "ended" else ""
+          $REMOVED = $PREV.name if $PREV and $PREV.state != "finished" else ""
           ...
           $X.project_agent(..., removed=$REMOVED, ...)
       - pattern-not: |
-          $REMOVED = $PREV.name if $PREV and $PREV.state == "ended" and $REST else ""
+          $REMOVED = $PREV.name if $PREV and $PREV.state != "finished" and $REST else ""
           ...
           $X._project(..., removed=$REMOVED, ...)
       - pattern-not: |
-          $REMOVED = $PREV.name if $PREV and $PREV.state == "ended" and $REST else ""
+          $REMOVED = $PREV.name if $PREV and $PREV.state != "finished" and $REST else ""
           ...
           $X.project_agent(..., removed=$REMOVED, ...)

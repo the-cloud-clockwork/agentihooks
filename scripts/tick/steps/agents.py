@@ -606,7 +606,7 @@ def _conversations(slug: str, store: Any, runtime: Any) -> None:
 def _session_models(slug: Any, store: Any) -> Any:
     for agent in store.agents(slug):
         reported = tick.session_model.apply(agent, tick.session_model.get(store.redis, slug, agent.name))
-        if reported != agent:
+        if reported != agent and agent.state != "finished":
             store.put_agent(slug, reported)
 
 

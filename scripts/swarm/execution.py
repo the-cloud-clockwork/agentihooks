@@ -245,7 +245,7 @@ class ExecutionRegistry:
             return current, previous
 
         current, previous = self._fenced(slug, admit, history=True)
-        removed = previous.name if previous and previous.state == "ended" and previous.name != current.name else ""
+        removed = previous.name if previous and previous.state != "finished" and previous.name != current.name else ""
         self._project(slug, (current.name, *((previous.name,) if previous else ())), current, removed=removed)
         return current
 

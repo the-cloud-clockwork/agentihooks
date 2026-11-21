@@ -230,8 +230,8 @@ def _new(store: RedisStore, slug: str, runtime: Any, at: int, forced: bool) -> L
     return Launched(name, record.pane_id, record.seat, FORCED if forced else NEW)
 
 
-def _front_doors(store, slug, live):
-    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.name in live]
+def _front_doors(store: RedisStore, slug: str, live: set[str]) -> list[AgentRecord]:
+    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.name in live and a.state != "finished"]
 
 
 def _starting_leads(store, slug):
