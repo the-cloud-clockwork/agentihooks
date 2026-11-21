@@ -105,6 +105,7 @@ class StaticGate:
     producers: tuple[Producer, ...] = ()
     reads: tuple[str, ...] = ()
     matrix: tuple[tuple[str, str], ...] = ()
+    tolerated: bool = False
 
     @property
     def missing(self) -> tuple[str, ...]:

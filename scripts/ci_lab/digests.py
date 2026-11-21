@@ -8,7 +8,7 @@ docs/reference/ci-lab.md holds the digest specification.
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from scripts.ci_mutation import stats_cache
 from scripts.profiles.sources import blob as blob_id
@@ -49,13 +49,15 @@ class Toolchain:
 
 @dataclass(frozen=True)
 class StaticInputs:
-    """The inputs of one static gate: the files it grades at head and base and the grader tree."""
+    """The inputs of one static gate: the files it grades at head and base, the grader tree, and the event names it
+    reads with their values."""
 
     gate: str
     head: Mapping[str, str]
     base: Mapping[str, str]
     grader: str
     toolchain: Toolchain
+    event: Mapping[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True)

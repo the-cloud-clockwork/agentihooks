@@ -441,6 +441,7 @@ class State:
     idle: list[str] = field(default_factory=list[str])
     authoritative: list[str] = field(default_factory=list[str])
     hold: int = 0
+    head_branch: str = ""
 
 
 def _parse(raw: str | bytes) -> State:

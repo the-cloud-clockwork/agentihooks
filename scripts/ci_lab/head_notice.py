@@ -36,7 +36,12 @@ def notice(url: str, secret: bytes, fields: Mapping[str, str]) -> urllib.request
 
 
 def send(
-    environ: Mapping[str, str], repo: str, head: str, base: str, opener: Opener = urllib.request.urlopen
+    environ: Mapping[str, str],
+    repo: str,
+    head: str,
+    base: str,
+    opener: Opener = urllib.request.urlopen,
+    branch: str = "",
 ) -> int | None:
     """Post the signed notice of a pushed head and return the receiver's status, 0 when the send failed, or None when
     the environment does not name a receiver, a secret and an actor."""
