@@ -13,6 +13,7 @@ from hooks.context import credential_guard
 from scripts import secret_env
 from scripts.cli_delegates import delegated_cli
 
+
 def _args(target: Path) -> list[str]:
     return ["example", "service", "token.key", "SERVICE_TOKEN", str(target)]
 
@@ -153,7 +154,7 @@ def test_transfer_refuses_invalid_identifiers(
     assert capsys.readouterr() == ("", "Secret transfer failed.\n")
 
 
-@pytest.mark.parametrize("failure", ["exit", "timeout", "missing", "invalid", "multiline", "nul"])
+@pytest.mark.parametrize("failure", ["nonzero", "timeout", "missing", "invalid", "multiline", "nul"])
 @pytest.mark.feature("cluster-secret-private-env")
 def test_failed_retrieval_never_writes_or_exposes_values(
     failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -161,7 +162,7 @@ def test_failed_retrieval_never_writes_or_exposes_values(
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     target = tmp_path / "private.env"
     target.write_text("OTHER=keep\n")
-    run = _cluster(monkeypatch, "synthetic-value", 1 if failure == "exit" else 0)
+    run = _cluster(monkeypatch, "synthetic-value", 1 if failure == "nonzero" else 0)
     if failure == "timeout":
         run.side_effect = subprocess.TimeoutExpired("kubectl", 30, b"synthetic-value", b"synthetic-value")
     elif failure in {"missing", "invalid"}:
