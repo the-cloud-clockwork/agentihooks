@@ -2,14 +2,14 @@ import pytest
 
 from scripts.forge import github
 from scripts.forge.model import ChangedFile, ChangeRequest, Check, ForgeError
-from tests.forge.fakes import FEATURE, Ran, fixture
+from tests.forge.fakes import Ran, fixture
 
 pytestmark = pytest.mark.unit
 REPO = "github.com/o/r"
 CALLED = {"capture_output": True, "text": True, "timeout": 60}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_github_reads_a_recorded_pull_request_into_a_change_request() -> None:
     diff = fixture("github_pr.diff")
     ran = Ran((0, fixture("github_pr.json")), (0, diff))
@@ -31,7 +31,7 @@ def test_github_reads_a_recorded_pull_request_into_a_change_request() -> None:
     ]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_github_posts_a_review_comment_with_the_body_on_standard_input() -> None:
     ran = Ran((0, "https://github.com/o/r/pull/7#issuecomment-1\n"))
     assert github.GitHubForge(REPO, ran).post(7, "Finding one") == "https://github.com/o/r/pull/7#issuecomment-1"
@@ -40,7 +40,7 @@ def test_github_posts_a_review_comment_with_the_body_on_standard_input() -> None
     ]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_a_failed_gh_call_raises_with_its_error_text() -> None:
     with pytest.raises(ForgeError, match="^gh failed: boom$"):
         github.GitHubForge(REPO, Ran((1, ""))).read(7)

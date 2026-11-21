@@ -9,7 +9,6 @@ import pytest
 from scripts import cli_delegates
 from scripts.forge import cli, remote
 from scripts.forge.model import ChangedFile, ChangeRequest, Check
-from tests.forge.fakes import FEATURE
 
 pytestmark = pytest.mark.unit
 URL = "git@github.com:o/r.git"
@@ -53,13 +52,13 @@ def picked(monkeypatch: pytest.MonkeyPatch) -> Picked:
     return fake
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_the_cli_delegates_forge_to_this_module() -> None:
     assert cli_delegates.DELEGATED_CLIS["forge"] == "scripts.forge.cli"
     assert cli_delegates.delegated_cli(["forge", "read"]) is cli.main
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_read_prints_the_change_request_as_json(picked: Picked, capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["read", "7", "--remote", URL]) == 0
     assert json.loads(capsys.readouterr().out) == {
@@ -76,7 +75,7 @@ def test_read_prints_the_change_request_as_json(picked: Picked, capsys: pytest.C
     assert picked.reads == [7]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_post_reads_the_body_file_and_prints_the_comment_url(
     picked: Picked, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -88,14 +87,14 @@ def test_post_reads_the_body_file_and_prints_the_comment_url(
     assert picked.calls[0][1] == "github"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_post_reads_the_body_from_standard_input(picked: Picked, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.stdin", io.StringIO("From standard input"))
     assert cli.main(["post", "7", "--body-file", "-", "--remote", URL]) == 0
     assert picked.posts == [(7, "From standard input")]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_the_origin_remote_of_the_current_checkout_is_the_default(
     picked: Picked, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -106,7 +105,7 @@ def test_the_origin_remote_of_the_current_checkout_is_the_default(
     assert picked.calls[0][0] == remote.Remote("github.com", "o/r")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_a_forge_failure_prints_its_reason_and_returns_one(picked: Picked, capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["read", "7", "--remote", "/local/repo"]) == 1
     assert capsys.readouterr() == ("", "forge: not a repository remote: /local/repo\n")

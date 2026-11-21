@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 FIXTURES = Path(__file__).parent / "fixtures"
-FEATURE = "forge-change-request-seam"
 API = "https://gitlab.example.com/api/v4/projects/group%2Fsub%2Frepo/merge_requests"
 HEADERS = {"PRIVATE-TOKEN": "fake-token", "Content-Type": "application/json"}
 

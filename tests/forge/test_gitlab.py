@@ -6,7 +6,7 @@ import pytest
 
 from scripts.forge import gitlab
 from scripts.forge.model import ChangedFile, ChangeRequest, Check
-from tests.forge.fakes import API, FEATURE, HEADERS, Sent, fixture
+from tests.forge.fakes import API, HEADERS, Sent, fixture
 
 pytestmark = pytest.mark.unit
 DIFF = (
@@ -31,7 +31,7 @@ def recorded() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return json.loads(fixture("gitlab_mr.json")), json.loads(fixture("gitlab_diffs.json"))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_gitlab_reads_a_recorded_merge_request_into_a_change_request() -> None:
     merge, diffs = recorded()
     sent = Sent(merge, diffs)
@@ -51,7 +51,7 @@ def test_gitlab_reads_a_recorded_merge_request_into_a_change_request() -> None:
     ]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_gitlab_reads_every_diffs_page_until_a_short_page(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gitlab, "PAGE_SIZE", 2)
     merge, diffs = recorded()
@@ -64,7 +64,7 @@ def test_gitlab_reads_every_diffs_page_until_a_short_page(monkeypatch: pytest.Mo
     ]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_a_merge_request_without_pipeline_or_description_reads_empty() -> None:
     merge, _ = recorded()
     merge.update(head_pipeline=None, description=None)
@@ -72,7 +72,7 @@ def test_a_merge_request_without_pipeline_or_description_reads_empty() -> None:
     assert (change.body, change.diff, change.files, change.checks) == ("", "", (), ())
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_gitlab_posts_a_review_comment_as_a_merge_request_note() -> None:
     sent = Sent({"id": 3301, "body": "Finding one"})
     url = forge(sent).post(12, "Finding one")
@@ -100,7 +100,7 @@ class Opened:
         return b'{"id": 1}'
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("forge-change-request-seam")
 def test_the_default_transport_sends_one_request_through_urlopen(monkeypatch: pytest.MonkeyPatch) -> None:
     opened = Opened()
     monkeypatch.setattr(gitlab, "urlopen", opened)
