@@ -6,12 +6,13 @@ nav_order: 50
 
 # Swarm scoped bus credentials
 
-A hive member's NATS credential reaches the event, work queue, dead letter and state resources of the swarms it
-belongs to and nothing of any other swarm. Every subject a scoped member publishes or reads sits under
-`swarm.<swarm>.`, except its account slot request subject `slots.<swarm>.<hive>`; see
-[Hub slot requests and the hive binding](#hub-slot-requests-and-the-hive-binding). The JetStream API subjects that cannot carry that prefix are granted only for stream and consumer
-names that carry the swarm id. A member credential of one swarm is refused by the NATS server on another swarm's
-queue, dead letter, state and stream subjects, even when those resources exist.
+A hive member's NATS credential reaches the event, work queue, dead letter and state resources of the swarms it belongs
+to, and in each of them the execution stop consumer of its own hive, and nothing of any other swarm or hive. Every
+subject a scoped member publishes or reads sits under `swarm.<swarm>.`, except its account slot request subject
+`slots.<swarm>.<hive>`; see [Hub slot requests and the hive binding](#hub-slot-requests-and-the-hive-binding). The
+JetStream API subjects that cannot carry that prefix are granted only for stream and consumer names that carry the swarm
+id. A member credential of one swarm is refused by the NATS server on another swarm's queue, dead letter, state and
+stream subjects, even when those resources exist.
 
 ## When a credential is scoped
 
@@ -82,6 +83,7 @@ Stream names carry the swarm id as the hex of its UTF-8 bytes, so `rig` becomes 
 |---|---|---|---|
 | Events | `AGENTIHOOKS-<hex>-EVENTS` | `swarm.<swarm>.events.>` | durable per reactor |
 | Dead letters | `AGENTIHOOKS-<hex>-DEAD` | `swarm.<swarm>.dead.>` | durable per reader |
+| Execution stops | `AGENTIHOOKS-<hex>-STOP` | `swarm.<swarm>.stop.>` | one durable per hive, created by the hub; see [Execution stops](#execution-stops) |
 | Work queue, one per lane `eng`, `ci`, `plan` | `AGENTIHOOKS-<hex>-h-<queue-digest>` | `swarm.<swarm>.queue.<lane>.>`; offers publish to `swarm.<swarm>.queue.<lane>.work` | durable named `<lane>` |
 | State bucket | `AGENTIHOOKS-<hex>-h-<state-digest>` | `swarm.<swarm>.state.<bucket>.<key>`, 64 revisions kept per key | none; reads use direct message get |
 
@@ -111,7 +113,8 @@ Each swarm has a state stream for `spoke-work`, `spoke-pending`, `hive-presence`
 Callers keep their logical names. A scoped bus maps `swarm.<swarm>.ready.<lane>` to the lane queue, `dead.<swarm>`
 to `swarm.<swarm>.dead.event`, and an event subject such as `swarm.*.execution.>` or
 `swarm.<swarm>.execution.started` to `swarm.<swarm>.events.execution.>` or
-`swarm.<swarm>.events.execution.started`. A subject naming another swarm is refused before it reaches the server:
+`swarm.<swarm>.events.execution.started`. The stops log maps a stop subject `swarm.<swarm>.execution.stop.<hive>` to
+`swarm.<swarm>.stop.execution.stop.<hive>`. A subject naming another swarm is refused before it reaches the server:
 `subject 'swarm.other.execution.started' does not belong to swarm 'rig'`. An event whose `swarm` field differs from the
 bus swarm is refused on offer and publish: `event swarm 'other' does not match bus swarm 'rig'`.
 
@@ -119,11 +122,14 @@ bus swarm is refused on offer and publish: `event swarm 'other' does not match b
 
 For each listed swarm the credential allows publishing to:
 
-- `swarm.<swarm>.>`
+- `swarm.<swarm>.>`, except the stop and exit subjects every member is denied
 - for each of the swarm's streams above: `$JS.API.STREAM.INFO.<stream>`, `$JS.API.STREAM.MSG.GET.<stream>`,
-  `$JS.API.CONSUMER.INFO.<stream>.*`, `$JS.API.CONSUMER.MSG.NEXT.<stream>.*` and `$JS.ACK.<stream>.>`
+  `$JS.API.CONSUMER.INFO.<stream>.*`, `$JS.API.CONSUMER.MSG.NEXT.<stream>.*` and `$JS.ACK.<stream>.>`, except the
+  stop stream
+- on the stop stream, its stream info and its own hive's stop consumer only
 
-and subscribing to `swarm.<swarm>.>` and its own `_INBOX.<user>.>`.
+and subscribing to `swarm.<swarm>.>`, except `swarm.*.stop.>`, and its own `_INBOX.<user>.>`.
+[Execution stops](#execution-stops) lists the stop grants and every deny.
 
 Account slot accounting spans every swarm on a hive, so its two buckets, `account-slots` and
 `hive-slot-accounts`, belong to the hub and no member credential reaches them. A member takes, renews and
@@ -134,6 +140,132 @@ scoped state`.
 
 Nothing grants stream or consumer creation, the legacy `AGENTIHOOKS_EVENTS` and `AGENTIHOOKS_DEAD` streams, or any
 other swarm's stream names.
+
+## Execution stops
+
+The hub stops an agent by publishing an `execution.stop` event addressed to the hive that runs it;
+[Stopping an agent whose work ended](../pillars/hives.md#stopping-an-agent-whose-work-ended) covers when the tick
+sends one and how the hive honors it. Stops travel on a stop stream of their own in each swarm, never on the swarm's
+events stream. A scoped member credential reaches only its own hive's stop consumer there and may publish no stop, so
+no hive can read, acknowledge, suppress or forge another hive's stops.
+
+Before [pull request #11233](https://github.com/the-cloud-clockwork/agentihooks/pull/11233) stops travelled on the
+events stream. A member may fetch and acknowledge any consumer of that stream, because
+`$JS.API.CONSUMER.MSG.NEXT.<stream>.*` covers the reactor durables of every hive, and a hive's stop consumer name is
+fixed by its swarm and hive id. Any member of the swarm could therefore pull another hive's stops and acknowledge
+them before that hive saw them.
+
+### Names
+
+| What | Name | From |
+|---|---|---|
+| Stream | `AGENTIHOOKS-<hex>-STOP`, holding `swarm.<swarm>.stop.>` | `scripts.hive.stop_names.stream(swarm)` |
+| Subject of one hive's stops, as callers write it | `swarm.<swarm>.execution.stop.<hive>` | `scripts.hive.execution_stop.stop_subject(swarm, hive)` |
+| The same subject on the wire | `swarm.<swarm>.stop.execution.stop.<hive>` | the scoped stops log |
+| Durable consumer of one hive | `execution-stop-` followed by the SHA-256 hex digest of the JSON array `["<swarm>", "<hive>"]` | `scripts.hive.stop_names.durable(swarm, hive)`; `stop_names.consumer(swarm, hive)` gives the name the server holds, the durable unchanged because it already fits the consumer name pattern |
+
+For swarm `rig` and hive `m1` the stream is `AGENTIHOOKS-726967-STOP` and the consumer is
+`execution-stop-2a86bfeeb11f91465322e7471f40fc6d918465df25b25614b74cddcda7b45e1f`. To compute them for another
+swarm and hive from an agentihooks install:
+
+```bash
+python -c 'from scripts.hive import stop_names; print(stop_names.stream("rig"), stop_names.consumer("rig", "h2"))'
+```
+
+### Who creates, publishes and reads
+
+- **The hub** sends a stop with `scripts.hive.execution_stop.stop(bus, swarm, agent, reason)`. On the swarm's stops
+  log it creates the hive's durable, filtered on that hive's stop subject, then publishes the stop. Its answer is
+  `sent`, `pending` (the same stop went out within the bus dedupe window), `ended` or `unknown`. The hub's root bus
+  creates each swarm's stop stream at `AGENTIHOOKS_BUS_REPLICAS` when it first opens that swarm, beside its events
+  and dead letter streams. It does so only with `AGENTIHOOKS_BUS_SCOPED=1` and without `AGENTIHOOKS_BUS_BIND`; a
+  member binds and creates none.
+- **The hive** reads with `scripts.hive.execution_stop.Stopper`, one per swarm. Each pass binds the same durable and
+  fetches up to 10 stops. Until the hub has sent the hive's first stop the durable does not exist, and the reader
+  answers nothing until its next pass. Any other failure prints
+  `hive execution stops for swarm <swarm> failed (<exception type>: <message>)` on the hive's stderr. A settled stop
+  is acknowledged; a failed reap is redelivered after 30 seconds, up to 100,000 deliveries, after which the stop is
+  dead lettered like an event.
+
+`Bus.stops` is the event log for stops, beside `events` and `dead`:
+
+| Bus | `stops` |
+|---|---|
+| NATS, swarm view (`for_swarm(<swarm>)`) with `AGENTIHOOKS_BUS_SCOPED=1` | The swarm's stop stream |
+| NATS root bus with `AGENTIHOOKS_BUS_SCOPED=1` | Publishes to the stop stream of the event's swarm. A consumer reads every swarm's stop stream, and on the hub, where provisioning is on, the legacy events stream as well |
+| NATS without `AGENTIHOOKS_BUS_SCOPED` | The legacy events stream, so an unscoped bus keeps stops where they were |
+| Memory | A stops log of its own, routed per swarm when scoped, as events and dead letters are |
+
+### What a member may do on the stop stream
+
+For each swarm in its `member_swarms` entry, a member credential may publish only these stop stream subjects, where
+`<consumer>` is the stop consumer of the hive the credential was minted for:
+
+| Subject | Lets the member |
+|---|---|
+| `$JS.API.STREAM.INFO.AGENTIHOOKS-<hex>-STOP` | Read the stop stream's info when it binds |
+| `$JS.API.CONSUMER.INFO.AGENTIHOOKS-<hex>-STOP.<consumer>` | Bind its own stop consumer |
+| `$JS.API.CONSUMER.MSG.NEXT.AGENTIHOOKS-<hex>-STOP.<consumer>` | Fetch its stops |
+| `$JS.ACK.AGENTIHOOKS-<hex>-STOP.<consumer>.>` | Acknowledge or redeliver each of them |
+
+`scripts.hive.nats_grant.stop_publish(swarm, member)` renders these four. No grant names another hive's consumer, and
+the wildcard consumer grants of the swarm's other streams do not cover the stop stream.
+
+Every member credential denies publishing to these subjects, so stops and execution exits are published by the hub
+alone:
+
+- `swarm.*.execution.stop`, `swarm.*.execution.stop.>`, `swarm.*.events.execution.stop` and
+  `swarm.*.events.execution.stop.>`
+- `swarm.*.stop.>`
+- `swarm.*.execution.exited` and `swarm.*.events.execution.exited`
+
+A scoped credential also denies subscribing to `swarm.*.stop.>`, so a member cannot watch the stops of the swarm as
+they are published. A pull fetch on its own consumer delivers on its `_INBOX.<user>.>` reply subject, which the deny
+does not touch.
+
+`member_claims` called without member swarms still renders the legacy unscoped grant, whose
+`$JS.API.CONSUMER.MSG.NEXT.>` and `$JS.ACK.>` reach every stop consumer. No mint path issues it: the hive endpoint
+and `hive root-bus` refuse a signer record with no `member_swarms` field and a member the record does not list, and
+`hive invite` and `hive create` refuse a record with no `member_swarms` field, as
+[When a credential is scoped](#when-a-credential-is-scoped) describes. [The grant check](#the-grant-check) renders it
+only to compare it with the retired shared `swarm-hive` user.
+
+### Checking the stop grants
+
+From a member, with the credential `hive join` saved, a fetch on another hive's stop consumer is refused by the
+server:
+
+```bash
+OTHER=$(python -c 'from scripts.hive import stop_names; print(stop_names.consumer("rig", "h2"))')
+nats --server "$AGENTIHOOKS_BUS_URL" --creds "$AGENTIHOOKS_BUS_CREDENTIALS" \
+  pub "\$JS.API.CONSUMER.MSG.NEXT.AGENTIHOOKS-726967-STOP.$OTHER" '1'
+```
+
+The server answers with a permissions violation for publish to that subject. It refuses
+`$JS.API.CONSUMER.INFO.AGENTIHOOKS-<hex>-STOP.<other consumer>` and `$JS.ACK.AGENTIHOOKS-<hex>-STOP.<other consumer>.>`
+the same way, any publish to `swarm.<swarm>.stop.execution.stop.<hive>`, and a subscription on a stop subject. The
+NATS Python client lowercases the server's error line, as the stop grant regression tests expect for these refusals,
+so a hive log prints the subject as `$js.api...` and `agentihooks-<hex>-stop`.
+
+The feature map entry `hive-own-stop-consumer` lists the regression tests, which run these refusals and a member's
+own fetch and acknowledgement against a live NATS server. The Semgrep incident rule `stop-on-events-log` fails code
+under `scripts/` that passes a `stop_subject(...)` subject, or a durable built by any call named `durable(...)` or by
+`stop_names.durable(...)`, to an events log `consumer` call, or a `stop_subject(...)` subject to an events log
+`publish` call.
+
+### Upgrading to the stop stream
+
+- A credential keeps the grant it was minted with. A hive whose credential predates the stop stream grants logs
+  `hive execution stops for swarm <swarm> failed (...)` with a permissions violation on the stop stream until it gets
+  a new one. On a member hive run `agentihooks hive refresh`, then restart its hive service:
+  `systemctl --user restart agentihooks-hive` on a workstation or VM, a pod roll on Kubernetes. The refresh rewrites
+  the saved credential and `hive.env`, while a running hive service keeps the bus it opened when its lanes started.
+  The workstation root hive re-mints its stored
+  credential when `hive run` starts and finds its grant differs from a fresh mint; see
+  [Troubleshooting ended agents](../pillars/hives.md#troubleshooting-ended-agents).
+- Stops still unacknowledged on the events stream when the hub moves to the stop stream are not carried over, and
+  the stop stream starts empty. The tick's reap step sends a new stop for an agent that is still seated on a later
+  pass.
 
 ## Hub slot requests and the hive binding
 
@@ -451,3 +583,5 @@ missing hive user is accepted only in operator mode, where the values file has n
 | `scoped queue migration is incomplete` | The hub has not finished `migrate_queue` for that lane | Finish the migration on the hub, then restart the member |
 | The grant check fails with `the SWARM account has no swarm-hive user` | The antoncore values file still defines the `SWARM` account, so the check expects the shared user | Finish the antoncore operator mode change, which removes the `accounts` block, or restore the user |
 | The grant check fails with `the SWARM account has no swarm-controller user` | The controller user is missing from antoncore `users.yaml` | Restore `swarm-controller` there; only the hive user may be retired |
+| A hive logs `hive execution stops for swarm <swarm> failed (...)` naming a permissions violation on `$js.api.consumer.info.agentihooks-<hex>-stop.<consumer>` | The hive's credential was minted before the stop stream grants | On a member hive, `agentihooks hive refresh`, then restart its hive service; on the workstation root hive, restart the hive service; as in [Upgrading to the stop stream](#upgrading-to-the-stop-stream) |
+| A hive logs a permissions violation on another hive's stop consumer, or on publishing or subscribing to `swarm.<swarm>.stop.>` | Code on that hive reads or writes stops outside its own consumer, which the grant forbids by design | Read stops only through `Stopper` on the hive's own durable; only the hub publishes stops |

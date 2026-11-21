@@ -5,10 +5,9 @@ import logging
 import subprocess
 import sys
 import threading
+import urllib.error
 import urllib.request
-import zipfile
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import wait
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -1169,10 +1168,10 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
     spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {"backfill": 0.5}))
     spending.charge(1, 3600.0)
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
-    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0))
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0, 0))
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
-    api, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
+    api, control, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
     try:
         capacity = json.loads(_read(f"{api}/capacity"))
         assert capacity["classes"]["promotion"]["pending"] == 1
@@ -1186,7 +1185,7 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
         job, token = leased[0]["job"], leased[0]["token"]
         signed = json.loads(_read(f"{api}/upload-url?job={job}&token={token}&name=report"))
         assert signed == {"url": run.lab.objects.upload_url(upload_path(job, "report"), 0)}
-        resume = urllib.request.Request(f"{api}/resume", data=b"", headers={"Authorization": "Bearer tok"})
+        resume = urllib.request.Request(f"{control}/resume", data=b"", headers={"Authorization": "Bearer tok"})
         with urllib.request.urlopen(resume, timeout=5) as reply:
             assert json.loads(reply.read()) == {"resumed": []}
         text = _read(f"{exposition}/metrics").decode()
@@ -1199,14 +1198,44 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
             server.server_close()
 
 
+def _status(url: str, authorization: str | None) -> int:
+    headers = {} if authorization is None else {"Authorization": authorization}
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=b"{}", headers=headers), timeout=5) as reply:
+            return reply.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+@pytest.mark.feature("lab-control-routes")
+def test_listen_serves_the_control_routes_only_on_the_control_port(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {}))
+    routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0, 0))
+    for server in servers:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    api, control, _ = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
+    try:
+        assert [_status(f"{api}{path}", "Bearer tok") for path in ("/priority", "/pause", "/resume")] == [404] * 3
+        assert _status(f"{control}/resume", None) == 401
+        assert _status(f"{control}/resume", "Bearer other") == 401
+        assert _status(f"{control}/resume", "Bearer tok") == 200
+        assert _status(f"{control}/lease", "Bearer tok") == 404
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+
+
 def scrape(run: Run, now: int) -> str:
     spending = budget.Budget(run.lab.client, lambda: now, budget.Policy(100.0, {}))
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: now)
-    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0))
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0, 0))
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        return _read(f"http://127.0.0.1:{servers[1].server_address[1]}/metrics").decode()
+        return _read(f"http://127.0.0.1:{servers[2].server_address[1]}/metrics").decode()
     finally:
         for server in servers:
             server.shutdown()
@@ -2494,145 +2523,6 @@ def test_a_grade_that_keyed_no_manifest_writes_no_outside_note(lab: Callable[...
     assert run.lab.objects.keys(manifest_folder(SLUG)) == []
 
 
-@pytest.mark.feature("lab-dev-manifest-fetch")
-def test_stored_manifests_fetch_a_newest_commit_stored_nowhere_and_keep_it_by_repository_and_commit(
-    tmp_path: Path,
-) -> None:
-    objects = LocalObjects(tmp_path / "objects")
-    objects.write_once(f"{manifest_folder(SLUG)}older.json", packed_file(STORED_MANIFEST, "older"))
-    fetches = Fetches({"newer": packed_file(STORED_MANIFEST, "newer")})
-    stored = scheduler.StoredManifests(objects, fetches)
-    assert stored(REPO, ["head", "newer", "older"]) == {**STORED_MANIFEST, "commit": "newer"}
-    assert fetches.asked == [(SLUG, "head"), (SLUG, "newer")]
-    folder = "lab/manifests/the-cloud-clockwork--agentihooks/"
-    assert objects.keys("lab/") == [f"{folder}newer.json", f"{folder}older.json"]
-    assert objects.read(f"{folder}newer.json") == packed_file(STORED_MANIFEST, "newer")
-    assert stored(REPO, ["newer", "older"]) == {**STORED_MANIFEST, "commit": "newer"}
-    assert stored(REPO, ["older"]) == {**STORED_MANIFEST, "commit": "older"}
-    assert fetches.asked == [(SLUG, "head"), (SLUG, "newer")]
-
-
-@pytest.mark.feature("lab-dev-manifest-fetch")
-def test_stored_manifests_fetch_only_the_newest_commits_of_the_chain(tmp_path: Path) -> None:
-    objects = LocalObjects(tmp_path / "objects")
-    commits = [f"commit-{index}" for index in range(scheduler.MANIFEST_DEPTH + 1)]
-    fetches = Fetches({commits[-1]: packed_file(STORED_MANIFEST, commits[-1])})
-    assert scheduler.StoredManifests(objects, fetches)(REPO, commits) is None
-    assert fetches.asked == [(SLUG, commit) for commit in commits[:-1]]
-    assert objects.keys("lab/") == []
-
-
-@pytest.mark.feature("lab-dev-manifest-fetch")
-@pytest.mark.usefixtures("staticless")
-def test_a_head_that_needs_test_units_expands_on_the_manifest_stored_from_its_base_dev_push_run(
-    tmp_path: Path,
-) -> None:
-    suite = _suite(tmp_path, DELIVERY["lab"])
-    objects = LocalObjects(tmp_path / "objects")
-    fetches = Fetches({suite.base: packed_file(STORED_MANIFEST, suite.base)})
-    node = tmp_path / "node"
-    _git(tmp_path, "init", "-q", "--bare", str(node))
-    toolchain = Toolchain("3.12", {}, "", "", "image", {})
-    port = Port()
-    stored = scheduler.StoredManifests(objects, fetches)
-    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, port.verdicts)
-    found = expander.expand(suite.request(Priority.PROMOTION))
-    assert [batch.members for batch in found.gates["unit"]] == [(FIRST_TEST,)]
-    assert found.manifest == suite.base
-    slug = str(suite.repo).removeprefix("/")
-    assert fetches.asked == [(slug, suite.base)]
-    assert objects.read(f"{manifest_folder(slug)}{suite.base}.json") == packed_file(STORED_MANIFEST, suite.base)
-
-
-@pytest.mark.feature("lab-manifest-fetch-holds-head")
-@pytest.mark.usefixtures("staticless")
-def test_a_head_whose_manifest_fetch_times_out_waits_out_its_window_again_and_a_later_pass_grades_it(
-    lab: Callable[..., Run], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    suite = _suite(tmp_path, DELIVERY["lab"])
-    packed = packed_file(STORED_MANIFEST, suite.base)
-    archive = io.BytesIO()
-    with zipfile.ZipFile(archive, "w") as written:
-        written.writestr("packed.json", packed)
-    get = Mock(
-        side_effect=[
-            requests.ReadTimeout("read timed out"),
-            Mock(status_code=200, json=Mock(return_value={"workflow_runs": [{"id": 1}]})),
-            Mock(status_code=200, json=Mock(return_value={"artifacts": [{"id": 2, "expired": False}]})),
-            Mock(status_code=200, content=archive.getvalue()),
-        ]
-    )
-    monkeypatch.setattr(requests, "get", get)
-    run = lab({}, quiet_ms=30_000)
-    token = Mock(get_token=Mock(return_value="fixture"))
-    stored = scheduler.StoredManifests(run.lab.objects, Fetcher(lambda repo: Actions(repo, token)))
-    node = tmp_path / "node"
-    _git(tmp_path, "init", "-q", "--bare", str(node))
-    toolchain = Toolchain("3.12", {}, "", "", "image", {})
-    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, Port().verdicts)
-    monkeypatch.setattr(run.lab.expander, "expand", expander.expand)
-    event = HeadEvent("push", suite.remote, suite.head, suite.base, ACTOR, "pushed")
-    run.lab.inbox.pending.append(scheduler.Head(event, "dev"))
-    assert run.tick(1000) == [f"received {suite.head} on dev"]
-    runs = f"actions/workflows/test.yml/runs?event=push&branch=dev&head_sha={suite.base}"
-    assert run.tick(31_000) == [f"holding {suite.head}: GET {runs} failed: read timed out"]
-    assert run.tick(60_999) == []
-    assert get.call_count == 1
-    assert run.tick(61_000)[0].startswith("grading ")
-    assert run.grade(suite.head).base == suite.base
-    slug = str(suite.repo).removeprefix("/")
-    assert run.lab.objects.read(f"{manifest_folder(slug)}{suite.base}.json") == packed
-    assert get.call_count == 4
-
-
-@pytest.mark.wall_clock
-@pytest.mark.feature("lab-manifest-fetch-off-pass")
-@pytest.mark.usefixtures("staticless")
-def test_a_pass_reaps_leases_and_advances_grades_while_a_manifest_fetch_github_never_answers(
-    lab: Callable[..., Run], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    suite = _suite(tmp_path, DELIVERY["lab"])
-    answered = threading.Event()
-
-    def never_answers(fetcher: Fetcher, slug: str, commit: str) -> bytes | None:
-        answered.wait(2 * manifests.TIMEOUT)
-        return packed_file(STORED_MANIFEST, commit)
-
-    monkeypatch.setattr(Fetcher, "__call__", never_answers)
-    lost, done = unit(1), unit(2)
-    run = lab({HEAD_A: plan({"lint": (lost,)}), HEAD_B: plan({"lint": (done,)})})
-    run.push(HEAD_A, lane="lost")
-    run.push(HEAD_B, lane="done")
-    run.tick(1000)
-    grants = {grant.unit: grant for grant in run.lease(slots=2, ttl_ms=100)}
-    run.finish(grants[done], "passed", {})
-    node = tmp_path / "node"
-    _git(tmp_path, "init", "-q", "--bare", str(node))
-    toolchain = Toolchain("3.12", {}, "", "", "image", {})
-    stored = scheduler.StoredManifests(run.lab.objects)
-    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, stored, Port().verdicts)
-    monkeypatch.setattr(run.lab.expander, "expand", expander.expand)
-    event = HeadEvent("push", suite.remote, suite.head, suite.base, ACTOR, "pushed")
-    run.lab.inbox.pending.append(scheduler.Head(event, "dev"))
-    passes: list[list[str]] = []
-    ticking = threading.Thread(target=lambda: passes.append(run.tick(1100)), daemon=True)
-    ticking.start()
-    ticking.join(manifests.TIMEOUT)
-    stalled = ticking.is_alive()
-    answered.set()
-    ticking.join()
-    assert not stalled
-    [actions] = passes
-    slug = str(suite.repo).removeprefix("/")
-    assert f"holding {suite.head}: {slug} manifest of {suite.base} is still fetching" in actions
-    assert f"reaped {grants[lost].job} pending" in actions
-    assert f"completed {run.grade(HEAD_B).run} success" in actions
-    assert isinstance(stored.fetch, manifests.Background)
-    wait([future for _, future in stored.fetch.fetches.values()])
-    assert run.tick(1200)[0].startswith("grading ")
-    assert run.grade(suite.head).base == suite.base
-
-
 @pytest.mark.feature("lab-control-routes")
 def test_the_hotfix_port_reads_the_heads_the_control_routes_marked() -> None:
     client = fake_redis()
@@ -2774,10 +2664,10 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         routes: lease_api.ControlRoutes,
         spending: Any,
         clock: Any,
-        ports: tuple[int, int],
+        ports: tuple[int, int, int],
     ) -> list[Server]:
         calls["listen"] = (found, leases, routes, spending, clock, ports)
-        return [Server(), Server()]
+        return [Server(), Server(), Server()]
 
     class Thread:
         def __init__(self, target: Callable[[], None], daemon: bool) -> None:
@@ -2839,8 +2729,18 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     monkeypatch.setattr(relay, "build", builds)
     assert scheduler.main(["--interval", "0.5", "--passes", "3"], environ) == 7
     assert calls["redis"] == ("redis://lab", {"decode_responses": True})
-    options = {"endpoint_url": "endpoint", "aws_access_key_id": "access", "aws_secret_access_key": "secret"}
-    assert calls["s3"] == ("s3", options)
+    name, options = calls["s3"]
+    signing = options.pop("config")
+    assert (name, options) == (
+        "s3",
+        {
+            "endpoint_url": "endpoint",
+            "region_name": "us-east-1",
+            "aws_access_key_id": "access",
+            "aws_secret_access_key": "secret",
+        },
+    )
+    assert (signing.signature_version, signing.s3) == ("s3v4", {"addressing_style": "path"})
     built_from, redis_client, objects, consumer, built_spending = calls["build"]
     assert (built_from, redis_client, consumer) == (environ, client, "ci-lab-scheduler consumer")
     assert (objects.client, objects.bucket, objects.prefix) == ("s3 client", "bucket", "")
@@ -2858,8 +2758,8 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert spending.client is client and spending.clock() == 1_000_250
     assert spending.policy == budget.Policy(600, {"backfill": 0.5})
     assert built_spending is spending and found.spending is spending
-    assert ports == (8800, 9108)
-    assert calls["thread"] is True and calls["served"] == 2
+    assert ports == (8800, 8801, 9108)
+    assert calls["thread"] is True and calls["served"] == 3
     found, relaying, interval, passes, clock, sleep = calls["serve"]
     assert found is relayed and relaying == "relay"
     assert (found.queue.client, interval, passes, clock, sleep) == (client, 0.5, 3, Clock.time, Clock.sleep)

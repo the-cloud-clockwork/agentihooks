@@ -24,7 +24,7 @@ import sys
 import tempfile
 import time
 from collections import Counter, defaultdict
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
 from functools import partial
@@ -50,12 +50,11 @@ from scripts.ci_lab import (
     lease_api,
     metrics,
     service,
-    venvs,
 )
 from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output, PostRefused
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
-from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
+from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchUnanswered
@@ -95,6 +94,7 @@ __all__ = [
     "listen",
     "main",
     "serve",
+    "storage",
     "summary",
 ]
 
@@ -408,6 +408,7 @@ class Slot:
     outcome: str = ""
     started: bool = False
     held: bool = False
+    manifest: str = ""
 
 
 @dataclass
@@ -448,6 +449,26 @@ def _parse(raw: str | bytes) -> State:
     data["flags"] = Flags(**data["flags"])
     data["units"] = {ref: Slot(**slot) for ref, slot in data["units"].items()}
     return State(**data)
+
+
+def restore_manifests(queue: Queue, objects: Objects, states: Iterable[State]) -> None:
+    for state in states:
+        missing = [slot for slot in state.units.values() if slot.kind == "test" and not slot.manifest and slot.job]
+        if state.manifest and missing:
+            _restore_manifest(queue, objects, state, missing)
+
+
+def _restore_manifest(queue: Queue, objects: Objects, state: State, missing: list[Slot]) -> None:
+    path = f"{manifest_folder(_slug(state.repo))}{state.manifest}.json"
+    records = UNPACK(json.loads(objects.read(path)))["tests"]
+    proposed = {
+        slot.job: json.dumps({"tests": {test: records[test] for test in slot.members if test in records}})
+        for slot in missing
+    }
+    restored = queue.restore_manifests(proposed)
+    for slot in missing:
+        slot.manifest = restored[slot.job]
+    queue.client.set(GRADES + state.run, json.dumps(asdict(state)))
 
 
 def _evidence(state: State) -> evidence.GradeEvidence:
@@ -571,6 +592,7 @@ class Scheduler:
         self.shed: tuple[str, ...] = ()
         self.registry = metrics.Registry()
         self.held: defaultdict[str, int] = defaultdict(int)
+        restore_manifests(self.queue, self.objects, self._live())
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
@@ -851,7 +873,7 @@ class Scheduler:
         ref = f"{unit.kind}:{unit.key}"
         if ref in state.units:
             return ref
-        slot = Slot(unit.kind, unit.key, list(unit.members))
+        slot = Slot(unit.kind, unit.key, list(unit.members), manifest=unit.manifest)
         verdict = self.store.get(unit.kind, unit.key, bypass_negative=bypass)
         lookup = contract.CACHE_MISSES_TOTAL if verdict is None else contract.CACHE_HITS_TOTAL
         self.registry.inc(lookup, 1.0, {"cache": caches.VERDICT})
@@ -895,7 +917,7 @@ class Scheduler:
             for slot in state.units.values():
                 if slot.held and budget.admits(CLASSES[state.tier], DEFAULT.slots, load.slots_free, waiting, self.shed):
                     slot.held = False
-                    admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
+                    admitted.append(Unit(slot.kind, slot.key, tuple(slot.members), slot.manifest))
                     waiting += DEFAULT.slots
             if admitted:
                 self.queue.enqueue(admitted, state.head, {}, state.base, state.grader)
@@ -1302,9 +1324,7 @@ class MirrorExpander:
         head, base = self._files(mirror, request.head), self._files(mirror, request.base)
         workflow = self._git(mirror, "show", f"{grader}:{WORKFLOW.as_posix()}")
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
-        toolchain = replace(
-            self.toolchain, lockfile=head.get(venvs.LOCKFILE, ""), pyproject=head.get("pyproject.toml", "")
-        )
+        toolchain = replace(self.toolchain, lockfile=head.get(LOCKFILE, ""), pyproject=head.get("pyproject.toml", ""))
         gates: dict[str, list[Unit]] = {}
         for gate in discover(workflow, registry, self._workflows(mirror, grader)):
             if gate.missing:
@@ -1474,19 +1494,24 @@ def listen(
     routes: lease_api.ControlRoutes,
     spending: budget.Budget,
     clock: Callable[[], int],
-    ports: tuple[int, int],
-) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer]:
-    """Bind the scheduler port's lease API, control, capacity and grades routes and the metrics port, both over one
-    load whose budget fraction and shed classes come from the day's spending, the metrics port with the counters the
-    scheduler's passes keep; the caller runs each serve_forever."""
+    ports: tuple[int, int, int],
+) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, ThreadingHTTPServer]:
+    """Bind the scheduler port's lease API, capacity and grades routes, the control port's control routes and the
+    metrics port, the scheduler and metrics ports over one load whose budget fraction and shed classes come from the
+    day's spending, the metrics port with the counters the scheduler's passes keep; the caller runs each
+    serve_forever."""
 
     def snapshot() -> Load:
         return budget.observe(scheduler.load(clock()), spending.status())
 
-    api, exposition = ports
-    lease = partial(lease_api.answer, leases, Uploads(scheduler.objects), routes)
+    api, steering, exposition = ports
+    lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
     port = service.Routes(lease, snapshot, scheduler.grades_of)
-    return service.serve("", api, port), metrics.serve("", exposition, snapshot, scheduler.registry)
+    return (
+        service.serve("", api, port),
+        lease_api.serve_control("", steering, routes),
+        metrics.serve("", exposition, snapshot, scheduler.registry),
+    )
 
 
 def _now_ms() -> int:
@@ -1499,10 +1524,26 @@ def _sleep_ms(ms: int) -> None:
     time.sleep(ms / 1000)
 
 
+def storage(environ: Mapping[str, str]) -> S3Objects:
+    """Return the lab objects in the MinIO bucket the environment names, through an S3 client that signs worker
+    upload URLs with SigV4 over the host alone, so a worker PUT may carry any Content-Type."""
+    import boto3  # pyright: ignore[reportMissingTypeStubs]
+    from botocore.config import Config  # pyright: ignore[reportMissingTypeStubs]
+
+    s3: Any = boto3.client(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        "s3",
+        endpoint_url=environ[MINIO_ENDPOINT],
+        region_name="us-east-1",
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        aws_access_key_id=environ[MINIO_ACCESS_KEY],
+        aws_secret_access_key=environ[MINIO_SECRET_KEY],
+    )
+    return S3Objects(s3, environ[MINIO_BUCKET], "")
+
+
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Run the scheduler service from its mounted runtime config: the lease API, capacity and grades on the scheduler
-    port, metrics on the metrics port and a pass every interval."""
-    import boto3  # pyright: ignore[reportMissingTypeStubs]
+    port, the control routes on the control port, metrics on the metrics port and a pass every interval."""
     import redis
 
     from scripts.ci_lab import relay
@@ -1515,13 +1556,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     arguments = parser.parse_args(argv)
     runtime = load_runtime(Path(environ[contract.RUNTIME_CONFIG]))
     client: Any = redis.Redis.from_url(environ[contract.REDIS_URL], decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
-    s3: Any = boto3.client(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        "s3",
-        endpoint_url=environ[MINIO_ENDPOINT],
-        aws_access_key_id=environ[MINIO_ACCESS_KEY],
-        aws_secret_access_key=environ[MINIO_SECRET_KEY],
-    )
-    objects = S3Objects(s3, environ[MINIO_BUCKET], "")
+    objects = storage(environ)
     heads = open_bus(replace(BusConfig.from_environ(environ), provision=False)).lab_heads
     spending = budget.Budget(client, _now_ms, budget.policy(runtime))
     scheduler = build(environ, client, objects, heads.consumer(DURABLE, SUBJECT), spending)
@@ -1530,7 +1565,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
-    ports = (contract.SCHEDULER_PORT, contract.METRICS_PORT)
+    ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
     for server in listen(scheduler, leases, routes, spending, _now_ms, ports):
         Thread(target=server.serve_forever, daemon=True).start()
     return serve(scheduler, relaying, arguments.interval, arguments.passes, time.time, time.sleep)

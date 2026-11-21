@@ -432,8 +432,8 @@ def cmd_status(args):
     )
 
 
-def cmd_ack(args):
-    rev = args.rev if args.rev is not None else call(args.slug)["_meta"]["rev"]
+def cmd_ack(args: Any) -> None:
+    rev = args.rev if args.rev is not None else resource(args.slug, "metadata")["_meta"]["rev"]
     send(args, "ack", rev=rev)
     print(json.dumps({"acked": rev}))
 
@@ -838,6 +838,7 @@ def _task_add_fields(args: argparse.Namespace) -> dict[str, Any]:
         ("plan_url", args.plan),
         ("not_duplicate", args.not_duplicate),
         ("plan_slice", args.plan_slice),
+        ("covers_job", args.covers_job),
     )
     lists.update((key, value) for key, value in options if value)
     if args.kind == "workflow":
@@ -957,7 +958,7 @@ def cmd_url(args):
     print(ledger_link.page_line(args.slug))
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--slug")
     parser.add_argument("--as", dest="name")
@@ -1118,6 +1119,11 @@ def build_parser():
     task.add_argument("--difficulty", choices=ledger_tasks.DIFFICULTIES, help="task size: S, M or L")
     task.add_argument(
         "--not-duplicate", default="", help="why the task differs from the one it resembles; skips the duplicate check"
+    )
+    task.add_argument(
+        "--covers-job",
+        help="the failed dev job or unit test this task fixes, exactly as the promotion alert names it; "
+        "the promotion watch files no task for it while this task is open",
     )
     task.add_argument("--quote", help="task set rank=...: the operator's words, so the rank stays his")
     publish = sub.add_parser("publish-plan")
