@@ -22,6 +22,7 @@ from scripts.hive import (
     nats_grant,
     registry,
 )
+from scripts.hive.handoff_order import ORDER, ROLL, SENDER
 from scripts.hive.purge import FINISHED, forget, hosted, on_hive
 from scripts.hive.purge import keys as _keys
 from scripts.hive.purge import recorded as _recorded
@@ -33,18 +34,6 @@ if TYPE_CHECKING:
     from scripts.swarm.store import AgentRecord, RedisStore
 
 POLL_S = 15
-SENDER = "operator"
-ORDER = (
-    "The operator is removing hive {hive}, which runs you. Finish the step you are on, then hand off with the "
-    "handoff skill: run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your "
-    "successor on another hive."
-)
-ROLL = (
-    "Hive {hive}, which runs you, is stopping for a release and takes no new agents. Finish the step you are on, commit "
-    "and push your branch so no work is lost with the pod, then hand off with the handoff skill even while you wait on checks, a merge or a reply, naming that wait under Next: "
-    "run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your successor on "
-    "another hive."
-)
 WITHDRAWN = "hive {hive} stopped draining for its release, so its hand off order no longer applies"
 REMOVED = "hive {hive} was removed, so its hand off order no longer applies"
 RECOVERY = """## Intent
@@ -240,7 +229,7 @@ def _order(
 ) -> None:
     for slug, agent in remaining:
         if (slug, agent.name) not in ordered:
-            sent = inbox.send(SENDER, agent.seat or agent.name, text.format(hive=hive, slug=slug))
+            sent = inbox.send(SENDER, agent.name, text.format(hive=hive, slug=slug))
             ordered[(slug, agent.name)] = sent.id
 
 

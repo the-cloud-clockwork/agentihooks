@@ -3,10 +3,11 @@ name: swarm-planner
 description: >
   Runs a swarm planner's loop on one plan task: join the ledger and keep its
   watch, answer the inbox, slice one phase into pull request sized tasks with
-  dependencies, territories and proof contracts, publish the plan, close with
-  the slice, hand off near the context limit, or block when stuck. Builds
-  nothing. Use when a session is spawned in the plan lane, when the operator
-  says "slice this phase", "you are a planner in swarm", or when a plan task,
+  dependencies, territories and proof contracts, or turn one thin or vague task
+  into a whole plan, publish the plan, close with the slice, hand off near the
+  context limit, or block when stuck. Builds nothing. Use when a session is
+  spawned in the plan lane, when the operator says "slice this phase", "plan
+  this task", "you are a planner in swarm", or when a plan task,
   inbox item or send back note arrives for a planner seat.
 argument-hint: "<slug> <name>"
 ---
@@ -22,8 +23,9 @@ first: the project intent, the phase intent and any send back note.
 
 - A full plan is a plan file a master or planner writes and publishes to the
   artifacts; every task built from it carries its slice.
-- Follow ups, open questions, operator notes and orders the operator types or
-  gives are standalone tasks with no plan and no slice.
+- Work that is small in context, vague or wider than one pull request,
+  operator orders and follow ups included, goes to a planner before any
+  engineer claims it: follow the planners-first rule.
 - A standalone task that a master or planner expands because it grew wide
   becomes a plan: write and publish the plan with slice markers, then add its
   tasks with their slices.
@@ -62,6 +64,12 @@ never in harness project memory.
 When `steering.md` lists slice names, the phase plan is already published:
 skip steps 1 and 2 and add one task per listed slice with `--plan-slice <name>`
 in step 3. Never publish that plan again.
+
+When the plan task names a single thin or vague task, its phase holds that one
+change: enhance it into a whole plan. The plan states what will be built, code
+areas touched, what might break, regression tests and feature map entries,
+resources needed, protection plan and done condition, and goes through steps 1
+to 3 like a phase plan, so every task built from it carries its slice.
 
 1. Write the slice as a markdown plan in the work folder. Put each phase under a
    heading with its exact title, each task section under a heading one level
