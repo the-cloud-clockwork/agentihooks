@@ -239,8 +239,14 @@ def continuation_task(repo: Path, task: dict, scoped: dict, branch: str) -> dict
     return {**scoped, "branch": recorded}
 
 
-def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | None, Path, dict]:
-    current = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+def publishing_root(
+    repo: str, task: dict, agent: AgentRecord, cwd: str | None = None
+) -> tuple[Path | None, Path, dict]:
+    current = subprocess.run(
+        ["git", *(["-C", cwd] if cwd is not None else []), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
     root = None
     if current.returncode == 0 and (Path(current.stdout.strip()) / ".git").is_file():
         root = Path(current.stdout.strip())

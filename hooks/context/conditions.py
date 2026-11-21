@@ -909,16 +909,73 @@ def _ordinary_target(token: str, bases: list[str | None]) -> bool:
     return not conditional or _staged(conditional)
 
 
+def _publish_files(command: str) -> tuple[str, list[str] | None] | None:
+    import shlex
+
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if words and re.fullmatch(r"python(?:3(?:\.\d+)?)?", Path(words[0]).name):
+        if words[1:4] != ["-m", "scripts.github_app_cli", "exec"]:
+            return None
+        words = words[4:]
+    if len(words) < 4 or (Path(words[0]).name, words[1], words[3]) != ("agentihooks", "swarm", "publish"):
+        return None
+    slug = words[2]
+    lexer = shlex.shlex(command, posix=False, punctuation_chars=";&|<>()\n")
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    if any(
+        re.fullmatch(r"[;&|<>()\n]+", token) or (not token.startswith("'") and re.search(r"[$`]", token))
+        for token in lexer
+    ):
+        return slug, None
+    from scripts.swarm.cli import build_parser
+
+    try:
+        args = build_parser().parse_args(words[2:])
+    except SystemExit:
+        return slug, None
+    return args.slug, args.files
+
+
+def _publish_root(slug: str, cwd: str | None) -> Path | None:
+    from scripts.swarm import publish
+    from scripts.swarm.runtime import REPO_VARIABLE
+    from scripts.swarm.store import AgentRecord, connect
+
+    name = os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    task_id = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
+    if slug != os.environ.get("AGENTIHOOKS_SWARM") or not name or not task_id or not cwd:
+        return None
+    try:
+        agent = AgentRecord(name=name, lane="eng", task=task_id)
+        task = publish.task_row(slug, agent, publish.LedgerClient())
+        repo = os.environ.get(REPO_VARIABLE) or connect().config(slug).repo
+        root, _, _ = publish.publishing_root(repo, task, agent, cwd)
+    except Exception:
+        return None
+    return root
+
+
 def _staged_command(command: str, cwd: str | None) -> bool:
-    """Every word of *command* resolves to a path, one is a condition path, and all of them are staged."""
     bases = _bases(command, cwd)
+    words = [token for word in _PATH_TOKEN.findall(command) for token in filter(None, word.split("="))]
+    invocation = _publish_files(command)
+    if invocation is not None:
+        if invocation[1] is None:
+            return False
+        root = _publish_root(invocation[0], cwd)
+        if root is None:
+            return False
+        bases, words = [str(root)], invocation[1]
     paths: list[Path] = []
-    for word in _PATH_TOKEN.findall(command):
-        for token in filter(None, word.split("=")):
-            resolved = _resolve(token, bases)
-            if resolved is None:
-                return False
-            paths += resolved
+    for token in words:
+        resolved = _resolve(token, bases)
+        if resolved is None:
+            return False
+        paths += resolved
     return any("conditions" in p.resolve().parts for p in paths) and _staged(paths)
 
 
@@ -974,6 +1031,12 @@ def _touches_live(name: str, tool_input: dict, cwd: str | None) -> bool:
         plain = _UNQUOTE.sub(lambda m: m.group(1) or "", command)
         if not any(_NEAR_CONDITIONS.search(text) or _touches_conditions(text) for text in (command, plain)):
             return False
+        invocation = _publish_files(command)
+        if invocation is not None:
+            files = invocation[1]
+            return files is None or (
+                any(_touches_conditions(path) for path in files) and not _staged_command(command, cwd)
+            )
         return not _read_only_shell(command, cwd) and not _staged_command(command, cwd)
     return False
 

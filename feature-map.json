@@ -621,7 +621,15 @@
         "tests/hooks/test_conditions_publish.py::test_publish_lookup_failure_keeps_the_guard_closed",
         "tests/hooks/test_conditions_publish.py::test_publish_through_the_github_app_wrapper_uses_the_task_worktree",
         "tests/hooks/test_conditions_publish.py::test_read_only_commands_keep_their_existing_admission",
-        "tests/hooks/test_conditions_publish.py::test_publish_without_condition_paths_does_not_read_task_state"
+        "tests/hooks/test_conditions_publish.py::test_publish_without_condition_paths_does_not_read_task_state",
+        "tests/hooks/test_conditions_publish.py::test_publish_without_session_identity_stays_closed",
+        "tests/hooks/test_conditions_publish.py::test_publish_rejects_invalid_task_ownership_and_branches",
+        "tests/hooks/test_conditions_publish.py::test_publish_without_a_task_worktree_stays_closed",
+        "tests/hooks/test_conditions_publish.py::test_publish_follows_condition_symlinks_before_allowing_the_file",
+        "tests/hooks/test_conditions_publish.py::test_publish_resolves_only_files_and_keeps_quoted_message_text",
+        "tests/hooks/test_conditions_publish.py::test_publish_message_paths_do_not_trigger_task_reads",
+        "tests/hooks/test_conditions_publish.py::test_publish_with_unresolved_shell_effects_stays_closed",
+        "tests/hooks/test_conditions_publish.py::test_publish_recognition_does_not_change_other_invocations"
       ]
     },
     {

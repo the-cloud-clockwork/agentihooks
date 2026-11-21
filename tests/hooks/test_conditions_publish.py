@@ -147,3 +147,73 @@ def test_publish_without_condition_paths_does_not_read_task_state(
     monkeypatch.setattr(publish, "LedgerClient", lookup)
     assert _guard(_command("README.md"), checkouts["primary"]) is None
     lookup.assert_not_called()
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+@pytest.mark.parametrize("missing", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_AGENT_NAME"])
+def test_publish_without_session_identity_stays_closed(
+    checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    monkeypatch.delenv(missing)
+    assert _guard(_command(FILE), checkouts["primary"]) == conditions.GATE_MESSAGE
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+@pytest.mark.parametrize("field,value", [("claimed_by", "other"), ("state", "done"), ("branch", "dev")])
+def test_publish_rejects_invalid_task_ownership_and_branches(
+    checkouts: dict[str, Path], field: str, value: str
+) -> None:
+    ledger = publish.LedgerClient()
+    assert isinstance(ledger, Mock)
+    ledger.task.return_value[field] = value
+    assert _guard(_command(FILE), checkouts["primary"]) == conditions.GATE_MESSAGE
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+def test_publish_without_a_task_worktree_stays_closed(checkouts: dict[str, Path]) -> None:
+    for key in ("recorded", "current"):
+        _git(checkouts["primary"], "worktree", "remove", "--force", str(checkouts[key]))
+    assert _guard(_command(FILE), checkouts["primary"]) == conditions.GATE_MESSAGE
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+def test_publish_follows_condition_symlinks_before_allowing_the_file(checkouts: dict[str, Path]) -> None:
+    link = checkouts["recorded"] / ".claude" / "conditions" / "linked.sh"
+    link.symlink_to(checkouts["live"] / FILE)
+    assert (
+        _guard(_command(link.relative_to(checkouts["recorded"]).as_posix()), checkouts["primary"])
+        == conditions.GATE_MESSAGE
+    )
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+def test_publish_resolves_only_files_and_keeps_quoted_message_text(checkouts: dict[str, Path]) -> None:
+    command = shlex.join(
+        ["agentihooks", "swarm", SLUG, "publish", "-m", f"Inspect {checkouts['live'] / FILE}; keep it", FILE]
+    )
+    assert _guard(command, checkouts["primary"]) is None
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+def test_publish_message_paths_do_not_trigger_task_reads(
+    checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookup = Mock(side_effect=AssertionError("unexpected task lookup"))
+    monkeypatch.setattr(publish, "LedgerClient", lookup)
+    command = shlex.join(["agentihooks", "swarm", SLUG, "publish", "-m", FILE, "--", "README.md"])
+    assert _guard(command, checkouts["primary"]) is None
+    lookup.assert_not_called()
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+@pytest.mark.parametrize("tail", ["--unknown", "> proof.log", "; true", "$(touch proof)"])
+def test_publish_with_unresolved_shell_effects_stays_closed(checkouts: dict[str, Path], tail: str) -> None:
+    assert _guard(_command(FILE) + " " + tail, checkouts["current"]) == conditions.GATE_MESSAGE
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+@pytest.mark.parametrize(
+    "command", ["", "agentihooks '", "agentihooks swarm demo prepare", "python -m other agentihooks swarm demo publish"]
+)
+def test_publish_recognition_does_not_change_other_invocations(command: str) -> None:
+    assert conditions._publish_files(command) is None
