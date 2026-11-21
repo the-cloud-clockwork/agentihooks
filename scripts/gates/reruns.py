@@ -4,7 +4,8 @@ import json
 import re
 import subprocess
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+from typing import Any
 
 from scripts.gates import log
 from scripts.gates.base import Decision
@@ -111,3 +112,7 @@ class RerunBudget:
             reason = f"CI reruns {spent} of {self.cap} on head {head[:12]}"
             log.append(state.slug, log.Row.of(self.name, "count", who, call.tool, reason), state.home)
         return Decision()
+
+
+def released(payload: dict[str, Any], home: Path | None = None) -> None:
+    """Give back the CI reruns counted for a call the PreToolUse hook denied, since a denied call never runs."""
