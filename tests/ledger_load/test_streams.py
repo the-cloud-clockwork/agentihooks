@@ -1,8 +1,10 @@
 import importlib
 import json
+import math
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -66,6 +68,7 @@ class Lagging:
 
     def __init__(self) -> None:
         self.results: list[dict[str, Any]] = []
+        self.rev = 0
 
     def consume(
         self, base: str, token: str, ready: threading.Event, stop: threading.Event, result: dict[str, Any]
@@ -75,15 +78,16 @@ class Lagging:
         ready.set()
 
     def mutate(self, slug: str, ops: list[dict[str, Any]]) -> dict[str, Any]:
+        self.rev += 1
         for result in self.results:
-            timer = threading.Timer(LAG_S, self.publish, args=(result, ops))
+            timer = threading.Timer(LAG_S, self.publish, args=(result, self.rev))
             timer.daemon = True
             timer.start()
-        return {"data": {"rejected": []}}
+        return {"data": {"rejected": [], "_meta": {"rev": self.rev}}}
 
-    def publish(self, result: dict[str, Any], ops: list[dict[str, Any]]) -> None:
+    def publish(self, result: dict[str, Any], rev: int) -> None:
         result["patches"] += 1
-        streams.arrived(result["arrivals"], {"patch": ops})
+        result["arrivals"].append((rev, time.monotonic()))
 
 
 @contextmanager
@@ -113,17 +117,9 @@ def test_the_delivery_check_waits_for_a_patch_published_after_the_measurement_wi
     assert all("arrivals" not in consumer for consumer in result["consumers"])
 
 
-def test_a_patch_folding_two_writes_delivers_both_and_keeps_each_first_arrival() -> None:
-    arrivals: dict[int, float] = {}
-    streams.arrived(
-        arrivals, {"patch": {"o": {"comments": {"add": [{"id": "stream-load-0"}, {"id": "stream-load-1"}]}}}}
-    )
-    first = dict(arrivals)
-    streams.arrived(
-        arrivals, {"patch": {"ids": ["stream-load-join", "stream-load-0", "stream-load-1", "stream-load-2"]}}
-    )
-    assert sorted(arrivals) == [0, 1, 2]
-    assert arrivals[0] == arrivals[1] == first[0] == first[1] <= arrivals[2]
+def test_a_patch_past_two_writes_delivers_both_and_a_write_no_patch_reached_is_never_delivered() -> None:
+    written = [(5, 10.0), (6, 10.5), (7, 11.0)]
+    assert streams.delivery_delays([(4, 10.2), (6, 11.0), (6, 11.5)], written) == [1.0, 0.5, math.inf]
 
 
 def test_the_follow_pass_bound_follows_the_scheduler_pass_period() -> None:
