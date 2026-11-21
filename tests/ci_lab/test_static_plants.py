@@ -5,7 +5,6 @@ from typing import Any
 import pytest
 
 from scripts import ci_wiring
-from scripts.ci_lab import executors, expressions
 from scripts.ci_lab.static_gates import REGISTRY, STATIC_JOBS, WORKFLOW, StaticGate, discover
 
 pytestmark = pytest.mark.unit
@@ -13,8 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PLANTS = ROOT / "tests" / "ci_lab" / "plants"
 EXCLUSIONS = ROOT / "tests" / "ci_lab" / "static_gate_exclusions.json"
 NEEDS = {"step env", "secret", "checkout", "earlier step", "docker", "network"}
-UNSUPPLIED = {"step env", "secret"}
-CONTEXT = {executors.INPUTS_BASE: "0" * 40}
+UNSUPPLIED = {"step env"}
 
 
 def gates() -> dict[str, StaticGate]:
@@ -33,13 +31,7 @@ def exclusions() -> dict[str, dict[str, Any]]:
 
 
 def supplied(gate: StaticGate) -> bool:
-    try:
-        expressions.holds(gate.condition, CONTEXT)
-        for _, value in gate.env:
-            expressions.interpolate(value, CONTEXT)
-    except ValueError:
-        return False
-    return True
+    return not gate.missing
 
 
 def test_every_discovered_static_gate_has_one_plant_or_one_exclusion() -> None:
