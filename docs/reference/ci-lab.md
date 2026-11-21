@@ -4439,10 +4439,9 @@ computes a new digest and builds that venv on each pod that leases one of them. 
 the head's static, test and stats units. The scheduler keys the `toolchain.lockfile` input of
 static and test units on the git blob id of the same file in `MirrorExpander.expand`, and the
 `runtime` of stats units on the sha256 of its bytes through `stats_cache.runtime_digest`, so no
-verdict stored under the old lock answers them. Mutant unit keys, built in
-`expand_mutation`, take neither input. A head
-without the lock is still expanded, with an empty `lockfile` input and a null stats `runtime`, and
-its units then crash on the worker as the last row above shows.
+verdict stored under the old lock answers them. Mutant unit keys, built in `expand_mutation`,
+take neither input. A head without the lock is still expanded, with an empty `lockfile` input and
+a null stats `runtime`, and its units then crash on the worker as the last row above shows.
 
 #### Verify the venv keying
 
