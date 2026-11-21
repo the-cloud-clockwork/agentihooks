@@ -21,6 +21,7 @@ See [Cancelled watcher after the gate change](delivery-tiers.md#cancelled-watche
 | [Swarm elapsed thresholds](swarm-thresholds.md) | Idle and input timing, retirement, dispatch and autoscale windows, cadence examples, legacy settings, holds and ledger probe limits |
 | [Semgrep feature tests](semgrep-features.md) | One dated rule per operator ordered feature, regression and passing fixtures, and required CI proofs |
 | [Feature map](feature-map.md) | Feature map origins and keys, the test marker, live check targets and the pull request validation |
+| [Completed worker archive acknowledgement](../swarm-v2/retention.md#completed-worker-cleanup) | Final checkpoint validation, heartbeat archive progress, configuration examples, retry limits and the outcome and archive guards for completed worker cleanup |
 | [Feature live checks](feature-live-checks.md) | The feature map, how the Doctor runs each live check on its timer, the `feature regressed` finding with the operator's words, the front door login check, measuring and troubleshooting |
 | [Local test guard](local-test-guard.md) | Source and symbol inspection, prose mentioning runners, execution refusals, configuration and troubleshooting |
 | [Admission seat helper for tests](test-seat-helper.md) | Fixture imports and direct calls, launch defaults and overrides, hive and clock options, execution state, readiness limits and admission refusals |
