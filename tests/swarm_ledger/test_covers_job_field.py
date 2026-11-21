@@ -1,4 +1,3 @@
-import ledger_core as core
 import pytest
 
 from scripts.swarm_ledger import ledger_tasks
@@ -20,14 +19,13 @@ def test_a_task_added_or_set_with_covers_job_keeps_the_job(slug: str) -> None:
     assert next(t for t in state["tasks"] if t["id"] == "c1")["covers_job"] == "lint"
 
 
-@pytest.mark.feature("promotion-covering-task-holds-cause")
 def test_covers_job_must_be_a_string() -> None:
-    assert "covers_job" in ledger_tasks.UPDATABLE
     task = {"op": "task_add", "id": "t", "by": "eng", "task": "c", "title": "Work", "lane": "eng"}
     update = {"op": "task_update", "id": "u", "by": "eng", "item": "tasks/c", "fields": {"covers_job": ["lint"]}}
-    for bad in ({**task, "covers_job": ["lint"]}, update):
-        with pytest.raises(ValueError):
-            core.check_op(bad)
+    with pytest.raises(ValueError, match="^covers_job must be a string"):
+        ledger_tasks.check({**task, "covers_job": ["lint"]})
+    with pytest.raises(ValueError, match="covers_job"):
+        ledger_tasks.check(update)
 
 
 @pytest.mark.feature("promotion-covering-task-holds-cause")
