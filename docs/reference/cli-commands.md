@@ -447,6 +447,7 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 |---|---|
 | `--dir`, `--name`, `--prompt` / `--prompt-file` | Directory, session/tab name, opening prompt |
 | `--dry-run` | Print the launch without opening a terminal |
+| `--inbox-channel` | Claude: load the AgentiHooks [inbox channel](codex-inbox-transport.md#three-inbox-paths) and answer Claude's development channels warning in herdr. It first registers the `inbox` MCP server in the Claude config, also on `--dry-run`; see [Claude config lock](#claude-config-lock). The swarm passes it on every Claude agent launch |
 | `--codex-transport legacy\|app_server`, `--seat` | Select the transport and admitted seat for a managed Codex swarm launch; see [Managed Codex terminals](codex-managed-terminal.md) for configuration and viewer behavior |
 | `--start-timeout` | Seconds to wait for the terminal to start (default 30) |
 | `--route-timeout` | Seconds to wait for the new session's route report (default 150) |
@@ -471,6 +472,7 @@ so a herdr pane's own environment cannot point Claude at another file.
 `trust=trusted|marked|untrusted` names the outcome;
 `AGENTIHOOKS_TRUST_LAUNCH_DIR=0` turns marking off. On `untrusted` the launch
 still goes ahead and stderr says the session waits for someone to answer.
+Marking takes the Claude config lock; see [Claude config lock](#claude-config-lock).
 
 Hosts: herdr when installed and not disabled (`state.json` `herdr.enabled`), else
 the native terminal. `--host herdr|native` or `AGENTIHOOKS_TERMINAL_HOST` overrides.
@@ -487,6 +489,93 @@ With `--profile`, the output adds `profile_validation=validated` and
 The launcher starts the session through `agentihooks select-profile NAME
 --home=<recorded home>`, so a pull of `dev` or another code root between
 prepare and launch does not change the home the session mounts.
+
+### Claude config lock
+
+Two launch steps write the Claude config file, `$CLAUDE_CONFIG_DIR/.claude.json`
+(else `$CLAUDE_CODE_HOME_DIR/.claude.json`, else `~/.claude.json`): folder trust
+marking and inbox channel registration. Each takes the lock Claude Code itself
+uses for that file, a `.claude.json.lock` directory beside it, and removes the
+lock when its write ends, so neither writes while a Claude session holds the file.
+
+| Writer | Takes the lock when | Lock still held after 3 seconds |
+|---|---|---|
+| Folder trust marking | A Claude launch goes into a folder the config does not trust yet and `AGENTIHOOKS_TRUST_LAUNCH_DIR` is not `0` | `trust=untrusted`; stderr prints `agentihooks init-agent: Claude does not trust <dir> (<config>.lock is held); the session will wait at Claude's folder trust question until someone answers it in its pane`, and the launch goes ahead |
+| Inbox channel registration | `init-agent --inbox-channel`, and `select-profile` when the Claude arguments carry `--dangerously-load-development-channels=server:inbox` | The launch fails with exit 2: `agentihooks init-agent: <config>.lock is held`, or `agentihooks select-profile: <config>.lock is held`, which also fails a pending launch report |
+
+Registration takes the lock on every such launch and rewrites the file only when
+the stored `inbox` entry under `mcpServers` differs from the current one.
+
+Both writers treat a lock the same way. A lock directory whose modification time
+is `claude_trust.STALE_LOCK_SECONDS` (10 seconds) old or older is abandoned, the
+stale bound Claude Code's lockfile uses: the writer removes it through
+`claude_trust._reclaim` and takes the lock at once, with no wait. A younger lock
+belongs to a live holder: the writer checks it again every 0.1 seconds, takes it
+as soon as it is gone or reaches the bound, and gives up after 3 seconds. Reclaim
+removes only an empty directory, the shape Claude Code's lock has.
+
+A rendered profile home is the Claude config home of every launch of that profile
+on the host, so one abandoned lock there reaches all of them. A launch killed
+while it holds the lock leaves the empty directory behind. Before registration
+reclaimed it, registration waited on that directory as on a live lock, and every
+later Claude launch of the profile failed with `is held`: one abandoned lock in a
+ci profile home refused every ci launch on its hive.
+
+#### Check a lock
+
+The lock of the config this shell's launches use, and how long it has been held:
+
+```bash
+lock="${CLAUDE_CONFIG_DIR:-${CLAUDE_CODE_HOME_DIR:-$HOME}}/.claude.json.lock"
+test -d "$lock" && echo "held $(( $(date +%s) - $(stat -c %Y "$lock") ))s" || echo free
+```
+
+Every lock in the rendered profile homes on this host:
+
+```bash
+find ~/.agentihooks/profiles/.homes -name .claude.json.lock -type d -printf '%TY-%Tm-%Td %TH:%TM %p\n'
+```
+
+A lock held 10 seconds or more needs no action: the next launch that writes the
+config removes it.
+
+#### Troubleshooting
+
+- **`<config>.lock is held`.** The lock stayed younger than 10 seconds for the
+  whole 3 second wait: a Claude session was writing its config, or another launch
+  was registering at the same moment. Launch again. A lock that never ages past
+  10 seconds is live, because its holder keeps renewing it; let that Claude
+  session finish and never delete the lock by hand.
+- **`[Errno 39] Directory not empty: '<lock>'`** (Linux). The lock directory has
+  files inside. Reclaim does not remove it, so registration fails with this error
+  and trust marking reports `untrusted` with it. Inspect the directory, then
+  remove it by hand.
+- **`trust=untrusted` with `is held` and a launch that went ahead.** Only trust
+  marking timed out; answer the trust question in the session's pane, or launch
+  again once the lock is free.
+
+#### Tests and guards
+
+- Feature `inbox-channel-lock-reclaim` in `feature-map.json`.
+  `tests/inbox/test_channel_server.py::test_registration_reclaims_an_abandoned_native_config_lock`
+  registers the channel over a lock half an hour past the bound, removes the lock
+  and never sleeps.
+  `tests/inbox/test_channel_server.py::test_registration_leaves_a_lock_inside_the_stale_bound_to_its_holder`
+  keeps a lock 5 seconds inside the bound, checks it through
+  `claude_trust._reclaim` on every try and fails with `<lock> is held`.
+- Feature `claude-trust-lock-reclaim` covers the same reclaim in folder trust
+  marking in `tests/test_claude_trust.py`, including a lock exactly at the bound,
+  which is reclaimed.
+- Semgrep incident rule `mkdir-lock-without-reclaim`: a `while True` loop that
+  takes a lock with `mkdir` and retries on `FileExistsError` without first calling
+  a reclaim helper and continuing is an error. The Semgrep workflow runs every
+  rule in `.semgrep-incidents/`. Run it by hand with:
+
+```bash
+semgrep scan --config .semgrep-incidents/mkdir-lock-without-reclaim.yml scripts/
+semgrep --test --config .semgrep-incidents/mkdir-lock-without-reclaim.yml \
+  .semgrep-incidents/mkdir-lock-without-reclaim.py
+```
 
 ---
 
@@ -510,7 +599,10 @@ agentihooks select-profile engineer --home="$HOME/.agentihooks/profiles/.homes/e
 | `--home <dir>` | Mount this rendered home instead of rendering; refused unless its binding matches the profile and harness and its persona and sources are unchanged |
 | `--dry-run` | Print the selected environment and `argv=` line without starting the harness |
 
-Arguments after `--` pass through to the harness. A refusal exits 2 with
+Arguments after `--` pass through to the harness. For Claude, when they carry
+`--dangerously-load-development-channels=server:inbox`, the inbox channel is
+registered in the mounted home's `.claude.json` before Claude starts, under the
+[Claude config lock](#claude-config-lock). A refusal exits 2 with
 `agentihooks select-profile: <reason>` and fails a pending launch report. Home
 checks, refusals and troubleshooting: [Profile launch home](profile-launch-home.md).
 
