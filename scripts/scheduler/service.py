@@ -293,8 +293,8 @@ def _spawn_env(active: Mapping[str, str]) -> dict[str, str]:
     return spawned
 
 
-def _accepted(refusal: Path, active: Mapping[str, str]) -> bool:
-    """False while the last supervisor stopped refused and a probe read with this environment is still not accepted."""
+def _refusal_cleared(refusal: Path, active: Mapping[str, str]) -> bool:
+    """True when no refusal stands or a probe read with this environment is accepted, which removes the refusal."""
     if not refusal.is_file():
         return True
     try:
@@ -332,7 +332,7 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
         with machine_lock("startup", environ=active):
             with machine_lock("supervisor", environ=active):
                 pass
-            if not _accepted(runtime_dir(active) / REFUSAL, active):
+            if not _refusal_cleared(runtime_dir(active) / REFUSAL, active):
                 return False
             if _unit_owns(runtime_dir(active)) and _start_unit():
                 return True

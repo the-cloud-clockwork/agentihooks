@@ -356,7 +356,9 @@ def test_service_entrypoint_names_its_command(monkeypatch, capsys, args):
         service.main(args)
     output = capsys.readouterr()
     assert result.value.code == (0 if args == ["--help"] else 2)
-    assert (output.out or output.err).splitlines()[0] == ("usage: agentihooks scheduler service [-h] {run,supervise}")
+    assert (output.out or output.err).splitlines()[0] == (
+        "usage: agentihooks scheduler service [-h] {run,supervise,probe}"
+    )
 
 
 def test_supervisor_entrypoint_stops_on_signals_and_restores_handlers(monkeypatch):
@@ -1328,7 +1330,7 @@ def test_the_wait_pass_starts_no_scheduler_after_a_refused_exit_while_its_ping_a
 
     def probe(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         probes.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, service.main(argv[3:]))
+        return subprocess.CompletedProcess(argv, service.main(argv[-1:]))
 
     spawn = _stopped_supervisor(monkeypatch, tmp_path, 4, probe)
     environ = {"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}
@@ -1348,14 +1350,16 @@ def test_the_wait_pass_starts_no_scheduler_after_a_refused_exit_while_its_ping_a
 
 @pytest.mark.feature("scheduler-refused-restart-skip")
 @pytest.mark.parametrize(
-    "failure", [subprocess.TimeoutExpired(["probe"], 30), OSError("no interpreter")], ids=["timeout", "unstarted"]
+    "outcome",
+    [subprocess.TimeoutExpired(["probe"], 30), OSError("no interpreter"), subprocess.CompletedProcess(["probe"], 1)],
+    ids=["timeout", "unstarted", "crashed"],
 )
-def test_a_probe_that_times_out_or_cannot_start_keeps_a_refused_scheduler_stopped(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: Exception
+def test_a_probe_that_fails_times_out_or_cannot_start_keeps_a_refused_scheduler_stopped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, outcome: object
 ) -> None:
     from scripts.scheduler import service
 
-    spawn = _stopped_supervisor(monkeypatch, tmp_path, 4, Mock(side_effect=failure))
+    spawn = _stopped_supervisor(monkeypatch, tmp_path, 4, Mock(side_effect=[outcome]))
     assert service.ensure_running({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}) is False
     assert spawn.call_count == 1
     assert (tmp_path / service.REFUSAL).is_file()
