@@ -17,11 +17,16 @@ NAMED = re.compile(
     r"|\b[a-z][a-z0-9]+(?:[._][a-z0-9]+)+"
     r"|(?<![\w/])/[\w{}-]+(?:/[\w{}-]+)*"
     r"|\b(?:agentihooks|python -m)\s+[a-z]"
-    r"|\b(?:function|file)\s+`[A-Za-z][\w./-]*`"
+    r"|\b(?:command|function|file)\s+(?:`[A-Za-z][\w./-]*`|[A-Za-z][\w./-]*)"
     r"|\bcommand\s+`[A-Za-z][\w./-]*(?:\s+[^`\n]+)?`",
     re.I,
 )
-OBSERVED = re.compile(r"\b(?:returns?|responds?|emits?|prints?|writes?|contains?|exits?|rejects?|raises?)\s+\S", re.I)
+OBSERVED = re.compile(
+    r"\b(?:returns?|responds?|emits?|prints?|writes?|contains?|exits?|rejects?|raises?)\s+\S"
+    r"|\b(?:has|have)\s+status\s+\S"
+    r"|(?<=\))\s*(?:==|!=|<=|>=|<|>)\s*\S",
+    re.I,
+)
 RECON = (
     "What will be built",
     "Code areas touched",
@@ -53,7 +58,12 @@ def thin(task: dict[str, Any]) -> list[str]:
 
 def _named_seam(text: str) -> bool:
     parts = re.split(r"(?<=[.!?])\s+|\n(?=\s*(?:[-*+]|\d+[.)]|#{1,6})\s)|\n\s*\n", text)
-    return any(NAMED.search(part) and OBSERVED.search(part) for part in parts)
+    return any(
+        boundary.end() < observation.start() or observation.end() < boundary.start()
+        for part in parts
+        for boundary in NAMED.finditer(part)
+        for observation in OBSERVED.finditer(part)
+    )
 
 
 def exempt(task: dict[str, Any]) -> bool:
