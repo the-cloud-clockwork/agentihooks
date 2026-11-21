@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from hooks.context.profile_chain import layer_root
 from scripts import mcp_daemon, tool_deps
 
 try:
@@ -70,7 +71,7 @@ def manifest_path() -> Path | None:
     from scripts.install import _get_bundle_path
 
     bundle = _get_bundle_path()
-    path = bundle / "deps.json" if bundle else None
+    path = layer_root(bundle) / "deps.json" if bundle else None
     return path if path and path.is_file() else None
 
 
@@ -78,7 +79,7 @@ def user_manifest_path() -> Path | None:
     from scripts.install import _get_user_bundle_path
 
     user = _get_user_bundle_path()
-    path = user / "deps.json" if user else None
+    path = layer_root(user) / "deps.json" if user else None
     return path if path and path.is_file() else None
 
 
@@ -86,7 +87,7 @@ def shared_manifest_path() -> Path | None:
     from scripts.install import _get_shared_bundle_path
 
     shared = _get_shared_bundle_path()
-    path = shared / "deps.json" if shared else None
+    path = layer_root(shared) / "deps.json" if shared else None
     return path if path and path.is_file() else None
 
 
@@ -102,9 +103,8 @@ def declared(paths: list[Path] | None = None) -> list[Dep]:
 
 
 def fleet_plugins(bundle: Path | None, user: Path | None = None, shared: Path | None = None) -> list[str]:
-    paths = [
-        root / "deps.json" for root in (bundle, shared, user) if root is not None and (root / "deps.json").is_file()
-    ]
+    layers = [layer_root(root) for root in (bundle, shared, user) if root is not None]
+    paths = [layer / "deps.json" for layer in layers if (layer / "deps.json").is_file()]
     return [dep.id for dep in declared(paths) if dep.kind == "claude-plugin" and dep.present]
 
 

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/execution.py:scripts.swarm.execution.xǁExecutionRegistryǁ_unchanged:3854d5acafa33569205f75197573aa6135026806a2143ae9af95619515079a9c": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged and ignores its first argument at runtime. Both expressions therefore call get('pod_uid') on the identical written.runtime_target object, with identical output and exceptions."
+  }
+}

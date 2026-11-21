@@ -89,6 +89,11 @@ SECRETISH_NAME = re.compile(
     r"(?i)(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|APIKEY|CREDENTIAL"
     r"|PRIVATE_?KEY|ACCESS_?KEY|SESSION_?KEY|AUTH)"
 )
+SET_TEST = re.compile(
+    r"\s*(?:test|\[\[?)\s+-[nz]\s+"
+    r"\"\$(?:\{[A-Za-z_][A-Za-z0-9_]*(?::?-)?\}|[A-Za-z_][A-Za-z0-9_]*)\"(?:\s+\]\]?)?\s*"
+)
+XTRACE = re.compile(r"\s-[A-Za-z]*x|\bxtrace\b")
 
 QUOTING = re.compile(r"[\"'\\]")
 PROC_DIR = re.compile(r"/proc\b")
@@ -211,6 +216,7 @@ LAUNCHERS = {
 SEGMENT_DELIM = re.compile(r"&&|\|\||;|\n")
 STAGE_DELIM = re.compile(r"(?<!\|)\|(?!\|)")
 SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`|<\(([^()]*)\)")
+BODY_SUBSTITUTION = re.compile(r"\\.|(\$\([^()]*\)|`[^`]*`)", re.S)
 VERB_PREFIX = re.compile(
     r"^(\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:sudo\s+(?:-\S+\s+)*|command\s+)?(?:\S*/)?(grep|egrep|fgrep|rg))(?=\s)"
 )
@@ -284,13 +290,61 @@ def tokens_of(text):
         return text.split()
 
 
-def verb_index(tokens):
-    for i, tok in enumerate(tokens):
-        if tok in ("sudo", "command", "env") and len(tokens) > i + 1:
+WRAPPER_VALUE_FLAGS = {
+    "sudo": {
+        "-u",
+        "--user",
+        "-g",
+        "--group",
+        "-h",
+        "--host",
+        "-p",
+        "--prompt",
+        "-C",
+        "--close-from",
+        "-D",
+        "--chdir",
+        "-R",
+        "--chroot",
+        "-T",
+        "--command-timeout",
+        "-r",
+        "--role",
+        "-t",
+        "--type",
+        "-U",
+        "--other-user",
+    },
+    "env": {"-u", "--unset", "-C", "--chdir"},
+}
+
+
+def wrapper_option_takes_value(wrapper: str, option: str) -> bool:
+    flags = WRAPPER_VALUE_FLAGS[wrapper]
+    if option.startswith("--"):
+        return option in flags
+    for i, char in enumerate(option[1:], 1):
+        if f"-{char}" in flags:
+            return i == len(option) - 1
+    return False
+
+
+def verb_index(tokens: list[str]) -> int:
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in ("sudo", "command", "env") and i + 1 < len(tokens):
+            i += 1
+            if tok != "command":
+                while i < len(tokens) and tokens[i].startswith("-"):
+                    option = tokens[i]
+                    i += 1
+                    if option == "--":
+                        break
+                    i += int(wrapper_option_takes_value(tok, option) and i < len(tokens))
             continue
-        if ASSIGNMENT.match(tok) and len(tokens) > i + 1:
-            continue
-        if tok.startswith("-") and i > 0 and tokens[i - 1] == "sudo":
+        if ASSIGNMENT.match(tok) and i + 1 < len(tokens):
+            i += 1
             continue
         return i
     return len(tokens)
@@ -435,11 +489,19 @@ def counts_only(stage):
     return False
 
 
-def env_dump_verdict(command):
+def pod_command(toks: list[str]) -> list[str]:
+    """The words after -- of a kubectl exec stage, the command the pod runs; the tokens themselves otherwise."""
+    if verb_of(toks) != "kubectl" or "--" not in toks:
+        return toks
+    end = toks.index("--")
+    return toks[end + 1 :] if "exec" in toks[:end] else toks
+
+
+def env_dump_verdict(command: str) -> str | None:
     stages = split_stages(command)
     if not stages:
         return None
-    toks = tokens_of(stages[0])
+    toks = pod_command(tokens_of(stages[0]))
     if not toks:
         return None
     verb = verb_of(toks)
@@ -495,16 +557,28 @@ def leaf_names_environ(leaf):
     return "$" in leaf or "`" in leaf or fnmatch.fnmatchcase("environ", leaf)
 
 
-def echo_secret_verdict(command):
+def echo_secret_verdict(command: str) -> str | None:
     if not re.search(r"\b(echo|printf)\b", command):
         return None
-    for name in re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", command):
-        if SECRETISH_NAME.search(name):
-            return block(
-                "printing ${} to stdout".format(name),
-                KIND_ENVIRONMENT,
-            )
+    for piece in [command] if XTRACE.search(command) else untested_pieces(command):
+        for name in re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", piece):
+            if SECRETISH_NAME.search(name):
+                return block(f"printing ${name} to stdout", KIND_ENVIRONMENT)
     return None
+
+
+def untested_pieces(command: str) -> list[str]:
+    """The command's text with every part of a single quoted -c script that is only a set test left out."""
+    pieces: list[str] = []
+    rest = command
+    for stage in split_outside_quotes(STAGE_DELIM, command)[::2]:
+        for script in shell_scripts(tokens_of(stage)):
+            head, quoted, tail = rest.partition(f"'{script}'")
+            if quoted:
+                parts = split_outside_quotes(SEGMENT_DELIM, script)
+                pieces += [head, *(part for part in parts if not SET_TEST.fullmatch(part))]
+                rest = tail
+    return [*pieces, rest]
 
 
 def awk_environ_verdict(command: str) -> str | None:
@@ -999,7 +1073,7 @@ def rewrite_stage(stage_text, verb):
     return VERB_PREFIX.sub(lambda m: m.group(1) + " " + excludes, stage_text, count=1)
 
 
-def stage_verdict(stage_text, ctx):
+def stage_verdict(stage_text: str, ctx: Context) -> Verdict:
     for m in SUBSTITUTION.finditer(stage_text):
         inner = next(g for g in m.groups() if g is not None).strip()
         if inner.startswith("<"):
@@ -1046,7 +1120,7 @@ def stage_verdict(stage_text, ctx):
     if verb in INTERPRETERS:
         tok, kind = first_sensitive(operands_of(toks, verb))
         if not kind:
-            tok, kind = first_sensitive(SENSITIVE_FRAGMENT.findall(stage_text))
+            tok, kind = first_sensitive(SENSITIVE_FRAGMENT.findall(" ".join(toks[verb_index(toks) :])))
         return read_block(tok, kind) if kind else ALLOW
 
     if verb not in READER_VERBS:
@@ -1121,14 +1195,28 @@ def runs_input_script(stage_text: str) -> bool:
 
 def heredoc_verdict(segment: str, heredocs: list[re.Match[str]], ctx: Context) -> Verdict:
     """The verdict on each heredoc body of the segment, checked as a command once a stage of it runs a shell."""
-    if not any(runs_input_script(stage) for stage in split_outside_quotes(STAGE_DELIM, segment)[::2]):
-        return ALLOW
+    runs_script = any(runs_input_script(stage) for stage in split_outside_quotes(STAGE_DELIM, segment)[::2])
     for token in HEREDOC_TOKEN.finditer(segment):
         index = int(token.group(1))
-        body = {"command": heredocs[index].group(4)} if index < len(heredocs) else {}
-        v = decide_bash(body, Context(ctx.cwd, ctx.recursive))
+        if index >= len(heredocs):
+            continue
+        v = heredoc_body_verdict(heredocs[index], runs_script, ctx)
         if v.block:
             return v
+    return ALLOW
+
+
+def heredoc_body_verdict(heredoc: re.Match[str], runs_script: bool, ctx: Context) -> Verdict:
+    """A body a shell runs is judged as a command; an unquoted body's command substitutions are judged as stages."""
+    if runs_script:
+        return decide_bash({"command": heredoc.group(4)}, Context(ctx.cwd, ctx.recursive))
+    if heredoc.group(1):
+        return ALLOW
+    for m in BODY_SUBSTITUTION.finditer(heredoc.group(4)):
+        if m.group(1):
+            v = stage_verdict(m.group(1), Context(ctx.cwd, ctx.recursive))
+            if v.block:
+                return v
     return ALLOW
 
 

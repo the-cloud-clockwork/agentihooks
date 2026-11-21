@@ -150,6 +150,32 @@ def test_lock_taking_steps_of_a_pass_run_one_at_a_time_on_its_one_placement_work
     assert [record.outcome for record in rows] == [engine.OK] * 3
 
 
+@pytest.mark.feature("kept-placing-steps-first-on-the-placement-worker")
+def test_a_kept_lock_taking_step_ready_beside_a_slower_one_ahead_of_it_runs_first_on_the_placement_worker() -> None:
+    order: list[str] = []
+    seated = Event()
+
+    def notice(ctx: Context) -> Result:
+        seated.wait(10)
+        order.append("notice")
+        return Result()
+
+    def seat(ctx: Context) -> Result:
+        order.append("seat")
+        seated.set()
+        return Result()
+
+    steps = (
+        Step("placing notice", notice, GROUP, placing=True, budget_s=15.0),
+        Step("placing seat", seat, GROUP, placing=True, kept=True),
+    )
+    with pool.running(workers=2, critical_s=20.0, slow_s=20.0):
+        rows = engine.run_group(GROUP, Context(View(), Deadline.after(20.0)), steps)
+
+    assert order == ["seat", "notice"]
+    assert {record.name: record.outcome for record in rows} == {step.name: engine.OK for step in steps}
+
+
 @pytest.mark.feature("placement-lock-steps-on-one-placement-worker")
 def test_a_lock_taking_step_on_the_slow_lane_runs_on_the_placement_worker() -> None:
     order: list[str] = []

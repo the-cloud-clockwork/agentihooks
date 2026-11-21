@@ -46,6 +46,7 @@ ROLL = (
     "another hive."
 )
 WITHDRAWN = "hive {hive} stopped draining for its release, so its hand off order no longer applies"
+REMOVED = "hive {hive} was removed, so its hand off order no longer applies"
 RECOVERY = """## Intent
 Continue task {task}; hive {hive} stopped for a release while {name} still worked it.
 
@@ -183,6 +184,7 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
         if host.clock() >= deadline:
             break
         host.sleep(POLL_S)
+    _withdraw(inbox, ordered, REMOVED.format(hive=plan.hive))
     handed = sorted(name for (slug, name), agent in seen.items() if agent.task and _handed(store, slug, agent))
     released, retired = release(store, plan.hive, host)
     lines = [
@@ -265,15 +267,15 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str 
         host.sleep(POLL_S)
     else:
         ended = f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
-    _withdraw(inbox, ordered, hive)
+    _withdraw(inbox, ordered, WITHDRAWN.format(hive=hive))
     return f"{ended}; only member {member} drained, the hive stays open for its other members" if shared else ended
 
 
-def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: str) -> None:
+def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], reason: str) -> None:
     worlds = inbox.worlds()
     for item_id in ordered.values():
         for world in worlds:
-            world.settle(item_id, SENDER, "cancel", WITHDRAWN.format(hive=hive))
+            world.settle(item_id, SENDER, "cancel", reason)
 
 
 def _unhanded(store: "RedisStore", client: Any, hive: str, own: str, now_ms: int) -> list[tuple[str, "AgentRecord"]]:

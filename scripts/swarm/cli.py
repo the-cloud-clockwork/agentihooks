@@ -236,7 +236,7 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
     "wrapper commands": (pass_domains("stop"), NONE),
     "wrapper phases": (pass_domains("stop"), hook_domains("doc")),
     "wrapper intent": (pass_domains("stop"), hook_domains("doc", "config")),
-    "wrapper relay": (pass_domains("judged"), hook_domains("view")),
+    "wrapper relay": (pass_domains("judged"), NONE),
     "wrapper view": (pass_domains("agents", "stop"), hook_domains("agents", "doc", "config", "rows")),
     "wrapper metrics": (NONE, hook_domains("count")),
 }
@@ -537,13 +537,12 @@ class _Wrapper:
         return True
 
     def _judged(self) -> bool:
-        """End the tick's scan and keep the intent check's view and checked actions when it stored them; an intent
-        check that raised or overran its budget stored neither and leaves the pass going, and only the pass end raises
-        what it held."""
+        """End the tick's scan and keep the intent check's checked actions when it stored them, leaving its view to
+        the view wait step; an intent check that raised or overran its budget stored neither and leaves the pass
+        going, and only the pass end raises what it held."""
         self.ticks.close()
         if "judged" in self.judging:
-            view, self.checked = self.judging["judged"]
-            self.box["view"] = host_steps.pass_view(self.slug, view)
+            _, self.checked = self.judging["judged"]
         return True
 
     def _reread(self) -> bool:
@@ -2165,6 +2164,7 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
                 ),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
+                priority=lambda: queue_priority.automatic(store, args.slug, args.url, LedgerClient()),
             )
         else:
             result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))

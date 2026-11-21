@@ -229,14 +229,18 @@ def test_the_swarm_tells_its_own_lab_of_a_priority_move(monkeypatch: pytest.Monk
         return {"ok": True}
 
     def prioritize(
-        url: str, journal: queue_record.Journal, displaced: Any, lab: Callable[[str], dict[str, Any]]
+        url: str,
+        journal: queue_record.Journal,
+        displaced: Any,
+        lab: Callable[[str], dict[str, Any]],
+        lift: bool = False,
     ) -> dict[str, Any]:
         assert (url, journal.url) == (URL, URL)
         return {"url": url, "displaced": [], "errors": [], "lab": lab("head9")}
 
     monkeypatch.setattr(lab_control, "acknowledge", acknowledge)
     monkeypatch.setattr(merge_queue, "prioritize", prioritize)
-    result = queue_priority.reorder(store, "sw", URL, "master", [], queue_record.Journal(URL))
+    result = queue_priority.reorder(store, "sw", URL, "master", [], queue_record.Journal(URL), lift=False)
     assert result["lab"] == {"ok": True}
     assert asked == [("http://lab:8800", "head9", "tok")]
 
