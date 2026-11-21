@@ -3206,7 +3206,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-tick-view-critical-lane-fit",
       "behaviour": "The tick wrapper waits for the pass view only while the critical and slow lanes keep a reserve for the reread and the steps that need the view; a build that misses that bound yields the last view the swarm completed in the long running tick process, and a late build replaces it once it ends unless a newer build is kept, so waits end, merge pass, done recheck and health findings run every pass. The first pass of a process has no earlier view: it waits within the same bound, a build that misses it leaves the pass with no view so the tick view step builds nothing and the steps that need the view skip that pass, and the late build becomes the next pass's view.",
-      "seam": "pass_view, settled_view and the tick view step in scripts.tick.steps.host, called by the relay hook and the closing hand off of the wrapper pass in scripts.swarm.cli",
+      "seam": "pass_view, settled_view and the tick view step in scripts.tick.steps.host, called by the view wait step of scripts.tick.steps.view_wait and the closing hand off of the wrapper pass in scripts.swarm.cli",
       "tests": [
         "tests/tick/steps/test_pass_view.py::test_a_built_view_is_returned_and_kept_for_the_next_pass",
         "tests/tick/steps/test_pass_view.py::test_a_view_that_is_no_future_is_returned_as_is",
@@ -3217,7 +3217,6 @@
         "tests/tick/steps/test_pass_view.py::test_views_are_kept_per_swarm",
         "tests/tick/steps/test_pass_view.py::test_a_build_that_raises_its_own_timeout_in_time_raises_it",
         "tests/tick/steps/test_pass_view.py::test_the_wait_has_no_bound_outside_a_pass",
-        "tests/tick/steps/test_pass_view.py::test_the_relay_hook_takes_the_view_through_pass_view",
         "tests/tick/steps/test_pass_view.py::test_an_older_build_ending_last_never_replaces_a_newer_view",
         "tests/tick/steps/test_pass_view.py::test_a_cancelled_late_build_keeps_the_last_view",
         "tests/tick/steps/test_pass_view.py::test_a_first_build_that_misses_the_bound_is_pending_and_becomes_the_next_view",
@@ -3225,6 +3224,22 @@
         "tests/tick/steps/test_pass_view.py::test_a_pending_view_settles_to_no_view_and_a_view_to_itself",
         "tests/tick/steps/test_pass_view.py::test_the_tick_view_step_builds_nothing_while_the_first_build_is_pending",
         "tests/tick/steps/test_pass_view.py::test_the_tick_view_step_builds_on_the_pass_view"
+      ]
+    },
+    {
+      "id": "tick-view-wait-off-scheduler",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2596",
+      "behaviour": "The wrapper relay site hook answers without waiting for the pass view build, so outbox migration and page relay start as soon as the intent check ends instead of after the build; the kept view wait step at the relay site waits for the build on its own step thread within the pass view bound and stores the view the tick view step takes, and stores none when the intent check stored no verdict.",
+      "seam": "the view wait step of scripts.tick.steps.view_wait and the wrapper relay hook scripts.swarm.cli._Wrapper._judged, observed through scripts.swarm.cli.run_tick",
+      "rules": ["tick-site-hook-waits-on-future"],
+      "tests": [
+        "tests/tick/steps/test_view_wait.py::test_outbox_migration_starts_before_a_slow_view_build_ends",
+        "tests/tick/steps/test_view_wait.py::test_view_wait",
+        "tests/tick/steps/test_view_wait.py::test_the_view_wait_step_stores_the_view_pass_view_waited_for",
+        "tests/tick/steps/test_view_wait.py::test_the_view_wait_step_stores_no_view_when_the_intent_check_stored_none",
+        "tests/tick/steps/test_view_wait.py::test_a_view_build_that_raised_is_held_in_the_pass_box_for_the_pass_end",
+        "tests/tick/steps/test_pass_view.py::test_the_relay_hook_keeps_the_checked_actions_and_leaves_the_view_to_the_view_wait_step"
       ]
     },
     {

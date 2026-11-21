@@ -260,7 +260,8 @@ def test_the_watches_and_findings_declare_the_steps_they_need() -> None:
         "status publish": frozenset({"health findings"}),
     }
     assert {step.name: step.needs for step in host.STEPS if step.needs} == {
-        "planning after phase": frozenset({"planning and phase pass"})
+        "planning after phase": frozenset({"planning and phase pass"}),
+        "tick view": frozenset({"view wait"}),
     }
     assert CallStep("heartbeat", "g", host.held(lambda cli, get: None)).needs == frozenset()
 
