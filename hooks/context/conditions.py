@@ -13,6 +13,7 @@ import difflib
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -764,6 +765,10 @@ _REDIRECT = re.compile(rf">>?\|?\s*({_WORD})")
 _PATH_TOKEN = re.compile(_WORD)
 _UNQUOTE = re.compile(r"""\\(.)|["']""")
 _CD_TARGET = re.compile(rf"(?:^|[;&|(\n])\s*(?:cd|pushd)\s+({_WORD})")
+_PUBLISH_SYNTAX = re.compile(r"[;&|<>`$(){}*?\[\]\n]")
+_PUBLISH_WRAPPER = ["-m", "scripts.github_app_cli", "exec"]
+_PUBLISH_VALUES = frozenset({"--message", "-m", "--via"})
+_PYTHON = re.compile(r"python[\d.]*")
 _CAT_HEREDOC = re.compile(
     r"((?:^|[;&|(])[ \t]*(?:cat|tee)\b[^\n;&|]*?)<<-?[ \t]*(['\"]?)(\w+)\2([^\n]*)\n.*?^[ \t]*\3[ \t]*$",
     re.DOTALL | re.MULTILINE,
@@ -910,7 +915,13 @@ def _ordinary_target(token: str, bases: list[str | None]) -> bool:
 
 
 def _staged_command(command: str, cwd: str | None) -> bool:
-    """Every word of *command* resolves to a path, one is a condition path, and all of them are staged."""
+    """Every word of *command* resolves to a path, one is a condition path, and all of them are staged.
+
+    A lone swarm publish naming a condition file is judged by its file names in the worktree publish commits in.
+    """
+    root, files = _publish_target(command, cwd)
+    if root is not None:
+        return _staged([root / name for name in files])
     bases = _bases(command, cwd)
     paths: list[Path] = []
     for word in _PATH_TOKEN.findall(command):
@@ -920,6 +931,79 @@ def _staged_command(command: str, cwd: str | None) -> bool:
                 return False
             paths += resolved
     return any("conditions" in p.resolve().parts for p in paths) and _staged(paths)
+
+
+def _publish_target(command: str, cwd: str | None) -> tuple[Path | None, list[str]]:
+    """The worktree a lone swarm publish naming a condition file commits in, with its file names."""
+    call = _publish_call(command)
+    if call is None or not any("conditions" in Path(name).parts for name in call[1]):
+        return None, []
+    return _publish_root(call[0], cwd), call[1]
+
+
+def _publish_call(command: str) -> tuple[str, list[str]] | None:
+    """The slug and file names of one lone swarm publish call, bare or behind the GitHub app wrapper.
+
+    Shell control, substitution, glob or brace syntax, an unknown option or another subcommand gives None.
+    """
+    if _PUBLISH_SYNTAX.search(command):
+        return None
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if words and _PYTHON.fullmatch(Path(words[0]).name) and words[1:4] == _PUBLISH_WRAPPER:
+        words = words[5:] if words[4:5] == ["--"] else words[4:]
+    if not words or Path(words[0]).name != "agentihooks":
+        return None
+    return _publish_operands(words[1:])
+
+
+def _publish_operands(words: list[str]) -> tuple[str, list[str]] | None:
+    """The slug and file names in the words after agentihooks, when they are swarm SLUG publish and its options."""
+    rest = iter(words)
+    head: list[str] = []
+    for word in rest:
+        if word == "--as":
+            next(rest, None)
+        elif not word.startswith("--as="):
+            head.append(word)
+        if len(head) == 3:
+            break
+    if head[:1] != ["swarm"] or head[2:] != ["publish"]:
+        return None
+    files: list[str] = []
+    for word in rest:
+        if word == "--":
+            files += rest
+        elif word in _PUBLISH_VALUES:
+            next(rest, None)
+        elif not word.startswith("-"):
+            files.append(word)
+        elif word != "--direct" and not word.startswith(("--message=", "--via=")):
+            return None
+    return head[1], files
+
+
+def _publish_root(slug: str, cwd: str | None) -> Path | None:
+    """The root swarm publish selects for this session: its worktree, else the task's recorded worktree.
+
+    Another swarm, no session folder, a missing agent identity or a failed task or worktree lookup gives None.
+    """
+    from scripts.swarm import publish
+    from scripts.swarm.runtime import REPO_VARIABLE
+
+    environ = os.environ
+    if not cwd or environ.get("AGENTIHOOKS_SWARM") != slug:
+        return None
+    try:
+        agent = publish.AgentRecord(
+            environ["AGENTIHOOKS_AGENT_NAME"], environ["AGENTIHOOKS_SWARM_LANE"], environ["AGENTIHOOKS_SWARM_TASK"]
+        )
+        task = publish.task_row(slug, agent, publish.LedgerClient())
+        return publish.publishing_root(environ.get(REPO_VARIABLE) or cwd, task, agent, Path(cwd))[0]
+    except (KeyError, publish.SwarmError, OSError, subprocess.SubprocessError, ValueError, RuntimeError):
+        return None
 
 
 def _read_only_shell(command: str, cwd: str | None = None) -> bool:

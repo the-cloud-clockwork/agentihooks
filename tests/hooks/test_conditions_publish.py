@@ -56,6 +56,7 @@ def checkouts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path
     monkeypatch.setattr(conditions, "_requested_on_task", lambda session_id: False)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", agent.task)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_LANE", agent.lane)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", agent.name)
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REPO", str(primary))
     monkeypatch.chdir(primary)
@@ -180,3 +181,32 @@ def test_publish_without_condition_paths_does_not_read_task_state(
     )
     assert _guard(command, checkouts["primary"]) == conditions.GATE_MESSAGE
     lookup.assert_not_called()
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("agentihooks swarm s publish --message m -- a --b", ("s", ["a", "--b"])),
+        ("agentihooks swarm --as n s publish -m m a b", ("s", ["a", "b"])),
+        ("agentihooks swarm --as=n s publish --message=m --via lab --direct a", ("s", ["a"])),
+        ("agentihooks swarm s publish --via=lab -m 'm n' a", ("s", ["a"])),
+        ("/usr/bin/python3 -m scripts.github_app_cli exec agentihooks swarm s publish -m m a", ("s", ["a"])),
+        ("python -m scripts.github_app_cli exec -- /opt/bin/agentihooks swarm s publish -m m a", ("s", ["a"])),
+        ("agentihooks swarm s prepare", None),
+        ("agentihooks swarm s publish -x a", None),
+        ("agentihooks swarm s publish -mm a", None),
+        ("agentihooks swarm s publish -m m a; touch b", None),
+        ('agentihooks swarm s publish -m "$(touch b)" a', None),
+        ("agentihooks swarm s publish -m m .claude/conditions/*", None),
+        ("agentihooks swarm s publish -m 'm", None),
+        ("agentihooks swarm --as", None),
+        ("agentihooks msg send x y", None),
+        ("python -m scripts.other exec agentihooks swarm s publish -m m a", None),
+        ("python -m scripts.github_app_cli exec", None),
+        ("bash -m scripts.github_app_cli exec agentihooks swarm s publish -m m a", None),
+        ("other swarm s publish -m m a", None),
+    ],
+)
+def test_publish_call_reads_the_slug_and_file_names(command: str, expected: tuple[str, list[str]] | None) -> None:
+    assert conditions._publish_call(command) == expected

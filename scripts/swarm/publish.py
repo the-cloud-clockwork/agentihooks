@@ -117,7 +117,7 @@ def git(root: Path, *args: str) -> str:
     return output if "-z" in args else output.strip()
 
 
-def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
+def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict[str, Any]:
     task = ledger.task(slug, agent.task) or {}
     if task.get("claimed_by") != agent.name or task.get("state") not in ("claimed", "pr"):
         raise SwarmError("publication requires this agent's claimed task")
@@ -239,8 +239,10 @@ def continuation_task(repo: Path, task: dict, scoped: dict, branch: str) -> dict
     return {**scoped, "branch": recorded}
 
 
-def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | None, Path, dict]:
-    current = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+def publishing_root(
+    repo: str, task: dict[str, Any], agent: AgentRecord, cwd: Path | None = None
+) -> tuple[Path | None, Path, dict[str, Any]]:
+    current = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, cwd=cwd)
     root = None
     if current.returncode == 0 and (Path(current.stdout.strip()) / ".git").is_file():
         root = Path(current.stdout.strip())
