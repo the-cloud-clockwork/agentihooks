@@ -31,12 +31,15 @@
       "seam": "scripts.ci_lab.compact over the lab Redis records and object store",
       "tests": [
         "tests/ci_lab/test_compact.py::test_compaction_moves_each_manifest_redis_carries_to_its_unit_and_strips_it_everywhere",
+        "tests/ci_lab/test_compact.py::test_compaction_counts_each_manifest_and_record_of_every_live_grade_and_pending_or_leased_job",
         "tests/ci_lab/test_compact.py::test_compaction_moves_a_job_manifest_whose_grade_slot_carries_none",
         "tests/ci_lab/test_compact.py::test_compaction_slices_the_manifest_an_unfinished_test_slot_lacks_from_its_grades_packed_manifest",
         "tests/ci_lab/test_compact.py::test_compaction_counts_the_batches_whose_grade_commit_has_no_packed_manifest",
+        "tests/ci_lab/test_compact.py::test_compaction_slices_nothing_for_a_grade_state_stored_before_it_kept_a_manifest_commit",
         "tests/ci_lab/test_compact.py::test_compaction_slices_no_manifest_for_a_finished_test_slot",
         "tests/ci_lab/test_compact.py::test_compaction_keeps_a_grade_state_the_scheduler_wrote_meanwhile",
-        "tests/ci_lab/test_compact.py::test_the_compact_command_compacts_the_lab_redis_its_environment_names"
+        "tests/ci_lab/test_compact.py::test_the_compact_command_compacts_the_lab_redis_its_environment_names",
+        "tests/ci_lab/test_compact.py::test_the_compact_command_help_names_its_invocation"
       ]
     },
     {
