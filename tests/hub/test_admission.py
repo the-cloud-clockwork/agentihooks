@@ -877,7 +877,7 @@ def test_a_repeat_ask_while_the_hives_own_admission_still_claims_past_its_turn_k
 
     assert asked == [{"held": hive_admission.ADMITTING}, None]
     assert marked[0] == "hive-a"
-    assert 0 < marked[1] <= tick.LEASE_MS
+    assert tick.LEASE_MS - 5_000 < marked[1] <= tick.LEASE_MS
     assert rig.store.redis.exists(mark) == 0
     assert other.admit(SLUG, ask()) == admitted
     assert [agent.name for agent in rig.store.agents(SLUG)] == [admitted["name"]]
@@ -909,6 +909,24 @@ def test_an_admission_claim_that_ends_without_an_admission_leaves_no_claiming_ma
     assert marked == ["hive-a"]
     assert rig.store.redis.exists(mark) == 0
     assert rig.store.claimant(SLUG, "t1") is None
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_an_admission_claim_leaves_a_claiming_mark_another_hive_wrote_in_place(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mark = f"{rig.admitter._key(SLUG, ask())}:claiming"
+    write = rig.admitter._mark
+
+    def overwritten(*args: Any) -> dict[str, Any] | None:
+        rig.store.redis.set(mark, "hive-b")
+        written: dict[str, Any] | None = write(*args)
+        return written
+
+    monkeypatch.setattr(rig.admitter, "_mark", overwritten)
+
+    assert rig.admitter.admit(SLUG, ask()) is not None
+    assert rig.store.redis.get(mark) == "hive-b"
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")

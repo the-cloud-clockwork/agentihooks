@@ -272,7 +272,7 @@ class Admission:
     def _claiming(self, offer: str, hive: str) -> Generator[None]:
         """Names the hive whose admission of the offer is claiming for as long as the claim runs, within the task
         claim lease, so that hive's repeat ask stays held after its turn key lapses; cleared once the claim returns
-        or raises."""
+        or raises while the mark still names that hive."""
         from scripts.swarm import tick
 
         key, redis = claiming_key(offer), cast(Any, self.store).redis
@@ -280,7 +280,8 @@ class Admission:
         try:
             yield
         finally:
-            redis.delete(key)
+            if redis.get(key) == hive:
+                redis.delete(key)
 
     def _admitting(self, hive: str, offer: str) -> bool:
         """True while the hive's admission key is held by an admission of this same offer."""
