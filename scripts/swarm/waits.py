@@ -80,13 +80,20 @@ def checks_resolution(held, github, reread=None):
 
 
 def required_green(target: str, head: str) -> bool:
-    """Whether GitHub reads every required check of ``target`` passed on ``head``; logs the error a failed read holds on."""
+    """Whether GitHub reads every required check of ``target`` passed on ``head``; logs a failed or empty read."""
     try:
         pull = merge_queue.required_view(target, subprocess.run)
     except (SwarmError, KeyError, TypeError) as exc:
         print(f"required checks of {target} unread: {exc}", file=sys.stderr)
         return False
-    return pull is not None and pull.head == head and pull.resolved and not pull.red
+    if pull is None:
+        print(
+            f"required checks of {target} unread: empty pull request read; "
+            "GitHub backoff or rate limiting may be active",
+            file=sys.stderr,
+        )
+        return False
+    return pull.head == head and pull.resolved and not pull.red
 
 
 def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
