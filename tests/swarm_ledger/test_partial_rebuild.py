@@ -36,7 +36,8 @@ def claim(writer: dict[str, Any]) -> None:
 
 
 def serialized(patch: pytest.MonkeyPatch, writer: dict[str, Any], previous: Fragment) -> tuple[int, Fragment, dict]:
-    """The values one writer copy rebuild serializes, with the fragments and writer copy it returns."""
+    """The orjson and JSON encoder calls one writer copy rebuild makes, with the fragments and writer copy it
+    returns."""
     dumped: list[object] = []
     dumps, encode = fragments.orjson.dumps, fragments.encode
     with patch.context() as counting:
