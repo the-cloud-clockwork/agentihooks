@@ -97,12 +97,11 @@ def test_launches_print_missing_acknowledgement(
     from scripts.hive import execution_events
     from scripts.swarm import launch_starts
 
-    starts = rig.bus.for_swarm("rig").state(execution_events.STARTS)
-    key = execution_events.identity("rig", "engineer", 3)
-    starts.delete(key)
+    agent = replace(rig.agent, generation=4)
     if value is not None:
-        starts.create(key, value)
-    rig.store.agents.return_value = [rig.agent]
+        starts = rig.bus.for_swarm("rig").state(execution_events.STARTS)
+        starts.create(execution_events.identity("rig", "engineer", 4), value)
+    rig.store.agents.return_value = [agent]
 
     launch_starts.command(rig.store, argparse.Namespace(slug="rig"))
 
