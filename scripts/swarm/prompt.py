@@ -49,6 +49,20 @@ RESTACK = (
     " Then run {me} restack in it: it rebases the parked work onto dev. On a conflict it lists the files: resolve "
     "them, run git rebase --continue, then run {me} restack again."
 )
+RECON_FIRST = (
+    "Before your first edit, in this order:",
+    "- Still valid scouter: launch the scouter sub agent to check, with evidence, that the task and the "
+    "architecture it assumes still hold on current dev. Outdated or not feasible: build nothing, send its finding "
+    'to the front door master with the msg send command above and block the task with {me} block "<evidence>".',
+    "- Recon plan: launch scouter sub agents of more than one kind and, from their results, write recon.md in your "
+    "task work folder: at most 500 lines, six non empty headings in this order: What will be built, Code areas "
+    "touched, What might break, Regression tests, Resources needed, Protection plan. The regression tests and "
+    "feature map entries it adds for touched behaviour land in your pull request, written against the current code "
+    "before you modify it. A successor reads the recon.md its predecessor left.",
+    "- Traced plan: a planner sub agent writes plan.md in your task work folder, one piece per line "
+    "(- what | area, area | why); with no sub agent tool, write it yourself. Then run {me} trace-plan: the build "
+    "gate refuses an edit or commit before a passing verdict and outside the kept areas and your task's territory.",
+)
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
 CARRIED = "hive_opening"
@@ -620,11 +634,20 @@ def resumed_steps(steps: list[str], name: str, branch: str) -> list[str]:
 
 def task_steps(task: dict[str, Any], me: str, led: str, name: str, phase: str, autonomy: str) -> list[str]:
     kind = ledger_kinds.kind(task)
-    steps = kind_steps(kind, me, led, name, phase, autonomy, task["id"])
+    steps = (
+        enhance_steps(me, led, phase, task["enhances"])
+        if task.get("enhances")
+        else kind_steps(kind, me, led, name, phase, autonomy, task["id"])
+    )
     if kind not in STACKED_KINDS and task.get("parked_on") and task.get("branch"):
         return resumed_steps(steps, naming.plain(name), task["branch"])
     if kind not in STACKED_KINDS:
         return continued(steps, name, task)
+    return [*(line.format(me=me) for line in RECON_FIRST), *stacked_kind_steps(task, steps, me, led, name)]
+
+
+def stacked_kind_steps(task: dict[str, Any], steps: list[str], me: str, led: str, name: str) -> list[str]:
+    """Return a code or ci task's numbered steps for a fresh, parked, stacked or continued claim."""
     if task.get("parked_on") and _verdict(task).get("continue_from") == "fresh":
         return [f"Start your worktree fresh from dev: {_verdict(task)['fresh_reason']}.", *steps]
     if task.get("parked_on") and task.get("branch") and task.get("stacked_base"):
@@ -719,6 +742,29 @@ def plan_steps(me: str, led: str, name: str, phase: str) -> list[str]:
         f"7. Leave the crew with {led} leave, then close with {me} done --slice <ids>, the comma separated ids "
         f"of the tasks you added in this phase. The ledger refuses invalid slice ids and slice tasks without the "
         f"plan link. {CLOSES}",
+    ]
+
+
+def enhance_steps(me: str, led: str, phase: str, target: str) -> list[str]:
+    """Return the steps of a plan task that turns thin task target into a full plan before an engineer claims it."""
+    return [
+        f"This plan task enhances task {target}, too thin or vague for an engineer to claim: the thin check failed "
+        "it on the rules this task's description lists. steering.md holds its title, phase, territory and "
+        "description.",
+        "Work it end to end, then stop:",
+        "1. Read steering.md: the target task's record and the project and mission intent.",
+        f"2. Read task {target} with {led} get tasks/{target}, then have scouter sub agents read the code it names: "
+        "the code areas and their callers, the tests and feature map entries that cover them, and what might break. "
+        "Edit no code.",
+        f"3. Write one plan section for task {target} in plan.md in your work folder: a slice anchor line "
+        "<!-- slice: <anchor> --> above its heading, the seams the tests observe, the six recon headings What will "
+        "be built, Code areas touched, What might break, Regression tests, Resources needed and Protection plan, the "
+        "pull request body sections Summary, Seams, Tests and Proof, and a Done when sentence.",
+        f"4. Publish it into the target's phase: {led} publish-plan <plan file> --phase {phase}.",
+        f"5. Point task {target} at its section and clarify it: {led} task set {target} plan_url=<plan link> "
+        'plan_slice=<anchor> description="<clarified scope, seams and Done when sentence>".',
+        f'6. Propose work outside task {target} as a follow up: {led} followup add "<plain words>".',
+        f"7. Leave the crew with {led} leave, then close with {me} done --slice {target}. {CLOSES}",
     ]
 
 

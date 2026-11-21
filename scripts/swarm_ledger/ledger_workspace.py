@@ -1,5 +1,6 @@
 """A swarm task's work folder: steering notes seeded from the task, and the progress and proof its agents append."""
 
+import bisect
 import json
 import re
 from pathlib import Path
@@ -17,11 +18,14 @@ CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", 
 TAILS = (("latest_progress", "progress.md"), ("latest_proof", "proof.md"))
 TAIL_LINES = 3
 TAIL_BYTES = 4096
-SEEDS = ("steering.md", "progress.md", "proof.md")
+SEEDS = ("steering.md", "progress.md", "proof.md", "recon.md")
 SEED_CHARS = 65536
+LINE_BYTES = 131072
+SEED_BYTES = 2 * LINE_BYTES
 FILES = 32
 FILES_SECONDS = 86400
 ENDED = ("ended", "finished")
+WORK_FOLDER = "work-folder"
 
 
 def folder(slug: str, task_id: str) -> Path:
@@ -45,7 +49,7 @@ def scaffold(slug: str, task: dict, doc: dict | None = None) -> Path:
     return path
 
 
-def steering(task: dict, doc: dict | None = None) -> str:
+def steering(task: dict[str, Any], doc: dict[str, Any] | None = None) -> str:
     lines = [f"# {task['id']}: {task.get('title', '')}", ""]
     if task.get("description"):
         lines += [task["description"], ""]
@@ -57,11 +61,29 @@ def steering(task: dict, doc: dict | None = None) -> str:
     rows = [f"- {label}: {contract[key]}" for key, label in CONTRACT_LABELS if contract.get(key)]
     if rows:
         lines += ["Proof contract", *rows, ""]
+    if task.get("enhances") and doc is not None:
+        lines += target_lines(task, doc["tasks"])
     if task.get("kind") == "plan" and doc is not None:
         from scripts.swarm_ledger.plan_evidence import evidence
 
         lines.append(evidence(task, doc))
     return "\n".join(lines)
+
+
+def target_lines(task: dict[str, Any], tasks: list[dict[str, Any]]) -> list[str]:
+    """Return the steering block of an enhancement plan task: its target's id, title, phase, territory, description."""
+    rows = {row.get("id"): row for row in tasks}
+    if task["enhances"] not in rows:
+        return ["Enhancement target", f"- Task: {task['enhances']} is not in the ledger: block this task.", ""]
+    row = rows[task["enhances"]]
+    return [
+        "Enhancement target",
+        f"- Task: {task['enhances']}: {row.get('title', '')}",
+        f"- Phase: {row.get('phase', '')}",
+        f"- Territory: {', '.join(row.get('territory') or []) or 'none'}",
+        f"- Description: {row.get('description', '')}",
+        "",
+    ]
 
 
 def rewrite(task: dict) -> None:
@@ -105,10 +127,12 @@ def seeds(slug, task_id):
     return {**sent, **contents(slug, task_id)}
 
 
-def contents(slug, task_id):
-    """Progress and proof keep their latest text; another plain text file travels whole or not at all."""
-    found = {}
-    added = 0
+def contents(slug: str, task_id: str) -> dict[str, str]:
+    """Progress, proof and the recon plan keep their latest LINE_BYTES of JSON; another plain text file of up to
+    SEED_CHARS bytes travels whole while its JSON fits what is left of SEED_BYTES, so the hub admit reply carrying the
+    copy stays under the NATS payload limit."""
+    found: dict[str, str] = {}
+    added, left = 0, SEED_BYTES
     for file in _files(folder(slug, task_id)):
         seed = file.name in SEEDS
         if not seed and added >= FILES:
@@ -119,9 +143,28 @@ def contents(slug, task_id):
             text = file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        found[file.name] = text[-SEED_CHARS:]
-        added += not seed
+        kept = _latest(text, LINE_BYTES if seed else left)
+        if seed or kept == text:
+            found[file.name] = kept
+            left -= _json_bytes(kept)
+            added += not seed
     return found
+
+
+def _latest(text: str, limit: int) -> str:
+    """The longest end of text whose JSON takes at most limit bytes; a character takes at least one byte, so only the
+    last limit characters are searched."""
+    tail = text[max(len(text) - limit, 0) :]
+
+    def fits(start: int) -> bool:
+        return _json_bytes(tail[start:]) <= limit
+
+    return tail[bisect.bisect_left(range(len(tail)), True, key=fits) :]
+
+
+def _json_bytes(text: str) -> int:
+    """The bytes text adds to a JSON message, which escapes every character outside ASCII."""
+    return len(json.dumps(text)) - 2
 
 
 def _files(path):
@@ -167,8 +210,9 @@ def task_files_key(hive: str, slug: str, task_id: str) -> str:
 
 
 def sync(redis: "Redis", hive: str, hosted: list[tuple[str, str]], ttl: int) -> None:
-    """Publishes the hosted tasks' latest lines and files, and keeps each task's files under its own key for the files
-    TTL, so the copy outlives the hive hosting the task; a task holding no files leaves its copy as it was."""
+    """Publishes the hosted tasks' latest lines and files, and keeps each task's files under its own key with no expiry,
+    so the copy seeds the task's next agent however long after this hive stops hosting the task; a task holding no files
+    leaves its copy as it was."""
     copy: dict[str, dict[str, dict[str, str]]] = {}
     files: dict[str, dict[str, dict[str, str]]] = {}
     for slug, task_id in hosted:
@@ -176,9 +220,14 @@ def sync(redis: "Redis", hive: str, hosted: list[tuple[str, str]], ttl: int) -> 
         found = contents(slug, task_id)
         files.setdefault(slug, {})[task_id] = found
         if found:
-            redis.set(task_files_key(hive, slug, task_id), json.dumps(found), ex=FILES_SECONDS)
+            redis.set(task_files_key(hive, slug, task_id), json.dumps(found))
     redis.set(synced_key(hive), json.dumps(copy), ex=ttl)
     redis.set(files_key(hive), json.dumps(files), ex=FILES_SECONDS)
+
+
+def launched_on(store: Any, slug: str, task_id: str, hive: str) -> None:
+    """Records the hive that last launched the task, whose task copy seeds the task's next agent."""
+    store.redis.set(store.key(slug, WORK_FOLDER, task_id), hive)
 
 
 def latest(agents: "Iterable[Any]") -> "dict[str, Any]":
@@ -187,15 +236,27 @@ def latest(agents: "Iterable[Any]") -> "dict[str, Any]":
     return {agent.task: agent for agent in ordered}
 
 
-def published(store, slug, ledger):
-    """Each task's latest work folder lines: the synced copy of the hive that runs, or last ran, its execution."""
-    synced = _synced(store, slug, ledger, synced_key)
-    return {task_id: tails(slug, task_id) if copy is None else copy for task_id, copy in synced.items()}
+def published(store: Any, slug: str, ledger: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Each task's latest work folder lines: the synced copy of the hive that runs, or last ran, its execution, else the
+    lines held here, which the mirror keeps from that hive's task copy once the hive stops publishing them."""
+    copies: dict[str, Any] = {}
+
+    def synced(host: str, task_id: str) -> dict[str, str] | None:
+        if host not in copies:
+            copies[host] = json.loads(store.redis.get(synced_key(host)) or "{}")
+        return copies[host].get(slug, {}).get(task_id)
+
+    return {task_id: copy or tails(slug, task_id) for task_id, copy in _synced(store, slug, ledger, synced).items()}
 
 
-def mirror(store, slug, ledger):
-    """A task run on a hive takes that hive's folder files here, so a successor on any host reads them."""
-    for task_id, copy in _synced(store, slug, ledger, files_key).items():
+def mirror(store: Any, slug: str, ledger: dict[str, Any]) -> None:
+    """A task run on another hive takes that hive's task copy here, which outlives the hive, so a successor on any host
+    and the page read its files."""
+
+    def kept(host: str, task_id: str) -> dict[str, str]:
+        return json.loads(store.redis.get(task_files_key(host, slug, task_id)) or "{}")
+
+    for task_id, copy in _synced(store, slug, ledger, kept).items():
         if not copy:
             continue
         path = folder(slug, task_id)
@@ -205,23 +266,15 @@ def mirror(store, slug, ledger):
                 (path / name).write_text(text, encoding="utf-8")
 
 
-def _synced(store: Any, slug: str, ledger: dict[str, Any], key: "Callable[[str], str]") -> dict[str, Any]:
-    """Each work folder task's copy from the hive that runs, or last ran, its execution; None for one run here."""
+def _synced(
+    store: Any, slug: str, ledger: dict[str, Any], read: "Callable[[str, str], dict[str, str] | None]"
+) -> dict[str, Any]:
+    """Each work folder task's copy, read from the hive that runs, or last ran, its execution; None for one run here."""
     ran = latest(store.agents(slug))
-    copies = {}
-    found = {}
+    found: dict[str, Any] = {}
     for task in ledger.get("tasks", []):
         if not task.get("workspace"):
             continue
-        host = (
-            ports.hive().reports.host(ran[task["id"]]) or ports.hive().reports.admitted(ran[task["id"]])
-            if task["id"] in ran
-            else ""
-        )
-        if not host:
-            found[task["id"]] = None
-            continue
-        if host not in copies:
-            copies[host] = json.loads(store.redis.get(key(host)) or "{}")
-        found[task["id"]] = copies[host].get(slug, {}).get(task["id"], {})
+        host = ports.hive().reports.workspace_host(ran[task["id"]]) if task["id"] in ran else ""
+        found[task["id"]] = read(host, task["id"]) if host else None
     return found

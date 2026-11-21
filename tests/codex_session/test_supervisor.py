@@ -266,6 +266,17 @@ def test_local_codex_app_server_admission_records_the_root_hive(store, server, c
     assert store.execution(SLUG, admitted.execution_id).hive == "workstation-root"
 
 
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_a_session_that_starts_its_own_execution_records_its_hive_as_the_task_work_folder(
+    store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "hive-a")
+    admitted = supervisor.admit(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    assert store.redis.get(store.key(SLUG, "work-folder", admitted.task)) == "hive-a"
+
+
 def test_no_opening_prompt_sends_no_turn(store, server, clock, root, tmp_path):
     started = supervisor.launch(store, launch_spec(store, server, tmp_path, opening=""), deps(server, clock, root))
     assert "turn/start" not in server.methods()

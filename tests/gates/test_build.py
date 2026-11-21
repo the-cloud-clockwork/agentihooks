@@ -3,6 +3,7 @@
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -294,7 +295,75 @@ class TestCommit:
         assert staged.decide(tool="Bash", command="git commit -m x", cwd=elsewhere).allowed
 
 
+def merge_dev(staged: Any, on_dev: bool = True) -> Any:
+    git(staged.repo, "checkout", "-q", "-b", "side")
+    (staged.repo / "power/generator/diesel.py").write_text("dev\n")
+    (staged.repo / ".github/workflows").mkdir(parents=True)
+    (staged.repo / ".github/workflows/test.yml").write_text("dev\n")
+    git(staged.repo, "add", "power/generator/diesel.py", ".github/workflows/test.yml")
+    git(staged.repo, "commit", "-qm", "dev")
+    git(staged.repo, "update-ref", "refs/remotes/origin/dev", "HEAD" if on_dev else "HEAD~1")
+    git(staged.repo, "checkout", "-q", "-")
+    (staged.repo / "doghouse/light/lamp.py").write_text("task\n")
+    git(staged.repo, "commit", "-qam", "task")
+    git(staged.repo, "merge", "-q", "--no-commit", "--no-ff", "side")
+    return staged
+
+
+class TestDevMerge:
+    @pytest.mark.feature("build-gate-dev-merge-content")
+    def test_a_dev_merge_commit_passes_when_only_dev_content_lies_outside_the_plan(self, staged: Any) -> None:
+        merged = merge_dev(staged)
+        assert merged.decide(tool="Bash", command="git commit --no-edit").allowed
+        assert merged.decide(tool="Bash", command="git commit -a --no-edit").allowed
+
+    @pytest.mark.feature("build-gate-dev-merge-content")
+    def test_an_off_plan_edit_staged_inside_a_dev_merge_is_refused_alone(self, staged: Any) -> None:
+        merged = merge_dev(staged)
+        (merged.repo / "power/generator/fuel.py").write_text("task\n")
+        git(merged.repo, "add", "power/generator/fuel.py")
+        denied = merged.decide(tool="Bash", command="git commit --no-edit")
+        assert not denied.allowed
+        assert denied.reason.startswith("build gate: outside your traced plan: power/generator/fuel.py. ")
+
+    @pytest.mark.feature("build-gate-dev-merge-content")
+    def test_an_unstaged_off_plan_edit_inside_a_dev_merge_counts_only_for_commit_all(self, staged: Any) -> None:
+        merged = merge_dev(staged)
+        (merged.repo / "power/generator/diesel.py").write_text("task\n")
+        denied = merged.decide(tool="Bash", command="git commit -a --no-edit")
+        assert not denied.allowed
+        assert denied.reason.startswith("build gate: outside your traced plan: power/generator/diesel.py. ")
+        assert merged.decide(tool="Bash", command="git commit --no-edit").allowed
+
+    @pytest.mark.feature("build-gate-dev-merge-content")
+    def test_a_merge_of_a_commit_dev_does_not_hold_is_judged_whole(self, staged: Any) -> None:
+        merged = merge_dev(staged, on_dev=False)
+        denied = merged.decide(tool="Bash", command="git commit --no-edit")
+        assert not denied.allowed
+        assert denied.reason.startswith(
+            "build gate: outside your traced plan: .github/workflows/test.yml, power/generator/diesel.py. "
+        )
+
+    @pytest.mark.feature("build-gate-dev-merge-content")
+    def test_a_failed_diff_against_the_dev_merge_head_judges_every_file(self, staged: Any) -> None:
+        merged = merge_dev(staged)
+        tree = subprocess.run(
+            ["git", "-C", str(merged.repo), "rev-parse", "MERGE_HEAD^{tree}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        (merged.repo / ".git/objects" / tree[:2] / tree[2:]).unlink()
+        git(merged.repo, "merge-base", "--is-ancestor", "MERGE_HEAD", "origin/dev")
+        denied = merged.decide(tool="Bash", command="git commit --no-edit")
+        assert not denied.allowed
+        assert denied.reason.startswith(
+            "build gate: outside your traced plan: .github/workflows/test.yml, power/generator/diesel.py. "
+        )
+
+
 CHARTS = "- bake the runner chart | antoncore/k8s/charts | the runners need it\n"
+COLON_CHARTS = "- bake the runner chart | antoncore:k8s/charts | the runners need it\n"
 
 
 @pytest.fixture
@@ -357,6 +426,39 @@ class TestRepositoryNamedAreas:
         assert not within("k8s/charts/x", ["antoncore/k8s/charts"], "other")
         assert not within("k8s/charts/x", ["antoncore/k8s/charts"], "")
         assert within("antoncore/k8s/charts/x", ["antoncore/k8s/charts"], "")
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_an_area_in_the_repository_colon_form_allows_an_edit_inside_it(self, antoncore: Any) -> None:
+        antoncore.plan(COLON_CHARTS, kept=(True,))
+        assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
+        assert not antoncore.decide(file_path=str(antoncore.antoncore / "k8s/other/smoke.sh")).allowed
+        assert not edit(antoncore, "k8s/charts/runners/smoke.sh").allowed
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_a_territory_in_the_repository_colon_form_widens_it(self, antoncore: Any) -> None:
+        antoncore.plan()
+        antoncore.territory("antoncore:k8s/charts/")
+        assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
+        assert not edit(antoncore, "k8s/charts/runners/smoke.sh").allowed
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_within_strips_the_edited_repository_colon_name(self) -> None:
+        assert within("k8s/charts/x", ["antoncore:k8s/charts"], "antoncore")
+        assert within("k8s/charts/x", ["antoncore:./k8s/charts/"], "antoncore")
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_within_keeps_colon_areas_of_other_repositories_apart(self) -> None:
+        assert not within("k8s/charts/x", ["antoncore:k8s/charts"], "other")
+        assert not within("k8s/charts/x", ["antoncore:k8s/charts"], "anton")
+        assert not within("k8s/charts/x", ["antoncore-bundle:k8s/charts"], "antoncore")
+        assert not within("k8s/charts/x", ["antoncore:k8s/charts"], "")
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_a_colon_area_matches_in_the_repository_trace_plan_names(self) -> None:
+        pieces = trace_plan.parse(COLON_CHARTS, TASK)
+        assert trace_plan.repositories(pieces) == ["antoncore"]
+        assert within("k8s/charts/x", list(pieces[0].areas), "antoncore")
+        assert not within("k8s/charts/x", list(pieces[0].areas), "other")
 
 
 class TestTerritory:

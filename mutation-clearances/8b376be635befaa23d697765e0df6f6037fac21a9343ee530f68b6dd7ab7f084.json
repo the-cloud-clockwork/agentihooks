@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/compact.py:scripts.ci_lab.compact.x__job:11a6fb90df5618df5a9f434e94c4667658cf6187e95a53191f007d4de52c5f6b": {
+    "reader": "standards-reader",
+    "reason": "keep_manifests and unit_path read only unit.kind, unit.key and unit.manifest, and compact.py never hashes or compares these Unit values, so members () and None are observably identical in _grade, _job and _slice."
+  }
+}

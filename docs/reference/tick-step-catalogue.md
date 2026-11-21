@@ -59,6 +59,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | lost runner | placement notices | slow | 2 | 60 | drained resume | none | none |
 | quota notice | placement notices | tick | 2 | 60 | drained resume | none | none |
 | time left | placement notices | slow | 2 | 60 | drained resume | none | none |
+| autoscaler alert | reopen passes | slow | 2 | 60 | drained resume | none | swarm-autoscaler-scale-up-alert |
 | dev red reopen | reopen passes | tick | 2 | 60 | drained resume | none | none |
 | fleet red notice | reopen passes | slow | 30 | 60 | drained resume | none | none |
 | prerequisite reopen | reopen passes | tick | 2 | 60 | dev red reopen | none | none |

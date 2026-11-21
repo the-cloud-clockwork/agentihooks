@@ -34,6 +34,7 @@ from contextvars import Token, copy_context
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -104,6 +105,8 @@ from scripts.swarm import (
     remote_control,
     review_rounds,
     run_window,
+    seat_crons,
+    seat_heads,
     snapshot,
     stack,
     stages,
@@ -1031,12 +1034,13 @@ def _state(store, args, state):
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state}))
 
 
-def cmd_start(store, args):
+def cmd_start(store: RedisStore, args: argparse.Namespace) -> None:
     shape = plan_shape.report(LedgerClient().tasks(args.slug), store.config(args.slug).max_eng)
     print(shape["summary"], flush=True)
     if shape["warning"]:
         print(f"warning: {shape['warning']}", file=sys.stderr, flush=True)
     _state(store, args, "running")
+    seat_crons.on_start(store, args.slug)
     print(ledger_link.page_line(args.slug))
 
 
@@ -1055,12 +1059,14 @@ def cmd_proof_control(store, args):
     print(json.dumps(result))
 
 
-def cmd_stop(store, args):
+def cmd_stop(store: RedisStore, args: argparse.Namespace) -> None:
     _snapshot(store, args.slug)
     if not args.now:
         _state(store, args, "stopping")
+        seat_crons.on_stop(args.slug)
         return
     config, left = stop_now(store, args.slug, routed(herdr=HerdrRuntime()), LedgerClient())
+    seat_crons.on_stop(args.slug)
     print(json.dumps({"swarm": args.slug, "state": config.state, "still_running": left}))
 
 
@@ -1094,18 +1100,19 @@ def _live_master(store, slug, live):
     return next((a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished" and a.name in live), None)
 
 
-def _retire_each(store, slug, runtime, agents):
-    left = []
+def _retire_each(store: RedisStore, slug: str, runtime: Any, agents: list[AgentRecord]) -> list[str]:
+    left: list[str] = []
     for agent in agents:
         store.release(slug, agent.task, agent.name)
         store.drop_agent(slug, agent.name)
         if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
-            store.put_agent(slug, agent)
+            if not seat_heads.superseded(agent, agents):
+                store.put_agent(slug, agent)
             left.append(agent.name)
     return left
 
 
-def cmd_close(store, args):
+def cmd_close(store: RedisStore, args: argparse.Namespace) -> None:
     store.config(args.slug)
     runtime = routed(herdr=HerdrRuntime())
     live = runtime.live_names()
@@ -1119,6 +1126,7 @@ def cmd_close(store, args):
     ledger.summarize(args.slug, args.note, by)
     path = snapshot.take(store, args.slug, now_ms())
     store.update(args.slug, state="stopping")
+    seat_crons.on_stop(args.slug)
     agents = store.agents(args.slug)
     left = _retire_each(store, args.slug, runtime, [a for a in agents if a.lane != MASTER])
     for row in ledger.tasks(args.slug):
@@ -1820,9 +1828,18 @@ def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
 
 def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     """The panic button: on, pressed by the master or the operator, stops agent starts, cancels CI runs and pauses the
-    lab's pull request grading but the checked fixes and the fixer branches every swarm recorded; off clears it once
-    stable and resumes the lab."""
+    lab's pull request grading but the checked fixes and the fixer branches every swarm recorded; drop, by the master or
+    the operator, removes one registered fix and tells the lab the fixes left; off clears it once stable and resumes the
+    lab."""
     now = now_ms()
+    if args.action == "drop":
+        _master_or_operator(store, args, "only the master or the operator drops a panic fix")
+        if len(args.fix) != 1:
+            raise SwarmError("panic drop takes exactly one --fix")
+        found = panic.drop(store, args.slug, args.fix[0])
+        lab = panic.lab_engage(store, args.slug, found.fixes)
+        print(json.dumps({"panic": "on", "fixes": list(found.fixes), "lab": lab}))
+        return
     if args.action == "on":
         _master_or_operator(store, args, "only the master or the operator presses panic on")
         for fix in args.fix:
@@ -1989,7 +2006,7 @@ def origin_repo(run=subprocess.run):
 def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
     import syslog
 
-    from scripts.swarm import publish
+    from scripts.swarm import pr_wait, publish
 
     agent = _worker(store, args)
     repo = _local_repo(store, args.slug)
@@ -2001,7 +2018,8 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
             return publish.prepare(args.slug, agent, repo, ledger)
         if args.direct and args.via != publish.LAB:
             raise SwarmError("publish --direct goes with --via lab")
-        lab = publish.LabRoute(agent.task, args.direct) if args.via == publish.LAB else None
+        pushed = partial(pr_wait.lab_pushed, store.redis, args.slug, agent) if args.via == publish.LAB else None
+        lab = publish.LabRoute(agent.task, args.direct, pushed) if args.via == publish.LAB else None
         return publish.publish(args.slug, agent, repo, ledger, args.message, args.files, lab)
     except SwarmError as exc:
         branch = exc.branch if isinstance(exc, publish.PublicationRefusal) else publish.refusal_branch(Path(repo), task)
@@ -2794,7 +2812,7 @@ def build_parser() -> argparse.ArgumentParser:
     blockers_cmd.add_argument("category", nargs="?", default="")
     blockers_cmd.set_defaults(handler=cmd_blockers)
     panic_cmd = sub.add_parser("panic")
-    panic_cmd.add_argument("action", nargs="?", default="status", choices=("on", "off", "status"))
+    panic_cmd.add_argument("action", nargs="?", default="status", choices=("on", "off", "status", "drop"))
     panic_cmd.add_argument("--fix", action="append", default=[])
     panic_cmd.set_defaults(handler=cmd_panic)
     sub.add_parser("prepare")

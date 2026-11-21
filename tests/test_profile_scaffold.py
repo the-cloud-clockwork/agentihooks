@@ -262,6 +262,7 @@ def test_base_roles_are_the_package_roles():
         "master",
         "planner",
         "qa",
+        "reviewer",
     ]
 
 
