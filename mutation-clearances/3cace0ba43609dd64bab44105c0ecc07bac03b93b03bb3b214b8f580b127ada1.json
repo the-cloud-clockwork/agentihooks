@@ -1,0 +1,6 @@
+{
+  "hooks/context/approval_guard.py:hooks.context.approval_guard.x__read:de6dc37fceac08ff0fda50b40cbd543d9f00711e50fbdcae11780dd492b57314": {
+    "reader": "standards_reader",
+    "reason": "Changes only the case of the codec name passed to bytes.decode. Python codec lookup normalizes case and separators, so codecs.lookup('LATIN-1').name and codecs.lookup('latin-1').name are both iso8859-1; the same codec decodes the same bytes to the same text. Equivalent."
+  }
+}

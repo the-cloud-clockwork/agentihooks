@@ -1,0 +1,2 @@
+name: reviewer
+description: "Swarm reviewer: strict, independent review of each pull request or merge request, edits nothing"

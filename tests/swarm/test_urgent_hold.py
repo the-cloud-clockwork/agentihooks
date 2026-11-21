@@ -98,6 +98,75 @@ def test_an_urgent_eng_task_the_lab_holds_names_the_lab_and_raises_no_finding(st
     assert not urgent_hold.observe(store, SLUG, found, 12 * MINUTE)["held"]["why"]
 
 
+@pytest.mark.feature("swarm-urgent-hold-hive-admission")
+def test_an_urgent_task_while_no_live_hive_has_admission_room_names_the_hive_and_raises_no_finding(
+    store: RedisStore,
+) -> None:
+    import time
+
+    from scripts.hive import registry
+    from scripts.swarm.health import urgent_hold
+
+    now = int(time.time() * 1000)
+    registry.register(store.redis, "full", "full", [])
+    registry.beat(store.redis, "full", {"heartbeat_at": now, "beat_at": now})
+    found = doc([task("ready", rank="urgent")])
+    urgent_hold.observe(store, SLUG, found, 0)
+    urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
+    rows = urgent_hold.read(store, SLUG)["tasks"]
+    assert rows["ready"]["why"] == "no hive has admission room: hive full missing telemetry"
+    assert urgent_hold.findings(store, SLUG) == []
+
+
+FULL_CPU = {"id": "a", "room": 0, "refusal": "cpu: five minute load 7.00 on 8 CPUs, fits 0 more"}
+FULL_AGENTS = {"id": "b", "room": 0, "refusal": "max agents: 6 of 6 agents on the hive, fits 0 more"}
+SPARE = {"id": "b", "room": 1, "refusal": ""}
+
+
+@pytest.mark.feature("swarm-urgent-hold-hive-admission")
+@pytest.mark.parametrize(
+    ("hives", "refused", "why"),
+    [
+        ([FULL_CPU, FULL_AGENTS], {}, "no hive has admission room: hive a cpu, hive b max agents"),
+        ([FULL_CPU, SPARE], {}, ""),
+        ([FULL_CPU], {"b": "No permissions to access a key"}, ""),
+        ([], {}, ""),
+    ],
+)
+def test_the_hive_admission_hold_stands_only_while_every_live_hive_is_read_at_zero_room(
+    store: RedisStore,
+    monkeypatch: pytest.MonkeyPatch,
+    hives: list[dict[str, object]],
+    refused: dict[str, str],
+    why: str,
+) -> None:
+    from scripts.swarm import status
+    from scripts.swarm.health import urgent_hold
+
+    monkeypatch.setattr(status, "readable_hives", lambda found: (hives, refused) if found is store else ([], {}))
+    found = doc([task("ready", rank="urgent")])
+    urgent_hold.observe(store, SLUG, found, 0)
+    urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
+    assert (urgent_hold.read(store, SLUG)["tasks"]["ready"]["why"] or "") == why
+    expected = [] if why else ["urgent-unclaimable/ready"]
+    assert [finding.id for finding in urgent_hold.findings(store, SLUG)] == expected
+
+
+@pytest.mark.feature("swarm-urgent-hold-hive-admission")
+def test_a_release_wait_is_named_ahead_of_the_hive_admission_hold(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import release_wait, status
+    from scripts.swarm.health import urgent_hold
+
+    monkeypatch.setattr(status, "readable_hives", lambda found: ([FULL_CPU], {}))
+    monkeypatch.setattr(release_wait, "tags", lambda config: ["v1.2.3"])
+    found = doc([task("waiting", rank="urgent", after_release="v1.2.3"), task("ready", rank="urgent")])
+    held = urgent_hold.observe(store, SLUG, found, 0)
+    assert held["waiting"]["why"] == "it waits on a release newer than v1.2.3"
+    assert held["ready"]["why"] == "no hive has admission room: hive a cpu"
+
+
 @pytest.mark.feature("swarm-claim-dependencies")
 def test_stacking_on_a_live_dependency_is_claimable_but_parked_work_waits(store):
     from scripts.swarm.health import urgent_hold
