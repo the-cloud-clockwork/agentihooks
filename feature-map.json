@@ -159,6 +159,19 @@
       ]
     },
     {
+      "id": "merge-queue-single-github-slot",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-queue-nested-github-slot",
+      "behaviour": "Four concurrent merge queue GraphQL calls complete through the real four slot GitHub pool because the GitHub read owns each request's only slot.",
+      "seam": "scripts.swarm.merge_queue.graphql through GitHubSourceControl.graph and github_reads.rest",
+      "rules": [
+        "github-pool-port-nested"
+      ],
+      "tests": [
+        "tests/swarm/test_merge_queue_pool.py::test_four_graphql_calls_complete_with_the_real_github_pool"
+      ]
+    },
+    {
       "id": "stop-gate-ledger-variable",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2745",
@@ -10558,8 +10571,8 @@
       "id": "lab-scheduler-metrics",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2642",
-      "behaviour": "After a scheduler pass the lab scheduler's GET /metrics on 9108 sets every contract metric queue, lease and worker state answers: slots wanted from the running and waiting slots per class and the shed classes, workers whose lease poll is inside the ready window, leased units past their estimate from the lease start the claim stores, core seconds of each finished attempt counted once in the most urgent class of the live grades holding it, the last unit duration per kind, verdict store hits and misses per placed unit, git and uv cache hits and misses from the caches a worker writes into each unit report, grades closed by class and conclusion, and expired leases requeued or lost.",
-      "seam": "scripts.ci_lab.scheduler.Scheduler.tick and listen read through GET /metrics over fakeredis and the local object store, scripts.ci_lab.metrics.observe_load and observe_unit, scripts.ci_lab.queue.Queue.claim and tally, scripts.ci_lab.leases.Leases.lease, scripts.ci_lab.worktrees.Worktrees.lease and own, scripts.ci_lab.caches.report and read",
+      "behaviour": "After a scheduler pass the lab scheduler's GET /metrics on 9108 sets every contract metric queue, lease and worker state answers: slots wanted from the running and waiting slots per class and the shed classes, workers whose lease poll is inside the ready window, leased units past their estimate from the lease start the claim stores, core seconds of each finished attempt counted once in the most urgent class of the live grades holding it, the last unit duration per kind, verdict store hits and misses per placed unit, git and uv cache hits and misses from the caches a worker writes into each unit report, grades closed by class and conclusion, and expired leases requeued or lost. The metrics route observes the load and returns every contract family as valid typed Prometheus samples with escaped labels and signed infinite values.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick and listen read through GET /metrics over fakeredis and the local object store, scripts.ci_lab.metrics.observe_load and observe_unit, scripts.ci_lab.queue.Queue.claim and tally, scripts.ci_lab.leases.Leases.lease, scripts.ci_lab.worktrees.Worktrees.lease and own, scripts.ci_lab.caches.report and read, scripts.ci_lab.metrics.respond and Registry.render",
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_the_exposition_asks_for_the_running_and_waiting_slots_after_a_pass",
         "tests/ci_lab/test_scheduler.py::test_the_exposition_counts_the_workers_that_polled_within_the_ready_window_after_a_pass",
@@ -10578,7 +10591,9 @@
         "tests/ci_lab/test_leases.py::test_a_grant_records_the_millisecond_its_lease_started",
         "tests/ci_lab/test_worktrees.py::test_a_lease_and_an_own_copy_report_whether_the_store_fetched_their_head",
         "tests/ci_lab/test_caches.py::test_a_report_counts_git_hits_and_misses_per_revision_and_uv_per_venv",
-        "tests/ci_lab/test_caches.py::test_read_takes_each_cache_a_unit_report_carries_and_nothing_from_an_older_worker"
+        "tests/ci_lab/test_caches.py::test_read_takes_each_cache_a_unit_report_carries_and_nothing_from_an_older_worker",
+        "tests/ci_lab/test_metrics.py::test_metrics_route_observes_the_load_and_renders_every_family",
+        "tests/ci_lab/test_metrics.py::test_every_sample_line_is_valid_exposition"
       ]
     },
     {
@@ -10623,6 +10638,20 @@
       ]
     },
     {
+      "id": "lab-check-run-rate-limits",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-map-lab-and-metrics-tests",
+      "behaviour": "CI lab check posts retry primary and secondary rate limits, using the reset time or fallback wait, reject other refusals without waiting, and stop after four waits or fifteen minutes for one request while spending the fractional remainder of the wait budget.",
+      "seam": "scripts.ci_lab.checks.Checks.post over mocked requests, clock and sleep",
+      "tests": [
+        "tests/ci_lab/test_checks.py::test_a_rate_limited_post_waits_like_the_ci_budget_then_posts",
+        "tests/ci_lab/test_checks.py::test_a_refusal_outside_a_rate_limit_raises_without_waiting",
+        "tests/ci_lab/test_checks.py::test_the_backoff_stops_after_four_waits",
+        "tests/ci_lab/test_checks.py::test_the_backoff_waits_out_the_last_second_of_its_budget",
+        "tests/ci_lab/test_checks.py::test_the_backoff_never_waits_past_fifteen_minutes_for_one_request"
+      ]
+    },
+    {
       "id": "lab-authoritative-check-names",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-authoritative-post",
@@ -10664,6 +10693,16 @@
       "tests": [
         "tests/ci_lab/test_relay.py::test_a_restarted_relay_posts_no_second_completed_check_run",
         "tests/ci_lab/test_relay.py::test_a_relayed_grade_holding_the_scheduler_s_own_check_run_ids_still_posts_every_lab_check_run"
+      ]
+    },
+    {
+      "id": "lab-relay-build-wiring",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-map-lab-and-metrics-tests",
+      "behaviour": "The CI lab relay builder wires the scheduler client, registry and grade reader, the trusted bus consumer, repository mirror pushers and pull request clients, and check posters cached per repository; it creates the mirror store directory and strips trailing slashes from the configured lab URL.",
+      "seam": "scripts.ci_lab.relay.build over a fake Redis client, test bus consumer, scheduler, LocalObjects and temporary mirror stores",
+      "tests": [
+        "tests/ci_lab/test_relay.py::test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_url"
       ]
     },
     {
