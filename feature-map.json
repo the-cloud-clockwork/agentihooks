@@ -12378,6 +12378,7 @@
         "tests/swarm/test_review_lane.py::test_the_ledger_stores_a_review_lane_review_task",
         "tests/swarm/test_review_lane.py::test_the_review_lane_accepts_only_review_tasks",
         "tests/swarm/test_review_lane.py::test_the_task_command_takes_the_review_lane",
+        "tests/swarm/test_review_lane.py::test_readiness_offers_only_the_lanes_the_event_scope_carries",
         "tests/swarm/test_review_lane.py::test_capacity_places_a_reviewer_only_for_review_demand",
         "tests/swarm/test_review_lane.py::test_quota_status_reads_a_decision_stored_before_the_review_lane",
         "tests/swarm/test_review_lane.py::test_quota_status_shows_the_configured_review_cap_beside_the_autoscaled_ceilings"

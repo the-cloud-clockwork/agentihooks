@@ -4,13 +4,16 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import capacity, naming, quota_view, templates
+from scripts.swarm import capacity, naming, quota_view, readiness, templates
 from scripts.swarm import tick as swarm_tick
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_tasks, new_ledger
 from scripts.tick.steps import tasks as task_steps
 from tests.swarm.test_capacity import _readings, account
+from tests.swarm.test_readiness import doc as readiness_doc
+from tests.swarm.test_readiness import snapshot as readiness_snapshot
+from tests.swarm.test_readiness import task as readiness_task
 from tests.swarm.test_tick import FakeLedger
 from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.test_plan_kind import add
@@ -209,6 +212,15 @@ def test_the_task_command_takes_the_review_lane() -> None:
     argv = ["--slug", "demo", "--as", "planner", "task", "add", "review", "Review", "--lane", "review"]
     args = ledger.build_parser().parse_args([*argv, "--kind", "review"])
     assert (args.lane, args.kind) == ("review", "review")
+
+
+@pytest.mark.feature("swarm-review-lane")
+def test_readiness_offers_only_the_lanes_the_event_scope_carries(monkeypatch: pytest.MonkeyPatch) -> None:
+    found = readiness_doc([readiness_task("e"), readiness_task("r", lane="review", kind="review")])
+    monkeypatch.setattr(readiness, "LANES", ("eng", "ci", "plan"))
+    assert [event.key for event in readiness.offers(readiness_snapshot(found), 5_000)] == ["e"]
+    monkeypatch.setattr(readiness, "LANES", ("eng", "ci", "plan", "review"))
+    assert sorted(event.key for event in readiness.offers(readiness_snapshot(found), 5_000)) == ["e", "r"]
 
 
 @pytest.mark.feature("swarm-review-lane")
