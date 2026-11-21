@@ -1123,6 +1123,24 @@ def test_substitutions_nested_past_the_limit_are_refused(opener: str, closer: st
     assert reason == block(f"command substitutions nested over {MAX_SUBSTITUTION_DEPTH} deep", KIND_DOTENV)
 
 
+@pytest.mark.feature("credential-guard-stage-substitutions")
+def test_a_substitution_after_a_cd_scans_the_tree_the_cd_entered(tmp_path: Path) -> None:
+    start, entered = tmp_path / "start", tmp_path / "entered"
+    start.mkdir()
+    entered.mkdir()
+    (entered / ".env").write_text("A=1\n")
+
+    verdict = evaluate(_bash(f"cd {entered} && x=$(grep -r needle .)", cwd=str(start)), allow_rewrite=True)
+
+    assert verdict.block == block(f"searching a tree that holds {entered}/./.env", KIND_RECURSIVE)
+
+
+@pytest.mark.feature("credential-guard-stage-substitutions")
+@pytest.mark.parametrize("command", ["echo $(<<<.env)", "echo $(<<.env)"])
+def test_a_here_string_or_heredoc_word_in_a_substitution_passes(command: str) -> None:
+    assert decide(_bash(command)) is None
+
+
 AWK_ENVIRON_VALUE_READS = [
     "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^AGENTIHOOKS_(HIVE|SWARM)/) print k\"=\"ENVIRON[k]}'",
     "gawk 'BEGIN{print ENVIRON[\"DATABASE_URL\"]}'",

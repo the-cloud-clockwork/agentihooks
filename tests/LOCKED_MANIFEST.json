@@ -1045,6 +1045,14 @@
    "a76f47343f702669"
   ]
  },
+ "tests/test_credential_guard.py::test_a_here_string_or_heredoc_word_in_a_substitution_passes": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 2,
+  "texts": [
+   "a76f47343f702669"
+  ]
+ },
  "tests/test_credential_guard.py::test_a_heredoc_a_shell_runs_keeps_the_credential_tree_scan": {
   "assertions": 1,
   "calls": 5,
@@ -1181,6 +1189,14 @@
   "texts": [
    "41f1fcd984f7eef3",
    "c8255937adffc2e6"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_substitution_after_a_cd_scans_the_tree_the_cd_entered": {
+  "assertions": 1,
+  "calls": 7,
+  "cases": 1,
+  "texts": [
+   "499b473391896046"
   ]
  },
  "tests/test_credential_guard.py::test_a_substitution_that_reads_no_credential_passes": {
