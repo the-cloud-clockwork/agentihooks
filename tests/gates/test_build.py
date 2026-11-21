@@ -426,6 +426,32 @@ class TestRepositoryNamedAreas:
         assert not within("k8s/charts/x", ["antoncore/k8s/charts"], "")
         assert within("antoncore/k8s/charts/x", ["antoncore/k8s/charts"], "")
 
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_an_area_in_the_repository_colon_form_allows_an_edit_inside_it(self, antoncore: Any) -> None:
+        antoncore.plan("- bake the runner chart | antoncore:k8s/charts | the runners need it\n", kept=(True,))
+        assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
+        assert not antoncore.decide(file_path=str(antoncore.antoncore / "k8s/other/smoke.sh")).allowed
+        assert not edit(antoncore, "k8s/charts/runners/smoke.sh").allowed
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_a_territory_in_the_repository_colon_form_widens_it(self, antoncore: Any) -> None:
+        antoncore.plan()
+        antoncore.territory("antoncore:k8s/charts/")
+        assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
+        assert not edit(antoncore, "k8s/charts/runners/smoke.sh").allowed
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_within_strips_the_edited_repository_colon_name(self) -> None:
+        assert within("k8s/charts/x", ["antoncore:k8s/charts"], "antoncore")
+        assert within("k8s/charts/x", ["antoncore:./k8s/charts/"], "antoncore")
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_within_keeps_colon_areas_of_other_repositories_apart(self) -> None:
+        assert not within("k8s/charts/x", ["antoncore:k8s/charts"], "other")
+        assert not within("k8s/charts/x", ["antoncore:k8s/charts"], "anton")
+        assert not within("k8s/charts/x", ["antoncore-bundle:k8s/charts"], "antoncore")
+        assert not within("k8s/charts/x", ["antoncore:k8s/charts"], "")
+
 
 class TestTerritory:
     def test_a_missing_ledger_or_task_reads_as_no_territory(self, tmp_path):
