@@ -1,0 +1,6 @@
+{
+ "scripts/swarm/execution.py:scripts.swarm.execution.xǁExecutionRegistryǁ_unchanged:642acaab807d03ea9d142d950bfc0ca2a214ed0fb3ff6af73dc4b1223a860592": {
+  "reader": "standards_reader",
+  "reason": "typing.cast returns its second argument unchanged at runtime, so cast(None, written.runtime_target) yields the same dict as cast(dict[str, Any], written.runtime_target) and the mutant changes no output."
+ }
+}

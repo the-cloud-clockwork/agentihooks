@@ -81,9 +81,10 @@ def hive_wakes(redis, hive="m1"):
     return [CommandOrder(**json.loads(fields["order"])) for _, fields in entries]
 
 
-def remote_codex(redis, agent, transport=""):
+def remote_codex(redis: Any, agent: AgentRecord, transport: str = "", admitted: bool = False) -> AgentRecord:
     redis.set(reports.key("m1"), json.dumps({}))
-    return replace(agent, harness="codex", transport=transport, pane_id="p1", runtime_target={"host_id": "m1"})
+    target = {} if admitted else {"host_id": "m1"}
+    return replace(agent, harness="codex", transport=transport, pane_id="p1", runtime_target=target)
 
 
 def test_the_wake_pass_orders_the_hive_to_wake_its_idle_legacy_codex_pane(redis, agent, mail):
@@ -150,6 +151,35 @@ def test_a_hive_codex_pane_with_a_push_pump_gets_no_typed_wake(redis, agent, mai
     wake.wake_pass(InboxStore(redis), "sw", [remote], FakeHerdr({}), FakeLedger(), item.created_at + 1, 300_000)
     assert hive_wakes(redis) == []
     assert wake.WOKEN not in [e.get("event") for e in member.history(item.id)]
+
+
+@pytest.mark.feature("inbox-wake-admitted-hive")
+def test_the_wake_pass_orders_the_admitting_hive_to_wake_a_hub_admitted_legacy_codex_pane(
+    redis: Any, agent: AgentRecord, mail: tuple[InboxStore, Any]
+) -> None:
+    member, item = mail
+    admitted = remote_codex(redis, agent, admitted=True)
+    idle.beat(redis, "sw", admitted.name, idle.IDLE, item.created_at)
+    herdr = FakeHerdr({"p1": "idle"})
+    wake.wake_pass(InboxStore(redis), "sw", [admitted], herdr, FakeLedger(), item.created_at + 1, 300_000)
+    assert herdr.prompts == []
+    [order] = hive_wakes(redis)
+    assert (order.action, order.slug, order.name, order.text) == ("nudge", "sw", admitted.name, wake.WAKE_TEXT)
+    assert (order.execution_id, order.generation) == (admitted.execution_id, admitted.generation)
+    assert wake.WOKEN in [e.get("event") for e in member.history(item.id)]
+
+
+@pytest.mark.feature("inbox-wake-admitted-hive")
+def test_the_waker_orders_the_admitting_hive_to_wake_a_hub_admitted_legacy_codex_pane(
+    redis: Any, agent: AgentRecord, mail: tuple[InboxStore, Any]
+) -> None:
+    _, item = mail
+    admitted = remote_codex(redis, agent, admitted=True)
+    idle.beat(redis, "sw", admitted.name, idle.IDLE, item.created_at)
+    herdr = FakeHerdr({})
+    wake.wake_now(InboxStore(redis), "sw", [admitted], herdr, item.created_at + 1, 300_000)
+    assert herdr.prompts == []
+    assert [(order.action, order.slug, order.name) for order in hive_wakes(redis)] == [("nudge", "sw", admitted.name)]
 
 
 def test_the_exit_sweep_moves_a_gone_member_agents_mail_to_its_seat(store, agent, mail):

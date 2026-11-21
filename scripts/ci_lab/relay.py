@@ -9,13 +9,16 @@ verdicts, to the Lab check workflow, which posts it with the workflow token, onc
 each check run on the grade's state, and opens the branch's draft pull request
 into dev with a token holding pull requests write, or names the open one the push updated. A red grade relays nothing
 and names its failed units. A head whose grades were all superseded is dropped, and a relay GitHub refuses is named
-and dropped.
+and dropped. A relay whose App token GitHub refuses is named held, stays pending and holds every relay of its
+repository for the scheduler's post hold.
 """
 
 import base64
 import json
 import os
 import subprocess
+import time
+from collections import defaultdict
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import asdict, dataclass
 from functools import partial
@@ -30,13 +33,13 @@ from scripts.ci_lab.checks import API, HEADERS, Dispatches, Key, Output, PostRef
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import PASSED
 from scripts.ci_lab.remote.post_receive import BRANCH, GRADE_REFS, LAB_URL
-from scripts.ci_lab.scheduler import BATCH, FETCH_MS, MIRROR_STORE, REQUIRED, Scheduler, State
+from scripts.ci_lab.scheduler import BATCH, FETCH_MS, MIRROR_STORE, POST_HOLD_MS, REQUIRED, Scheduler, State
 from scripts.ci_lab.store import PREFIX
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.webhooks import HEAD_SUBJECT, NOTICE
 from scripts.ci_lab.worktrees import Mirror
 from scripts.events.bus import Consumer
-from scripts.github_app import GitHubAppAuth
+from scripts.github_app import GitAuthRefused, GitHubAppAuth
 
 __all__ = [
     "DURABLE",
@@ -130,13 +133,14 @@ class Notices(Protocol):
 
 @dataclass(frozen=True)
 class Ports:
-    """The relay's outside world: a pusher per repository URL, check runs and pull requests per owner/name, and where
-    a grade's state is saved."""
+    """The relay's outside world: a pusher per repository URL, check runs and pull requests per owner/name, where a
+    grade's state is saved, and the wall clock in seconds."""
 
     pusher: Callable[[str], Pusher]
     checks: Callable[[str], CheckRuns]
     pulls: Callable[[str], Pulls]
     save: Callable[[State], None]
+    clock: Callable[[], float] = time.time
 
 
 def _slug(repo: str) -> str:
@@ -207,16 +211,22 @@ class Relay:
         self.grades = grades
         self.ports = ports
         self.lab = lab
+        self.held: defaultdict[str, int] = defaultdict(int)
 
     def tick(self) -> list[str]:
         """Record the new notices' relays per head and branch, then relay each pending one a closed grade answers and
-        forget it once relayed; a relay whose git or HTTP call fails is named and stays pending for the next tick."""
+        forget it once relayed; a relay whose git or HTTP call fails is named and stays pending for the next tick, and a
+        relay whose App token GitHub refuses is named held, stays pending and holds every relay of its repository for
+        POST_HOLD_MS while other repositories still relay."""
         actions: list[str] = []
+        now_ms = int(self.ports.clock() * 1000)
         for item in self.notices.pending():
             self.client.hset(PENDING, f"{item.head} {item.branch}", json.dumps(asdict(item)))
             actions.append(f"pending {item.head} for {item.branch}")
         for key, raw in sorted(self.client.hgetall(PENDING).items()):
             item = Pending(**json.loads(raw))
+            if now_ms < self.held[item.repo]:
+                continue
             states = self.grades(item.head)
             if not states:
                 continue
@@ -224,6 +234,10 @@ class Relay:
                 actions.extend(self._relay(item, states))
             except (OSError, subprocess.SubprocessError) as error:
                 actions.append(f"retry {item.head} for {item.branch}: {error}")
+                continue
+            except GitAuthRefused as error:
+                self.held[item.repo] = now_ms + POST_HOLD_MS
+                actions.append(f"held {item.head} for {item.branch} for a later pass: {error}")
                 continue
             self.client.hdel(PENDING, key)
         return actions

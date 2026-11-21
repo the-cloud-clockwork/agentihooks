@@ -5,6 +5,7 @@ import logging
 import subprocess
 import sys
 import threading
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -66,6 +67,7 @@ BASE = "c" * 40
 TREE = "d" * 40
 OTHER_TREE = "e" * 40
 LOCK = ".github/test-requirements.lock"
+APP_SETTINGS = {"GITHUB_APP_ID": "1", "GITHUB_APP_INSTALLATION_ID": "2", "GITHUB_APP_PRIVATE_KEY": "fixture"}
 
 Post = tuple[str, str, str, str | None, Output, bool]
 
@@ -1167,10 +1169,10 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
     spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {"backfill": 0.5}))
     spending.charge(1, 3600.0)
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
-    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0))
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0, 0))
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
-    api, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
+    api, control, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
     try:
         capacity = json.loads(_read(f"{api}/capacity"))
         assert capacity["classes"]["promotion"]["pending"] == 1
@@ -1184,7 +1186,7 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
         job, token = leased[0]["job"], leased[0]["token"]
         signed = json.loads(_read(f"{api}/upload-url?job={job}&token={token}&name=report"))
         assert signed == {"url": run.lab.objects.upload_url(upload_path(job, "report"), 0)}
-        resume = urllib.request.Request(f"{api}/resume", data=b"", headers={"Authorization": "Bearer tok"})
+        resume = urllib.request.Request(f"{control}/resume", data=b"", headers={"Authorization": "Bearer tok"})
         with urllib.request.urlopen(resume, timeout=5) as reply:
             assert json.loads(reply.read()) == {"resumed": []}
         text = _read(f"{exposition}/metrics").decode()
@@ -1197,14 +1199,44 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
             server.server_close()
 
 
+def _status(url: str, authorization: str | None) -> int:
+    headers = {} if authorization is None else {"Authorization": authorization}
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=b"{}", headers=headers), timeout=5) as reply:
+            return reply.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+@pytest.mark.feature("lab-control-routes")
+def test_listen_serves_the_control_routes_only_on_the_control_port(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {}))
+    routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0, 0))
+    for server in servers:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    api, control, _ = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
+    try:
+        assert [_status(f"{api}{path}", "Bearer tok") for path in ("/priority", "/pause", "/resume")] == [404] * 3
+        assert _status(f"{control}/resume", None) == 401
+        assert _status(f"{control}/resume", "Bearer other") == 401
+        assert _status(f"{control}/resume", "Bearer tok") == 200
+        assert _status(f"{control}/lease", "Bearer tok") == 404
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+
+
 def scrape(run: Run, now: int) -> str:
     spending = budget.Budget(run.lab.client, lambda: now, budget.Policy(100.0, {}))
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: now)
-    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0))
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0, 0))
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        return _read(f"http://127.0.0.1:{servers[1].server_address[1]}/metrics").decode()
+        return _read(f"http://127.0.0.1:{servers[2].server_address[1]}/metrics").decode()
     finally:
         for server in servers:
             server.shutdown()
@@ -2633,10 +2665,10 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         routes: lease_api.ControlRoutes,
         spending: Any,
         clock: Any,
-        ports: tuple[int, int],
+        ports: tuple[int, int, int],
     ) -> list[Server]:
         calls["listen"] = (found, leases, routes, spending, clock, ports)
-        return [Server(), Server()]
+        return [Server(), Server(), Server()]
 
     class Thread:
         def __init__(self, target: Callable[[], None], daemon: bool) -> None:
@@ -2681,7 +2713,7 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         scheduler.MINIO_SECRET_KEY: "secret",
         scheduler.MINIO_BUCKET: "bucket",
         scheduler.contract.CONTROL_TOKEN: "tok",
-    }
+    } | APP_SETTINGS
     monkeypatch.setattr(redis.Redis, "from_url", from_url)
     monkeypatch.setattr(boto3, "client", s3)
     provisioning = config.BusConfig(backend="nats", url="nats://lab")
@@ -2727,8 +2759,8 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert spending.client is client and spending.clock() == 1_000_250
     assert spending.policy == budget.Policy(600, {"backfill": 0.5})
     assert built_spending is spending and found.spending is spending
-    assert ports == (8800, 9108)
-    assert calls["thread"] is True and calls["served"] == 2
+    assert ports == (8800, 8801, 9108)
+    assert calls["thread"] is True and calls["served"] == 3
     found, relaying, interval, passes, clock, sleep = calls["serve"]
     assert found is relayed and relaying == "relay"
     assert (found.queue.client, interval, passes, clock, sleep) == (client, 0.5, 3, Clock.time, Clock.sleep)
@@ -2827,6 +2859,7 @@ def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_sta
         scheduler.MINIO_ACCESS_KEY: "access",
         scheduler.MINIO_SECRET_KEY: "secret",
         scheduler.MINIO_BUCKET: "bucket",
+        **APP_SETTINGS,
     } | setting
     stdout = Stdout()
     monkeypatch.setattr(redis.Redis, "from_url", from_url)

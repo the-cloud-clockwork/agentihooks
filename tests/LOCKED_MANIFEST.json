@@ -993,6 +993,14 @@
    "8701db235e2e771b"
   ]
  },
+ "tests/test_credential_guard.py::test_a_brace_in_the_last_segment_of_a_proc_environ_path_is_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 4,
+  "texts": [
+   "1190c020f6602f17"
+  ]
+ },
  "tests/test_credential_guard.py::test_a_credential_read_after_a_heredoc_delimiter_is_refused": {
   "assertions": 2,
   "calls": 4,

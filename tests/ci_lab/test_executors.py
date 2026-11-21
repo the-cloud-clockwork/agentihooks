@@ -475,7 +475,11 @@ def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_l
     trees = FakeWorktrees({"h1": tree})
     pod = pod_of(tmp_path, trees)
 
-    finished = executors.tests(pod, suite, lease("test", "k", ("tests/a.py::t",), slots=3))
+    finished = executors.tests(
+        pod,
+        suite,
+        Lease("job", "tok", "h1", Unit("test", "k", ("tests/a.py::t",), json.dumps(manifest)), 3, 1500, "b1", "g1"),
+    )
 
     assert venv.calls == [
         (hashlib.sha256(b"lock-h").hexdigest(), tree, pod.root / "venvs", venvs.Build(pod.ports, WHITELIST, 30.0))

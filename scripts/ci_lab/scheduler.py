@@ -24,7 +24,7 @@ import sys
 import tempfile
 import time
 from collections import Counter, defaultdict
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
 from functools import partial
@@ -57,7 +57,7 @@ from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_run
 from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
-from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchUnanswered
+from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
@@ -136,6 +136,7 @@ BATCH = 50
 FETCH_MS = 100
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
+UNANSWERED_FETCHES = 10
 POST_HOLD_MS = 60_000
 INTERVAL_S = 2.0
 LEASE_TTL_MS = 120_000
@@ -150,6 +151,7 @@ MIRROR_STORE = "CI_LAB_MIRROR_STORE"
 IMAGE = "CI_LAB_IMAGE"
 REPOSITORY = "CI_LAB_REPOSITORY"
 REINDEX_ON_START = "CI_LAB_REINDEX_ON_START"
+GITHUB_APP_SETTINGS = ("GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY")
 MANIFEST_DEPTH = 10
 
 Needs = Mapping[str, Mapping[str, Any]]
@@ -408,6 +410,7 @@ class Slot:
     outcome: str = ""
     started: bool = False
     held: bool = False
+    manifest: str = ""
 
 
 @dataclass
@@ -448,6 +451,26 @@ def _parse(raw: str | bytes) -> State:
     data["flags"] = Flags(**data["flags"])
     data["units"] = {ref: Slot(**slot) for ref, slot in data["units"].items()}
     return State(**data)
+
+
+def restore_manifests(queue: Queue, objects: Objects, states: Iterable[State]) -> None:
+    for state in states:
+        missing = [slot for slot in state.units.values() if slot.kind == "test" and not slot.manifest and slot.job]
+        if state.manifest and missing:
+            _restore_manifest(queue, objects, state, missing)
+
+
+def _restore_manifest(queue: Queue, objects: Objects, state: State, missing: list[Slot]) -> None:
+    path = f"{manifest_folder(_slug(state.repo))}{state.manifest}.json"
+    records = UNPACK(json.loads(objects.read(path)))["tests"]
+    proposed = {
+        slot.job: json.dumps({"tests": {test: records[test] for test in slot.members if test in records}})
+        for slot in missing
+    }
+    restored = queue.restore_manifests(proposed)
+    for slot in missing:
+        slot.manifest = restored[slot.job]
+    queue.client.set(GRADES + state.run, json.dumps(asdict(state)))
 
 
 def _evidence(state: State) -> evidence.GradeEvidence:
@@ -571,6 +594,7 @@ class Scheduler:
         self.shed: tuple[str, ...] = ()
         self.registry = metrics.Registry()
         self.held: defaultdict[str, int] = defaultdict(int)
+        restore_manifests(self.queue, self.objects, self._live())
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
@@ -708,8 +732,9 @@ class Scheduler:
         the most urgent class first and the longest waiting first within a class. A head still quiet or paused takes no
         place, and the rest wait for a later pass, so every pass reaches admission. A head whose manifest fetch still
         runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never answered or
-        answered with a server error waits out the window again; any other expansion failure drops it and posts its
-        failed required check run. Each of these takes a place, since its expansion ran on the pass."""
+        answered with a server error waits out the window again, until the `UNANSWERED_FETCHES`th such fetch in a row,
+        counted in its waiting entry; that fetch and any other expansion failure drop the head and post its failed
+        required check run. Each of these takes a place, since its expansion ran on the pass."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         started = 0
@@ -730,8 +755,16 @@ class Scheduler:
                 self.client.hset(WAITING, name, raw)
                 actions.append(f"holding {request.head}: {error}")
             except FetchUnanswered as error:
-                self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms}))
-                actions.append(f"holding {request.head}: {error}")
+                fetches = held.get("unanswered", 0) + 1
+                if fetches < UNANSWERED_FETCHES:
+                    self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unanswered": fetches}))
+                    actions.append(f"holding {request.head}: {error}")
+                else:
+                    refusal = FetchRefused(
+                        f"{fetches} manifest fetches in a row got no answer or a server error, the last: {error}"
+                    )
+                    actions.append(f"cannot expand {request.head}: {refusal}")
+                    actions.extend(self._refuse(request, ref, refusal, now_ms))
             except (
                 subprocess.CalledProcessError,
                 ValueError,
@@ -851,7 +884,7 @@ class Scheduler:
         ref = f"{unit.kind}:{unit.key}"
         if ref in state.units:
             return ref
-        slot = Slot(unit.kind, unit.key, list(unit.members))
+        slot = Slot(unit.kind, unit.key, list(unit.members), manifest=unit.manifest)
         verdict = self.store.get(unit.kind, unit.key, bypass_negative=bypass)
         lookup = contract.CACHE_MISSES_TOTAL if verdict is None else contract.CACHE_HITS_TOTAL
         self.registry.inc(lookup, 1.0, {"cache": caches.VERDICT})
@@ -895,7 +928,7 @@ class Scheduler:
             for slot in state.units.values():
                 if slot.held and budget.admits(CLASSES[state.tier], DEFAULT.slots, load.slots_free, waiting, self.shed):
                     slot.held = False
-                    admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
+                    admitted.append(Unit(slot.kind, slot.key, tuple(slot.members), slot.manifest))
                     waiting += DEFAULT.slots
             if admitted:
                 self.queue.enqueue(admitted, state.head, {}, state.base, state.grader)
@@ -1472,19 +1505,24 @@ def listen(
     routes: lease_api.ControlRoutes,
     spending: budget.Budget,
     clock: Callable[[], int],
-    ports: tuple[int, int],
-) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer]:
-    """Bind the scheduler port's lease API, control, capacity and grades routes and the metrics port, both over one
-    load whose budget fraction and shed classes come from the day's spending, the metrics port with the counters the
-    scheduler's passes keep; the caller runs each serve_forever."""
+    ports: tuple[int, int, int],
+) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, ThreadingHTTPServer]:
+    """Bind the scheduler port's lease API, capacity and grades routes, the control port's control routes and the
+    metrics port, the scheduler and metrics ports over one load whose budget fraction and shed classes come from the
+    day's spending, the metrics port with the counters the scheduler's passes keep; the caller runs each
+    serve_forever."""
 
     def snapshot() -> Load:
         return budget.observe(scheduler.load(clock()), spending.status())
 
-    api, exposition = ports
-    lease = partial(lease_api.answer, leases, Uploads(scheduler.objects), routes)
+    api, steering, exposition = ports
+    lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
     port = service.Routes(lease, snapshot, scheduler.grades_of)
-    return service.serve("", api, port), metrics.serve("", exposition, snapshot, scheduler.registry)
+    return (
+        service.serve("", api, port),
+        lease_api.serve_control("", steering, routes),
+        metrics.serve("", exposition, snapshot, scheduler.registry),
+    )
 
 
 def _now_ms() -> int:
@@ -1516,7 +1554,7 @@ def storage(environ: Mapping[str, str]) -> S3Objects:
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Run the scheduler service from its mounted runtime config: the lease API, capacity and grades on the scheduler
-    port, metrics on the metrics port and a pass every interval."""
+    port, the control routes on the control port, metrics on the metrics port and a pass every interval."""
     import redis
 
     from scripts.ci_lab import relay
@@ -1527,6 +1565,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     parser.add_argument("--interval", type=float, default=INTERVAL_S)
     parser.add_argument("--passes", type=int, default=0)
     arguments = parser.parse_args(argv)
+    missing = [name for name in GITHUB_APP_SETTINGS if not environ.get(name)]
+    if missing:
+        print(f"ci-lab scheduler refuses to start: {', '.join(missing)} not set", file=sys.stderr)
+        return 1
     runtime = load_runtime(Path(environ[contract.RUNTIME_CONFIG]))
     client: Any = redis.Redis.from_url(environ[contract.REDIS_URL], decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
     objects = storage(environ)
@@ -1538,7 +1580,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
     leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods)
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
-    ports = (contract.SCHEDULER_PORT, contract.METRICS_PORT)
+    ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
     for server in listen(scheduler, leases, routes, spending, _now_ms, ports):
         Thread(target=server.serve_forever, daemon=True).start()
     return serve(scheduler, relaying, arguments.interval, arguments.passes, time.time, time.sleep)
