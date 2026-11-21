@@ -8,11 +8,15 @@ rules:
     paths:
       include:
         - /scripts/swarm/waits.py
+        - /scripts/swarm/pr_wait.py
         - waits-end-without-agent-isolation.py
     patterns:
       - pattern-inside: |
-          def end_pass(...):
+          def $PASS(...):
               ...
+      - metavariable-regex:
+          metavariable: $PASS
+          regex: ^(end_pass|enforce_pass)$
       - pattern: |
           for $AGENT in $STORE.agents($SLUG):
               ...
