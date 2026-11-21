@@ -81,9 +81,10 @@ def hive_wakes(redis, hive="m1"):
     return [CommandOrder(**json.loads(fields["order"])) for _, fields in entries]
 
 
-def remote_codex(redis, agent, transport=""):
+def remote_codex(redis: Any, agent: AgentRecord, transport: str = "", admitted: bool = False) -> AgentRecord:
     redis.set(reports.key("m1"), json.dumps({}))
-    return replace(agent, harness="codex", transport=transport, pane_id="p1", runtime_target={"host_id": "m1"})
+    target = {} if admitted else {"host_id": "m1"}
+    return replace(agent, harness="codex", transport=transport, pane_id="p1", runtime_target=target)
 
 
 def test_the_wake_pass_orders_the_hive_to_wake_its_idle_legacy_codex_pane(redis, agent, mail):
@@ -152,17 +153,12 @@ def test_a_hive_codex_pane_with_a_push_pump_gets_no_typed_wake(redis, agent, mai
     assert wake.WOKEN not in [e.get("event") for e in member.history(item.id)]
 
 
-def admitted_codex(redis: Any, agent: AgentRecord) -> AgentRecord:
-    redis.set(reports.key("m1"), json.dumps({}))
-    return replace(agent, harness="codex", transport="", pane_id="p1")
-
-
 @pytest.mark.feature("inbox-wake-admitted-hive")
 def test_the_wake_pass_orders_the_admitting_hive_to_wake_a_hub_admitted_legacy_codex_pane(
     redis: Any, agent: AgentRecord, mail: tuple[InboxStore, Any]
 ) -> None:
     member, item = mail
-    admitted = admitted_codex(redis, agent)
+    admitted = remote_codex(redis, agent, admitted=True)
     idle.beat(redis, "sw", admitted.name, idle.IDLE, item.created_at)
     herdr = FakeHerdr({"p1": "idle"})
     wake.wake_pass(InboxStore(redis), "sw", [admitted], herdr, FakeLedger(), item.created_at + 1, 300_000)
@@ -178,7 +174,7 @@ def test_the_waker_orders_the_admitting_hive_to_wake_a_hub_admitted_legacy_codex
     redis: Any, agent: AgentRecord, mail: tuple[InboxStore, Any]
 ) -> None:
     _, item = mail
-    admitted = admitted_codex(redis, agent)
+    admitted = remote_codex(redis, agent, admitted=True)
     idle.beat(redis, "sw", admitted.name, idle.IDLE, item.created_at)
     herdr = FakeHerdr({})
     wake.wake_now(InboxStore(redis), "sw", [admitted], herdr, item.created_at + 1, 300_000)
