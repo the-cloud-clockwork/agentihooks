@@ -73,7 +73,190 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 | `readiness` | A poll; it also subscribes to `swarm.*.readiness.requested`, which nothing publishes yet | Offers the claimable tasks of every `events` swarm to the lane work queues. |
 | `preemption` | A one minute poll; it also subscribes to `swarm.*.preemption.requested`, which nothing publishes yet | Asks the lowest ranked holder of a full lane to hand off when an urgent or focused task of a running `events` swarm still waits one poll later. |
 | `pulls` | `swarm.*.task.*` and a poll | Publishes pull request, merge queue and check events, also fed by `agentihooks github-webhook`. |
-| `launch-checks` | A ten second poll; it also subscribes to `swarm.*.launch-checks.requested`, which nothing publishes yet | Judges the launch check of each worker the hub admitted, from the launch time its execution started write records. A worker whose hive reports no launch fails 300 seconds after admission. A failed worker is stopped on its hive, and its task relaunches once. |
+| `launch-checks` | A ten second poll; it also subscribes to `swarm.*.launch-checks.requested`, which nothing publishes yet | Judges the launch check of each worker the hub admitted, from the launch time its execution started write records. A worker whose hive reports no launch fails 360 seconds after its hive took the launch, or after admission when no hive took it. A failed worker is stopped on its hive, and its task relaunches once. |
+
+### Reactor leases
+
+Every reactor in the table above is a singleton. Its lease is the key `reactor.<name>` in the `hub-leases` bucket,
+holding the holder's name and an expiry. The holder is the replica's `HOSTNAME`, which is the pod name in the chart,
+or the host name when `HOSTNAME` is unset.
+
+| Rule | Value |
+|---|---|
+| Lease length | 15 seconds (`LEASE_TTL_MS` in `scripts.hub.runner`). |
+| Renewal | Every 5 seconds, a third of the lease length. A keeper thread renews each lease the replica holds. `agentihooks hub run --once` starts no keeper. |
+| Take | A replica takes a lease when its key is missing, when the replica already holds it, or when the holder's expiry has passed. A concurrent write that wins first leaves the other replica without it. |
+| Release | When `agentihooks hub run` stops, including on `SIGTERM`, the replica writes an expiry of zero on every lease it holds, so the other replica takes them on its next pass. A replica that dies without stopping keeps its leases until they expire, at most 15 seconds later. |
+
+Before each pass of a reactor, the replica takes or renews that reactor's lease. A replica without the lease records
+`standby` for the pass and handles nothing. A holder that loses the lease partway through a batch returns the rest of
+the batch unhandled, so the new holder receives those deliveries again. Each reactor has its own lease, so two
+replicas can split them: one pod can hold `reconciler` while the other holds `inbox-wake-expiry`.
+
+The hub prints a lease line only when a replica's held state changes:
+
+| Line | Stream | Meaning |
+|---|---|---|
+| `<reactor>: lease taken by <holder>` | stdout | This replica now holds the reactor's lease. |
+| `<reactor>: lease lost by <holder>` | stdout | This replica held the lease, and its last renewal or pass found another live holder or lost a concurrent write. |
+| `hub: reactor lease renewal failed`, then a traceback | stderr | The keeper's renewal raised, for example because the bus was unreachable. A lease that is not renewed expires 15 seconds after its last renewal. |
+| `hub: reactor <name> lease release failed`, then a traceback | stderr | Releasing a lease at stop raised. The lease expires on its own. |
+| `hub: reactor <name> timer callback failed`, then a traceback | stderr | The reactor's poll raised. The pass records `failed`, and the next pass runs the poll again. |
+
+### The inbox wake outbox
+
+Every inbox send adds the item's id to the `wake-outbox` set of its inbox world. Moving an item to another world
+removes the id from the source world's set and adds it to the target world's set. The `inbox-wake` reactor's poll,
+`InboxWake.flush`, drains these sets on every pass:
+
+1. It walks the main inbox world, then the world of each joined hive member.
+2. In each world it takes at most 32 ids, in an order that changes on every pass, so an item that fails on every
+   pass does not hold back the others.
+3. For each id it reads the item and acts on what it finds:
+   - **No item record.** The id is removed from the set, and the pass goes on to the next id.
+   - **An item addressed to a swarm.** The swarm is the part after `@` of a seat address, or the swarm an agent name
+     belongs to. The item is sent onto that swarm's seat inbox on the bus, then its id is removed.
+   - **An item whose address resolves to no swarm.** The id is removed without a send.
+   - **An item readdressed after its first send.** The item keeps its id, so the send finds that id's send record
+     holding the old address and raises `item id already belongs to a different message`. The flush catches it,
+     publishes only an `inbox.wake` request for the new address and removes the id. The request's id is
+     `wake-<item id>-<first 16 hex digits of the SHA-256 of the swarm and the address>`, so each address of one item
+     gets its own wake id.
+   - **Any other send error.** The poll ends with `hub: reactor inbox-wake timer callback failed`, and the id stays
+     in the set for a later pass. An address that is not a valid event subject token, for example, stays until the
+     item is repaired.
+
+Before [#7630](https://github.com/the-cloud-clockwork/agentihooks/pull/7630), an id whose item record was gone made
+`InboxStore.get` raise `InboxError` before the id was removed, so the id stayed in the set and failed every later
+pass. On release v2.17.374 the leading hub pod logged `inbox-wake timer callback failed` 499 times in 73 minutes,
+each one `InboxError: no message <id>`. The wake outboxes then held 15 gone ids of 25 in the main world, 19 of 815 in
+one hive world and 7 of 432 in another. The regression test
+`test_an_outbox_id_whose_message_is_gone_is_dropped_without_failing_the_pass` puts gone ids in the main world and in
+a hive world beside a live item, then asserts that both sets empty and the live item is still sent. Red on the
+earlier code: [run 40415421709](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40415421709).
+
+### Verify a two replica hub
+
+After a release rolls the hub, two log reads and one store read prove that the replicas share their reactors and
+that an `events` swarm's launches reach the hub. Run them from a shell with `kubectl` access to the hub's namespace
+and a checkout of this repository.
+
+1. Confirm the hub runs the release you expect, and that the release carries the change under test:
+
+   ```bash
+   kubectl get deploy -n <namespace> <release>-hub \
+     -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+   # ghcr.io/<owner>/agentihooks-swarm:<version>
+   git fetch --tags origin
+   git merge-base --is-ancestor <merge commit> v<version> && echo carries
+   # carries
+   ```
+
+2. Count the lease and failure lines on each hub pod:
+
+   ```bash
+   for pod in $(kubectl get pods -n <namespace> -l app.kubernetes.io/component=hub -o name); do
+     log=$(kubectl logs -n <namespace> "$pod" --timestamps)
+     echo "== $pod"
+     grep 'reconciler: lease' <<<"$log"
+     for line in 'reconciler: lease taken' 'lease lost' 'renewal failed' \
+       'already belongs to a different message' 'timer callback failed'; do
+       echo "$(grep -c "$line" <<<"$log") $line"
+     done
+   done
+   ```
+
+   A healthy pair, as read on release 2.17.896 on 15 November:
+
+   ```text
+   == pod/<release>-hub-<pod-a>
+   2026-11-15T01:59:18.818347255Z reconciler: lease taken by <release>-hub-<pod-a>
+   1 reconciler: lease taken
+   0 lease lost
+   0 renewal failed
+   0 already belongs to a different message
+   0 timer callback failed
+   == pod/<release>-hub-<pod-b>
+   0 reconciler: lease taken
+   0 lease lost
+   0 renewal failed
+   0 already belongs to a different message
+   0 timer callback failed
+   ```
+
+   The read passes when the `reconciler: lease taken` counts of both pods add up to one and every other count is zero
+   on both pods. `kubectl logs` reads only the current container; after a restart, add `--previous` to read the
+   container before it.
+
+3. Read each agent's acknowledged launch. Every swarm runs on the `events` engine since
+   [#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141); a stored engine of any other value fails
+   to load with `engine must be events`, so no engine check is needed first.
+
+   A hive spoke writes `null` to the `execution-starts` bucket before it spawns an agent. Once the spawn returns, it
+   replaces that value with the `execution.started` record and publishes the record on
+   `swarm.<slug>.execution.started`. The key is the SHA-256 of the JSON list
+   `[<slug>, <agent name>, <generation>]`, so a launch the hive never acknowledged still reads `null`. No
+   `agentihooks` command lists these records yet; the read below uses the reconciler's own matching helper,
+   `scripts.hub.reconciler._start`, which returns the record only when its swarm, execution, generation, agent name
+   and task match the agent record. The hub pod carries the swarm store and bus settings it needs:
+
+   ```bash
+   kubectl exec -i -n <namespace> deploy/<release>-hub -- python - <slug> <<'EOF'
+   import sys
+
+   from scripts.events.config import BusConfig
+   from scripts.events.factory import open_bus
+   from scripts.hub.reconciler import _start
+   from scripts.swarm.store import connect
+
+   slug = sys.argv[1]
+   bus = open_bus(BusConfig.from_environ())
+   try:
+       for agent in connect().agents(slug):
+           event = _start(bus, slug, agent)
+           if event is None:
+               print(agent.name, "no acknowledged start")
+           else:
+               data = event.data
+               print(agent.name, event.author, data["launched_at"], event.time, data["claim_revision"], event.cause)
+   finally:
+       bus.close()
+   EOF
+   ```
+
+   Two of the seven lines from the same 15 November read, one line per agent:
+
+   ```text
+   engineer@<code>-<n> <hive id> 1794704229546 1794704268058 2147 ready:<slug>:<task>:12
+   <master name> no acknowledged start
+   ```
+
+   | Field | Meaning |
+   |---|---|
+   | `author` | The hive that launched the agent. The record's `data.hive` names the same hive. |
+   | `data.launched_at` | The session start time the hive recorded, in milliseconds. |
+   | `time` | When the spoke wrote the record, in milliseconds. |
+   | `data.claim_revision` | The revision of the `launching` write to the task's `spoke-work` claim, which fences the launch. |
+   | `cause` | The id of the offer the spoke took from the lane work queue. |
+
+   The record's `data` also carries `task`, `task_generation`, `claim_key`, `generation`, `lane`, `name`,
+   `pane_id`, `harness`, `account`, `conversation_id` and `overlays`. The read passes when every agent the hub
+   admitted prints a record whose author is a hive. An agent started outside hub admission prints
+   `no acknowledged start`; on the 15 November read that was the swarm's master, while 6 of its 7 agents printed a
+   record.
+
+#### Hub verification troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| Both pods print `reconciler: lease taken` | The lease moved: the first holder's renewals stopped for 15 seconds, or it lost a renewal to the other pod. | The first pod's `lease lost` line, its `renewal failed` tracebacks and its restart count show which. Two pods hold one lease at the same time only when they do not share one `hub-leases` bucket, so check that both reach the same NATS server. |
+| Neither pod prints `reconciler: lease taken` | The holder took the lease before its current container's log starts. | Read the earlier container with `--previous`, or read the lease record on the hub pod: `python -c 'from scripts.events.config import BusConfig; from scripts.events.factory import open_bus; from scripts.hub import lease; bus = open_bus(BusConfig.from_environ()); print(lease.read(bus.state(lease.BUCKET), "reactor.reconciler")); bus.close()'` prints the holder and its expiry in milliseconds. |
+| `lease lost` lines | The holder missed renewals for 15 seconds and the other replica took over. | Read the `renewal failed` tracebacks and the pod's CPU around the line's timestamp. |
+| `hub: reactor lease renewal failed` | The keeper could not read or write `hub-leases`. | The traceback names the bus error. |
+| `hub: reactor inbox-wake timer callback failed` with `InboxError: no message <id>` | The hub runs a release without [#7630](https://github.com/the-cloud-clockwork/agentihooks/pull/7630). | Roll the hub to a release that carries it, checked as in step 1. |
+| `hub: reactor inbox-wake timer callback failed` with another error | An outbox item whose send keeps failing, such as `ValueError: invalid event subject token` for an invalid address. | The id stays in the outbox until the item is repaired or settled. Other ids still drain because the order changes on every pass. |
+| `item id already belongs to a different message` in a traceback | A send outside the outbox flush reused an item id for a different message. The flush catches this error itself. | The traceback's frames name the sender. |
+| An admitted agent prints `no acknowledged start` | The spawn failed or has not returned, so the record still reads `null`, or the record names another execution, generation or task than the agent record. | The `launch-checks` reactor fails a worker with no started record 360 seconds after the hive wrote its `null`, or after admission when the hive never wrote one: the 300 second spawn timeout plus the 60 second launch check deadline. It then relaunches the task once. Read the spoke's log on the agent's hive. |
 
 ### Hub readiness and rollouts
 
