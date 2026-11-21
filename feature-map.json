@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "lab-remote-repository-owner",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2713",
+      "behaviour": "A lab remote URL with an owner serves a checkout only when both its owner and repository name match the origin, ignoring case and transport. Ownerless lab mirrors and local repository paths retain their existing name match.",
+      "seam": "scripts.ci_lab.remote.checkout.serves",
+      "tests": [
+        "tests/ci_lab/test_remote_repository_owner.py::test_lab_remote_matches_repository_owner"
+      ]
+    },
+    {
       "id": "credential-guard-refuses-brace-environ-leaves",
       "origin": "regression",
       "ordered_at": "2026-11-20",
@@ -11345,7 +11355,7 @@
       "id": "lab-remote-in-workspaces",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/loop-remote-in-workspaces",
-      "behaviour": "Every workspace carries the lab remote: wt.sh new and tmp, swarm v2 workspace mirrors and hive checkouts at daemon start give a repository the lab remote at AGENTIHOOKS_LAB_REMOTE with a credential helper reading AGENTIHOOKS_LAB_REMOTE_TOKEN when the lab URL names the repository origin names. swarm publish --via lab pushes HEAD to refs/grade/<task> with the branch push option before origin and pushes origin on a green grade or at once with --direct, leaving origin untouched on a red one. A git push lab is a push: the prepush guard needs the gate, the one push gate holds one relaying the task branch while its checks run, panic spares one only for a registered fix, and the stop gate still counts only origin.",
+      "behaviour": "Every workspace carries the lab remote: wt.sh new and tmp, swarm v2 workspace mirrors and hive checkouts at daemon start give a repository the lab remote at AGENTIHOOKS_LAB_REMOTE with a credential helper reading AGENTIHOOKS_LAB_REMOTE_TOKEN when the lab URL names the repository origin names; the Python check also requires an owner the lab URL names to be origin's owner (lab-remote-repository-owner). swarm publish --via lab pushes HEAD to refs/grade/<task> with the branch push option before origin and pushes origin on a green grade or at once with --direct, leaving origin untouched on a red one. A git push lab is a push: the prepush guard needs the gate, the one push gate holds one relaying the task branch while its checks run, panic spares one only for a registered fix, and the stop gate still counts only origin.",
       "seam": "wt.sh new and tmp, swarm publish, swarm v2 workspace prepare, the hive daemon start, and the one push, panic, prepush and stop guards",
       "tests": [
         "tests/ci_lab/test_remote_checkout.py::test_name_is_the_lowercase_repository_a_remote_ends_in",

@@ -1855,12 +1855,17 @@ For a repository the URL matches, it writes two git config entries:
 **Which repositories match.** The lab serves one repository per URL, so the remote goes only to the
 repository the URL names. Each URL is reduced to its repository name: the last part after a `/` or
 `:`, without a trailing `/` or `.git`, in lowercase. The remote is added only when the lab URL
-yields a name and that name equals the name of the checkout's `origin`. Host and owner are not
-compared.
+yields a name and that name equals the name of the checkout's `origin`. When the lab URL also names
+an owner, the part before the repository name in the path of a URL with a scheme or of an scp
+address such as `git@host:owner/repo.git`, that owner must equal the origin's owner, in lowercase.
+A lab URL with the repository at the root of its path, a local path and a `file://` URL name no
+owner and match on the name alone. The host is not compared. `wt.sh` compares the name alone.
 
 | `AGENTIHOOKS_LAB_REMOTE` | `origin` | Gets `lab` |
 |---|---|---|
-| `http://<lab host>/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name `agentihooks` |
+| `http://<lab host>/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name `agentihooks` and the lab URL names no owner |
+| `http://<lab host>/the-cloud-clockwork/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name the owner `the-cloud-clockwork` and `agentihooks` |
+| `http://<lab host>/other-owner/agentihooks.git` | `git@github.com:the-cloud-clockwork/agentihooks.git` | No, the lab URL names another owner |
 | `http://<lab host>/agentihooks.git` | `https://github.com/the-cloud-clockwork/agentihooks-bundle` | No, the origin names `agentihooks-bundle` |
 | unset or empty | any | No |
 
@@ -1903,7 +1908,7 @@ holds the token, without printing it.
 
 | Symptom | Cause | Check |
 |---|---|---|
-| `git remote -v` lists no `lab` | The process that made the workspace had no `AGENTIHOOKS_LAB_REMOTE`, or the URL names another repository | `test -n "${AGENTIHOOKS_LAB_REMOTE:-}" && echo set \|\| echo unset` in that process's environment, then compare the last part of the lab URL with `git remote get-url origin` |
+| `git remote -v` lists no `lab` | The process that made the workspace had no `AGENTIHOOKS_LAB_REMOTE`, or the URL names another repository | `test -n "${AGENTIHOOKS_LAB_REMOTE:-}" && echo set \|\| echo unset` in that process's environment, then compare the last part of the lab URL, and the owner before it when the URL names one, with `git remote get-url origin` |
 | A hive checkout lacks `lab` while a fresh worktree has it | The checkout was cloned after the daemon started, or the daemon started without the variable | Restart the daemon, or run `wt.sh new` against that checkout |
 | `lab` points at an old URL | The workspace was carried before the URL changed | The next `wt.sh new`, `publish --via lab` or daemon start sets the new URL; the old URL's helper entry stays and is unused |
 | A push to `lab` fails authentication | The pushing shell has no `AGENTIHOOKS_LAB_REMOTE_TOKEN`, so the helper sends an empty password, or it holds another value than the lab expects | The third verify command; set the variable in the environment the agent runs in |
