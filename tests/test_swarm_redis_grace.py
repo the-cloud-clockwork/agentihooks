@@ -7,12 +7,14 @@ from pathlib import Path
 from types import ModuleType
 from typing import cast
 
+import fakeredis
 import pytest
 import yaml
 
 from scripts import install
 from scripts.swarm import controller, controller_probes, lease, redis_grace
-from scripts.swarm.store import RedisStore, SwarmError, Unreachable
+from scripts.swarm.replica import REPLICA_ENV
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, Unreachable
 
 pytestmark = pytest.mark.unit
 
@@ -132,20 +134,52 @@ def api_disabled_liveness_command() -> list[str]:
     return yaml.safe_load(textwrap.dedent(branch))["exec"]["command"]
 
 
-@pytest.mark.feature("controller-liveness-rides-out-redis-outage")
-def test_api_disabled_liveness_command_stays_live_while_redis_refuses_inside_the_grace_window(
-    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    command = api_disabled_liveness_command()
-    assert command == ["agentihooks", "controller", "live"]
-    monkeypatch.delenv(controller_probes.PORT_ENV, raising=False)
+def probe_status(command: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
+    """Run a chart probe command in this process and answer the exit status the kubelet exec would read."""
+    if command[:2] == ["python", "-c"]:
+        try:
+            exec(command[2], {})
+        except SystemExit as stop:
+            return int(stop.code or 0)
+        except Exception:
+            return 1
+        return 0
     monkeypatch.setattr(sys, "argv", command)
+    try:
+        install.main()
+    except SystemExit as stop:
+        return int(stop.code or 0)
+    return 0
 
-    for _ in range(2):
-        with pytest.raises(SystemExit) as probe:
-            install.main()
-        assert probe.value.code == 0
+
+@pytest.mark.feature("controller-liveness-rides-out-redis-outage")
+@pytest.mark.parametrize("replica", [{}, {REPLICA_ENV: "pod-standby"}], ids=["single", "standby"])
+def test_api_disabled_liveness_command_stays_live_while_redis_refuses_inside_the_grace_window(
+    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], replica: dict[str, str]
+) -> None:
+    monkeypatch.setattr("scripts.swarm.store.connect", refused)
+    monkeypatch.delenv(controller_probes.PORT_ENV, raising=False)
+    monkeypatch.delenv(REPLICA_ENV, raising=False)
+    for name, value in replica.items():
+        monkeypatch.setenv(name, value)
+    command = api_disabled_liveness_command()
+
+    assert [probe_status(command, monkeypatch) for _ in range(2)] == [0, 0]
     assert "live inside the 120s Redis grace window" in capsys.readouterr().out
+
+
+@pytest.mark.feature("controller-liveness-rides-out-redis-outage")
+def test_api_disabled_liveness_command_fails_on_a_lapsed_lease_once_redis_answers(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("fixture", "agentihooks", 2, 0))
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.controller.connect", lambda: store)
+    for name in (controller_probes.PORT_ENV, controller_probes.HOST_SWARMS_ENV, REPLICA_ENV):
+        monkeypatch.delenv(name, raising=False)
+
+    assert probe_status(api_disabled_liveness_command(), monkeypatch) == 1
 
 
 def test_ready_still_fails_while_redis_refuses(home, capsys):

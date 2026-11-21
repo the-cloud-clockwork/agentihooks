@@ -705,6 +705,7 @@
       "seam": "The API disabled livenessProbe exec of the swarm chart controller template, and controller_probes.live without AGENTIHOOKS_CONTROL_API_PORT",
       "tests": [
         "tests/test_swarm_redis_grace.py::test_api_disabled_liveness_command_stays_live_while_redis_refuses_inside_the_grace_window",
+        "tests/test_swarm_redis_grace.py::test_api_disabled_liveness_command_fails_on_a_lapsed_lease_once_redis_answers",
         "tests/test_swarm_controller_probes.py::test_live_without_the_control_api_passes_on_held_leases_with_no_endpoint_check",
         "tests/test_swarm_controller_probes.py::test_live_without_the_control_api_still_fails_on_a_lapsed_lease"
       ]
