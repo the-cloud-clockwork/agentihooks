@@ -3,7 +3,7 @@
 import json
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, cast
@@ -71,6 +71,7 @@ for index = values + 1, #KEYS do
 end
 return {out, members}
 """
+DUMP_BATCH = 1000
 DISPATCH = "dispatch"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
@@ -899,12 +900,12 @@ class RedisStore:
         held = (key[len(self.seats.key("")) :].split(":")[0] for key in seats if key.startswith(self.seats.key("")))
         seated = {address for address in held if address.endswith(f"@{slug}")}
         mail, addresses = InboxStore(self.redis), cast(list[str], sorted(named | seated))  # pragma: no mutate
-        inbox, _ = mail.keys_at(addresses)
-        item = mail.key("item", "")
-        sets = {mail.key(shared): addresses for shared in ("waiting", "indexed", "open-indexed")}
-        sets[mail.key("wake-outbox")] = [key.removeprefix(item) for key in inbox if key.startswith(item)]
-        keys: list[str] = sorted(own) + seats + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
-        dumped, members = _dump(self.redis, keys, sets)
+        singles: list[tuple[list[str], dict[str, list[str]]]] = [
+            ([key], {}) for key in [*sorted(own), *seats, self.culture.key(slug)]
+        ]
+        names: list[tuple[list[str], dict[str, list[str]]]] = [([key], {}) for key in self.names.swarm_keys(slug)]
+        inboxes = [_inbox_group(mail, address) for address in addresses]
+        dumped, members = _dump(self.redis, singles + inboxes + names)
         return {
             "keys": dumped,
             "members": {f"{PREFIX}:index": [slug], **members},
@@ -959,6 +960,38 @@ _WRITE = {
 
 
 def _dump(
+    redis: Any, groups: list[tuple[list[str], dict[str, list[str]]]]
+) -> tuple[dict[str, dict[str, Any]], dict[str, list[str]]]:
+    """Every key's type, value and time to live and which candidates each set holds, read in scripts of at most
+    DUMP_BATCH keys; a group's keys and set checks share one atomic script so no write lands between two of its reads."""
+    dumped: dict[str, dict[str, Any]] = {}
+    members: dict[str, list[str]] = {}
+    for keys, sets in _batches(groups):
+        rows, found = _dump_batch(redis, keys, sets)
+        dumped.update(rows)
+        for key, held in found.items():
+            members.setdefault(key, []).extend(held)
+    return dumped, members
+
+
+def _batches(
+    groups: list[tuple[list[str], dict[str, list[str]]]],
+) -> Iterator[tuple[list[str], dict[str, list[str]]]]:
+    """The groups packed in order into batches of at most DUMP_BATCH keys; a group larger than a batch runs alone."""
+    keys: list[str] = []
+    sets: dict[str, list[str]] = {}
+    for group_keys, group_sets in groups:
+        if keys and len(keys) + len(group_keys) > DUMP_BATCH:
+            yield keys, sets
+            keys, sets = [], {}
+        keys.extend(group_keys)
+        for key, candidates in group_sets.items():
+            sets.setdefault(key, []).extend(candidates)
+    if keys:
+        yield keys, sets
+
+
+def _dump_batch(
     redis: Any, keys: list[str], sets: dict[str, list[str]]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, list[str]]]:
     """Every key's type, value and time to live and which candidates each set holds, read in one atomic script so no
@@ -972,6 +1005,16 @@ def _dump(
             dumped[key] = {"type": kind, "value": _DECODE[kind](raw), "ttl_ms": max(int(ttl_ms), 0)}
     members = {key: held for (key, _), held in zip(pairs, found) if held}
     return dumped, members
+
+
+def _inbox_group(mail: InboxStore, address: str) -> tuple[list[str], dict[str, list[str]]]:
+    """The keys of one inbox address, its items and journal, with its checks in the shared waiting, indexed,
+    open-indexed and wake sets, so one script reads them together."""
+    keys, _ = mail.keys_at([address])
+    item = mail.key("item", "")
+    sets = {mail.key(shared): [address] for shared in ("waiting", "indexed", "open-indexed")}
+    sets[mail.key("wake-outbox")] = [key.removeprefix(item) for key in keys if key.startswith(item)]
+    return keys, sets
 
 
 def redis_url(environ):
