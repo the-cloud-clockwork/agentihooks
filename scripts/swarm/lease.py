@@ -98,13 +98,20 @@ def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
     return document.write(store, slug, take)
 
 
-def _check(doc: dict, at: int, held: Lease | int) -> None:
-    live = _live(doc, at)
+def _stale(live: Lease | None, held: Lease | int) -> bool:
     if isinstance(held, Lease):
-        if live is None or (live.owner, live.epoch) != (held.owner, held.epoch):
-            raise SwarmError(STALE)
-    elif live is None or live.epoch != held:
+        return live is None or (live.owner, live.epoch) != (held.owner, held.epoch)
+    return live is None or live.epoch != held
+
+
+def _check(doc: dict, at: int, held: Lease | int) -> None:
+    if _stale(_live(doc, at), held):
         raise SwarmError(STALE)
+
+
+def stale(store: RedisStore, slug: str, held: Lease | int) -> bool:
+    """Whether held, a lease or its epoch, is no longer the live controller lease, read cheaply."""
+    return _stale(current(store, slug), held)
 
 
 def fenced(store: RedisStore, slug: str, held: Lease | int | None, change: Callable[[dict], T]) -> T:
