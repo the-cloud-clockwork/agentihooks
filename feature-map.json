@@ -761,6 +761,17 @@
       ]
     },
     {
+      "id": "metrics-outbox-and-recall-store-wait-out-another-write-lock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2708",
+      "behaviour": "The swarm metrics outbox and a writable recall store that turn a new SQLite file to WAL while another connection holds the file's write lock wait for that lock within the busy timeout instead of failing at once with database is locked.",
+      "seam": "Outbox construction and SQLiteRecallStore construction on a new file, the WAL switch against another connection's write lock",
+      "tests": [
+        "tests/swarm/test_metrics_outbox.py::test_a_new_spool_waits_out_another_connections_write_lock_before_it_turns_on_wal",
+        "tests/recall/test_store.py::test_a_new_store_waits_out_another_connections_write_lock_before_it_turns_on_wal"
+      ]
+    },
+    {
       "id": "ledger-server-pid-file-after-projector",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2689",
