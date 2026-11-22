@@ -195,6 +195,22 @@ def test_the_seat_pass_sends_mail_that_reached_a_stopped_seat_back_when_it_ends_
     assert (inbox.get(late.id).state, inbox.get(late.id).address) == ("pending", "master@sw")
 
 
+def test_the_seat_mail_of_an_expert_whose_lineage_record_is_gone_goes_back_to_the_master(
+    store: RedisStore, runtime: Any
+) -> None:
+    lineage = started(store)
+    expert = seated(store, runtime)
+    store.redis.hdel(store.key("sw", "expert-lineages"), "expert-1")
+    store.redis.srem(store.key("sw", "expert-running"), "expert-1")
+    inbox = InboxStore(store.redis)
+    late = inbox.send(ENGINEER, lineage.seat, "One more thing")
+    assert expert_seat.run("sw", store.config("sw"), store, runtime, NOW + MINUTE) == [
+        f"ended expert {expert.name}: lineage expert-1 is unknown"
+    ]
+    moved = inbox.get(late.id)
+    assert (moved.state, moved.address, moved.reason) == ("pending", "master@sw", RETURNED.format(state="unknown"))
+
+
 @pytest.mark.feature("expert-seat-recovery")
 def test_a_restored_expert_is_told_to_read_its_mission_and_its_seat_recap(store: RedisStore) -> None:
     expert = AgentRecord("expert@a1b2c3-0001", "expert", "expert-1", seat="expert-1@sw")
