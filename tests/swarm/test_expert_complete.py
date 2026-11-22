@@ -22,6 +22,7 @@ from tests.swarm.expert_fixture import (
     TITLE,
     acting,
     indexed,
+    operating,
     run,
     seated,
     started,
@@ -154,7 +155,7 @@ def test_only_the_expert_that_works_the_lineage_completes_it(
     if actor:
         acting(monkeypatch, actor)
     else:
-        monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+        operating(monkeypatch)
     assert run("sw", "expert", "complete", proof(tmp_path)) == 1
     assert capsys.readouterr().err == ONLY
     assert expert_lineage.get(working, "sw", "expert-1").state == "running"
@@ -166,6 +167,7 @@ def test_an_expert_that_already_left_its_seat_completes_nothing(
     seated(working, EXPERT, "expert-1", state="finished")
     assert run("sw", "expert", "complete", proof(tmp_path)) == 1
     assert capsys.readouterr().err == ONLY
+    working.drop_agent("sw", EXPERT)
     seated(working, EXPERT, "expert-1")
     assert run("sw", "expert", "complete", proof(tmp_path)) == 0
     capsys.readouterr()
@@ -308,7 +310,7 @@ def test_the_master_and_the_operator_read_the_proof_a_lineage_ended_on(
         if actor:
             acting(monkeypatch, actor)
         else:
-            monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+            operating(monkeypatch)
         assert run("sw", "expert", "proof", "expert-1") == 0
         assert capsys.readouterr().out == VALID
     assert run("sw", "expert", "status", "expert-1") == 0
