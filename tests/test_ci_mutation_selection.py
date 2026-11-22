@@ -1186,7 +1186,9 @@ def test_statistics_collection_exceptions_exit_the_fork_child_with_failure(tmp_p
     assert failed.value.code == 1
 
 
-def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everything(tmp_path, monkeypatch):
+def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from time import process_time
 
     from scripts.ci_mutation.selection import collect_shard_stats
@@ -1222,7 +1224,20 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
     assert calls == [
         (
             ["tests/test_a.py"],
-            ["-q", "-p", "pytest_rerunfailures", "--reruns", "1", "-m", "not wall_clock", "--basetemp=/scratch/base"],
+            [
+                "-q",
+                "-p",
+                "pytest_rerunfailures",
+                "--reruns",
+                "1",
+                "-m",
+                "not wall_clock",
+                "--basetemp=/scratch/base",
+                "-p",
+                "xdist",
+                "-p",
+                "tests.flake_ledger",
+            ],
             "stats",
             "1",
         )

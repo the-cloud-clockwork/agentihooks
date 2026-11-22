@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -170,8 +171,15 @@ def test_measured_dependencies_keep_only_the_test_modules_a_node_runs(
     }
 
 
+def place_flake_ledger(tests: Path) -> None:
+    (tests / "__init__.py").touch()
+    shutil.copy(Path(__file__).with_name("flake_ledger.py"), tests)
+
+
 @pytest.mark.parametrize("inherited", ["before", None])
-def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch, inherited):
+def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inherited: str | None
+) -> None:
     import os
     import subprocess
     import sys
@@ -192,6 +200,7 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
             (root / name).write_text(text)
     for root in (original, work / "mutants"):
         (root / "scripts/untracked.py").write_text("value = 2\n")
+    place_flake_ledger(work / "mutants" / "tests")
     subprocess.run(["git", "init", "-q", str(original)], check=True)
     subprocess.run(["git", "add", *files], cwd=original, check=True)
     monkeypatch.chdir(work)
@@ -242,7 +251,9 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     assert "scripts/untracked.py" not in result["dependencies"][node]
 
 
-def test_a_stats_bucket_of_only_wall_clock_tests_collects_nothing_and_succeeds(tmp_path, monkeypatch):
+def test_a_stats_bucket_of_only_wall_clock_tests_collects_nothing_and_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import os
     import subprocess
     import sys
@@ -254,6 +265,7 @@ def test_a_stats_bucket_of_only_wall_clock_tests_collects_nothing_and_succeeds(t
     test = work / "mutants" / "tests" / "test_sample.py"
     test.parent.mkdir(parents=True)
     test.write_text("import pytest\n@pytest.mark.wall_clock\ndef test_value():\n    assert True\n")
+    place_flake_ledger(test.parent)
     monkeypatch.chdir(work)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
@@ -454,6 +466,7 @@ def test_a_stats_bucket_gives_the_caller_back_its_flake_ledger_setting(
 
         def run_stats(self, *, tests: list[str]) -> int:
             seen.append(os.environ.get("CI_FLAKES"))
+            os.environ.pop("CI_FLAKES")
             if fails:
                 raise RuntimeError("stats failed")
             return 0

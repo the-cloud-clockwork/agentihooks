@@ -12,7 +12,7 @@ from collections import Counter
 from pathlib import Path
 from time import process_time
 from types import ModuleType, SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from mutmut.utils.format_utils import get_mutant_name
@@ -355,7 +355,22 @@ def loaded_files(bases: list[Path], modules: dict[str, ModuleType] = sys.modules
     return sorted(found)
 
 
-def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
+def run_stats_with_flake_ledger(test_runner: Any, tests: list[str], output: Path) -> int:
+    flakes = output.with_suffix(".flakes.jsonl")
+    flakes.unlink(missing_ok=True)
+    test_runner._pytest_add_cli_args.extend(["-p", "xdist", "-p", "tests.flake_ledger"])
+    previous = os.environ.get("CI_FLAKES")
+    os.environ["CI_FLAKES"] = str(flakes)
+    try:
+        return test_runner.run_stats(tests=tests)
+    finally:
+        if previous is None:
+            os.environ.pop("CI_FLAKES", None)
+        else:
+            os.environ["CI_FLAKES"] = previous
+
+
+def collect_shard_stats(runner: Any, test_runner: Any, tests: list[str], output: Path, basetemp: str) -> None:
     os.environ["MUTANT_UNDER_TEST"] = "stats"
     os.environ["PY_IGNORE_IMPORTMISMATCH"] = "1"
     # Stats tracing slows every test, so a wall clock bound only holds in the unit shards.
@@ -386,7 +401,7 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
         *(Path(root).resolve() for root in [os.environ.get("MUTATION_STATS_ROOT")] if root),
     ]
     start = process_time()
-    status = test_runner.run_stats(tests=tests)
+    status = run_stats_with_flake_ledger(test_runner, tests, output)
     # A bucket of only wall clock tests deselects everything, and pytest reports that as no tests collected.
     status = 0 if status == pytest.ExitCode.NO_TESTS_COLLECTED else status
     dependencies = {}
@@ -499,7 +514,21 @@ def collect_file_stats(runner, test_runner, files: list[str], workers: int, work
     return collect(files)
 
 
-def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stats: tuple[str, ...]) -> None:
+def collect_stats_with_flake_ledger(
+    runner: Any, test_runner: Any, files: list[str], workers: int, work: Path, output: Path, index: int
+) -> list[dict[str, Any]]:
+    for flakes in work.glob("stats-*.flakes.jsonl"):
+        flakes.unlink()
+    try:
+        return collect_file_stats(runner, test_runner, files, workers, work)
+    finally:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.with_name(f"flakes-{index}.jsonl").write_text(
+            "".join(flakes.read_text() for flakes in sorted(work.glob("stats-*.flakes.jsonl")))
+        )
+
+
+def load_or_collect_stats(runner: Any, test_runner: Any, paths: list[str], mode: str, stats: tuple[str, ...]) -> None:
     if mode not in ("", "collect", "reuse"):
         raise ValueError(f"unknown mutation stats mode {mode!r}")
     for path in paths:
@@ -509,7 +538,9 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
             break
     else:
         if mode == "collect":
-            write_part(Path(stats[0]), stats[1], (int(stats[2]), int(stats[3])), [])
+            output = Path(stats[0])
+            write_part(output, stats[1], (int(stats[2]), int(stats[3])), [])
+            output.with_name(f"flakes-{int(stats[2])}.jsonl").write_text("")
         raise SystemExit(0)
     if mode == "reuse":
         apply_stats(runner, json.loads(Path(stats[0]).read_text()))
@@ -526,7 +557,9 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
             if total > 1:
                 files = collect_test_ids(test_runner, files)
             split = split_files(Path.cwd(), files, total)
-            results = collect_file_stats(runner, test_runner, split[index], workers, Path.cwd())
+            results = collect_stats_with_flake_ledger(
+                runner, test_runner, split[index], workers, Path.cwd(), output, index
+            )
             write_part(output, key, (index, total), results, split_key(split))
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
