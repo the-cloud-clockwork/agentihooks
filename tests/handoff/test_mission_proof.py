@@ -14,6 +14,10 @@ HEADINGS = "Mission, Deliverables, Validation, Smoke tests, Regression tests, Se
 UNSHOWN = "carries no evidence; add the run, command or link that shows it"
 GUESSED = "is labelled hypothesis; a proof holds only what was shown"
 STRAY = "Deliverables bullet {number} names no deliverable; start it with D and its number"
+UNREAD = (
+    "{written} under Deliverables cannot be read as a merged pull request; write a pull request as its full link "
+    "https://github.com/<owner>/<repo>/pull/<number> and anything that is no pull request in words"
+)
 PLAN, FIRST, SECOND = (f"https://github.com/o/r/pull/{number}" for number in (12, 14, 15))
 D1 = "- D1 Each cause proven against the live ledger, run 4471\n"
 D2 = f"- D2 The plan file, merged in {PLAN}\n"
@@ -156,16 +160,22 @@ def test_every_pull_request_named_under_deliverables_is_merged() -> None:
     "written",
     [
         "#13200",
+        "o/r#12",
         "http://github.com/o/r/pull/7",
         "https://www.github.com/o/r/pull/7",
+        "https://GitHub.com/o/r/pull/7",
+        "HTTPS://github.com/o/r/PULL/7",
         "github.com/o/r/pull/7",
         "https://github.com/o/r/issues/7",
     ],
 )
 def test_a_pull_request_under_deliverables_is_written_as_the_link_the_swarm_can_read(written: str) -> None:
-    assert _problems(_swap(D1, D1.rstrip("\n") + f", merged in {written}\n")) == [
-        f"{written} under Deliverables cannot be read as a merged pull request; write it as "
-        "https://github.com/<owner>/<repo>/pull/<number>"
+    assert _problems(_swap(D1, D1.rstrip("\n") + f", merged in {written}\n")) == [UNREAD.format(written=written)]
+
+
+def test_a_number_sign_under_deliverables_that_is_no_pull_request_is_told_to_be_put_in_words() -> None:
+    assert _problems(_swap(D1, "- D1 Each cause proven, smoke step #3 passed in run 4471\n")) == [
+        UNREAD.format(written="#3")
     ]
 
 
