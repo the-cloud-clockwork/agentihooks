@@ -24,6 +24,7 @@ from hooks import config
 from scripts import gates
 from scripts.swarm_ledger import api_service, ledger_server, run, storage, warm_writer
 from scripts.swarm_ledger.api import resources
+from scripts.swarm_ledger.repository import postgres
 from scripts.tick.adapters import database_ledger
 
 CONTENT = {"title": "Warm", "overview": "o", "phases": [{"title": "One", "description": "d"}]}
@@ -305,6 +306,62 @@ def test_ask_raises_when_the_writer_closes_without_an_answer(memory_path: Path, 
     with pytest.raises(EOFError, match="the ledger writer closed with no answer"):
         warm_writer.ask(warm_writer.connected(10.0, where), "sw", "tasks", None)
     thread.join(10.0)
+
+
+class Outer:
+    """A class that holds an error class."""
+
+    class Inner(Exception):
+        """An error class nested in another, rebuilt by its qualified name."""
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_an_error_the_in_process_call_raises_is_raised_again_by_the_socket_caller(
+    writer: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refused(found: Any, exchange: database_ledger.Exchange, slug: str, path: str) -> tuple[int, bytes]:
+        raise postgres.Refused(postgres.refusal(1, 2))
+
+    monkeypatch.setattr(database_ledger, "answer", refused)
+    with database_ledger.acting(""):
+        with pytest.raises(postgres.Refused) as in_process_error:
+            in_process("sw", "operations", {"ops": []})
+        with pytest.raises(postgres.Refused) as socket_error:
+            over_socket(writer, "sw", "operations", {"ops": []})
+    assert socket_error.value.args == in_process_error.value.args == (postgres.refusal(1, 2),)
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_a_raised_reply_names_the_error_class_and_its_arguments() -> None:
+    assert warm_writer.raised(KeyError(Path("/x"), 2)) == (
+        b'raised\n{"module": "builtins", "name": "KeyError", "args": ["/x", 2]}'
+    )
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_an_error_class_nested_in_another_is_rebuilt_by_its_qualified_name() -> None:
+    error = warm_writer.reraised(warm_writer.raised(Outer.Inner("deep", 3)).split(b"\n", 1)[1])
+    assert type(error).__qualname__ == "Outer.Inner"
+    assert error.args == ("deep", 3)
+
+
+@pytest.mark.feature("ledger-warm-writer")
+@pytest.mark.parametrize(
+    ("module", "name", "args"),
+    [
+        ("scripts.nowhere", "Gone", ["x"]),
+        ("builtins", "KeyError.missing", ["x"]),
+        ("builtins", "UnicodeDecodeError", ["x"]),
+        ("builtins", "str", ["x"]),
+    ],
+    ids=["module", "name", "arguments", "not-an-error"],
+)
+def test_an_error_the_caller_cannot_rebuild_is_raised_as_a_runtime_error_naming_it(
+    module: str, name: str, args: list[str]
+) -> None:
+    error = warm_writer.reraised(json.dumps({"module": module, "name": name, "args": args}).encode())
+    assert type(error) is RuntimeError
+    assert error.args == (f"the ledger writer raised {module}.{name}: {args}",)
 
 
 @pytest.mark.feature("ledger-warm-writer")

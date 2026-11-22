@@ -1,6 +1,8 @@
 """The host's warm ledger writer."""
 
 import argparse
+import functools
+import importlib
 import json
 import os
 import signal
@@ -16,6 +18,7 @@ from scripts.swarm_ledger import ledger_server, ports
 from scripts.tick.adapters import database_ledger
 
 NAME = "ledger-writer.sock"
+RAISED = b"raised"
 CHECK_S = 5.0
 POLL_S = 0.5
 PROBE_S = 1.0
@@ -41,7 +44,8 @@ def connected(timeout: float, where: Path | None = None) -> socket.socket:
 
 
 def ask(sock: socket.socket, slug: str, path: str, payload: dict[str, Any] | None) -> tuple[int, bytes]:
-    """The writer's status and body for one ledger API request sent on ``sock`` as this process's caller."""
+    """The writer's status and body for one ledger API request sent on ``sock`` as this process's caller; an error
+    the writer's in process call raised is raised again here."""
     with sock:
         asked = {
             "slug": slug,
@@ -56,7 +60,29 @@ def ask(sock: socket.socket, slug: str, path: str, payload: dict[str, Any] | Non
             head, body = reply.readline(), reply.read()
     if not head.endswith(b"\n"):
         raise EOFError("the ledger writer closed with no answer")
+    if head == RAISED + b"\n":
+        raise reraised(body)
     return int(head), body
+
+
+def raised(exc: Exception) -> bytes:
+    """The reply that carries ``exc``, an error the in process call raised, back to the caller."""
+    kind = type(exc)
+    carried = {"module": kind.__module__, "name": kind.__qualname__, "args": list(exc.args)}
+    return RAISED + b"\n" + json.dumps(carried, default=str).encode()
+
+
+def reraised(body: bytes) -> Exception:
+    """The error a ``raised`` reply carries, rebuilt as the class the writer raised, else a runtime error naming it."""
+    carried = json.loads(body)
+    try:
+        kind: Any = functools.reduce(getattr, carried["name"].split("."), importlib.import_module(carried["module"]))
+        error = kind(*carried["args"])
+    except (ImportError, AttributeError, TypeError):
+        error = None
+    if isinstance(error, Exception):
+        return error
+    return RuntimeError(f"the ledger writer raised {carried['module']}.{carried['name']}: {carried['args']}")
 
 
 class Answering(socketserver.StreamRequestHandler):
@@ -65,13 +91,19 @@ class Answering(socketserver.StreamRequestHandler):
     timeout = READ_S
 
     def handle(self) -> None:
-        """Reply with the in process answer's status line and body."""
+        """Reply with the in process answer's status line and body, or with the error the in process call raises."""
         sent = self.rfile.read()
         if not sent:
             return
         asked = json.loads(sent)
         with database_ledger.acting(asked["principal"]):
-            _, status, body = database_ledger.replied(asked["slug"], asked["path"], asked["payload"], asked["headers"])
+            try:
+                _, status, body = database_ledger.replied(
+                    asked["slug"], asked["path"], asked["payload"], asked["headers"]
+                )
+            except Exception as exc:
+                self.wfile.write(raised(exc))
+                raise
         self.wfile.write(b"%d\n" % status + body)
 
 
