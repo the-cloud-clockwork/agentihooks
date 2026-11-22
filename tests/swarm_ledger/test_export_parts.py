@@ -123,15 +123,13 @@ def test_the_tick_view_parts_are_accepted(live: dict) -> None:
 
 
 @pytest.mark.feature("tick-view-plan-graph")
-def test_the_held_tick_view_admits_tasks_under_focused_slices_and_plans(
-    live: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_the_held_tick_view_admits_tasks_under_focused_slices_and_plans(tmp_path: Path) -> None:
     from scripts.swarm import freeze
-    from scripts.swarm_ledger.repository import hierarchy
+    from scripts.swarm_ledger.api.routes import export_text
+    from scripts.swarm_ledger.repository import fragments, hierarchy
     from scripts.tick import view
-    from tests.swarm_ledger.test_api_v1 import stored
 
-    document = request(live, "POST", "export", {"since": 0})[1]["data"]
+    document: dict[str, Any] = {"_meta": {}}
     document.update(
         plans=[{"id": "plan-one"}, {"id": "plan-two"}],
         phases=[
@@ -154,10 +152,10 @@ def test_the_held_tick_view_admits_tasks_under_focused_slices_and_plans(
             {"verb": "focus", "target": "plans/plan-two"},
         ],
     )
-    stored(monkeypatch, document)
 
     def reader(since: int, parts: tuple[str, ...], after: int | None) -> dict[str, Any]:
-        return parted(live, since, list(parts))
+        assert since == 0
+        return {"generation": 7, **json.loads(export_text(fragments.document(document), parts))}
 
     held = view.refreshed(tmp_path / "view.json", reader)
     expected = frozenset({"sliced", "direct", "planned"})

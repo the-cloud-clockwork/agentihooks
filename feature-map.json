@@ -6629,7 +6629,7 @@
     },
     {
       "id": "tick-view-plan-graph",
-      "origin": "incident",
+      "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-view-slices-plans",
       "behaviour": "The held tick ledger view carries slices and plans through full and delta reads so phase and plan focus admit descendant tasks, and a changed parts contract starts a complete cache.",
       "seam": "Named ledger export parts, held tick view, hierarchy projection and freeze admission",
