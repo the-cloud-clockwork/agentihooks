@@ -541,18 +541,22 @@ class SQLiteLedgerRepository:
             if cached is not None and cached.generation >= row[0]:
                 return cached
             if cached is None and self.copies is not None:
-                cached = self.copies.adopt(slug, row[0])
-            state, writer = self._refreshed(connection, slug, cached, row[0])
+                with request_metrics.step("copy_adopt"):
+                    cached = self.copies.adopt(slug, row[0])
+            with request_metrics.step("copy_refresh"):
+                state, writer = self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
-                state = load(connection, slug)
-            if "events" in state["_meta"]:
-                state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
-            fragments = document(state, None if whole else cached.fragments)
-            entry = Entry(row[0], None, fragments.value, fragments, writer)
-            self._remember(slug, entry)
-            if self.copies is not None:
-                self.copies.keep(slug, entry, whole)
+                with request_metrics.step("copy_load"):
+                    state = load(connection, slug)
+            with request_metrics.step("copy_document"):
+                if "events" in state["_meta"]:
+                    state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
+                fragments = document(state, None if whole else cached.fragments)
+                entry = Entry(row[0], None, fragments.value, fragments, writer)
+                self._remember(slug, entry)
+                if self.copies is not None:
+                    self.copies.keep(slug, entry, whole)
         if whole:
             heap.release()
         return entry
@@ -726,10 +730,11 @@ class SQLiteLedgerRepository:
         with request_metrics.locked(self.domain.LOCK.ledger(slug)), self.connect() as connection:
             with connection:
                 request_metrics.begin_ledger(connection, slug, BEGIN_IMMEDIATE)
-                entry = self._entry(connection, slug)
-                state = entry.for_write()
-                rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
-                written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
+                with request_metrics.step("apply_locked"):
+                    entry = self._entry(connection, slug)
+                    state = entry.for_write()
+                    rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
+                    written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
             artifact_files.drop(slug, ctx.unstored)
             media_files.drop(slug, ctx.unstored)
             self._remember(slug, written)
