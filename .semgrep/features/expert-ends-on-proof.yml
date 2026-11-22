@@ -1,0 +1,23 @@
+rules:
+  - id: feature-expert-ends-on-proof
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-22, a lineage of experts ends only when the last expert completed the mission and proved it:
+      expert_lineage.complete is called by the complete command alone, after the mission proof passed its check and
+      a faulty proof was refused.
+    patterns:
+      - pattern: expert_lineage.complete(...)
+      - pattern-not-inside: |
+          def cmd_complete(...):
+            ...
+            $FOUND = handoff_expert.proof_problems(...)
+            ...
+            if $FOUND:
+              raise SwarmError(...)
+            ...
+    paths:
+      include:
+        - /scripts/
+        - /hooks/
+        - '*.test.py'

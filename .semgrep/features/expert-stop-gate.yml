@@ -1,0 +1,16 @@
+rules:
+  - id: feature-expert-stop-gate
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-22, an expert completes every instruction of its mission with no excuse for stopping short:
+      the gate registry carries the expert Stop gate, so the stop of an expert whose lineage still runs is judged.
+    patterns:
+      - pattern: |
+          GATES = {$NAME: $GATE for $ONE in (...)}
+      - pattern-not: |
+          GATES = {$NAME: $GATE for $ONE in (..., ExpertStop(), ...)}
+    paths:
+      include:
+        - /scripts/gates/entry.py
+        - '*.test.py'

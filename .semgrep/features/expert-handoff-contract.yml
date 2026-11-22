@@ -1,0 +1,31 @@
+rules:
+  - id: feature-expert-handoff-contract
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-22, an expert hands its seat off with its own handoff: the mission, what is done and pending,
+      the assumptions, the tests and the validation. The handoff command and the context limit gate judge a document
+      through scripts/handoff/contracts.py, which holds an expert to that contract, so neither calls the Handoff v2
+      check on its own, except the gate for a session it has just found is no expert.
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              def cmd_handoff(...):
+                ...
+          - pattern: handoff_check.problems(...)
+      - patterns:
+          - pattern-inside: |
+              def $GATE(...):
+                ...
+          - metavariable-regex:
+              metavariable: $GATE
+              regex: ^(_handoff_refusal|_problems)$
+          - pattern: handoff_check.problems(...)
+          - pattern-not-inside: |
+              if not _expert(...):
+                ...
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - /hooks/context/context_recycle.py
+        - '*.test.py'
