@@ -42,5 +42,10 @@ def test_each_mode_of_the_stop_gate_is_typed_on_the_lineage_page_as_the_shell_ta
         assert cli.gate_mode(key, value) == {ExpertStop.name: modes.normalize(value)}
 
 
-def test_the_lineage_page_marks_what_it_describes_before_it_is_built() -> None:
-    assert "## Not yet built" in PAGE.read_text()
+@pytest.mark.feature("expert-seat-step")
+def test_the_lineage_page_describes_how_a_seat_is_kept_and_marks_nothing_as_not_built() -> None:
+    text = PAGE.read_text()
+    assert "## How a seat is kept" in text and "## Starting from a handoff" in text
+    assert "Not yet built" not in text
+    assert "`agentihooks swarm <id> expert start <mission file> --handoff <doc> --from <session>`" not in text
+    assert "agentihooks swarm <id> expert start <mission file> --handoff <doc> --from <session>" in text

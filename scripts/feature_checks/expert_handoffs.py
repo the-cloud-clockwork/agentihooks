@@ -1,19 +1,21 @@
 """Live check of the expert handoffs: in every swarm that is not stopped, the handoff an expert left on the seat of a
-running lineage conforms to the expert handoff contract against the saved mission of that lineage. Its Read first
+running lineage conforms to the expert handoff contract against the saved mission of that lineage, and the Handoff
+v2 a lineage was started from conforms to Handoff v2. Its Read first
 addresses resolved when the handoff command took the document and are not resolved again: an address may rightly
 stop resolving afterwards. A stored document with no title line is the runtime's recovery note: it is listed and not
 judged. The check prints one line per lineage that holds a document and never an account or a credential."""
 
 import sys
-from typing import Protocol
+from typing import Any, Protocol
 
 from scripts.feature_checks.expert_missions import Missions
-from scripts.handoff import expert
+from scripts.handoff import check, expert
 from scripts.swarm import expert_lineage
 from scripts.swarm.store import SwarmError
 
 FAIL = "FAIL: "
 CONFORMS = "{slug} lineage {id} holds a conforming expert handoff"
+SEED = "{slug} lineage {id} holds the conforming Handoff v2 it was started from"
 RECOVERY = "{slug} lineage {id} holds a recovery note the runtime wrote"
 NONE = "no running expert lineage holds a handoff"
 
@@ -23,18 +25,26 @@ class Handoffs(Missions, Protocol):
 
     def handoff(self, slug: str, task: str) -> str: ...
 
+    def handoff_envelope(self, slug: str, task: str) -> dict[str, Any] | None: ...
+
 
 def _judged(store: Handoffs, slug: str, lineage: expert_lineage.Lineage, text: str) -> str:
-    """The line for the document a running lineage holds: conforming, failing with every fault, or a recovery note."""
+    """The line for the document a running lineage holds: conforming, failing with every fault, or a recovery note.
+    The Handoff v2 a lineage was started from, known by the reason of its envelope, is held to Handoff v2; every
+    other titled document is held to the expert handoff."""
     if not text.lstrip().startswith("# "):
         return RECOVERY.format(slug=slug, id=lineage.id)
+    seed = (store.handoff_envelope(slug, lineage.id) or {}).get("reason") == expert.SEED
     try:
-        found = expert.problems(text, _resolved_when_taken, slug, expert_lineage.mission(store, slug, lineage))
+        if seed:
+            found = check.problems(text, _resolved_when_taken)
+        else:
+            found = expert.problems(text, _resolved_when_taken, slug, expert_lineage.mission(store, slug, lineage))
     except SwarmError as fault:
         found = [str(fault)]
     if found:
         return f"{FAIL}{slug} lineage {lineage.id}: {'; '.join(found)}"
-    return CONFORMS.format(slug=slug, id=lineage.id)
+    return (SEED if seed else CONFORMS).format(slug=slug, id=lineage.id)
 
 
 def _resolved_when_taken(address: str) -> bool:
