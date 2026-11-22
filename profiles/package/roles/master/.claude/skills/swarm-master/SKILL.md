@@ -73,7 +73,7 @@ cannot use take other work.
 - Every loop, read the orders: `agentihooks api --slug <slug> get orders`. An
   order with `claimable` 0 and `busy` 0 is stuck: fix what its verdicts name.
   An `order waiting` finding names an order whose unfinished tasks had nothing
-  claimed or in a pull request for thirty minutes.
+  claimed or in a pull request for more than thirty minutes.
 - A handoff carries the open orders by code: the envelope lists them and the
   successor's opening prompt shows them.
 

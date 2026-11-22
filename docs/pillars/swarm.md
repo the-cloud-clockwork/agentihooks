@@ -8786,9 +8786,10 @@ nothing; a focus stays the hold for "only this runs".
   opening prompt shows them, the master refocus block lists the phases under an order first, and the master loop
   seat cron reads the orders every loop.
 - **Order waiting finding.** Every ten minutes the slow lane `order waiting` step notes each open order whose
-  unfinished tasks have nothing claimed or in a pull request. Past thirty minutes an `order waiting` health finding
-  names the order, its unfinished and claimable counts and each reason the claim gate holds its tasks, and the
-  findings pass sends it to the master inbox for a verdict.
+  unfinished tasks have nothing claimed or in a pull request. Once it has seen an order so for more than thirty
+  minutes, forty at that cadence, an `order waiting` health finding names the order, its unfinished and claimable
+  counts and each reason the claim gate holds its tasks, and the findings pass sends it to the master inbox for a
+  verdict. A claim taken and released between two sightings is not seen.
 
 ### How a freeze hold is named
 
