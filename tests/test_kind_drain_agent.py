@@ -4,7 +4,6 @@ import time
 from pathlib import Path
 from types import ModuleType
 
-import fakeredis
 import pytest
 
 from scripts.hive import remove
@@ -44,18 +43,20 @@ def _drain_agent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ModuleType:
     return module
 
 
-def _seated(client: fakeredis.FakeRedis, tmp_path: Path) -> tuple[RedisStore, AgentRecord]:
-    store = RedisStore(client)
+def _seated(tmp_path: Path) -> tuple[RedisStore, AgentRecord]:
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, str(tmp_path), 0, 0, state="stopped"))
     name = store.next_name(SLUG, "eng", 1)
     seated = AgentRecord(name, "eng", TASK, seat=f"eng-1@{SLUG}", hive=HIVE, state="working", started_at=1)
     return store, store.start_execution(SLUG, seated)
 
 
-def _handoff(store: RedisStore, client: fakeredis.FakeRedis) -> tuple[str, str, str]:
+def _handoff(store: RedisStore) -> tuple[str, str, str]:
     envelope = store.handoff_envelope(SLUG, TASK)
     assert envelope is not None
-    return envelope["agent"], envelope["reason"], json.loads(str(client.get(f"kind-drain:{SLUG}:handed")))["hive"]
+    return envelope["agent"], envelope["reason"], json.loads(store.redis.get(f"kind-drain:{SLUG}:handed"))["hive"]
 
 
 @pytest.mark.feature("kind-drain-agent-reads-session-mail")
@@ -63,14 +64,13 @@ def test_the_kind_drain_agent_records_its_own_recycle_handoff_once_its_seat_hold
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     drain_agent = _drain_agent(monkeypatch, tmp_path)
-    client = fakeredis.FakeRedis(decode_responses=True)
-    store, agent = _seated(client, tmp_path)
-    SeatRegistry(client).occupy(agent.seat, agent.name, 1)
-    InboxStore(client).send(remove.SENDER, agent.seat, remove.ROLL.format(hive=HIVE, slug=SLUG))
+    store, agent = _seated(tmp_path)
+    SeatRegistry(store.redis).occupy(agent.seat, agent.name, 1)
+    InboxStore(store.redis).send(remove.SENDER, agent.seat, remove.ROLL.format(hive=HIVE, slug=SLUG))
 
     drain_agent.hand_off(store, agent)
 
-    assert _handoff(store, client) == (agent.name, "recycle", HIVE)
+    assert _handoff(store) == (agent.name, "recycle", HIVE)
     assert store.handoff_seat(SLUG, TASK) == agent.seat
 
 
@@ -79,10 +79,9 @@ def test_the_kind_drain_agent_sees_the_roll_order_the_hive_drain_sends_to_its_na
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     drain_agent = _drain_agent(monkeypatch, tmp_path)
-    client = fakeredis.FakeRedis(decode_responses=True)
-    store, agent = _seated(client, tmp_path)
-    remove._order(InboxStore(client), {}, [(SLUG, agent)], remove.ROLL, HIVE)
+    store, agent = _seated(tmp_path)
+    remove._order(InboxStore(store.redis), {}, [(SLUG, agent)], remove.ROLL, HIVE)
 
     drain_agent.hand_off(store, agent)
 
-    assert _handoff(store, client) == (agent.name, "recycle", HIVE)
+    assert _handoff(store) == (agent.name, "recycle", HIVE)
