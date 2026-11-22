@@ -8380,6 +8380,20 @@
       ]
     },
     {
+      "id": "type-gate-cpu-workers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-gate-workers-cpu",
+      "behaviour": "The type gate sizes its checker pool from process allowed CPUs minus one minute load, bounded to one through four workers. AGENTIHOOKS_TYPE_WORKERS overrides that selection within the same bounds.",
+      "seam": "scripts.type_gate.measure through the checker executor worker count",
+      "tests": [
+        "tests/test_type_gate_workers.py::test_measure_sizes_workers_from_allowed_cpus_and_load",
+        "tests/test_type_gate_workers.py::test_measure_honors_a_bounded_worker_override",
+        "tests/test_type_gate_workers.py::test_measure_refuses_an_invalid_worker_override",
+        "tests/test_type_gate_workers.py::test_measure_uses_cpu_count_when_affinity_is_unavailable",
+        "tests/test_type_gate_workers.py::test_measure_uses_one_worker_when_load_is_unavailable"
+      ]
+    },
+    {
       "id": "type-gate-repeatable-counts",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-strict-type-gate-flake",
@@ -13467,7 +13481,7 @@
       "id": "type-gate-one-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-gate-cross-file-baseline",
-      "behaviour": "The strict type gate counts each source in its run of the head's every source layout, checked from the run's first source through its last graded one with four runs checked at once, so a pull request, prepush and a baseline refresh count a file the same type errors at one commit whichever other files they grade.",
+      "behaviour": "The strict type gate counts each source in its run of the head's every source layout, checked from the run's first source through its last graded one with up to four runs checked at once according to CPU availability and load, so a pull request, prepush and a baseline refresh count a file the same type errors at one commit whichever other files they grade.",
       "seam": "scripts.type_gate.measure through the source lists of its basedpyright runs",
       "tests": [
         "tests/test_type_gate.py::test_a_file_counts_the_same_errors_whichever_other_files_the_gate_checks",
