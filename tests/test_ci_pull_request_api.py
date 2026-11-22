@@ -196,6 +196,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_marker_vectors.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/arrival.py",
+        "scripts/ci_mutation/evidence.py",
         "scripts/ci_mutation/identity.py",
         "scripts/ci_mutation/measured.py",
         "scripts/ci_mutation/merge.py",

@@ -1,6 +1,32 @@
 {
   "features": [
     {
+      "id": "lab-remote-repository-owner",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2713",
+      "behaviour": "A lab remote URL with an owner serves a checkout only when both its owner and repository name match the origin, ignoring case and transport. Ownerless lab mirrors and local repository paths retain their existing name match.",
+      "seam": "scripts.ci_lab.remote.checkout.serves",
+      "tests": [
+        "tests/ci_lab/test_remote_repository_owner.py::test_lab_remote_matches_repository_owner"
+      ]
+    },
+    {
+      "id": "mutation-stats-failure-upload-set",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-failure-upload-trim",
+      "behaviour": "Failed mutation statistics uploads retain one source workspace copy and every part diagnostic, excluding repeated source copies and disposable caches without changing producer workspaces or successful statistics and shard uploads.",
+      "seam": "scripts.ci_mutation.evidence.stage and main with both statistics failure uploads",
+      "tests": [
+        "tests/test_ci_mutation_evidence.py::test_failed_statistics_upload_contains_one_trimmed_workspace",
+        "tests/test_ci_mutation_evidence.py::test_staging_preserves_every_parts_diagnostics_and_the_producer_workspace",
+        "tests/test_ci_mutation_evidence.py::test_failure_before_workspace_setup_keeps_available_diagnostics",
+        "tests/test_ci_mutation_evidence.py::test_failure_before_output_exists_does_not_create_evidence",
+        "tests/test_ci_mutation_evidence.py::test_command_line_uses_the_statistics_failure_upload_selection",
+        "tests/test_ci_mutation_evidence.py::test_both_statistics_failure_uploads_use_the_trimmed_evidence_set",
+        "tests/test_ci_mutation_evidence.py::test_successful_statistics_and_shard_evidence_keep_their_existing_upload_sets"
+      ]
+    },
+    {
       "id": "mutation-timeout-without-killer",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutant-timeout-retry-without-killer",
@@ -36,6 +62,19 @@
         "tests/scheduler/test_service.py::test_a_supervisor_ends_without_a_new_runner_once_its_runner_was_refused",
         "tests/scheduler/test_service.py::test_the_supervisor_entrypoint_exits_with_the_code_its_supervisor_stopped_on",
         "tests/swarm/test_timer_install.py::test_the_scheduler_is_its_own_restarting_user_service_apart_from_the_units_that_start_it"
+      ]
+    },
+    {
+      "id": "scheduler-refused-restart-skip",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-wait-pass-skips-refused-scheduler",
+      "behaviour": "A scheduler supervisor that stopped because its state store refused its credential leaves a refusal file, and every later start, the fifteen second swarm wait pass included, starts nothing while a probe read of the scheduler entries with the caller's environment is refused, times out or cannot start, even when the store answers a ping; the first accepted probe removes the file and the start goes ahead. A probe that exits with any other nonzero code starts nothing either, a bus authorization refusal counts as refused, and a supervisor that starts removes any refusal left behind, so one that later stopped on silence or cleanly is started again on the next pass with no probe.",
+      "seam": "scripts.scheduler.service.supervise, ensure_running, probe and main probe mode",
+      "tests": [
+        "tests/scheduler/test_service.py::test_a_supervisor_that_stopped_on_silence_or_cleanly_is_started_again_on_the_next_pass",
+        "tests/scheduler/test_service.py::test_the_wait_pass_starts_no_scheduler_after_a_refused_exit_while_its_ping_answers_and_its_reads_are_refused",
+        "tests/scheduler/test_service.py::test_a_probe_that_fails_times_out_or_cannot_start_keeps_a_refused_scheduler_stopped",
+        "tests/scheduler/test_service.py::test_the_probe_returns_the_refused_code_when_the_bus_refuses_its_authorization"
       ]
     },
     {
@@ -148,6 +187,17 @@
       ]
     },
     {
+      "id": "swarm-image-lab-dependencies",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-image-lab-deps",
+      "behaviour": "The swarm image installs the pinned test and mutation dependencies needed by every CI lab module, including the executors and mutation expansion the scheduler imports at call time. Image smoke discovers every lab module of the installed wheel, imports each one and fails on the first missing dependency.",
+      "seam": "Swarm image hashed dependency lock and the installed image lab module smoke",
+      "tests": [
+        "tests/test_swarm_lab_imports.py::test_swarm_image_smoke_imports_every_discovered_lab_module_and_refuses_a_missing_dependency",
+        "tests/test_swarm_lab_imports.py::test_swarm_image_smoke_reaches_every_lab_module_on_disk"
+      ]
+    },
+    {
       "id": "swarm-progress-data",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-bundle-ledger-leftovers",
@@ -196,6 +246,22 @@
       "rules": ["lab-push-zero-base-unchecked"],
       "tests": [
         "tests/ci_lab/test_intake.py::test_a_new_branch_push_with_a_zero_before_names_no_head"
+      ]
+    },
+    {
+      "id": "swarm-launch-acknowledgements",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2677",
+      "behaviour": "The launches command reports each swarm agent's acknowledged hive and launch time through the public events reader, with null fields for missing or mismatched acknowledgements.",
+      "seam": "scripts.swarm.launch_starts.command and the swarm parser over execution_stop.started",
+      "tests": [
+        "tests/swarm/test_launch_starts.py::test_launches_parser_dispatches_the_public_command",
+        "tests/swarm/test_launch_starts.py::test_launches_print_acknowledged_and_missing_starts",
+        "tests/swarm/test_launch_starts.py::test_launches_print_reconstructed_acknowledgement_time",
+        "tests/swarm/test_launch_starts.py::test_launches_print_missing_acknowledgement",
+        "tests/swarm/test_launch_starts.py::test_launches_reject_mismatched_acknowledgements",
+        "tests/swarm/test_launch_starts.py::test_launches_close_the_bus_on_read_failure",
+        "tests/swarm/test_launch_starts.py::test_launches_print_an_empty_agent_list"
       ]
     },
     {
@@ -303,6 +369,37 @@
         "tests/test_credential_guard.py::test_an_unquoted_heredoc_without_a_credential_substitution_passes",
         "tests/test_credential_guard.py::test_a_heredoc_substitution_keeps_the_credential_tree_scan",
         "tests/test_credential_guard.py::test_a_spelled_heredoc_token_hides_no_later_heredoc_body"
+      ]
+    },
+    {
+      "id": "credential-guard-balanced-substitutions",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cred-guard-balanced-substitution",
+      "behaviour": "The credential guard reads each dollar and process command substitution to its balanced closing parenthesis, skipping quoted, escaped and nested parentheses, and each backtick span to its close, then judges the body as a command split on its own separators. A dotenv read or a token print inside such a substitution is refused at the top level of a Bash command and in an unquoted heredoc body, even when the body holds a quoted parenthesis or a semicolon. Safe substitutions, arithmetic, quoted heredoc bodies and escaped markers pass. An unbalanced opener keeps the first parenthesis reading, so a read the older scan refused stays refused, and substitutions nested deeper than the limit are refused without recursing.",
+      "seam": "hooks.context.credential_guard.decide on Bash payloads with command substitutions and heredoc bodies",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_substitution_that_reads_no_credential_passes",
+        "tests/test_credential_guard.py::test_a_credential_read_in_a_balanced_command_substitution_is_refused",
+        "tests/test_credential_guard.py::test_a_token_print_in_a_balanced_command_substitution_is_refused",
+        "tests/test_credential_guard.py::test_an_unquoted_heredoc_substitution_that_reads_no_credential_passes",
+        "tests/test_credential_guard.py::test_a_credential_read_in_a_balanced_heredoc_substitution_is_refused",
+        "tests/test_credential_guard.py::test_a_quoted_heredoc_balanced_substitution_stays_literal",
+        "tests/test_credential_guard.py::test_an_unbalanced_substitution_read_stays_refused",
+        "tests/test_credential_guard.py::test_substitutions_nested_to_the_limit_pass",
+        "tests/test_credential_guard.py::test_substitutions_nested_past_the_limit_are_refused"
+      ]
+    },
+    {
+      "id": "credential-guard-stage-substitutions",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44944557560-0",
+      "behaviour": "The credential guard judges each command substitution of a stage again as a command in the directory an earlier cd of the same command entered, so a recursive search inside a substitution of a tree that holds a credential file is refused there even when the starting directory holds none. A command substitution whose body opens with an input redirection or a here string is refused when the text after it ends in a credential file name.",
+      "seam": "hooks.context.credential_guard.evaluate and decide on Bash payloads whose stages hold command substitutions",
+      "tests": [
+        "tests/test_credential_guard.py::test_a_substitution_after_a_cd_scans_the_tree_the_cd_entered",
+        "tests/test_credential_guard.py::test_a_read_after_a_leading_input_redirection_in_a_substitution_is_refused"
       ]
     },
     {
@@ -832,6 +929,19 @@
       "tests": [
         "tests/test_swarm_redis_grace.py::test_the_pass_loop_rides_out_redis_refusing_its_waits_between_passes",
         "tests/test_swarm_redis_grace.py::test_startup_rides_out_redis_refusing_its_retry_wait"
+      ]
+    },
+    {
+      "id": "controller-liveness-rides-out-redis-outage",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-liveness-redis-grace",
+      "behaviour": "With the control API disabled, the controller liveness probe runs the controller live command, so a Redis outage inside the controller Redis grace window keeps the probe live and the kubelet restarts no replica, standby or leading, while a lapsed controller lease still fails it. Without the control API port setting the live probe checks only the leases and skips the health endpoint it cannot reach.",
+      "seam": "The API disabled livenessProbe exec of the swarm chart controller template, and controller_probes.live without AGENTIHOOKS_CONTROL_API_PORT",
+      "tests": [
+        "tests/test_swarm_redis_grace.py::test_api_disabled_liveness_command_stays_live_while_redis_refuses_inside_the_grace_window",
+        "tests/test_swarm_redis_grace.py::test_api_disabled_liveness_command_fails_on_a_lapsed_lease_once_redis_answers",
+        "tests/test_swarm_controller_probes.py::test_live_without_the_control_api_passes_on_held_leases_with_no_endpoint_check",
+        "tests/test_swarm_controller_probes.py::test_live_without_the_control_api_still_fails_on_a_lapsed_lease"
       ]
     },
     {
@@ -1955,12 +2065,14 @@
       "id": "hive-root-bus-re-mint",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2531-reoffer",
-      "behaviour": "hive run, after the operator env fills and before the lane spokes start, compares the publish and subscribe grant of the stored root hive bus credential with what nats_grant.member_claims mints now for the swarms the hub signer lists for root; when they differ, such as a credential minted before the per member stop consumer grants, or the stored credential does not decode, it re-mints through root_bus.write and loads the rewritten bus env into the hive run process before the spokes open the bus; a matching credential is kept unchanged, no signer is read without a stored credential, and a signer that cannot mint keeps the stored credential and logs why.",
+      "behaviour": "hive run, after the operator env fills and before the lane spokes start, compares the publish and subscribe grant of the stored root hive bus credential with what nats_grant.member_claims mints now for the swarms the hub signer lists for root; when they differ, such as a credential minted before the per member stop consumer grants, or the stored credential does not read or decode, it re-mints through root_bus.write and loads the rewritten bus env into the hive run process before the spokes open the bus; a matching credential is kept unchanged, no signer is read without a stored credential, and a signer that cannot mint, or a credential that can be neither read nor rewritten, keeps the stored credential and logs why while hive run goes on to start the spokes and telemetry.",
       "seam": "root_bus.refresh and hive run",
       "tests": [
         "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_stale_root_credential_before_the_lane_spokes_read_its_env",
         "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_root_credential_whose_subscribe_grant_alone_differs",
         "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_root_credential_that_does_not_decode",
+        "tests/hive/test_root_bus.py::test_hive_run_re_mints_a_root_credential_that_cannot_be_read",
+        "tests/hive/test_root_bus.py::test_hive_run_keeps_the_stored_root_credential_when_it_can_be_neither_read_nor_rewritten",
         "tests/hive/test_root_bus.py::test_hive_run_keeps_the_stored_root_credential_when_the_signer_cannot_mint",
         "tests/hive/test_root_bus.py::test_hive_run_keeps_a_root_credential_whose_grant_matches_a_fresh_mint",
         "tests/hive/test_root_bus.py::test_hive_run_reads_no_signer_without_a_stored_root_credential",
@@ -2295,7 +2407,7 @@
       "id": "hub-admission-hive-asks-again",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2542",
-      "behaviour": "A hive whose admit ask the hub leaves unanswered keeps the offer as its own pending admission, its claim asked by that hive, and asks the hub again on its next poll with no wait for a redelivery, so an admission the hub kept past the hive's wait launches even after the hub readiness pass withdrew the offer, without the hub launch check freeing it and raising the claim generation by two. It asks on every poll for as long as the hub leaves the ask unanswered, with no delivery cap, because a restarting hub answers no responders at once and a cap would dead letter offers still open, and the launch needs no second room reading because its take already passed one; a held answer to the repeat ask returns the offer, a refusal withdraws it, and a pending admission another hive now asks for is dropped. The hub answers a repeat ask from the same hive with that hive's own admission of the offer once the admission leaves the hive's turn, holds the answer while the admission outlasts the turn wait, and gives another hive none. An asked claim keeps other hives off the offer until its hive is lost.",
+      "behaviour": "A hive whose admit ask the hub leaves unanswered keeps the offer as its own pending admission, its claim asked by that hive, and asks the hub again on its next poll with no wait for a redelivery, so an admission the hub kept past the hive's wait launches even after the hub readiness pass withdrew the offer, without the hub launch check freeing it and raising the claim generation by two. It asks on every poll for as long as the hub leaves the ask unanswered, with no delivery cap, because a restarting hub answers no responders at once and a cap would dead letter offers still open, and the launch needs no second room reading because its take already passed one; a held answer to the repeat ask returns the offer, a refusal withdraws it, and a pending admission another hive now asks for is dropped. The hub answers a repeat ask from the same hive with that hive's own admission of the offer once the admission leaves the hive's turn, holds the answer while the admission outlasts the turn wait, keeps holding it while that admission is still claiming after the hive's turn key lapsed or another admission for the hive took the turn key, and gives another hive none; a claim that ends without an admission leaves no hold behind and never clears a mark another hive wrote. An asked claim keeps other hives off the offer until its hive is lost.",
       "seam": "Spoke.poll and LaneTasks.request on the hive, and Admission.admit on the hub",
       "rules": [
         "hive-unanswered-admit-waits-for-redelivery"
@@ -2312,6 +2424,9 @@
         "tests/hive/test_spoke.py::test_a_fresh_hive_keeps_its_claim_until_presence_expires",
         "tests/hive/test_lanes.py::test_a_held_answer_naming_the_hives_own_admission_in_progress_raises_unanswered",
         "tests/hub/test_admission.py::test_a_repeat_ask_while_the_hives_own_admission_holds_its_turn_is_held_and_another_hive_gets_none",
+        "tests/hub/test_admission.py::test_a_repeat_ask_while_the_hives_own_admission_still_claims_past_its_turn_key_is_held",
+        "tests/hub/test_admission.py::test_an_admission_claim_that_ends_without_an_admission_leaves_no_claiming_mark",
+        "tests/hub/test_admission.py::test_an_admission_claim_leaves_a_claiming_mark_another_hive_wrote_in_place",
         "tests/hub/test_admission.py::test_a_repeat_ask_whose_own_ask_was_kept_before_its_turn_answers_that_admission",
         "tests/hub/test_admission.py::test_a_repeat_ask_waiting_on_the_hives_turn_answers_its_own_admission_once_it_leaves_the_turn",
         "tests/hub/test_admission.py::test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_answers_that_admission",
@@ -4802,6 +4917,32 @@
       ],
       "rules": [
         "hive-order-never-withdrawn"
+      ]
+    },
+    {
+      "id": "hive-drain-order-one-life",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2792",
+      "behaviour": "A hive drain or release stop hand off order reaches only the agent life running on the hive it names; a successor in the same seat on another hive never reads it, the order closes when that agent leaves its seat, and other operator mail still moves to the seat for its next occupant.",
+      "seam": "scripts.hive.remove order addressing and scripts.inbox.exits.settle",
+      "tests": [
+        "tests/hive/test_remove.py::test_a_release_roll_order_reaches_only_the_agent_on_the_draining_hive_and_closes_when_it_leaves_its_seat",
+        "tests/inbox/test_exits.py::test_a_hive_hand_off_order_ends_with_the_life_it_was_sent_to",
+        "tests/inbox/test_exits.py::test_an_operator_message_that_is_no_hive_order_still_moves_to_the_seat_on_exit"
+      ],
+      "rules": [
+        "hive-order-sent-to-seat"
+      ]
+    },
+    {
+      "id": "kind-drain-agent-reads-session-mail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44956266312-1",
+      "behaviour": "The kind chart proof's scripted drain agent waits for its hive roll order in the mail a real session reads, so it sees the order wherever the hive drain addresses it and records its own recycle handoff on the draining hive before that hive stops.",
+      "seam": "the hand_off wait of deploy/helm/agentihooks-swarm/ci/hive-drain-agent.sh against scripts.hive.remove._order",
+      "tests": [
+        "tests/test_kind_drain_agent.py::test_the_kind_drain_agent_records_its_own_recycle_handoff_once_its_seat_holds_the_roll_order",
+        "tests/test_kind_drain_agent.py::test_the_kind_drain_agent_sees_the_roll_order_the_hive_drain_sends_to_its_name"
       ]
     },
     {
@@ -7940,7 +8081,7 @@
       "tests": [
         "tests/test_swarm_chart_controller_probes.py::test_controller_api_probes_use_kubelet_http",
         "tests/test_swarm_chart_controller_probes.py::test_controller_reserves_its_measured_cpu",
-        "tests/test_swarm_chart_controller_probes.py::test_api_disabled_controller_keeps_its_lease_probe",
+        "tests/test_swarm_chart_controller_probes.py::test_api_disabled_liveness_runs_the_controller_live_command",
         "tests/test_swarm_chart_controller_probes.py::test_kind_checks_the_rendered_http_probes",
         "tests/test_swarm_v2_readiness.py::test_readiness_is_open_and_reports_redis_without_deep_diagnostics",
         "tests/test_swarm_v2_readiness.py::test_readiness_redis_uses_bounded_sockets_without_retries",
@@ -9344,6 +9485,17 @@
       "seam": "scripts.swarm_ledger.ledger_server.serve and follow_shared over scripts.swarm_ledger.events.publishing.Publishing",
       "tests": [
         "tests/swarm_ledger/test_folder_store.py::test_the_folder_ledger_server_publishes_a_write_another_process_stored_without_a_read"
+      ]
+    },
+    {
+      "id": "ledger-server-follow-wakes-on-its-own-interval",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-follow-loop-latency",
+      "behaviour": "The ledger server's shared follow loop ends each wait at its own quarter second interval even when the scheduler fires timers once a second, so a write another process stores reaches the publisher within the follow interval plus a small margin.",
+      "seam": "scripts.swarm_ledger.ledger_server.follow_shared and scheduled_wait over scripts.scheduler.process_timer.wait",
+      "tests": [
+        "tests/swarm_ledger/test_follow_delivery.py::test_the_shared_follow_waits_at_most_its_own_interval",
+        "tests/swarm_ledger/test_follow_delivery.py::test_a_write_another_process_stores_reaches_the_publisher_within_the_follow_interval"
       ]
     },
     {
@@ -12268,7 +12420,7 @@
       "id": "lab-remote-in-workspaces",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/loop-remote-in-workspaces",
-      "behaviour": "Every workspace carries the lab remote: wt.sh new and tmp, swarm v2 workspace mirrors and hive checkouts at daemon start give a repository the lab remote at AGENTIHOOKS_LAB_REMOTE with a credential helper reading AGENTIHOOKS_LAB_REMOTE_TOKEN when the lab URL names the repository origin names. swarm publish --via lab pushes HEAD to refs/grade/<task> with the branch push option before origin and pushes origin on a green grade or at once with --direct, leaving origin untouched on a red one. A git push lab is a push: the prepush guard needs the gate, the one push gate holds one relaying the task branch while its checks run, panic spares one only for a registered fix, and the stop gate still counts only origin.",
+      "behaviour": "Every workspace carries the lab remote: wt.sh new and tmp, swarm v2 workspace mirrors and hive checkouts at daemon start give a repository the lab remote at AGENTIHOOKS_LAB_REMOTE with a credential helper reading AGENTIHOOKS_LAB_REMOTE_TOKEN when the lab URL names the repository origin names; the Python check also requires an owner the lab URL names to be origin's owner (lab-remote-repository-owner). swarm publish --via lab pushes HEAD to refs/grade/<task> with the branch push option before origin and pushes origin on a green grade or at once with --direct, leaving origin untouched on a red one. A git push lab is a push: the prepush guard needs the gate, the one push gate holds one relaying the task branch while its checks run, panic spares one only for a registered fix, and the stop gate still counts only origin.",
       "seam": "wt.sh new and tmp, swarm publish, swarm v2 workspace prepare, the hive daemon start, and the one push, panic, prepush and stop guards",
       "tests": [
         "tests/ci_lab/test_remote_checkout.py::test_name_is_the_lowercase_repository_a_remote_ends_in",

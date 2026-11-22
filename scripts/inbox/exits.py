@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from scripts.inbox.store import InboxStore
+    from scripts.inbox.store import InboxStore, Item
     from scripts.swarm.store import RedisStore
 
 BY = "swarm"
@@ -29,7 +29,7 @@ def settle(inbox, name, seat, exit_text, worlds=None):
         worlds.run(world, lambda w: _settle_world(w, name, seat, exit_text))
 
 
-def _settle_world(inbox, name, seat, exit_text):
+def _settle_world(inbox: "InboxStore", name: str, seat: str, exit_text: str) -> None:
     from scripts.inbox.store import CLOSED
     from scripts.swarm.naming import NameRegistry
 
@@ -41,7 +41,7 @@ def _settle_world(inbox, name, seat, exit_text):
         if item.state in CLOSED:
             continue
         if ended := _life_notice_end(item, name, exit_text):
-            inbox.settle(item.id, BY, "done", ended)
+            inbox.settle(item.id, item.sender, "done", ended)
         elif successor:
             inbox.redirect(item.id, BY, successor, f"{name} {exit_text}; passed to {successor}, its successor", name)
         elif seat and _task_continues(inbox, item, seat):
@@ -72,13 +72,13 @@ def _settle_taken_seat_mail(inbox: "InboxStore", name: str, exit_text: str, goes
             _settle_taken(inbox, item, held, name, exit_text, goes_on)
 
 
-def _settle_taken(inbox: "InboxStore", item, held: str, name: str, exit_text: str, goes_on: bool) -> None:
+def _settle_taken(inbox: "InboxStore", item: "Item", held: str, name: str, exit_text: str, goes_on: bool) -> None:
     """Seat mail a gone life took: back to pending for the seat's next occupant when the work goes on, else closed."""
     if goes_on and not _task_continues(inbox, item, held):
         exit_text = f"left its seat and task {item.task}"
         goes_on = False
     if ended := _life_notice_end(item, name, exit_text):
-        inbox.settle(item.id, BY, "done", ended)
+        inbox.settle(item.id, item.sender, "done", ended)
     elif goes_on:
         inbox.redirect(item.id, BY, held, f"{name} {exit_text}; back to {held} for its next occupant", held, name)
     elif (
@@ -103,11 +103,14 @@ def _task_continues(inbox: "InboxStore", item, seat: str) -> bool:
     return item.fyi or not item.task or not task or item.task == task
 
 
-def _life_notice_end(item, name: str, exit_text: str) -> str:
+def _life_notice_end(item: "Item", name: str, exit_text: str) -> str:
     """The close reason of a notice meant only for the life that left; '' for any other item."""
     from scripts.gates import push_stop
+    from scripts.hive import handoff_order
     from scripts.swarm import quota_notice
 
+    if handoff_order.is_order(item):
+        return f"{name} {exit_text}; its hive hand off order ended with it"
     if push_stop.is_notice(item):
         return push_stop.left(name, exit_text)
     if quota_notice.is_notice(item):

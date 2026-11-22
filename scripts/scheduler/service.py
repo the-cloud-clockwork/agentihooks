@@ -23,6 +23,7 @@ DRAIN_S = 30
 UNREACHABLE_S = 300
 UNREACHABLE = 3
 REFUSED = 4
+REFUSAL = "refused"
 STOPS = {UNREACHABLE: "its state store did not answer", REFUSED: "its state store refused its credential"}
 PASS_S = 1
 STARTER = "AGENTIHOOKS_SCHEDULER_STARTER"
@@ -153,6 +154,7 @@ def supervise(stop: Event | None = None) -> int:
     _take_over()
     with machine_lock("supervisor"):
         _identify(loaded)
+        (runtime_dir() / REFUSAL).unlink(missing_ok=True)
         while not stopped.is_set():
             child = subprocess.Popen(_command("run"), cwd=Path(__file__).resolve().parents[2])
             while child.poll() is None:
@@ -172,6 +174,8 @@ def supervise(stop: Event | None = None) -> int:
                     loaded = current
                     _identify(loaded)
             print(f"the scheduler runner {child.pid} exited with code {child.returncode}", file=sys.stderr)
+            if child.returncode == REFUSED:
+                (runtime_dir() / REFUSAL).touch()
             if child.returncode in STOPS:
                 print(f"the scheduler supervisor {os.getpid()} stops: {STOPS[child.returncode]}", file=sys.stderr)
                 return child.returncode
@@ -290,6 +294,33 @@ def _spawn_env(active: Mapping[str, str]) -> dict[str, str]:
     return spawned
 
 
+def _refusal_cleared(refusal: Path, active: Mapping[str, str]) -> bool:
+    """True when no refusal stands or a probe read with this environment is accepted, which removes the refusal."""
+    if not refusal.is_file():
+        return True
+    try:
+        probed = subprocess.run(
+            _command("probe"), cwd=ROOT, env=active, stdin=subprocess.DEVNULL, capture_output=True, timeout=30
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if probed.returncode:
+        return False
+    refusal.unlink()
+    return True
+
+
+def probe(scheduler: Scheduler) -> int:
+    """Read the scheduler entries once through the runner's own store: REFUSED when it refuses the credential."""
+    from scripts.events import state
+
+    try:
+        scheduler.state.get(scheduler.name("entries"))
+    except state.refused():
+        return REFUSED
+    return 0
+
+
 def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
     from scripts.events.state import backend
 
@@ -302,6 +333,8 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
         with machine_lock("startup", environ=active):
             with machine_lock("supervisor", environ=active):
                 pass
+            if not _refusal_cleared(runtime_dir(active) / REFUSAL, active):
+                return False
             if _unit_owns(runtime_dir(active)) and _start_unit():
                 return True
             with (runtime_dir(active) / "scheduler.log").open("ab") as log:
@@ -344,9 +377,11 @@ def _supervised() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks scheduler service")
-    parser.add_argument("mode", choices=("run", "supervise"))
+    parser.add_argument("mode", choices=("run", "supervise", "probe"))
     args = parser.parse_args(argv)
     try:
+        if args.mode == "probe":
+            return probe(Scheduler())
         if args.mode == "run":
             if asyncio.run(run(Scheduler())):
                 return UNREACHABLE
