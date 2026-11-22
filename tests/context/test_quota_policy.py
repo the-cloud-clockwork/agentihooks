@@ -341,7 +341,8 @@ def test_wait_directive_carries_a_cron_for_the_reset(
     assert at in text
     if swarm:
         assert f'agentihooks swarm {swarm} wait {minutes} --reason "quota reset at {at}"' in text
-        assert "If the reset is still ahead when this wait ends, follow the next QUOTA WAIT directive." in text
+        assert "If this wait ends before the reset time in its reason, declare another bounded wait "
+            "until that time, even if QUOTA WAIT no longer appears." in text
         assert "agentihooks timer add" not in text
     else:
         assert f'agentihooks timer add --at "{at}" --session "sess-1"' in text

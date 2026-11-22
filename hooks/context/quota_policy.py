@@ -405,7 +405,8 @@ def _wait_command(reset: float, session_id: str, swarm: str | None) -> str:
         minutes = min(60, max(1, math.ceil((reset - time.time()) / 60)))
         return (
             f'agentihooks swarm {swarm} wait {minutes} --reason "quota reset at {at}"\n'
-            "If the reset is still ahead when this wait ends, follow the next QUOTA WAIT directive."
+            "If this wait ends before the reset time in its reason, declare another bounded wait "
+            "until that time, even if QUOTA WAIT no longer appears."
         )
     return (
         f'agentihooks timer add --at "{at}" --session "{session_id}" '
