@@ -28,7 +28,7 @@ jobs:
           python-version: '3.12'
       - name: Prove the rendered worker hive chart
         run: |
-          python3 -m pip install PyYAML
+          python3 -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
           bash deploy/worker/chart-proof.sh
 
   kind:

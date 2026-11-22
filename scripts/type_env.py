@@ -44,13 +44,20 @@ def environment(
 ) -> Path:
     """Return the interpreter of the environment for root's lock, building it when missing.
 
-    A build holds a lock per key, so concurrent runs on one lock build it once. Each use marks its environment, and a
-    build removes environments unused for STALE_SECONDS or beyond the MAX_ENVIRONMENTS most recently used.
+    A ready environment is reused under a shared lock per key, so a type gate run holding that lock for its grade never
+    delays it. A build holds the lock exclusively and checks again under it, so concurrent runs on one lock build it
+    once. Each use marks its environment, and a build removes environments unused for STALE_SECONDS or beyond the
+    MAX_ENVIRONMENTS most recently used.
     """
     target = home / key(root)
     python = target / "bin" / "python"
     ready = target / READY
     home.mkdir(parents=True, exist_ok=True)
+    with (home / f"{target.name}.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        if ready.is_file() and python.is_file():
+            ready.touch()
+            return python
     with (home / f"{target.name}.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if ready.is_file() and python.is_file():

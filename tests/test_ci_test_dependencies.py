@@ -1,8 +1,13 @@
+import ast
+import functools
 import os
 import re
 import shlex
 import subprocess
 import tomllib
+from collections import Counter
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -237,3 +242,921 @@ def test_mutation_jobs_keep_the_head_lock_when_the_head_has_one(tmp_path: Path, 
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "constraint=./.github/test-requirements.lock"
+
+
+CI_TOOLS_PREFIX = ".github/ci-tools/"
+CONSTRAINTS = ".github/test-constraints.txt"
+PLANT_LOCK = ".github/ci-tools/plant.lock"
+PLANT_PINS = (
+    "build==1.3.0\nmutmut==3.6.0\npip-audit==2.10.1\npytest==9.0.1\npyyaml==6.0.3\nruff==0.15.12\nsemgrep==1.177.0\n"
+)
+UNCONSTRAINED = "no checked in constraint"
+SOURCES = {".yml", ".yaml", ".sh", ".py"}
+RUNNERS = {"uvx", "uv tool run", "pipx run"}
+INSTALLER_WORDS = {"install", "uvx", "pipx", "tool"}
+CONTROL = {"&&", "||", ";", "|", "&", "(", ")", "|&", ";;"}
+REDIRECT = {">", ">>", "<", "<<", "<<<", ">&", "<&", "&>", "&>>", ">|", "<>"}
+CONSTRAINT_FLAGS = {"-c", "--constraint", "--constraints"}
+REQUIREMENT_FLAGS = {"-r", "--requirement", "--requirements", "--with-requirements"}
+NAMED_OPTIONS = {"--with", "--from", "--spec", "--with-executables-from"}
+EDITABLE_OPTIONS = {"-e", "--editable", "--with-editable"}
+INSTALLING = NAMED_OPTIONS | EDITABLE_OPTIONS | REQUIREMENT_FLAGS
+VALUED = (
+    CONSTRAINT_FLAGS
+    | REQUIREMENT_FLAGS
+    | {
+        "-e",
+        "--editable",
+        "-p",
+        "--python",
+        "--excludes",
+        "--exclude",
+        "-f",
+        "--find-links",
+        "-i",
+        "--index-url",
+        "--extra-index-url",
+        "--index",
+        "--default-index",
+        "--with",
+        "--from",
+        "--with-editable",
+        "--with-executables-from",
+        "-t",
+        "--target",
+        "--prefix",
+        "--root",
+        "--override",
+        "--overrides",
+        "-b",
+        "--build-constraint",
+        "--build-constraints",
+        "--extra",
+        "--group",
+        "--python-version",
+        "--python-platform",
+        "--platform",
+        "--implementation",
+        "--abi",
+        "--only-binary",
+        "--no-binary",
+        "-C",
+        "--config-setting",
+        "--config-settings",
+        "--global-option",
+        "--install-option",
+        "-P",
+        "--upgrade-package",
+        "--reinstall-package",
+        "--refresh-package",
+        "--no-build-isolation-package",
+        "--exclude-newer",
+        "--exclude-newer-package",
+        "--cache-dir",
+        "--resolution",
+        "--prerelease",
+        "--fork-strategy",
+        "--index-strategy",
+        "--keyring-provider",
+        "--link-mode",
+        "--torch-backend",
+        "--upgrade-strategy",
+        "--exists-action",
+        "--root-user-action",
+        "--progress-bar",
+        "--report",
+        "--timeout",
+        "--retries",
+        "--proxy",
+        "--cert",
+        "--client-cert",
+        "--use-feature",
+        "--use-deprecated",
+        "--pip-args",
+        "--spec",
+        "--suffix",
+        "--src",
+        "--log",
+        "--trusted-host",
+        "--allow-insecure-host",
+        "--config-file",
+        "--env-file",
+        "--color",
+        "--directory",
+        "--project",
+    }
+)
+PIP = re.compile(r"pip(?:\d+(?:\.\d+)*)?")
+LINE = re.compile(r"pip|uv|=")
+ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=.*")
+ENV_REFERENCE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+SHELL_RUN = re.compile(r"(?:\$\{?\w+\}?/)?((?:[\w.-]+/)*[\w.-]+\.sh)\b")
+MODULE_RUN = re.compile(r"\bpython3?\b[^\n;&|]*?\s-m\s+([A-Za-z_]\w*(?:\.\w+)*)")
+FILE_RUN = re.compile(r"\bpython(?:\d+(?:\.\d+)*)?\s+(?:-\w+\s+)*((?:[\w.-]+/)*[\w.-]+\.py)\b")
+NESTED_CONSTRAINT = re.compile(r"(?:-c\s*|--constraints?(?:=|\s+))(\S+)")
+NESTED_REQUIREMENT = re.compile(r"(?:-r\s*|--requirements?(?:=|\s+))(\S+)")
+NESTED_EDITABLE = re.compile(r"(?:-e\s*|--editable(?:=|\s+))(\S+)")
+LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+INTENTIONAL_SMOKES = {
+    ".github/workflows/publish-pypi.yml: pip install --no-cache-dir 'agentihooks==$VERSION'": (
+        "installs the release just published into a clean venv from the package index, as a user does, to prove it"
+    ),
+    ".github/workflows/test.yml: uv pip install --python '$RUNNER_TEMP/install-smoke-venv/bin/python' '$wheel[all]'": (
+        "installs the built wheel into a clean venv with the resolution a user gets from the package index"
+    ),
+    "scripts/packaging/swarm-init-smoke.sh: uv pip install --quiet --python '$work/venv/bin/python' .": (
+        "installs the checkout into a fresh venv with its natural resolution to prove a new user's first swarm init"
+    ),
+}
+FLOATING_INSTALLS: tuple[str, ...] = (
+    ".github/workflows/branch-lanes.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/coverage-stability.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
+    ".github/workflows/gate-protected.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/publish-pypi.yml: pip install build",
+    ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
+    ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
+    ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2",
+    ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2",
+    ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2 'semgrep==$SEMGREP_VERSION'",
+    ".github/workflows/test.yml: pip install 'playwright>=1.44.0' 'orjson>=3.10'",
+    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
+    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
+    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4' PyYAML==6.0.3",
+    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4' PyYAML==6.0.3",
+    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock tree-sitter tree-sitter-bash tree-sitter-javascript tree-sitter-css",
+    ".github/workflows/test.yml: pip install --quiet 'cryptography>=42'",
+    ".github/workflows/test.yml: pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1",
+    ".github/workflows/test.yml: pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0",
+    ".github/workflows/test.yml: pip install ruff==0.15.12",
+    ".github/workflows/test.yml: pip install ruff==0.15.12",
+    ".github/workflows/test.yml: pip install vulture==2.14",
+    ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
+    ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
+    ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
+    "scripts/ci_duration_provenance.yml: pip install 'pyyaml>=6.0'",
+    "scripts/ci_release.sh: pip install build",
+    "scripts/ci_reuse_job.yml: pip install 'pyyaml>=6.0'",
+)
+
+
+@dataclass(frozen=True)
+class _Floating:
+    key: str
+    reasons: tuple[str, ...]
+
+
+def _words(line: str) -> list[str]:
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError:
+        return line.split()
+
+
+def _split(words: list[str]) -> list[list[str]]:
+    commands: list[list[str]] = [[]]
+    target = False
+    for word in words:
+        if target:
+            target = False
+        elif word in CONTROL:
+            commands.append([])
+        elif word in REDIRECT:
+            target = True
+            if commands[-1] and commands[-1][-1].isdigit():
+                commands[-1].pop()
+        else:
+            commands[-1].append(word)
+    return [command for command in commands if command]
+
+
+def _assignments(words: list[str]) -> dict[str, str]:
+    return {name: value for name, _, value in (word.partition("=") for word in words if ASSIGNMENT.fullmatch(word))}
+
+
+def _shell_commands(text: str, env: dict[str, str]) -> Iterator[tuple[list[str], dict[str, str]]]:
+    scoped = dict(env)
+    for line in text.replace("\\\n", " ").splitlines():
+        if not LINE.search(line):
+            continue
+        for words in _split(_words(line)):
+            assigned = words[1:] if words[0] == "export" else words
+            if all(ASSIGNMENT.fullmatch(word) for word in assigned):
+                scoped |= _assignments(assigned)
+            else:
+                yield words, dict(scoped)
+
+
+def _yaml_runs(node: object, env: dict[str, str]) -> Iterator[tuple[str, dict[str, str]]]:
+    if isinstance(node, list):
+        for item in node:
+            yield from _yaml_runs(item, env)
+    elif isinstance(node, dict):
+        variables = node.get("env")
+        scoped = env | {str(k): str(v) for k, v in variables.items()} if isinstance(variables, dict) else env
+        if isinstance(node.get("run"), str):
+            yield str(node["run"]), scoped
+        for key, value in node.items():
+            if key != "env":
+                yield from _yaml_runs(value, scoped)
+
+
+def _assigned(node: ast.AST) -> tuple[str, ast.expr] | None:
+    if isinstance(node, ast.Assign) and len(node.targets) == 1:
+        target = node.targets[0]
+        return (target.id, node.value) if isinstance(target, ast.Name) else None
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+        return node.target.id, node.value
+    return None
+
+
+@functools.cache
+def _module_strings(text: str) -> dict[str, str]:
+    strings: dict[str, str] = {}
+    for statement in ast.parse(text).body:
+        pair = _assigned(statement)
+        if pair is not None:
+            name, value = pair
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                strings[name] = value.value
+    return strings
+
+
+def _imported_strings(node: ast.ImportFrom, root: Path) -> dict[str, str]:
+    if node.level or not node.module:
+        return {}
+    base = root.joinpath(*node.module.split("."))
+    source = next((path for path in (base.with_suffix(".py"), base / "__init__.py") if path.is_file()), None)
+    strings = _module_strings(source.read_text()) if source else {}
+    return {alias.asname or alias.name: strings[alias.name] for alias in node.names if alias.name in strings}
+
+
+def _python_name(node: ast.Name | ast.Starred, names: dict[str, str | list[str]]) -> list[str]:
+    value = names.get(ast.unparse(node.value) if isinstance(node, ast.Starred) else node.id)
+    if isinstance(value, list):
+        return list(value)
+    return [value] if isinstance(value, str) else [ast.unparse(node)]
+
+
+def _python_words(node: ast.expr, names: dict[str, str | list[str]]) -> list[str]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, (ast.Name, ast.Starred)):
+        return _python_name(node, names)
+    if isinstance(node, ast.Call) and ast.unparse(node.func) in {"str", "Path", "os.fspath"} and len(node.args) == 1:
+        return _python_words(node.args[0], names)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return ["/".join([*_python_words(node.left, names)[:1], *_python_words(node.right, names)[:1]])]
+    return [ast.unparse(node)]
+
+
+def _python_names(tree: ast.Module, root: Path) -> dict[str, str | list[str]]:
+    imported: dict[str, str] = {}
+    for statement in tree.body:
+        if isinstance(statement, ast.ImportFrom):
+            imported |= _imported_strings(statement, root)
+    nodes = list(ast.walk(tree))
+    stored = [node.id for node in nodes if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)]
+    bound = Counter([*imported, *stored, *(node.arg for node in nodes if isinstance(node, ast.arg))])
+    names: dict[str, str | list[str]] = {name: value for name, value in imported.items() if bound[name] == 1}
+    for name, value in (pair for node in nodes if (pair := _assigned(node)) is not None):
+        if bound[name] != 1:
+            continue
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            names[name] = value.value
+        elif isinstance(value, (ast.List, ast.Tuple)):
+            names[name] = [word for element in value.elts for word in _python_words(element, names)]
+    return names
+
+
+def _python_argvs(path: Path, root: Path) -> Iterator[list[str]]:
+    tree = ast.parse(path.read_text())
+    names = _python_names(tree, root)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.List, ast.Tuple)):
+            words = [word for element in node.elts for word in _python_words(element, names)]
+            if INSTALLER_WORDS.intersection(words):
+                yield words
+
+
+def _commands(path: Path, root: Path) -> Iterator[tuple[list[str], dict[str, str]]]:
+    if path.suffix == ".py":
+        yield from ((words, {}) for words in _python_argvs(path, root))
+    elif path.suffix == ".sh":
+        yield from _shell_commands(path.read_text(), {})
+    else:
+        for run, env in _yaml_runs(yaml.load(path.read_text(), Loader=LOADER), {}):
+            yield from _shell_commands(run, env)
+
+
+def _run_targets(path: Path, root: Path) -> list[Path]:
+    if path.suffix == ".py":
+        return []
+    text = path.read_text()
+    shells = [base / match for match in SHELL_RUN.findall(text) for base in (root, path.parent)]
+    modules = [root.joinpath(*module.split(".")) for module in MODULE_RUN.findall(text)]
+    candidates = [
+        *shells,
+        *(root / match for match in FILE_RUN.findall(text)),
+        *(module.with_suffix(".py") for module in modules),
+        *(module / "__main__.py" for module in modules),
+    ]
+    return [target for target in candidates if ".." not in target.parts and target.is_file()]
+
+
+def _ci_sources(root: Path) -> list[Path]:
+    tops = [*(root / ".github").glob("*"), *(root / "scripts").glob("ci_*")]
+    pending = [path for top in tops for path in (top.rglob("*") if top.is_dir() else [top]) if path.suffix in SOURCES]
+    sources: set[Path] = set()
+    while pending:
+        path = pending.pop()
+        if path.is_file() and path not in sources:
+            sources.add(path)
+            pending += _run_targets(path, root)
+    return sorted(sources)
+
+
+def _installer_at(names: list[str], index: int) -> tuple[str, int]:
+    name, following = names[index], names[index + 1 : index + 3]
+    if PIP.fullmatch(name) and following[:1] == ["install"]:
+        return ("uv pip install" if index and names[index - 1] == "uv" else "pip install"), index + 2
+    if name == "uvx":
+        return "uvx", index + 1
+    if name == "uv" and following in (["tool", "run"], ["tool", "install"]):
+        return f"uv tool {following[1]}", index + 3
+    if name == "pipx" and following[:1] in (["install"], ["run"]):
+        return f"pipx {following[0]}", index + 2
+    return "", 0
+
+
+def _installer(words: list[str]) -> tuple[str, list[str], dict[str, str]] | None:
+    names = [word.rsplit("/", 1)[-1] for word in words]
+    for index in range(len(names)):
+        kind, start = _installer_at(names, index)
+        if kind:
+            return kind, words[start:], _assignments(words[:index])
+    return None
+
+
+def _expand(word: str, env: dict[str, str]) -> str:
+    return ENV_REFERENCE.sub(lambda match: env.get(match[1] or match[2], match[0]), word)
+
+
+def _arguments(kind: str, args: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
+    options: list[tuple[str, str]] = []
+    targets: list[str] = []
+    words = iter(args)
+    for word in words:
+        if word.startswith("-") and len(word) > 1:
+            flag, equals, value = word.partition("=")
+            options.append((flag, value if equals or flag not in VALUED else next(words, "")))
+        elif kind in RUNNERS:
+            return options, [] if any(flag in {"--from", "--spec"} for flag, _ in options) else [word]
+        else:
+            targets.append(word)
+    return options, targets
+
+
+def _path_target(target: str) -> bool:
+    if "://" in target:
+        return " @ file://" in target or target.startswith("file://")
+    return target.startswith((".", "/", "~")) or "/" in target or target.endswith((".whl", ".tar.gz", ".zip"))
+
+
+def _pin(text: str) -> tuple[str, str] | None:
+    try:
+        requirement = Requirement(text)
+    except ValueError:
+        return None
+    specifiers = list(requirement.specifier)
+    if len(specifiers) != 1 or specifiers[0].operator not in {"==", "==="} or "*" in specifiers[0].version:
+        return None
+    return re.sub(r"[-_.]+", "-", requirement.name).lower(), specifiers[0].version
+
+
+def _pins(path: Path, follow: bool = True) -> set[tuple[str, str]]:
+    pins: set[tuple[str, str]] = set()
+    for line in path.read_text().splitlines():
+        text = line.split("#", 1)[0].strip().removesuffix("\\").strip()
+        nested = NESTED_CONSTRAINT.fullmatch(text) or NESTED_REQUIREMENT.fullmatch(text)
+        chained = path.parent / nested.group(1) if nested else None
+        if chained is not None and follow and chained.is_file():
+            pins |= _pins(chained, follow=False)
+        elif (pin := _pin(text)) is not None:
+            pins.add(pin)
+    return pins
+
+
+def _floating_lines(path: Path, seen: frozenset[Path] = frozenset()) -> list[str]:
+    floating: list[str] = []
+    for line in path.read_text().splitlines():
+        text = line.split("#", 1)[0].strip().removesuffix("\\").strip()
+        nested = NESTED_REQUIREMENT.fullmatch(text)
+        included = path.parent / nested.group(1) if nested else None
+        if included is not None and included.is_file():
+            floating += [] if included in seen | {path} else _floating_lines(included, seen | {path})
+        elif nested or NESTED_EDITABLE.fullmatch(text) or (text[:1] not in {"", "-"} and _pin(text) is None):
+            floating.append(text)
+    return floating
+
+
+def _constraint_file(value: str, root: Path) -> Path | None:
+    start = value.find(".github/")
+    relative = value[start:]
+    if start < 0 or (start and value[start - 1] != "/") or not (root / relative).is_file():
+        return None
+    if relative == CONSTRAINTS:
+        chained = "--constraint test-requirements.lock" in (root / CONSTRAINTS).read_text().splitlines()
+        return root / CONSTRAINTS if chained else None
+    tools = relative.startswith(CI_TOOLS_PREFIX) and "/" not in relative.removeprefix(CI_TOOLS_PREFIX)
+    return root / relative if relative == LOCK or tools else None
+
+
+def _constraint_files(kind: str, options: list[tuple[str, str]], env: dict[str, str], root: Path) -> list[Path]:
+    values = [value for flag, value in options if flag in CONSTRAINT_FLAGS | REQUIREMENT_FLAGS]
+    values += [
+        value
+        for flag, pip_args in options
+        if flag == "--pip-args"
+        for inner, value in _arguments("pip install", _words(pip_args))[0]
+        if inner in CONSTRAINT_FLAGS
+    ]
+    values += env.get("UV_CONSTRAINT" if kind.startswith("uv") else "PIP_CONSTRAINT", "").split()
+    return [file for value in values if (file := _constraint_file(value, root)) is not None]
+
+
+def _spec_problems(named: list[str], files: list[Path]) -> list[str]:
+    pins: set[tuple[str, str]] = set().union(*(_pins(file) for file in files))
+    problems: list[str] = []
+    for spec in named:
+        pin = _pin(spec)
+        if pin is None:
+            problems.append(f"floating version {spec}")
+        elif files and pin not in pins:
+            problems.append(f"{spec} is not pinned in its constraint")
+    return problems
+
+
+def _requirement_problems(options: list[tuple[str, str]], root: Path) -> list[str]:
+    return [
+        f"requirements file {value} is not a checked in lock"
+        for flag, value in options
+        if flag in REQUIREMENT_FLAGS
+        and value.rsplit("/", 1)[-1] != "pyproject.toml"
+        and _constraint_file(value, root) in {None, root / CONSTRAINTS}
+    ]
+
+
+def _lock_problems(files: list[Path], root: Path) -> list[str]:
+    locks = [root / LOCK if file == root / CONSTRAINTS else file for file in files]
+    return [
+        f"{lock.relative_to(root).as_posix()} holds {text}"
+        for lock in dict.fromkeys(locks)
+        for text in _floating_lines(lock)
+    ]
+
+
+def _problems(kind: str, args: list[str], env: dict[str, str], root: Path) -> tuple[str, ...]:
+    options, targets = _arguments(kind, [_expand(arg, env) for arg in args])
+    named = [target for target in targets if not _path_target(target)]
+    named += [value for flag, value in options if flag in NAMED_OPTIONS]
+    named += [value for flag, value in options if flag in EDITABLE_OPTIONS and not _path_target(value)]
+    if not targets and not any(flag in INSTALLING for flag, _ in options):
+        return ()
+    files = _constraint_files(kind, options, env, root)
+    problems = [*_spec_problems(named, files), *_requirement_problems(options, root), *_lock_problems(files, root)]
+    return (*problems, *(() if files else (UNCONSTRAINED,)))
+
+
+def _floating_ci_installs(root: Path) -> list[_Floating]:
+    found: list[_Floating] = []
+    for path in _ci_sources(root):
+        relative = path.relative_to(root).as_posix()
+        for words, env in _commands(path, root):
+            install = _installer(words)
+            if install is None:
+                continue
+            kind, args, prefix = install
+            reasons = _problems(kind, args, env | prefix, root)
+            if reasons:
+                found.append(_Floating(f"{relative}: {kind} {shlex.join(args)}".rstrip(), reasons))
+    return found
+
+
+@functools.cache
+def _repository() -> tuple[_Floating, ...]:
+    return tuple(_floating_ci_installs(ROOT))
+
+
+def _job(run: str, env: dict[str, str] | None = None) -> str:
+    return yaml.safe_dump({"jobs": {"plant": {"env": env or {}, "steps": [{"name": "Plant", "run": run}]}}})
+
+
+def _composite(run: str) -> str:
+    return yaml.safe_dump({"runs": {"using": "composite", "steps": [{"name": "Plant", "run": run, "shell": "bash"}]}})
+
+
+def _plant(root: Path, files: dict[str, str]) -> None:
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text)
+
+
+@pytest.mark.feature("ci-tool-installs-pinned-walk")
+def test_every_ci_tool_install_pins_an_exact_version_under_a_checked_in_constraint() -> None:
+    reasons = {finding.key: "; ".join(finding.reasons) for finding in _repository()}
+    measured = Counter(finding.key for finding in _repository()) - Counter(list(INTENTIONAL_SMOKES))
+    listed = Counter(FLOATING_INSTALLS)
+    problems = [
+        f"floating CI tool install, pin it: {key} ({reasons[key]})" for key in sorted((measured - listed).elements())
+    ]
+    problems += [
+        f"no longer floating, remove it from FLOATING_INSTALLS: {key}" for key in sorted((listed - measured).elements())
+    ]
+    listing = [f"    {key!r}," for key in sorted(measured.elements())]
+    assert not problems, "\n".join([*problems, "Measured floating installs:", *listing])
+
+
+@pytest.mark.feature("ci-tool-installs-pinned-walk")
+@pytest.mark.parametrize(
+    ("planted", "pinned"),
+    [
+        pytest.param(
+            {".github/workflows/plant.yml": _job("python -m pip install 'pyyaml>=6.0'")},
+            {".github/workflows/plant.yml": _job(f"python -m pip install --constraint {PLANT_LOCK} PyYAML==6.0.3")},
+            id="workflow pip install",
+        ),
+        pytest.param(
+            {".github/actions/plant/action.yml": _composite("uv pip install --system ruff==0.15.12")},
+            {".github/actions/plant/action.yml": _composite(f"uv pip install --system -c {PLANT_LOCK} ruff==0.15.12")},
+            id="composite action uv pip install",
+        ),
+        pytest.param(
+            {"scripts/ci_plant.yml": yaml.safe_dump([{"name": "Plant", "run": "pip install build"}])},
+            {"scripts/ci_plant.yml": yaml.safe_dump([{"name": "Plant", "run": f"pip install -c {LOCK} build==1.3.0"}])},
+            id="step template pip install",
+        ),
+        pytest.param(
+            {".github/scripts/plant.sh": "uvx pip-audit==2.10.1 --format json\n"},
+            {".github/scripts/plant.sh": f"uvx --constraints {PLANT_LOCK} pip-audit==2.10.1 --format json\n"},
+            id="github shell script uvx",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job("bash deploy/plant.sh"), "deploy/plant.sh": "uv tool install ruff\n"},
+            {"deploy/plant.sh": f"UV_CONSTRAINT={PLANT_LOCK} uv tool install ruff==0.15.12\n"},
+            id="shell script a step runs uv tool install",
+        ),
+        pytest.param(
+            {
+                "scripts/ci_plant.py": 'PIN = "platformdirs!=4.14.8"\nAUDIT = ["uvx", "--with", PIN, "pip-audit==2.10.1"]\n'
+            },
+            {
+                "scripts/ci_plant.py": f'LOCKS = ["--constraints", "{PLANT_LOCK}"]\nAUDIT = ["uvx", *LOCKS, "pip-audit==2.10.1"]\n'
+            },
+            id="python ci script uvx",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job("pipx run build")},
+            {".github/workflows/plant.yml": _job(f"pipx run --pip-args='--constraint {PLANT_LOCK}' build==1.3.0")},
+            id="workflow pipx run",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job("python -m tools.plant"),
+                "tools/plant.py": 'ARGV = ("python", "-m", "pip", "install", "pyyaml")\n',
+            },
+            {
+                "tools/plant.py": f'ARGV = ("python", "-m", "pip", "install", "--constraint", "{PLANT_LOCK}", "pyyaml==6.0.3")\n'
+            },
+            id="python module a step runs pip install",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job("pip3.12 install ruff==0.15.12")},
+            {".github/workflows/plant.yml": _job(f"pip3.12 install -c {PLANT_LOCK} ruff==0.15.12")},
+            id="versioned pip name",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.txt")},
+            {".github/ci-tools/tools.txt": "ruff==0.15.12\n"},
+            id="requirements file with a floating line",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job("pip install -r requirements.txt ruff==0.15.12")},
+            {".github/workflows/plant.yml": _job(f"pip install -r {LOCK} ruff==0.15.12")},
+            id="requirements lock is the constraint",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job("pip install -c .github/ci-tools/empty.lock pyyaml==6.0.3")},
+            {".github/ci-tools/empty.lock": "pyyaml==6.0.3\n"},
+            id="constraint without the tool pin",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job(f'pip install -c {PLANT_LOCK} "$PACKAGE"')},
+            {
+                ".github/workflows/plant.yml": _job(
+                    f'pip install -c {PLANT_LOCK} "$PACKAGE"', {"PACKAGE": "ruff==0.15.12"}
+                )
+            },
+            id="package from an unresolved variable",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} git+https://example.com/tool.git")},
+            {".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} 'tool @ file:///opt/wheels/tool.whl'")},
+            id="package from a remote url",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -e git+https://example.com/tool.git")},
+            {".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -e .")},
+            id="editable install from a remote url",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job("pipx install ruff")},
+            {".github/workflows/plant.yml": _job(f"pipx install --pip-args='--constraint {PLANT_LOCK}' ruff==0.15.12")},
+            id="workflow pipx install",
+        ),
+        pytest.param(
+            {".github/scripts/plant.sh": "uv tool run ruff check .\n"},
+            {".github/scripts/plant.sh": f"uv tool run --constraints {PLANT_LOCK} ruff==0.15.12 check .\n"},
+            id="github shell script uv tool run",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(
+                    f"pipx run --pip-args='--constraint {PLANT_LOCK}' --spec 'build>=1' build"
+                )
+            },
+            {
+                ".github/workflows/plant.yml": _job(
+                    f"pipx run --pip-args='--constraint {PLANT_LOCK}' --spec build==1.3.0 build"
+                )
+            },
+            id="pipx run with a spec",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job("pip install -c .github/ci-tools/tools.txt ruff==0.15.12"),
+                ".github/ci-tools/tools.txt": "ruff==0.15.12\npytest>=8\n",
+            },
+            {".github/ci-tools/tools.txt": "ruff==0.15.12\npytest==9.0.1\n"},
+            id="constraint file with a floating line",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "ruff==0.15.12\n-r loose.txt\n",
+                ".github/ci-tools/loose.txt": "pytest>=8\n",
+            },
+            {".github/ci-tools/loose.txt": "pytest==9.0.1\n"},
+            id="requirements lock including a floating file",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "-e .[dev]\n",
+            },
+            {".github/ci-tools/tools.lock": "ruff==0.15.12\n"},
+            id="editable line in a requirements lock",
+        ),
+        pytest.param(
+            {"scripts/ci_plant.py": 'ARGS = ["install", "ruff"]\nCMD = ["python", "-m", "pip", *ARGS]\n'},
+            {
+                "scripts/ci_plant.py": (
+                    f'ARGS = ["install", "--constraint", "{PLANT_LOCK}", "ruff==0.15.12"]\n'
+                    'CMD = ["python", "-m", "pip", *ARGS]\n'
+                )
+            },
+            id="python argv whose splat names the installer",
+        ),
+        pytest.param(
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\n\n\ndef install():\n    ARGS = ["ruff"]\n'
+                    '    return ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n\n\n'
+                    'def report():\n    ARGS = ["ruff==0.15.12"]\n    return ARGS\n'
+                )
+            },
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\n\n\ndef install():\n    ARGS = ["ruff==0.15.12"]\n'
+                    '    return ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n\n\n'
+                    'def report():\n    NAMES = ["ruff"]\n    return NAMES\n'
+                )
+            },
+            id="python list name bound twice",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job("python3.12 tools/plant.py"),
+                "tools/plant.py": 'ARGV = ("pip", "install", "pyyaml")\n',
+            },
+            {"tools/plant.py": f'ARGV = ("pip", "install", "--constraint", "{PLANT_LOCK}", "pyyaml==6.0.3")\n'},
+            id="python file a step runs with a versioned interpreter",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "ruff==0.15.12\n--requirement=loose.txt\n",
+                ".github/ci-tools/loose.txt": "pytest>=8\n",
+            },
+            {".github/ci-tools/loose.txt": "pytest==9.0.1\n"},
+            id="requirements lock including a floating file by an equals option",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "-rloose.txt\n",
+                ".github/ci-tools/loose.txt": "pytest>=8\n",
+            },
+            {".github/ci-tools/loose.txt": "pytest==9.0.1\n"},
+            id="requirements lock including a floating file with no space",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "--editable=git+https://example.com/x.git\n",
+            },
+            {".github/ci-tools/tools.lock": "ruff==0.15.12\n"},
+            id="editable url line in a requirements lock",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "-e.[dev]\n",
+            },
+            {".github/ci-tools/tools.lock": "ruff==0.15.12\n"},
+            id="editable line with no space in a requirements lock",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"uv pip install --system -c {CONSTRAINTS} pyyaml==6.0.3"),
+                CONSTRAINTS: "--constraint test-requirements.lock\n",
+                LOCK: PLANT_PINS + "coverage>=7.4\n",
+            },
+            {LOCK: PLANT_PINS},
+            id="floating line in the lock the test constraints chain",
+        ),
+        pytest.param(
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\nARGS = ["ruff==0.15.12"]\nfor ARGS in (["ruff"],):\n'
+                    '    CMD = ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n'
+                )
+            },
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\nARGS = ["ruff==0.15.12"]\nfor NAMES in (["ruff"],):\n'
+                    '    CMD = ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n'
+                )
+            },
+            id="python list name rebound by a loop",
+        ),
+        pytest.param(
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\nARGS = ["ruff==0.15.12"]\n\n\ndef install(ARGS):\n'
+                    '    return ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n'
+                )
+            },
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\nARGS = ["ruff==0.15.12"]\n\n\ndef install(names):\n'
+                    '    return ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n'
+                )
+            },
+            id="python list name shadowed by a parameter",
+        ),
+    ],
+)
+def test_the_install_walker_reports_a_planted_floating_install(
+    tmp_path: Path, planted: dict[str, str], pinned: dict[str, str]
+) -> None:
+    _plant(tmp_path, {LOCK: PLANT_PINS, PLANT_LOCK: PLANT_PINS, ".github/ci-tools/tools.txt": "ruff>=0.15\n"})
+    _plant(tmp_path, {".github/ci-tools/empty.lock": "", **planted})
+    assert len(found := _floating_ci_installs(tmp_path)) == 1, found
+    _plant(tmp_path, pinned)
+    assert _floating_ci_installs(tmp_path) == []
+
+
+@pytest.mark.feature("ci-tool-installs-pinned-walk")
+@pytest.mark.parametrize(
+    "files",
+    [
+        pytest.param(
+            {".github/workflows/plant.yml": _job("echo '::error::pin it on the pip install line' && exit 1")},
+            id="echo text",
+        ),
+        pytest.param(
+            {".github/scripts/plant.sh": "uv pip compile pyproject.toml --output-file requirements.txt\n"},
+            id="uv pip compile",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(
+                    'bash .github/scripts/pypi-retry.sh "Install" -- uv pip install --system'
+                    f' --constraint "$RUNNER_TEMP/workflow/{LOCK}" mutmut==3.6.0 -e ".[dev,all]"'
+                )
+            },
+            id="retry wrapper",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(
+                    "uv pip install --system pytest==9.0.1", {"UV_CONSTRAINT": "${{ github.workspace }}/" + CONSTRAINTS}
+                )
+            },
+            id="env chained constraint",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(
+                    f'python -m pip install -c {PLANT_LOCK} "semgrep==$SEMGREP_VERSION"', {"SEMGREP_VERSION": "1.177.0"}
+                )
+            },
+            id="env resolved version",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job(f"pip install --timeout 60 -c {PLANT_LOCK} pyyaml==6.0.3")},
+            id="option with a value",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job(f'uv pip install -c {LOCK} "agentihooks[dev,all] @ file://$WHEEL"')},
+            id="file url direct reference",
+        ),
+        pytest.param(
+            {
+                "scripts/ci_plant/venvs.py": (
+                    "from scripts.ci_plant.paths import LOCKFILE\n\n\ndef build(uv, tree):\n"
+                    "    constraints = ['--constraint', str(tree / LOCKFILE)]\n"
+                    "    return [uv, 'pip', 'install', *constraints, '-r', str(tree / 'pyproject.toml')]\n"
+                ),
+                "scripts/ci_plant/paths.py": f"LOCKFILE = {LOCK!r}\n",
+            },
+            id="python argv constrained by an imported lock",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job(f"uv pip install --system -r {LOCK}")},
+            id="requirements lock alone",
+        ),
+        pytest.param(
+            {".github/scripts/plant.sh": "if ! command -v uvx >/dev/null; then exit 1; fi\n"},
+            id="installer named by a command lookup",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job("pip install -c .github/ci-tools/hashed.lock ruff==0.15.12"),
+                ".github/ci-tools/hashed.lock": "ruff==0.15.12 \\\n    --hash=sha256:0000\n",
+            },
+            id="hash continued constraint line",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job("pip install -r .github/ci-tools/tools.lock ruff==0.15.12"),
+                ".github/ci-tools/tools.lock": "-r pins.txt\n",
+                ".github/ci-tools/pins.txt": "ruff==0.15.12\n",
+            },
+            id="requirements lock nesting a pinned file",
+        ),
+    ],
+)
+def test_the_install_walker_passes_pinned_and_non_install_commands(tmp_path: Path, files: dict[str, str]) -> None:
+    _plant(tmp_path, {LOCK: PLANT_PINS, PLANT_LOCK: PLANT_PINS, CONSTRAINTS: "--constraint test-requirements.lock\n"})
+    _plant(tmp_path, files)
+    assert _floating_ci_installs(tmp_path) == []
+
+
+@pytest.mark.feature("ci-tool-installs-pinned-walk")
+def test_each_intentional_install_smoke_is_a_measured_install_with_a_reason() -> None:
+    smokes = [finding for finding in _repository() if finding.key in INTENTIONAL_SMOKES]
+    assert Counter(finding.key for finding in smokes) == Counter(list(INTENTIONAL_SMOKES))
+    assert all(UNCONSTRAINED in finding.reasons for finding in smokes)
+    assert all(reason.strip() for reason in INTENTIONAL_SMOKES.values())
+
+
+@pytest.mark.feature("ci-small-workflows-install-the-parser-first")
+@pytest.mark.parametrize(
+    ("workflow", "job"),
+    [
+        ("access-audit.yml", "audit"),
+        ("gate-required.yml", "report"),
+        ("hive-worker.yml", "contracts"),
+        ("lost-runner.yml", "watch"),
+        ("queue-retry.yml", "retry"),
+    ],
+)
+def test_each_small_workflow_installs_pyyaml_before_its_repository_code(workflow: str, job: str) -> None:
+    steps = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"][job]["steps"]
+    lines = [line for step in steps for line in str(step.get("run", "")).splitlines()]
+    install = re.compile(r"\bpip3? install\b.*\bpyyaml\b", re.I)
+    repository_code = re.compile(
+        r"\bpython3?\s+(?:-\w+\s+)*(?:-m\s+scripts\.|\S*\.py\b)|\b(?:bash|sh)\s+\S*(?:deploy|scripts)/"
+    )
+    installs = [index for index, line in enumerate(lines) if install.search(line)]
+    code = [index for index, line in enumerate(lines) if repository_code.search(line)]
+    assert installs and code and installs[0] < code[0], (
+        f"PyYAML installs at {installs}, repository code at {code}: {lines}"
+    )
