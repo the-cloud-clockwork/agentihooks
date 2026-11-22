@@ -86,9 +86,9 @@ def agent_cpu(measured: dict[str, Any]) -> AgentCpu:
     """CPU per agent in hundredths of a CPU and where it comes from: AGENTIHOOKS_HIVE_AGENT_CPU when set, else the
     reading's pod load over the agents it counts, rounded up to the next 0.05 and never below AGENT_CPU, else
     AGENT_CPU."""
-    setting = os.environ.get(AGENT_CPU_ENV)
+    setting = _setting()
     if setting:
-        return AgentCpu(round(100 * float(setting)), f"set by {AGENT_CPU_ENV}")
+        return AgentCpu(setting, f"set by {AGENT_CPU_ENV}")
     agents = sum(measured.get("agents", {}).values())
     load = measured.get("pod_load")
     floor = round(100 * AGENT_CPU)
@@ -96,6 +96,14 @@ def agent_cpu(measured: dict[str, Any]) -> AgentCpu:
         return AgentCpu(floor, "by default")
     centi = CPU_STEP * math.ceil(round(100 * load) / (CPU_STEP * agents))
     return AgentCpu(max(floor, centi), f"measured from pod load {load:.2f} over {agents} agents")
+
+
+def _setting() -> int:
+    """AGENTIHOOKS_HIVE_AGENT_CPU in hundredths of a CPU, 0 when it is unset, not a number or rounds to no CPU."""
+    try:
+        return max(0, round(100 * float(os.environ[AGENT_CPU_ENV])))
+    except (KeyError, ValueError, OverflowError):
+        return 0
 
 
 def _per_agent(figure: AgentCpu) -> str:

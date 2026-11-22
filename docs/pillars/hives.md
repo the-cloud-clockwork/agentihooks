@@ -1284,9 +1284,11 @@ The CPU per agent comes from the reading itself:
 
 - **Measured:** the pod load over the agents the reading counts, rounded up to the next 0.05 and never below 0.5. A
   pod load of 6.70 over 9 agents gives 0.75 CPU per agent.
-- **Default:** 0.5 CPU per agent when no agent runs or the reading carries no pod load, as on the first reading after
-  a start or on a host without a cgroup CPU limit.
-- **Setting:** `AGENTIHOOKS_HIVE_AGENT_CPU` overrides both, in CPUs per agent.
+- **Default:** 0.5 CPU per agent when no agent runs or the reading carries no pod load: the first reading after a
+  start, a reading taken after a stale one, since pod load needs a previous reading under 30 seconds old, and a host
+  without a cgroup CPU limit. A reading that is itself stale never reaches admission; the hive's room is 0 as above.
+- **Setting:** `AGENTIHOOKS_HIVE_AGENT_CPU` overrides both, in CPUs per agent. A value that is not a number above 0
+  after rounding to hundredths is ignored.
 
 Every CPU detail names the figure and where it came from, for example
 `pod load 6.70 on a 16 CPU limit, 0.75 CPU per agent measured from pod load 6.70 over 9 agents, fits 8 more under the 80 percent line`,
@@ -1295,8 +1297,9 @@ Every CPU detail names the figure and where it came from, for example
 The host CPU line reads `used_cpus` when the reading carries it and the five minute load only as a fallback. With
 `used_cpus` in the reading it also carries a guard: while the five minute load is above 80 percent of the CPUs and
 the hive's own CPU, its pod load when the reading carries one and else `used_cpus`, is at or above the 40 percent
-swarm share, the line gives room 0. The workstation's swarm share limits count local agents at the same measured
-figure; see [Workstation admission room and the swarm share](#workstation-admission-room-and-the-swarm-share).
+swarm share, the line gives room 0. The swarm share is 40 percent of the machine's CPUs and memory; on the
+workstation its CPU limit counts the local agents at the same CPU per agent, see
+[Workstation admission room and the swarm share](#workstation-admission-room-and-the-swarm-share).
 
 `hive run` publishes headroom on two paths:
 
@@ -4377,7 +4380,8 @@ The spawn is admitted and the local cap reads 20. Before
 no hive for eng has room: ..., and the local machine runs 12 of its 12 agents: cpu: 12 swarm agents at 0.5 CPU each on 16 CPUs, fits 0 more under the 40 percent swarm share
 ```
 
-A spawn whose placement already chose the machine's own hive waits without the hives' reason in front:
+A spawn whose placement had already chosen the machine's own hive waited without the hives' reason in front. Both
+lines are the text of that time; the CPU figure now also names its source, as in `0.5 CPU each by default`:
 
 ```text
 , and the local machine runs 12 of its 12 agents: cpu: 12 swarm agents at 0.5 CPU each on 16 CPUs, fits 0 more under the 40 percent swarm share

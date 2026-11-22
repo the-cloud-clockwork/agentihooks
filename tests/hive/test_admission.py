@@ -1,10 +1,11 @@
+import json
 import threading
 from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from scripts.hive import admission, auth
+from scripts.hive import admission, auth, headroom
 from tests.swarm.test_cli import env as env
 
 if TYPE_CHECKING:
@@ -780,6 +781,32 @@ def test_the_agent_cpu_setting_overrides_the_measured_figure(monkeypatch: pytest
     )
     monkeypatch.setenv("AGENTIHOOKS_HIVE_AGENT_CPU", "0.7")
     assert admission.room(reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=5.8)).room == 10
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_AGENT_CPU", "0.29")
+    assert admission.agent_cpu(measured) == admission.AgentCpu(29, "set by AGENTIHOOKS_HIVE_AGENT_CPU")
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+@pytest.mark.parametrize("value", ["", "0", "0.001", "-1", "half", "nan", "inf"])
+def test_an_agent_cpu_setting_that_names_no_cpu_leaves_the_measured_figure(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_AGENT_CPU", value)
+    measured = reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 9})
+    assert admission.agent_cpu(measured) == admission.AgentCpu(75, "measured from pod load 6.70 over 9 agents")
+    assert admission.room(measured).room == 8
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_a_reading_taken_after_a_stale_one_has_no_pod_load_and_takes_the_default_figure(
+    redis: "fakeredis.FakeRedis",
+) -> None:
+    stale = reading(pod_cpus=7.0, pod_cpu_usec=1_000_000, pod_load=6.7, agents={"claude": 9}, measured_at=0)
+    redis.set(headroom.key("h1"), json.dumps(stale))
+    now = headroom.STALE_MS + 1
+    previous = headroom.read(redis, "h1", now)
+    assert previous is None
+    pod = {"pod_cpus": 7.0, "pod_cpu_usec": 2_000_000, **headroom._load(2_000_000, now, previous)}
+    assert admission.agent_cpu(reading(agents={"claude": 9}, **pod)) == admission.AgentCpu(50, "by default")
 
 
 @pytest.mark.feature("hive-admission-measured-agent-cpu")
