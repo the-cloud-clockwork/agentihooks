@@ -9,7 +9,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, account_key
-from scripts.swarm import autoscale, freeze, host_budget, master_pin
+from scripts.swarm import autoscale, freeze, host_budget, master_pin, plan_cap_floor
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import AUTO_SCALING, AgentRecord, RedisStore, SwarmConfig
@@ -537,20 +537,20 @@ def warned_accounts(observations: list[Account], environ: dict[str, str]) -> dic
 def autoscaled(
     config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None
 ) -> tuple[SwarmConfig, dict[str, Any] | None]:
+    demand: dict[str, int] = inputs.demand or dict.fromkeys(LANES, 0)
     if config.scaling != AUTO_SCALING:
-        return config, None
+        return plan_cap_floor.manual(config, demand), None
     host = host or granted(host_room(config, inputs), inputs.previous, inputs.now_ms)
     stored = inputs.previous.get("autoscale") or {}
     previous = {
         "ceilings": stored.get("ceilings") or _configured(config),
         "pending_raise": stored.get("pending_raise") or {"target": None, "ticks": 0},
     }
-    demand = inputs.demand or dict.fromkeys(LANES, 0)
     free = _placeable(_open(inputs.observations, inputs.warned))
     decision = autoscale.calculate(
         _busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous, now_ms=inputs.now_ms
     )
-    caps = decision["ceilings"]
+    caps = decision["ceilings"] = plan_cap_floor.ceilings(decision["ceilings"], demand)
     scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
     return scaled, {**decision, "host": host}
 

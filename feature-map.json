@@ -4547,10 +4547,34 @@
     {
       "id": "swarm-manual-caps",
       "origin": "inventory",
-      "behaviour": "Manual lane caps hold against lane demand.",
+      "behaviour": "Manual lane caps hold against lane demand, except a zero planner cap, which counts as one while plan work is ready.",
       "seam": "agentihooks swarm set max-eng-agents and max-ci-agents",
       "tests": [
         "tests/swarm/test_lane_caps_owner.py::test_manual_caps_hold_against_lane_demand"
+      ]
+    },
+    {
+      "id": "swarm-plan-cap-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-cap-floor",
+      "behaviour": "While plan work is ready the quota decision keeps one planner seat under a stored zero planner cap, in manual scaling and in auto scaling with the room full, taking the seat from the larger engineer or CI ceiling; the dispatcher lane caps keep one planner while a plan lane task is open; swarm start and a set that scales engineers or CI up restore a stored zero planner cap to its default, and a zero typed in the same set holds.",
+      "seam": "scripts.swarm.capacity.autoscaled, scripts.swarm.plan_cap_floor, scripts.swarm.dispatcher.lane_caps, agentihooks swarm start and agentihooks swarm set",
+      "tests": [
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_under_a_stored_zero_manual_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_zero_manual_cap_holds_while_no_plan_work_is_ready",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_manual_plan_cap_above_zero_is_kept",
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_when_live_agents_fill_the_room",
+        "tests/swarm/test_plan_cap_floor.py::test_the_plan_seat_comes_from_the_larger_lane_ceiling",
+        "tests/swarm/test_plan_cap_floor.py::test_the_ceilings_are_unchanged_without_ready_plan_work",
+        "tests/swarm/test_plan_cap_floor.py::test_a_plan_ceiling_already_granted_is_unchanged",
+        "tests/swarm/test_plan_cap_floor.py::test_a_frozen_plan_task_gets_no_planner_seat_under_a_stored_zero_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_the_claim_key_keeps_the_focus_order_of_plan_work_under_a_stored_zero_cap",
+        "tests/swarm/test_dispatcher.py::test_lane_caps_name_each_lane_with_its_own_cap",
+        "tests/swarm/test_dispatcher.py::test_at_delegate_the_queue_holds_only_focused_work_at_any_focus_weight",
+        "tests/swarm/test_dispatcher.py::test_below_delegate_proposals_name_only_focused_work_at_full_focus_weight",
+        "tests/swarm/test_plan_cap_floor.py::test_start_restores_a_stored_zero_plan_cap_to_its_default",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_restores_a_stored_zero_plan_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_keeps_a_stored_plan_cap_above_zero"
       ]
     },
     {
@@ -8684,6 +8708,22 @@
       ]
     },
     {
+      "id": "hive-spoke-spawn-fresh-quota-rows",
+      "origin": "regression",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-spoke-fresh-quota-rows",
+      "behaviour": "A long running hive spoke reads fresh quota rows at every spawn once a spawn has read them for itself, so it admits a spawn the hub placed when the accounts have free seats again, and the spawn it places still adds one session to its account; quota rows a tick pass read are kept for every spawn in that pass.",
+      "seam": "HerdrRuntime.spawn quota rows on a runtime without a tick pass, read through HerdrRuntime._quota_read and re-read by HerdrRuntime._quota_refresh",
+      "rules": [
+        "quota-rows-read-once-per-process"
+      ],
+      "tests": [
+        "tests/swarm/test_quota_handoff.py::test_a_spawn_keeps_the_quota_rows_its_tick_pass_read",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_reads_fresh_quota_rows_after_its_first_quota_handoff",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_still_counts_the_session_it_placed_on_fresh_rows"
+      ]
+    },
+    {
       "id": "controller-hive-refusal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
@@ -8858,6 +8898,16 @@
       "tests": [
         "tests/codex_session/test_attach.py::test_an_admitted_execution_waits_for_its_harness_and_then_attaches",
         "tests/codex_session/test_attach.py::test_a_classified_or_running_execution_without_an_app_server_still_refuses"
+      ]
+    },
+    {
+      "id": "quota-wait-no-session-cron",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-wait-scheduler-timer",
+      "behaviour": "Quota WAIT directs swarm sessions to bounded swarm waits naming the reset time and standalone sessions to a scheduler timer aimed at the current session, with no session cron instruction and the existing reset safety buffer.",
+      "seam": "hooks.context.quota_policy.render",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_wait_directive_carries_a_cron_for_the_reset"
       ]
     },
     {
@@ -12210,6 +12260,34 @@
       ]
     },
     {
+      "id": "expert-kind-and-launch-pin",
+      "origin": "operator",
+      "operator_words": "we need to create another swarm branch of agents profile \"expert\" that agenr exper profile will always use claude code fable model mandarory and effort default xhigh, the operator can chose to set max, and the agents will behave like a swarm agent but the difference is that they will not claim tasks",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "An expert is its own agent kind with its own name counter and a numbered lineage seat, and every expert launch or resume runs Claude Code on the Fable model at effort xhigh, or max when its lineage asks for it, whatever the swarm effort range, a lane setting, a saved handoff launch or a recorded session says; an expert launch that lands on another harness is refused.",
+      "seam": "naming.TYPES and templates.DEFAULT_PROFILES for the kind, expert_launch.pin called by HerdrRuntime.spawn and HerdrRuntime.resume, effort_range.bounds for the expert lane, and expert_launch.on_pin through the live check scripts.feature_checks.expert_launch_pin over the agent records",
+      "semgrep_rule": "feature-expert-launch-pin",
+      "tests": [
+        "tests/swarm/test_expert_kind.py::test_an_expert_name_builds_parses_and_counts_on_its_own",
+        "tests/swarm/test_expert_kind.py::test_a_fresh_expert_launch_runs_claude_code_on_fable_at_xhigh",
+        "tests/swarm/test_expert_kind.py::test_the_lineage_effort_decides_the_launch_effort_whatever_the_swarm_range",
+        "tests/swarm/test_expert_kind.py::test_a_successor_launches_fable_at_the_lineage_effort_whatever_its_predecessor_ran",
+        "tests/swarm/test_expert_kind.py::test_an_expert_launch_that_lands_on_another_harness_is_refused",
+        "tests/swarm/test_expert_kind.py::test_a_resumed_expert_relaunches_fable_inside_its_pin",
+        "tests/swarm/test_expert_launch.py::test_an_expert_pick_is_pinned_to_fable_at_the_effort_asked_for_or_xhigh",
+        "tests/swarm/test_expert_launch.py::test_a_recorded_launch_is_on_the_pin_only_with_claude_a_fable_model_and_a_pin_effort",
+        "tests/test_expert_launch_pin_check.py::test_working_experts_on_the_pin_pass_and_are_listed",
+        "tests/test_expert_launch_pin_check.py::test_a_working_expert_off_the_pin_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_launch_pin"
+      ]
+    },
+    {
       "id": "lane-model-harness-compatibility",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",
@@ -12888,7 +12966,7 @@
       "id": "ci-tool-installs-pinned-walk",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-walk-test",
-      "behaviour": "Every pip, uv pip, uvx, uv tool and pipx install in the CI workflows, composite actions, step templates and the shell and Python scripts CI runs pins each named package to one exact version that its checked in constraint pins too: the test requirements lock, the test constraints file while it chains that lock, a file in the CI tools folder, or such a lock passed with -r. Each such lock and CI tools file pins every line exactly, nested requirement files in any option form included, and any other requirements file fails. A command that names nothing to install, such as a command lookup, is not graded. Intentional clean install smokes are exempt once each by their install with a reason, and today's floating installs sit on an allowlist the walking test holds equal to its measurement, so an unlisted floating install or a pinned install still listed turns it red.",
+      "behaviour": "Every pip, uv pip, uvx, uv tool and pipx install in the CI workflows, composite actions, step templates and the shell and Python scripts CI runs pins each named package to one exact version that its checked in constraint pins too: the test requirements lock, the test constraints file while it chains that lock, a file in the CI tools folder, or such a lock passed with -r. Each such lock and CI tools file pins every line exactly, nested requirement files in any option form included, and any other requirements file fails. A command that names nothing to install, such as a command lookup, is not graded. Python sources are read as argv list displays with their names and splats resolved; Python shell strings, argv lists joined with plus, bash -c and backtick strings and installers held in variables are not read. Intentional clean install smokes are exempt once each by their install with a reason, and today's floating installs sit on an allowlist the walking test holds equal to its measurement, so an unlisted floating install or a pinned install still listed turns it red.",
       "seam": "tests.test_ci_test_dependencies._floating_ci_installs over .github, scripts/ci_* and the shell scripts and Python modules their run lines name",
       "tests": [
         "tests/test_ci_test_dependencies.py::test_every_ci_tool_install_pins_an_exact_version_under_a_checked_in_constraint",
