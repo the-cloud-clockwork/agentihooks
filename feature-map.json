@@ -6319,7 +6319,7 @@
       "id": "swarm-enhance-close",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-close",
-      "behaviour": "Swarm done on a plan task that enhances a thin task refuses unless the target carries a plan slice whose section names a seam and holds every recon heading, pull request body section and a done when sentence. A complete close releases the target from its thin claim hold at full autonomy when the slice check finds nothing; otherwise the master approves or sends it back with plan approve or send-back and a task option at delegate and full, and the operator decides at manual and assist by setting the enhancement planned. A send back reopens the enhancement task with the note and keeps the target held, only the master or the operator may skip an enhancement, the enhancement field takes only empty, needed, planned or skipped, and an ordinary plan task still closes on its slice proof.",
+      "behaviour": "Swarm done on a plan task that enhances a thin task refuses unless the target carries a plan slice whose section names a seam and holds every recon heading, pull request body section and a done when sentence. A complete close releases the target from its thin claim hold at full autonomy when the slice check finds nothing; otherwise the master approves or sends it back with plan approve or send-back and a task option at delegate and full, and the operator decides at manual and assist by setting the enhancement planned. A send back reopens the enhancement task with the note and keeps the target held, only the master or the operator may skip an enhancement, an eng or ci worker never sets one, the enhancement field takes only empty, needed, planned or skipped, and an ordinary plan task still closes on its slice proof.",
       "seam": "scripts.swarm.enhance_review close, settle and review, called by swarm done and swarm plan approve or send-back --task, with the ledger_tasks enhancement field rules",
       "tests": [
         "tests/swarm/test_enhance_close.py::test_an_ordinary_plan_task_still_closes_on_its_slice_proof",
@@ -6333,6 +6333,7 @@
         "tests/swarm/test_enhance_close.py::test_a_review_refuses_an_enhancement_that_is_not_in_review",
         "tests/swarm/test_enhance_close.py::test_a_review_names_exactly_one_of_a_phase_or_a_task",
         "tests/swarm/test_enhance_close.py::test_only_the_master_or_the_operator_may_skip_an_enhancement",
+        "tests/swarm/test_enhance_close.py::test_an_eng_or_ci_worker_cannot_release_its_own_hold",
         "tests/swarm/test_enhance_close.py::test_the_master_or_the_operator_skips_an_enhancement",
         "tests/swarm/test_enhance_close.py::test_the_operator_sets_only_the_enhancement_of_a_task",
         "tests/swarm/test_enhance_close.py::test_enhancement_takes_only_its_four_values",

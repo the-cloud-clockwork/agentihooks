@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import claim_hold
+from scripts.swarm import claim_hold, enhance_review
 from scripts.swarm import cli as swarm_cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_artifacts
@@ -71,6 +71,15 @@ def task(task_id: str) -> dict[str, Any]:
 def hold(task_id: str) -> str:
     seen = view(state(SLUG))
     return claim_hold.hold(seen.rows[task_id], seen.rows, seen.doc, seen.graph, "")
+
+
+def refused(by: str, value: str) -> str:
+    op = {"op": "task_update", "id": "enhance-set", "by": by, "item": f"tasks/{TARGET}"}
+    op["fields"] = {"enhancement": value}
+    core.check_op(op)
+    found, rejected = core.sync(SLUG, ops=[op])
+    assert rejected == ["enhance-set"]
+    return " ".join(found["_meta"]["warnings"])
 
 
 def autonomy(store: RedisStore, level: str) -> None:
@@ -185,6 +194,9 @@ def test_full_autonomy_asks_the_master_when_the_slice_check_faults_the_target(
     [ask] = [i for i in items(store, MASTER_SEAT) if ENHANCE in i.text]
     assert "Task t1 has a description under 20 words." in ask.text
     assert f"plan approve --task {ENHANCE}" in ask.text
+    code, out = cli(capsys, MASTER, "plan", "approve", "--task", ENHANCE)
+    assert (code, out["state"], task(TARGET)["enhancement"]) == (0, "approved", enhance_review.PLANNED)
+    assert hold(TARGET) == ""
 
 
 @pytest.mark.feature("swarm-enhance-close")
@@ -270,14 +282,15 @@ def test_a_review_names_exactly_one_of_a_phase_or_a_task(
     assert (code, err) == (1, "swarm: name exactly one of a phase or --task <enhancement task id>")
 
 
-@pytest.mark.feature("swarm-enhance-close")
-@pytest.mark.parametrize(
-    "author", ["planner@a1b2c3-0002", "engineer@a1b2c3-0003", "ci@a1b2c3-0004", "dispatcher@a1b2c3-0005", "swarm"]
-)
 def test_only_the_master_or_the_operator_may_skip_an_enhancement(thin: Seats, author: str) -> None:
-    _, ledger = thin
-    with pytest.raises(SwarmError, match="cannot skip the enhancement of task t1"):
-        ledger.update_task(SLUG, TARGET, {"enhancement": "skipped"}, by=author)
+    assert "cannot skip the enhancement of task t1" in refused(author, "skipped")
+    assert hold(TARGET) == HELD
+
+
+@pytest.mark.feature("swarm-enhance-close")
+@pytest.mark.parametrize("author", ["engineer@a1b2c3-0003", "ci@a1b2c3-0004"])
+def test_an_eng_or_ci_worker_cannot_release_its_own_hold(thin: Seats, author: str) -> None:
+    assert "cannot set the enhancement of task t1" in refused(author, "planned")
     assert hold(TARGET) == HELD
 
 

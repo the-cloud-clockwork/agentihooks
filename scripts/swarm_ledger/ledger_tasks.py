@@ -160,7 +160,9 @@ def check_enhancement(fields: object) -> None:
 
 def check(op: dict[str, Any]) -> None:
     if not _author(op):
-        raise ValueError("task ops need `by`, an agent name other than operator")
+        raise ValueError(
+            "task ops need `by`, an agent name other than operator; the operator may set only a task's enhancement"
+        )
     check_enhancement(op.get("fields") if op["op"] == "task_update" else op)
     if op["op"] == "task_add":
         if (
@@ -610,11 +612,16 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
 
 
 def skip_refusal(op: dict[str, Any]) -> str:
-    """Only the master or the operator skips a task's enhancement; every other seat leaves it to the planner."""
-    if op["fields"].get("enhancement") != "skipped" or _block_author(op["by"]):
-        return ""
+    """Only the master or the operator skips a task's enhancement, and an eng or ci worker never sets one, so a held
+    worker cannot release its own claim hold."""
+    value, by = op["fields"].get("enhancement"), op["by"]
     task = op["item"].split("/")[1]
-    return f"{op['by']} cannot skip the enhancement of task {task}: only the master or the operator skips it"
+    if value == "skipped" and not _block_author(by):
+        return f"{by} cannot skip the enhancement of task {task}: only the master or the operator skips it"
+    lane = ports.swarm().naming.lane_of(by)
+    if value is not None and lane in WORKER_LANES:
+        return f"{by} works in the {lane} lane and cannot set the enhancement of task {task}: {PROPOSE}"
+    return ""
 
 
 def urgent_update_refusal(op: dict, task: dict, doc: dict) -> str:
