@@ -57,6 +57,7 @@ FIX_LINK = re.compile(
 )
 ACTIVE = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 TOOL_SECONDS = 60.0
+RUN_READ_SECONDS = 10.0
 MERGED_FIXES = "merged-fixes"
 LEGACY_REASON = re.compile(r"pressed on swarm (\S+)")
 FIXER_TASK = re.compile(r"promo-[0-9]+-[0-9]+|crew-[0-9]+(?:-[0-9]+)?-fix-[0-9]+")
@@ -166,6 +167,19 @@ def engage(store: RedisStore, slug: str, reason: str, auto: bool, fixes: Iterabl
     return found
 
 
+def drop(store: RedisStore, slug: str, fix: str) -> Panic:
+    """Removes one fix from the swarm's panic, keeping its start, reason, mode and other fixes; refuses a fix the panic
+    does not hold and a swarm no panic holds."""
+    current = state(store, slug)
+    if current is None:
+        raise SwarmError(f"no panic holds swarm {slug}")
+    if fix not in current.fixes:
+        raise SwarmError(f"the panic on swarm {slug} holds no fix {fix}")
+    found = Panic(current.since, current.reason, current.auto, tuple(kept for kept in current.fixes if kept != fix))
+    _client(store).set(_swarm_key(slug, "state"), json.dumps(found.__dict__))
+    return found
+
+
 def release(store: RedisStore, slug: str, now_ms: int) -> bool:
     """Turns the swarm's panic off, with the legacy fleet record that names it, only when the swarm is stable and back
     at RELEASE_LEVEL of business as usual."""
@@ -245,6 +259,21 @@ def fix_state(kept: tuple[RedisStore, str] | None, url: str) -> ChangeState:
 def fix_branch(url: str) -> str:
     """Return the head branch of a fix pull request, read through the source control port."""
     return fix_change(url).head_branch
+
+
+def run_branch(repository: str, resource: str) -> str:
+    """Return the head branch of one Actions run or job of ``repository``, ``resource`` being runs/ID or jobs/ID, read
+    through the source control port within RUN_READ_SECONDS, short enough that the PreToolUse hook asking it refuses a
+    stalled read before its own timeout lets the command through; one without a head branch reads as an empty name,
+    and a failed read refuses."""
+    from scripts.swarm.stack import PORT_ERRORS, refusal
+
+    path = f"repos/{repository}/actions/{resource}"
+    try:
+        deadline = Deadline.after(RUN_READ_SECONDS)
+        return json.loads(port(repository).download(path, deadline=deadline))["head_branch"] or ""
+    except PORT_ERRORS as error:
+        raise SwarmError(f"cannot read {path}: {refusal(error)}") from error
 
 
 def branch_fix(fix: str) -> tuple[str, str]:

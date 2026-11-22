@@ -106,6 +106,7 @@ from scripts.swarm import (
     review_rounds,
     run_window,
     seat_crons,
+    seat_heads,
     snapshot,
     stack,
     stages,
@@ -1100,13 +1101,14 @@ def _live_master(store, slug, live):
     return next((a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished" and a.name in live), None)
 
 
-def _retire_each(store, slug, runtime, agents):
-    left = []
+def _retire_each(store: RedisStore, slug: str, runtime: Any, agents: list[AgentRecord]) -> list[str]:
+    left: list[str] = []
     for agent in agents:
         store.release(slug, agent.task, agent.name)
         store.drop_agent(slug, agent.name)
         if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
-            store.put_agent(slug, agent)
+            if not seat_heads.superseded(agent, agents):
+                store.put_agent(slug, agent)
             left.append(agent.name)
     return left
 
@@ -1827,9 +1829,18 @@ def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
 
 def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     """The panic button: on, pressed by the master or the operator, stops agent starts, cancels CI runs and pauses the
-    lab's pull request grading but the checked fixes and the fixer branches every swarm recorded; off clears it once
-    stable and resumes the lab."""
+    lab's pull request grading but the checked fixes and the fixer branches every swarm recorded; drop, by the master or
+    the operator, removes one registered fix and tells the lab the fixes left; off clears it once stable and resumes the
+    lab."""
     now = now_ms()
+    if args.action == "drop":
+        _master_or_operator(store, args, "only the master or the operator drops a panic fix")
+        if len(args.fix) != 1:
+            raise SwarmError("panic drop takes exactly one --fix")
+        found = panic.drop(store, args.slug, args.fix[0])
+        lab = panic.lab_engage(store, args.slug, found.fixes)
+        print(json.dumps({"panic": "on", "fixes": list(found.fixes), "lab": lab}))
+        return
     if args.action == "on":
         _master_or_operator(store, args, "only the master or the operator presses panic on")
         for fix in args.fix:
@@ -2802,7 +2813,7 @@ def build_parser() -> argparse.ArgumentParser:
     blockers_cmd.add_argument("category", nargs="?", default="")
     blockers_cmd.set_defaults(handler=cmd_blockers)
     panic_cmd = sub.add_parser("panic")
-    panic_cmd.add_argument("action", nargs="?", default="status", choices=("on", "off", "status"))
+    panic_cmd.add_argument("action", nargs="?", default="status", choices=("on", "off", "status", "drop"))
     panic_cmd.add_argument("--fix", action="append", default=[])
     panic_cmd.set_defaults(handler=cmd_panic)
     sub.add_parser("prepare")

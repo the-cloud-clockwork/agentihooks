@@ -10,7 +10,7 @@ from typing import Any
 
 from scripts.events import subjects
 from scripts.events.bus import Bus, Delivery, WorkQueue
-from scripts.events.config import QueuePolicy
+from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.events.scope import LANES
 from scripts.swarm import apply_wait, claim_hold, fleet_red, freeze, release_wait
@@ -220,25 +220,51 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
 def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePolicy()) -> list[str]:
     """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned, and
     withdraws the stale offers there before the fresh ones join them; an offer still queued is not offered again, so
-    one that waits past the dedupe window stays a single copy."""
+    one that waits past the dedupe window stays a single copy, unless it waits ``behind`` an urgent or focused offer,
+    when it is withdrawn and offered again after it."""
     events = offers(view, now_ms)
+    offered = {event.id for event in events}
     lanes = dict.fromkeys([*LANES, *(event.data["lane"] for event in events)])
     queues = {lane: bus.queue(queue_name(view.slug, lane), policy) for lane in lanes}
     queued: set[str] = set()
-
-    def swept(event: Envelope) -> bool:
-        if stale(event, view):
-            return True
-        queued.add(event.id)
-        return False
-
-    for queue in queues.values():
-        queue.withdraw(swept)
+    for lane, queue in queues.items():
+        kept = _sweep(queue, view)
+        ids = {event.id for event in kept}
+        fresh = [event for event in events if event.data["lane"] == lane and event.id not in ids]
+        if moving := behind(kept, fresh, view, now_ms) & offered:
+            queue.withdraw(lambda event: event.id in moving)
+        queued |= ids - moving
     placed = []
     for event in events:
         if event.id not in queued and queues[event.data["lane"]].offer(event):
             placed.append(event.id)
     return placed
+
+
+def _sweep(queue: WorkQueue, view: Snapshot) -> list[Envelope]:
+    """The queue's waiting offers in stream order once its stale offers are withdrawn."""
+    kept: list[Envelope] = []
+
+    def swept(event: Envelope) -> bool:
+        if stale(event, view):
+            return True
+        kept.append(event)
+        return False
+
+    queue.withdraw(swept)
+    return kept
+
+
+def behind(kept: list[Envelope], fresh: list[Envelope], view: Snapshot, now_ms: int) -> set[str]:
+    """The ids of one lane's waiting offers of tasks neither urgent nor focused, the set preemption serves first, that
+    sit ahead of an urgent or focused offer waiting or about to be offered and are at least one dedupe window old, so
+    offering one again behind it is never dropped by the bus dedupe and moves it at most once per window."""
+    from scripts.swarm import preempt
+
+    flags = [preempt.preferred(view.rows[event.key], view.doc, view.graph) for event in [*kept, *fresh]]
+    last = max((index for index, flag in enumerate(flags) if flag), default=0)
+    window = BusConfig().dedupe_window_ms
+    return {event.id for event, flag in zip(kept[:last], flags) if not flag and now_ms - event.time >= window}
 
 
 def stale(event: Envelope, view: Snapshot) -> bool:
