@@ -12,6 +12,7 @@
         "tests/hive/test_daemon.py::test_hive_install_reports_writer_enable_failure",
         "tests/hive/test_daemon.py::test_hive_install_reloads_a_changed_writer_unit",
         "tests/swarm/test_workstation_units.py::test_distributed_reconciliation_keeps_the_host_writer",
+        "tests/deployment/test_worker_hive.py::test_worker_stops_live_children_when_the_hive_ends_or_startup_is_terminated",
         "tests/deployment/test_worker_hive.py::test_worker_restarts_the_writer_with_the_database_env_and_stops_with_the_hive"
       ]
     },
