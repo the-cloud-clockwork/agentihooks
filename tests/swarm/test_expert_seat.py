@@ -12,7 +12,7 @@ from scripts.handoff import expert as handoff_expert
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, expert_commands, expert_lineage, expert_seat, naming, prompt
+from scripts.swarm import cli, expert_lineage, expert_seat, naming, prompt
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import AgentRecord, RedisStore
 from tests.handoff.test_expert_contract import VALID as HANDOFF
@@ -249,12 +249,100 @@ def test_the_expert_of_a_completed_lineage_is_closed_from_the_kept_proof_and_the
     assert go(store, runtime, NOW + MINUTE) == [f"ended expert {expert.name}: lineage expert-1 is complete"]
     [ended] = experts(store)
     assert ended.state == "finished"
-    notice = expert_commands.NOTICE.format(slug="sw", id="expert-1", title=TITLE)
+    notice = expert_seat.NOTICE.format(slug="sw", id="expert-1", title=TITLE)
     inbox = InboxStore(store.redis)
     assert [(item.sender, item.text) for item in inbox.inbox("master@sw")] == [(expert.name, notice)]
     assert [kept["text"] for kept in store.memory.recaps(lineage.seat)] == [RECAP]
     assert go(store, runtime, NOW + 2 * MINUTE) == []
     assert len(inbox.inbox("master@sw")) == 1 and len(store.memory.recaps(lineage.seat)) == 1
+
+
+def test_a_completed_lineage_is_closed_even_when_the_reap_dropped_its_dead_expert_first(store: RedisStore) -> None:
+    lineage, runtime = started(store), FakeRuntime()
+    expert = launched(store, runtime)
+    expert_lineage.complete(store, "sw", "expert-1", expert.name, PROOF, NOW + 1)
+    store.drop_agent("sw", expert.name)
+    assert go(store, runtime, NOW + MINUTE) == [f"ended expert {expert.name}: lineage expert-1 is complete"]
+    notice = expert_seat.NOTICE.format(slug="sw", id="expert-1", title=TITLE)
+    inbox = InboxStore(store.redis)
+    assert [(item.sender, item.text) for item in inbox.inbox("master@sw")] == [(expert.name, notice)]
+    assert [kept["text"] for kept in store.memory.recaps(lineage.seat)] == [RECAP]
+    assert experts(store) == []
+    assert go(store, runtime, NOW + 2 * MINUTE) == [] and len(inbox.inbox("master@sw")) == 1
+
+
+def test_a_lineage_whose_closing_steps_finished_leaves_nothing_for_the_pass(store: RedisStore) -> None:
+    started(store)
+    runtime = FakeRuntime()
+    expert = launched(store, runtime)
+    ended = expert_lineage.complete(store, "sw", "expert-1", expert.name, PROOF, NOW + 1)
+    assert [row.id for row in expert_lineage.closing(store, "sw")] == ["expert-1"]
+    expert_seat.close(store, "sw", ended, PROOF)
+    assert expert_lineage.closing(store, "sw") == []
+    assert [agent.state for agent in experts(store)] == ["finished"]
+    assert go(store, runtime, NOW + MINUTE) == []
+
+
+@pytest.mark.parametrize("ended", ["stopped", "complete"])
+def test_the_handoff_an_ended_lineage_left_on_its_seat_is_cleared(store: RedisStore, ended: str) -> None:
+    started(store)
+    runtime = FakeRuntime()
+    expert = launched(store, runtime)
+    store.put_handoff("sw", "expert-1", HANDOFF, seat=expert.seat, envelope={"reason": "recycle"})
+    if ended == "stopped":
+        expert_lineage.stop(store, "sw", "expert-1", MASTER, "the order changed", NOW + 1)
+    else:
+        expert_lineage.complete(store, "sw", "expert-1", expert.name, PROOF, NOW + 1)
+    go(store, runtime, NOW + MINUTE)
+    assert store.handoff("sw", "expert-1") == "" and store.handoff_envelope("sw", "expert-1") is None
+
+
+def test_stopping_a_lineage_clears_the_handoff_that_waited_for_its_next_expert(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    started(store)
+    runtime = FakeRuntime()
+    handed_off(store, launched(store, runtime))
+    acting(monkeypatch, MASTER)
+    assert run("sw", "expert", "stop", "expert-1", "--note", "the order changed") == 0
+    capsys.readouterr()
+    assert store.handoff("sw", "expert-1") == ""
+    assert go(store, runtime, NOW + MINUTE) == [] and len(runtime.spawned) == 1
+
+
+def test_an_expert_of_a_lineage_the_swarm_does_not_hold_is_finished_and_the_other_seats_are_kept(
+    store: RedisStore,
+) -> None:
+    started(store, at=1_000)
+    runtime = FakeRuntime()
+    stray = launched(store, runtime)
+    store.redis.hdel(store.key("sw", "expert-lineages"), "expert-1")
+    store.redis.srem(store.key("sw", "expert-running"), "expert-1")
+    started(store, at=2_000)
+    actions = go(store, runtime, NOW + MINUTE)
+    [kept] = [agent for agent in experts(store) if agent.task == "expert-2"]
+    assert actions == [
+        f"ended expert {stray.name}: lineage expert-1 is unknown",
+        f"spawned expert {kept.name} on lineage expert-2 as its expert number 1",
+    ]
+    assert [agent.state for agent in experts(store) if agent.name == stray.name] == ["finished"]
+
+
+def test_an_expert_that_was_spawned_is_counted_even_when_the_pass_fails_right_after(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started(store)
+    real = RedisStore.put_agent
+
+    def failing(*given: Any, **named: Any) -> Any:
+        if given[2].lane == "expert" and given[2].state == "working":
+            raise RuntimeError("the store dropped the write")
+        return real(*given, **named)
+
+    monkeypatch.setattr(RedisStore, "put_agent", failing)
+    with pytest.raises(RuntimeError, match="the store dropped the write"):
+        go(store, FakeRuntime())
+    assert expert_lineage.launches(store, "sw", "expert-1") == 1
 
 
 @pytest.mark.feature("expert-seat-step")
@@ -338,7 +426,7 @@ def test_an_expert_that_confirms_its_handoff_takes_it_off_the_seat_so_a_later_lo
 
 def test_a_worker_that_confirms_its_handoff_keeps_it_stored(store: RedisStore) -> None:
     store.put_handoff("sw", "t1", V2, seat="eng-1@sw")
-    expert_commands.confirmed(store, "sw", AgentRecord(ENGINEER, "eng", "t1"))
+    expert_seat.drop_confirmed(store, "sw", AgentRecord(ENGINEER, "eng", "t1"))
     assert store.handoff("sw", "t1") == V2
 
 
