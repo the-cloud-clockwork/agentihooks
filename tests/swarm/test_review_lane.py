@@ -170,6 +170,19 @@ def test_autoscale_reads_no_demand_as_zero_demand_on_every_scaled_lane() -> None
 
 
 @pytest.mark.feature("swarm-review-lane")
+def test_autoscale_reads_a_scaled_lane_missing_from_ready_work_as_zero_demand() -> None:
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto", max_review=2)
+    inputs = capacity.fixture_inputs({**_readings(), "previous": {}})
+    zero = capacity.ScaleInputs(inputs.observations, inputs.agents, {"eng": 0, "ci": 0, "plan": 0}, lambda: None, {})
+    review_only = capacity.ScaleInputs(inputs.observations, inputs.agents, {"review": 2}, lambda: None, {})
+    _, idle = capacity.autoscaled(config, zero)
+    _, missing = capacity.autoscaled(config, review_only)
+    assert idle is not None and missing is not None
+    assert missing["ceilings"] == idle["ceilings"]
+    assert missing["reason"] == idle["reason"]
+
+
+@pytest.mark.feature("swarm-review-lane")
 def test_ready_work_lists_each_task_only_on_its_own_lane(store: RedisStore) -> None:
     assert _ready(store, [{"id": "e1"}, {"id": "c1", "lane": "ci"}]) == {"eng": ["e1"], "ci": ["c1"]}
 

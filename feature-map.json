@@ -13693,6 +13693,7 @@
         "tests/swarm/test_review_lane.py::test_autoscale_sizes_only_the_engineering_ci_and_plan_lanes",
         "tests/swarm/test_review_lane.py::test_autoscale_keeps_the_configured_review_cap",
         "tests/swarm/test_review_lane.py::test_autoscale_reads_no_demand_as_zero_demand_on_every_scaled_lane",
+        "tests/swarm/test_review_lane.py::test_autoscale_reads_a_scaled_lane_missing_from_ready_work_as_zero_demand",
         "tests/swarm/test_review_lane.py::test_ready_work_lists_each_task_only_on_its_own_lane",
         "tests/swarm/test_review_lane.py::test_ready_work_lists_an_open_review_task_on_the_review_lane",
         "tests/swarm/test_review_lane.py::test_a_drained_swarm_runs_again_for_a_new_review_task",
