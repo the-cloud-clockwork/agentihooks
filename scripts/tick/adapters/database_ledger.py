@@ -16,6 +16,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 from scripts.swarm import timing
+from scripts.swarm_ledger import request_metrics
 from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import resources as api_resources
 from scripts.swarm_ledger.api import routes as api_routes
@@ -152,6 +153,13 @@ def answered(slug: str, path: str, payload: dict[str, Any] | None = None) -> dic
 
 
 def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Answer one ledger API request in process as ``journaled`` does, timed through request metrics as the ledger
+    server times its requests."""
+    with request_metrics.command("GET" if payload is None else "POST", f"/api/v1/ledgers/{slug}/{path}"):
+        return journaled(slug, path, payload)
+
+
+def journaled(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Answer one ledger API request in process as ``answered`` does; inside a tick pass, also journal one
     ``swarm_tick_ledger_call`` line naming its ledger, method, path and outcome with its wall seconds."""
     current = timing.PASS.get()

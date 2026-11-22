@@ -369,17 +369,9 @@ INTENTIONAL_SMOKES = {
     ),
 }
 FLOATING_INSTALLS: tuple[str, ...] = (
-    ".github/workflows/access-audit.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/brain-smoke.yml: uv pip install --python .venv/bin/python -e '.[all]'",
     ".github/workflows/branch-lanes.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/coverage-stability.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
-    ".github/workflows/gate-required.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/hive-worker.yml: pip install PyYAML",
-    ".github/workflows/ledger-load.yml: uv pip install --python '$HOME/venv/bin/python' -e '.[all]'",
-    ".github/workflows/ledger-load.yml: uv pip install --python '$HOME/venv/bin/python' -e '.[all]'",
-    ".github/workflows/lost-runner.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/publish-pypi.yml: pip install build",
-    ".github/workflows/queue-retry.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
     ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
     ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2",
@@ -404,7 +396,6 @@ FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
     ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
     ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
-    "scripts/ci_dependency_audit.py: uvx --with 'platformdirs!=4.14.8' pip-audit==2.10.1 -r requirements --no-deps --disable-pip --format json",
     "scripts/ci_duration_provenance.yml: pip install 'pyyaml>=6.0'",
     "scripts/ci_release.sh: pip install build",
     "scripts/ci_reuse_job.yml: pip install 'pyyaml>=6.0'",
@@ -1143,3 +1134,28 @@ def test_each_intentional_install_smoke_is_a_measured_install_with_a_reason() ->
     assert Counter(finding.key for finding in smokes) == Counter(list(INTENTIONAL_SMOKES))
     assert all(UNCONSTRAINED in finding.reasons for finding in smokes)
     assert all(reason.strip() for reason in INTENTIONAL_SMOKES.values())
+
+
+@pytest.mark.feature("ci-small-workflows-install-the-parser-first")
+@pytest.mark.parametrize(
+    ("workflow", "job"),
+    [
+        ("access-audit.yml", "audit"),
+        ("gate-required.yml", "report"),
+        ("hive-worker.yml", "contracts"),
+        ("lost-runner.yml", "watch"),
+        ("queue-retry.yml", "retry"),
+    ],
+)
+def test_each_small_workflow_installs_pyyaml_before_its_repository_code(workflow: str, job: str) -> None:
+    steps = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"][job]["steps"]
+    lines = [line for step in steps for line in str(step.get("run", "")).splitlines()]
+    install = re.compile(r"\bpip3? install\b.*\bpyyaml\b", re.I)
+    repository_code = re.compile(
+        r"\bpython3?\s+(?:-\w+\s+)*(?:-m\s+scripts\.|\S*\.py\b)|\b(?:bash|sh)\s+\S*(?:deploy|scripts)/"
+    )
+    installs = [index for index, line in enumerate(lines) if install.search(line)]
+    code = [index for index, line in enumerate(lines) if repository_code.search(line)]
+    assert installs and code and installs[0] < code[0], (
+        f"PyYAML installs at {installs}, repository code at {code}: {lines}"
+    )
