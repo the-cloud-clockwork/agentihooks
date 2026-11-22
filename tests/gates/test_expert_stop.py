@@ -121,6 +121,23 @@ def test_no_other_session_is_held(stop: Stop, who: Who) -> None:
     assert stop(who) == Decision()
 
 
+@pytest.mark.parametrize(
+    "who",
+    [
+        Who(name="engineer@a1b2c3-0001", swarm=SLUG, lane="eng", task="expert-1"),
+        Who(name="master@a1b2c3-0001", swarm=SLUG, lane="master", task="master"),
+        Who(name=ME, swarm="", lane="expert", task="expert-1"),
+        Who(name="", swarm=SLUG),
+    ],
+)
+def test_a_session_that_is_no_pinned_expert_is_let_go_without_reading_the_swarm_store(who: Who, tmp_path: Path) -> None:
+    def unread() -> RedisStore:
+        raise AssertionError("the swarm store was read")
+
+    gate = ExpertStop(connect=unread, now=lambda: NOW)
+    assert gate.decide(STOP, who, Verdicts(SLUG, gate.name, tmp_path)) == Decision()
+
+
 def test_an_expert_whose_lineage_record_is_gone_is_not_held(store: RedisStore, stop: Stop) -> None:
     store.redis.hdel(store.key(SLUG, "expert-lineages"), "expert-1")
     assert stop() == Decision()

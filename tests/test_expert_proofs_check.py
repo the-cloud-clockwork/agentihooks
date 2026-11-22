@@ -7,7 +7,7 @@ import pytest
 
 from scripts.feature_checks import expert_proofs as check
 from scripts.swarm import expert_lineage
-from tests.handoff.test_mission_proof import D3, VALID
+from tests.handoff.test_mission_proof import D3, HEADINGS, VALID
 from tests.swarm.test_expert_mission import GOOD
 
 pytestmark = pytest.mark.unit
@@ -85,6 +85,20 @@ def test_a_completed_lineage_whose_proof_is_gone_or_breaks_the_contract_fails_by
         "FAIL: rig lineage expert-3 reads complete and holds no mission proof",
         "FAIL: rig lineage expert-4: ## Open items must be None; a lineage ends with nothing open",
     ]
+
+
+def test_a_kept_proof_with_two_faults_names_both_on_its_line(capsys: pytest.CaptureFixture[str]) -> None:
+    store = Store(("rig",))
+    _ended(store, "rig", [_for("rig")])
+    faulty = _for("rig").replace(
+        "## Open items\nNone\n", "## Read first\n- recap:expert-1@rig what was done\n## Open items\n- one left\n"
+    )
+    store.redis.hset(store.key("rig", "expert-proofs"), "expert-1", faulty)
+    assert check.main(store) == 1
+    assert capsys.readouterr().out == (
+        f"FAIL: rig lineage expert-1: ## Read first is not one of the eight headings: {HEADINGS}; "
+        "## Open items must be None; a lineage ends with nothing open\n"
+    )
 
 
 def test_a_completed_lineage_whose_saved_mission_is_gone_fails_by_name(capsys: pytest.CaptureFixture[str]) -> None:
