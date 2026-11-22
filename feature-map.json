@@ -12608,6 +12608,35 @@
       ]
     },
     {
+      "id": "expert-role-profile",
+      "origin": "operator",
+      "operator_words": "we need to abstract the instructions style you gave to that agent, and we need to create another swarm branch of agents profile \"expert\"",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "The package ships an expert role an agent mounts with no bundle: a persona that holds it to one saved mission with every instruction completed, no exception, workaround, excuse or follow up and causes fixed at the root; a rule with the commands of its loop; the swarm-expert and expert-handoff skills, whose templates carry the headings and markers the handoff and proof checks read; an identity pin, a prompt guard and a Stop condition that runs the expert Stop gate. The opening prompt of an expert names its seat, its lineage and its place in it, the mission command, the obligation, the waits, the handoff and the mission proof, and carries the priming every seat gets. The master skill and the toolbelt skill carry the lineage controls.",
+      "seam": "the expert role rendered with no bundle; prompt.build through the seat builders table and prompt.build_expert; the role's Stop condition shim; the live check scripts.feature_checks.expert_role over the shipped role",
+      "semgrep_rule": "feature-expert-role-stop-condition",
+      "tests": [
+        "tests/profiles/test_expert_role.py::test_the_expert_role_renders_alone_with_its_persona_its_rule_and_both_skills",
+        "tests/profiles/test_expert_role.py::test_the_expert_persona_holds_the_operators_obligation",
+        "tests/profiles/test_expert_role.py::test_the_expert_role_loads_its_identity_pin_its_prompt_guard_and_its_stop_gate",
+        "tests/profiles/test_expert_role.py::test_each_expert_skill_covers_its_loop_with_commands_that_parse",
+        "tests/profiles/test_expert_role.py::test_the_skill_templates_carry_the_headings_the_swarm_checks",
+        "tests/swarm/test_expert_prompt.py::test_the_first_expert_of_a_lineage_is_told_its_mission_its_obligation_and_its_loop",
+        "tests/swarm/test_expert_prompt.py::test_a_successor_is_told_to_confirm_the_handoff_it_inherits_and_carries_it",
+        "tests/swarm/test_expert_prompt.py::test_the_autonomy_and_the_role_argument_do_not_change_an_expert_prompt",
+        "tests/test_expert_role_check.py::test_a_stop_condition_that_runs_another_gate_fails",
+        "tests/test_expert_role_check.py::test_the_shipped_expert_role_holds_every_part_and_each_is_listed",
+        "tests/test_expert_role_check.py::test_a_role_whose_part_is_gone_or_emptied_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_role"
+      ]
+    },
+    {
       "id": "lane-model-harness-compatibility",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",
