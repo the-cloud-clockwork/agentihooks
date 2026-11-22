@@ -18,8 +18,10 @@ HELD = [
     "the expert role holds its handoff skill",
     "the expert role holds its stop gate",
     "the expert role holds its identity pin",
+    "the expert role holds its prompt guard",
 ]
 STOP = ".claude/conditions/stop-expert_stop.py"
+GUARD = ".claude/conditions/pre-bash.rm+bash.rmdir+bash.bash+bash.sh+bash.zsh+bash.eval-prompt_guard.py"
 
 
 @pytest.fixture
@@ -49,6 +51,7 @@ def test_the_shipped_expert_role_holds_every_part_and_each_is_listed(capsys: pyt
             "identity pin",
             5,
         ),
+        (GUARD, "prompt guard", 6),
     ],
 )
 def test_a_role_whose_part_is_gone_or_emptied_fails_by_name(
@@ -64,6 +67,7 @@ def test_a_role_whose_part_is_gone_or_emptied_fails_by_name(
     assert capsys.readouterr().out.splitlines() == expected
 
 
+@pytest.mark.feature("expert-role-profile")
 def test_a_stop_condition_that_runs_another_gate_fails(copy: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (copy / "expert" / STOP).write_text(
         'from scripts.gates.entry import main\n\nraise SystemExit(main(["claim-stop"]))\n'
@@ -76,4 +80,4 @@ def test_a_folder_with_no_expert_role_fails_every_part(tmp_path: Path, capsys: p
     assert check.main(tmp_path) == 1
     assert [line.startswith("FAIL: the expert role lacks its ") for line in capsys.readouterr().out.splitlines()] == [
         True
-    ] * 6
+    ] * 7

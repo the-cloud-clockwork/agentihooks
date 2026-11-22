@@ -12497,6 +12497,8 @@
         "tests/profiles/test_expert_role.py::test_the_skill_templates_carry_the_headings_the_swarm_checks",
         "tests/swarm/test_expert_prompt.py::test_the_first_expert_of_a_lineage_is_told_its_mission_its_obligation_and_its_loop",
         "tests/swarm/test_expert_prompt.py::test_a_successor_is_told_to_confirm_the_handoff_it_inherits_and_carries_it",
+        "tests/swarm/test_expert_prompt.py::test_the_autonomy_and_the_role_argument_do_not_change_an_expert_prompt",
+        "tests/test_expert_role_check.py::test_a_stop_condition_that_runs_another_gate_fails",
         "tests/test_expert_role_check.py::test_the_shipped_expert_role_holds_every_part_and_each_is_listed",
         "tests/test_expert_role_check.py::test_a_role_whose_part_is_gone_or_emptied_fails_by_name"
       ],
