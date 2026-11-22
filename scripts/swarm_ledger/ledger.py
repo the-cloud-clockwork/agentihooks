@@ -368,7 +368,7 @@ def post(args: Any, ops: list[dict[str, Any]]) -> dict[str, Any]:
         if lead and isinstance(exc.code, str):
             raise type(exc)(lead + exc.code) from None
         raise
-    filed = len(ops) > 1 and first["id"] not in state.get("rejected", ())
+    filed = len(ops) > 1 and first["id"] not in (state.get("rejected") or ())
     refused(state, ops, lead=UNORDERED if filed else lead)
     if lead and not state.get("applied"):
         sys.exit(f"{lead}the ledger server did not apply it")
@@ -697,7 +697,7 @@ def filing(args: argparse.Namespace, kind: str, item: str, fields: dict[str, Any
     return post(args, [op(kind, args, **fields), op("order_set", args, item=item, quote=args.quote)])
 
 
-def cmd_order(args: argparse.Namespace) -> None:
+def order_command(args: argparse.Namespace) -> None:
     if bool(args.quote) == bool(args.request) or (args.clear and not args.quote):
         sys.exit(ORDER_USAGE)
     if args.quote:
@@ -1032,7 +1032,7 @@ def build_parser() -> argparse.ArgumentParser:
     order.add_argument("--quote", help="the operator's recorded words")
     order.add_argument("--request", help="id of the operator chat line or comment that ordered the work")
     order.add_argument("--clear", action="store_true", help="remove the mark, with --quote")
-    order.set_defaults(handler=cmd_order)
+    order.set_defaults(handler=order_command)
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")

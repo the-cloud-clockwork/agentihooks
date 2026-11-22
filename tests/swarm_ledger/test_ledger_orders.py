@@ -20,6 +20,9 @@ HEARD = "Build the reviewer seats today"
 UNVERIFIED = "the server could not verify at least three quoted operator words in its recorded prompts or answers"
 NOT_HIS = "order refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
 USAGE = "order takes ITEM with --quote WORDS or --request ENTRY, and --clear only with --quote WORDS"
+NO_AUTHOR = "order ops take by, the relaying agent's name, or none for the operator"
+NO_ITEM = "an order names phases/<id> or tasks/<id>"
+NO_PROOF = "an agent's order needs quote, the operator's words, or request, the id of an entry he wrote"
 
 
 @pytest.fixture(autouse=True)
@@ -73,7 +76,8 @@ def cli(monkeypatch, *argv, by=MASTER):
 
     monkeypatch.setattr(ledger, "call", call)
     args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", by, *argv])
-    getattr(ledger, f"cmd_{args.command}")(args)
+    handler = vars(args).get("handler") or getattr(ledger, f"cmd_{args.command}")
+    handler(args)
 
 
 def spied(monkeypatch):
@@ -223,21 +227,39 @@ def test_phase_and_task_updates_keep_the_order():
 @pytest.mark.parametrize(
     ("op", "message"),
     [
-        ({"op": "order_set", "by": MASTER, "item": "followups/f1", "quote": QUOTE}, "an order names phases/<id>"),
-        ({"op": "order_set", "by": MASTER, "item": "phases/p1/comments", "quote": QUOTE}, "an order names phases/<id>"),
-        ({"op": "order_set", "by": MASTER, "item": "tasks/", "quote": QUOTE}, "an order names phases/<id>"),
-        ({"op": "order_set", "by": MASTER, "quote": QUOTE}, "an order names phases/<id>"),
-        ({"op": "order_set", "by": MASTER, "item": "phases/p1"}, "an agent's order needs quote"),
-        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": QUOTE, "request": "c1"}, "an agent's order"),
-        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": "  "}, "quote must be text"),
-        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": 7}, "quote must be text"),
-        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "request": ""}, "request must be text"),
-        ({"op": "order_set", "by": "operator", "item": "phases/p1", "quote": QUOTE}, "order ops take by"),
-        ({"op": "order_set", "by": 7, "item": "phases/p1", "quote": QUOTE}, "order ops take by"),
-        ({"op": "order_set", "by": "no name", "item": "phases/p1", "quote": QUOTE}, "order ops take by"),
-        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": QUOTE, "rank": "urgent"}, "takes only"),
-        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": "x" * 20001}, "up to 20000 characters"),
-        ({"op": "order_clear", "by": MASTER, "item": "phases/p1"}, "an agent clears an order only with quote"),
+        ({"op": "order_set", "by": MASTER, "item": "followups/f1", "quote": QUOTE}, NO_ITEM),
+        ({"op": "order_set", "by": MASTER, "item": "phases/p1/comments", "quote": QUOTE}, NO_ITEM),
+        ({"op": "order_set", "by": MASTER, "item": "tasks/", "quote": QUOTE}, NO_ITEM),
+        ({"op": "order_set", "by": MASTER, "quote": QUOTE}, NO_ITEM),
+        ({"op": "order_set", "by": MASTER, "item": "phases/p1"}, NO_PROOF),
+        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": QUOTE, "request": "c1"}, NO_PROOF),
+        (
+            {"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": "  "},
+            "quote must be text up to 20000 characters",
+        ),
+        (
+            {"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": 7},
+            "quote must be text up to 20000 characters",
+        ),
+        (
+            {"op": "order_set", "by": MASTER, "item": "phases/p1", "request": ""},
+            "request must be text up to 20000 characters",
+        ),
+        ({"op": "order_set", "by": "operator", "item": "phases/p1", "quote": QUOTE}, NO_AUTHOR),
+        ({"op": "order_set", "by": 7, "item": "phases/p1", "quote": QUOTE}, NO_AUTHOR),
+        ({"op": "order_set", "by": "no name", "item": "phases/p1", "quote": QUOTE}, NO_AUTHOR),
+        (
+            {"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": QUOTE, "rank": "urgent"},
+            "order_set takes only item quote request",
+        ),
+        (
+            {"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": "x" * 20001},
+            "quote must be text up to 20000 characters",
+        ),
+        (
+            {"op": "order_clear", "by": MASTER, "item": "phases/p1"},
+            "an agent clears an order only with quote, the operator's words",
+        ),
         (
             {"op": "order_clear", "by": MASTER, "item": "phases/p1", "request": "c1"},
             "order_clear takes only item quote",
@@ -245,8 +267,9 @@ def test_phase_and_task_updates_keep_the_order():
     ],
 )
 def test_a_malformed_order_is_refused_at_check(op, message):
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError) as refused:
         core.check_op({"id": "o1", **op})
+    assert str(refused.value) == message
 
 
 @pytest.mark.feature("ledger-order-mark")
@@ -314,6 +337,22 @@ def test_the_order_command_needs_exactly_one_proof_and_clears_only_on_his_words(
     with pytest.raises(SystemExit) as refused:
         cli(monkeypatch, *argv)
     assert refused.value.code == USAGE
+
+
+@pytest.mark.feature("ledger-order-mark")
+@pytest.mark.parametrize(
+    ("argv", "text"),
+    [
+        (["--help"], "order mark phases/<id> or tasks/<id> as the operator's order"),
+        (["order", "--help"], "--quote QUOTE the operator's recorded words"),
+        (["order", "--help"], "--request REQUEST id of the operator chat line or comment that ordered the work"),
+        (["order", "--help"], "--clear remove the mark, with --quote"),
+    ],
+)
+def test_the_help_names_the_order_command_and_its_flags(capsys, argv, text):
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(argv)
+    assert text in " ".join(capsys.readouterr().out.split())
 
 
 @pytest.mark.feature("ledger-order-at-filing")
@@ -385,6 +424,34 @@ def test_filing_without_his_words_sends_the_add_alone(monkeypatch, capsys):
     assert "ordered" not in row(state, "phases/p7")
     assert "ordered" not in row(state, "tasks/t7")
     capsys.readouterr()
+
+
+@pytest.mark.feature("ledger-order-at-filing")
+def test_a_filing_the_outbox_holds_prints_what_it_filed(monkeypatch, capsys):
+    sent = []
+    monkeypatch.setattr(ledger, "call", lambda slug, ops: sent.extend(ops) or {"queued": ops[0]["id"]})
+    args = ["--slug", SLUG, "--as", MASTER, "phase", "add", "p7", "Reviewer seats", "--quote", QUOTE]
+    ledger.cmd_phase(ledger.build_parser().parse_args(args))
+    assert [(op["op"], op.get("item")) for op in sent] == [("phase_add", None), ("order_set", "phases/p7")]
+    assert json.loads(capsys.readouterr().out)["title"] == "Reviewer seats"
+
+
+@pytest.mark.feature("ledger-order-at-filing")
+@pytest.mark.parametrize(
+    ("command", "text"),
+    [
+        ("phase", "--quote QUOTE phase add: the operator's words, filing the phase as his order"),
+        (
+            "task",
+            "--quote QUOTE task set rank=...: the operator's words, so the rank stays his; "
+            "task add: his words, so the task is filed as his order",
+        ),
+    ],
+)
+def test_the_help_names_the_quote_that_files_an_order(capsys, command, text):
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args([command, "--help"])
+    assert text in " ".join(capsys.readouterr().out.split())
 
 
 @pytest.mark.feature("ledger-order-at-filing")

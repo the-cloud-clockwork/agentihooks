@@ -5793,7 +5793,8 @@
         "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_marks_and_clears_through_the_cli",
         "tests/swarm_ledger/test_ledger_orders.py::test_the_ledger_entry_point_runs_an_order_the_outbox_holds_as_queued",
         "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_takes_a_request_and_refuses_words_he_never_said",
-        "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_needs_exactly_one_proof_and_clears_only_on_his_words"
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_needs_exactly_one_proof_and_clears_only_on_his_words",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_help_names_the_order_command_and_its_flags"
       ]
     },
     {
@@ -5810,6 +5811,8 @@
         "tests/swarm_ledger/test_ledger_orders.py::test_a_filing_whose_order_the_server_refuses_says_the_entry_was_filed",
         "tests/swarm_ledger/test_ledger_orders.py::test_a_task_the_server_refuses_to_add_still_reads_as_not_added",
         "tests/swarm_ledger/test_ledger_orders.py::test_filing_without_his_words_sends_the_add_alone",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_filing_the_outbox_holds_prints_what_it_filed",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_help_names_the_quote_that_files_an_order",
         "tests/swarm_ledger/test_ledger_orders.py::test_only_phase_add_takes_his_words",
         "tests/swarm_ledger/test_ledger_orders.py::test_the_other_task_actions_still_take_no_quote"
       ]

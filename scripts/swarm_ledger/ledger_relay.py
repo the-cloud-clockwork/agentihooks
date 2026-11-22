@@ -83,7 +83,7 @@ def relayed(op, meta) -> str:
     return verified(op["by"], op["quote"]) if master else ""
 
 
-def orchestrator(op: dict[str, Any], ctx: Any, what: str = "relay") -> bool:
+def orchestrator(op: dict[str, Any], ctx: Any, what: str) -> bool:
     """Whether the op's author is the ledger's orchestrator, with the refusal recorded on ctx when it is not."""
     if ctx.meta["members"].get(op["by"], {}).get("role") == "orchestrator":
         return True
