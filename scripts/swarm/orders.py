@@ -1,18 +1,19 @@
 """Order times: when the operator's order reached each unfinished task of a ledger."""
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 MARK = "ordered"
 
 
 def marked(row: dict[str, Any]) -> int | None:
     """The time of the row's order mark, None when it carries no well formed one."""
-    match row.get(MARK):
-        case {"at": int() as at} if type(at) is int:
-            return at
-        case _:
-            return None
+    mark: object = row.get(MARK)
+    if not isinstance(mark, dict):
+        return None
+    fields = cast("dict[str, object]", mark)  # pragma: no mutate
+    at = fields.get("at")
+    return at if type(at) is int else None
 
 
 def stamps(doc: dict[str, Any]) -> dict[str, int]:
