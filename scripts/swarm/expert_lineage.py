@@ -19,6 +19,8 @@ MISSIONS = "expert-missions"
 SEQUENCE = "expert-seq"
 ACTIVE = "expert-running"
 PROOFS = "expert-proofs"
+LAUNCHES = "expert-launches"
+CLOSING = "expert-closing"
 RUNNING = "running"
 STOPPED = "stopped"
 COMPLETE = "complete"
@@ -87,10 +89,14 @@ def get(store: Any, slug: str, name: str) -> Lineage:
 def running(store: Any, slug: str) -> list[Lineage]:
     """The lineages of the swarm that have not ended, in the order started. The set of their ids bounds the read, so
     code that runs every pass never reads the lineages that ended."""
-    names: list[str] = list(store.redis.smembers(store.key(slug, ACTIVE)))
-    raws: list[str] = store.redis.hmget(store.key(slug, LINEAGES), names) if names else []
-    rows = [Lineage(**json.loads(raw)) for raw in raws]
-    return sorted(rows, key=lambda row: (row.started_at, len(row.id), row.id))
+    return sorted(_indexed(store, slug, ACTIVE), key=lambda row: (row.started_at, len(row.id), row.id))
+
+
+def _indexed(store: Any, slug: str, index: str) -> list[Lineage]:
+    """The lineages an index set names, read by its ids; an id whose record is gone is left out."""
+    names: list[str] = list(store.redis.smembers(store.key(slug, index)))
+    raws: list[str | None] = store.redis.hmget(store.key(slug, LINEAGES), names) if names else []
+    return [Lineage(**json.loads(raw)) for raw in raws if raw]
 
 
 def mission(store: Any, slug: str, lineage: Lineage) -> str:
@@ -114,8 +120,8 @@ def stop(store: Any, slug: str, name: str, by: str, note: str, at: int) -> Linea
 
 
 def complete(store: Any, slug: str, name: str, by: str, proof: str, at: int) -> Lineage:
-    """End a running lineage on the mission proof its expert handed in, and keep that proof; a lineage that already
-    ended is refused. The caller has checked the proof."""
+    """End a running lineage on the mission proof its expert handed in, keep that proof and owe the lineage its
+    closing steps; a lineage that already ended is refused. The caller has checked the proof."""
 
     def proven(found: Lineage) -> Lineage:
         return replace(found, state=COMPLETE, ended_by=by, ended_at=at, note=PROVEN)
@@ -126,6 +132,32 @@ def complete(store: Any, slug: str, name: str, by: str, proof: str, at: int) -> 
 def proof(store: Any, slug: str, name: str) -> str:
     """The mission proof the lineage ended on, empty when it holds none."""
     return store.redis.hget(store.key(slug, PROOFS), name) or ""
+
+
+def launches(store: Any, slug: str, name: str) -> int:
+    """How many experts of the lineage launched so far."""
+    return int(store.redis.hget(store.key(slug, LAUNCHES), name) or 0)
+
+
+def launched(store: Any, slug: str, name: str) -> int:
+    """Count one more launched expert of the lineage and return its number in the lineage."""
+    return int(store.redis.hincrby(store.key(slug, LAUNCHES), name, 1))
+
+
+def unlaunched(store: Any, slug: str, name: str) -> int:
+    """Take back the count of an expert whose spawn failed after it was counted, and return the count left."""
+    return int(store.redis.hincrby(store.key(slug, LAUNCHES), name, -1))
+
+
+def closing(store: Any, slug: str) -> list[Lineage]:
+    """The lineages that ended on a mission proof and whose closing steps are still owed, in the order of their
+    ids. The set of their ids bounds the read."""
+    return sorted(_indexed(store, slug, CLOSING), key=lambda row: (len(row.id), row.id))
+
+
+def closed(store: Any, slug: str, name: str) -> None:
+    """Record that the closing steps of a completed lineage finished."""
+    store.redis.srem(store.key(slug, CLOSING), name)
 
 
 def every(store: Any, slug: str) -> list[Lineage]:
@@ -153,6 +185,7 @@ def _end(store: Any, slug: str, name: str, change: Callable[[Lineage], Lineage],
         pipe.srem(store.key(slug, ACTIVE), name)
         if proof:
             pipe.hset(store.key(slug, PROOFS), name, proof)
+            pipe.sadd(store.key(slug, CLOSING), name)
         return ended
 
     return store.redis.transaction(write, key, value_from_callable=True)
