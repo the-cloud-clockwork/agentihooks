@@ -220,7 +220,7 @@ saved mission on one seat, each handing off to the next, until the swarm accepts
 
 - Write the mission from `agentihooks swarm <slug> expert template`: the operator's words word for word, the
   problem, the evidence with each fact marked proven or unproven, the numbered deliverables, how to report.
-- Start it with `agentihooks swarm <slug> expert start <mission file>`; add `--effort max` only when the
+- Start it with `agentihooks swarm <slug> expert start <mission-file>`; add `--effort max` only when the
   operator names it. A refusal lists every fault of the mission: fix them and start again.
 - `agentihooks swarm <slug> expert status` shows where each running lineage stands. An expert asks you through
   the inbox, never the operator: answer from the mission and relay only what he alone can decide.
