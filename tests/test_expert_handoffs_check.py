@@ -105,8 +105,10 @@ def test_a_handoff_of_a_running_lineage_that_breaks_the_contract_fails_with_each
 def test_the_handoff_a_lineage_was_started_from_is_held_to_handoff_v2(capsys: pytest.CaptureFixture[str]) -> None:
     store = Store(("rig",))
     _started(store, "rig", 3)
+    taken = V2.replace("## Read first\nNone", "## Read first\n- recap:eng-1@rig the state the session left")
+    assert taken != V2
     store.documents = {
-        ("rig", "expert-1"): V2,
+        ("rig", "expert-1"): taken,
         ("rig", "expert-2"): V2.replace("## Intent\n", "## Intend\n"),
         ("rig", "expert-3"): V2,
     }
