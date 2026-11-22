@@ -1275,6 +1275,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent with its [transport capabilities](#transport-capabilities), and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room None: <reason>` when capacity is unavailable; see [Local host room](#local-host-room) and [Deployed host capacity](#deployed-host-capacity)) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling after the quota seat check; master seats pass it, as they pass workstation admission, though each master launch still counts against the room. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
 | `agentihooks swarm <id> autoscale [--fixture <file>] [--json]` | Read only: the autoscale decision (lane ceilings, pending raise, host room and reason) and the local slots, the smaller of `local-max-agents` and this machine's hive `max-agents` (`local_slots` in `--json`), for the live swarm, or for a fixture of accounts and host readings. It never refreshes quota or writes the stored decision; `applied` is false when the swarm runs manual scaling. `swarm create` stores `scaling=auto` and prints it, caps given at create included, so a new swarm's lane ceilings follow free quota seats, host room and ready work; a master keeps it on and reads this preview with `agentihooks balance` before stating capacity. In deployed mode it reads the Kubernetes worker namespace or reports why host room is off; see [Deployed host capacity](#deployed-host-capacity). |
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
+| `agentihooks swarm <id> launches` | Read only: a JSON list with each current agent's `agent`, acknowledged `hive` and `launched_at` in epoch milliseconds, ordered by agent name. Reads the public events interface. Missing acknowledgements and acknowledgements for another execution have null hive and launch time. Reconstructed starts use the event timestamp when no launch timestamp is recorded. A failed read exits nonzero without printing a partial report. |
 | `agentihooks swarm <id> tasks` | Read only: one JSON document, `{"tasks": [...], "freezes": [...]}`, with every task row of the swarm and every freeze and focus record, as the swarm's ledger reads them. A tool outside agentihooks reads tasks and freezes through this command and names only the swarm. An unreachable ledger exits 1 with the reason on stderr and prints nothing on stdout. |
 | `agentihooks swarm <id> merge-path [--hours N] [--json] [--post ITEM]` | The merge path into dev of the swarm's repository over the last N hours (default 24): merges an hour, Tests runs per merge by event, cancelled head runs, reruns, enqueues, queue removals by cause, head failure rate, failed queue runs, queue cycle, standard jobs per queue run, open ready pull requests and lead time. A window GitHub cannot list in full is refused, never undercounted. `--post` writes the plain line as a ledger comment on ITEM. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
@@ -1405,15 +1406,15 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 |---|---|
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. It refuses, with no ledger write, a pull request whose body closes an issue (`Closes`, `Fixes` or `Resolves #n`) that neither the task nor a group member records as its issue or names in its description as `#n` or the issue URL, because the swarm closes every issue the body names once the pull request merges. Drop the closing keyword from the body, or record the task's own issue with `swarm issue` first. A `--prerequisite` pull request that leaves the recorded pull request in place is not checked. `agentihooks api task set ID pr_url=URL` is a raw field edit that reads nothing from GitHub, so it records a pull request without this check. |
-| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev`, such as antoncore, gets a squash merge instead, only for a ready pull request with a review decision of none or approved: the command waits up to ten minutes, polling every fifteen seconds, for the required checks to pass, read from the check rollup where the token can read it and otherwise from the pull request merge state (`CLEAN`, `HAS_HOOKS` or `UNSTABLE`), because the hive GitHub App token cannot read check results on a private repository. It then squash merges the observed head through the same token and reports the `merge_commit`; a merge refused with `Resource not accessible by integration` names the pull requests write permission the GitHub App token needs. The direct squash merge appends no queue journal record. The tick's merge pass checks once and never waits, and its checks wait still reads the check rollup. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run for a swarm worker on a pull request its task names (final, split half, `--stage` or `--prerequisite`) or on one no task names whose head is one of the worker's own worktree branches (`<agent>` or `<agent>-N`), read from GitHub only in that case; another task's pull request is refused, and refuse a pull request into any other base. The master seat may `queue` only through a route in [How the master queues a pull request](#how-the-master-queues-a-pull-request), and `dequeue` refuses it. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). A pull request whose body declares a staged pair is refused until its proof is complete on the exact heads ([Staged compatibility before admission](#staged-compatibility-before-admission)). |
+| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev`, such as antoncore, gets a squash merge instead, only for a ready pull request with a review decision of none or approved: the command waits up to ten minutes, polling every fifteen seconds, for the required checks to pass, read from the check rollup where the token can read it and otherwise from the pull request merge state (`CLEAN`, `HAS_HOOKS` or `UNSTABLE`), because the hive GitHub App token cannot read check results on a private repository. It then squash merges the observed head through the same token and reports the `merge_commit`; a merge refused with `Resource not accessible by integration` names the pull requests write permission the GitHub App token needs. The direct squash merge appends no queue journal record. The tick's merge pass checks once and never waits, and its checks wait still reads the check rollup. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run for a swarm worker on a pull request its task names (final, split half, `--stage` or `--prerequisite`) or on one no task names whose head is one of the worker's own worktree branches (`<agent>` or `<agent>-N`), read from GitHub only in that case; another task's pull request is refused, and refuse a pull request into any other base. The master seat may `queue` only through a route in [How the master queues a pull request](#how-the-master-queues-a-pull-request), and `dequeue` refuses it. Each queue and dequeue appends a record with the queue before and after to the [queue journal](../reference/delivery-tiers.md#the-queue-journal). A new `queue` entry whose task is urgent or focused then gets merge priority by code, reported under `priority` in the output ([Automatic priority on queue entry](../reference/delivery-tiers.md#automatic-priority-on-queue-entry)). A pull request whose body declares a staged pair is refused until its proof is complete on the exact heads ([Staged compatibility before admission](#staged-compatibility-before-admission)). |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
 | `agentihooks swarm <id> publish [--via lab [--direct]] --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. When no listed file changed and the selected remote branch already matches `HEAD`, it skips the commit, gate and push; see [publishing unchanged files](#publishing-unchanged-files). Otherwise the result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. While a panic holds the swarm, a due push is refused before the gate unless the branch it writes is a registered fix of the worktree's repository; see [publishing under panic mode](#publishing-under-panic-mode). `--via lab` grades the committed head on the CI lab's `refs/grade/<task>` before origin and pushes origin only on a green grade; `--direct` pushes origin as soon as the lab accepted the head; see [publishing through the lab](#publishing-through-the-lab). Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the published branch and its repository (`branch_repo`, the origin remote without credentials). When the local branch tracks `origin/<task branch>`, retain that recorded task branch even when the local name differs; otherwise use the local branch. The selected branch must exist on origin. See [recording a published upstream branch](#recording-a-published-upstream-branch). |
 | `agentihooks swarm <id> resolve attempt\|critic\|escalate\|status ITEM` | The blocker protocol on a ledger item, each step recorded and counted on the item by code: two attempts (`--tried`, `--command`, `--output`), then `critic`, which launches a read only headless critic with only the item, the autonomy and the recorded attempts, then one attempt applying its resolution, then `escalate` (`--reason`, `--evidence`), which lands the priority and one comment listing every attempt, the critic resolution and the blocker reason. If critic routing refuses because no Claude account has a free session under its quota band, code records the capacity refusal and proceeds directly to escalation; other critic failures keep the critic requirement. At delegate or full autonomy the ledger refuses a priority, a flagged follow up or a new question from an agent until the item's record has escalated; manual and assist keep the old path. Prints the next step. |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. Rounds spent before the task records a pull request, on its first pull request and on each later one, count on separate counters ([Review round counters](#review-round-counters)). |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. A code or ci task needs its pull request merged. A task of any other kind with a recorded pull request is refused until that pull request merges, unless its proof gives `--filed` for a fix proposed instead of made; its prompt tells it to release the seat with `ready` instead, or at manual or assist autonomy to wait for the operator's merge. A `plan` task records no pull request. |
-| `agentihooks swarm <id> merge priority URL [--lift]` | The master or operator moves a green critical pull request ahead of waiting dev queue entries, at once and never deferred ([Merge priority](../reference/delivery-tiers.md#merge-priority) lists its refusals, its lock and the requeue). Running entries stay in place. `--lift` is the operator's only and adds a `priority-lift` journal record to the same reorder. Waiting entries ahead of the critical request, and waiting entries behind it when it is already queued, are removed tail first in one pass and requeued in their original order after it: the critical request, then the displaced entries, then the later arrivals. Each owner still working its task receives an inbox notice sent as information only (see [Merge priority owner notices](#merge-priority-owner-notices)). A failed insertion still restores the displaced entries, and a critical request the queue ejected during the pass is queued again. Restoring stops at the first refused entry and reports it; the swarm then requeues every entry still left out in queue order, earlier priorities first, at once and on every refresh. Each reorder and restore is recorded in the [queue journal](../reference/delivery-tiers.md#the-queue-journal). Once the queue steps ran, even when one failed, the swarm also marks the pull request head hotfix in its [CI lab](../reference/ci-lab.md#control-routes); the `priority` journal record carries the queue steps under `steps` and the lab's reply, or `{"error": why}`, under `lab`. |
-| `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue ([Ready on a task of any kind](#ready-on-a-task-of-any-kind)). Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff and leave the worktree in place; a green ejection with no failed merge group run of its own is queued again instead ([Ready merge pass queue exits](#ready-merge-pass-queue-exits)). Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
+| `agentihooks swarm <id> merge priority URL [--lift]` | The master or operator moves a green critical pull request ahead of waiting dev queue entries when the command runs ([Merge priority](../reference/delivery-tiers.md#merge-priority) lists its refusals, its lock and the requeue). Running entries stay in place and finish their tests: this deferred priority is the default. `--lift` is the operator's only: it writes a `priority-lift` journal record and also removes the running entries, so their tests are lost, then restores them with the waiting entries behind the critical request in their original order. A pull request of an urgent or focused task gets the default priority by code when it enters the queue ([Automatic priority on queue entry](../reference/delivery-tiers.md#automatic-priority-on-queue-entry)). Waiting entries ahead of the critical request, and waiting entries behind it when it is already queued, are removed tail first in one pass and requeued in their original order after it: the critical request, then the displaced entries, then the later arrivals. Each owner still working its task receives an inbox notice sent as information only (see [Merge priority owner notices](#merge-priority-owner-notices)). A failed insertion still restores the displaced entries, and a critical request the queue ejected during the pass is queued again. Restoring stops at the first refused entry and reports it; the swarm then requeues every entry still left out in queue order, earlier priorities first, at once and on every refresh. Each reorder and restore is recorded in the [queue journal](../reference/delivery-tiers.md#the-queue-journal). Once the queue steps ran, even when one failed, the swarm also marks the pull request head hotfix in its [CI lab](../reference/ci-lab.md#control-routes); the `priority` journal record carries the queue steps under `steps` and the lab's reply, or `{"error": why}`, under `lab`. |
+| `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue ([Ready on a task of any kind](#ready-on-a-task-of-any-kind)). Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, with the same [automatic priority](../reference/delivery-tiers.md#automatic-priority-on-queue-entry) for an urgent or focused task, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff and leave the worktree in place; a green ejection with no failed merge group run of its own is queued again instead ([Ready merge pass queue exits](#ready-merge-pass-queue-exits)). Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
 | `agentihooks swarm <id> block NOTE` | At delegate or full autonomy, refused until the task's blocker record has escalated through `resolve` (`--dev-red` is exempt). Comment the blocker, mark the task `blocked`, end the session. A dependency that is not `done` turns the block into a checked wait on that task instead, keeping the claim. Before blocking, refuses while a task worktree holds commits its remote branch lacks, naming the push to run, and records a pushed branch on the task; see [Blocking with unpushed commits](#blocking-with-unpushed-commits). |
 | `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone when the task title, description and scope authorizations are unchanged; a task text rewrite retraces every piece. See [Retrace a plan after rewriting a task](#retrace-a-plan-after-rewriting-a-task) for reuse, configuration and upgrade recovery. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
@@ -6096,8 +6097,12 @@ WantedBy=default.target
   an ACL denial (`NoPermissionError`). The runner prints
   `scheduler stops: the state store refused its credential (<error>: <text>)` and exits 4 on that pass, in any swarm.
   Its supervisor prints `the scheduler supervisor <pid> stops: its state store refused its credential`, starts no
-  new runner and exits 4, and systemd leaves it stopped. A timeout or a dropped connection still gets a new pass
-  every second. The next `ensure_running` call starts the unit again.
+  new runner, leaves a `refused` file in its runtime folder and exits 4, and systemd leaves it stopped. A timeout or a
+  dropped connection still gets a new pass every second. While the `refused` file stands, every `ensure_running`
+  call, the 15 s `swarm waits` pass included, first runs `python -m scripts.scheduler.service probe` with its own
+  environment, which reads the scheduler entries past the ping and exits 4 when that read is refused. A refused,
+  timed out or failed probe starts nothing; the first accepted probe removes the file and starts the unit again.
+  A supervisor that starts, a hand start included, removes the file as well.
 - Exit 3 means a proof swarm's runner stopped because its state store did not answer for 300 seconds. Its supervisor
   prints `the scheduler supervisor <pid> stops: its state store did not answer`, starts no new runner and exits 3.
   Exit 3 is not in `RestartPreventExitStatus`, so systemd restarts the supervisor as it does after any other exit.
@@ -6167,7 +6172,7 @@ the new seam tests failing. Green: Proofs run
 | Symptom | Cause | Fix |
 |---|---|---|
 | The tick stops when `agentihooks-swarm-waits.service` or `agentihooks-hive.service` restarts | The supervisor runs as a child in that unit's group: the scheduler unit is missing or was never started | Run `agentihooks swarm tick` once from the installed agentihooks, or wait for the next host tick; `timer.reconcile` writes and enables the unit |
-| `agentihooks-scheduler.service` is inactive with exit status 4 and `scheduler.log` names a refused credential | The scheduler's Redis user was removed, its password changed or its ACL denies a scheduler command | Fix the credential or ACL behind the scheduler's Redis URL in `~/.agentihooks/.env`, then run `systemctl --user start agentihooks-scheduler.service` |
+| `agentihooks-scheduler.service` is inactive with exit status 4 and `scheduler.log` names a refused credential | The scheduler's Redis user was removed, its password changed or its ACL denies a scheduler command | Fix the credential or ACL behind the scheduler's Redis URL in `~/.agentihooks/.env`; the next `swarm waits` pass probes the scheduler entries, removes the `refused` file in the scheduler runtime folder and starts the unit |
 | `agentihooks-scheduler.service` is inactive with exit status 2 | Another supervisor held the machine lock past the 30 second take over | The next wait pass starts the unit again; when it repeats, list supervisors with the `ps` check in [A supervisor started off the installed code exits with its starter](#a-supervisor-started-off-the-installed-code-exits-with-its-starter) |
 | The unit is active but `scheduler.log` keeps getting new supervisors | The runtime folder has no mark, so callers spawn children: the unit's supervisor resolves another folder | Keep the Redis settings in `~/.agentihooks/.env`, which the unit loads, rather than only in a shell profile |
 
@@ -7547,13 +7552,137 @@ stops nothing.
 A lane whose `agent` is `claude` or `codex` gets seats from that harness only, however many free seats the other
 harness has. Each capacity pass stores every pinned lane with its quota decision: the pin, the time a pass first saw
 it, the other harness's free quota seats, and the ready lane tasks the pass placed nowhere while the lane sat below its
-ceiling. The swarm config keeps no time for a pin, so its age counts from the first pass that saw it; changing or
-clearing the pin starts the age again.
+ceiling. The swarm config keeps no time for a pin, so its age counts from the first pass that saw it. Moving the pin
+to the other harness starts the age again; clearing it does too once a capacity pass runs while the lane is unpinned,
+so a clear and a new pin between two passes keep the old age.
 
 `agentihooks swarm <id> status` shows one quota line per pinned lane under quota capacity, and raises one `harness
 pin` finding for a pinned lane whose other harness has free seats while ready tasks wait. The finding names the lane,
 the pin and its age, the free seats and the waiting tasks. It reports only: the pin stays until someone sets the lane
 agent back to `auto`.
+
+A pin left in place after its reason has passed keeps work off the other harness without any error; this finding
+makes such a pin show in status.
+
+#### How a lane gets pinned
+
+The capacity pass checks the `eng`, `ci` and `plan` lanes. A lane is pinned when its `agent` field is `claude` or
+`codex`; `auto`, the default, and an unset field offer both harnesses. The `master` lane is never checked. A lane
+agent is set in three ways:
+
+| Source | Effect |
+|---|---|
+| `agentihooks swarm <id> set <lane>-agent=claude`, `=codex` or `=auto` | Pins the lane, moves the pin to the other harness, or clears it. Any other value is refused with `lane <lane> agent must be one of ('auto', 'claude', 'codex')`. |
+| A template's lane `agent` at `swarm create` | The swarm starts pinned. Of the built-in templates, `codex-ci` pins eng to Claude and ci to Codex, and `codex-only` and `claude-only` pin every lane; see [Templates](#templates). |
+| The bottleneck remedy | Moves an `eng` or `ci` lane that is already pinned to the stuck harness onto the other harness; it never pins an `auto` lane. The move restarts the pin age. See [Spawn holds in the stage report](#spawn-holds-in-the-stage-report). |
+
+A task's `requires_harness` field is not a lane pin. It decides the harness for that task alone and creates no pin
+entry and no finding.
+
+#### What each capacity pass stores
+
+The tick's `quota notice` step runs the capacity pass and writes the quota capacity decision to the swarm's
+`quota-capacity` key. For each pinned lane the decision holds one entry under `pins`; `agentihooks swarm <id> status
+--json` shows it as `quota_capacity.pins.<lane>`. With no pinned lane the decision has no `pins` key.
+
+| Field | Value |
+|---|---|
+| `agent` | The pinned harness, `claude` or `codex`. |
+| `since` | The time in milliseconds when a capacity pass first saw this pin. A pass keeps it while the lane stays pinned to the same harness, and sets it to the pass time when the pin is new or names the other harness. A lane that goes back to `auto` drops its entry, so a later pin starts a new age. |
+| `other` | The harness the pin leaves out. |
+| `free` | The other harness's free quota seats: each account's session cap minus its live sessions, never below zero, summed over the accounts that are not API key accounts and carry no quota handoff warning. It is counted before the pass places anything, and it is the same number as `free quota seats` on the scaling line. |
+| `waiting` | The ids of the ready lane tasks this pass placed on no seat. Tasks skipped for a fresh placement refusal never count. The list is empty unless the lane's agents, plus those this pass placed, stay below the lane cap (`max-eng-agents`, `max-ci-agents` or `max-plan-agents`): ready tasks behind a full lane wait on the cap, not on the pin. |
+
+#### When the finding raises and clears
+
+Swarm status raises one `harness pin` finding per lane while all three conditions hold on the stored decision:
+
+| Condition | Read from |
+|---|---|
+| The lane has a pin entry | `pins.<lane>` |
+| The other harness has at least one free quota seat | `pins.<lane>.free` |
+| At least one ready lane task waits | `pins.<lane>.waiting` |
+
+There is no age threshold and no setting: the finding raises as soon as one stored decision meets all three. It
+clears once a capacity pass stores a decision where any condition fails, for example when the lane goes back to
+`auto`, the other harness fills up, the pinned harness places the waiting tasks or the lane reaches its cap. Its
+measure is the number of waiting tasks.
+
+#### What status shows
+
+The quota pin line prints after the scaling line and before the host and account lines, one per pinned lane in lane
+name order. It prints for every pin, also when no finding raises; with no waiting task it ends at `0 ready tasks
+wait`. A swarm whose eng lane has run on Claude for six days, with every Claude account open but at its session cap
+and Codex free, shows:
+
+```text
+quota capacity eng 2 of 3, ci 0 of 1, plan 0 of 1, changed 12 minutes ago, because ci and plan have no more ready tasks; accounts have quota; Claude has 0 free seats and Codex has 6 free seats
+scaling manual, live of ceiling eng 2 of 3, ci 0 of 1, plan 0 of 1, free quota seats claude 0 and codex 6
+lane eng pinned to claude, first seen 6d04h ago: codex has 6 free quota seats and 2 ready tasks wait: t12, t15
+```
+
+The findings block of the same status shows:
+
+```text
+finding  harness pin  eng: Lane eng is pinned to Claude, first seen 6d04h ago, while Codex has 6 free quota seats and 2 ready tasks wait
+  - The eng lane agent is claude, so capacity offers its tasks only Claude seats
+  - Codex free quota seats: 6
+  - Ready eng tasks waiting: t12, t15
+  - Pin first seen by the capacity pass 6d04h ago
+  threshold a free seat on the other harness
+  id harness-pin/eng
+  last outcome none recorded
+  rows none in the ledger events
+```
+
+The age is written as minutes under an hour (`5m`), hours and minutes under a day (`2h05m`), and days and hours
+after that (`6d04h`). The summary names the harnesses `Claude` and `Codex`; the quota line prints the lane field
+value, `claude` or `codex`, and the first evidence line prints both. The subject is a lane, not an agent or task, so
+the last outcome and rows lines print their placeholders, `none recorded` and `none in the ledger events`.
+
+#### Delivery and verdicts
+
+The tick's findings pass sends one inbox item from `swarm` to the swarm's lead master:
+
+```text
+New health finding on swarm <id>: Lane eng is pinned to Claude, first seen 6d04h ago, while Codex has 6 free quota seats and 2 ready tasks wait (harness pin). Give it a verdict: agentihooks swarm <id> verdict harness-pin/eng false-positive|early-real|established|insufficient-evidence|resolved --note "<why>"
+```
+
+It sends that item once per finding id and verdict, and remembers the send for 30 days, so a pin that clears and
+comes back on the same lane within those 30 days, before any verdict, sends no second item. A verdict hides the
+finding from status and from the inbox for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60); after that it comes back, with
+the earlier verdict on its `id` line, only when more tasks wait than when it was judged. The verdict is stored under
+`harness-pin/<lane>`, so it also covers a later pin on the same lane. Only a registered master or the operator may
+give a verdict.
+
+#### Investigate and clear a pin
+
+```bash
+agentihooks swarm <id> status
+agentihooks swarm <id> status --json
+```
+
+1. Read the quota pin line and the `free quota seats` part of the scaling line. Free seats on the other harness and
+   waiting tasks mean the pin keeps work off seats that could take it.
+2. In the JSON, compare `config.lanes.<lane>.agent` with `quota_capacity.pins.<lane>`. The `since` time shows how
+   long the capacity pass has seen the pin.
+3. Clear a pin that no longer has a reason:
+
+   ```bash
+   agentihooks swarm <id> set eng-agent=auto
+   ```
+
+   The next capacity pass stores no entry for the lane, and the quota line and the finding go away. To move the pin
+   instead, set the lane to the other harness; its age starts again.
+4. Keep a pin that is deliberate, such as a `codex-only` swarm or a profile that needs one harness, and record why:
+
+   ```bash
+   agentihooks swarm <id> verdict harness-pin/eng established --note "eng stays on Codex for the profile proof"
+   ```
+
+The age counts from the first capacity pass that saw the pin, so a pin set while the tick was stopped, or before the
+release that added this finding, reads younger than it is. `free` counts quota seats only; a free seat there does not
+mean a host has room to launch the agent.
 
 ### Spawn stall findings
 
@@ -8955,8 +9084,10 @@ the routing change without claiming a measured production decrease.
 
 ### Merge priority owner notices
 
-`agentihooks swarm <slug> merge priority <url>` tells the owner of every displaced
-pull request that still has an owner working its task. The critical pull request's
+`agentihooks swarm <slug> merge priority <url>`, and the
+[automatic priority](../reference/delivery-tiers.md#automatic-priority-on-queue-entry) a new queue entry of an urgent or
+focused task gets, tell the owner of every displaced pull request that still has an
+owner working its task. The critical pull request's
 owner gets no notice. Each of these notices reports what already happened and asks
 for nothing, so the swarm sends every one as information only, the same as
 `msg send --fyi`. It closes as `done: information received` on read or confirmed
@@ -8966,7 +9097,7 @@ while the receiving seat is empty.
 
 | When | Sender | Notice text |
 |---|---|---|
-| A waiting entry was removed and requeued in its original order after the critical request | the agent or operator who ran `merge priority` | `Your pull request <url> was requeued in its original order after priority request <priority url>.` |
+| A waiting entry was removed and requeued in its original order after the critical request | the agent or operator who ran `merge priority`, or `swarm` for the automatic priority on queue entry | `Your pull request <url> was requeued in its original order after priority request <priority url>.` |
 | An interrupted priority left an entry out and the entry no longer qualifies, for example it became a draft, its head moved or it conflicts with dev | `swarm` | `Your pull request <url> left the merge queue in an interrupted priority and stays out because <reason>. Queue it again once its checks pass.` |
 | An interrupted priority left an entry out and the swarm could not queue it again yet | `swarm` | `Your pull request <url> left the merge queue in a priority and could not be queued again: <reason>. The swarm retries it at the end of the queue on every refresh until it is back or stays out for a reason.` |
 
@@ -9549,7 +9680,7 @@ Each path runs the check against the head it is about to admit, before it enqueu
 | The `ready` merge pass, once the released pull request's checks pass | The task reopens with the comment `Reopened by the swarm: its pull request <url> could not be queued: staged compatibility: <reason>. The next engineer continues it from the handoff its engineer left.` |
 | The merge pass requeue after a transient unmergeable exit | The `requeue` ledger alert reads `The swarm could not queue <url> again for task <task> after a transient unmergeable state: staged compatibility: <reason>`. The pass retries with backoff and reopens the task after five tries. |
 | `agentihooks swarm <slug> merge priority <url>` for the pull request | The priority is refused before any entry leaves the queue. |
-| Restoring an entry that `merge priority` displaced | That entry stays out; the priority result lists `could not restore <url>: staged compatibility: <reason>`. |
+| Restoring an entry that `merge priority` or the automatic priority on queue entry displaced | That entry stays out; the priority result lists `could not restore <url>: staged compatibility: <reason>`. For the automatic priority the result is `priority.errors` in the `merge queue` output, and the new entry stays queued. |
 | The requeue of an entry left out by an interrupted `merge priority` | The `merge-priority-requeue:<url>` ledger alert names the reason, the task's claimant gets one inbox notice, and the swarm retries on every refresh. |
 | `python -m scripts.ci_requeue` | That pull request's row reads `refused: staged compatibility: <reason>` and the sweep continues. |
 

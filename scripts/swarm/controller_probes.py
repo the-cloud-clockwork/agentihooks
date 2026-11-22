@@ -36,7 +36,7 @@ def live(
     if stale:
         print(f"controller: no live controller lease for {stale}")
         return 1
-    error = _unanswered(environ, fetch)
+    error = _unanswered(environ, fetch) if PORT_ENV in environ else ""
     if error:
         return _standby(environ[SWARM_ENV], store, owner, error)
     print("controller: live")
