@@ -132,8 +132,8 @@ def run(slug: str, config: Any, store: Any, ledger: Any, runtime: Any, now_ms: i
 def recycle(
     slug: str, store: RedisStore, ledger: Any, master: AgentRecord, text: str, now_ms: int, reason: str
 ) -> None:
-    built = envelope.build(store, slug, master, "recycle", pass_state(ledger, slug)["tasks"], now_ms)
-    found = envelope.with_orders(built, store, ledger, master)
+    found = envelope.build(store, slug, master, "recycle", pass_state(ledger, slug)["tasks"], now_ms)
+    found = envelope.with_orders(found, store, ledger, master)
     store.put_handoff(slug, MASTER, text, seat=master.seat, envelope=found)
     transfers.record(store, slug, master, reason, text, now_ms)
     store.put_agent(slug, replace(master, state="finished"))

@@ -12651,6 +12651,7 @@
       "tests": [
         "tests/swarm/test_order_continuity.py::test_a_master_envelope_carries_one_line_for_each_open_order",
         "tests/swarm/test_order_continuity.py::test_an_engineer_envelope_carries_no_orders_and_reads_none",
+        "tests/swarm/test_order_continuity.py::test_a_master_envelope_reads_the_orders_with_the_fix_phase_of_its_swarm",
         "tests/swarm/test_order_continuity.py::test_a_master_handoff_through_the_swarm_command_stores_the_open_orders",
         "tests/swarm/test_order_continuity.py::test_a_ledger_that_cannot_be_read_never_stops_a_master_handoff",
         "tests/swarm/test_order_continuity.py::test_an_engineer_handoff_through_the_swarm_command_reads_no_orders",

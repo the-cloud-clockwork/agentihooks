@@ -2,10 +2,11 @@ from typing import Any
 
 import pytest
 
+from scripts.doctor import loop, priming
 from scripts.handoff import envelope
 from scripts.swarm import cli, master_stall, prompt
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
-from tests.swarm.test_freeze import task
+from tests.swarm.test_freeze import record, task
 from tests.swarm.test_order_check import ORDER, ledger_doc
 
 pytestmark = pytest.mark.unit
@@ -82,6 +83,19 @@ def test_an_engineer_envelope_carries_no_orders_and_reads_none(store: RedisStore
     built = {"ledger": SLUG, "agent": "engineer@a1b2c3-0002"}
     engineer = AgentRecord("engineer@a1b2c3-0002", "eng", "t1")
     assert envelope.with_orders(built, store, Unread(None), engineer) is built
+
+
+@pytest.mark.feature("master-handoff-carries-orders")
+@pytest.mark.parametrize(("template", "claimable"), [(priming.TEMPLATE, 1), ("", 0)])
+def test_a_master_envelope_reads_the_orders_with_the_fix_phase_of_its_swarm(template: str, claimable: int) -> None:
+    import fakeredis
+
+    found = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    found.create(SwarmConfig(SLUG, "/repo", 1, 1, template=template))
+    rows = [task("t1", phase=loop.FIX_PHASE), task("t9")]
+    ledger = Ledger(ledger_doc(rows, record("phases/p1", "focus"), **{loop.FIX_PHASE: ORDER}))
+    line = f"phases/{loop.FIX_PHASE} Ship: 1 unfinished, {claimable} claimable, 0 claimed or in a pull request, 0 done"
+    assert envelope.with_orders({"ledger": SLUG}, found, ledger, seated(found))["orders"] == [line]
 
 
 @pytest.mark.feature("master-handoff-carries-orders")
