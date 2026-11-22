@@ -261,7 +261,12 @@ SHELL_RUN = re.compile(r"(?:\$\{?\w+\}?/)?((?:[\w.-]+/)*[\w.-]+\.sh)\b")
 MODULE_RUN = re.compile(r"\bpython3?\b[^\n;&|]*?\s-m\s+([A-Za-z_]\w*(?:\.\w+)*)")
 FILE_RUN = re.compile(r"\bpython3?\s+(?:-\w+\s+)*((?:[\w.-]+/)*[\w.-]+\.py)\b")
 LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+PROJECT = re.sub(r"[-_.]+", "-", tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["name"]).lower()
+NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 INTENTIONAL_SMOKES = {
+    ".github/workflows/publish-pypi.yml::Install the version clean and check what it reports": (
+        "installs the release just published into a clean venv from the package index, as a user does, to prove it"
+    ),
     ".github/workflows/test.yml::Install the wheel into a clean venv": (
         "installs the built wheel into a clean venv with the resolution a user gets from the package index"
     ),
@@ -269,7 +274,48 @@ INTENTIONAL_SMOKES = {
         "installs the checkout into a fresh venv with its natural resolution to prove a new user's first swarm init"
     ),
 }
-FLOATING_INSTALLS: tuple[str, ...] = ()
+FLOATING_INSTALLS: tuple[str, ...] = (
+    ".github/workflows/access-audit.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/brain-smoke.yml: uv pip install --python .venv/bin/python -e '.[all]'",
+    ".github/workflows/branch-lanes.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/coverage-stability.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
+    ".github/workflows/gate-protected.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/gate-required.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/hive-worker.yml: pip install PyYAML",
+    ".github/workflows/ledger-load.yml: uv pip install --python '$HOME/venv/bin/python' -e '.[all]'",
+    ".github/workflows/ledger-load.yml: uv pip install --python '$HOME/venv/bin/python' -e '.[all]'",
+    ".github/workflows/lost-runner.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/publish-pypi.yml: pip install build",
+    ".github/workflows/queue-retry.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
+    ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
+    ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2",
+    ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2",
+    ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2 'semgrep==$SEMGREP_VERSION'",
+    ".github/workflows/test.yml: pip install 'playwright>=1.44.0' 'orjson>=3.10'",
+    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
+    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
+    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
+    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4' PyYAML==6.0.3",
+    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4' PyYAML==6.0.3",
+    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock tree-sitter tree-sitter-bash tree-sitter-javascript tree-sitter-css",
+    ".github/workflows/test.yml: pip install --quiet 'cryptography>=42'",
+    ".github/workflows/test.yml: pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1",
+    ".github/workflows/test.yml: pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0",
+    ".github/workflows/test.yml: pip install ruff==0.15.12",
+    ".github/workflows/test.yml: pip install ruff==0.15.12",
+    ".github/workflows/test.yml: pip install vulture==2.14",
+    ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
+    ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
+    ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
+    "scripts/ci_dependency_audit.py: uvx --with 'platformdirs!=4.14.8' pip-audit==2.10.1 -r requirements --no-deps --disable-pip --format json",
+    "scripts/ci_duration_provenance.yml: pip install 'pyyaml>=6.0'",
+    "scripts/ci_release.sh: pip install build",
+    "scripts/ci_reuse_job.yml: pip install 'pyyaml>=6.0'",
+)
 
 
 @dataclass(frozen=True)
@@ -494,6 +540,9 @@ def _arguments(kind: str, args: list[str]) -> tuple[list[tuple[str, str]], list[
 
 
 def _local(target: str) -> bool:
+    named = NAME.match(target)
+    if named is not None and re.sub(r"[-_.]+", "-", named[0]).lower() == PROJECT:
+        return True
     return target.startswith((".", "$", "~")) or "/" in target or target.endswith((".whl", ".tar.gz", ".zip"))
 
 
@@ -690,6 +739,14 @@ def test_the_install_walker_reports_a_planted_floating_install(
                 )
             },
             id="env resolved version",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(
+                    f'pip install -c {LOCK} "agentihooks[all]==$VERSION"', {"VERSION": "${{ inputs.version }}"}
+                )
+            },
+            id="project release from the index",
         ),
         pytest.param(
             {
