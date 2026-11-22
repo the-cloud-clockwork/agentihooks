@@ -72,10 +72,10 @@ def test_the_report_carries_each_write_and_the_median_and_max_of_every_figure(
         ]
     )
     monkeypatch.setattr(write_timing, "spawned", children)
-    write_timing.main([*AGENT, "--count", "3", "--text", "Timing probe", "t9"])
+    write_timing.main([*AGENT, "--count", "3", "t9"])
     report = reported(capsys)
     assert (report["slug"], report["task"], report["count"]) == ("scratch", "t9", 3)
-    assert children.calls[0][0][-2:] == ["tasks/t9", "Timing probe"]
+    assert children.calls[0][0][-2:] == ["tasks/t9", write_timing.TEXT]
     assert len(report["load_before"]) == 3
     assert len(report["load_after"]) == 3
     assert report["writes"][0] == {

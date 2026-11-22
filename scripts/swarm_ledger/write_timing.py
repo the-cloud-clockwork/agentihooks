@@ -34,8 +34,9 @@ def spawned(argv: list[str], timing: Path) -> Child:
     return Child(done.returncode, wall, after.ru_utime + after.ru_stime - before.ru_utime - before.ru_stime)
 
 
-def agent_comment(slug: str, name: str, task: str, text: str) -> list[str]:
-    """The comment write an agent makes on its task, as a fresh command line process."""
+def agent_comment(slug: str, name: str, task: str) -> list[str]:
+    """The agentihooks api comment write an agent makes on its task, run through the console script's own entry
+    module on this interpreter so the child runs the same code as the timer."""
     return [
         sys.executable,
         "-m",
@@ -47,7 +48,7 @@ def agent_comment(slug: str, name: str, task: str, text: str) -> list[str]:
         name,
         "comment",
         f"tasks/{task}",
-        text,
+        TEXT,
     ]
 
 
@@ -57,7 +58,10 @@ def timed_lines(timing: Path) -> list[dict[str, Any]]:
 
 
 def figures(child: Child, lines: list[dict[str, Any]]) -> dict[str, float]:
-    """One write's figures: its process, its requests, its operations request and each substep, wall and CPU."""
+    """One write's figures: its process, its requests, its operations request and each substep, wall and CPU.
+
+    Substeps nest: apply_locked holds the four write substeps and, on a cold copy, the copy substeps, which otherwise
+    run inside guard_read."""
     writes = [line for line in lines if line["method"] == "POST"]
     row: dict[str, float] = {
         "process_wall": child.wall,
@@ -95,7 +99,6 @@ def parser() -> argparse.ArgumentParser:
     found.add_argument("--slug", required=True)
     found.add_argument("--as", dest="name", required=True)
     found.add_argument("--count", type=int, default=5)
-    found.add_argument("--text", default=TEXT)
     found.add_argument("task")
     return found
 
@@ -104,7 +107,7 @@ def main(argv: list[str] | None = None) -> None:
     """Run the writes one after another and print each write's figures with the median and max of each."""
     args = parser().parse_args(argv)
     count: int = args.count
-    agent = agent_comment(args.slug, args.name, args.task, args.text)
+    agent = agent_comment(args.slug, args.name, args.task)
     rows: list[dict[str, float]] = []
     before = os.getloadavg()
     with tempfile.TemporaryDirectory(prefix="ledger-write-timing-") as folder:
