@@ -22,8 +22,8 @@ Form = Callable[[dict[Any, Any]], dict[Any, Any]]
 
 
 def _install(step: dict[str, Any], floating: str, install: str) -> dict[str, Any]:
-    step["run"] = step["run"].replace(floating, PINNED).replace(PINNED, install)
-    assert install in step["run"]
+    assert floating in step["run"], "the template no longer installs the floating parser"
+    step["run"] = step["run"].replace(floating, install)
     return step
 
 
@@ -31,7 +31,7 @@ def _preflight(form: Form, install: str, sparse: str | None) -> dict[Any, Any]:
     preflight = form(yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text()))
     steps = preflight["jobs"]["grade"]["steps"]
     [parser] = [step for step in steps if step.get("name") == "Install workflow parser"]
-    _install(parser, DOUBLE, install)
+    parser["run"] = f"python -m {install}"
     if sparse is not None:
         steps[0]["with"]["sparse-checkout"] = sparse
     return preflight
@@ -55,8 +55,9 @@ def test_the_pinned_tool_form_pins_each_floating_parser_install_and_keeps_every_
     other = _SPARSE + "/scripts/\n"
     value = {
         True: {"push": None},
+        DOUBLE: SINGLE,
         "steps": [
-            {"run": f"python -m {DOUBLE}", "timeout-minutes": 5, "if": None},
+            {"run": f"python -m {DOUBLE} && python -m {DOUBLE}", "timeout-minutes": 5, "if": None},
             {"run": f'"$RUNNER_TEMP/python" -I -m {SINGLE}\necho done\n', "continue-on-error": False},
             {"with": {"sparse-checkout": _SPARSE, "fetch-depth": 1}},
             {"with": {"sparse-checkout": other}},
@@ -64,8 +65,9 @@ def test_the_pinned_tool_form_pins_each_floating_parser_install_and_keeps_every_
     }
     assert gate_protected._pinned_tool_form(value) == {
         True: {"push": None},
+        DOUBLE: PINNED,
         "steps": [
-            {"run": f"python -m {PINNED}", "timeout-minutes": 5, "if": None},
+            {"run": f"python -m {PINNED} && python -m {PINNED}", "timeout-minutes": 5, "if": None},
             {"run": f'"$RUNNER_TEMP/python" -I -m {PINNED}\necho done\n', "continue-on-error": False},
             {"with": {"sparse-checkout": PINNED_SPARSE, "fetch-depth": 1}},
             {"with": {"sparse-checkout": other}},
