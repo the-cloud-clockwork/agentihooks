@@ -29,6 +29,11 @@ def _fresh(run: Run, load: Callable[[int], Load], now: int) -> set[str]:
     return _samples(registry.render())
 
 
+def _named(served: set[str], fresh: set[str]) -> set[str]:
+    names = {line.split("{")[0].split(" ")[0] for line in fresh}
+    return {line for line in served if line.split("{")[0].split(" ")[0] in names}
+
+
 def _counted(run: Run, monkeypatch: pytest.MonkeyPatch) -> tuple[list[int], Callable[[int], Load]]:
     builds: list[int] = []
     load = run.engine.load
@@ -83,7 +88,8 @@ def test_a_scrape_serves_the_series_of_a_fresh_load_build_of_the_same_state(lab:
     with _serving(run, [1000]) as (_, exposition):
         served = _samples(_read(exposition).decode())
     assert f"{RUNNING} 1.0" in served
-    assert _fresh(run, run.engine.load, 1000) <= served
+    fresh = _fresh(run, run.engine.load, 1000)
+    assert _named(served, fresh) == fresh
 
 
 @pytest.mark.feature("lab-scheduler-cached-snapshot")
@@ -130,4 +136,5 @@ def test_the_metrics_port_rebuilds_the_load_on_its_own_cadence_and_serves_the_fr
     assert AGE_ZERO in text
     assert builds == [1000, later]
     assert f"{RUNNING} 1.0" in _samples(text)
-    assert _fresh(run, load, later) <= _samples(text)
+    fresh = _fresh(run, load, later)
+    assert _named(_samples(text), fresh) == fresh

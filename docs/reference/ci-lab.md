@@ -321,9 +321,10 @@ snapshot sets the queue, slot and `ci_lab_queue_wait_seconds` gauges through
 The scheduler service builds the snapshot with `scripts.ci_lab.scheduler.Scheduler.load` and
 serves it through `scripts.ci_lab.scheduler.listen`. Port 8800 builds one on every `/capacity`
 request. Port 9108 serves `/metrics` and `/capacity` from the last snapshot a
-`scripts.ci_lab.metrics.Latest` holds. The port's first read builds the snapshot once, however many
-reads meet that build, and a failed first build fails its read so the next read builds again. Every
-later read of the port answers at once with the last finished build and sets
+`scripts.ci_lab.metrics.Latest` holds. The port's first read after a start builds the snapshot once,
+however many reads meet that build, so the lab series stay without samples until that build
+finishes. A failed first build fails its own read, and each read that waited on it builds again in
+turn. Every later read of the port answers at once with the last finished build and sets
 `ci_lab_load_age_seconds` to the seconds since that build started. Between requests the port's serve loop runs `Latest.refresh`,
 which starts one background build, a daemon thread named `ci-lab-load-refresh`, once the last
 build started `REFRESH_MS` (15 seconds) ago and no build runs. The serve loop checks after each
