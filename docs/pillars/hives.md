@@ -1266,17 +1266,37 @@ A reading holds:
 | Field | Source |
 |---|---|
 | `cpus`, `load5` | CPU count and the five minute load average from `/proc/loadavg`. |
+| `cpu_ticks`, `used_cpus` | The node's busy and total CPU ticks from `/proc/stat`, and the CPUs used since the previous reading; `used_cpus` needs a previous reading, so the first reading after a start carries only the ticks. |
 | `available_mb`, `total_mb` | Available and total memory from `/proc/meminfo`. |
 | `pod_total_mb`, `pod_available_mb` | The cgroup v2 `memory.max` limit and that limit minus current use less inactive file pages, only when the limit is set. |
 | `pod_cpus`, `pod_cpu_usec`, `pod_load` | The cgroup v2 `cpu.max` quota and usage; `pod_load` needs a previous reading under 30 seconds old, so the pod CPU limit does not apply to the first reading after a start or a gap. |
 | `pending` | Launch orders waiting in the hive's order stream, shown by `hive list`. Room counts the hive's pending launch reservations instead. |
+| `agents` | The agent processes running on the machine, counted per harness, such as `{"claude": 6, "codex": 3}`. |
 | `measured_at` | Milliseconds when the reading was taken. |
 
 The reading expires after 30 seconds, and a reader treats one older than that as absent. With no fresh reading the
 hive's room is 0, the refusal reads `missing telemetry: no fresh headroom reading`, and `hive list` shows
-`headroom=missing`. Otherwise each limit fits whole agents at 0.5 CPU and 850 MB each under 80 percent of the host,
-and of the pod when the cgroup sets a limit; launches reserved on the hive in the last fifteen minutes count against
-each limit, and the smallest limit wins.
+`headroom=missing`. Otherwise each limit fits whole agents at the measured CPU per agent and 850 MB each under 80
+percent of the host, and of the pod when the cgroup sets a limit; launches reserved on the hive in the last fifteen
+minutes count against each limit, and the smallest limit wins.
+
+The CPU per agent comes from the reading itself:
+
+- **Measured:** the pod load over the agents the reading counts, rounded up to the next 0.05 and never below 0.5. A
+  pod load of 6.70 over 9 agents gives 0.75 CPU per agent.
+- **Default:** 0.5 CPU per agent when no agent runs or the reading carries no pod load, as on the first reading after
+  a start or on a host without a cgroup CPU limit.
+- **Setting:** `AGENTIHOOKS_HIVE_AGENT_CPU` overrides both, in CPUs per agent.
+
+Every CPU detail names the figure and where it came from, for example
+`pod load 6.70 on a 16 CPU limit, 0.75 CPU per agent measured from pod load 6.70 over 9 agents, fits 8 more under the 80 percent line`,
+`0.5 CPU per agent by default` or `1 CPU per agent set by AGENTIHOOKS_HIVE_AGENT_CPU`.
+
+The host CPU line reads `used_cpus` when the reading carries it and the five minute load only as a fallback. With
+`used_cpus` in the reading it also carries a guard: while the five minute load is above 80 percent of the CPUs and
+the hive's own CPU, its pod load when the reading carries one and else `used_cpus`, is at or above the 40 percent
+swarm share, the line gives room 0. The workstation's swarm share limits count local agents at the same measured
+figure; see [Workstation admission room and the swarm share](#workstation-admission-room-and-the-swarm-share).
 
 `hive run` publishes headroom on two paths:
 
@@ -4317,10 +4337,10 @@ Otherwise the room is the smallest of these limits:
 
 | Limit | Rule |
 |---|---|
-| Host CPU | Whole agents at 0.5 CPU each under 80 percent of the CPUs, measured from CPU used when the reading carries it, else from the five minute load. With CPU used in the reading, a five minute load above 80 percent of the CPUs and the hive's own CPU at or above 40 percent of them gives room 0; the hive's own CPU is its pod load when the reading carries one, else CPU used. |
+| Host CPU | Whole agents at the CPU per agent from [Headroom](#headroom), 0.5 on a workstation without a cgroup CPU limit, under 80 percent of the CPUs, measured from CPU used when the reading carries it, else from the five minute load. With CPU used in the reading, a five minute load above 80 percent of the CPUs and the hive's own CPU at or above 40 percent of them gives room 0; the hive's own CPU is its pod load when the reading carries one, else CPU used. |
 | Host memory | Whole agents at 850 MB each under 80 percent of total memory. |
 | Pod CPU and memory | The same rules on the cgroup limits, when the machine runs in a pod with limits set. |
-| Swarm share, CPU | 40 percent of the CPUs at 0.5 CPU per agent, less the local agents running: 12 agents on 16 CPUs. |
+| Swarm share, CPU | 40 percent of the CPUs at the same CPU per agent, less the local agents running: 12 agents on 16 CPUs at 0.5. |
 | Swarm share, memory | 40 percent of total memory at 850 MB per agent, less the local agents running. |
 
 The swarm share yields to the machine's agent ceiling. When the machine is a hive, the tick reads its ceiling, the
@@ -4370,9 +4390,9 @@ yields only that far.
 
 When the ceiling itself equals what the share fits, the share still names the limit; with 10 agents running under a
 ceiling of 12 the room reads
-`cpu: 10 swarm agents at 0.5 CPU each on 16 CPUs, fits 2 more under the 40 percent swarm share`. A busy host binds on
-its own line: at a five minute load of 12.00 on 16 CPUs the room reads
-`cpu: five minute load 12.00 on 16 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line` with 12 agents
+`cpu: 10 swarm agents at 0.5 CPU each by default on 16 CPUs, fits 2 more under the 40 percent swarm share`. A busy
+host binds on its own line: at a five minute load of 12.00 on 16 CPUs the room reads
+`cpu: five minute load 12.00 on 16 CPUs, 0.5 CPU per agent by default, fits 1 more under the 80 percent line` with 12 agents
 running under any ceiling above 12.
 
 To let the workstation run twenty local workers:
@@ -5218,8 +5238,9 @@ node's memory. Size it from the node's budget and the agents' measured use, in t
    cgroup of its own. Past the pod limit the kernel OOM killer ends a process in the pod cgroup; when that is the
    hive's main process, the container restarts and every agent on the hive ends.
 
-4. Check CPU against the pod's CPU limit. Inside the pod, admission refuses a launch unless 0.5 CPU fits under 80
-   percent of the pod's CPU limit, measured on the pod's load ([Headroom](#headroom)). Launches stop once pod load
+4. Check CPU against the pod's CPU limit. Inside the pod, admission refuses a launch unless one more agent's CPU, the
+   pod load over its running agents and never below 0.5, fits under 80 percent of the pod's CPU limit, measured on the
+   pod's load ([Headroom](#headroom)). Launches stop once pod load
    nears that line, so the hive reaches `maxAgents` only while its agents average about 0.8 times the CPU limit
    divided by `maxAgents`. A higher `maxAgents` with too small a CPU limit leaves the hive at a ceiling below its
    cap, with launches refused for `cpu`.
