@@ -454,7 +454,7 @@ def order_lines(envelope: dict[str, Any]) -> list[str]:
         return []
     orders: list[str] | str = envelope["orders"]
     if isinstance(orders, str):
-        return [ORDERS_UNKNOWN.format(slug=envelope.get("ledger", ""))]
+        return [ORDERS_UNKNOWN.format(slug=envelope.get("ledger", "<slug>"))]
     return [ORDERS_OPEN, *orders] if orders else [ORDERS_NONE]
 
 

@@ -26,6 +26,7 @@ class Ledger:
         self.doc = doc
 
     def state(self, slug: str) -> dict[str, Any]:
+        assert slug == SLUG
         if self.doc is None:
             raise SwarmError(f"ledger {slug}: unreachable")
         return self.doc
@@ -130,6 +131,11 @@ def test_the_opening_prompt_lists_the_orders_of_the_envelope_before_the_document
     lines = primed({"ledger": SLUG, "orders": orders})
     document = lines.index("Handoff document: continue from it:")
     assert lines[2:document] == said
+
+
+@pytest.mark.feature("master-handoff-carries-orders")
+def test_an_envelope_that_names_no_ledger_still_says_how_to_read_the_orders() -> None:
+    assert primed({"orders": "unknown"})[2] == UNKNOWN.replace("--slug sw", "--slug <slug>")
 
 
 @pytest.mark.feature("master-handoff-carries-orders")

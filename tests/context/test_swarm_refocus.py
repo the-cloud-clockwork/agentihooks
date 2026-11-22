@@ -320,6 +320,12 @@ def test_the_ordered_phases_lead_the_phases_share_when_it_is_clipped() -> None:
 
 
 @pytest.mark.feature("master-handoff-carries-orders")
+def test_an_ordered_phase_with_no_id_or_title_keeps_its_place() -> None:
+    ledger = {"phases": [{"title": "Later", "description": "After"}, {"ordered": {"at": 1}}]}
+    assert refocus.build_block(ledger, "master", 1500).endswith("Active phases: operator order  ; Later: After")
+
+
+@pytest.mark.feature("master-handoff-carries-orders")
 def test_listing_the_ordered_phases_loads_no_claim_gate_code() -> None:
     import subprocess
     import sys
