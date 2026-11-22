@@ -9,7 +9,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, account_key
-from scripts.swarm import autoscale, freeze, host_budget, master_pin, templates
+from scripts.swarm import autoscale, freeze, host_budget, master_pin, plan_cap_floor
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import AUTO_SCALING, AgentRecord, RedisStore, SwarmConfig
@@ -463,31 +463,6 @@ def _configured(config) -> dict:
     return dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan), strict=True))
 
 
-def plan_floor(ceilings: dict[str, int], demand: dict[str, int]) -> dict[str, int]:
-    """One plan seat while plan work is ready, taken from the larger of the eng and ci ceilings."""
-    if ceilings["plan"] or not demand.get("plan"):
-        return ceilings
-    donor = max(("eng", "ci"), key=lambda lane: ceilings[lane])
-    return {**ceilings, donor: max(0, ceilings[donor] - 1), "plan": 1}
-
-
-def manual_plan_floor(config: SwarmConfig, demand: dict[str, int]) -> SwarmConfig:
-    """A stored zero plan cap counts as one while plan work is ready."""
-    if config.max_plan or not demand.get("plan"):
-        return config
-    return replace(config, max_plan=1)
-
-
-def restored_plan(config: SwarmConfig, changes: dict[str, Any] | None = None) -> dict[str, int]:
-    """The default plan cap for a stored zero, on a start or on a set that raises the eng or ci cap and names no
-    plan cap."""
-    named = changes or {}
-    raised = changes is None or any(named.get(lane, 0) > getattr(config, lane) for lane in ("max_eng", "max_ci"))
-    if config.max_plan or "max_plan" in named or not raised:
-        return {}
-    return {"max_plan": templates.DEFAULT_CAPS["plan"]}
-
-
 def _busy(agents: list) -> dict:
     return {lane: sum(a.lane == lane and a.state != "finished" for a in agents) for lane in LANES}
 
@@ -564,7 +539,7 @@ def autoscaled(
 ) -> tuple[SwarmConfig, dict[str, Any] | None]:
     demand: dict[str, int] = inputs.demand or dict.fromkeys(LANES, 0)
     if config.scaling != AUTO_SCALING:
-        return manual_plan_floor(config, demand), None
+        return plan_cap_floor.manual(config, demand), None
     host = host or granted(host_room(config, inputs), inputs.previous, inputs.now_ms)
     stored = inputs.previous.get("autoscale") or {}
     previous = {
@@ -575,7 +550,7 @@ def autoscaled(
     decision = autoscale.calculate(
         _busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous, now_ms=inputs.now_ms
     )
-    caps = decision["ceilings"] = plan_floor(decision["ceilings"], demand)
+    caps = decision["ceilings"] = plan_cap_floor.ceilings(decision["ceilings"], demand)
     scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
     return scaled, {**decision, "host": host}
 

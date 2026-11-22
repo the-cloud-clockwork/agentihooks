@@ -91,6 +91,7 @@ from scripts.swarm import (
     phase_planning,
     phase_state,
     phases,
+    plan_cap_floor,
     plan_review,
     prerequisite_wait,
     priming_trace,
@@ -1038,9 +1039,7 @@ def cmd_start(store: RedisStore, args: argparse.Namespace) -> None:
     print(shape["summary"], flush=True)
     if shape["warning"]:
         print(f"warning: {shape['warning']}", file=sys.stderr, flush=True)
-    from scripts.swarm import capacity
-
-    store.update(args.slug, **capacity.restored_plan(store.config(args.slug)))
+    plan_cap_floor.restore(store, args.slug)
     _state(store, args, "running")
     seat_crons.on_start(store, args.slug)
     print(ledger_link.page_line(args.slug))
@@ -1427,10 +1426,8 @@ def cmd_set(store: RedisStore, args: argparse.Namespace) -> None:
                 f"or {', '.join(LANE_KEYS)}=<value>, engine=events, tick-mode=sequential|parallel"
             )
         changes[SETTABLE[key]] = int(value)
-    from scripts.swarm import capacity
-
     changes = _engine_origin(store.config(args.slug), changes)
-    restored = capacity.restored_plan(store.config(args.slug), changes)
+    restored = plan_cap_floor.restored(store.config(args.slug), changes)
     config = store.update(args.slug, **{**changes, **_pinned(changes), **restored})
     _store_master_counts(store, args.slug, counts, hives)
     _store_master_rules(store, args.slug, rules)
