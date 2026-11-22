@@ -37,12 +37,12 @@ PARTS = (
 )
 
 
-def section(*skip: str) -> str:
+def section(*missing: str) -> str:
     rows = ["### Seams", "The close calls `enhance_review.close` from swarm done."]
     for name in PARTS:
-        if name not in skip:
+        if name not in missing:
             rows += [f"### {name}", f"Plain words about {name.lower()}."]
-    rows.append("The tests pass in CI." if "done when" in skip else "Done when the tests pass in CI.")
+    rows.append("The tests pass in CI." if "done when" in missing else "Done when the tests pass in CI.")
     return "\n".join(rows)
 
 
