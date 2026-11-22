@@ -10,7 +10,7 @@ import pytest
 from scripts.tick import registry
 from scripts.tick.steps import hook_domains
 from tests.swarm.test_freeze import record, task
-from tests.swarm.test_order_check import ORDER, ledger_doc
+from tests.swarm.test_order_check import ORDER, held_view, ledger_doc
 
 SLUG = "sw"
 MINUTE = 60_000
@@ -159,6 +159,17 @@ def test_an_order_with_work_in_flight_or_a_shorter_wait_never_hides_one_that_wai
     order_waiting.observe(store, SLUG, ledger, START + 31 * MINUTE)
     assert list(order_waiting.read(store, SLUG)["orders"]) == ["phases/p1", "tasks/t7"]
     assert [found.subject for found in order_waiting.findings(store, SLUG)] == ["tasks/t7"]
+
+
+@pytest.mark.feature("swarm-order-waiting-finding")
+def test_a_view_without_slices_counts_every_task_filed_under_a_slice(store: Any) -> None:
+    from scripts.swarm.health import order_waiting
+
+    under = {"slice": "slices/a.first"}
+    working = ledger_doc([task("t1", **under, state="pr"), task("t2", **under), task("t3")], p1=ORDER)
+    idle = ledger_doc([task("t1", **under), task("t2", **under), task("t3")], p1=ORDER)
+    assert order_waiting.observe(store, SLUG, held_view(working), START) == {}
+    assert order_waiting.observe(store, SLUG, held_view(idle), START)["phases/p1"]["unfinished"] == 3
 
 
 @pytest.mark.feature("swarm-order-waiting-finding")
