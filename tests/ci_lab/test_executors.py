@@ -764,8 +764,9 @@ def test_settings_read_the_worker_contract_environment(tmp_path: Path) -> None:
 def test_the_node_cache_reaches_only_the_venv_build(tmp_path: Path) -> None:
     source = tmp_path / "node-cache"
     pod, _, _ = executors.settings({**environ_of(tmp_path), "UV_CACHE_DIR": str(source)})
-    assert pod.build.node_cache == source
+    assert pod.build == venvs.Build(pod.ports, pod.whitelist, pod.timeout, source)
     assert "UV_CACHE_DIR" not in pod.whitelist
+    assert executors.settings(environ_of(tmp_path))[0].build.node_cache is None
 
 
 @pytest.mark.feature("lab-static-step-env")

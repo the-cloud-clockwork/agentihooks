@@ -11,12 +11,18 @@ from typing import Any
 
 import pytest
 
-from scripts.ci_lab import sandbox, venvs
+from scripts.ci_lab import sandbox, uv_cache, venvs
 
 DIGEST = "a" * 64
 OTHER = "b" * 64
 LOCK = ".github/test-requirements.lock"
 EXCLUDES = ".github/test-excludes.txt"
+MISSES = """  × No solution found when resolving dependencies:
+  ╰─▶ Because uncached-dependency was not found in the
+      cache and offline-fixture depends on uncached-dependency==1.0, and
+      uncached-dependency was not found in the cache, we can conclude that
+      your requirements are unsatisfiable.
+error: Network connectivity is disabled, but the requested data wasn't found in the cache for: `http://index/files/partial-1.0-py3-none-any.whl`"""
 UV = """
 import json, os, pathlib, subprocess, sys, time
 config = json.loads(pathlib.Path(sys.argv[0]).with_name("uv.json").read_text())
@@ -32,6 +38,8 @@ time.sleep(config["sleep"])
 if sys.argv[1] == "venv":
     pathlib.Path(sys.argv[-1]).mkdir(parents=True, exist_ok=True)
 code = config["code"] if config["step"] in ("", sys.argv[1]) else 0
+if code and config["say"]:
+    print(config["say"])
 print("uv answered", code)
 sys.exit(code)
 """
@@ -42,9 +50,15 @@ class Uv:
     folder: Path
     record: Path
 
-    def answer(self, code: int = 0, sleep: float = 0.0, hold: Path | None = None, step: str = "") -> None:
+    def answer(
+        self, code: int = 0, sleep: float = 0.0, hold: Path | None = None, step: str = "", say: str = ""
+    ) -> None:
         config = {"record": str(self.record), "code": code, "sleep": sleep, "hold": "" if hold is None else str(hold)}
-        (self.folder / "uv.json").write_text(json.dumps({**config, "step": step}))
+        (self.folder / "uv.json").write_text(json.dumps({**config, "step": step, "say": say}))
+
+    def isolations(self) -> list[list[str]]:
+        calls = self.folder / "bwrap.calls"
+        return [line.split() for line in calls.read_text().splitlines()] if calls.exists() else []
 
     def seen(self) -> list[dict[str, Any]]:
         if not self.record.exists():
@@ -60,7 +74,11 @@ def uv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Uv:
     script.write_text(f"#!{sys.executable}\n{UV}")
     script.chmod(0o755)
     bwrap = folder / "bwrap"
-    bwrap.write_text("#!/bin/sh\nexit 97\n")
+    calls = folder / "bwrap.calls"
+    bwrap.write_text(
+        f'#!/bin/sh\nargs=""\nwhile [ "$1" != "--" ]; do args="$args $1"; shift; done\nshift\n'
+        f'echo "$args" >> \'{calls}\'\nexec "$@"\n'
+    )
     bwrap.chmod(0o755)
     fake = Uv(folder, tmp_path / "record.jsonl")
     fake.answer()
@@ -227,16 +245,30 @@ def test_a_second_caller_waits_for_the_running_build(tmp_path: Path, uv: Uv) -> 
 
 
 @pytest.mark.feature("lab-venv-offline-cache")
-def test_venv_builds_use_one_private_offline_cache_without_network(tmp_path: Path, uv: Uv) -> None:
-    root = tmp_path / "venvs"
-    venvs.venv_for(DIGEST, _tree(tmp_path), root, _build(), _baked(tmp_path, None))
+def test_venv_builds_run_offline_without_network_on_the_worker_copy_of_the_node_cache(tmp_path: Path, uv: Uv) -> None:
+    node, root = tmp_path / "node", tmp_path / "venvs"
+    node.mkdir()
+    (node / "warmed-lock").write_text("lock\n")
+    (node / "entry").write_text("cached")
+    build = venvs.Build(sandbox.PortAllocator(first=20000, last=20099, width=100), {"KEEP": "1"}, 30.0, node)
+    venvs.venv_for(DIGEST, _tree(tmp_path), root, build, _baked(tmp_path, None))
     calls = uv.seen()
     assert len(calls) == 2
-    caches = {call["env"]["UV_CACHE_DIR"] for call in calls}
-    assert len(caches) == 1
-    assert Path(caches.pop()).is_relative_to(root)
-    for call in calls:
-        assert call["env"]["UV_OFFLINE"] == "1"
-        assert call["env"]["UV_PYTHON_DOWNLOADS"] == "never"
-        assert call["env"]["UV_LINK_MODE"] == "copy"
-    assert len((uv.folder / "bwrap.calls").read_text().splitlines()) == 2
+    cache = uv_cache.cache_for(node, root)
+    assert (cache / "entry").read_text() == "cached"
+    offline = {"UV_CACHE_DIR": str(cache), "UV_OFFLINE": "1", "UV_PYTHON_DOWNLOADS": "never", "UV_LINK_MODE": "copy"}
+    assert [{name: call["env"].get(name) for name in offline} for call in calls] == [offline, offline]
+    assert uv.isolations() == [["--dev-bind", "/", "/", "--unshare-net", "--die-with-parent"]] * 2
+
+
+@pytest.mark.feature("lab-venv-offline-cache")
+def test_a_build_the_cache_cannot_serve_names_each_miss(tmp_path: Path, uv: Uv) -> None:
+    tree, root = _tree(tmp_path), tmp_path / "venvs"
+    uv.answer(code=1, step="pip", say=MISSES)
+    message = (
+        f"^uv cache miss for {re.escape(str(tree))}: uncached-dependency, "
+        f"http://index/files/partial-1.0-py3-none-any.whl; its log is {re.escape(str(root / 'builds'))}/[^/]+/log.txt$"
+    )
+    with pytest.raises(sandbox.CannotRun, match=message):
+        venvs.venv_for(DIGEST, tree, root, _build(), _baked(tmp_path, None))
+    assert not (root / DIGEST / "lockfile.sha256").exists()

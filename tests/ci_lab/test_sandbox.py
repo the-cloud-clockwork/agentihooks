@@ -2,6 +2,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -357,15 +358,19 @@ def test_a_real_uv_build_uses_the_read_only_node_cache_without_network(tmp_path:
             check=True,
             capture_output=True,
         )
+        (source / "warmed-lock").write_text("fixture\n")
         before = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*") if path.is_file()}
-        source.chmod(0o555)
+        modes = {path: path.stat().st_mode for path in [source, *source.rglob("*")] if not path.is_symlink()}
+        for path, mode in modes.items():
+            path.chmod(mode & ~0o222)
         count = len(requests)
         root = tmp_path / "venvs"
         root.mkdir()
         build = venvs.Build(sandbox.PortAllocator(20000, 20099, 100), {"UV_DEFAULT_INDEX": url}, 30.0, source)
         try:
             if missing:
-                with pytest.raises(sandbox.CannotRun, match="uv cache miss.*uncached-dependency"):
+                message = f"^uv cache miss for {re.escape(str(tree))}: uncached-dependency; its log is "
+                with pytest.raises(sandbox.CannotRun, match=message):
                     venvs.venv_for("missing", tree, root, build, tmp_path / "no-baked")
                 assert not (root / "missing" / venvs.MARKER).exists()
             else:
@@ -379,7 +384,8 @@ def test_a_real_uv_build_uses_the_read_only_node_cache_without_network(tmp_path:
                 )
                 assert result.stdout.strip() == "42"
         finally:
-            source.chmod(0o755)
+            for path, mode in modes.items():
+                path.chmod(mode)
         assert len(requests) == count
         after = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*") if path.is_file()}
         assert after == before
