@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x__configured:9617e6d8937b32ef99091ee3579594ffa2120b228393682f42494c04c7386e9d": {
+    "reader": "Standards",
+    "reason": "LANES and the cap tuple each have exactly four elements (eng, ci, plan, review). Zip strict False produces the same dictionary as strict=True for every supported config."
+  }
+}
