@@ -8369,7 +8369,14 @@
       "seam": "admission.room over a headroom reading with pod_load and agents, and admission.agent_cpu",
       "tests": [
         "tests/hive/test_admission.py::test_a_pod_reading_with_pod_load_and_no_agents_keeps_the_half_cpu_room",
-        "tests/hive/test_admission.py::test_a_workstation_reading_with_agents_and_no_pod_load_keeps_the_half_cpu_room"
+        "tests/hive/test_admission.py::test_a_workstation_reading_with_agents_and_no_pod_load_keeps_the_half_cpu_room",
+        "tests/hive/test_admission.py::test_a_pod_reading_of_six_point_seven_cores_over_nine_agents_admits_at_three_quarters_of_a_cpu_each",
+        "tests/hive/test_admission.py::test_a_pod_reading_with_no_agents_admits_at_half_a_cpu_by_default",
+        "tests/hive/test_admission.py::test_a_reading_without_running_agents_or_pod_load_takes_the_default_figure",
+        "tests/hive/test_admission.py::test_the_measured_figure_rounds_up_to_the_next_twentieth_and_never_drops_below_half_a_cpu",
+        "tests/hive/test_admission.py::test_the_agent_cpu_setting_overrides_the_measured_figure",
+        "tests/hive/test_admission.py::test_the_swarm_share_counts_swarm_agents_at_the_measured_figure",
+        "tests/hive/test_admission.py::test_each_host_cpu_line_names_the_measured_figure_and_its_source"
       ]
     },
     {

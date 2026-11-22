@@ -718,3 +718,82 @@ def test_a_pod_reading_with_pod_load_and_no_agents_keeps_the_half_cpu_room() -> 
 def test_a_workstation_reading_with_agents_and_no_pod_load_keeps_the_half_cpu_room() -> None:
     found = admission.room(reading(cpus=16, load5=4.0, agents={"claude": 9}))
     assert (found.room, found.reason) == (17, admission.CPU)
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_a_pod_reading_of_six_point_seven_cores_over_nine_agents_admits_at_three_quarters_of_a_cpu_each() -> None:
+    measured = reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 6, "codex": 3})
+    assert admission.agent_cpu(measured) == admission.AgentCpu(75, "measured from pod load 6.70 over 9 agents")
+    assert admission.room(measured) == admission.Room(
+        8,
+        admission.CPU,
+        "pod load 6.70 on a 16 CPU limit, 0.75 CPU per agent measured from pod load 6.70 over 9 agents, "
+        "fits 8 more under the 80 percent line",
+    )
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_a_pod_reading_with_no_agents_admits_at_half_a_cpu_by_default() -> None:
+    measured = reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 0, "codex": 0})
+    assert admission.agent_cpu(measured) == admission.AgentCpu(50, "by default")
+    assert admission.room(measured).detail == (
+        "pod load 6.70 on a 16 CPU limit, 0.5 CPU per agent by default, fits 12 more under the 80 percent line"
+    )
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+@pytest.mark.parametrize("fields", [{"pod_load": 6.7}, {"pod_load": 6.7, "agents": {}}, {"agents": {"claude": 9}}])
+def test_a_reading_without_running_agents_or_pod_load_takes_the_default_figure(fields: dict[str, Any]) -> None:
+    assert admission.agent_cpu(reading(**fields)) == admission.AgentCpu(50, "by default")
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+@pytest.mark.parametrize(
+    ("load", "agents", "centi"), [(6.7, 9, 75), (6.3, 9, 70), (1.1, 2, 55), (5.05, 5, 105), (2.0, 9, 50)]
+)
+def test_the_measured_figure_rounds_up_to_the_next_twentieth_and_never_drops_below_half_a_cpu(
+    load: float, agents: int, centi: int
+) -> None:
+    found = admission.agent_cpu(reading(pod_load=load, agents={"claude": agents}))
+    assert found == admission.AgentCpu(centi, f"measured from pod load {load:.2f} over {agents} agents")
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_the_agent_cpu_setting_overrides_the_measured_figure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_AGENT_CPU", "1")
+    measured = reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 9})
+    assert admission.agent_cpu(measured) == admission.AgentCpu(100, "set by AGENTIHOOKS_HIVE_AGENT_CPU")
+    assert admission.room(measured).detail == (
+        "pod load 6.70 on a 16 CPU limit, 1 CPU per agent set by AGENTIHOOKS_HIVE_AGENT_CPU, "
+        "fits 6 more under the 80 percent line"
+    )
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_AGENT_CPU", "0.7")
+    assert admission.room(reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=5.8)).room == 10
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_the_swarm_share_counts_swarm_agents_at_the_measured_figure() -> None:
+    measured = reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 9})
+    assert admission.room(measured, swarm_agents=2) == admission.Room(
+        6,
+        admission.CPU,
+        "2 swarm agents at 0.75 CPU each measured from pod load 6.70 over 9 agents on 16 CPUs, "
+        "fits 6 more under the 40 percent swarm share",
+    )
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+@pytest.mark.parametrize(
+    ("fields", "detail"),
+    [
+        ({"load5": 4.0}, "five minute load 4.00 on 16 CPUs"),
+        ({"load5": 0.0, "used_cpus": 4.0}, "4.00 of 16 CPUs used, five minute load 0.00 on 16 CPUs"),
+    ],
+)
+def test_each_host_cpu_line_names_the_measured_figure_and_its_source(fields: dict[str, Any], detail: str) -> None:
+    found = admission.room(reading(cpus=16, pod_cpus=64.0, pod_load=6.7, agents={"claude": 9}, **fields))
+    assert found == admission.Room(
+        11,
+        admission.CPU,
+        f"{detail}, 0.75 CPU per agent measured from pod load 6.70 over 9 agents, fits 11 more under the 80 percent line",
+    )
