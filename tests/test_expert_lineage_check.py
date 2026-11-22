@@ -1,29 +1,23 @@
 """The live check of the expert launch pin over a stand-in store."""
 
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
 from scripts.feature_checks import expert_lineage as check
+from scripts.swarm.store import AgentRecord
 
 pytestmark = pytest.mark.unit
 
 
-def _agent(name: str, **fields: Any) -> SimpleNamespace:
-    record: dict[str, Any] = {
-        "lane": "expert",
-        "state": "working",
-        "harness": "claude",
-        "model": "fable",
-        "effort": "xhigh",
-        **fields,
-    }
-    return SimpleNamespace(name=name, **record)
+def _agent(name: str, lane: str = "expert", **fields: Any) -> AgentRecord:
+    record: dict[str, Any] = {"state": "working", "harness": "claude", "model": "fable", "effort": "xhigh", **fields}
+    return AgentRecord(name, lane, "expert-1", **record)
 
 
 class Store:
-    def __init__(self, swarms: dict[str, list[SimpleNamespace]], stopped: tuple[str, ...] = ()) -> None:
+    def __init__(self, swarms: dict[str, list[AgentRecord]], stopped: tuple[str, ...] = ()) -> None:
         self.swarms, self.stopped = swarms, stopped
 
     def slugs(self) -> list[str]:
@@ -32,12 +26,12 @@ class Store:
     def config(self, slug: str) -> SimpleNamespace:
         return SimpleNamespace(state="stopped" if slug in self.stopped else "running")
 
-    def agents(self, slug: str) -> list[SimpleNamespace]:
+    def agents(self, slug: str) -> list[AgentRecord]:
         return self.swarms[slug]
 
 
 def _run(store: Store) -> int:
-    return check.main(cast("Any", store))
+    return check.main(store)
 
 
 def test_a_fleet_with_no_expert_passes_and_says_so(capsys: pytest.CaptureFixture[str]) -> None:
@@ -50,7 +44,10 @@ def test_a_fleet_with_no_expert_passes_and_says_so(capsys: pytest.CaptureFixture
 def test_working_experts_on_the_pin_pass_and_are_listed(capsys: pytest.CaptureFixture[str]) -> None:
     store = Store(
         {
-            "rig": [_agent("expert@a1b2c3-0002", model="claude-FABLE-5-2", effort="max"), _agent("expert@a1b2c3-0001")],
+            "rig": [
+                _agent("expert@a1b2c3-0002", model="claude-fable-5-2[1m]", effort="max"),
+                _agent("expert@a1b2c3-0001"),
+            ],
             "doctor": [_agent("expert@d0c7e5-0001")],
         }
     )
@@ -58,7 +55,7 @@ def test_working_experts_on_the_pin_pass_and_are_listed(capsys: pytest.CaptureFi
     assert capsys.readouterr().out.splitlines() == [
         "doctor expert expert@d0c7e5-0001 runs claude fable at xhigh",
         "rig expert expert@a1b2c3-0001 runs claude fable at xhigh",
-        "rig expert expert@a1b2c3-0002 runs claude claude-FABLE-5-2 at max",
+        "rig expert expert@a1b2c3-0002 runs claude claude-fable-5-2[1m] at max",
     ]
 
 
@@ -68,6 +65,8 @@ def test_working_experts_on_the_pin_pass_and_are_listed(capsys: pytest.CaptureFi
     [
         ({"harness": "codex"}, "codex fable at xhigh"),
         ({"model": "opus"}, "claude opus at xhigh"),
+        ({"model": "fable-old"}, "claude fable-old at xhigh"),
+        ({"model": "claude-fable-lite"}, "claude claude-fable-lite at xhigh"),
         ({"model": ""}, "claude  at xhigh"),
         ({"effort": "high"}, "claude fable at high"),
         ({"effort": ""}, "claude fable at "),

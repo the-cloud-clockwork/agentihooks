@@ -1,13 +1,42 @@
 """The agent kinds, lane profiles, launch ranges and moving seats a new lane must leave as they are."""
 
+from collections.abc import Collection
+
 import pytest
 
+from scripts.events import scope as event_scope
+from scripts.hive import lanes as hive_lanes
 from scripts.inbox import exits
-from scripts.swarm import effort_range, naming
+from scripts.swarm import capacity, effort_range, naming, stall_watch, templates
+from scripts.swarm import tick as swarm_tick
 from scripts.swarm.store import SwarmConfig
 from scripts.swarm.templates import DEFAULT_PROFILES
+from scripts.swarm_ledger import ledger_tasks
+from scripts.swarm_v2.runtime.base import HIVE_LANES
 
 pytestmark = pytest.mark.unit
+
+TABLES: dict[str, Collection[str]] = {
+    "default profile": templates.DEFAULT_PROFILES,
+    "configurable lane": templates.LANES,
+    "lane cap": templates.DEFAULT_CAPS,
+    "capacity lane": capacity.LANES,
+    "tick task lane": swarm_tick.LANES,
+    "hive task lane": hive_lanes.LANES,
+    "event scope lane": event_scope.LANES,
+    "ledger task lane": ledger_tasks.LANES,
+    "stall watched lane": stall_watch.LANES,
+    "hive placed lane": HIVE_LANES,
+}
+TASK_LANE = {*TABLES, "moving numbered seat", "capped seat"}
+PLACED = {
+    "master": {"default profile", "configurable lane", "lane cap"},
+    "eng": TASK_LANE,
+    "ci": TASK_LANE,
+    "plan": TASK_LANE - {"stall watched lane"},
+    "dispatch": {"default profile", "hive placed lane"},
+    "expert": {"default profile", "hive placed lane", "moving numbered seat"},
+}
 
 KINDS = [
     ("master", "master", "master", "master-2"),
@@ -57,3 +86,13 @@ def test_lane_and_dispatcher_seat_mail_moves_with_its_occupant_and_master_seat_m
     seat: str, moves: bool
 ) -> None:
     assert bool(exits.MOVING_SEAT.fullmatch(seat)) is moves
+
+
+def test_every_kind_sits_in_each_lane_table_on_purpose() -> None:
+    found: dict[str, set[str]] = {}
+    for lane in naming.TYPES:
+        seat = f"{lane}-2@sw"
+        found[lane] = {name for name, table in TABLES.items() if lane in table}
+        found[lane] |= {"moving numbered seat"} if exits.MOVING_SEAT.fullmatch(seat) else set()
+        found[lane] |= {"capped seat"} if exits.LANE_SEAT.fullmatch(seat) else set()
+    assert found == PLACED

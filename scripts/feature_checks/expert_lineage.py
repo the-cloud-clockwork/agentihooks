@@ -39,11 +39,7 @@ def experts(store: Fleet) -> list[tuple[str, "AgentRecord"]]:
 
 def pinned(agent: "AgentRecord") -> bool:
     """Whether the launch recorded for the agent is the expert pin."""
-    return (
-        agent.harness == expert_launch.HARNESS
-        and expert_launch.MODEL in agent.model.lower()
-        and agent.effort in expert_launch.EFFORTS
-    )
+    return expert_launch.on_pin(agent.harness, agent.model, agent.effort)
 
 
 def main(store: Fleet | None = None) -> int:

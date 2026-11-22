@@ -4,8 +4,8 @@ rules:
     severity: ERROR
     message: >-
       Ordered 2026-11-22, an expert always launches on Claude Code with the Fable model at effort xhigh or max: the
-      runtime's spawn and resume must hold their pick through expert_launch.hold before they build the launch model
-      arguments.
+      runtime's spawn and resume build their launch model arguments only from a pick that expert_launch.pin returned
+      earlier in the same function.
     patterns:
       - pattern-inside: |
           def $LAUNCH(...):
@@ -13,12 +13,15 @@ rules:
       - metavariable-regex:
           metavariable: $LAUNCH
           regex: ^(spawn|resume)$
-      - pattern: _model_args(...)
-      - pattern-not-inside: |
-          def $LAUNCH(...):
-            ...
-            $PICKED = expert_launch.hold(...)
-            ...
+      - pattern-either:
+          - patterns:
+              - pattern: _model_args($AGENT, $PICKED.__dict__, ...)
+              - pattern-not-inside: |
+                  $PICKED = expert_launch.pin(...)
+                  ...
+          - patterns:
+              - pattern: _model_args(...)
+              - pattern-not: _model_args($AGENT, $PICKED.__dict__, ...)
     paths:
       include:
         - /scripts/swarm/runtime.py

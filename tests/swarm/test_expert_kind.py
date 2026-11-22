@@ -193,6 +193,29 @@ def test_an_expert_launch_that_lands_on_another_harness_is_refused(
     assert refused.value.status == "unsupported"
 
 
+@pytest.mark.parametrize(
+    "pin,refusal",
+    [
+        ({}, "lane harness codex cannot run a task that requires claude"),
+        ({"requires_harness": ""}, "an expert launches on claude, never on codex"),
+    ],
+)
+def test_a_lane_setting_that_asks_codex_for_the_expert_lane_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pin: dict[str, str], refusal: str
+) -> None:
+    with pytest.raises(SpawnError) as refused:
+        _launch(tmp_path, monkeypatch, {**TASK, **pin}, lanes={"expert": {"agent": "codex"}})
+    assert str(refused.value) == refusal
+    assert refused.value.status == "unsupported"
+
+
+def test_the_profile_an_expert_task_carries_wins_over_a_lane_profile_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lanes = {"expert": {"profile": "engineer"}}
+    assert _flag(_launch(tmp_path, monkeypatch, TASK, lanes=lanes)["argv"], "--profile") == "expert"
+
+
 @pytest.mark.feature("expert-kind-and-launch-pin")
 @pytest.mark.parametrize(
     "recorded_model,recorded_effort,launched",
