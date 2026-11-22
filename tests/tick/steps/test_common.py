@@ -359,6 +359,22 @@ def test_drop_releases_an_agent_whose_task_has_no_row(monkeypatch: pytest.Monkey
     assert settled == [(("inbox", "redis"), "a", "", "stopped")]
 
 
+@pytest.mark.parametrize(("goes_on", "seat"), [(True, "expert-1@slug"), (False, "")])
+def test_drop_keeps_the_mail_of_an_expert_on_its_seat_while_its_lineage_goes_on(
+    monkeypatch: pytest.MonkeyPatch, goes_on: bool, seat: str
+) -> None:
+    settled: list[tuple[object, ...]] = []
+    asked: list[tuple[object, ...]] = []
+    monkeypatch.setattr(tick, "InboxStore", lambda redis: ("inbox", redis))
+    monkeypatch.setattr(tick.exits, "settle", lambda *args: settled.append(args))
+    monkeypatch.setattr(common.expert_lineage, "goes_on", lambda *args: asked.append(args) or goes_on)
+    store = _DropStore(1)
+    agent = SimpleNamespace(name="x", lane="expert", task="expert-1", seat="expert-1@slug")
+    assert common._drop("slug", store, _DropLedger({"state": "open", "claimed_by": ""}, {}), {}, agent) == ""
+    assert asked == [(store, "slug", agent)]
+    assert settled == [(("inbox", "redis"), "x", seat, "stopped")]
+
+
 MERGING = "https://github.com/o/r/pull/7"
 
 
