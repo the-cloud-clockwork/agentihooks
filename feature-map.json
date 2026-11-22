@@ -12942,7 +12942,7 @@
     {
       "id": "ci-dependency-audit-platformdirs-pin",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-audit",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2801",
       "behaviour": "The dependency audit runs pip-audit through uvx with --constraints on the checked in audit lock, .github/ci-tools/audit.lock, read from the script's own tree, and the lock pins the audited pip-audit version and its whole closure, so a new upstream release such as platformdirs 4.14.8 cannot reach the audit; the lint job's grading step sets no constraint of its own and calls the base's copy of the script.",
       "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint job's dependency audit step",
       "tests": [

@@ -116,7 +116,10 @@ def test_audit_runs_pip_audit_under_the_checked_in_audit_constraint(
             {"capture_output": True, "text": True},
         )
     ]
-    assert "pip-audit==2.10.1" in lock.read_text().splitlines()
+    pins = lock.read_text().splitlines()
+    (platformdirs,) = [pin for pin in pins if pin.startswith("platformdirs==")]
+    assert "pip-audit==2.10.1" in pins
+    assert platformdirs != "platformdirs==4.14.8"
 
 
 def test_a_report_error_names_the_cause():
