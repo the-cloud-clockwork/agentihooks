@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import io
 import json
+import signal
 
 import pytest
 
@@ -349,6 +350,52 @@ def test_main_serves_the_ingress_on_the_given_address(monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         github_webhooks.main([])
     assert served[1] == ("init", ("127.0.0.1", 8790), "Webhook")
+
+
+@pytest.mark.feature("hub-and-webhook-stop-cleanly-on-interrupt")
+def test_sigint_while_serving_ends_the_receiver_with_0_after_closing_server_and_bus(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_GITHUB_WEBHOOK_SECRET", "s")
+    monkeypatch.delenv(github_webhooks.NOTICE_SECRET_ENV, raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+    served: list[str] = []
+
+    class Bus:
+        def __init__(self, config: BusConfig) -> None:
+            served.append("bus")
+
+        def close(self) -> None:
+            served.append("bus closed")
+
+    class Server:
+        def __init__(self, address: tuple[str, int], handler: type) -> None:
+            served.append("init")
+
+        def serve_forever(self) -> None:
+            served.append("serve")
+            signal.raise_signal(signal.SIGINT)
+
+        def server_close(self) -> None:
+            served.append("close")
+
+    monkeypatch.setattr(github_webhooks, "open_bus", Bus)
+    monkeypatch.setattr(github_webhooks, "ThreadingHTTPServer", Server)
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        try:
+            code: object = github_webhooks.main(["--port", "9001"])
+        except SystemExit as exited:
+            code = exited.code
+        except KeyboardInterrupt:
+            code = "KeyboardInterrupt escaped the webhook command"
+        interrupted = signal.getsignal(signal.SIGINT)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    assert code == 0
+    assert served == ["bus", "init", "serve", "close", "bus closed"]
+    assert "Traceback" not in capsys.readouterr().err
+    assert interrupted is signal.default_int_handler
 
 
 def test_the_cli_delegates_github_webhook_to_this_module():

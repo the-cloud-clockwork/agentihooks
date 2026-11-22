@@ -608,9 +608,43 @@ def test_a_dead_local_managed_server_still_has_a_process_mismatch(
 
     assert facts == {rig.agent.name: {"process": False}}
     assert live_binding.record(rig.store, SLUG, rig.agent, facts[rig.agent.name], 1000) == {
-        "process": {"expected": True, "actual": False}
+        "process": {
+            "expected": True,
+            "actual": False,
+            "observer": "observer",
+            "owner": {"transport": "codex_app_server", "host": "observer"},
+        }
     }
     assert [finding.id for finding in live_binding.findings(rig.store, SLUG)] == [
         f"live-binding/{rig.agent.name}/process"
     ]
     reader.assert_not_called()
+
+
+@pytest.mark.feature("live-binding-process-provenance")
+def test_a_process_absence_another_hive_observed_keeps_that_hive_and_the_transport_owner(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("socket.gethostname", lambda: "controller")
+    rig.bindings.put(SLUG, replace(rig.record, host_id="root", state=CONNECTED))
+    process = {
+        "expected": True,
+        "actual": False,
+        "observer": "hive-one",
+        "owner": {"transport": "codex_app_server", "host": "root"},
+    }
+
+    differences = live_binding.record(rig.store, SLUG, rig.agent, {"process": False, "observer": "hive-one"}, 1000)
+
+    assert differences == {"process": process}
+    stored = json.loads(rig.store.redis.hget(rig.store.key(SLUG, "live-bindings"), rig.agent.name))
+    assert stored == {"agent": rig.agent.name, "at": 1000, "state": "mismatched", "differences": {"process": process}}
+    assert [finding.as_dict() for finding in live_binding.findings(rig.store, SLUG)] == [
+        {
+            "kind": "live binding",
+            "subject": f"{rig.agent.name}/process",
+            "summary": f"{rig.agent.name} differs in process",
+            "evidence": ["expected True; observed False", "observed by hive-one", "owned by codex_app_server on root"],
+            "threshold": "assigned launch must match",
+        }
+    ]

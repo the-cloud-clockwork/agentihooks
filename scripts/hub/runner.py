@@ -10,7 +10,7 @@ import traceback
 from dataclasses import replace
 from pathlib import Path
 from time import sleep
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
 from scripts.events.config import BusConfig
@@ -235,6 +235,10 @@ def _renew_leases(hub: HubRunner) -> None:
         traceback.print_exc()
 
 
+def _interrupted(*_: object) -> NoReturn:
+    sys.exit(0)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks hub")
     parser.add_argument("action", choices=("run",))
@@ -267,6 +271,7 @@ def main(argv: list[str]) -> int:
     if keeper is not None:
         keeper.start()
     previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    interrupted = signal.signal(signal.SIGINT, _interrupted)
     try:
         return {"run": _run}[args.action](hub, args.once)
     finally:
@@ -275,3 +280,4 @@ def main(argv: list[str]) -> int:
             keeper.close()
         bus.close()
         signal.signal(signal.SIGTERM, previous)
+        signal.signal(signal.SIGINT, interrupted)
