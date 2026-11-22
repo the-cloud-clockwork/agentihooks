@@ -38,16 +38,20 @@ EVIDENCE = re.compile(
 )
 HYPOTHESIS = re.compile(r"\bhypothes[ie]s\b", re.IGNORECASE)
 COUNTS = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+COMPLETION = re.compile(r"<!-- \w+ complete -->")
 
 
 @dataclass(frozen=True)
 class Contract:
-    """The shape a handoff document is held to: its title line, its headings in order and the sections whose bullets
-    must each carry evidence."""
+    """The shape a document is held to: its title line, its headings in order, the sections whose bullets must each
+    carry evidence, the completion marker that ends it and whether a bullet labelled hypothesis stands without
+    evidence."""
 
     title: str
     headings: tuple[str, ...]
     evidenced: tuple[str, ...] = ("Done",)
+    marker: str = MARKER
+    hypotheses: bool = True
 
 
 V2 = Contract(TITLE, HEADINGS)
@@ -63,10 +67,14 @@ def problems(text: str, resolves: Callable[[str], object], contract: Contract = 
         *_title(lines, contract.title),
         *_headings([name for name, _ in sections], contract.headings),
         *_empty(sections, contract.headings),
-        *_marker(lines),
+        *_marker(lines, contract.marker),
         *_read_first(bodies.get("Read first", []), resolves),
         *_wording(text),
-        *(found for heading in contract.evidenced for found in _evidence(heading, bodies.get(heading, []))),
+        *(
+            found
+            for heading in contract.evidenced
+            for found in _evidence(heading, bodies.get(heading, []), contract.hypotheses)
+        ),
     ]
 
 
@@ -74,14 +82,15 @@ def refusal(found: list[str]) -> str:
     return "handoff refused; fix the document and run the command again:\n" + "\n".join(f"- {p}" for p in found)
 
 
-def _sections(lines):
-    sections, fenced = [], False
+def _sections(lines: list[str]) -> list[tuple[str, list[str]]]:
+    sections: list[tuple[str, list[str]]] = []
+    fenced = False
     for line in lines:
         if line.lstrip().startswith("```"):
             fenced = not fenced
         if not fenced and line.startswith("## "):
             sections.append((line[3:].strip(), []))
-        elif sections and line.strip() != MARKER:
+        elif sections and not COMPLETION.fullmatch(line.strip()):
             sections[-1][1].append(line)
     return sections
 
@@ -122,9 +131,9 @@ def _empty(sections: list[tuple[str, list[str]]], headings: tuple[str, ...]) -> 
     ]
 
 
-def _marker(lines):
+def _marker(lines: list[str], marker: str) -> list[str]:
     last = next((line.strip() for line in reversed(lines) if line.strip()), "")
-    return [] if last == MARKER else [f"the completion marker {MARKER} must be the last line"]
+    return [] if last == marker else [f"the completion marker {marker} must be the last line"]
 
 
 def _bullets(body):
@@ -169,7 +178,7 @@ def leaks(text: str) -> list[str]:
 
 
 def _wording(text: str) -> list[str]:
-    prose = "\n".join(line for line in text.splitlines() if line.strip() != MARKER)
+    prose = "\n".join(line for line in text.splitlines() if not COMPLETION.fullmatch(line.strip()))
     found = leaks(prose)
     found += [f"file path {path}; name the module, type or command instead" for path in _paths(prose)]
     found += [
@@ -195,11 +204,19 @@ def bullets(body: str) -> list[str]:
     return _bullets(body.splitlines())
 
 
-def _evidence(heading: str, body: list[str]) -> list[str]:
+def _evidence(heading: str, body: list[str], hypotheses: bool) -> list[str]:
     if _is_none(body):
         return []
-    return [
-        f"{heading} bullet {number} carries no evidence; add it or label the bullet hypothesis"
-        for number, bullet in enumerate(_bullets(body), 1)
-        if not EVIDENCE.search(bullet) and not HYPOTHESIS.search(bullet)
-    ]
+    found = (_unshown(heading, number, bullet, hypotheses) for number, bullet in enumerate(_bullets(body), 1))
+    return [fault for fault in found if fault]
+
+
+def _unshown(heading: str, number: int, bullet: str, hypotheses: bool) -> str:
+    """Why one bullet of an evidenced section does not stand, empty when it does."""
+    labelled = HYPOTHESIS.search(bullet) is not None
+    if labelled and not hypotheses:
+        return f"{heading} bullet {number} is labelled hypothesis; a proof holds only what was shown"
+    if labelled or EVIDENCE.search(bullet):
+        return ""
+    remedy = "add it or label the bullet hypothesis" if hypotheses else "add the run, command or link that shows it"
+    return f"{heading} bullet {number} carries no evidence; {remedy}"

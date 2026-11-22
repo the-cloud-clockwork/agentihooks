@@ -12290,6 +12290,61 @@
       ]
     },
     {
+      "id": "expert-lineage-ends-on-proof",
+      "origin": "operator",
+      "operator_words": "The only reason a chain of experts finish is when the last expert completed the task, validated, smoke and regression tested, semgrep and featur map created tested. Chain of experts a a linage of  a mission, they dont pick tasks, an exper linage keeps doing handoff until the missions is completedx then they finish and get terminated .",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "The expert that works a running lineage, and no one else, ends it with expert complete on a mission proof. The proof opens with the mission line of the saved mission, names every deliverable once as proven, holds at least one bullet with its evidence under validation, smoke tests, regression tests, Semgrep rules and feature map, labels nothing a hypothesis, leaves no open item and links only merged pull requests under its deliverables. A proof with a fault is refused with each fault named and the lineage keeps running. A proof that passes ends the lineage as complete with the proof saved, writes the seat recap, finishes the expert, settles its inbox and tells the master, who reads the proof with expert proof.",
+      "seam": "handoff.expert.proof_problems under the PROOF contract; expert_lineage.complete, proof and every; expert_commands.cmd_complete and cmd_proof; the context limit gate's allowed steps for an expert; the live check scripts.feature_checks.expert_proofs over the proofs the completed lineages hold",
+      "semgrep_rule": "feature-expert-ends-on-proof",
+      "tests": [
+        "tests/handoff/test_mission_proof.py::test_a_proof_of_every_deliverable_with_nothing_open_has_no_problems",
+        "tests/handoff/test_mission_proof.py::test_each_deliverable_of_the_mission_is_proven_by_one_evidenced_bullet",
+        "tests/handoff/test_mission_proof.py::test_each_check_section_holds_at_least_one_evidenced_bullet",
+        "tests/handoff/test_mission_proof.py::test_a_proof_with_anything_left_open_is_refused",
+        "tests/handoff/test_mission_proof.py::test_every_pull_request_named_under_deliverables_is_merged",
+        "tests/handoff/test_mission_proof.py::test_each_fault_of_a_proof_is_named_under_its_eight_headings_all_at_once",
+        "tests/swarm/test_expert_complete.py::test_the_expert_ends_its_lineage_on_a_proof_that_passes",
+        "tests/swarm/test_expert_complete.py::test_a_proof_with_a_fault_is_refused_with_each_fault_and_the_lineage_still_runs",
+        "tests/swarm/test_expert_complete.py::test_only_the_expert_that_works_the_lineage_completes_it",
+        "tests/swarm/test_expert_complete.py::test_the_master_and_the_operator_read_the_proof_a_lineage_ended_on",
+        "tests/test_expert_proofs_check.py::test_each_completed_lineage_whose_proof_conforms_passes_and_is_listed",
+        "tests/test_expert_proofs_check.py::test_a_completed_lineage_whose_proof_is_gone_or_breaks_the_contract_fails_by_name",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_expert_still_ends_its_lineage_on_a_proof"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_proofs"
+      ]
+    },
+    {
+      "id": "expert-stop-gate",
+      "origin": "operator",
+      "operator_words": "their obligation is to complete absolutely 100% of the instructions given no exceptions, no workarounds, no excuses for not completing a task, no follow ups, all problems gets solved by the root not patches.",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "The end of an expert's turn is refused while its lineage runs, and the refusal names the three ways on: keep working, hand off near the context limit, or end the lineage on a mission proof. The turn ends once the lineage ended, once the expert handed its seat off, and while a declared wait holds. The gate ships at deny, is set per swarm like every gate and sits in the gate registry, so the status line, the ledger page and the gate log carry it.",
+      "seam": "gates.expert_stop.ExpertStop.decide on a Stop call; gates.entry.GATES and gates.catalog.defaults; the live check scripts.feature_checks.expert_stop_gate over the gate modes of each running swarm",
+      "semgrep_rule": "feature-expert-stop-gate",
+      "tests": [
+        "tests/gates/test_expert_stop.py::test_an_expert_of_a_running_lineage_is_told_how_to_go_on_instead_of_stopping",
+        "tests/gates/test_expert_stop.py::test_an_expert_that_handed_its_seat_off_stops",
+        "tests/gates/test_expert_stop.py::test_an_expert_whose_lineage_ended_stops",
+        "tests/gates/test_expert_stop.py::test_a_declared_wait_lets_the_expert_stop_until_it_ends",
+        "tests/test_expert_stop_gate_check.py::test_each_swarm_that_keeps_the_gate_at_enforce_passes_and_is_listed",
+        "tests/test_expert_stop_gate_check.py::test_a_swarm_that_loosens_the_gate_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_stop_gate"
+      ]
+    },
+    {
       "id": "lane-model-harness-compatibility",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",

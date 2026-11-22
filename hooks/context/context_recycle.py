@@ -65,8 +65,9 @@ _ALLOWED = (
 )
 _EXPERT_ALLOWED = (
     " Until the handoff every tool call is denied except reading files (cat, head, tail, ls, wc, grep and git status, "
-    "log, diff, show in the shell), writing the handoff document under ~/scratchpad, "
+    "log, diff, show in the shell), writing the handoff document or the mission proof under ~/scratchpad, "
     "`agentihooks swarm {slug} expert mission`, `agentihooks swarm {slug} handoff <doc>`, "
+    "`agentihooks swarm {slug} expert complete <proof>`, "
     "`agentihooks swarm {slug} learned` and `agentihooks api` comment, say, leave and ack, each as one command."
 )
 
@@ -250,8 +251,8 @@ def _allowed_command(command: str, slug: str) -> bool:
 def _swarm_step(args: list[str], slug: str) -> bool:
     if args[:2] == [slug, "learned"]:
         return len(args) == 3 or (len(args) == 5 and args[3] == "--maturity")
-    if args == [slug, "expert", "mission"]:
-        return True
+    if args[:2] == [slug, "expert"]:
+        return args[2:] == ["mission"] or (len(args) == 4 and args[2] == "complete")
     return args[:2] == [slug, "handoff"] and (len(args) == 3 or (len(args) == 5 and args[3] == "--recap"))
 
 

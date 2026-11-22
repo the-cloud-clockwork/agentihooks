@@ -18,8 +18,11 @@ LINEAGES = "expert-lineages"
 MISSIONS = "expert-missions"
 SEQUENCE = "expert-seq"
 ACTIVE = "expert-running"
+PROOFS = "expert-proofs"
 RUNNING = "running"
 STOPPED = "stopped"
+COMPLETE = "complete"
+PROVEN = "mission proof accepted"
 NO_RUNNING = "no running expert lineage"
 
 
@@ -102,25 +105,34 @@ def stop(store: Any, slug: str, name: str, by: str, note: str, at: int) -> Linea
     """End a running lineage by its starter's order; a note says why, and a lineage that already ended is refused."""
     if not note.strip():
         raise SwarmError("stopping a lineage needs a note that says why")
-    return _end(store, slug, name, lambda found: replace(found, state=STOPPED, ended_by=by, ended_at=at, note=note))
+    return _end(store, slug, name, lambda found: replace(found, state=STOPPED, ended_by=by, ended_at=at, note=note), "")
 
 
 def complete(store: Any, slug: str, name: str, by: str, proof: str, at: int) -> Lineage:
-    """End a running lineage on the mission proof its expert handed in, and keep that proof."""
-    raise NotImplementedError
+    """End a running lineage on the mission proof its expert handed in, and keep that proof; a lineage that already
+    ended is refused. The caller has checked the proof."""
+
+    def proven(found: Lineage) -> Lineage:
+        return replace(found, state=COMPLETE, ended_by=by, ended_at=at, note=PROVEN)
+
+    return _end(store, slug, name, proven, proof)
 
 
 def proof(store: Any, slug: str, name: str) -> str:
     """The mission proof the lineage ended on, empty when it holds none."""
-    raise NotImplementedError
+    return store.redis.hget(store.key(slug, PROOFS), name) or ""
 
 
 def every(store: Any, slug: str) -> list[Lineage]:
-    """Every lineage the swarm ever started, in the order of their ids."""
-    raise NotImplementedError
+    """Every lineage the swarm ever started, in the order of their ids, each read by its id. For a check an operator
+    runs: code that runs every pass reads the running ones."""
+    count = int(store.redis.get(store.key(slug, SEQUENCE)) or "0")
+    names = [naming.seat_label(expert_launch.LANE, number + 1) for number in range(count)]
+    raws: list[str | None] = store.redis.hmget(store.key(slug, LINEAGES), names) if names else []
+    return [Lineage(**json.loads(raw)) for raw in raws if raw]
 
 
-def _end(store: Any, slug: str, name: str, change: Callable[[Lineage], Lineage]) -> Lineage:
+def _end(store: Any, slug: str, name: str, change: Callable[[Lineage], Lineage], proof: str) -> Lineage:
     key = store.key(slug, LINEAGES)
 
     def write(pipe: Any) -> Lineage:
@@ -134,6 +146,8 @@ def _end(store: Any, slug: str, name: str, change: Callable[[Lineage], Lineage])
         pipe.multi()
         pipe.hset(key, name, json.dumps(asdict(ended)))
         pipe.srem(store.key(slug, ACTIVE), name)
+        if proof:
+            pipe.hset(store.key(slug, PROOFS), name, proof)
         return ended
 
     return store.redis.transaction(write, key, value_from_callable=True)
