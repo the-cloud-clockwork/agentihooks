@@ -25,3 +25,8 @@ def tool_under_the_short_flag() -> tuple[str, ...]:
 def audit_under_the_joined_flag() -> list[str]:
     # ok: uvx-call-without-constraint
     return ["uvx", "--constraints=.github/ci-tools/audit.lock", AUDIT]
+
+
+def audit_under_the_singular_alias() -> list[str]:
+    # ok: uvx-call-without-constraint
+    return ["uvx", "--constraint", LOCK, AUDIT]

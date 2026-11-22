@@ -11,5 +11,5 @@ rules:
       - pattern-either:
           - pattern: '["uvx", ...]'
           - pattern: '("uvx", ...)'
-      - pattern-not: '["uvx", ..., "=~/^(-c|--constraints)(=.+)?$/", ...]'
-      - pattern-not: '("uvx", ..., "=~/^(-c|--constraints)(=.+)?$/", ...)'
+      - pattern-not: '["uvx", ..., "=~/^(-c|--constraints?)(=.+)?$/", ...]'
+      - pattern-not: '("uvx", ..., "=~/^(-c|--constraints?)(=.+)?$/", ...)'
