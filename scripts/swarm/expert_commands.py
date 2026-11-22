@@ -17,7 +17,6 @@ from scripts.swarm import clearance, expert_launch, expert_lineage, expert_missi
 from scripts.swarm.store import SwarmError
 
 VACANT = "no expert yet"
-NO_LINEAGE = "no expert lineage"
 
 
 def register(sub: Any) -> None:
@@ -54,14 +53,19 @@ def cmd_start(store: Any, args: argparse.Namespace) -> None:
         text = path.read_bytes().decode()
     except OSError as exc:
         raise SwarmError(f"cannot read the mission {args.mission}: {exc.strerror}") from exc
+    except UnicodeDecodeError as exc:
+        raise SwarmError(f"cannot read the mission {args.mission}: it is not UTF-8 text") from exc
     lineage = expert_lineage.start(store, args.slug, text, str(path), args.effort, by, now_ms())
     print(json.dumps(asdict(lineage)))
 
 
 def cmd_status(store: Any, args: argparse.Namespace) -> None:
-    """Print where each lineage stands, or the one named: its state, its effort, its expert and its mission."""
-    found = expert_lineage.listed(store, args.slug)
-    rows = [expert_lineage.get(store, args.slug, args.lineage)] if args.lineage else found
+    """Print where each running lineage stands, or the one named, running or ended: its state, its effort, its expert
+    and its mission."""
+    if args.lineage:
+        rows = [expert_lineage.get(store, args.slug, args.lineage)]
+    else:
+        rows = expert_lineage.running(store, args.slug)
     agents = store.agents(args.slug)
     if args.json:
         print(json.dumps([{**asdict(row), "occupant": occupant(agents, row.id)} for row in rows]))
@@ -69,7 +73,7 @@ def cmd_status(store: Any, args: argparse.Namespace) -> None:
     for row in rows:
         print(stands(row, occupant(agents, row.id)))
     if not rows:
-        print(NO_LINEAGE)
+        print(expert_lineage.NO_RUNNING)
 
 
 def stands(lineage: expert_lineage.Lineage, expert: str) -> str:

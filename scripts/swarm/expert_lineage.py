@@ -17,8 +17,10 @@ from scripts.swarm.store import SwarmError
 LINEAGES = "expert-lineages"
 MISSIONS = "expert-missions"
 SEQUENCE = "expert-seq"
+ACTIVE = "expert-running"
 RUNNING = "running"
 STOPPED = "stopped"
+NO_RUNNING = "no running expert lineage"
 
 
 @dataclass(frozen=True)
@@ -58,8 +60,11 @@ def start(store: Any, slug: str, text: str, source: str, effort: str, by: str, a
         started_by=by,
         started_at=at,
     )
-    store.redis.hset(store.key(slug, MISSIONS), expert_mission.digest(text), text)
-    store.redis.hset(store.key(slug, LINEAGES), name, json.dumps(asdict(lineage)))
+    with store.redis.pipeline() as pipe:
+        pipe.hset(store.key(slug, MISSIONS), expert_mission.digest(text), text)
+        pipe.hset(store.key(slug, LINEAGES), name, json.dumps(asdict(lineage)))
+        pipe.sadd(store.key(slug, ACTIVE), name)
+        pipe.execute()
     return lineage
 
 
@@ -71,15 +76,13 @@ def get(store: Any, slug: str, name: str) -> Lineage:
     return Lineage(**json.loads(raw))
 
 
-def listed(store: Any, slug: str) -> list[Lineage]:
-    """Every lineage of the swarm in the order started."""
-    rows = [Lineage(**json.loads(raw)) for raw in store.redis.hgetall(store.key(slug, LINEAGES)).values()]
-    return sorted(rows, key=lambda row: (row.started_at, len(row.id), row.id))
-
-
 def running(store: Any, slug: str) -> list[Lineage]:
-    """The lineages of the swarm that have not ended, in the order started."""
-    raise NotImplementedError
+    """The lineages of the swarm that have not ended, in the order started. The set of their ids bounds the read, so
+    code that runs every pass never reads the lineages that ended."""
+    names: list[str] = list(store.redis.smembers(store.key(slug, ACTIVE)))
+    raws: list[str] = store.redis.hmget(store.key(slug, LINEAGES), names) if names else []
+    rows = [Lineage(**json.loads(raw)) for raw in raws]
+    return sorted(rows, key=lambda row: (row.started_at, len(row.id), row.id))
 
 
 def mission(store: Any, slug: str, lineage: Lineage) -> str:
@@ -115,6 +118,7 @@ def _end(store: Any, slug: str, name: str, change: Callable[[Lineage], Lineage])
         ended = change(found)
         pipe.multi()
         pipe.hset(key, name, json.dumps(asdict(ended)))
+        pipe.srem(store.key(slug, ACTIVE), name)
         return ended
 
     return store.redis.transaction(write, key, value_from_callable=True)

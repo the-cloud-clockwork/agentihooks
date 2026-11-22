@@ -1,5 +1,5 @@
-"""Live check of the saved expert missions: every lineage of every swarm that is not stopped still holds the mission
-text its address names. It prints one line per lineage and never an account or a credential."""
+"""Live check of the saved expert missions: every running lineage of every swarm that is not stopped still holds the
+mission text its address names. It prints one line per running lineage and never an account or a credential."""
 
 import sys
 from collections.abc import Iterable
@@ -10,8 +10,7 @@ from scripts.swarm import expert_lineage
 from scripts.swarm.store import SwarmError
 
 FAIL = "FAIL: "
-SAVED = "{slug} lineage {id} is {state} at {effort} with its mission saved as {mission}"
-NONE = "no expert lineage"
+SAVED = "{slug} lineage {id} runs at {effort} with its mission saved as {mission}"
 
 
 class Missions(Protocol):
@@ -27,20 +26,20 @@ class Missions(Protocol):
 
 
 def lines(store: Missions) -> list[str]:
-    """One line per lineage of the swarms that are not stopped, a failing one where its saved mission is gone or no
-    longer matches its address, or one line that says no lineage exists."""
+    """One line per running lineage of the swarms that are not stopped, a failing one where its saved mission is gone
+    or no longer matches its address, or one line that says no lineage runs."""
     found: list[str] = []
     for slug in sorted(store.slugs()):
         if store.config(slug).state == "stopped":
             continue
-        for lineage in expert_lineage.listed(store, slug):
+        for lineage in expert_lineage.running(store, slug):
             try:
                 expert_lineage.mission(store, slug, lineage)
             except SwarmError as fault:
                 found.append(f"{FAIL}{slug} lineage {lineage.id}: {fault}")
             else:
                 found.append(SAVED.format(slug=slug, **asdict(lineage)))
-    return found or [NONE]
+    return found or [expert_lineage.NO_RUNNING]
 
 
 def main(store: Missions | None = None) -> int:

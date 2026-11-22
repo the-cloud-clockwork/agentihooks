@@ -58,7 +58,7 @@ def problems(text: str) -> list[str]:
             found.append(f"## {heading} must appear once and appears {names.count(heading)} times")
         elif not check.section(text, heading):
             found.append(f"## {heading} is empty")
-    known = [name for name in names if name in HEADINGS]
+    known = list(dict.fromkeys(name for name in names if name in HEADINGS))
     if known != [heading for heading in HEADINGS if heading in known]:
         found.append(f"the headings are out of order; keep {', '.join(HEADINGS)}")
     if check.section(text, DELIVER) and not deliverables(text):
