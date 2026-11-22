@@ -4547,10 +4547,34 @@
     {
       "id": "swarm-manual-caps",
       "origin": "inventory",
-      "behaviour": "Manual lane caps hold against lane demand.",
+      "behaviour": "Manual lane caps hold against lane demand, except a zero planner cap, which counts as one while plan work is ready.",
       "seam": "agentihooks swarm set max-eng-agents and max-ci-agents",
       "tests": [
         "tests/swarm/test_lane_caps_owner.py::test_manual_caps_hold_against_lane_demand"
+      ]
+    },
+    {
+      "id": "swarm-plan-cap-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-cap-floor",
+      "behaviour": "While plan work is ready the quota decision keeps one planner seat under a stored zero planner cap, in manual scaling and in auto scaling with the room full, taking the seat from the larger engineer or CI ceiling; the dispatcher lane caps keep one planner while a plan lane task is open; swarm start and a set that scales engineers or CI up restore a stored zero planner cap to its default, and a zero typed in the same set holds.",
+      "seam": "scripts.swarm.capacity.autoscaled, scripts.swarm.plan_cap_floor, scripts.swarm.dispatcher.lane_caps, agentihooks swarm start and agentihooks swarm set",
+      "tests": [
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_under_a_stored_zero_manual_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_zero_manual_cap_holds_while_no_plan_work_is_ready",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_manual_plan_cap_above_zero_is_kept",
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_when_live_agents_fill_the_room",
+        "tests/swarm/test_plan_cap_floor.py::test_the_plan_seat_comes_from_the_larger_lane_ceiling",
+        "tests/swarm/test_plan_cap_floor.py::test_the_ceilings_are_unchanged_without_ready_plan_work",
+        "tests/swarm/test_plan_cap_floor.py::test_a_plan_ceiling_already_granted_is_unchanged",
+        "tests/swarm/test_plan_cap_floor.py::test_a_frozen_plan_task_gets_no_planner_seat_under_a_stored_zero_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_the_claim_key_keeps_the_focus_order_of_plan_work_under_a_stored_zero_cap",
+        "tests/swarm/test_dispatcher.py::test_lane_caps_name_each_lane_with_its_own_cap",
+        "tests/swarm/test_dispatcher.py::test_at_delegate_the_queue_holds_only_focused_work_at_any_focus_weight",
+        "tests/swarm/test_dispatcher.py::test_below_delegate_proposals_name_only_focused_work_at_full_focus_weight",
+        "tests/swarm/test_plan_cap_floor.py::test_start_restores_a_stored_zero_plan_cap_to_its_default",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_restores_a_stored_zero_plan_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_keeps_a_stored_plan_cap_above_zero"
       ]
     },
     {
@@ -12929,7 +12953,7 @@
       "id": "ci-tool-installs-pinned-walk",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-walk-test",
-      "behaviour": "Every pip, uv pip, uvx, uv tool and pipx install in the CI workflows, composite actions, step templates and the shell and Python scripts CI runs pins each named package to one exact version that its checked in constraint pins too: the test requirements lock, the test constraints file while it chains that lock, a file in the CI tools folder, or such a lock passed with -r. Each such lock and CI tools file pins every line exactly, nested requirement files in any option form included, and any other requirements file fails. A command that names nothing to install, such as a command lookup, is not graded. Intentional clean install smokes are exempt once each by their install with a reason, and today's floating installs sit on an allowlist the walking test holds equal to its measurement, so an unlisted floating install or a pinned install still listed turns it red.",
+      "behaviour": "Every pip, uv pip, uvx, uv tool and pipx install in the CI workflows, composite actions, step templates and the shell and Python scripts CI runs pins each named package to one exact version that its checked in constraint pins too: the test requirements lock, the test constraints file while it chains that lock, a file in the CI tools folder, or such a lock passed with -r. Each such lock and CI tools file pins every line exactly, nested requirement files in any option form included, and any other requirements file fails. A command that names nothing to install, such as a command lookup, is not graded. Python sources are read as argv list displays with their names and splats resolved; Python shell strings, argv lists joined with plus, bash -c and backtick strings and installers held in variables are not read. Intentional clean install smokes are exempt once each by their install with a reason, and today's floating installs sit on an allowlist the walking test holds equal to its measurement, so an unlisted floating install or a pinned install still listed turns it red.",
       "seam": "tests.test_ci_test_dependencies._floating_ci_installs over .github, scripts/ci_* and the shell scripts and Python modules their run lines name",
       "tests": [
         "tests/test_ci_test_dependencies.py::test_every_ci_tool_install_pins_an_exact_version_under_a_checked_in_constraint",
