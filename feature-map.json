@@ -7395,6 +7395,29 @@
       ]
     },
     {
+      "id": "ledger-warm-writer",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-daemon",
+      "behaviour": "One warm ledger writer per host answers each ledger API request on an owner only unix socket in the agentihooks home with the in process answer, as the caller and with the headers the request names, so a socket write, read or refusal returns the same status, body and rows as the in process call. A second writer refuses a live socket, a stale socket file is replaced, and the writer returns once the checkout moves after finishing requests in flight.",
+      "seam": "scripts.swarm_ledger.warm_writer.serve and ask over scripts.tick.adapters.database_ledger.replied, the answer the in process transport uses",
+      "tests": [
+        "tests/swarm_ledger/test_warm_writer.py::test_a_socket_write_returns_the_in_process_reply_and_leaves_the_same_rows",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_socket_read_returns_the_in_process_body",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_refused_socket_write_returns_the_in_process_refusal_and_changes_no_row",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_answers_as_the_caller_and_with_the_headers_the_request_names",
+        "tests/swarm_ledger/test_warm_writer.py::test_ask_sends_the_caller_name_and_the_in_process_headers",
+        "tests/swarm_ledger/test_warm_writer.py::test_ask_raises_when_the_writer_closes_without_an_answer",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_connection_fails_where_no_writer_listens_and_carries_its_timeout",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_socket_is_owner_only_in_the_agentihooks_home",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_second_writer_on_a_live_socket_returns_one_and_leaves_the_first_answering",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_stale_socket_file_is_replaced_by_a_new_writer",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_connection_that_sends_nothing_gets_no_reply_and_no_error",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_finishes_a_request_in_flight_then_returns_once_the_checkout_moves",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_checkout_moves_only_to_a_new_revision",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_command_serves_the_home_socket_until_sigterm"
+      ]
+    },
+    {
       "id": "ledger-record-read-scoped",
       "origin": "inventory",
       "behaviour": "A ledger API read of one record of a record collection, such as tasks/t1 or phases/p1, with no query reads only that record's stored rows and their ancestors and answers exactly as a read of the whole ledger would, so a fresh process, as every agentihooks ledger get is, never streams and parses every row of the ledger to answer it.",
