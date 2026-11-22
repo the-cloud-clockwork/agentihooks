@@ -87,8 +87,9 @@ def get(store: Any, slug: str, name: str) -> Lineage:
 
 
 def runs(store: Any, slug: str, name: str) -> bool:
-    """Whether the lineage of that id is running; an unknown id is refused."""
-    return get(store, slug, name).state == RUNNING
+    """Whether a lineage of that id is among the running ones. An id the swarm does not hold is not running, so the
+    reap asks this of any expert record without raising."""
+    return any(lineage.id == name for lineage in running(store, slug))
 
 
 def running(store: Any, slug: str) -> list[Lineage]:
