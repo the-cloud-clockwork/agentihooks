@@ -71,6 +71,23 @@ def test_an_expert_whose_lineage_ended_is_not_resumed(store: RedisStore, ledger:
     assert runtime.resumed == []
 
 
+def test_an_expert_whose_lineage_record_is_gone_is_not_resumed_and_its_mail_is_closed(
+    store: RedisStore, ledger: Any, runtime: Any
+) -> None:
+    started(store)
+    expert = seated(store, runtime)
+    inbox = InboxStore(store.redis)
+    asked = inbox.send(MASTER, expert.name, "Which batch comes first")
+    store.redis.hdel(store.key("sw", "expert-lineages"), "expert-1")
+    store.redis.srem(store.key("sw", "expert-running"), "expert-1")
+    assert expert_lineage.runs(store, "sw", "expert-1") is False
+    assert dead_resume.resumable(store, "sw", expert, ledger) is False
+    assert dead_resume.reopen("sw", store, ledger, runtime, expert, NOW + MINUTE) is False
+    assert runtime.resumed == []
+    assert tick_module._drop("sw", store, ledger, {}, expert) == ""
+    assert inbox.get(asked.id).state == "cancelled"
+
+
 def test_an_expert_that_never_confirmed_the_handoff_on_its_seat_is_not_resumed(
     store: RedisStore, ledger: Any, runtime: Any
 ) -> None:
