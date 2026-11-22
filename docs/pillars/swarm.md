@@ -896,7 +896,7 @@ item closes `done`.
 | `msg reply` to a claimant item the pool gave this master's seat | Passes. The answer reaches the claimant and closes the item. |
 | `msg reply` to a claimant item the pool gave another master | Refused by the fence with the owner named, as for any nonowner message. |
 | `msg reply` to a claimant item sent straight to a numbered seat, such as `msg send master-2@<id>` | Fenced: the item never passed through the pool, so only the task owner answers it. |
-| `msg reply` after the item went back to the pool, was redelivered to another master or was redirected | Fenced. The move clears the pool holder. A master that claims the item from the pool again can answer it. |
+| `msg reply` after the item went back to the pool, was redelivered to another master or was redirected | Fenced for the previous holder: the move clears the pool holder. A master that claims the item from the pool again becomes its holder and can answer it. |
 | `msg send` to the claimant just answered, or to any other master's task claimant | Refused by the fence, even right after a pooled reply. An answer grants no later message. |
 | `swarm say` to a claimant | Refused by the fence, as before. |
 | A replay of the same reply, as the outbox makes for a reply queued while Redis was unreachable | Refused as a duplicate, `message <id> was already answered with message <answer id>`, and the claimant gets no second answer. It is not a fence refusal and does not count in `master_write_refusals_total`. |
@@ -985,7 +985,7 @@ with `ledger` or `inbox` as the target and the exception as its reason. A refusa
 | Symptom | Action |
 |---|---|
 | A backend master cannot message a standalone task's engineer. | Ask the front door owner named in the refusal through `masters-channel say`. |
-| A master's `msg reply` to a claimant item it took from the pool is refused with `cannot message its claimant`. | The item no longer sits at the replier's seat. Run `msg read <id>`: its `address` must be the replier's seat and its history must end its pool moves with `claimed from the master pool by <that seat>`. A return to the pool, a redelivery to another master or a redirect clears the pool holder; ask the task owner named in the refusal. |
+| A master's `msg reply` to a claimant item it took from the pool is refused with `cannot message its claimant`. | The item no longer sits at the replier's seat; [Answering a pooled claimant item](#answering-a-pooled-claimant-item) lists the moves that end the exception. Run `msg read <id>`: its `address` must be the replier's seat and its history must end its pool moves with `claimed from the master pool by <that seat>`. A `msg read` refused with `message <id> belongs to <address>, not <replier>` shows the item already left the seat. Ask the task owner named in the fence refusal. |
 | A master answered a pooled claimant item, but its next `msg send` to that claimant is refused. | Pool delivery and task ownership are separate: the pooled reply covers that answer only. Read the current phase owners and ask the task owner to deliver the instruction. |
 | Another live master successfully comments on an owned task. | This is the later live master write policy. The ledger records cross owner writes; claimant messages remain owner checked, apart from a master's reply to a claimant item the pool gave it. |
 | A message passes despite an unexpected owner. | Check the sender's fence setting, the live master count, the recipient's claimed task and `fail-open` gate log rows. A linked Doctor master message to a watched master is also allowed, and so is a `msg reply` to a claimant item the pool gave the sender. |
@@ -1164,11 +1164,9 @@ door seat, `msg read` and every state change other than a close are refused with
 pool for the next master`. Closing it (`msg close <id> cancel`) takes it out of the pool. An item redirected to another address
 leaves the pool and stays where it was sent.
 
-The seat recorded as an item's holder may answer it: a `msg reply` from the master acting for that seat, or from
-its successor after a handoff, passes the task owner fence for a claimant's item, so the backend master that took a
-claimant's question answers it without a relay ([Answering a pooled claimant
-item](#answering-a-pooled-claimant-item)). A return to the pool or a redirect clears the holder, and the fence
-applies again until a master claims the item from the pool once more.
+The master acting for the seat recorded as an item's holder, or its successor after a handoff, answers a claimant's
+item past the task owner fence while the item stays at that seat ([Answering a pooled claimant
+item](#answering-a-pooled-claimant-item)).
 
 Operator facing items never enter the pool. Page chat, every operator write on the ledger page (comments, replies,
 answers, notes, checks) and every relayed decision are sent as `operator` and reach the front door master: the lead,
