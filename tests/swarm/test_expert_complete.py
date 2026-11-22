@@ -3,6 +3,7 @@
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -38,6 +39,27 @@ RECAP = (
 OPEN_ITEM = "## Open items must be None; a lineage ends with nothing open"
 NO_THIRD = "deliverable D3 is named by no Deliverables bullet; start one with D3"
 NO_RULE = "## Semgrep rules holds no bullet; name at least one check with its evidence"
+UNMERGED = f"pull request {FIRST} is not merged"
+
+
+class Fault(NamedTuple):
+    """One edit that breaks the valid proof, the pull request left open with it and the faults the command names."""
+
+    old: str
+    new: str
+    unmerged: str
+    named: list[str]
+
+
+FAULTY = [
+    Fault("## Open items\nNone\n", "## Open items\n- D3 needs one more pass\n", "", [OPEN_ITEM]),
+    Fault(D3, "", "", [NO_THIRD]),
+    Fault(D3, D3, FIRST, [UNMERGED]),
+    Fault(RULED, "None\n", "", [NO_RULE]),
+    Fault(D3, "", SECOND, [NO_THIRD]),
+    Fault(D3 + "## Validation", "## Validation", FIRST, [NO_THIRD]),
+    Fault("## Open items\nNone\n", "## Open items\nOne doc line.\n", FIRST, [OPEN_ITEM, UNMERGED]),
+]
 
 
 @pytest.fixture
@@ -91,38 +113,19 @@ def test_the_expert_ends_its_lineage_on_a_proof_that_passes(
 
 
 @pytest.mark.feature("expert-lineage-ends-on-proof")
-@pytest.mark.parametrize(
-    "old,new,unmerged,faults",
-    [
-        ("## Open items\nNone\n", "## Open items\n- D3 needs one more pass\n", "", [OPEN_ITEM]),
-        (D3, "", "", [NO_THIRD]),
-        (D3, D3, FIRST, [f"pull request {FIRST} is not merged"]),
-        (RULED, "None\n", "", [NO_RULE]),
-        (D3, "", SECOND, [NO_THIRD]),
-        (D3 + "## Validation", "## Validation", FIRST, [NO_THIRD]),
-        (
-            "## Open items\nNone\n",
-            "## Open items\nOne doc line.\n",
-            FIRST,
-            [OPEN_ITEM, f"pull request {FIRST} is not merged"],
-        ),
-    ],
-)
+@pytest.mark.parametrize("fault", FAULTY)
 def test_a_proof_with_a_fault_is_refused_with_each_fault_and_the_lineage_still_runs(
     working: RedisStore,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    old: str,
-    new: str,
-    unmerged: str,
-    faults: list[str],
+    fault: Fault,
 ) -> None:
     lineage = expert_lineage.get(working, "sw", "expert-1")
-    monkeypatch.setattr(ledger_events, "view", lambda url: OPEN if url == unmerged else MERGED)
-    assert old in VALID
-    assert run("sw", "expert", "complete", proof(tmp_path, VALID.replace(old, new, 1))) == 1
-    assert capsys.readouterr().err == REFUSED + "".join(f"- {fault}\n" for fault in faults)
+    monkeypatch.setattr(ledger_events, "view", lambda url: OPEN if url == fault.unmerged else MERGED)
+    assert fault.old in VALID
+    assert run("sw", "expert", "complete", proof(tmp_path, VALID.replace(fault.old, fault.new, 1))) == 1
+    assert capsys.readouterr().err == REFUSED + "".join(f"- {named}\n" for named in fault.named)
     assert expert_lineage.get(working, "sw", "expert-1") == lineage
     assert expert_lineage.proof(working, "sw", "expert-1") == ""
     assert expert_lineage.running(working, "sw") == [lineage]
