@@ -12902,27 +12902,6 @@
       ]
     },
     {
-      "id": "swarm-order-waiting-finding",
-      "origin": "regression",
-      "ordered_at": "2026-11-21",
-      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "The slow lane tick step order waiting notes, every ten minutes, each open operator order whose unfinished tasks have nothing claimed or in a pull request and when it first saw that; an order with work in flight, with no unfinished task or done drops out. Past thirty minutes between its first sighting and the last one the order is an order waiting health finding naming the order, its unfinished and claimable counts and each distinct reason the claim gate holds its tasks, and the findings pass mails it to the master. Every figure is the last sighting's: at the step's cadence the finding comes with the sighting forty minutes after the first, a claim taken and released between two sightings is not seen, and a step that stops running is the step starvation finding's to report. A ledger with no order raises none.",
-      "seam": "scripts.tick.steps.orders._order_waiting registered as tick step order waiting, scripts.swarm.health.order_waiting.observe and findings on a swarm store, and scripts.swarm.status.findings",
-      "tests": [
-        "tests/tick/steps/test_order_waiting.py::test_order_waiting",
-        "tests/tick/steps/test_order_waiting.py::test_an_order_with_open_tasks_and_nothing_in_flight_past_thirty_minutes_is_a_finding",
-        "tests/tick/steps/test_order_waiting.py::test_an_order_whose_open_tasks_are_all_claimable_says_nobody_claimed_one",
-        "tests/tick/steps/test_order_waiting.py::test_work_in_flight_under_an_order_drops_it_and_the_wait_starts_again",
-        "tests/tick/steps/test_order_waiting.py::test_an_order_with_no_open_task_a_done_order_and_a_ledger_without_orders_raise_none",
-        "tests/tick/steps/test_order_waiting.py::test_each_pass_stores_its_time_and_keeps_the_time_an_order_was_first_seen_waiting",
-        "tests/tick/steps/test_order_waiting.py::test_an_ordered_task_and_an_ordered_phase_are_each_one_finding",
-        "tests/tick/steps/test_order_waiting.py::test_an_order_with_work_in_flight_or_a_shorter_wait_never_hides_one_that_waited_longer",
-        "tests/tick/steps/test_order_waiting.py::test_the_order_is_read_with_the_doctor_fix_phase_of_its_swarm",
-        "tests/tick/steps/test_order_waiting.py::test_the_step_notes_the_orders_of_the_pass_state",
-        "tests/tick/steps/test_order_waiting.py::test_the_finding_is_in_the_swarm_status_findings_and_goes_to_the_master_inbox"
-      ]
-    },
-    {
       "id": "swarm-focus-verdict",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
@@ -12982,6 +12961,27 @@
         "tests/tick/steps/test_focus_unclaimed.py::test_a_task_below_three_ticks_does_not_stop_the_finding_of_the_next_one",
         "tests/tick/steps/test_focus_unclaimed.py::test_no_stored_count_is_no_finding",
         "tests/tick/steps/test_focus_unclaimed.py::test_the_doctor_fix_phase_comes_from_the_swarm_config"
+      ]
+    },
+    {
+      "id": "swarm-order-waiting-finding",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "The slow lane tick step order waiting notes, every ten minutes, each open operator order whose unfinished tasks have nothing claimed or in a pull request and when it first saw that; an order with work in flight, with no unfinished task or done drops out. Past thirty minutes between its first sighting and the last one the order is an order waiting health finding naming the order, its unfinished and claimable counts and each distinct reason the claim gate holds its tasks, and the findings pass mails it to the master. Every figure is the last sighting's: at the step's cadence the finding comes with the sighting forty minutes after the first, a claim taken and released between two sightings is not seen, and a step that stops running is the step starvation finding's to report. A ledger with no order raises none.",
+      "seam": "scripts.tick.steps.orders._order_waiting registered as tick step order waiting, scripts.swarm.health.order_waiting.observe and findings on a swarm store, and scripts.swarm.status.findings",
+      "tests": [
+        "tests/tick/steps/test_order_waiting.py::test_order_waiting",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_with_open_tasks_and_nothing_in_flight_past_thirty_minutes_is_a_finding",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_whose_open_tasks_are_all_claimable_says_nobody_claimed_one",
+        "tests/tick/steps/test_order_waiting.py::test_work_in_flight_under_an_order_drops_it_and_the_wait_starts_again",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_with_no_open_task_a_done_order_and_a_ledger_without_orders_raise_none",
+        "tests/tick/steps/test_order_waiting.py::test_each_pass_stores_its_time_and_keeps_the_time_an_order_was_first_seen_waiting",
+        "tests/tick/steps/test_order_waiting.py::test_an_ordered_task_and_an_ordered_phase_are_each_one_finding",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_with_work_in_flight_or_a_shorter_wait_never_hides_one_that_waited_longer",
+        "tests/tick/steps/test_order_waiting.py::test_the_order_is_read_with_the_doctor_fix_phase_of_its_swarm",
+        "tests/tick/steps/test_order_waiting.py::test_the_step_notes_the_orders_of_the_pass_state",
+        "tests/tick/steps/test_order_waiting.py::test_the_finding_is_in_the_swarm_status_findings_and_goes_to_the_master_inbox"
       ]
     },
     {
