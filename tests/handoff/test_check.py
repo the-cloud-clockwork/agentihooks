@@ -78,6 +78,11 @@ def test_an_empty_section_must_say_none():
     assert any("Decisions and promises" in p and "None" in p for p in found)
 
 
+def test_a_section_that_holds_only_blank_lines_is_empty() -> None:
+    found = problems(_swap("## Decisions and promises\nNone\n", "## Decisions and promises\n\n\n"), lambda a: True)
+    assert found == ["## Decisions and promises is empty; write None when there is nothing to say"]
+
+
 def test_the_marker_must_be_the_last_line():
     found = problems(VALID.replace(MARKER + "\n", MARKER + "\nlate words\n"), lambda a: True)
     assert any("last line" in p for p in found)
