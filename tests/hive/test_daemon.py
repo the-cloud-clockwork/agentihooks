@@ -1060,6 +1060,58 @@ def test_install_writes_the_service_and_enables_it(tmp_path):
     assert run.call_count == 1
 
 
+@pytest.mark.feature("ledger-writer-hosts")
+def test_writer_unit_uses_the_installed_binary_and_restarts_after_every_exit() -> None:
+    from scripts.swarm import timer
+
+    text = timer.units("/installed/bin/agentihooks")["agentihooks-ledger-writer.service"]
+    assert text == (
+        "[Unit]\nDescription=agentihooks warm ledger writer\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        "EnvironmentFile=-%h/.agentihooks/hive.env\n"
+        'ExecStart="/installed/bin/agentihooks" ledger writer serve\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+    assert "agentihooks-ledger-writer.service" not in timer.ENGINE
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_hive_install_enables_the_shared_writer_unit(tmp_path: Path) -> None:
+    from scripts.swarm import timer
+
+    run = Mock(return_value=Mock(returncode=0))
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    writer = "agentihooks-ledger-writer.service"
+    assert (tmp_path / writer).read_text() == timer.units("/bin/agentihooks")[writer]
+    assert run.call_args_list[-1].args[0] == ["systemctl", "--user", "enable", "--now", writer]
+    assert [call.args[0] for call in run.call_args_list].count(["systemctl", "--user", "daemon-reload"]) == 1
+    run.reset_mock()
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    assert run.call_count == 2
+    assert all(call.args[0][2] == "enable" for call in run.call_args_list)
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_hive_install_reports_writer_enable_failure(tmp_path: Path) -> None:
+    run = Mock(side_effect=[Mock(returncode=0), Mock(returncode=0), Mock(returncode=1)])
+    assert daemon.install("/bin/agentihooks", tmp_path, run) is False
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_hive_install_reloads_a_changed_writer_unit(tmp_path: Path) -> None:
+    run = Mock(return_value=Mock(returncode=0))
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    writer = tmp_path / "agentihooks-ledger-writer.service"
+    writer.write_text("old")
+    run.reset_mock()
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    assert run.call_args_list[0].args[0] == ["systemctl", "--user", "daemon-reload"]
+    assert "ledger writer serve\n" in writer.read_text()
+
+
 def test_install_reports_enable_failure(tmp_path):
     assert daemon.install("/bin/agentihooks", tmp_path, Mock(return_value=Mock(returncode=1))) is False
 
