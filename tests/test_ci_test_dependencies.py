@@ -934,3 +934,69 @@ def test_the_install_walker_passes_pinned_and_non_install_commands(tmp_path: Pat
 def test_each_intentional_install_smoke_is_a_measured_install_with_a_reason() -> None:
     assert {finding.key for finding in _repository() if _intentional(finding)} == set(INTENTIONAL_SMOKES)
     assert all(reason.strip() for reason in INTENTIONAL_SMOKES.values())
+
+
+BUILD_CONSTRAINT = "--dependency-constraints-txt"
+
+
+def _build_constraints(words: list[str]) -> list[str] | None:
+    names = [word.rsplit("/", 1)[-1] for word in words]
+    if "pyproject-build" not in names and not any(pair == ("-m", "build") for pair in zip(names, names[1:])):
+        return None
+    joined = [value for word in words if (value := word.removeprefix(f"{BUILD_CONSTRAINT}=")) != word]
+    return joined + [value for flag, value in zip(words, words[1:]) if flag == BUILD_CONSTRAINT]
+
+
+def _build_commands(path: Path) -> Iterator[list[str]]:
+    text = path.read_text()
+    runs = [text] if path.suffix == ".sh" else [run for run, _ in _yaml_runs(yaml.load(text, Loader=LOADER), {})]
+    for run in runs:
+        for line in run.replace("\\\n", " ").splitlines():
+            yield from _split(_words(line))
+
+
+def _unconstrained_ci_builds(root: Path) -> list[str]:
+    found: list[str] = []
+    for path in _ci_sources(root):
+        if path.suffix == ".py":
+            continue
+        for words in _build_commands(path):
+            values = _build_constraints(words)
+            if values is not None and not any(_constraint_file(value, root) for value in values):
+                found.append(f"{path.relative_to(root).as_posix()}: {shlex.join(words)}")
+    return found
+
+
+@pytest.mark.feature("ci-package-build-constrained")
+def test_every_ci_package_build_constrains_its_isolated_backend() -> None:
+    assert _unconstrained_ci_builds(ROOT) == []
+
+
+@pytest.mark.feature("ci-package-build-constrained")
+@pytest.mark.parametrize(
+    ("planted", "pinned"),
+    [
+        pytest.param(
+            {".github/workflows/plant.yml": _job("python -m build")},
+            {".github/workflows/plant.yml": _job(f"python -m build {BUILD_CONSTRAINT} {PLANT_LOCK}")},
+            id="workflow build",
+        ),
+        pytest.param(
+            {"scripts/ci_plant.sh": f"python3 -m build --wheel {BUILD_CONSTRAINT} constraints.txt\n"},
+            {"scripts/ci_plant.sh": f"python3 -m build --wheel {BUILD_CONSTRAINT}={PLANT_LOCK}\n"},
+            id="ci script build constrained outside the tool locks",
+        ),
+        pytest.param(
+            {".github/scripts/plant.sh": "pyproject-build --sdist\n"},
+            {".github/scripts/plant.sh": f"pyproject-build --sdist {BUILD_CONSTRAINT} {PLANT_LOCK}\n"},
+            id="pyproject build script",
+        ),
+    ],
+)
+def test_the_build_walker_reports_a_planted_unconstrained_build(
+    tmp_path: Path, planted: dict[str, str], pinned: dict[str, str]
+) -> None:
+    _plant(tmp_path, {PLANT_LOCK: PLANT_PINS, **planted})
+    assert len(found := _unconstrained_ci_builds(tmp_path)) == 1, found
+    _plant(tmp_path, pinned)
+    assert _unconstrained_ci_builds(tmp_path) == []

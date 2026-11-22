@@ -12784,6 +12784,17 @@
       ]
     },
     {
+      "id": "ci-package-build-constrained",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-build",
+      "behaviour": "Every pypa build run in the CI workflows, composite actions, step templates and the shell scripts CI runs passes the dependency constraints option naming a checked in lock, the test requirements lock or a file in the CI tools folder, so its isolated build environment installs the locked setuptools and setuptools scm versions instead of the newest release. The PyPI publish job and the release verify stage build the wheel this way.",
+      "seam": "tests.test_ci_test_dependencies._unconstrained_ci_builds over .github, scripts/ci_* and the shell scripts their run lines name",
+      "tests": [
+        "tests/test_ci_test_dependencies.py::test_every_ci_package_build_constrains_its_isolated_backend",
+        "tests/test_ci_test_dependencies.py::test_the_build_walker_reports_a_planted_unconstrained_build"
+      ]
+    },
+    {
       "id": "execution-put-unchanged-skips-lock",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2797",
