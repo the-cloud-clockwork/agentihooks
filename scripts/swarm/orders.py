@@ -32,18 +32,13 @@ def stamps(doc: dict[str, Any]) -> dict[str, int]:
         return found
     rows = {task["id"]: task for task in tasks}
     reach = _reach(doc, tasks)
-    for seed, at in list(found.items()):
-        waiting = reach(rows[seed])
-        while waiting:
-            row = rows.get(waiting.pop())
-            if row is None or closed(row):
-                continue
-            held = found.get(row["id"])
-            if held is not None and held <= at:
-                continue
-            found[row["id"]] = at
-            waiting += reach(row)
-    return found
+    spread: dict[str, int] = {}
+    for at in sorted(set(found.values())):
+        seeds = [name for name, own in found.items() if own == at]
+        for name in freeze.reached(seeds, rows, set(spread), reach):
+            if name in rows and not closed(rows[name]):
+                spread[name] = at
+    return spread
 
 
 def done(row: dict[str, Any]) -> bool:
@@ -58,7 +53,7 @@ def closed(row: dict[str, Any]) -> bool:
 
 def _reach(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> Callable[[dict[str, Any]], list[str]]:
     """Where a task's order time goes next: the work it waits on, the task it is merged into and the plan tasks that
-    enhance it."""
+    enhance it; nowhere from a row that is done, out of scope or no task of the ledger."""
     waits_on = freeze.waits(doc)
     plans: dict[str, list[str]] = {}
     for task in tasks:
@@ -66,6 +61,8 @@ def _reach(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> Callable[[dict[s
             plans.setdefault(task["enhances"], []).append(task["id"])
 
     def reach(row: dict[str, Any]) -> list[str]:
+        if not row or closed(row):
+            return []
         lead: list[str] = [row["merged_into"]] if row.get("merged_into") else []
         return [*waits_on(row), *lead, *plans.get(row["id"], [])]
 

@@ -432,7 +432,6 @@ def test_an_ordered_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_o
 
 
 def focused(target: str, outside: dict[str, str]) -> readiness.Snapshot:
-    """A focus on the target over b, a and w, with the ordered task d outside it that w waits on."""
     tasks = [
         task("b", kind="code"),
         task("a", kind="code", ordered=ORDER),
