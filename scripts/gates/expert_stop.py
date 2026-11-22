@@ -1,7 +1,8 @@
 """The Stop gate for an expert: a session of a running lineage does not end while its mission is open.
 
-An expert works one mission to its end. Its turn ends only when the lineage ended, on a mission proof or by its
-starter's order, when it handed its seat off, or while it holds a declared wait.
+An expert works one mission to its end. Its turn ends only when its starter stopped the lineage, when it left its seat
+by a handoff or by a completion that finished, or while it holds a declared wait. A lineage that ended on a mission
+proof whose completion did not finish holds the expert until it runs the completion again.
 """
 
 from collections.abc import Callable
@@ -20,6 +21,11 @@ REFUSAL = (
     "deliverable is proven, end the lineage with `agentihooks swarm {slug} expert complete <proof>`. While you wait "
     'on something, declare it with `agentihooks swarm {slug} wait <minutes> --reason "<what>"`.'
 )
+
+
+def _denied(text: str, lineage: str, slug: str) -> Decision:
+    refused: Decision = Decision.deny(text.format(lineage=lineage, slug=slug))  # pyright: ignore[reportUnknownMemberType]
+    return refused
 
 
 class ExpertStop:
@@ -47,17 +53,18 @@ class ExpertStop:
             lineage = expert_lineage.get(store, who.swarm, agent.task)
         except SwarmError:
             return Decision()
+        if lineage.state == expert_lineage.COMPLETE:
+            return _denied(expert_lineage.UNFINISHED, lineage.id, who.swarm)
+        if lineage.state != expert_lineage.RUNNING:
+            return Decision()
         held: dict[str, Any] | None = idle.wait(  # pyright: ignore[reportUnknownMemberType]
             store.redis,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             who.swarm,
             who.name,
         )
-        if lineage.state != expert_lineage.RUNNING or (held is not None and held["until"] > self.now()):
+        if held is not None and held["until"] > self.now():
             return Decision()
-        refused: Decision = Decision.deny(  # pyright: ignore[reportUnknownMemberType]
-            REFUSAL.format(lineage=lineage.id, slug=who.swarm)
-        )
-        return refused
+        return _denied(REFUSAL, lineage.id, who.swarm)
 
     def connect(self) -> "RedisStore":
         if self._connect:

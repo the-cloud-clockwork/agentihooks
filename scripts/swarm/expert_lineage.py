@@ -24,6 +24,11 @@ STOPPED = "stopped"
 COMPLETE = "complete"
 PROVEN = "mission proof accepted"
 NO_RUNNING = "no running expert lineage"
+UNFINISHED = (
+    "Lineage {lineage} ended on its mission proof, but its completion did not finish. Run "
+    "`agentihooks swarm {slug} expert complete <proof>` again with the same proof: it tells the master, keeps the "
+    "recap and ends your seat."
+)
 
 
 @dataclass(frozen=True)
