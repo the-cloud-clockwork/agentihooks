@@ -46,9 +46,14 @@ def stamps(doc: dict[str, Any]) -> dict[str, int]:
     return found
 
 
+def done(row: dict[str, Any]) -> bool:
+    """Whether a phase or task row is done, by its flag or its state."""
+    return bool(row.get("done") or row.get("state") == "done")
+
+
 def closed(row: dict[str, Any]) -> bool:
     """Whether a phase or task row is done or out of scope, so no order stands on it or passes through it."""
-    return bool(row.get("done") or row.get("state") == "done" or row.get("out_of_scope"))
+    return done(row) or bool(row.get("out_of_scope"))
 
 
 def _reach(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> Callable[[dict[str, Any]], list[str]]:

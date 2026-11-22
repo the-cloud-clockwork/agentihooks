@@ -127,8 +127,8 @@ def test_an_out_of_scope_task_under_an_order_is_not_counted_as_unfinished_work()
     ]
     [row] = order_check.read(ledger_doc(tasks, p1=ORDER), "")
     assert row["tasks"] == [{"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"}]
-    assert (row["claimable"], row["busy"], row["done"]) == (1, 0, [])
-    assert row["line"] == "phases/p1 Build: 1 unfinished, 1 claimable, 0 claimed or in a pull request, 0 done"
+    assert (row["claimable"], row["busy"], row["done"]) == (1, 0, ["t4"])
+    assert row["line"] == "phases/p1 Build: 1 unfinished, 1 claimable, 0 claimed or in a pull request, 1 done"
     [alone] = order_check.read(ledger_doc([task("t2", out_of_scope=True)], p1=ORDER), "")
     assert (alone["tasks"], alone["line"]) == (
         [],
