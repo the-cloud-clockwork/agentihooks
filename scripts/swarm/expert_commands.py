@@ -126,7 +126,7 @@ def cmd_stop(store: Any, args: argparse.Namespace) -> None:
     store.config(args.slug)
     ended = expert_lineage.stop(store, args.slug, args.lineage, _starter(store, args.slug), args.note, now_ms())
     store.clear_handoff(args.slug, ended.id)
-    expert_seat.returned(store, args.slug, ended)
+    expert_seat.returned(store, args.slug, ended.seat, ended.id, ended.state)
     print(json.dumps(asdict(ended)))
 
 

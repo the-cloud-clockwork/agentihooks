@@ -7,6 +7,7 @@ finishes the expert of a lineage that ended. The expert verb of the command line
 """
 
 import contextlib
+from collections.abc import Callable
 from dataclasses import replace
 from importlib import import_module
 from types import SimpleNamespace
@@ -15,7 +16,7 @@ from typing import Any
 from scripts.handoff import check, envelope, transfers
 from scripts.inbox import exits, outbox
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
-from scripts.inbox.store import DuplicateItem, InboxStore
+from scripts.inbox.store import DuplicateItem, InboxError, InboxStore
 from scripts.swarm import dispatch_seat, expert_launch, expert_lineage, expert_mission, seat_spawn
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 
@@ -23,6 +24,7 @@ LANE = expert_launch.LANE
 HELD = ("paused", "stopping", "stopped")
 REASON = "exit"
 GONE = "unknown"
+FAULT = "lineage {lineage} hit a fault this pass: {error}"
 NOTICE = (
     "Expert lineage {id} completed its mission: {title}. Its mission proof was accepted; read it with "
     "`agentihooks swarm {slug} expert proof {id}`."
@@ -76,46 +78,57 @@ def run(slug: str, config: Any, store: Any, runtime: Any, now_ms: int) -> list[s
     """One pass over the expert seats of a swarm: the lines of what it did. A completed lineage gets the closing
     steps it is still owed and the expert of an ended lineage is finished, whatever the swarm's state; nothing
     launches while the swarm is paused, stopping or stopped, and a seat that holds a record in any state gets no
-    second expert."""
-    actions = [_closed(slug, store, lineage) for lineage in expert_lineage.closing(store, slug)]
+    second expert. Each lineage is served on its own: a fault in one becomes a line and the others go on."""
+    owed = expert_lineage.closing(store, slug)
+    actions: list[str] = []
+    for lineage in owed:
+        actions += _guarded(lineage.id, _closed, slug, store, lineage)
     experts: list[AgentRecord] = [agent for agent in store.agents(slug) if agent.lane == LANE]
     lineages = expert_lineage.running(store, slug)
-    running = {lineage.id for lineage in lineages}
-    actions += [
-        _end(slug, store, agent) for agent in experts if agent.state != "finished" and agent.task not in running
-    ]
+    kept = {lineage.id for lineage in (*lineages, *owed)}
+    for agent in experts:
+        if agent.state != "finished" and agent.task not in kept:
+            actions += _guarded(agent.task, _end, slug, store, agent)
     if config.state in HELD:
         return actions
     seated = {agent.task for agent in experts}
     for lineage in lineages:
         if lineage.id not in seated:
-            actions += _launch(slug, config, store, runtime, lineage, now_ms)
+            actions += _guarded(lineage.id, _launch, slug, config, store, runtime, lineage, now_ms)
     return actions
 
 
-def _closed(slug: str, store: Any, lineage: expert_lineage.Lineage) -> str:
+def _guarded(lineage: str, serve: Callable[..., list[str]], *given: Any) -> list[str]:
+    """Serve one lineage; a refusal of the swarm store or the inbox becomes a line that names the lineage, so its
+    fault never stops the pass for the others. A store that stops answering is raised: it fails every lineage."""
+    try:
+        return serve(*given)
+    except (SwarmError, InboxError) as fault:
+        return [FAULT.format(lineage=lineage, error=fault)]
+
+
+def _closed(slug: str, store: Any, lineage: expert_lineage.Lineage) -> list[str]:
     """Run the closing steps a completed lineage is still owed, from the proof it kept. They need no expert record:
     the reap may have dropped a dead expert before this pass."""
     close(store, slug, lineage, expert_lineage.proof(store, slug, lineage.id))
-    return ENDED.format(name=lineage.ended_by, lineage=lineage.id, state=lineage.state)
+    return [ENDED.format(name=lineage.ended_by, lineage=lineage.id, state=lineage.state)]
 
 
-def _end(slug: str, store: Any, agent: AgentRecord) -> str:
+def _end(slug: str, store: Any, agent: AgentRecord) -> list[str]:
     """Finish the unfinished expert of a lineage that no longer runs: its open mail is withdrawn with the reason,
     the handoff left on its seat is cleared and the mail still open on that seat goes back to the master. An expert
     of a lineage the swarm does not hold ends the same way, so one stray record never stops the pass."""
     try:
-        lineage: expert_lineage.Lineage | None = expert_lineage.get(store, slug, agent.task)
+        state: str = expert_lineage.get(store, slug, agent.task).state
     except SwarmError:
-        lineage = None
-    state = lineage.state if lineage else GONE
+        state = GONE
     reason = STOPPED if state == expert_lineage.STOPPED else LEFT
     SEAT.exits.settle(InboxStore(store.redis), agent.name, "", reason.format(lineage=agent.task))
     store.clear_handoff(slug, agent.task)
-    if lineage:
-        returned(store, slug, lineage)
+    if state != GONE:
+        returned(store, slug, agent.seat, agent.task, state)
     store.put_agent(slug, replace(agent, state="finished"))
-    return ENDED.format(name=agent.name, lineage=agent.task, state=state)
+    return [ENDED.format(name=agent.name, lineage=agent.task, state=state)]
 
 
 def close(store: Any, slug: str, ended: expert_lineage.Lineage, text: str) -> None:
@@ -136,7 +149,7 @@ def close(store: Any, slug: str, ended: expert_lineage.Lineage, text: str) -> No
         store.memory.add_recap(ended.seat, ended.ended_by, ended.id, recap, ended.ended_at)
     SEAT.exits.settle(inbox, ended.ended_by, "", COMPLETED)
     store.clear_handoff(slug, ended.id)
-    returned(store, slug, ended)
+    returned(store, slug, ended.seat, ended.id, ended.state)
     agents: list[AgentRecord] = store.agents(slug)
     for agent in agents:
         if agent.name == ended.ended_by and agent.state != "finished":
@@ -161,12 +174,12 @@ def keep_handoff(
     SEAT.transfers.record(store, slug, author, reason, text, at)
 
 
-def returned(store: Any, slug: str, ended: expert_lineage.Lineage) -> None:
+def returned(store: Any, slug: str, seat: str, lineage: str, state: str) -> None:
     """Send the mail still open on the seat of a lineage that ended to the master's seat with the reason, so no
     message waits on a seat nobody will hold again."""
     inbox = InboxStore(store.redis)
-    for item in inbox.open_items(ended.seat):
-        inbox.redirect(item.id, SWARM, seat_address(slug, MASTER), RETURNED.format(id=ended.id, state=ended.state))
+    for item in inbox.open_items(seat):
+        inbox.redirect(item.id, SWARM, seat_address(slug, MASTER), RETURNED.format(id=lineage, state=state))
 
 
 def _launch(

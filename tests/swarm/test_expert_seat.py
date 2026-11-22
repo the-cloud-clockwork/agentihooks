@@ -11,7 +11,7 @@ import pytest
 from scripts.handoff import expert as handoff_expert
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli, expert_lineage, expert_seat, naming, prompt
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import AgentRecord, RedisStore
@@ -326,6 +326,57 @@ def test_an_expert_of_a_lineage_the_swarm_does_not_hold_is_finished_and_the_othe
         f"spawned expert {kept.name} on lineage expert-2 as its expert number 1",
     ]
     assert [agent.state for agent in experts(store) if agent.name == stray.name] == ["finished"]
+
+
+def test_a_running_id_whose_record_is_gone_is_left_out_and_the_other_seats_are_kept(store: RedisStore) -> None:
+    started(store, at=1_000)
+    started(store, at=2_000)
+    store.redis.hdel(store.key("sw", "expert-lineages"), "expert-1")
+    assert [row.id for row in expert_lineage.running(store, "sw")] == ["expert-2"]
+    actions = go(store, FakeRuntime())
+    [kept] = experts(store)
+    assert actions == [f"spawned expert {kept.name} on lineage expert-2 as its expert number 1"]
+
+
+def test_a_lineage_whose_closing_steps_fail_keeps_owing_them_and_does_not_stop_the_other_seats(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started(store, at=1_000)
+    runtime = FakeRuntime()
+    expert = launched(store, runtime)
+    expert_lineage.complete(store, "sw", "expert-1", expert.name, PROOF, NOW + 1)
+    started(store, at=2_000)
+    real = InboxStore.send
+
+    def failing(*given: Any, **named: Any) -> Any:
+        if given[1] == expert.name:
+            raise InboxError("the inbox refused the notice")
+        return real(*given, **named)
+
+    monkeypatch.setattr(InboxStore, "send", failing)
+    actions = go(store, runtime, NOW + MINUTE)
+    [kept] = [agent for agent in experts(store) if agent.task == "expert-2"]
+    assert actions == [
+        "lineage expert-1 hit a fault this pass: the inbox refused the notice",
+        f"spawned expert {kept.name} on lineage expert-2 as its expert number 1",
+    ]
+    assert [row.id for row in expert_lineage.closing(store, "sw")] == ["expert-1"]
+    assert [agent.state for agent in experts(store) if agent.name == expert.name] == ["working"]
+
+
+def test_a_lineage_whose_launch_is_refused_does_not_stop_the_next_lineage(store: RedisStore) -> None:
+    first = started(store, at=1_000)
+    runtime = FakeRuntime()
+    store.drop_agent("sw", launched(store, runtime).name)
+    started(store, at=2_000)
+    store.redis.hdel(store.key("sw", "expert-missions"), first.mission.rpartition("/")[2])
+    actions = go(store, runtime, NOW + MINUTE)
+    [kept] = experts(store)
+    assert actions == [
+        "lineage expert-1 hit a fault this pass: the saved mission of lineage expert-1 is missing or does not match "
+        f"{first.mission}",
+        f"spawned expert {kept.name} on lineage expert-2 as its expert number 1",
+    ]
 
 
 def test_an_expert_that_was_spawned_is_counted_even_when_the_pass_fails_right_after(

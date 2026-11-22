@@ -95,10 +95,14 @@ def runs(store: Any, slug: str, name: str) -> bool:
 def running(store: Any, slug: str) -> list[Lineage]:
     """The lineages of the swarm that have not ended, in the order started. The set of their ids bounds the read, so
     code that runs every pass never reads the lineages that ended."""
-    names: list[str] = list(store.redis.smembers(store.key(slug, ACTIVE)))
-    raws: list[str] = store.redis.hmget(store.key(slug, LINEAGES), names) if names else []
-    rows = [Lineage(**json.loads(raw)) for raw in raws]
-    return sorted(rows, key=lambda row: (row.started_at, len(row.id), row.id))
+    return sorted(_indexed(store, slug, ACTIVE), key=lambda row: (row.started_at, len(row.id), row.id))
+
+
+def _indexed(store: Any, slug: str, index: str) -> list[Lineage]:
+    """The lineages an index set names, read by its ids; an id whose record is gone is left out."""
+    names: list[str] = list(store.redis.smembers(store.key(slug, index)))
+    raws: list[str | None] = store.redis.hmget(store.key(slug, LINEAGES), names) if names else []
+    return [Lineage(**json.loads(raw)) for raw in raws if raw]
 
 
 def mission(store: Any, slug: str, lineage: Lineage) -> str:
@@ -154,9 +158,7 @@ def unlaunched(store: Any, slug: str, name: str) -> int:
 def closing(store: Any, slug: str) -> list[Lineage]:
     """The lineages that ended on a mission proof and whose closing steps are still owed, in the order of their
     ids. The set of their ids bounds the read."""
-    names: list[str] = sorted(store.redis.smembers(store.key(slug, CLOSING)), key=lambda name: (len(name), name))
-    raws: list[str | None] = store.redis.hmget(store.key(slug, LINEAGES), names) if names else []
-    return [Lineage(**json.loads(raw)) for raw in raws if raw]
+    return sorted(_indexed(store, slug, CLOSING), key=lambda row: (len(row.id), row.id))
 
 
 def closed(store: Any, slug: str, name: str) -> None:
