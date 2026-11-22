@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import prompt
+from tests.profiles.test_expert_role import PARSERS, _argv
 
 pytestmark = pytest.mark.unit
 
@@ -42,10 +43,26 @@ LOOP = (
     "\n"
     "If your context nears its limit a hook tells you to write a handoff: use the expert-handoff skill for the expert "
     f"handoff, run {ME} handoff <doc> and stop. The next expert of your lineage continues from it.\n"
-    f"When every deliverable is proven, write the mission proof and run {ME} expert complete <proof>. It refuses a "
-    "proof with a deliverable unproven or anything left open; a refusal is open work, not a wording problem. Only an "
-    "accepted proof ends the lineage, and the swarm then closes this session.\n"
+    "Your lineage ends only when every deliverable is delivered, validated on the deployed result, smoke tested and "
+    "regression tested, and held by a Semgrep rule and a feature map entry. Then write the mission proof and run "
+    f"{ME} expert complete <proof>. It refuses a proof with a deliverable unproven or anything left open; a refusal "
+    "is open work, not a wording problem. Only an accepted proof ends the lineage, and the swarm then closes this "
+    "session.\n"
     "Write messages in plain words: no ids, paths, hashes or dashes.\n"
+)
+COMMANDS = (
+    f"{ME} expert mission",
+    f"{ME} merge queue <url>",
+    'agentihooks msg send master@sw "<plain words>"',
+    f"{ME} wait --on checks <url>",
+    f"{ME} wait --on merge <url>",
+    f"{ME} wait --on reply <id>",
+    f'{ME} wait 30 --reason "<what>"',
+    'agentihooks msg reply <id> "<text>"',
+    'agentihooks msg close <id> done "<where the work went>"',
+    f'{ME} learned "<lesson because reason>"',
+    f"{ME} handoff <doc>",
+    f"{ME} expert complete <proof>",
 )
 HANDOFF = (
     "# Expert handoff\n## Mission\n" + MISSION + " Keep an ordered batch built\n## Done\n- D1 Proven, run 4471\n"
@@ -89,6 +106,16 @@ def test_an_expert_prompt_names_no_task_claim_and_no_ledger_crew_step() -> None:
         assert absent not in built, absent
 
 
+def test_every_command_an_expert_prompt_names_is_one_the_command_line_takes() -> None:
+    built = prompt.build("sw", "/repo", "expert", NAME, FIRST)
+    for command in COMMANDS:
+        assert command in built, command
+        tool, argv = _argv(command)
+        assert PARSERS[tool](argv), command
+    assert built.count("agentihooks ") == len(COMMANDS)
+
+
+@pytest.mark.feature("expert-role-profile")
 def test_the_autonomy_and_the_role_argument_do_not_change_an_expert_prompt() -> None:
     plain = prompt.build("sw", "/repo", "expert", NAME, FIRST)
     assert prompt.build("sw", "/repo", "expert", NAME, FIRST, role="an engineer", autonomy="full") == plain

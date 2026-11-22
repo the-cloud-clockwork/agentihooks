@@ -331,9 +331,11 @@ def build_expert(slug: str, repo: str, name: str, task: dict[str, Any], autonomy
         "",
         "If your context nears its limit a hook tells you to write a handoff: use the expert-handoff skill for the "
         f"expert handoff, run {me} handoff <doc> and stop. The next expert of your lineage continues from it.",
-        f"When every deliverable is proven, write the mission proof and run {me} expert complete <proof>. It refuses "
-        "a proof with a deliverable unproven or anything left open; a refusal is open work, not a wording problem. "
-        "Only an accepted proof ends the lineage, and the swarm then closes this session.",
+        "Your lineage ends only when every deliverable is delivered, validated on the deployed result, smoke tested "
+        "and regression tested, and held by a Semgrep rule and a feature map entry. Then write the mission proof and "
+        f"run {me} expert complete <proof>. It refuses a proof with a deliverable unproven or anything left open; a "
+        "refusal is open work, not a wording problem. Only an accepted proof ends the lineage, and the swarm then "
+        "closes this session.",
         "Write messages in plain words: no ids, paths, hashes or dashes.",
     ]
     return "\n".join(lines) + "\n"

@@ -65,7 +65,27 @@ Work the open deliverables in order.
 Done when every deliverable has its evidence: the merged pull request, the run,
 or the command and its output.
 
-## 4. Wait by name
+## 4. Prove it holds
+
+A merged pull request does not end a deliverable. Your lineage ends only on a
+mission that is delivered, validated, smoke tested and regression tested, and
+held by a Semgrep rule and a feature map entry. Each of these is a section of
+the mission proof, so collect its evidence while you work.
+
+- Validation: wait for the release that carries your change to reach where it
+  runs, then run the changed behaviour against the deployed target and keep the
+  command and its output. A local run or a green check is not validation.
+- Smoke tests: run the smoke check of the released build and keep its run.
+- Regression tests: each behaviour you touched is held by a test that fails
+  without your change; keep the run it is green in.
+- Semgrep rules: the fault you fixed is refused by a rule with a failing and a
+  passing fixture; keep the run its fixtures pass in.
+- Feature map: the behaviour has its feature map entry, with its tests and its
+  live check; keep the run its grader passes in.
+
+Done when each of the five holds its evidence for the mission.
+
+## 5. Wait by name
 
 Your stop is refused while your lineage runs and you hold no wait. Declare
 every wait:
@@ -81,17 +101,18 @@ Inbox items arrive in the session at your next tool call. Answer and close each
 one: `agentihooks msg reply <id> "<text>"`, or
 `agentihooks msg close <id> done "<where the work went>"`.
 
-## 5. Hand off near the context limit
+## 6. Hand off near the context limit
 
 When HANDOFF PREPARATION or CONTEXT RECYCLE arrives, write the expert handoff
 with the expert-handoff skill, submit it with
 `agentihooks swarm <slug> handoff <doc>` and stop. The next expert of your
 lineage launches on the same seat and continues from it.
 
-## 6. End the lineage on a mission proof
+## 7. End the lineage on a mission proof
 
-When every deliverable is proven, write the mission proof from the template
-below and submit it with `agentihooks swarm <slug> expert complete <proof>`.
+When every deliverable is delivered and step 4 holds for the mission, write the
+mission proof from the template below and submit it with
+`agentihooks swarm <slug> expert complete <proof>`.
 
 The command refuses a proof with a fault and lists every fault: a deliverable
 with no bullet, a bullet with no evidence, a bullet labelled hypothesis, a

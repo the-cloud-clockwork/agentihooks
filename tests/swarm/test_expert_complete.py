@@ -302,8 +302,8 @@ def test_an_expert_of_a_running_lineage_cannot_leave_its_seat_through_exit(
     monkeypatch.setattr(cli, "HerdrRuntime", lambda: SimpleNamespace(reap_name=reaped.append))
     assert run("sw", "exit") == 1
     assert capsys.readouterr().err == (
-        f"swarm: {EXPERT} works lineage expert-1, which still runs: an expert leaves its seat by a handoff or a "
-        "mission proof\n"
+        f"swarm: {EXPERT} works lineage expert-1, which still runs: an expert leaves its seat by a handoff, "
+        "`agentihooks swarm sw handoff <doc>`, or by a mission proof, `agentihooks swarm sw expert complete <proof>`\n"
     )
     assert state(working, EXPERT) == ["working"] and reaped == []
     expert_lineage.stop(working, "sw", "expert-1", MASTER, "the order changed", 5)

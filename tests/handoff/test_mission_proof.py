@@ -179,6 +179,24 @@ def test_a_number_sign_under_deliverables_that_is_no_pull_request_is_told_to_be_
     ]
 
 
+@pytest.mark.parametrize(
+    ("named", "written"),
+    [
+        ("o" * 39 + "/" + "r" * 100 + "#12", "o" * 39 + "/" + "r" * 100 + "#12"),
+        ("o" * 40 + "/r#12", "#12"),
+        ("o/" + "r" * 101 + "#12", "#12"),
+    ],
+    ids=["longest names", "owner too long", "repository too long"],
+)
+def test_a_number_sign_reference_carries_only_names_a_repository_can_have(named: str, written: str) -> None:
+    assert _problems(_swap(D1, D1.rstrip("\n") + f", merged in {named}\n")) == [UNREAD.format(written=written)]
+
+
+@pytest.mark.timeout(20, method="signal")
+def test_a_proof_with_a_very_long_unbroken_word_is_still_judged_at_once() -> None:
+    assert _problems(_swap(D1, D1.rstrip("\n") + " " + "a" * 200_000 + "\n")) == []
+
+
 def test_a_reference_outside_deliverables_is_not_held_to_the_link_form() -> None:
     assert _problems(_swap(SMOKED, SMOKED.rstrip("\n") + ", see #13200 and github.com/o/r/pull/7\n")) == []
 
