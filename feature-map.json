@@ -7390,8 +7390,15 @@
         "tests/tick/test_database_ledger_routes.py::test_an_empty_path_reads_the_metadata",
         "tests/tick/test_database_ledger_routes.py::test_a_refused_request_raises_the_server_http_error",
         "tests/tick/test_database_ledger_routes.py::test_a_reply_below_400_is_returned",
-        "tests/tick/test_database_ledger_routes.py::test_the_database_client_carries_the_base_timeout_and_in_process_transport",
-        "tests/tick/test_database_ledger_routes.py::test_the_port_bounds_each_built_clients_timeout_by_the_deadline_left"
+        "tests/tick/test_database_ledger_routes.py::test_the_database_client_carries_the_base_timeout_and_the_writer_first_transport",
+        "tests/tick/test_database_ledger_routes.py::test_the_port_bounds_each_built_clients_timeout_by_the_deadline_left",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_request_goes_to_the_host_writer_when_one_listens",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_request_runs_in_process_when_no_writer_takes_the_connection",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_lost_reply_after_send_raises_a_timeout_and_never_runs_in_process",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_writer_that_holds_the_reply_past_the_client_timeout_is_never_run_in_process",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_writer_refusal_raises_the_in_process_http_error",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_reply_just_below_400_from_the_writer_is_returned",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_tick_pass_stays_in_process_and_journals_while_a_writer_listens"
       ]
     },
     {
