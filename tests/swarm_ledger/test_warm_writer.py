@@ -21,6 +21,7 @@ import pytest
 
 from hooks import config
 from scripts.swarm_ledger import api_service, ledger_server, run, storage, warm_writer
+from scripts.swarm_ledger.api import resources
 from scripts.tick.adapters import database_ledger
 
 CONTENT = {"title": "Warm", "overview": "o", "phases": [{"title": "One", "description": "d"}]}
@@ -74,14 +75,42 @@ def same_revision(root: Path | str) -> str:
     return "same"
 
 
+@pytest.fixture(autouse=True)
+def paced(monkeypatch: pytest.MonkeyPatch) -> list[tuple[float, float | None]]:
+    """The scheduler waits a writer paces its checkout checks on, each slept for its interval."""
+    waits: list[tuple[float, float | None]] = []
+
+    def wait(interval: float, timeout: float | None = None) -> None:
+        waits.append((interval, timeout))
+        time.sleep(interval)
+
+    monkeypatch.setattr(ledger_server, "scheduled_wait", wait)
+    return waits
+
+
+def answering(where: Path) -> bool:
+    """Whether a writer accepts connections on ``where``."""
+    try:
+        warm_writer.connected(1.0, where).close()
+    except OSError:
+        return False
+    return True
+
+
 def serving(where: Path, stopped: threading.Event) -> threading.Thread:
-    """A writer serving on ``where`` in a thread until ``stopped``, its socket bound."""
+    """A writer serving on ``where`` in a thread until ``stopped``, accepting connections."""
     served = threading.Thread(target=warm_writer.serve, args=(where, stopped, 0.05), daemon=True)
     served.start()
     deadline = time.monotonic() + 10.0
-    while not where.exists() and time.monotonic() < deadline:
+    while not answering(where) and time.monotonic() < deadline:
         time.sleep(0.01)
     return served
+
+
+def guarded(slug: str, path: str) -> dict[str, str]:
+    """The write guard naming the revision ``path`` holds in ``slug``."""
+    held, _ = storage.default().apply_ops(slug)
+    return {path: resources.resource_revision(held, path)}
 
 
 @pytest.fixture
@@ -162,7 +191,8 @@ def recording(where: Path, reply: bytes) -> tuple[threading.Thread, list[bytes]]
 
 @pytest.mark.feature("ledger-warm-writer")
 def test_a_socket_write_returns_the_in_process_reply_and_leaves_the_same_rows(twins: Twins, writer: Path) -> None:
-    payload = {"operation_id": "warm-op", "ops": [TASK, COMMENT], "guards": {}}
+    payload = {"operation_id": "warm-op", "ops": [TASK, COMMENT], "guards": guarded(twins.here, "phases/p1/comments")}
+    assert payload["guards"] == guarded(twins.there, "phases/p1/comments")
     with database_ledger.acting(""):
         expected = in_process(twins.here, "operations", payload)
         answered = over_socket(writer, twins.there, "operations", payload)
@@ -349,7 +379,10 @@ def test_a_connection_that_sends_nothing_gets_no_reply_and_no_error(
 
 @pytest.mark.feature("ledger-warm-writer")
 def test_the_writer_finishes_a_request_in_flight_then_returns_once_the_checkout_moves(
-    memory_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    memory_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    paced: list[tuple[float, float | None]],
 ) -> None:
     checkout = ["one"]
 
@@ -393,6 +426,8 @@ def test_the_writer_finishes_a_request_in_flight_then_returns_once_the_checkout_
     asking.join(10.0)
     assert answers == [(200, b'{"late": 1}')]
     assert codes == [0]
+    assert paced
+    assert set(paced) == {(0.05, 0.05)}
     assert not where.exists()
     assert f"the ledger writer {os.getpid()} restarts: the checkout moved from one to two" in capsys.readouterr().err
 

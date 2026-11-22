@@ -11,8 +11,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from hooks import config
 from scripts.scheduler.service import ROOT, revision
+from scripts.swarm_ledger import ledger_server, ports
 from scripts.tick.adapters import database_ledger
 
 NAME = "ledger-writer.sock"
@@ -23,7 +23,8 @@ PROBE_S = 1.0
 
 def socket_path() -> Path:
     """This host's writer socket, in the agentihooks home."""
-    return config.AGENTIHOOKS_HOME / NAME
+    config: Any = ports.hooks().config
+    return Path(config.AGENTIHOOKS_HOME) / NAME
 
 
 def connected(timeout: float, where: Path | None = None) -> socket.socket:
@@ -105,9 +106,8 @@ def serve(where: Path, stopped: threading.Event, check_s: float = CHECK_S) -> in
     listening = threading.Thread(target=server.serve_forever, args=(POLL_S,))
     listening.start()
     try:
-        while not stopped.wait(check_s):
-            if moved(loaded):
-                break
+        while not stopped.is_set() and not moved(loaded):
+            ledger_server.scheduled_wait(check_s, timeout=check_s)
     finally:
         server.shutdown()
         listening.join()
