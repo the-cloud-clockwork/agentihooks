@@ -2691,6 +2691,28 @@
       ]
     },
     {
+      "id": "ledger-copy-after-commit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2853",
+      "behaviour": "Ledger host copies are saved or removed only after the Postgres transaction commits, discarded on rollback or failed commit, and never replaced by an older deferred generation.",
+      "seam": "SQLiteLedgerRepository._entry and purge, PostgresLedgerRepository, Connection.commit and rollback, host_entries.Copies",
+      "rules": [
+        "ledger-host-copy-inside-entry"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_slow_host_copy_observes_a_committed_postgres_transaction",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_entry_is_never_written_to_the_host",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_failed_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_closing_without_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_purge_drops_the_copy_after_its_queued_save",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_deferred_older_copy_never_replaces_a_newer_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_successful_commit_runs_each_pending_host_copy_once",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_purge_keeps_its_committed_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_cannot_lower_a_newer_deferred_copy_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_during_a_save_preserves_the_newer_host_generation"
+      ]
+    },
+    {
       "id": "ledger-cold-write",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-write-full-load",
@@ -8649,6 +8671,22 @@
       ]
     },
     {
+      "id": "hive-spoke-spawn-fresh-quota-rows",
+      "origin": "regression",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-spoke-fresh-quota-rows",
+      "behaviour": "A long running hive spoke reads fresh quota rows at every spawn once a spawn has read them for itself, so it admits a spawn the hub placed when the accounts have free seats again, and the spawn it places still adds one session to its account; quota rows a tick pass read are kept for every spawn in that pass.",
+      "seam": "HerdrRuntime.spawn quota rows on a runtime without a tick pass, read through HerdrRuntime._quota_read and re-read by HerdrRuntime._quota_refresh",
+      "rules": [
+        "quota-rows-read-once-per-process"
+      ],
+      "tests": [
+        "tests/swarm/test_quota_handoff.py::test_a_spawn_keeps_the_quota_rows_its_tick_pass_read",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_reads_fresh_quota_rows_after_its_first_quota_handoff",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_still_counts_the_session_it_placed_on_fresh_rows"
+      ]
+    },
+    {
       "id": "controller-hive-refusal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
@@ -8823,6 +8861,16 @@
       "tests": [
         "tests/codex_session/test_attach.py::test_an_admitted_execution_waits_for_its_harness_and_then_attaches",
         "tests/codex_session/test_attach.py::test_a_classified_or_running_execution_without_an_app_server_still_refuses"
+      ]
+    },
+    {
+      "id": "quota-wait-no-session-cron",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-wait-scheduler-timer",
+      "behaviour": "Quota WAIT directs swarm sessions to bounded swarm waits naming the reset time and standalone sessions to a scheduler timer aimed at the current session, with no session cron instruction and the existing reset safety buffer.",
+      "seam": "hooks.context.quota_policy.render",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_wait_directive_carries_a_cron_for_the_reset"
       ]
     },
     {
@@ -12000,6 +12048,18 @@
         "tests/ci_lab/test_expand_tests.py::test_lockfile_removal_rekeys_every_test",
         "tests/test_ci_mutation_planned_selection.py::test_record_drift_treats_a_test_requirements_lock_change_as_global",
         "tests/test_ci_self_plant_detector.py::test_a_test_requirements_lock_change_still_plants"
+      ]
+    },
+    {
+      "id": "ci-tool-constraint-files",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-locks",
+      "behaviour": "Every CI tool set has one checked in constraint file under .github/ci-tools: parser, audit, semgrep, build, browser and crypto, and lint tools. Each line of each file is one exact pin, the lock generator writes exactly these files with every root it resolves satisfied by its pin, and the parser file pins the PyYAML version the announced protected workflow candidate installs.",
+      "seam": "bash .github/scripts/lock-ci-tools.sh run with a recording uv, against the checked in .github/ci-tools constraint files",
+      "tests": [
+        "tests/test_ci_test_dependencies.py::test_every_ci_tool_constraint_line_is_an_exact_pin",
+        "tests/test_ci_test_dependencies.py::test_the_ci_tool_generator_writes_each_checked_in_file",
+        "tests/test_ci_test_dependencies.py::test_the_parser_constraint_pins_the_announced_pyyaml"
       ]
     },
     {
