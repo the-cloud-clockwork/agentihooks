@@ -381,28 +381,6 @@ FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/lost-runner.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/publish-pypi.yml: pip install build",
     ".github/workflows/queue-retry.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
-    ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
-    ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2",
-    ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2",
-    ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2 'semgrep==$SEMGREP_VERSION'",
-    ".github/workflows/test.yml: pip install 'playwright>=1.44.0' 'orjson>=3.10'",
-    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
-    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
-    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4' PyYAML==6.0.3",
-    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4' PyYAML==6.0.3",
-    ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock tree-sitter tree-sitter-bash tree-sitter-javascript tree-sitter-css",
-    ".github/workflows/test.yml: pip install --quiet 'cryptography>=42'",
-    ".github/workflows/test.yml: pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1",
-    ".github/workflows/test.yml: pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0",
-    ".github/workflows/test.yml: pip install ruff==0.15.12",
-    ".github/workflows/test.yml: pip install ruff==0.15.12",
-    ".github/workflows/test.yml: pip install vulture==2.14",
-    ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
-    ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
-    ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
     "scripts/ci_dependency_audit.py: uvx --with 'platformdirs!=4.14.8' pip-audit==2.10.1 -r requirements --no-deps --disable-pip --format json",
     "scripts/ci_release.sh: pip install build",
 )
@@ -1204,3 +1182,15 @@ def test_the_pinned_ci_tool_installs_keep_their_packages(workflow: str, job: str
     steps = yaml.safe_load((ROOT / workflow).read_text())["jobs"][job]["steps"]
     [step] = [step for step in steps if step.get("name") == name]
     assert _installed_packages(step["run"]) == PINNED_TOOL_STEPS[workflow, job, name]
+
+
+@pytest.mark.feature("ci-test-and-semgrep-tool-installs-constrained")
+def test_the_lab_verdict_install_reads_its_constraints_from_the_grader_checkout() -> None:
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lab-verdict"]["steps"]
+    [grader] = [step["with"]["path"] for step in steps if str(step.get("uses", "")).startswith("actions/checkout@")]
+    [install] = [step["run"] for step in steps if step.get("name") == "Install the lab verdict dependencies"]
+    [found] = [found for words, _ in _shell_commands(install, {}) if (found := _installer(words)) is not None]
+    options, _ = _arguments(found[0], found[1])
+    constraints = [value for flag, value in options if flag in CONSTRAINT_FLAGS]
+    assert constraints == [f"{grader}/{CI_TOOLS}/parser.lock", f"{grader}/{CI_TOOLS}/lint-tools.lock"]
+    assert all((ROOT / constraint.removeprefix(f"{grader}/")).is_file() for constraint in constraints)
