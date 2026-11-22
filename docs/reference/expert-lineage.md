@@ -112,8 +112,9 @@ While its lineage runs, the end of an expert's turn is refused by the
 wait. The refusal names the ways on: keep working, hand off, complete on a
 proof, or declare the wait. An expert whose lineage ended on a proof but whose
 completion did not finish is refused too and told to run the completion again.
-Its default mode is `enforce`; it is set like every gate with
-`agentihooks swarm <id> set expert-stop-gate=enforce|observe|off`.
+Its default mode is `deny`. It is set like every gate, with
+`agentihooks swarm <id> set expert-stop-gate=<mode>`,
+where the mode is `deny`, `log only` or `skip`.
 
 ## Not yet built
 
@@ -137,7 +138,7 @@ Each part has a live check the Doctor runs on its timer:
 | `python -m scripts.feature_checks.expert_handoffs` | Every handoff a running lineage holds conforms to the expert handoff. |
 | `python -m scripts.feature_checks.expert_claims` | No ledger task is claimed by an expert. |
 | `python -m scripts.feature_checks.expert_proofs` | Every completed lineage holds a proof that conforms. |
-| `python -m scripts.feature_checks.expert_stop_gate` | Every running swarm keeps the Stop gate at `enforce`. |
+| `python -m scripts.feature_checks.expert_stop_gate` | Every running swarm keeps the Stop gate at `deny`. |
 | `python -m scripts.feature_checks.expert_role` | The shipped expert role holds its persona, rule, both skills, Stop gate, identity pin and prompt guard. |
 
 ## Troubleshooting
