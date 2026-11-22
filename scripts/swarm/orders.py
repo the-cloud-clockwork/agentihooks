@@ -3,8 +3,6 @@
 from collections.abc import Callable
 from typing import Any
 
-from scripts.swarm import freeze
-
 MARK = "ordered"
 
 
@@ -53,6 +51,8 @@ def _unfinished(row: dict[str, Any]) -> bool:
 def _reach(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> Callable[[dict[str, Any]], list[str]]:
     """Where a task's order time goes next: the work it waits on, the task it is merged into and the plan tasks that
     enhance it."""
+    from scripts.swarm import freeze
+
     waits_on = freeze.waits(doc)
     plans: dict[str, list[str]] = {}
     for task in tasks:

@@ -319,6 +319,24 @@ def test_the_ordered_phases_lead_the_phases_share_when_it_is_clipped() -> None:
     )
 
 
+@pytest.mark.feature("master-handoff-carries-orders")
+def test_listing_the_ordered_phases_loads_no_claim_gate_code() -> None:
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    code = (
+        "import sys\n"
+        "from hooks.context import swarm_refocus\n"
+        "phases = [{'id': 'p1', 'title': 'Seats', 'ordered': {'at': 1}}]\n"
+        "block = swarm_refocus.build_block({'phases': phases}, 'master', 1500)\n"
+        "print('operator order p1 Seats' in block, 'scripts.swarm.freeze' in sys.modules)\n"
+    )
+    root = Path(refocus.__file__).parents[2]
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, cwd=root)
+    assert done.stdout.split() == ["True", "False"]
+
+
 @pytest.mark.parametrize("ledger", [{}, {"phases": [{}], "priorities": [{}]}])
 def test_master_sparse_ledger_keeps_obligations_without_invented_intent(ledger):
     phases = ": " if ledger else ""

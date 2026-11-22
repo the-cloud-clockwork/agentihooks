@@ -2479,7 +2479,8 @@ def _hand_off(
     )
     waits.settle_notices(InboxStore(store.redis), agent, "a handoff")
     rows = _own_rows(ledger, slug, agent.task)
-    envelope = handoff_envelope.build(store, slug, agent, reason, rows, now_ms())
+    built = handoff_envelope.build(store, slug, agent, reason, rows, now_ms())
+    envelope = handoff_envelope.with_orders(built, store, ledger, agent)
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
     if hive_release.release(ledger, slug, (rows or [{}])[0], agent.name):

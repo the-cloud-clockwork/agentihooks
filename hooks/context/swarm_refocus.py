@@ -4,6 +4,7 @@ import json
 import os
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from hooks.config import AGENTIHOOKS_HOME
 from hooks.context import master_coding, worker_mode
@@ -35,11 +36,6 @@ def build_block(ledger, task_id, cap):
 
 def _master_block(ledger: dict, cap: int) -> str:
     share = cap // 5
-    phases = "; ".join(
-        f"{phase.get('title', '')}: {phase.get('description', '')}"
-        for phase in ledger.get("phases", [])
-        if not phase.get("done")
-    )
     priorities = "; ".join(item.get("text", "") for item in ledger.get("priorities", []))
     return _clip(
         f"=== SWARM REFOCUS: {_clip(ledger.get('title', ''), share)} ===\n"
@@ -50,9 +46,26 @@ def _master_block(ledger: dict, cap: int) -> str:
         f"{FOCUS_READ}\n"
         f"Plan: {_clip(ledger.get('overview', ''), share)}\n"
         f"Priorities: {_clip(priorities, share)}\n"
-        f"Active phases: {_clip(phases, share * 2)}",
+        f"Active phases: {_clip(_phases(ledger), share * 2)}",
         cap,
     )
+
+
+def _phases(ledger: dict[str, Any]) -> str:
+    """The open phases: those under an operator order first, oldest order first, by id and title, then the rest."""
+    from scripts.swarm import orders
+
+    ordered: list[tuple[int, str]] = []
+    rest: list[str] = []
+    for phase in ledger.get("phases", []):
+        if phase.get("done"):
+            continue
+        at = orders.marked(phase)
+        if at is None:
+            rest.append(f"{phase.get('title', '')}: {phase.get('description', '')}")
+        else:
+            ordered.append((at, f"operator order {phase.get('id', '')} {phase.get('title', '')}"))
+    return "; ".join([text for _, text in sorted(ordered)] + rest)
 
 
 def refocus_context(session_id, event, environ=None):

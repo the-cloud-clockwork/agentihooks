@@ -65,6 +65,12 @@ RECON_FIRST = (
 )
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
+ORDERS_OPEN = "Operator orders open at the handoff. Build each before other work; only the operator's words clear one:"
+ORDERS_NONE = "Operator orders: none were open at the handoff."
+ORDERS_UNKNOWN = (
+    "Operator orders: unknown, the ledger could not be read at the handoff. "
+    "Run agentihooks api --slug {slug} get orders first."
+)
 CARRIED = "hive_opening"
 WORKSTATION_LINE = (
     "A task that reads or changes the workstation's primary checkout or its local task folders, such as a "
@@ -423,11 +429,12 @@ def priming_lines(task):
     return lines
 
 
-def handoff_lines(task):
-    envelope = task.get("handoff_envelope")
+def handoff_lines(task: dict[str, Any]) -> list[str]:
+    envelope: dict[str, Any] | None = task.get("handoff_envelope")
     lines = [
         "1. Handoff runtime envelope:",
         json.dumps(envelope, indent=2) if envelope else "Missing runtime envelope.",
+        *order_lines(envelope or {}),
     ]
     lines += ["Handoff document: continue from it:", task["handoff"]]
     reading = section(task["handoff"], "Read first")
@@ -439,6 +446,16 @@ def handoff_lines(task):
     else:
         lines.append("Read first: missing from the handoff document.")
     return lines
+
+
+def order_lines(envelope: dict[str, Any]) -> list[str]:
+    """What a master's handoff envelope says of the operator's open orders; nothing for an envelope without them."""
+    if "orders" not in envelope:
+        return []
+    orders: list[str] | str = envelope["orders"]
+    if isinstance(orders, str):
+        return [ORDERS_UNKNOWN.format(slug=envelope.get("ledger", ""))]
+    return [ORDERS_OPEN, *orders] if orders else [ORDERS_NONE]
 
 
 def _verdict(task):

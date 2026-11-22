@@ -61,7 +61,17 @@ def build(store, slug, agent, reason, rows, at, run=subprocess.run):
 def with_orders(built: dict[str, Any], store: RedisStore, ledger: Any, agent: AgentRecord) -> dict[str, Any]:
     """A master's envelope with one plain line per open operator order, unknown when the ledger could not be read;
     any other lane's envelope as it is."""
-    return built
+    if agent.lane != MASTER:
+        return built
+    from scripts.swarm import freeze
+    from scripts.swarm.health import order_check
+
+    slug: str = built["ledger"]
+    try:
+        found = order_check.read(ledger.state(slug), freeze.fix_phase(store.config(slug)))
+    except SwarmError:
+        return {**built, "orders": UNKNOWN}
+    return {**built, "orders": [entry["line"] for entry in found]}
 
 
 def _launch(store, slug, agent):

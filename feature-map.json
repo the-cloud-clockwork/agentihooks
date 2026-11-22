@@ -12637,7 +12637,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "A master seat change carries the operator's open orders by code. The handoff envelope of a master holds one plain line per open order, an empty list when none is open and unknown when the ledger could not be read, whether the master hands off through the swarm command or the stall pass recycles it; a ledger error never stops the handoff, and no other lane's envelope carries or reads orders. The successor's opening prompt lists those lines before the handoff document. The master refocus block lists the open phases under an order first, oldest order first, by id and title. The master loop seat cron tells the master to read the orders every loop and that only the operator's words clear one; a seat cron the code owns whose text is no longer the code's is replaced once, and a cron a master added by hand stays adopted.",
+      "behaviour": "A master seat change carries the operator's open orders by code. The handoff envelope of a master holds one plain line per open order, an empty list when none is open and unknown when the ledger could not be read, whether the master hands off through the swarm command or the stall pass recycles it; a ledger error never stops the handoff, and no other lane's envelope carries or reads orders. The successor's opening prompt lists those lines before the handoff document. The master refocus block lists the open phases under an order first, oldest order first, by id and title. Reading a mark there loads no claim gate code, because the refocus hook runs on every tool call. The master loop seat cron tells the master to read the orders every loop and that only the operator's words clear one; a seat cron the code owns whose text is no longer the code's is replaced once, and a cron a master added by hand stays adopted.",
       "seam": "scripts.handoff.envelope.with_orders, agentihooks swarm handoff for a master, the master stall recycle, scripts.swarm.prompt.handoff_lines, hooks.context.swarm_refocus.build_block for the master task and the crons agentihooks swarm start keeps aimed at master@<slug>",
       "tests": [
         "tests/swarm/test_order_continuity.py::test_a_master_envelope_carries_one_line_for_each_open_order",
@@ -12650,6 +12650,7 @@
         "tests/swarm/test_order_continuity.py::test_an_envelope_without_orders_primes_as_before",
         "tests/context/test_swarm_refocus.py::test_the_master_block_lists_phases_under_an_operator_order_first_by_id_and_title",
         "tests/context/test_swarm_refocus.py::test_the_ordered_phases_lead_the_phases_share_when_it_is_clipped",
+        "tests/context/test_swarm_refocus.py::test_listing_the_ordered_phases_loads_no_claim_gate_code",
         "tests/swarm/test_seat_crons.py::test_the_master_loop_cron_reads_the_operator_orders_every_loop",
         "tests/swarm/test_seat_crons.py::test_a_seat_cron_the_code_owns_with_an_older_text_is_replaced_once",
         "tests/swarm/test_seat_crons.py::test_a_hand_made_cron_is_adopted_in_place_of_an_older_code_owned_one"

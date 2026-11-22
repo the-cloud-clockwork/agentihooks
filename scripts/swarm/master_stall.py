@@ -11,7 +11,7 @@ from scripts.swarm import affinity, launch_check, master_retire, naming
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import pass_state
-from scripts.swarm.store import MASTER, AgentRecord
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 STALLED = "stalled"
 RESUMED = "the master resumed work"
@@ -129,8 +129,11 @@ def run(slug: str, config: Any, store: Any, ledger: Any, runtime: Any, now_ms: i
     return [line for stall in found for line in apply_stall(slug, store, ledger, stall, now_ms)]
 
 
-def recycle(slug, store, ledger, master, text, now_ms, reason):
-    found = envelope.build(store, slug, master, "recycle", pass_state(ledger, slug)["tasks"], now_ms)
+def recycle(
+    slug: str, store: RedisStore, ledger: Any, master: AgentRecord, text: str, now_ms: int, reason: str
+) -> None:
+    built = envelope.build(store, slug, master, "recycle", pass_state(ledger, slug)["tasks"], now_ms)
+    found = envelope.with_orders(built, store, ledger, master)
     store.put_handoff(slug, MASTER, text, seat=master.seat, envelope=found)
     transfers.record(store, slug, master, reason, text, now_ms)
     store.put_agent(slug, replace(master, state="finished"))
