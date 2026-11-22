@@ -10,7 +10,7 @@ import pytest
 from hooks.context import context_recycle
 from scripts.handoff import transfers
 from scripts.inbox.store import InboxStore
-from scripts.swarm import dead_resume, expert_commands, expert_lineage, expert_seat, resume
+from scripts.swarm import dead_resume, expert_lineage, expert_seat, resume
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import AgentRecord, RedisStore
 from tests.handoff.test_mission_proof import VALID as PROOF
@@ -159,7 +159,7 @@ def test_a_completed_lineage_sends_the_mail_waiting_on_its_seat_back_to_the_mast
     inbox = InboxStore(store.redis)
     waiting = inbox.send(ENGINEER, lineage.seat, "Read the new evidence")
     ended = expert_lineage.complete(store, "sw", "expert-1", expert.name, PROOF, NOW + 1)
-    expert_commands.close(store, "sw", expert, ended, PROOF)
+    expert_seat.close(store, "sw", ended, PROOF)
     moved = inbox.get(waiting.id)
     assert (moved.state, moved.address, moved.reason) == ("pending", "master@sw", RETURNED.format(state="complete"))
 

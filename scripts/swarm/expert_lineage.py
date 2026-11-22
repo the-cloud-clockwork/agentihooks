@@ -20,6 +20,7 @@ SEQUENCE = "expert-seq"
 ACTIVE = "expert-running"
 PROOFS = "expert-proofs"
 LAUNCHES = "expert-launches"
+CLOSING = "expert-closing"
 RUNNING = "running"
 STOPPED = "stopped"
 COMPLETE = "complete"
@@ -120,8 +121,8 @@ def stop(store: Any, slug: str, name: str, by: str, note: str, at: int) -> Linea
 
 
 def complete(store: Any, slug: str, name: str, by: str, proof: str, at: int) -> Lineage:
-    """End a running lineage on the mission proof its expert handed in, and keep that proof; a lineage that already
-    ended is refused. The caller has checked the proof."""
+    """End a running lineage on the mission proof its expert handed in, keep that proof and owe the lineage its
+    closing steps; a lineage that already ended is refused. The caller has checked the proof."""
 
     def proven(found: Lineage) -> Lineage:
         return replace(found, state=COMPLETE, ended_by=by, ended_at=at, note=PROVEN)
@@ -142,6 +143,24 @@ def launches(store: Any, slug: str, name: str) -> int:
 def launched(store: Any, slug: str, name: str) -> int:
     """Count one more launched expert of the lineage and return its number in the lineage."""
     return int(store.redis.hincrby(store.key(slug, LAUNCHES), name, 1))
+
+
+def unlaunched(store: Any, slug: str, name: str) -> int:
+    """Take back the count of an expert whose spawn failed after it was counted, and return the count left."""
+    return int(store.redis.hincrby(store.key(slug, LAUNCHES), name, -1))
+
+
+def closing(store: Any, slug: str) -> list[Lineage]:
+    """The lineages that ended on a mission proof and whose closing steps are still owed, in the order of their
+    ids. The set of their ids bounds the read."""
+    names: list[str] = sorted(store.redis.smembers(store.key(slug, CLOSING)), key=lambda name: (len(name), name))
+    raws: list[str | None] = store.redis.hmget(store.key(slug, LINEAGES), names) if names else []
+    return [Lineage(**json.loads(raw)) for raw in raws if raw]
+
+
+def closed(store: Any, slug: str, name: str) -> None:
+    """Record that the closing steps of a completed lineage finished."""
+    store.redis.srem(store.key(slug, CLOSING), name)
 
 
 def every(store: Any, slug: str) -> list[Lineage]:
@@ -169,6 +188,7 @@ def _end(store: Any, slug: str, name: str, change: Callable[[Lineage], Lineage],
         pipe.srem(store.key(slug, ACTIVE), name)
         if proof:
             pipe.hset(store.key(slug, PROOFS), name, proof)
+            pipe.sadd(store.key(slug, CLOSING), name)
         return ended
 
     return store.redis.transaction(write, key, value_from_callable=True)

@@ -4,10 +4,10 @@ def _expert_seats(tick, get):
 
 
 # ok: feature-expert-seat-in-tick
-def _expert_seats(tick, get):
-    if tick.panic.state(get("store"), get("slug")) is not None:
+def _expert_seats(cli, get):
+    if cli.panic.state(get("store"), get("slug")) is not None:
         return []
-    actions: list[str] = tick.skip_refused(
+    actions: list[str] = cli.skip_refused(
         SEAT.expert_seat.run, get("slug"), get("config"), get("store"), get("runtime"), get("now_ms")
     )
     return actions

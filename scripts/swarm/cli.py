@@ -75,6 +75,7 @@ from scripts.swarm import (
     done_gate,
     enhance_review,
     expert_commands,
+    expert_seat,
     failed_panes,
     git_https,
     hive_release,
@@ -2562,7 +2563,7 @@ def cmd_confirm_handoff(store: RedisStore, args: argparse.Namespace) -> None:
     if agent.name not in HerdrRuntime().live_names():
         raise SwarmError("Only a live successor can confirm its handoff")
     result = transfers.confirm(store, args.slug, args.transfer, agent, args.next, now_ms())
-    expert_commands.confirmed(store, args.slug, agent)
+    expert_seat.drop_confirmed(store, args.slug, agent)
     print(json.dumps(result))
 
 

@@ -50,7 +50,7 @@ Starting and stopping belong to the master of the swarm and the operator.
 | `agentihooks swarm <id> expert start <mission file> [--effort xhigh\|max] [--handoff <doc>] [--from <session>]` | Saves the mission and opens a running lineage. Its id, `expert-<n>`, is also its seat label. The swarm launches its first expert on the next pass. With `--handoff`, the first expert continues a session that was not an expert: see Starting from a handoff. |
 | `agentihooks swarm <id> expert status [<lineage>] [--json]` | One line per running lineage, or the one named: state, effort, the expert on its seat while it runs, mission title, who started it and who ended it. |
 | `agentihooks swarm <id> expert mission [<lineage>]` | Prints the mission line and the saved text. An expert reads its own mission and no other. |
-| `agentihooks swarm <id> expert stop <lineage> --note "<why>"` | Ends a running lineage by order. The note is kept. |
+| `agentihooks swarm <id> expert stop <lineage> --note "<why>"` | Ends a running lineage by order. The note is kept, and a handoff that waited on its seat is cleared. |
 | `agentihooks swarm <id> expert proof <lineage>` | Prints the mission proof a completed lineage ended on. |
 
 ## What an expert may do
@@ -129,12 +129,14 @@ running lineage and keeps its seat:
 | An accepted handoff waiting on the seat | Launches the next expert with that handoff and the transfer it confirms. |
 | An expert whose session was lost while its lineage runs | Resumes it in its own conversation and seat, up to three times in a row, unless the handoff on its seat is one it never confirmed. Its mail stays with the seat. |
 | An empty seat whose last expert was lost | Leaves the next expert a handoff first. If the lost expert never confirmed the handoff it was given, that handoff is offered again. Otherwise the swarm writes a recovery handoff: every deliverable pending and marked unknown, the mission and the seat recap to read first. |
-| An expert whose lineage was stopped | Closes its open mail with the reason and finishes it. |
-| An expert whose lineage completed | Runs the closing steps of the completion again from the kept proof, so the master is told once and the recap is kept even when the expert's session died first. |
+| An expert whose lineage was stopped | Closes its open mail with the reason, clears the handoff left on the seat and finishes it. |
+| A completed lineage whose closing steps are still owed | Runs them from the kept proof, with or without its expert's record: the master is told once, the recap is kept and the handoff left on the seat is cleared, even when the expert's session died right after its proof was accepted and the swarm already dropped it. |
+| An expert of a lineage the swarm does not hold | Finishes it and goes on with the other seats. |
 
 A launch waits, and says why, while the swarm has no session slot, the host is
 full or the lineage is placed elsewhere. Nothing launches while the swarm is
-paused, stopping, stopped or in panic. The handoff an expert was given stays on
+paused, stopping, stopped or in panic. A sleeping swarm still keeps its expert
+seats: a lineage waits for no ledger work. The handoff an expert was given stays on
 the seat until that expert confirms it. When a lineage is stopped or completes,
 mail still open on its seat goes to the master's seat with the reason.
 
