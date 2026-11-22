@@ -343,3 +343,45 @@ def test_each_master_item_id_names_its_hive_swarm_and_change_so_a_later_release_
     assert [item.id for item in _master(store, "other")] == [
         _id("drain", HIVE, "other", entry["at"], entry["owner"], entry["reason"])
     ]
+
+
+@pytest.mark.feature("master-hive-drain-item")
+def test_a_drain_tells_the_masters_only_when_the_hive_flag_and_its_newest_drain_entry_both_read_draining(
+    store: RedisStore,
+) -> None:
+    from scripts.hive import master_notice
+
+    names = _agents(store)
+    entry = {"at": NOW_MS, "owner": "tick", "reason": "quiet"}
+    for flag, history in (
+        ("yes", []),
+        ("yes", [{**entry, "draining": "no"}]),
+        ("no", [{**entry, "draining": "yes"}]),
+        ("", [{**entry, "draining": "yes"}]),
+    ):
+        master_notice.drained(store, HIVE, {"draining": flag, "drains": history})
+        assert [_texts(store, slug) for slug in SWARMS] == [[], [], []]
+
+    master_notice.drained(store, HIVE, {"draining": "yes", "drains": [{**entry, "draining": "yes"}]})
+
+    assert [_texts(store, slug) for slug in SWARMS] == [
+        [_drained("quiet", ", ".join(names["sw"]))],
+        [_drained("quiet", ", ".join(names["other"]))],
+        [],
+    ]
+
+
+@pytest.mark.feature("master-hive-drain-item")
+def test_a_lost_hive_whose_exits_name_no_agent_tells_the_master_none_named(store: RedisStore) -> None:
+    from scripts.events.envelope import Envelope
+    from scripts.hive import master_notice
+
+    data = {"task": "task-a", "reason": "hive-lost"}
+    exited = Envelope("exited:a", "execution.exited", "sw", "execution", "execution-a", 2, T0, "hub", data)
+
+    master_notice.lost(store.redis, "sw", LOST_HIVE, [exited])
+
+    assert _texts(store, "sw") == [
+        f"hive {LOST_HIVE} was lost: hive-lost. The hub ended execution execution-a of task task-a. "
+        "Agents of this swarm on it: none named"
+    ]

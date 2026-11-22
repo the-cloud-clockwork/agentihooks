@@ -13048,7 +13048,9 @@
         "tests/hive/test_master_hive_items.py::test_a_drain_run_as_the_hive_member_writes_no_master_item_the_relay_would_refuse",
         "tests/hive/test_master_hive_items.py::test_a_lost_hive_tells_the_master_of_each_swarm_it_ran_once_and_keeps_the_hub_log",
         "tests/hive/test_master_hive_items.py::test_a_failed_master_send_logs_every_loss_and_still_sends_the_other_masters_items",
-        "tests/hive/test_master_hive_items.py::test_each_master_item_id_names_its_hive_swarm_and_change_so_a_later_release_never_resends_it"
+        "tests/hive/test_master_hive_items.py::test_each_master_item_id_names_its_hive_swarm_and_change_so_a_later_release_never_resends_it",
+        "tests/hive/test_master_hive_items.py::test_a_drain_tells_the_masters_only_when_the_hive_flag_and_its_newest_drain_entry_both_read_draining",
+        "tests/hive/test_master_hive_items.py::test_a_lost_hive_whose_exits_name_no_agent_tells_the_master_none_named"
       ]
     }
   ],
