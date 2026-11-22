@@ -192,6 +192,19 @@ def waits(doc: dict[str, Any]) -> Callable[[dict[str, Any]], list[str]]:
     return _waits(doc, doc.get("tasks") or [])
 
 
+def reached(
+    seeds: Iterable[str],
+    rows: dict[str, dict[str, Any]],
+    cold: set[str],
+    next_of: Callable[[dict[str, Any]], list[str]],
+) -> set[str]:
+    """Every id a walk from the seeds meets along next_of, the seeds included, short of the cold ones."""
+    seen: set[str] = set()
+    for seed in seeds:
+        _reach(seed, rows, cold, next_of, seen)
+    return seen
+
+
 def _stuck(
     task_id: str,
     rows: dict[str, dict[str, Any]],
