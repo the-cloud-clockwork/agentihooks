@@ -74,7 +74,7 @@ def hold(task_id: str) -> str:
 
 
 def refused(by: str, value: str) -> str:
-    op = {"op": "task_update", "id": "enhance-set", "by": by, "item": f"tasks/{TARGET}"}
+    op: dict[str, Any] = {"op": "task_update", "id": "enhance-set", "by": by, "item": f"tasks/{TARGET}"}
     op["fields"] = {"enhancement": value}
     core.check_op(op)
     found, rejected = core.sync(SLUG, ops=[op])
