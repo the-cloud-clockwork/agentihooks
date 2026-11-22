@@ -19,6 +19,14 @@ FIELD = "after_release"
 SOURCE = "release"
 ALERT = "The release tag lookup for {repo} failed: {why}. Tasks {tasks} stay held for a newer release until it works."
 VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+RELEASED = (
+    "Release {tag} is out from dev push run {run_id} of Tests: {url}. "
+    "Check that the hub, controller and hive images rolled out to {tag}."
+)
+UNREAD = (
+    "Dev push run {run_id} of Tests promoted dev, but the release tag lookup failed: {url}. "
+    "Check the newest release and that the hub, controller and hive images rolled out to it."
+)
 HOST = "github.com"
 SECONDS = 15
 FAILURES = (OSError, subprocess.SubprocessError, TimeoutError, ValueError, KeyError, TypeError)
@@ -34,6 +42,11 @@ def newer(tags: list[str], floor: str) -> bool:
     """Whether any stable tag is newer than the floor tag."""
     base = version(floor)
     return base is not None and any((found := version(tag)) is not None and found > base for tag in tags)
+
+
+def newest(found: list[str]) -> str:
+    """The newest stable tag among the tags, '' when none is stable."""
+    return max((tag for tag in found if version(tag)), key=lambda tag: version(tag) or (), default="")
 
 
 def repository(config: SwarmConfig) -> str:
@@ -100,5 +113,12 @@ def checker(config: SwarmConfig) -> Callable[[dict[str, Any]], bool]:
 
 
 def announce(mail: Mail, config: SwarmConfig, run_id: int, url: str) -> list[str]:
-    """Tell the master seat once per release tag that a green promotion published it."""
-    return []
+    """Tell the master seat once per release tag that a green promotion published it, once per run when the tags
+    cannot be read, and nothing for a repository not on GitHub."""
+    if not repository(config):
+        return []
+    tag = newest(tags(config))
+    key, text = (f"release-{tag}", RELEASED) if tag else (f"promotion-green-{run_id}", UNREAD)
+    if not mail.send(key, mail.master, text.format(tag=tag, run_id=run_id, url=url)):
+        return []
+    return [f"told the master to check the rollout of {tag or f'dev push run {run_id}'}"]
