@@ -16,16 +16,19 @@ def named(text: str) -> list[str]:
     return [*spans, *(line.strip() for line in text.splitlines() if line.startswith("agentihooks "))]
 
 
-def argv(command: str) -> tuple[str, list[str]]:
-    """The tool and the arguments of a named command: an optional part and a redirect left out, the first of each set
-    of alternatives taken and each placeholder filled."""
-    typed = command.replace("\\|", "|").partition(" > ")[0]
-    plain = re.sub(r"<[^>]+>", "x", re.sub(r"\[[^\]]*\]", "", typed))
-    tokens = [token.split("|")[0] for token in shlex.split(plain)[1:]]
-    return tokens[0], tokens[1:]
+def typed(command: str) -> list[str]:
+    """The command lines a named command stands for: one without its optional parts and, when it has any, one with
+    them. A redirect is left out and each placeholder is filled."""
+    shown = command.replace("\\|", "|").partition(" > ")[0]
+    variants = dict.fromkeys((re.sub(r"\[[^\]]*\]", "", shown), re.sub(r"\[([^\]]*)\]", r"\1", shown)))
+    return [re.sub(r"<[^>]+>", "x", variant) for variant in variants]
 
 
 def taken(command: str) -> bool:
-    """Whether the command line parses the named command."""
-    tool, arguments = argv(command)
-    return bool(PARSERS[tool](arguments))
+    """Whether the command line parses the named command, without its optional parts and with them, taking the first
+    of each set of alternatives."""
+    for line in typed(command):
+        tool, *arguments = (token.split("|")[0] for token in shlex.split(line)[1:])
+        if not PARSERS[tool](arguments):
+            return False
+    return True
