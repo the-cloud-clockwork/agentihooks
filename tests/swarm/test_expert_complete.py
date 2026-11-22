@@ -202,6 +202,21 @@ def test_each_expert_completes_its_own_lineage_and_no_other(
     assert (state(working, EXPERT), state(working, SECOND_EXPERT)) == (["working"], ["finished"])
 
 
+def test_each_completed_lineage_tells_the_master_under_its_own_notice(
+    working: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    second = started(working, at=2_000)
+    seated(working, SECOND_EXPERT, second.id)
+    assert run("sw", "expert", "complete", proof(tmp_path)) == 0
+    acting(monkeypatch, SECOND_EXPERT)
+    assert run("sw", "expert", "complete", proof(tmp_path)) == 0
+    capsys.readouterr()
+    assert [(sender, text.partition(" completed")[0]) for sender, text in mail(working)] == [
+        (EXPERT, "Expert lineage expert-1"),
+        (SECOND_EXPERT, "Expert lineage expert-2"),
+    ]
+
+
 def test_a_lineage_ends_once(working: RedisStore) -> None:
     expert_lineage.complete(working, "sw", "expert-1", EXPERT, VALID, 5)
     for end in (
