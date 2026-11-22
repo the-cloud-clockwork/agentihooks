@@ -58,15 +58,18 @@ _QUICK_ALLOWED = (
 
 _ALLOWED_UNTIL = (
     " Until the handoff every tool call is denied except reading files (cat, head, tail, ls, wc, grep and git status, "
-    "log, diff, show in the shell), writing the handoff document under ~/scratchpad, "
+    "log, diff, show in the shell), writing the handoff document"
 )
 _ALLOWED_ALSO = (
     "`agentihooks swarm {slug} learned` and `agentihooks api` comment, say, leave and ack, each as one command."
 )
-_ALLOWED = _ALLOWED_UNTIL + "`agentihooks swarm {slug} handoff <doc> [--recap <recap>]`, " + _ALLOWED_ALSO
+_ALLOWED = (
+    _ALLOWED_UNTIL + " under ~/scratchpad, `agentihooks swarm {slug} handoff <doc> [--recap <recap>]`, " + _ALLOWED_ALSO
+)
 _EXPERT_ALLOWED = (
     _ALLOWED_UNTIL
-    + "`agentihooks swarm {slug} expert mission`, `agentihooks swarm {slug} handoff <doc>`, "
+    + " or the mission proof under ~/scratchpad, `agentihooks swarm {slug} expert mission`, "
+    + "`agentihooks swarm {slug} handoff <doc>`, `agentihooks swarm {slug} expert complete <proof>`, "
     + _ALLOWED_ALSO
 )
 
@@ -250,8 +253,8 @@ def _allowed_command(command: str, slug: str, expert: bool) -> bool:
 def _swarm_step(args: list[str], slug: str, expert: bool) -> bool:
     if args[:2] == [slug, "learned"]:
         return len(args) == 3 or (len(args) == 5 and args[3] == "--maturity")
-    if args == [slug, "expert", "mission"]:
-        return expert
+    if args[:2] == [slug, "expert"]:
+        return expert and (args[2:] == ["mission"] or (len(args) == 4 and args[2] == "complete"))
     return args[:2] == [slug, "handoff"] and (len(args) == 3 or (len(args) == 5 and args[3] == "--recap"))
 
 
