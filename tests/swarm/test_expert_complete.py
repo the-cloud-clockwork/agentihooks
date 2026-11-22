@@ -115,6 +115,20 @@ def test_the_expert_ends_its_lineage_on_a_proof_that_passes(
     ]
 
 
+def test_mail_still_open_for_the_expert_is_closed_with_the_reason_when_its_lineage_completes(
+    working: RedisStore, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    inbox = InboxStore(working.redis)
+    asked = inbox.send(MASTER, EXPERT, "Which batch comes first")
+    assert run("sw", "expert", "complete", proof(tmp_path)) == 0
+    capsys.readouterr()
+    closed = inbox.get(asked.id)
+    assert (closed.state, closed.reason) == (
+        "cancelled",
+        f"cancelled: {EXPERT} completed its mission and left before closing it",
+    )
+
+
 @pytest.mark.feature("expert-lineage-ends-on-proof")
 @pytest.mark.parametrize("fault", FAULTY)
 def test_a_proof_with_a_fault_is_refused_with_each_fault_and_the_lineage_still_runs(
