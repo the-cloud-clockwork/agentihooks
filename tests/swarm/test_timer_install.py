@@ -545,7 +545,7 @@ def test_the_own_group_is_the_tick_service_cgroup_on_either_hierarchy(tmp_path, 
         assert str(found).startswith(str(tmp_path / "fs" / procs))
 
 
-def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
+def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path: Path) -> None:
     calls = []
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
     (tmp_path / "agentihooks-swarm.service").write_text("[Service]\nType=oneshot\n")
@@ -560,7 +560,7 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     ]
     calls.clear()
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
-    assert [argv[2] for argv, _ in calls] == ["enable"] * 5
+    assert [argv[2] for argv, _ in calls] == ["enable"] * 6
 
 
 def test_ensure_fails_and_keeps_the_tick_timer_when_registration_fails_before_any_delivery(tmp_path, monkeypatch):

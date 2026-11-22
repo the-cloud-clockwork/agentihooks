@@ -178,14 +178,19 @@ def test_a_distributed_reconcile_installs_the_spoke(tmp_path, monkeypatch, distr
     assert sorted(path.name for path in tmp_path.glob("agentihooks-*")) == ["agentihooks-spoke.service"]
 
 
-def test_a_distributed_reconcile_retires_current_engine_units_instead_of_scheduling(tmp_path, monkeypatch, distributed):
+def test_a_distributed_reconcile_retires_current_engine_units_instead_of_scheduling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, distributed: object
+) -> None:
     monkeypatch.setattr(timer, "reconcile", real_reconcile)
     for name, text in timer.units(BINARY).items():
         (tmp_path / name).write_text(text)
 
     assert timer.reconcile(BINARY, tmp_path, run=systemctl([]))
 
-    assert sorted(path.name for path in tmp_path.glob("agentihooks-*")) == ["agentihooks-spoke.service"]
+    assert sorted(path.name for path in tmp_path.glob("agentihooks-*")) == [
+        "agentihooks-ledger-writer.service",
+        "agentihooks-spoke.service",
+    ]
 
 
 def test_a_distributed_tick_ticks_no_swarm_and_names_the_hub(monkeypatch, capsys, distributed):
