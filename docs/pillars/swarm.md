@@ -8588,19 +8588,21 @@ obligation.
 
 ### Operator orders
 
-Work the operator orders carries his order as a mark on the phase or the task: when it was ordered, who filed it and
-his words or the id of the entry he wrote. An order puts its tasks first and holds nothing; a focus stays the hold
-for "only this runs".
+A phase or task the operator ordered carries his order as a mark: when it was ordered, who filed it and his words or
+the id of the entry he wrote. An order puts its tasks ahead of the rest, after urgent and focused work, and holds
+nothing; a focus stays the hold for "only this runs".
 
 - **Writing it.** `agentihooks api --slug <id> --as <name> phase add <phase id> "<title>" --quote "<his words>"` and
   `task add <task id> "<title>" --phase <phase id> --quote "<his words>"` file the entry and mark it in one call.
   `agentihooks api --slug <id> --as <name> order phases/<phase id> --quote "<his words>"` marks work already filed;
   it takes `tasks/<task id>` too, and `--request <entry id>` in place of the quote names a chat line or comment he
   wrote. The operator writes the mark himself; the ledger orchestrator writes it with his recorded words or an entry
-  he wrote. Any other author, words he never said and an entry an agent wrote are refused with the reason. An add
-  whose order the server refuses is still filed and reports `not_ordered` with that reason.
-- **Clearing it.** `order <item> --clear --quote "<his words>"`. Only the operator, or the orchestrator quoting his
-  recorded words, clears an order. Done work needs no clearing.
+  he wrote. Any other author, words he never said and an entry an agent wrote are refused with the reason. Words
+  that are not his recorded words stop an add before it files anything; an add whose order the server refuses is
+  still filed and reports `not_ordered` with that reason.
+- **Clearing it.** `agentihooks api --slug <id> --as <name> order <item> --clear --quote "<his words>"`. Only the
+  operator, or the orchestrator quoting his recorded words, clears an order. Done work needs no clearing: it drops
+  out of the orders read by itself.
 - **What it changes.** Among the tasks a lane may claim, the hub offers urgent and focused work first, then the
   tasks under an order, oldest order first, then the rest (see [Offer order](hives.md#offer-order)). A task's order
   time is the earlier of its own mark and its phase's; the work it waits on, the plan task that enhances it and the

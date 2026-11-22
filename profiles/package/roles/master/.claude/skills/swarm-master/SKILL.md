@@ -53,24 +53,27 @@ goes to a lane as a task.
 
 ## Operator orders
 
-Work the operator orders carries his order as a mark on the phase or task.
-Among the tasks a lane may claim, the hub offers urgent and focused work,
-then ordered work, oldest order first, then the rest. An order holds nothing:
-seats it cannot use take other work.
+A phase or task the operator ordered carries his order as a mark. Among the
+tasks a lane may claim, the hub offers urgent and focused work, then ordered
+work, oldest order first, then the rest. An order holds nothing: seats it
+cannot use take other work.
 
 - File his work with its order in one command: `agentihooks api --slug <slug>
   --as <name> phase add <id> "<title>" --quote "<his words>"`, or `task add
-  <id> "<title>" --phase <phase> --quote "<his words>"`. A reply with
-  `not_ordered` names why the mark was refused: fix that, then mark the entry.
+  <id> "<title>" --lane <lane> --phase <phase> --quote "<his words>"`. Words
+  that are not his recorded words stop the command before it files anything.
+  A reply with `not_ordered` means the entry is filed and the server refused
+  the mark for the reason it names: fix that, then mark the entry.
 - Mark work already filed: `agentihooks api --slug <slug> --as <name> order
   phases/<id> --quote "<his words>"`, or `--request <entry id>` naming the
   chat line or comment where he asked.
-- An order stays until its work is done. Only his words clear one: `order
+- Done work drops out of the orders by itself. Only his words clear an order
+  whose work is not done: `agentihooks api --slug <slug> --as <name> order
   <item> --clear --quote "<his words>"`.
 - Every loop, read the orders: `agentihooks api --slug <slug> get orders`. An
   order with `claimable` 0 and `busy` 0 is stuck: fix what its verdicts name.
-  An `order waiting` finding names an order nobody has worked on for thirty
-  minutes.
+  An `order waiting` finding names an order whose unfinished tasks had nothing
+  claimed or in a pull request for thirty minutes.
 - A handoff carries the open orders by code: the envelope lists them and the
   successor's opening prompt shows them.
 
