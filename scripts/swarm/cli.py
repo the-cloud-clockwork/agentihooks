@@ -48,6 +48,7 @@ from scripts.gates import feature as feature_gate
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
+from scripts.handoff import contracts as handoff_contracts
 from scripts.handoff import envelope as handoff_envelope
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
@@ -72,6 +73,7 @@ from scripts.swarm import (
     dispatch_seat,
     doc_report,
     done_gate,
+    expert_commands,
     failed_panes,
     git_https,
     hive_release,
@@ -2450,11 +2452,11 @@ def cmd_plan(store, args):
     print(json.dumps(result))
 
 
-def cmd_handoff(store, args):
-    agent = _me(store, args)
+def cmd_handoff(store: RedisStore, args: argparse.Namespace) -> None:
+    agent: AgentRecord = _me(store, args)
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
-    found = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.item))
+    found = handoff_contracts.problems(store, args.slug, agent, text, Resolver(args.slug, store.redis, ledger.item))
     if found:
         raise SwarmError(handoff_check.refusal(found))
     envelope, transfer = _hand_off(store, args.slug, agent, text, args.reason, ledger)
@@ -2887,6 +2889,7 @@ def build_parser() -> argparse.ArgumentParser:
     culture = sub.add_parser("culture").add_subparsers(dest="action", required=True)
     culture.add_parser("set").add_argument("file")
     culture.add_parser("show")
+    expert_commands.register(sub)
     say = sub.add_parser("say")
     say.add_argument("text")
     say.add_argument("--to", default="")
