@@ -136,7 +136,7 @@ PUBLISH = (
 
 def check_lane(task: dict) -> None:
     for paired in PAIRED_LANES:
-        if (ledger_kinds.kind(task) == paired) != (task.get("lane", "eng") == paired):
+        if (ledger_kinds.kind(task) == paired) != (task.get("lane") == paired):
             raise ValueError(
                 f"{paired} tasks must use the {paired} lane, and the {paired} lane accepts only {paired} tasks"
             )

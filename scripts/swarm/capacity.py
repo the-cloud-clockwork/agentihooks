@@ -465,7 +465,7 @@ def _allocate(
 
 
 def _configured(config: SwarmConfig) -> dict[str, int]:
-    return dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan, config.max_review), strict=True))
+    return {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan, "review": config.max_review}
 
 
 def _scaled(counts: dict[str, int]) -> dict[str, int]:
