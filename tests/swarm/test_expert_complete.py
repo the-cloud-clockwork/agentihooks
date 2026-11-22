@@ -10,7 +10,7 @@ import pytest
 
 from scripts.inbox import exits, outbox
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import cli, expert_commands, expert_lineage, ledger_events
+from scripts.swarm import cli, expert_commands, expert_lineage, expert_seat, ledger_events
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
@@ -234,6 +234,19 @@ def test_each_completed_lineage_tells_the_master_under_its_own_notice(
         (EXPERT, "Expert lineage expert-1"),
         (SECOND_EXPERT, "Expert lineage expert-2"),
     ]
+
+
+def test_the_closing_steps_run_again_after_a_completion_change_nothing(
+    working: RedisStore, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run("sw", "expert", "complete", proof(tmp_path)) == 0
+    capsys.readouterr()
+    ended = expert_lineage.get(working, "sw", "expert-1")
+    assert expert_lineage.closing(working, "sw") == []
+    expert_seat.close(working, "sw", ended, VALID)
+    assert [sender for sender, _ in mail(working)] == [EXPERT]
+    assert [recap["text"] for recap in working.memory.recaps("expert-1@sw")] == [RECAP]
+    assert state(working, EXPERT) == ["finished"]
 
 
 def test_a_lineage_ends_once(working: RedisStore) -> None:
