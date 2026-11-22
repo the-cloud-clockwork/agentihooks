@@ -92,7 +92,7 @@ def test_an_event_leaves_a_wait_it_does_not_name_open_and_reads_nothing(
     rig.store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw", state=state))
     rig.hold(held)
     rig.react.handle(_event(url=url))
-    assert idle.wait(rig.store.redis, "sw", ME)["on"] == held
+    assert idle.wait(rig.store.redis, "sw", ME) == {"until": 10_000_000, "reason": "", "at": 1, "on": held}
     assert rig.told() == []
     assert rig.reads == []
 
@@ -102,7 +102,7 @@ def test_an_event_whose_fresh_resolution_is_pending_leaves_the_wait_open(rig: Si
     rig.hold(CHECKS)
     rig.pulls[URL] = PullRequest("OPEN", None, 1, False, False, head="first")
     rig.react.handle(_event())
-    assert idle.wait(rig.store.redis, "sw", ME)["on"] == CHECKS
+    assert idle.wait(rig.store.redis, "sw", ME) == {"until": 10_000_000, "reason": "", "at": 1, "on": CHECKS}
     assert rig.told() == []
 
 
