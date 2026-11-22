@@ -1885,6 +1885,121 @@ The hub creates the hive buckets; members are not allowed to create them:
 
 A hive beats `hive-presence` every 15 seconds. A beat expires after 45 seconds.
 
+### From admission to a working agent
+
+For eng, ci and plan agents admitted by the hub, admission and a successful launch are separate steps:
+
+1. `Admission.admit` creates an agent in `starting`, records its admission `started_at`, occupies its seat and
+   pends its claim life. Its pane is empty and `launched_at` is zero until the start is recorded.
+2. After a successful runtime spawn, the spoke reports the launch decision through `Admission.launched`:
+   `harness`, `profile`, `account`, `model` and `effort`. Current versions also accept optional `overlays` and
+   `profile_decision`. This acknowledgement records the selection; it does not change the agent to `working`.
+3. The spoke publishes `execution.started` with its task and claim identity, hive, pane and launch time before
+   acknowledging the work offer. It also carries the runtime's `conversation_id` and `overlays` for resume.
+4. The hub's `claim-lives` reactor handles that event. With a nonempty `pane_id`, it writes `state="working"`,
+   `pane_id` and `launched_at` through `ExecutionRegistry.set_launch` before counting the started claim life.
+   Nonempty conversation and overlay values are saved too; empty values preserve the existing resume metadata.
+
+The launch decision and started event may reach the hub in either order. A launch decision that arrives after
+an agent became working still records its selection. The working write gives the watchers that require a
+working agent its pane and launch time; an admission alone cannot supply those fields.
+
+#### Setup and inspection
+
+This transition is automatic for hub admitted agents. The swarm uses the `events` engine, a NATS JetStream bus,
+a running hub with its `claim-lives` reactor, and the hive's lane spoke. There is no separate switch for the
+working write. The existing engine setting is:
+
+```bash
+agentihooks swarm <slug> set engine=events
+```
+
+For the distributed Helm deployment, the relevant values are:
+
+```yaml
+deployment: distributed
+nats:
+  enabled: true
+hub:
+  enabled: true
+```
+
+Use [The hub and the bus](../reference/deployment-modes.md#the-hub-and-the-bus) for the bus and credential
+configuration, and [Running a spoke](#running-a-spoke) for the hive process. Member hives receive bus settings
+with their invite; the root hive uses the documented root bus setup. A memory bus cannot launch this work.
+
+Inspect the swarm with:
+
+```bash
+agentihooks swarm <slug> status --json
+```
+
+For example, this is the relevant part of a started event, rather than a complete envelope to publish manually:
+
+```json
+{
+  "type": "execution.started",
+  "entity": "execution",
+  "key": "<execution id>",
+  "time": 1700000000500,
+  "data": {
+    "task": "<task id>",
+    "name": "<agent name>",
+    "claim_key": "<claim key>",
+    "hive": "<hive id>",
+    "pane_id": "w1:p3",
+    "launched_at": 1700000000000
+  }
+}
+```
+
+Once the hub applies it to the current admitted execution, the agent record contains:
+
+```json
+{
+  "state": "working",
+  "pane_id": "w1:p3",
+  "launched_at": 1700000000000
+}
+```
+
+Both times are Unix milliseconds. `started_at` records admission; `launched_at` records the runtime launch.
+The spoke uses its own clock when the runtime placement's launch time is zero. The hub uses the event's `time`
+when the event data has no launch time or carries zero. Neither fallback changes the admission time.
+
+#### Redelivery and recovery limits
+
+The reactor accepts an `execution.started` event on entity `execution` only when it has a `claim_key`.
+The working write applies only while that execution heads its seat, its agent is still listed, and the
+execution is `starting`. A late event that would change a record after it left `starting` is refused, so it
+cannot revive a finished agent or restore an older pane.
+
+An identical decision can be projected again on redelivery. If the registry write or its agent projection
+raises, the reactor counts no life; retrying the event retries the working write and projection first.
+The same execution and generation count only once. Starts already counted in the old launch records are
+skipped, preventing a second life count.
+
+A reconciler rebuilt start copies the recorded pane and has no launch time of its own. With an empty pane,
+the reactor counts the life but leaves the agent `starting`; it cannot infer a pane from the admission.
+A counted life alone therefore does not prove that the working projection exists.
+
+The test helper follows the same admission, launch acknowledgement and started event sequence without
+spawning a process. See [Admission seat helper for tests](../reference/test-seat-helper.md) for usage and
+launch overrides. It returns a working agent with synthetic pane `w1:p1` and launch time `1000`, counts one
+life and leaves the swarm paused. Its `clock` option controls admission time, not that fixed launch time.
+
+| Symptom | Check |
+|---|---|
+| A launched agent stays `starting` with no pane | Check the hive's started event carries a pane and the hub's `claim-lives` consumer handles it; the launch acknowledgement alone is insufficient. |
+| A rebuilt start counts a life but the pane stays empty | Check the original spoke start and runtime placement. Rebuilding from an empty record cannot recover its pane. |
+| The event is retried and no life is counted | Check the hub's registry or projection error; the write must finish before counting. |
+| A late event leaves a finished agent unchanged | Expected: the starting state guard rejects a decision that would change it. |
+| Launch time differs from admission time or event time | Compare the placement time, spoke clock and event data fallback before treating the difference as a defect. |
+
+Feature `events-started-working` covers these transitions and retries in the hub, hive and execution registry
+regression tests. Feature `hub-conversation-overlays` protects resume metadata, and `test-seat-through-admission`
+protects the helper. Tests run in CI; see [Delivery tiers](../reference/delivery-tiers.md).
+
 ### Offer order
 
 On each readiness pass the hub reads one snapshot of every `events` swarm and offers each task a lane may claim to

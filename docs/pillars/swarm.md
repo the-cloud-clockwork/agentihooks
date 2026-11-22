@@ -117,7 +117,9 @@ agentihooks swarm <slug> set engine=events
    is terminated: the task is gone, claimed, no longer open, on a different
    generation or lane, or held.
 4. **Claim and launch.** The spoke records its claim in the hive buckets and launches the agent. It publishes
-   `execution.started` with the claim, the task generation, the hive and the pane, then acknowledges the offer.
+   `execution.started` with the claim, the task generation, the hive, the pane and the launch time, then acknowledges
+   the offer. For a hub admitted agent, the hub writes the working state, pane and launch time before counting its
+   started claim life; see [From admission to a working agent](hives.md#from-admission-to-a-working-agent).
 5. **Lease.** The claim has no timer of its own. It holds for as long as the hive's presence keeps beating. When the
    presence expires, the hub treats the hive as lost and ends the claim.
 6. **Redelivery.**
