@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.handoff.check import MARKER, problems
+from scripts.handoff.check import MARKER, problems, section
 
 pytestmark = pytest.mark.unit
 
@@ -39,6 +39,11 @@ def test_a_conforming_document_has_no_problems():
 
 def test_trailing_blank_lines_after_the_marker_are_fine():
     assert problems(VALID + "\n\n", lambda address: True) == []
+
+
+@pytest.mark.parametrize("blank", ["\n", "\n\n", "\n\n\n"])
+def test_blank_lines_after_the_marker_leave_the_last_section_as_it_was_written(blank: str) -> None:
+    assert section(VALID + blank, "Read first") == section(VALID, "Read first")
 
 
 def test_missing_title_is_refused():
