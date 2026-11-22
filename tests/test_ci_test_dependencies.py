@@ -1144,3 +1144,67 @@ def test_each_intentional_install_smoke_is_a_measured_install_with_a_reason() ->
     assert Counter(finding.key for finding in smokes) == Counter(list(INTENTIONAL_SMOKES))
     assert all(UNCONSTRAINED in finding.reasons for finding in smokes)
     assert all(reason.strip() for reason in INTENTIONAL_SMOKES.values())
+
+
+PINNED_TOOL_STEPS = {
+    (".github/workflows/semgrep.yml", "charts", "Install PyYAML and Semgrep"): ("pyyaml", "semgrep"),
+    (".github/workflows/semgrep.yml", "feature-tests", "Install Semgrep"): ("semgrep",),
+    (".github/workflows/semgrep.yml", "scan", "Install PyYAML"): ("pyyaml",),
+    (".github/workflows/semgrep.yml", "scan", "Install Semgrep"): ("semgrep",),
+    (".github/workflows/test.yml", "coverage-baseline", "Install coverage"): ("coverage",),
+    (".github/workflows/test.yml", "coverage-ratchet", "Install coverage"): ("coverage",),
+    (".github/workflows/test.yml", "dep-manifest", "Install coverage"): ("coverage", "pyyaml"),
+    (".github/workflows/test.yml", "lab-verdict", "Install the lab verdict dependencies"): ("jsonschema", "pyyaml"),
+    (".github/workflows/test.yml", "lint", "Install the comment gate grammars"): (
+        "tree-sitter",
+        "tree-sitter-bash",
+        "tree-sitter-css",
+        "tree-sitter-javascript",
+    ),
+    (".github/workflows/test.yml", "lint", "Hold the hive member NATS grants equal to the antoncore hive user"): (
+        "cryptography",
+    ),
+    (".github/workflows/test.yml", "lint", "Install Playwright for artifact checks"): ("orjson", "playwright"),
+    (".github/workflows/test.yml", "lint", "Install PyYAML"): ("pyyaml",),
+    (".github/workflows/test.yml", "lint", "Install ruff"): ("ruff",),
+    (".github/workflows/test.yml", "lint", "Install vulture"): ("vulture",),
+    (".github/workflows/test.yml", "lint", "Prepare the dashboard query checker in the background"): (
+        "jsonschema",
+        "orjson",
+        "pyyaml",
+    ),
+    (".github/workflows/test.yml", "mutation-plan", "Install dependencies"): ("mutmut", "pytest", "pyyaml", "tomlkit"),
+    (".github/workflows/test.yml", "mutation-refine", "Install dependencies"): (
+        "mutmut",
+        "pytest",
+        "pyyaml",
+        "tomlkit",
+    ),
+    (".github/workflows/test.yml", "mutation-replan", "Install dependencies"): (
+        "mutmut",
+        "pytest",
+        "pyyaml",
+        "tomlkit",
+    ),
+    (".github/workflows/test.yml", "select", "Install admission ruff"): ("ruff",),
+    (".github/workflows/test.yml", "select", "Install unit reuse metadata dependencies"): ("pyyaml",),
+    (".github/workflows/test.yml", "sonar", "Install coverage"): ("coverage", "pyyaml"),
+}
+
+
+def _installed_packages(run: str) -> tuple[str, ...]:
+    names: set[str] = set()
+    for words, _ in _shell_commands(run, {}):
+        if (found := _installer(words)) is not None:
+            kind, args, _ = found
+            targets = _arguments(kind, args)[1]
+            names |= {canonicalize_name(re.split(r"[^A-Za-z0-9._-]", target, maxsplit=1)[0]) for target in targets}
+    return tuple(sorted(names))
+
+
+@pytest.mark.feature("ci-test-and-semgrep-tool-installs-constrained")
+@pytest.mark.parametrize(("workflow", "job", "name"), sorted(PINNED_TOOL_STEPS))
+def test_the_pinned_ci_tool_installs_keep_their_packages(workflow: str, job: str, name: str) -> None:
+    steps = yaml.safe_load((ROOT / workflow).read_text())["jobs"][job]["steps"]
+    [step] = [step for step in steps if step.get("name") == name]
+    assert _installed_packages(step["run"]) == PINNED_TOOL_STEPS[workflow, job, name]
