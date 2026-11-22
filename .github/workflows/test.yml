@@ -4472,12 +4472,16 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Prepare stats evidence
+        if: failure() && steps.stats.outcome == 'failure'
+        run: python -m scripts.ci_mutation.evidence . .mutation-gate-stats .mutation-stats-evidence
+
       - name: Upload stats evidence
         if: failure() && steps.stats.outcome == 'failure'
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-evidence-stats-0
-          path: .mutation-gate-stats/
+          path: .mutation-stats-evidence/
           include-hidden-files: true
           retention-days: 7
 
@@ -4723,12 +4727,16 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Prepare stats evidence
+        if: failure()
+        run: python -m scripts.ci_mutation.evidence . .mutation-gate .mutation-stats-evidence
+
       - name: Upload stats evidence
         if: failure()
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-evidence-stats-${{ matrix.part }}
-          path: .mutation-gate/
+          path: .mutation-stats-evidence/
           include-hidden-files: true
           retention-days: 7
 

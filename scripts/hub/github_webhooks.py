@@ -3,13 +3,14 @@ import hmac
 import json
 import os
 import re
+import signal
 import sys
 import threading
 import traceback
 from collections.abc import Mapping
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, NoReturn
 
 from scripts.ci_lab.head_notice import signature as signed
 from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV, LabIntake, envelope, head_events, notice_event
@@ -138,10 +139,10 @@ class Ingress:
 
     def _record(self, seen: list[Observation], heads: list[Envelope], changes: list[RepositoryEvent]) -> int:
         try:
-            for observed in seen:
-                self._pulls.observe(observed)
             if self._lab is not None:
                 self._lab.publish(heads)
+            for observed in seen:
+                self._pulls.observe(observed)
             for change in changes:
                 self._pulls.announce(*change)
         except Exception:
@@ -178,6 +179,10 @@ def handler(ingress: Ingress) -> type[BaseHTTPRequestHandler]:
     return Webhook
 
 
+def _interrupted(*_: object) -> NoReturn:
+    sys.exit(0)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks github-webhook")
     parser.add_argument("--host", default="127.0.0.1")
@@ -191,8 +196,10 @@ def main(argv: list[str]) -> int:
     lab_secret = os.environ.get(NOTICE_SECRET_ENV, "").encode()
     lab = LabIntake(bus.lab_heads, lab_secret) if lab_secret else None
     server = ThreadingHTTPServer((args.host, args.port), handler(Ingress(LazyPulls(bus), secret, lab)))
+    previous = signal.signal(signal.SIGINT, _interrupted)
     try:
         server.serve_forever()
     finally:
         server.server_close()
         bus.close()
+        signal.signal(signal.SIGINT, previous)

@@ -5523,7 +5523,7 @@ its turn sends each agent one inbox order to hand off, so successors start on th
 
 The antoncore swarm hives are one ArgoCD Application each, `swarm-hive-001` and `swarm-hive-003`, with values in
 `k8s/values-overlays/<hive>/values.yaml`. Each takes the `agentihooks-swarm` chart from
-`ghcr.io/the-cloud-clockwork/charts` at `targetRevision: '*'`, runs the hive worker image at tag `release` with
+`ghcr.io/the-cloud-clockwork/charts`, runs the hive worker image at tag `release` with
 `pullPolicy: Always`, and sets `workers.rollout.enabled: true` (the chart default is false), keeping the other
 rollout defaults:
 
@@ -5536,14 +5536,18 @@ workers:
     enabled: true
 ```
 
-ArgoCD syncs each release's chart. Pod templates carry no chart version label
+The release hive, `swarm-hive-001`, follows `targetRevision: '*'` and rolls at most once per automated sync window
+onto the newest chart. Manual syncs remain allowed. The stable hive, `swarm-hive-003`, pins its chart and keeps its
+daily manual drain then chart bump.
+
+ArgoCD syncs the release hive inside its automated sync window and the stable hive after its manual bump. Pod
+templates carry no chart version label
 ([#10072](https://github.com/the-cloud-clockwork/agentihooks/pull/10072)), but each leased worker hive on the `release`
-tag carries the release chart's `appVersion` as its `release` stamp, so every release changes it once and rolls the hive
+tag carries the synced chart's `appVersion` as its `release` stamp, so each newly synced chart changes it once and rolls the hive
 ([#12360](https://github.com/the-cloud-clockwork/agentihooks/issues/12360)). A rolled pod pulls the current `:release`
 image. Each roll goes through the shared Lease `default/agentihooks-hive-rollout`, one hive at a time. The overlays
 set no `release` stamp and the Applications carry no image updater annotations, so no second writer changes the
-template after the chart moved; antoncore's `test_hive_release_roll` asserts both, and that a chart version bump
-leaves each hive pod template unchanged.
+template after the chart moved; antoncore's `test_hive_release_roll` guards that single writer behavior.
 
 Antoncore [#1474](https://github.com/the-cloud-clockwork/antoncore/pull/1474) first wrote each release's `:release`
 digest into `workers.rollout.release` through the ArgoCD image updater. On release v2.17.472 that rolled every hive

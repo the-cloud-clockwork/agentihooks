@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol
 
 import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli
+from scripts.swarm.store import AgentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -103,3 +105,53 @@ def test_close_runs_at_once_when_no_master_is_live(closing):
     assert run("sw", "close") == 0
     assert [c[0] for c in ledger.calls] == ["summary", "closed"]
     assert store.agents("sw") == []
+
+
+def _hand_off(store: RedisStore, owner: AgentRecord) -> AgentRecord:
+    """Finish the seat owner as a handoff does and start its successor on the same seat."""
+    store.put_agent("sw", replace(owner, state="finished"))
+    successor = AgentRecord(
+        store.next_name("sw", owner.lane), owner.lane, owner.task, seat=owner.seat, started_at=2_000
+    )
+    return store.start_execution("sw", successor, owner.execution_id)
+
+
+@pytest.mark.feature("swarm-close-retires-superseded-predecessor")
+def test_close_completes_when_retire_refuses_a_finished_predecessor_whose_successor_is_listed(
+    closing: tuple[RedisStore, ClosingLedger, FakeRuntime, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    store, ledger, rt, _ = closing
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    successor = _hand_off(store, owner)
+    assert {owner.name, successor.name} <= {a.name for a in store.agents("sw")}
+    rt.stuck.add(owner.name)
+    assert run("sw", "close", "--now", "--note", "Done.") == 0
+    assert ledger.calls == [("summary", "Done.", "operator"), ("closed", "operator")]
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["still_running"] == [owner.name]
+    assert store.agents("sw") == []
+    assert store.names.entry(owner.name).get("retired_at")
+    assert store.config("sw").state == "stopping"
+
+
+@pytest.mark.feature("swarm-close-retires-superseded-predecessor")
+def test_close_still_puts_back_an_agent_with_no_successor_whose_retire_is_refused(
+    closing: tuple[RedisStore, ClosingLedger, FakeRuntime, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store, ledger, rt, _ = closing
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    put_back: list[tuple[str, str]] = []
+    put_agent = store.put_agent
+
+    def recording(slug: str, agent: AgentRecord) -> None:
+        put_back.append((slug, agent.name))
+        put_agent(slug, agent)
+
+    monkeypatch.setattr(store, "put_agent", recording)
+    rt.stuck.add(owner.name)
+    assert run("sw", "close", "--now", "--note", "Done.") == 0
+    assert put_back == [("sw", owner.name)]
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["still_running"] == [owner.name]
+    assert ledger.calls == [("summary", "Done.", "operator"), ("closed", "operator")]
+    assert store.config("sw").state == "stopping"

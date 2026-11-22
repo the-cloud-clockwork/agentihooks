@@ -4,8 +4,10 @@ Each tick also records the urgent tasks under claim with their claimant, which t
 """
 
 import json
+from functools import cache, partial
 from typing import Any
 
+from scripts.hive import admission
 from scripts.swarm import claim_hold, freeze, release_wait, tick_activity
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.store import RedisStore
@@ -14,6 +16,7 @@ from scripts.swarm_ledger.repository import hierarchy
 HOLD_MS = 600_000
 KEY = "urgent-hold"
 RELEASE = "it waits on a release newer than {after_release}"
+FULL = "no hive has admission room: {}"
 BLOCKED = "blocked"
 BLOCKED_WHY = "its claimant blocked it"
 CLAIMED = "claimed"
@@ -29,6 +32,7 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
     graph, released = hierarchy.project(doc)[0], release_wait.checker(store.config(slug))
     fix = freeze.fix_phase(store.config(slug))
     lab = claim_hold.lab_reason(store, slug, fix)
+    full = cache(partial(hives_full, store))
     rows = {t["id"]: t for t in doc["tasks"]}
     held = {}
     for task in rows.values():
@@ -40,6 +44,8 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
             else claim_hold.urgent(task, rows, doc, graph, fix)
             or lab(task)
             or (not released(task) and RELEASE.format(**task))
+            or full()
+            or False
         )
         if task.get("merged_into"):
             continue
@@ -52,6 +58,17 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
     tick_activity.renew_now()
     store.redis.set(store.key(slug, KEY), json.dumps(state))
     return held
+
+
+def hives_full(store: RedisStore) -> str:
+    """Why no hive can launch a claim: each live hive and the limit refusing it while every hive the swarm reads has
+    zero admission room; empty when one has room, a hive's admission count is unreadable or no hive is live."""
+    from scripts.swarm.status import readable_hives
+
+    hives, refused = readable_hives(store)
+    if refused or not hives or any(hive["room"] for hive in hives):
+        return ""
+    return FULL.format(", ".join(f"hive {hive['id']} {admission.category(hive['refusal'])}" for hive in hives))
 
 
 def _claimed(rows: dict[str, dict[str, Any]]) -> dict[str, dict[str, str]]:

@@ -1,0 +1,23 @@
+rules:
+  - id: agent-approves-pull-request
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Agent sessions hold the operator's GitHub login, and the test count floor takes a code owner approval of the pull
+      request head as the operator's own review. Code an agent runs never submits an approving review: no gh pr review
+      with its approve flag and no review event APPROVE. Leave a comment or request changes instead.
+    paths:
+      include:
+        - /hooks/
+        - /scripts/
+        - agent-approves-pull-request.py
+    pattern-either:
+      - pattern: '[..., "--approve", ...]'
+      - patterns:
+          - pattern-either:
+              - pattern: '{..., "event": "$EVENT", ...}'
+              - pattern: '$CALL(..., event="$EVENT", ...)'
+          - metavariable-regex:
+              metavariable: $EVENT
+              regex: (?i)^approve$
+      - pattern-regex: (?i)\bevent\b\W{0,3}[:=]\W{0,3}approve\b
