@@ -787,6 +787,23 @@ def test_the_focus_read_serves_every_focus_and_one_target(live: Any, monkeypatch
     assert (status, reply["error"]["code"]) == (404, "resource_missing")
 
 
+@pytest.mark.feature("swarm-orders-read")
+def test_the_orders_read_serves_every_open_order(live: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    phases = [{"id": "p1", "title": "Build", "ordered": {"at": 7, "by": "operator"}}]
+    tasks = [
+        {"id": "t1", "lane": "eng", "state": "open", "phase": "p1"},
+        {"id": "t2", "lane": "eng", "state": "done", "phase": "p1"},
+    ]
+    stored(monkeypatch, {"tasks": tasks, "phases": phases, "freezes": [], "_meta": {"rev": 1}})
+    monkeypatch.setattr(routes, "fix_phase", lambda services, slug: "")
+    status, reply = request(live, "GET", "orders")
+    assert status == 200 and reply["next_cursor"] is None and len(reply["revision"]) == 64
+    [row] = reply["data"]
+    assert (row["item"], row["by"], row["at"]) == ("phases/p1", "operator", 7)
+    assert (row["claimable"], row["busy"], row["done"]) == (1, 0, ["t2"])
+    assert row["tasks"] == [{"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"}]
+
+
 def test_metadata_resource_reports_its_named_fields(live, monkeypatch):
     document = {
         "title": "Report",
