@@ -190,7 +190,7 @@ def test_mutation_jobs_keep_the_head_lock_when_the_head_has_one(tmp_path: Path, 
     assert result.stdout.strip() == "constraint=./.github/test-requirements.lock"
 
 
-CI_TOOLS = ".github/ci-tools/"
+CI_TOOLS_PREFIX = ".github/ci-tools/"
 CONSTRAINTS = ".github/test-constraints.txt"
 PLANT_LOCK = ".github/ci-tools/plant.lock"
 PLANT_PINS = (
@@ -609,7 +609,7 @@ def _constraint_file(value: str, root: Path) -> Path | None:
     if relative == CONSTRAINTS:
         chained = "--constraint test-requirements.lock" in (root / CONSTRAINTS).read_text().splitlines()
         return root / CONSTRAINTS if chained else None
-    tools = relative.startswith(CI_TOOLS) and "/" not in relative.removeprefix(CI_TOOLS)
+    tools = relative.startswith(CI_TOOLS_PREFIX) and "/" not in relative.removeprefix(CI_TOOLS_PREFIX)
     return root / relative if relative == LOCK or tools else None
 
 
@@ -680,10 +680,6 @@ def _repository() -> tuple[_Floating, ...]:
     return tuple(_floating_ci_installs(ROOT))
 
 
-def _intentional(finding: _Floating) -> bool:
-    return finding.key in INTENTIONAL_SMOKES
-
-
 def _job(run: str, env: dict[str, str] | None = None) -> str:
     return yaml.safe_dump({"jobs": {"plant": {"env": env or {}, "steps": [{"name": "Plant", "run": run}]}}})
 
@@ -700,9 +696,9 @@ def _plant(root: Path, files: dict[str, str]) -> None:
 
 @pytest.mark.feature("ci-tool-installs-pinned-walk")
 def test_every_ci_tool_install_pins_an_exact_version_under_a_checked_in_constraint() -> None:
-    found = [finding for finding in _repository() if not _intentional(finding)]
-    reasons = {finding.key: "; ".join(finding.reasons) for finding in found}
-    measured, listed = Counter(finding.key for finding in found), Counter(FLOATING_INSTALLS)
+    reasons = {finding.key: "; ".join(finding.reasons) for finding in _repository()}
+    measured = Counter(finding.key for finding in _repository()) - Counter(list(INTENTIONAL_SMOKES))
+    listed = Counter(FLOATING_INSTALLS)
     problems = [
         f"floating CI tool install, pin it: {key} ({reasons[key]})" for key in sorted((measured - listed).elements())
     ]
@@ -777,9 +773,9 @@ def test_every_ci_tool_install_pins_an_exact_version_under_a_checked_in_constrai
             id="requirements file with a floating line",
         ),
         pytest.param(
+            {".github/workflows/plant.yml": _job("pip install -r requirements.txt ruff==0.15.12")},
             {".github/workflows/plant.yml": _job(f"pip install -r {LOCK} ruff==0.15.12")},
-            {".github/workflows/plant.yml": _job(f"pip install -r {LOCK} -c {LOCK} ruff==0.15.12")},
-            id="requirements file is no constraint",
+            id="requirements lock is the constraint",
         ),
         pytest.param(
             {".github/workflows/plant.yml": _job("pip install -c .github/ci-tools/empty.lock pyyaml==6.0.3")},
@@ -799,6 +795,94 @@ def test_every_ci_tool_install_pins_an_exact_version_under_a_checked_in_constrai
             {".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} git+https://example.com/tool.git")},
             {".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} 'tool @ file:///opt/wheels/tool.whl'")},
             id="package from a remote url",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -e git+https://example.com/tool.git")},
+            {".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -e .")},
+            id="editable install from a remote url",
+        ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job("pipx install ruff")},
+            {".github/workflows/plant.yml": _job(f"pipx install --pip-args='--constraint {PLANT_LOCK}' ruff==0.15.12")},
+            id="workflow pipx install",
+        ),
+        pytest.param(
+            {".github/scripts/plant.sh": "uv tool run ruff check .\n"},
+            {".github/scripts/plant.sh": f"uv tool run --constraints {PLANT_LOCK} ruff==0.15.12 check .\n"},
+            id="github shell script uv tool run",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(
+                    f"pipx run --pip-args='--constraint {PLANT_LOCK}' --spec 'build>=1' build"
+                )
+            },
+            {
+                ".github/workflows/plant.yml": _job(
+                    f"pipx run --pip-args='--constraint {PLANT_LOCK}' --spec build==1.3.0 build"
+                )
+            },
+            id="pipx run with a spec",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job("pip install -c .github/ci-tools/tools.txt ruff==0.15.12"),
+                ".github/ci-tools/tools.txt": "ruff==0.15.12\npytest>=8\n",
+            },
+            {".github/ci-tools/tools.txt": "ruff==0.15.12\npytest==9.0.1\n"},
+            id="constraint file with a floating line",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "ruff==0.15.12\n-r loose.txt\n",
+                ".github/ci-tools/loose.txt": "pytest>=8\n",
+            },
+            {".github/ci-tools/loose.txt": "pytest==9.0.1\n"},
+            id="requirements lock including a floating file",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "-e .[dev]\n",
+            },
+            {".github/ci-tools/tools.lock": "ruff==0.15.12\n"},
+            id="editable line in a requirements lock",
+        ),
+        pytest.param(
+            {"scripts/ci_plant.py": 'ARGS = ["install", "ruff"]\nCMD = ["python", "-m", "pip", *ARGS]\n'},
+            {
+                "scripts/ci_plant.py": (
+                    f'ARGS = ["install", "--constraint", "{PLANT_LOCK}", "ruff==0.15.12"]\n'
+                    'CMD = ["python", "-m", "pip", *ARGS]\n'
+                )
+            },
+            id="python argv whose splat names the installer",
+        ),
+        pytest.param(
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\n\n\ndef install():\n    ARGS = ["ruff"]\n'
+                    '    return ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n\n\n'
+                    'def report():\n    ARGS = ["ruff==0.15.12"]\n    return ARGS\n'
+                )
+            },
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\n\n\ndef install():\n    ARGS = ["ruff==0.15.12"]\n'
+                    '    return ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n\n\n'
+                    'def report():\n    NAMES = ["ruff"]\n    return NAMES\n'
+                )
+            },
+            id="python list name bound twice",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job("python3.12 tools/plant.py"),
+                "tools/plant.py": 'ARGV = ("pip", "install", "pyyaml")\n',
+            },
+            {"tools/plant.py": f'ARGV = ("pip", "install", "--constraint", "{PLANT_LOCK}", "pyyaml==6.0.3")\n'},
+            id="python file a step runs with a versioned interpreter",
         ),
     ],
 )
@@ -868,6 +952,21 @@ def test_the_install_walker_reports_a_planted_floating_install(
             },
             id="python argv constrained by an imported lock",
         ),
+        pytest.param(
+            {".github/workflows/plant.yml": _job(f"uv pip install --system -r {LOCK}")},
+            id="requirements lock alone",
+        ),
+        pytest.param(
+            {".github/scripts/plant.sh": "if ! command -v uvx >/dev/null; then exit 1; fi\n"},
+            id="installer named by a command lookup",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job("pip install -c .github/ci-tools/hashed.lock ruff==0.15.12"),
+                ".github/ci-tools/hashed.lock": "ruff==0.15.12 \\\n    --hash=sha256:0000\n",
+            },
+            id="hash continued constraint line",
+        ),
     ],
 )
 def test_the_install_walker_passes_pinned_and_non_install_commands(tmp_path: Path, files: dict[str, str]) -> None:
@@ -878,5 +977,7 @@ def test_the_install_walker_passes_pinned_and_non_install_commands(tmp_path: Pat
 
 @pytest.mark.feature("ci-tool-installs-pinned-walk")
 def test_each_intentional_install_smoke_is_a_measured_install_with_a_reason() -> None:
-    assert {finding.key for finding in _repository() if _intentional(finding)} == set(INTENTIONAL_SMOKES)
+    smokes = [finding for finding in _repository() if finding.key in INTENTIONAL_SMOKES]
+    assert Counter(finding.key for finding in smokes) == Counter(list(INTENTIONAL_SMOKES))
+    assert all(UNCONSTRAINED in finding.reasons for finding in smokes)
     assert all(reason.strip() for reason in INTENTIONAL_SMOKES.values())
