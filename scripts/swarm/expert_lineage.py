@@ -19,6 +19,7 @@ MISSIONS = "expert-missions"
 SEQUENCE = "expert-seq"
 ACTIVE = "expert-running"
 PROOFS = "expert-proofs"
+LAUNCHES = "expert-launches"
 RUNNING = "running"
 STOPPED = "stopped"
 COMPLETE = "complete"
@@ -126,6 +127,16 @@ def complete(store: Any, slug: str, name: str, by: str, proof: str, at: int) -> 
 def proof(store: Any, slug: str, name: str) -> str:
     """The mission proof the lineage ended on, empty when it holds none."""
     return store.redis.hget(store.key(slug, PROOFS), name) or ""
+
+
+def launches(store: Any, slug: str, name: str) -> int:
+    """How many experts of the lineage launched so far."""
+    return int(store.redis.hget(store.key(slug, LAUNCHES), name) or 0)
+
+
+def launched(store: Any, slug: str, name: str) -> int:
+    """Count one more launched expert of the lineage and return its number in the lineage."""
+    return int(store.redis.hincrby(store.key(slug, LAUNCHES), name, 1))
 
 
 def every(store: Any, slug: str) -> list[Lineage]:

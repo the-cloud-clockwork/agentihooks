@@ -221,7 +221,11 @@ saved mission on one seat, each handing off to the next, until the swarm accepts
 - Write the mission from `agentihooks swarm <slug> expert template`: the operator's words word for word, the
   problem, the evidence with each fact marked proven or unproven, the numbered deliverables, how to report.
 - Start it with `agentihooks swarm <slug> expert start <mission file>`; add `--effort max` only when the
-  operator names it. A refusal lists every fault of the mission: fix them and start again.
+  operator names it. A refusal lists every fault of the mission: fix them and start again. The swarm launches
+  the expert on its next tick pass and each successor after a handoff; nobody opens an expert session by hand.
+- To move a session that is not an expert into a lineage, have it write a Handoff v2 and start the lineage from
+  it: `agentihooks swarm <slug> expert start <mission file> --handoff <doc> --from <session>`. The first expert
+  confirms that handoff like any successor.
 - `agentihooks swarm <slug> expert status` shows where each running lineage stands. An expert asks you through
   the inbox, never the operator: answer from the mission and relay only what he alone can decide.
 - A lineage ends itself on an accepted mission proof; the notice reaches your inbox and

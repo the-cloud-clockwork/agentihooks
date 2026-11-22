@@ -2557,11 +2557,12 @@ def cmd_restack(store, args):
     print(json.dumps({"task": agent.task, **fields}))
 
 
-def cmd_confirm_handoff(store, args):
+def cmd_confirm_handoff(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _me(store, args)
     if agent.name not in HerdrRuntime().live_names():
         raise SwarmError("Only a live successor can confirm its handoff")
     result = transfers.confirm(store, args.slug, args.transfer, agent, args.next, now_ms())
+    expert_commands.confirmed(store, args.slug, agent)
     print(json.dumps(result))
 
 

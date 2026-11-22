@@ -154,6 +154,7 @@ FLOORS: dict[str, Timing] = {
     "focus unclaimed": Timing(LIGHT_S, CRITICAL_S),
     "view wait": Timing(CRITICAL_S, CRITICAL_S),
     "autoscaler alert": Timing(LIGHT_S, CRITICAL_S),
+    "expert seats": Timing(LIGHT_S, CRITICAL_S),
 }
 
 

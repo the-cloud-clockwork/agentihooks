@@ -46,6 +46,7 @@ PROOF = check.Contract(
     marker="<!-- mission complete -->",
     shown=True,
 )
+SEED = "operator"
 ACCOUNTED = ("Done", "Pending")
 CHECKED = PROOF.evidenced[1:]
 DELIVERABLE = re.compile(r"D(\d+)\b")

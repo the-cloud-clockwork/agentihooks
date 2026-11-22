@@ -1,0 +1,24 @@
+rules:
+  - id: feature-expert-seat-in-tick
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-22, an expert lineage keeps handing off until its mission is completed: the expert seats step
+      of the tick runs the expert seats pass, the only launcher of an expert and of its successor.
+    patterns:
+      - pattern: |
+          def _expert_seats(...):
+            ...
+      - pattern-not: |
+          def _expert_seats(...):
+            ...
+            $ACTIONS: $TYPE = tick.skip_refused(SEAT.expert_seat.run, ...)
+            ...
+      - pattern-not: |
+          def _expert_seats(...):
+            ...
+            return tick.skip_refused(SEAT.expert_seat.run, ...)
+    paths:
+      include:
+        - /scripts/tick/steps/experts.py
+        - '*.test.py'

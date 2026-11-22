@@ -12573,6 +12573,41 @@
       ]
     },
     {
+      "id": "expert-seat-step",
+      "origin": "operator",
+      "operator_words": "Chain of experts a a linage of  a mission, they dont pick tasks, an exper linage keeps doing handoff until the missions is completedx then they finish and get terminated .",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "Every pass of the tick keeps the seat of each running expert lineage. An empty seat gets one expert, launched on Claude Code at the lineage's effort with the lineage, the mission and its number in the lineage; a seat that holds a record in any state gets no second one. After an accepted handoff the next expert launches on the same seat with the handoff and the transfer it confirms, and the handoff stays on the seat until that expert confirms it. A launch that fails leaves no record and a failed binding, one refused for room hands the transfer back, and no slot, a full host or a placement elsewhere holds the launch by name. An expert lost without a handoff leaves its successor one: the handoff it never confirmed, offered again, or a recovery handoff in the expert handoff form with every deliverable pending and unknown. The expert of a stopped lineage is finished with its open mail closed, and the expert of a completed lineage is closed from the kept proof with the master told once. Nothing launches while the swarm is paused, stopping, stopped or in panic. A lineage started from the Handoff v2 of a session that was not an expert gives its first expert that handoff to confirm.",
+      "seam": "swarm.expert_seat.run over a fake runtime and store; the tick step expert seats in tick.steps.experts; expert_lineage.launches and launched; expert_commands.close, confirmed and the expert start --handoff and --from options; the live checks scripts.feature_checks.expert_seats over the experts of each running swarm and scripts.feature_checks.expert_handoffs over the handoff a lineage was started from",
+      "semgrep_rule": "feature-expert-seat-in-tick",
+      "tests": [
+        "tests/tick/steps/test_expert_seats.py::test_expert_seats",
+        "tests/tick/steps/test_expert_seats.py::test_the_step_runs_the_expert_seats_pass_and_nothing_while_panic_holds",
+        "tests/swarm/test_expert_seat.py::test_a_started_lineage_gets_one_expert_on_its_seat_with_the_launch_an_expert_is_held_to",
+        "tests/swarm/test_expert_seat.py::test_a_seat_that_holds_a_record_in_any_state_gets_no_second_expert",
+        "tests/swarm/test_expert_seat.py::test_the_next_expert_follows_an_accepted_handoff_onto_the_same_seat",
+        "tests/swarm/test_expert_seat.py::test_a_launch_that_fails_leaves_no_record_and_a_failed_binding_and_the_next_pass_tries_again",
+        "tests/swarm/test_expert_seat.py::test_nothing_launches_while_the_swarm_is_paused_stopping_or_stopped",
+        "tests/swarm/test_expert_seat.py::test_the_expert_of_a_stopped_lineage_is_finished_and_its_mail_closed_with_the_reason",
+        "tests/swarm/test_expert_seat.py::test_the_expert_of_a_completed_lineage_is_closed_from_the_kept_proof_and_the_master_told_once",
+        "tests/swarm/test_expert_seat.py::test_an_expert_lost_without_a_handoff_leaves_its_successor_a_recovery_handoff",
+        "tests/swarm/test_expert_seat.py::test_an_expert_lost_before_it_confirmed_its_handoff_has_that_handoff_offered_again",
+        "tests/swarm/test_expert_seat.py::test_an_expert_that_confirms_its_handoff_takes_it_off_the_seat_so_a_later_loss_is_a_recovery",
+        "tests/swarm/test_expert_seat.py::test_a_lineage_started_from_a_handoff_gives_its_first_expert_that_handoff_to_confirm",
+        "tests/test_expert_handoffs_check.py::test_the_handoff_a_lineage_was_started_from_is_held_to_handoff_v2",
+        "tests/test_expert_seats_check.py::test_each_running_lineage_is_listed_with_the_one_expert_on_its_seat_or_none",
+        "tests/test_expert_seats_check.py::test_a_seat_two_experts_hold_and_an_expert_of_no_lineage_each_fail_by_name",
+        "tests/test_expert_lineage_docs.py::test_the_lineage_page_describes_how_a_seat_is_kept_and_marks_nothing_as_not_built"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_seats"
+      ]
+    },
+    {
       "id": "lane-model-harness-compatibility",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.gates import Who
-from scripts.handoff import check
+from scripts.handoff import check, envelope, transfers
 from scripts.handoff import expert as handoff_expert
 from scripts.handoff.resolve import Resolver
 from scripts.handoff.transfers import now_ms
@@ -21,9 +21,10 @@ from scripts.inbox import exits, outbox
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import clearance, expert_launch, expert_lineage, expert_mission, ledger_events
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 
 VACANT = "no expert yet"
+ORPHAN = "--from names the session a handoff document comes from; give the document with --handoff"
 ONLY = "only the expert that works a running lineage completes it, from its own session"
 REFUSED = "mission proof refused; fix what it names and run the command again:"
 NOTICE = (
@@ -45,6 +46,8 @@ def register(sub: Any) -> None:
     start = actions.add_parser("start")
     start.add_argument("mission")
     start.add_argument("--effort", default=expert_launch.DEFAULT_EFFORT)
+    start.add_argument("--handoff", default="")
+    start.add_argument("--from", dest="source", default="")
     start.set_defaults(handler=cmd_start)
     status = actions.add_parser("status")
     status.add_argument("lineage", nargs="?", default="")
@@ -71,12 +74,46 @@ def cmd_template(store: Any, args: argparse.Namespace) -> None:
 
 
 def cmd_start(store: Any, args: argparse.Namespace) -> None:
-    """Save the mission file and open a running lineage for it, for the master or the operator."""
+    """Save the mission file and open a running lineage for it, for the master or the operator. Given a handoff
+    document, the lineage starts from it: its first expert continues the session the document comes from."""
     store.config(args.slug)
     by = _starter(store, args.slug)
     path, text = _document(args.mission, "mission")
-    lineage = expert_lineage.start(store, args.slug, text, str(path), args.effort, by, now_ms())
+    handed = _handed(store, args)
+    at = now_ms()
+    lineage = expert_lineage.start(store, args.slug, text, str(path), args.effort, by, at)
+    if handed:
+        _seed(store, args.slug, lineage, AgentRecord(args.source or by, "", lineage.id, seat=lineage.seat), handed, at)
     print(json.dumps(asdict(lineage)))
+
+
+def _handed(store: Any, args: argparse.Namespace) -> str:
+    """The Handoff v2 document a lineage is started from, empty when none is given; one that does not conform is
+    refused with its faults, and a session named without a document is refused."""
+    if not args.handoff:
+        if args.source:
+            raise SwarmError(ORPHAN)
+        return ""
+    _, text = _document(args.handoff, "handoff document")
+    found = check.problems(text, Resolver(args.slug, store.redis))
+    if found:
+        raise SwarmError(check.refusal(found))
+    return text
+
+
+def _seed(store: Any, slug: str, lineage: expert_lineage.Lineage, author: AgentRecord, text: str, at: int) -> None:
+    """Store the handoff a lineage starts from on its seat, with the runtime's envelope and the transfer its first
+    expert confirms."""
+    built: dict[str, Any] = envelope.build(store, slug, author, handoff_expert.SEED, None, at)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    store.put_handoff(slug, lineage.id, text, seat=lineage.seat, envelope=built)
+    transfers.record(store, slug, author, handoff_expert.SEED, text, at)  # pyright: ignore[reportUnknownMemberType]
+
+
+def confirmed(store: Any, slug: str, agent: Any) -> None:
+    """Drop the stored handoff of a lineage once its expert confirmed it: from then on an expert that is lost left
+    no handoff, and the next one gets a recovery handoff, not the one already taken."""
+    if agent.lane == expert_launch.LANE:
+        store.clear_handoff(slug, agent.task)
 
 
 def cmd_status(store: Any, args: argparse.Namespace) -> None:
@@ -139,11 +176,11 @@ def cmd_complete(store: Any, args: argparse.Namespace) -> None:
     at = now_ms()
     kept = expert_lineage.proof(store, args.slug, lineage.id) == text
     ended = lineage if kept else expert_lineage.complete(store, args.slug, lineage.id, agent.name, text, at)
-    _close(store, args.slug, agent, ended, text)
+    close(store, args.slug, agent, ended, text)
     print(json.dumps(asdict(ended)))
 
 
-def _close(store: Any, slug: str, agent: Any, ended: expert_lineage.Lineage, text: str) -> None:
+def close(store: Any, slug: str, agent: Any, ended: expert_lineage.Lineage, text: str) -> None:
     """Tell the master, keep the recap, settle the expert's mail and finish the expert, in that order. Each step can
     run again: the notice is one inbox item under an id fixed by the lineage, the recap is kept once, and the expert
     is finished last, so the command still finds it when a failure cut the steps short."""

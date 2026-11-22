@@ -47,7 +47,7 @@ Starting and stopping belong to the master of the swarm and the operator.
 
 | Command | What it does |
 |---|---|
-| `agentihooks swarm <id> expert start <mission file> [--effort xhigh\|max]` | Saves the mission and opens a running lineage. Its id, `expert-<n>`, is also its seat label. |
+| `agentihooks swarm <id> expert start <mission file> [--effort xhigh\|max] [--handoff <doc>] [--from <session>]` | Saves the mission and opens a running lineage. Its id, `expert-<n>`, is also its seat label. The swarm launches its first expert on the next pass. With `--handoff`, the first expert continues a session that was not an expert: see Starting from a handoff. |
 | `agentihooks swarm <id> expert status [<lineage>] [--json]` | One line per running lineage, or the one named: state, effort, the expert on its seat while it runs, mission title, who started it and who ended it. |
 | `agentihooks swarm <id> expert mission [<lineage>]` | Prints the mission line and the saved text. An expert reads its own mission and no other. |
 | `agentihooks swarm <id> expert stop <lineage> --note "<why>"` | Ends a running lineage by order. The note is kept. |
@@ -117,16 +117,38 @@ Its default mode is `deny`. It is set like every gate, to one of three modes:
 `agentihooks swarm <id> set expert-stop-gate="log only"` (quoted, the name holds a space) or
 `agentihooks swarm <id> set expert-stop-gate=skip`.
 
-## Not yet built
+## How a seat is kept
 
-This page describes the whole lineage. Two parts arrive with the seat step that
-follows this change and do not run before it:
+Nobody launches an expert by hand. Every pass of the swarm tick looks at each
+running lineage and keeps its seat:
 
-- Launching the first expert of a started lineage and each successor after a
-  handoff. Until then `expert start` saves the mission and the lineage and no
-  session opens.
-- Closing the session of an expert whose lineage ended, and recovering a seat
-  whose expert was lost without a handoff.
+| The pass finds | It does |
+|---|---|
+| A running lineage with an empty seat | Launches one expert on it. The expert's opening names its number in the lineage. |
+| A seat that holds an expert, working or not yet retired | Nothing: one seat never holds two experts. |
+| An accepted handoff waiting on the seat | Launches the next expert with that handoff and the transfer it confirms. |
+| An empty seat whose last expert was lost | Leaves the next expert a handoff first. If the lost expert never confirmed the handoff it was given, that handoff is offered again. Otherwise the swarm writes a recovery handoff: every deliverable pending and marked unknown, the mission and the seat recap to read first. |
+| An expert whose lineage was stopped | Closes its open mail with the reason and finishes it. |
+| An expert whose lineage completed | Runs the closing steps of the completion again from the kept proof, so the master is told once and the recap is kept even when the expert's session died first. |
+
+A launch waits, and says why, while the swarm has no session slot, the host is
+full or the lineage is placed elsewhere. Nothing launches while the swarm is
+paused, stopping, stopped or in panic. The handoff an expert was given stays on
+the seat until that expert confirms it.
+
+## Starting from a handoff
+
+A session that was not an expert can pass its work to a lineage. It writes a
+Handoff v2, and the master or the operator starts the lineage from it:
+
+```bash
+agentihooks swarm <id> expert start <mission file> --handoff <doc> --from <session>
+```
+
+The document must pass the Handoff v2 check, or nothing starts. The first
+expert gets it in its opening with a transfer to confirm, like any successor.
+`--from` names the session the document comes from; without it the starter is
+recorded as its author.
 
 ## Checks
 
@@ -136,7 +158,8 @@ Each part has a live check the Doctor runs on its timer:
 |---|---|
 | `python -m scripts.feature_checks.expert_launch_pin` | Every live expert runs Claude Code on Fable at its lineage's effort. |
 | `python -m scripts.feature_checks.expert_missions` | Every running lineage's saved mission matches its address. |
-| `python -m scripts.feature_checks.expert_handoffs` | Every handoff a running lineage holds conforms to the expert handoff. |
+| `python -m scripts.feature_checks.expert_handoffs` | Every handoff a running lineage holds conforms to the expert handoff, and the one a lineage was started from to Handoff v2. |
+| `python -m scripts.feature_checks.expert_seats` | No lineage seat is held by two experts, and every expert on a seat belongs to a lineage the swarm started. |
 | `python -m scripts.feature_checks.expert_claims` | No ledger task is claimed by an expert. |
 | `python -m scripts.feature_checks.expert_proofs` | Every completed lineage holds a proof that conforms. |
 | `python -m scripts.feature_checks.expert_stop_gate` | Every running swarm keeps the Stop gate at `deny`. |
@@ -149,4 +172,6 @@ Each part has a live check the Doctor runs on its timer:
 | `mission refused` on start | The mission breaks the template | Fix each fault the command lists and start again. |
 | `mission proof refused` on complete | Work is still open or not shown | Do the work each fault names, then submit again. |
 | An expert's turn does not end | Its lineage runs and it holds no wait | It is working as designed. Stop the lineage with `expert stop` to end it by order. |
+| `expert status` shows `no expert yet` | The swarm is paused, or the launch waits on a session slot, the host or a hive | Read the tick's line for the lineage; it names what it waits on. |
+| `handoff refused` on start | The document given with `--handoff` breaks Handoff v2 | Fix each fault the command lists and start again. |
 | `<name> is an expert; an expert works its mission and claims no task` | An expert ran a worker verb | Do the work inside the mission, or ask the master. |
