@@ -72,6 +72,7 @@ from scripts.swarm import (
     dispatch_seat,
     doc_report,
     done_gate,
+    expert_commands,
     failed_panes,
     git_https,
     hive_release,
@@ -2886,6 +2887,7 @@ def build_parser() -> argparse.ArgumentParser:
     culture = sub.add_parser("culture").add_subparsers(dest="action", required=True)
     culture.add_parser("set").add_argument("file")
     culture.add_parser("show")
+    expert_commands.register(sub)
     say = sub.add_parser("say")
     say.add_argument("text")
     say.add_argument("--to", default="")

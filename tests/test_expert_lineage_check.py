@@ -1,14 +1,19 @@
 """The live check of the expert launch pin over a stand-in store."""
 
+import hashlib
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from scripts.feature_checks import expert_lineage as check
+from scripts.swarm import expert_lineage
 from scripts.swarm.store import AgentRecord
+from tests.swarm.test_expert_mission import GOOD
 
 pytestmark = pytest.mark.unit
+
+DIGEST = hashlib.sha256(GOOD.encode()).hexdigest()
 
 
 def _agent(name: str, lane: str = "expert", **fields: Any) -> AgentRecord:
@@ -18,7 +23,10 @@ def _agent(name: str, lane: str = "expert", **fields: Any) -> AgentRecord:
 
 class Store:
     def __init__(self, swarms: dict[str, list[AgentRecord]], stopped: tuple[str, ...] = ()) -> None:
+        import fakeredis
+
         self.swarms, self.stopped = swarms, stopped
+        self.redis: Any = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
 
     def slugs(self) -> list[str]:
         return sorted(self.swarms)
@@ -28,6 +36,9 @@ class Store:
 
     def agents(self, slug: str) -> list[AgentRecord]:
         return self.swarms[slug]
+
+    def key(self, slug: str, *parts: str) -> str:
+        return ":".join(("fleet", slug, *parts))
 
 
 def _run(store: Store) -> int:
@@ -109,3 +120,41 @@ def test_with_no_store_given_the_check_reads_the_swarm_store(
     monkeypatch.setattr(swarm_store, "RedisStore", lambda redis: found if redis is client else None)
     assert check.main() == 0
     assert capsys.readouterr().out == "rig expert expert@a1b2c3-0001 runs claude fable at max\n"
+
+
+@pytest.mark.feature("expert-mission-and-lineage")
+def test_each_lineage_whose_mission_is_saved_passes_and_is_listed(capsys: pytest.CaptureFixture[str]) -> None:
+    store = Store({"rig": [], "old": []}, stopped=("old",))
+    expert_lineage.start(store, "rig", GOOD, "/missions/batch.md", "max", "operator", 1)
+    second = expert_lineage.start(store, "rig", GOOD, "/missions/batch.md", "xhigh", "operator", 2)
+    expert_lineage.stop(store, "rig", second.id, "operator", "superseded", 3)
+    expert_lineage.start(store, "old", GOOD, "/missions/batch.md", "xhigh", "operator", 1)
+    store.redis.hdel(store.key("old", "expert-missions"), DIGEST)
+    assert _run(store) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "no working expert",
+        f"rig lineage expert-1 is running at max with its mission saved as mission:rig/{DIGEST}",
+        f"rig lineage expert-2 is stopped at xhigh with its mission saved as mission:rig/{DIGEST}",
+    ]
+
+
+@pytest.mark.feature("expert-mission-and-lineage")
+@pytest.mark.parametrize("saved", ["another text", None])
+def test_a_lineage_whose_saved_mission_is_gone_or_changed_fails_by_name(
+    capsys: pytest.CaptureFixture[str], saved: str | None
+) -> None:
+    store = Store({"rig": [_agent("expert@a1b2c3-0001")]})
+    expert_lineage.start(store, "rig", GOOD, "/missions/batch.md", "xhigh", "operator", 1)
+    expert_lineage.start(store, "rig", GOOD + "\nA second mission.\n", "/missions/next.md", "xhigh", "operator", 2)
+    if saved is None:
+        store.redis.hdel(store.key("rig", "expert-missions"), DIGEST)
+    else:
+        store.redis.hset(store.key("rig", "expert-missions"), DIGEST, saved)
+    second = hashlib.sha256((GOOD + "\nA second mission.\n").encode()).hexdigest()
+    assert _run(store) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "rig expert expert@a1b2c3-0001 runs claude fable at xhigh",
+        "FAIL: rig lineage expert-1: the saved mission of lineage expert-1 is missing or does not match "
+        f"mission:rig/{DIGEST}",
+        f"rig lineage expert-2 is running at xhigh with its mission saved as mission:rig/{second}",
+    ]

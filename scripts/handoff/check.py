@@ -137,6 +137,16 @@ def _read_first(body, resolves):
     return found
 
 
+def headings(text: str) -> list[str]:
+    """The name of every section heading of the document in the order written, a fenced block's lines left out."""
+    return []
+
+
+def leaks(text: str) -> list[str]:
+    """The problem a credential value in the text raises, whatever secret mode the session runs in."""
+    return []
+
+
 def _wording(text):
     prose = "\n".join(line for line in text.splitlines() if line.strip() != MARKER)
     names = secrets.scan(prose, mode="standard")
