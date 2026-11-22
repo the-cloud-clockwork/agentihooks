@@ -155,11 +155,13 @@ def test_each_command_line_request_appends_its_own_line(timing_file: Path) -> No
 def test_a_command_line_request_writes_nothing_without_the_timing_variable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    folder = tmp_path / "work"
+    folder.mkdir()
     monkeypatch.delenv(metrics.TIMING_FILE, raising=False)
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(folder)
     with metrics.command("POST", OPERATIONS), metrics.step("guard_read"):
         pass
-    assert list(tmp_path.iterdir()) == []
+    assert list(folder.iterdir()) == []
     assert list(metrics.SAMPLES) == []
     assert metrics.CURRENT.get() is None
 
