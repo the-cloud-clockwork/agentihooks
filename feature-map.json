@@ -2691,6 +2691,28 @@
       ]
     },
     {
+      "id": "ledger-copy-after-commit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2853",
+      "behaviour": "Ledger host copies are saved or removed only after the Postgres transaction commits, discarded on rollback or failed commit, and never replaced by an older deferred generation.",
+      "seam": "SQLiteLedgerRepository._entry and purge, PostgresLedgerRepository, Connection.commit and rollback, host_entries.Copies",
+      "rules": [
+        "ledger-host-copy-inside-entry"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_slow_host_copy_observes_a_committed_postgres_transaction",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_entry_is_never_written_to_the_host",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_failed_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_closing_without_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_purge_drops_the_copy_after_its_queued_save",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_deferred_older_copy_never_replaces_a_newer_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_successful_commit_runs_each_pending_host_copy_once",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_purge_keeps_its_committed_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_cannot_lower_a_newer_deferred_copy_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_during_a_save_preserves_the_newer_host_generation"
+      ]
+    },
+    {
       "id": "ledger-cold-write",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-write-full-load",
@@ -4525,10 +4547,34 @@
     {
       "id": "swarm-manual-caps",
       "origin": "inventory",
-      "behaviour": "Manual lane caps hold against lane demand.",
+      "behaviour": "Manual lane caps hold against lane demand, except a zero planner cap, which counts as one while plan work is ready.",
       "seam": "agentihooks swarm set max-eng-agents and max-ci-agents",
       "tests": [
         "tests/swarm/test_lane_caps_owner.py::test_manual_caps_hold_against_lane_demand"
+      ]
+    },
+    {
+      "id": "swarm-plan-cap-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-cap-floor",
+      "behaviour": "While plan work is ready the quota decision keeps one planner seat under a stored zero planner cap, in manual scaling and in auto scaling with the room full, taking the seat from the larger engineer or CI ceiling; the dispatcher lane caps keep one planner while a plan lane task is open; swarm start and a set that scales engineers or CI up restore a stored zero planner cap to its default, and a zero typed in the same set holds.",
+      "seam": "scripts.swarm.capacity.autoscaled, scripts.swarm.plan_cap_floor, scripts.swarm.dispatcher.lane_caps, agentihooks swarm start and agentihooks swarm set",
+      "tests": [
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_under_a_stored_zero_manual_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_zero_manual_cap_holds_while_no_plan_work_is_ready",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_manual_plan_cap_above_zero_is_kept",
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_when_live_agents_fill_the_room",
+        "tests/swarm/test_plan_cap_floor.py::test_the_plan_seat_comes_from_the_larger_lane_ceiling",
+        "tests/swarm/test_plan_cap_floor.py::test_the_ceilings_are_unchanged_without_ready_plan_work",
+        "tests/swarm/test_plan_cap_floor.py::test_a_plan_ceiling_already_granted_is_unchanged",
+        "tests/swarm/test_plan_cap_floor.py::test_a_frozen_plan_task_gets_no_planner_seat_under_a_stored_zero_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_the_claim_key_keeps_the_focus_order_of_plan_work_under_a_stored_zero_cap",
+        "tests/swarm/test_dispatcher.py::test_lane_caps_name_each_lane_with_its_own_cap",
+        "tests/swarm/test_dispatcher.py::test_at_delegate_the_queue_holds_only_focused_work_at_any_focus_weight",
+        "tests/swarm/test_dispatcher.py::test_below_delegate_proposals_name_only_focused_work_at_full_focus_weight",
+        "tests/swarm/test_plan_cap_floor.py::test_start_restores_a_stored_zero_plan_cap_to_its_default",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_restores_a_stored_zero_plan_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_keeps_a_stored_plan_cap_above_zero"
       ]
     },
     {
@@ -5795,6 +5841,62 @@
       ]
     },
     {
+      "id": "ledger-order-mark",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "A phase or a task carries the operator's order as a mark holding when it was ordered, who filed it and his words or the id of the entry he wrote. The operator writes it himself; the ledger orchestrator writes it with his recorded words, stored as he wrote them, or with an entry he wrote. Any other author, words he never said, an entry an agent wrote and an item the ledger does not hold are refused with the reason and write nothing. An order takes one proof. A second order keeps the first mark and still needs its proof. Phase and task updates, a split and a group keep the mark, and only the operator or the orchestrator with his recorded words clears it.",
+      "seam": "ledger_core.sync with the order_set and order_clear ops, their rows in the ledger API schema, and agentihooks api order",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_orchestrator_marks_an_item_with_the_operators_words_as_he_wrote_them",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_ledger_entry_the_operator_wrote_marks_the_item_it_asks_for",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_entry_an_agent_wrote_orders_nothing",
+        "tests/swarm_ledger/test_ledger_orders.py::test_words_the_operator_never_said_order_nothing",
+        "tests/swarm_ledger/test_ledger_orders.py::test_only_the_orchestrator_relays_an_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_order_on_an_item_the_ledger_does_not_hold_is_refused",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_operator_marks_an_item_himself",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_operators_own_order_keeps_the_words_he_gives_unchecked",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_second_order_keeps_the_first_mark_and_still_needs_its_proof",
+        "tests/swarm_ledger/test_ledger_orders.py::test_only_the_operator_or_his_words_clear_an_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_clearing_an_item_that_carries_no_order_changes_nothing_and_still_needs_its_proof",
+        "tests/swarm_ledger/test_ledger_orders.py::test_updates_a_split_and_a_group_keep_the_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_malformed_order_is_refused_at_check",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_well_formed_order_passes_check",
+        "tests/swarm_ledger/test_ledger_orders.py::test_order_ops_are_in_the_api_contract_and_target_their_item",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_marks_and_clears_through_the_cli",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_ledger_entry_point_runs_an_order_the_outbox_holds_as_queued",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_takes_a_request_and_refuses_words_he_never_said",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_needs_exactly_one_proof_and_clears_only_on_his_words",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_help_names_the_order_command_and_its_flags"
+      ]
+    },
+    {
+      "id": "ledger-order-at-filing",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "Adding a phase or a task with the operator's quoted words files it and marks it as his order in one ledger call. Words he never said stop the command before anything is written. An order sent with an add marks the entry only when that call added it. When the server files the entry and refuses the order, the command still finishes the add, work folder included, and reports the entry as not ordered with the server's reason in its output and on standard error; a task the server refuses to add still reads as not added. Without his words the add is sent alone, and phase set, phase done, task group and task split take no quote.",
+      "seam": "agentihooks api phase add --quote and agentihooks api task add --quote",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_orders.py::test_phase_add_with_his_words_files_and_orders_the_phase_in_one_call",
+        "tests/swarm_ledger/test_ledger_orders.py::test_task_add_with_his_words_files_and_orders_the_task_in_one_call",
+        "tests/swarm_ledger/test_ledger_orders.py::test_filing_with_words_he_never_said_writes_nothing",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_add_whose_order_the_server_refuses_is_filed_and_says_it_is_not_ordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_words_the_server_cannot_verify_leave_the_add_filed_and_not_ordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_order_refused_with_no_reason_from_the_server_still_says_it_is_not_ordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_scaffolded_task_whose_order_is_refused_still_gets_its_work_folder",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_add_that_files_nothing_new_leaves_the_entry_it_names_unordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_not_ordered_reason_is_the_servers_refusal_of_that_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_order_sent_as_a_filing_marks_only_the_entry_its_own_call_added",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_task_the_server_refuses_to_add_still_reads_as_not_added",
+        "tests/swarm_ledger/test_ledger_orders.py::test_filing_without_his_words_sends_the_add_alone",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_filing_the_outbox_holds_prints_what_it_filed",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_help_names_the_quote_that_files_an_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_only_phase_add_takes_his_words",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_other_task_actions_still_take_no_quote"
+      ]
+    },
+    {
       "id": "ledger-followup-duplicates",
       "origin": "inventory",
       "behaviour": "A follow up repeating an open follow up or task is refused naming it, unless a plain words not duplicate reason is given and stored.",
@@ -6375,6 +6477,37 @@
       "seam": "scripts.size_limits.measure and scripts.size_limits.grade, called by the unit suite on the merge group head",
       "tests": [
         "tests/test_size_limits.py::test_the_checked_out_tree_holds_the_size_limits"
+      ]
+    },
+    {
+      "id": "swarm-enhance-close",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-close",
+      "behaviour": "Swarm done on a plan task that enhances a thin task refuses unless the target carries a plan slice whose section names a seam and holds every recon heading, pull request body section and a done when sentence. A complete close releases the target from its thin claim hold at full autonomy when the slice check finds nothing; otherwise the master approves or sends it back with plan approve or send-back and a task option at delegate and full, and the operator decides at manual and assist by setting the enhancement planned. A send back reopens the enhancement task with the note and keeps the target held, only the master or the operator may skip an enhancement, an eng or ci worker never sets one, only the closed enhancement plan task's planner, the master or the operator marks it planned, the task enhancement ledger operation is the only write of the field and takes only empty, needed, planned or skipped, and an ordinary plan task still closes on its slice proof.",
+      "seam": "scripts.swarm.enhance_review close, settle and review, called by swarm done and swarm plan approve or send-back --task, with the ledger_tasks enhancement field rules",
+      "tests": [
+        "tests/swarm/test_enhance_close.py::test_an_ordinary_plan_task_still_closes_on_its_slice_proof",
+        "tests/swarm/test_enhance_close.py::test_done_refuses_an_enhancement_whose_target_carries_no_plan_slice",
+        "tests/swarm/test_enhance_close.py::test_done_refuses_an_enhancement_of_a_task_the_ledger_does_not_hold",
+        "tests/swarm/test_enhance_close.py::test_done_refuses_an_incomplete_section_and_names_every_missing_part",
+        "tests/swarm/test_enhance_close.py::test_full_autonomy_closes_a_complete_enhancement_and_releases_the_target",
+        "tests/swarm/test_enhance_close.py::test_the_close_reads_the_target_section_through_the_hosted_loader",
+        "tests/swarm/test_enhance_close.py::test_full_autonomy_asks_the_master_when_the_slice_check_faults_the_target",
+        "tests/swarm/test_enhance_close.py::test_delegate_holds_the_target_until_the_master_approves_the_task",
+        "tests/swarm/test_enhance_close.py::test_the_operator_decides_an_enhancement_at_manual_and_assist",
+        "tests/swarm/test_enhance_close.py::test_send_back_reopens_the_enhancement_with_the_note_and_keeps_the_target_held",
+        "tests/swarm/test_enhance_close.py::test_a_review_refuses_an_enhancement_that_is_not_in_review",
+        "tests/swarm/test_enhance_close.py::test_a_review_names_exactly_one_of_a_phase_or_a_task",
+        "tests/swarm/test_enhance_close.py::test_the_enhancement_op_refuses_a_malformed_write",
+        "tests/swarm/test_enhance_close.py::test_only_the_master_or_the_operator_may_skip_an_enhancement",
+        "tests/swarm/test_enhance_close.py::test_an_eng_or_ci_worker_never_sets_an_enhancement",
+        "tests/swarm/test_enhance_close.py::test_only_a_closed_enhancement_the_master_or_the_operator_marks_a_task_planned",
+        "tests/swarm/test_enhance_close.py::test_the_master_or_the_operator_skips_an_enhancement",
+        "tests/swarm/test_enhance_close.py::test_the_enhancement_op_refuses_a_task_the_ledger_does_not_hold",
+        "tests/swarm/test_enhance_close.py::test_a_task_update_never_writes_an_enhancement",
+        "tests/swarm/test_enhance_close.py::test_enhances_survives_task_add_and_the_hosted_schemas_accept_the_fields",
+        "tests/swarm/test_enhance_close.py::test_the_task_slice_check_grades_a_target_in_its_own_phase",
+        "tests/swarm/test_enhance_close.py::test_the_plan_reader_fetches_a_hosted_ledger_with_its_loader"
       ]
     },
     {
@@ -8223,6 +8356,19 @@
       ]
     },
     {
+      "id": "type-env-ready-fast-path",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-env-fast-path",
+      "behaviour": "A ready CI type environment is reused under a shared lock on its per digest lock file, so a prepush returns at once while another worktree's type gate run holds that shared lock for its whole grade. Only a missing environment takes the exclusive lock, and the ready marker is checked again under it, so builders racing for one digest build it once. A reuse still waits while a build holds the exclusive lock, and never prunes other environments.",
+      "seam": "scripts.type_env.environment through its per digest lock file and the uv build commands it runs",
+      "tests": [
+        "tests/test_type_env.py::test_a_ready_environment_returns_while_a_grade_holds_its_shared_lock",
+        "tests/test_type_env.py::test_builders_racing_for_one_environment_build_it_once",
+        "tests/test_type_env.py::test_reuse_waits_while_a_build_holds_the_lock",
+        "tests/test_type_env.py::test_reuse_leaves_other_environments_in_place"
+      ]
+    },
+    {
       "id": "design-rules-body-change-graded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-design-rules-body-change-types",
@@ -8649,6 +8795,22 @@
       ]
     },
     {
+      "id": "hive-spoke-spawn-fresh-quota-rows",
+      "origin": "regression",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-spoke-fresh-quota-rows",
+      "behaviour": "A long running hive spoke reads fresh quota rows at every spawn once a spawn has read them for itself, so it admits a spawn the hub placed when the accounts have free seats again, and the spawn it places still adds one session to its account; quota rows a tick pass read are kept for every spawn in that pass.",
+      "seam": "HerdrRuntime.spawn quota rows on a runtime without a tick pass, read through HerdrRuntime._quota_read and re-read by HerdrRuntime._quota_refresh",
+      "rules": [
+        "quota-rows-read-once-per-process"
+      ],
+      "tests": [
+        "tests/swarm/test_quota_handoff.py::test_a_spawn_keeps_the_quota_rows_its_tick_pass_read",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_reads_fresh_quota_rows_after_its_first_quota_handoff",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_still_counts_the_session_it_placed_on_fresh_rows"
+      ]
+    },
+    {
       "id": "controller-hive-refusal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
@@ -8823,6 +8985,16 @@
       "tests": [
         "tests/codex_session/test_attach.py::test_an_admitted_execution_waits_for_its_harness_and_then_attaches",
         "tests/codex_session/test_attach.py::test_a_classified_or_running_execution_without_an_app_server_still_refuses"
+      ]
+    },
+    {
+      "id": "quota-wait-no-session-cron",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-wait-scheduler-timer",
+      "behaviour": "Quota WAIT directs swarm sessions to bounded swarm waits naming the reset time and standalone sessions to a scheduler timer aimed at the current session, with no session cron instruction and the existing reset safety buffer.",
+      "seam": "hooks.context.quota_policy.render",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_wait_directive_carries_a_cron_for_the_reset"
       ]
     },
     {
@@ -9179,6 +9351,21 @@
       ]
     },
     {
+      "id": "master-release-item",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-release-items",
+      "behaviour": "A green dev push run of Tests whose promote job succeeded sends the master seat one inbox item naming the release that promotion published, the run and the hub, controller and hive rollout to check. The item is keyed once per release tag, or once per run when the release tag lookup fails, so within the thirty day window of the ledger events mail markers a repeat pass or a later green run with no newer release sends nothing. A repository not on GitHub, or one with no stable tag, sends nothing, and red promotion fixer items keep their own key.",
+      "seam": "promotion_watch.refresh on a green promoted run; release_wait.announce with the ledger events Mail",
+      "tests": [
+        "tests/swarm/test_promotion_watch.py::test_a_green_promotion_tells_the_master_once_to_check_the_release_rollout",
+        "tests/swarm/test_promotion_watch.py::test_a_green_promotion_with_no_red_before_it_still_tells_the_master_of_its_release",
+        "tests/swarm/test_release_wait.py::test_a_published_release_tells_the_master_once_to_check_its_rollout",
+        "tests/swarm/test_release_wait.py::test_a_failed_tag_lookup_tells_the_master_once_per_promotion_run",
+        "tests/swarm/test_release_wait.py::test_a_repository_not_on_github_has_no_release_to_announce",
+        "tests/swarm/test_release_wait.py::test_a_repository_with_no_stable_tag_tells_the_master_nothing"
+      ]
+    },
+    {
       "id": "promotion-red-graded-job-fails-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2598",
@@ -9240,6 +9427,39 @@
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_substep_run_twice_in_one_request_adds_both_times",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_the_summary_totals_each_write_substep_and_keeps_other_wall",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_journal_sample_carries_its_substeps_across_a_restore"
+      ]
+    },
+    {
+      "id": "ledger-command-line-write-timing",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-baseline",
+      "behaviour": "Every ledger request a command line process answers in process is timed through request metrics as a server request is: with the ledger timing variable set it appends one line per request naming its method, route, wall, CPU, waits and the wall and CPU of each substep, among them the ledger copy adopt, refresh, whole load and document build, the guard read, the write gate, the apply under the ledger lock and the publish; without the variable nothing is written, inside a server request its substeps join that request, and server write records keep their four substep columns. Substeps nest: the apply under the ledger lock holds the four write substeps and, on a cold copy, the copy substeps, which otherwise run inside the guard read.",
+      "seam": "scripts.swarm_ledger.request_metrics.command around scripts.tick.adapters.database_ledger.request, with substeps from SQLiteLedgerRepository._entry, SQLiteLedgerRepository.apply_ops and scripts.swarm_ledger.api.mutations.apply",
+      "tests": [
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_comment_write_keeps_its_reply_and_leaves_no_timing_set",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_server_write_record_keeps_only_its_four_substep_columns",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_request_appends_one_timing_line_to_the_named_file",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_each_command_line_request_appends_its_own_line",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_request_writes_nothing_without_the_timing_variable",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_request_inside_a_server_request_joins_it_and_writes_no_line",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_comment_write_records_its_requests_and_write_substeps",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_fresh_repository_records_the_whole_load_of_its_ledger",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_fresh_repository_over_a_host_copy_records_its_adoption",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_write_under_the_ledger_lock_records_its_apply"
+      ]
+    },
+    {
+      "id": "ledger-write-timing-baseline-command",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-baseline",
+      "behaviour": "agentihooks ledger time-writes runs the given number of agent comment writes one after another, each a fresh agentihooks api comment process on the named slug and task, run as python -m scripts.install, the console script's entry module, on the timer's own interpreter so it runs the timer's code, with a timing file of its own, and prints JSON with the load average before and after, each write's process wall and CPU, request and write wall and CPU, lock and Postgres waits and every substep's wall and CPU, and the median and max of each figure; a write that exits non zero stops the run with that exit code.",
+      "seam": "scripts.swarm_ledger.write_timing.main and scripts.swarm_ledger.write_timing.spawned, registered as the time-writes entry of scripts.swarm_ledger.TOOLS",
+      "tests": [
+        "tests/swarm_ledger/test_write_timing_command.py::test_each_write_is_a_fresh_agent_comment_process_with_its_own_timing_file",
+        "tests/swarm_ledger/test_write_timing_command.py::test_the_report_carries_each_write_and_the_median_and_max_of_every_figure",
+        "tests/swarm_ledger/test_write_timing_command.py::test_a_failing_write_stops_the_run_with_its_exit_code",
+        "tests/swarm_ledger/test_write_timing_command.py::test_a_write_process_gets_its_timing_file_and_keeps_its_exit_code",
+        "tests/swarm_ledger/test_write_timing_command.py::test_the_time_writes_command_is_a_ledger_tool"
       ]
     },
     {
@@ -12026,6 +12246,18 @@
       ]
     },
     {
+      "id": "ci-tool-constraint-files",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-locks",
+      "behaviour": "Every CI tool set has one checked in constraint file under .github/ci-tools: parser, audit, semgrep, build, browser and crypto, and lint tools. Each line of each file is one exact pin, the lock generator writes exactly these files with every root it resolves satisfied by its pin, and the parser file pins the PyYAML version the announced protected workflow candidate installs.",
+      "seam": "bash .github/scripts/lock-ci-tools.sh run with a recording uv, against the checked in .github/ci-tools constraint files",
+      "tests": [
+        "tests/test_ci_test_dependencies.py::test_every_ci_tool_constraint_line_is_an_exact_pin",
+        "tests/test_ci_test_dependencies.py::test_the_ci_tool_generator_writes_each_checked_in_file",
+        "tests/test_ci_test_dependencies.py::test_the_parser_constraint_pins_the_announced_pyyaml"
+      ]
+    },
+    {
       "id": "lab-sandbox-bwrap-pull-request-tier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-bwrap-ci",
@@ -12183,6 +12415,34 @@
       "tests": [
         "tests/swarm/test_naming.py::test_an_agent_number_past_four_digits_builds_and_parses",
         "tests/swarm/test_naming.py::test_names_lists_an_agent_above_ten_thousand_once_build_is_uncapped"
+      ]
+    },
+    {
+      "id": "expert-kind-and-launch-pin",
+      "origin": "operator",
+      "operator_words": "we need to create another swarm branch of agents profile \"expert\" that agenr exper profile will always use claude code fable model mandarory and effort default xhigh, the operator can chose to set max, and the agents will behave like a swarm agent but the difference is that they will not claim tasks",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "An expert is its own agent kind with its own name counter and a numbered lineage seat, and every expert launch or resume runs Claude Code on the Fable model at effort xhigh, or max when its lineage asks for it, whatever the swarm effort range, a lane setting, a saved handoff launch or a recorded session says; an expert launch that lands on another harness is refused.",
+      "seam": "naming.TYPES and templates.DEFAULT_PROFILES for the kind, expert_launch.pin called by HerdrRuntime.spawn and HerdrRuntime.resume, effort_range.bounds for the expert lane, and expert_launch.on_pin through the live check scripts.feature_checks.expert_launch_pin over the agent records",
+      "semgrep_rule": "feature-expert-launch-pin",
+      "tests": [
+        "tests/swarm/test_expert_kind.py::test_an_expert_name_builds_parses_and_counts_on_its_own",
+        "tests/swarm/test_expert_kind.py::test_a_fresh_expert_launch_runs_claude_code_on_fable_at_xhigh",
+        "tests/swarm/test_expert_kind.py::test_the_lineage_effort_decides_the_launch_effort_whatever_the_swarm_range",
+        "tests/swarm/test_expert_kind.py::test_a_successor_launches_fable_at_the_lineage_effort_whatever_its_predecessor_ran",
+        "tests/swarm/test_expert_kind.py::test_an_expert_launch_that_lands_on_another_harness_is_refused",
+        "tests/swarm/test_expert_kind.py::test_a_resumed_expert_relaunches_fable_inside_its_pin",
+        "tests/swarm/test_expert_launch.py::test_an_expert_pick_is_pinned_to_fable_at_the_effort_asked_for_or_xhigh",
+        "tests/swarm/test_expert_launch.py::test_a_recorded_launch_is_on_the_pin_only_with_claude_a_fable_model_and_a_pin_effort",
+        "tests/test_expert_launch_pin_check.py::test_working_experts_on_the_pin_pass_and_are_listed",
+        "tests/test_expert_launch_pin_check.py::test_a_working_expert_off_the_pin_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_launch_pin"
       ]
     },
     {
@@ -12769,6 +13029,20 @@
       ]
     },
     {
+      "id": "mutation-stats-flake-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stats-flake-ledger",
+      "behaviour": "Mutation stats retries retain the first failure message and traceback in a separate flake ledger and job reports; clean buckets write no rows, caller settings are restored, uploaded parts include current retry records and stats cache records and key construction remain unchanged.",
+      "seam": "scripts.ci_mutation.selection.collect_shard_stats and scripts.ci_mutation.selection.load_or_collect_stats",
+      "tests": [
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_records_a_test_that_fails_once_then_passes_its_rerun_in_the_flake_ledger",
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_with_no_rerun_points_the_flake_ledger_beside_its_output_and_writes_no_row",
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_gives_the_caller_back_its_flake_ledger_setting",
+        "tests/test_ci_mutation_stats.py::test_a_collected_stats_part_keeps_its_bucket_flake_rows_beside_the_part_and_out_of_the_stats_cache",
+        "tests/test_ci_mutation_stats_cache.py::test_collection_parts_reuse_stats_and_keep_the_new_head_identity"
+      ]
+    },
+    {
       "id": "test-wait-bound-ratchet",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-wait-bound-ratchet",
@@ -12876,10 +13150,34 @@
       "id": "ci-dependency-audit-platformdirs-pin",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2801",
-      "behaviour": "The dependency audit's pip-audit invocation excludes platformdirs 4.14.8 from its own resolution with a uv --with constraint, so a runner whose home directory is world-writable does not hit that release's refusal to create a cache directory there; the lint job's own grading step also writes a UV_CONSTRAINT file before calling the base's copy of the script, so a pull request's own audit stays green while the fix has not yet reached the base.",
+      "behaviour": "The dependency audit runs pip-audit through uvx with --constraints on the checked in audit lock, .github/ci-tools/audit.lock, read from the script's own tree, and the lock pins the audited pip-audit version and its whole closure, so a new upstream release such as platformdirs 4.14.8 cannot reach the audit; the lint job's grading step sets no constraint of its own and calls the base's copy of the script.",
       "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint job's dependency audit step",
       "tests": [
-        "tests/test_ci_dependency_audit.py::test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home"
+        "tests/test_ci_dependency_audit.py::test_audit_runs_pip_audit_under_the_checked_in_audit_constraint",
+        "tests/test_ci_dependency_audit.py::test_dependency_audit_is_a_lint_step_graded_by_the_base"
+      ]
+    },
+    {
+      "id": "ci-tool-installs-pinned-walk",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-walk-test",
+      "behaviour": "Every pip, uv pip, uvx, uv tool and pipx install in the CI workflows, composite actions, step templates and the shell and Python scripts CI runs pins each named package to one exact version that its checked in constraint pins too: the test requirements lock, the test constraints file while it chains that lock, a file in the CI tools folder, or such a lock passed with -r. Each such lock and CI tools file pins every line exactly, nested requirement files in any option form included, and any other requirements file fails. A command that names nothing to install, such as a command lookup, is not graded. Python sources are read as argv list displays with their names and splats resolved; Python shell strings, argv lists joined with plus, bash -c and backtick strings and installers held in variables are not read. Intentional clean install smokes are exempt once each by their install with a reason, and today's floating installs sit on an allowlist the walking test holds equal to its measurement, so an unlisted floating install or a pinned install still listed turns it red.",
+      "seam": "tests.test_ci_test_dependencies._floating_ci_installs over .github, scripts/ci_* and the shell scripts and Python modules their run lines name",
+      "tests": [
+        "tests/test_ci_test_dependencies.py::test_every_ci_tool_install_pins_an_exact_version_under_a_checked_in_constraint",
+        "tests/test_ci_test_dependencies.py::test_the_install_walker_reports_a_planted_floating_install",
+        "tests/test_ci_test_dependencies.py::test_the_install_walker_passes_pinned_and_non_install_commands",
+        "tests/test_ci_test_dependencies.py::test_each_intentional_install_smoke_is_a_measured_install_with_a_reason"
+      ]
+    },
+    {
+      "id": "ci-small-workflows-install-the-parser-first",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-small-workflows",
+      "behaviour": "The audit job of the access audit, the report job of Gate Required status, the watch job of the lost runner, the retry job of queue retry and the contracts job of the hive worker install PyYAML on a line ahead of the first line that runs repository Python or a repository script, so the scripts that import yaml always find it.",
+      "seam": "the run lines of each job's steps in its workflow under .github/workflows, read in step order",
+      "tests": [
+        "tests/test_ci_test_dependencies.py::test_each_small_workflow_installs_pyyaml_before_its_repository_code"
       ]
     },
     {
@@ -13077,6 +13375,19 @@
         "tests/swarm/test_urgent_hold.py::test_an_urgent_task_while_no_live_hive_has_admission_room_names_the_hive_and_raises_no_finding",
         "tests/swarm/test_urgent_hold.py::test_the_hive_admission_hold_stands_only_while_every_live_hive_is_read_at_zero_room",
         "tests/swarm/test_urgent_hold.py::test_a_release_wait_is_named_ahead_of_the_hive_admission_hold"
+      ]
+    },
+    {
+      "id": "changelog-fragment-required-on-pull-request",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fragment-required",
+      "behaviour": "A pull request run whose head adds no changelog fragment named from its branch is refused with an error naming the missing path, also when that file already sits in the base; a dispatched run or a run with no event stays green, and a pull request that adds its branch fragment stays green.",
+      "seam": "scripts.ci_changelog_fragments.main reading GITHUB_EVENT_NAME, then scripts.ci_changelog_fragments.grade",
+      "tests": [
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_no_branch_fragment_is_red_naming_the_path",
+        "tests/test_ci_changelog_fragments.py::test_a_run_outside_a_pull_request_that_adds_no_fragment_stays_green",
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_its_branch_fragment_is_green",
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_only_a_misnamed_fragment_is_red_naming_both"
       ]
     }
   ],
