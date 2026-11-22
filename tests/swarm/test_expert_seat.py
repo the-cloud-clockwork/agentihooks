@@ -14,7 +14,7 @@ from scripts.handoff.resolve import Resolver
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli, expert_lineage, expert_seat, naming, prompt
 from scripts.swarm import tick as tick_module
-from scripts.swarm.store import AgentRecord, RedisStore
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
 from tests.handoff.test_expert_contract import VALID as HANDOFF
 from tests.handoff.test_mission_proof import VALID as PROOF
@@ -392,6 +392,48 @@ def test_a_lineage_whose_closing_steps_fail_keeps_owing_them_and_does_not_stop_t
         f"spawned expert {kept.name} on lineage expert-2 as its expert number 1",
     ]
     assert [row.id for row in expert_lineage.closing(store, "sw")] == ["expert-1"]
+    assert [agent.state for agent in experts(store) if agent.name == expert.name] == ["working"]
+
+
+def test_one_pass_closes_every_completed_lineage_and_ends_the_expert_of_a_stopped_one(store: RedisStore) -> None:
+    for at in (1_000, 2_000, 3_000):
+        started(store, at=at)
+    runtime = FakeRuntime()
+    go(store, runtime)
+    seated = {agent.task: agent.name for agent in experts(store)}
+    for name in ("expert-1", "expert-2"):
+        expert_lineage.complete(store, "sw", name, seated[name], PROOF, NOW + 1)
+    expert_lineage.stop(store, "sw", "expert-3", MASTER, "the order changed", NOW + 1)
+    assert go(store, runtime, NOW + MINUTE) == [
+        f"ended expert {seated['expert-1']}: lineage expert-1 is complete",
+        f"ended expert {seated['expert-2']}: lineage expert-2 is complete",
+        f"ended expert {seated['expert-3']}: lineage expert-3 is stopped",
+    ]
+    assert [agent.state for agent in experts(store)] == ["finished"] * 3
+
+
+def test_an_expert_whose_ending_is_refused_is_named_by_its_lineage_and_the_other_seats_are_kept(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started(store, at=1_000)
+    runtime = FakeRuntime()
+    expert = launched(store, runtime)
+    expert_lineage.stop(store, "sw", "expert-1", MASTER, "the order changed", NOW + 1)
+    started(store, at=2_000)
+    real = store.put_agent
+
+    def refusing(slug: str, agent: AgentRecord) -> None:
+        if agent.name == expert.name:
+            raise SwarmError("the store refused the record")
+        real(slug, agent)
+
+    monkeypatch.setattr(store, "put_agent", refusing)
+    actions = go(store, runtime, NOW + MINUTE)
+    [kept] = [agent for agent in experts(store) if agent.task == "expert-2"]
+    assert actions == [
+        "lineage expert-1 hit a fault this pass: the store refused the record",
+        f"spawned expert {kept.name} on lineage expert-2 as its expert number 1",
+    ]
     assert [agent.state for agent in experts(store) if agent.name == expert.name] == ["working"]
 
 

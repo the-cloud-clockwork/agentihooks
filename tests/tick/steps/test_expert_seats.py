@@ -32,7 +32,8 @@ def _step() -> Any:
 
 def _swarm(monkeypatch: pytest.MonkeyPatch, panic: list[object], calls: list[tuple[Any, ...]]) -> None:
     """Stand in for what the step takes from the swarm command module: the panic state and the fenced call."""
-    monkeypatch.setattr(cli, "panic", SimpleNamespace(state=lambda store, slug: panic[0] if slug == "sw" else None))
+    held = SimpleNamespace(state=lambda store, slug: panic[0] if (store, slug) == ("store", "sw") else None)
+    monkeypatch.setattr(cli, "panic", held)
     monkeypatch.setattr(cli, "skip_refused", lambda function, *args: calls.append((function, *args)) or ["seated"])
 
 

@@ -291,6 +291,7 @@ def test_the_expert_verb_parses_each_action_to_its_handler() -> None:
     }
     assert (parsed["start"].mission, parsed["start"].effort) == ("mission.md", "max")
     assert parser.parse_args(["sw", "expert", "start", "mission.md"]).effort == "xhigh"
+    assert (parsed["start"].handoff, parsed["start"].source) == ("", "")
     assert (parsed["status"].lineage, parsed["status"].json) == ("expert-2", True)
     assert (parsed["stop"].lineage, parsed["stop"].note) == ("expert-2", "why")
     assert (parser.parse_args(["sw", "expert", "status"]).lineage, parsed["mission"].lineage) == ("", "expert-2")
