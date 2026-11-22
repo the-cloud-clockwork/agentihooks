@@ -4439,7 +4439,8 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
 1. Points git at `python3 -m scripts.github_app_cli credential` for github.com, which answers with a GitHub
    App installation token when `GITHUB_APP_PRIVATE_KEY` is set, else with `GITHUB_TOKEN`. In App mode
    the start script caches that token in `github-token` under the agentihooks home, private to the worker user. The
-   token never reaches a remote URL or the log.
+   token never reaches a remote URL or the log. `gh` calls are signed as
+   [GitHub auth for gh calls](#github-auth-for-gh-calls) describes.
 2. Clones the repos in `workers.repositories` under its repo root, and the bundle at `HIVE_BUNDLE_URL` and
    `HIVE_BUNDLE_REF` beside them as `agentihooks-bundle`.
 3. Writes the container env file `hive-container.env` and, with `workers.ssh.enabled`, starts sshd
@@ -4563,6 +4564,151 @@ and rolls out by Recreate. A pre-install and pre-upgrade Job makes both folders 
 system drive. `hiveStorage.homeFolders.hives` lists hives whose `homeVolume` is set by hand under `default.homes`; one
 DaemonSet makes their folders on every node `homeFolders.nodeSelector` selects, except the nodes `hiveStorage.nodes`
 lists. [Worker hive home volume](#worker-hive-home-volume) gives examples, checks and refusals.
+
+### GitHub auth for gh calls
+
+The swarm image, which the controller runs, and the hive worker image both install a gh wrapper at
+`/usr/local/bin/gh`, ahead of the real client at `/usr/bin/gh` on `PATH`. A plain `gh` command in either image runs
+the wrapper, which chooses how the call is signed:
+
+| Environment | The wrapper runs |
+|---|---|
+| `HIVE_GITHUB_AUTH_MODE` is set, or `github-token` under the agentihooks home is not empty | `/opt/venv/bin/python3 -P -m scripts.github_app_cli exec /usr/bin/gh <args>`: a new Python process that sets the GitHub token environment, checks the read reserve, then replaces itself with gh |
+| Neither | `/usr/bin/gh <args>` with the process's own gh login |
+
+`gh auth status` through the wrapper replaces any token in its output with `<hidden>`.
+
+Each wrapper call is a new process with an empty token cache. In App mode with `GITHUB_APP_PRIVATE_KEY` set, it mints
+a new installation token on every call, and before a read it also asks GitHub for the remaining rate limit. On the
+leader controller on 17 November, a 40 second sample of 24 serial gh calls spent 0.919 s per call in the wrapper and
+0.656 s in gh. One read took 1464 to 2040 ms through the wrapper, and 431 to 500 ms in gh run directly with `GH_TOKEN`
+set.
+
+#### In process signing
+
+Since pull request [11713](https://github.com/the-cloud-clockwork/agentihooks/pull/11713), a process whose own
+environment holds `HIVE_GITHUB_AUTH_MODE=app` and `GITHUB_APP_PRIVATE_KEY`, as the swarm controller's does, signs each
+gh call it makes through `scripts.swarm.github_reads.rest` itself, and starts no wrapper:
+
+1. `github_reads._signed` reads both settings from the process environment. Without both it returns the command and
+   options unchanged and never imports `scripts.github_app_cli`, so a process without the key pays no import cost.
+2. `github_app_cli.signed(command, base)` takes the installation token from the process's own `GitHubAppAuth` cache.
+   The first call mints the token; later calls reuse it until five minutes before it expires, so a long lived
+   process mints once per token lifetime instead of once per call.
+3. It builds the signed environment over the call's own `env` option, or over the process environment when the call
+   passes none: `GH_TOKEN` and `GITHUB_TOKEN` hold the token, `AGENTIHOOKS_GITHUB_AUTH_READY` is `1`,
+   `GIT_TERMINAL_PROMPT` is `0`, and a git credential helper for github.com is added through `GIT_CONFIG_COUNT`. A
+   caller that passes `env={"GH_REPO": "o/r", ...}` keeps `GH_REPO`; a caller that passes an empty `env` gets only the
+   signed keys.
+4. For a read, it runs the [read reserve](#the-read-reserve) check in the process: one rate limit request, no new
+   process.
+5. The call runs `/usr/bin/gh` with the command's other arguments. Its other options, such as `text`,
+   `capture_output` and `timeout`, are passed through unchanged.
+
+`rest` signs on both of its paths: calls whose endpoint the read audit does not record, and audited `gh api` reads. Every
+`SourceControl` call of the tick (see [Tick adapters](../reference/tick-adapters.md)) and every merge queue call goes
+through `rest`, so all of them are signed this way in the controller. A gh runner handed to `rest` must forward the
+`env` option it receives, or gh runs with no token; see
+[Signed GitHub calls in the merge pass](swarm.md#signed-github-calls-in-the-merge-pass). A `gh` call made outside
+`rest` still runs the wrapper.
+
+#### When a call falls back to the wrapper
+
+In each case below, the call keeps its plain `gh` command and its options, so `PATH` resolves it to the wrapper,
+which handles it as it did before pull request 11713:
+
+| Case | What happens |
+|---|---|
+| `HIVE_GITHUB_AUTH_MODE` is `token`, or unset | `_signed` does not sign. The wrapper runs `github_app_cli exec` when the mode is set or `github-token` is not empty, and plain gh otherwise. |
+| App mode without `GITHUB_APP_PRIVATE_KEY`, such as a process that reads the cached `github-token` file | `_signed` does not sign. The wrapper reads `github-token` through `github_app_cli exec`. |
+| The process cannot mint a token: `GITHUB_APP_ID` or `GITHUB_APP_INSTALLATION_ID` missing, an unreadable or invalid key, GitHub unreachable, or the App refusing the scoped token | `signed` returns `None`. The wrapper tries again; when it fails too, it prints `GitHub App cannot supply scoped contents write credentials` and exits 1. |
+| A read while the App's remaining calls are below the reserve | `signed` returns `None`. The wrapper reads the limit again and refuses the read with exit 3 and the `GitHub read refused` line below. |
+
+#### The read reserve
+
+Every agent and service on the App's installation shares one hourly GitHub limit. The reserve keeps its last calls
+for launches, queueing and merges: a read is refused while the remaining count is below the reserve, and a write
+always runs. The check is the same in the wrapper and in process signing.
+
+| Command | Counts as a read |
+|---|---|
+| `gh <group> list`, `view`, `download`, `checks`, `diff`, `status` or `watch`, and `gh search` | Yes |
+| `gh api` with `-X GET` or `--method GET` | Yes |
+| `gh api` with no method and no `-f`, `-F`, `--field`, `--raw-field` or `--input` | Yes |
+| `gh api graphql` whose query is not a `mutation`, not an `@file` and not `--input` | Yes |
+| `gh api rate_limit`, which GitHub does not charge | No |
+| `gh alias`, `auth`, `completion`, `config` and `extension` | No |
+| Any other `gh api` method, or a field flag with no method | No, a write |
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `AGENTIHOOKS_GITHUB_READ_RESERVE` | `1000` | Remaining calls below which a read is refused. Read from the process environment on every check. |
+
+A refused read prints, on stderr:
+
+```text
+GitHub read refused: the shared App limit has <remaining> of <limit> calls left, below the reserve of <reserve> kept for launches, queueing and merges; reads resume after the reset at <time>
+```
+
+When the rate limit request itself fails, the read runs.
+
+The chart's `controller.env` and `workers.env` maps set the reserve for the controller and the worker hives. To raise
+it on the controller, which also needs the App key to sign in process:
+
+```yaml
+controller:
+  env:
+    HIVE_GITHUB_AUTH_MODE: app
+    AGENTIHOOKS_GITHUB_READ_RESERVE: "1500"
+  secretEnv:
+    - name: GITHUB_APP_ID
+      secretName: <github-app-secret>
+      key: GITHUB_APP_ID
+    - name: GITHUB_APP_INSTALLATION_ID
+      secretName: <github-app-secret>
+      key: GITHUB_APP_INSTALLATION_ID
+    - name: GITHUB_APP_PRIVATE_KEY
+      secretName: <github-app-secret>
+      key: GITHUB_APP_PRIVATE_KEY
+```
+
+A worker hive gets the App settings from `workers.githubAuth` with `mode: app` instead.
+
+#### Checking signing on a live controller
+
+Ask the controller's own Python which command `rest` would run. This mints a token if the process has none cached,
+but prints only the command and whether the environment holds `GH_TOKEN`, never the token:
+
+```bash
+kubectl -n <namespace> exec deploy/<release>-controller -c controller -- /opt/venv/bin/python -c '
+from scripts.swarm import github_reads
+command, options = github_reads._signed(["gh", "api", "rate_limit"], {})
+print(command[0], "GH_TOKEN" in options.get("env", {}))'
+```
+
+| Output | Meaning |
+|---|---|
+| `/usr/bin/gh True` | The controller signs its gh calls in process. |
+| `gh False` | The call goes to the wrapper: the pod lacks `HIVE_GITHUB_AUTH_MODE=app` or `GITHUB_APP_PRIVATE_KEY`, or cannot mint a token. Check the first two with `kubectl -n <namespace> exec deploy/<release>-controller -c controller -- sh -c 'test -n "$GITHUB_APP_PRIVATE_KEY" && echo key set; echo "mode=$HIVE_GITHUB_AUTH_MODE"'`. |
+
+Wrapper processes still running in the controller show up in a process listing. Only gh calls made outside
+`github_reads.rest` start them:
+
+```bash
+kubectl -n <namespace> exec deploy/<release>-controller -c controller -- sh -c \
+  'for f in /proc/[0-9]*/cmdline; do tr "\0" " " < "$f"; echo; done | grep -c "[g]ithub_app_cli exec"'
+```
+
+Tests:
+
+| Guard | What it holds |
+|---|---|
+| `tests/swarm/test_github_reads.py::test_a_process_holding_the_app_key_runs_gh_on_its_own_cached_app_token` | Two `rest` calls in a process holding the App key run `/usr/bin/gh` with one minted token, keep each caller's `GH_REPO` and options, and make one rate limit read for the one read among them. |
+| `tests/swarm/test_github_reads.py::test_a_process_that_cannot_mint_the_app_token_leaves_gh_to_its_wrapper` | App mode without the key, token mode with the key, and no mode with the key all run plain `gh` without calling `signed`. |
+| `tests/swarm/test_github_reads.py::test_a_call_the_process_cannot_sign_runs_through_the_wrapper_unchanged` | A `None` from `signed` keeps the plain command and options, and an empty caller `env` is passed to `signed` as given. |
+| `tests/test_github_app_cli.py::test_signed_*` | `signed` builds over the caller's environment, leaves a read below the reserve and every mint failure to the wrapper, and signs a write at any budget. |
+
+The feature map entry `controller-gh-token-in-process` names these tests.
 
 ### Python dependencies in the worker image
 
