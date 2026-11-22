@@ -1,4 +1,3 @@
-import fakeredis
 import pytest
 
 from scripts.inbox.store import InboxStore
@@ -16,6 +15,8 @@ OUTCOME = f"checks on {URL}, now green"
 def test_the_polled_pass_ends_a_green_checks_wait_with_one_item_woke_and_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import fakeredis
+
     monkeypatch.setattr(waits, "required_green", lambda target, head: True)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))

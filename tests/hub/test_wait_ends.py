@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 from typing import Any, cast
 
-import fakeredis
 import pytest
 
 from scripts.events import memory
@@ -35,6 +34,8 @@ def _event(kind: str = "checks.completed", url: str = URL) -> Envelope:
 
 @pytest.fixture
 def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    import fakeredis
+
     monkeypatch.setattr(waits, "required_green", lambda target, head: True)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
