@@ -4,6 +4,7 @@ The event only triggers the re-check: each matching wait goes through ``waits.en
 polled waits pass runs, so the resolution, the ended item, the woke key and the wait history are the polled pass's own.
 """
 
+import sys
 from collections.abc import Callable
 from importlib import import_module
 from typing import Any
@@ -55,7 +56,10 @@ class WaitEnds:
         }
         reads = waits.Reads(rows, InboxStore(store.redis), self.github, self.github)
         for agent, wait in held:
-            waits.end_one(store, event.swarm, agent, wait, reads, self.clock())
+            try:
+                waits.end_one(store, event.swarm, agent, wait, reads, self.clock())
+            except Exception as exc:
+                print(f"wait of {agent.name} failed: {exc}", file=sys.stderr)
 
 
 def _held(store: Any, slug: str, url: str) -> list[tuple[AgentRecord, dict[str, Any]]]:

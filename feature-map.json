@@ -1963,7 +1963,7 @@
       "id": "wait-ends-on-pull-event",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-wake-on-pull-events",
-      "behaviour": "A pull merged, pull closed, merge dequeued or checks completed event makes the hub re-check every checks or merge wait on that pull request through the polled pass's own resolution and end a resolved one at once with the same ended item, woke key and wait history; an event for another pull request, another wait kind or a finished agent reads nothing and leaves the wait, a pending resolution leaves it open, a merge wait on an open dependency pull request keeps holding as the polled pass holds it, and a duplicate event sends no second item.",
+      "behaviour": "A pull merged, pull closed, merge dequeued or checks completed event makes the hub re-check every checks or merge wait on that pull request through the polled pass's own resolution and end a resolved one at once with the same ended item, woke key and wait history; an event for another pull request, another wait kind or a finished agent reads nothing and leaves the wait, a pending resolution leaves it open, a merge wait on an open dependency pull request keeps holding as the polled pass holds it, a wait that raises is logged without stopping the other waits on the event, and a duplicate event sends no second item.",
       "seam": "scripts.hub.wait_ends.WaitEnds.handle on hub events, the reactors scripts.hub.registry.configured wires, and scripts.swarm.waits.end_one",
       "tests": [
         "tests/hub/test_wait_ends.py::test_a_pull_event_ends_a_matching_wait_with_one_item_and_the_polled_records",
@@ -1971,6 +1971,7 @@
         "tests/hub/test_wait_ends.py::test_an_event_whose_fresh_resolution_is_pending_leaves_the_wait_open",
         "tests/hub/test_wait_ends.py::test_a_duplicate_event_sends_no_second_item",
         "tests/hub/test_wait_ends.py::test_a_merge_wait_on_an_open_dependency_pull_request_holds_on_its_event",
+        "tests/hub/test_wait_ends.py::test_a_raising_wait_does_not_stop_the_other_waits_on_the_event",
         "tests/hub/test_wait_ends.py::test_the_hub_registry_wires_one_singleton_wait_end_reactor_per_pull_subject"
       ]
     },
