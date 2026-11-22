@@ -1,0 +1,18 @@
+rules:
+  - id: hive-resume-start-unguarded
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The hive command poll starts each resume order process on the hive beat. A start that raises, such as an OSError
+      from subprocess.Popen, must be caught where it is started and stored as the order's failed answer; otherwise it
+      escapes poll_commands and daemon.beat, ends the hive run loop and stops its heartbeat.
+    patterns:
+      - pattern: $CONSUMER.offbeat(...)
+      - pattern-inside: |
+          def $F(...):
+              ...
+      - pattern-not-inside: |
+          try:
+              ...
+          except Exception as $EXC:
+              ...
