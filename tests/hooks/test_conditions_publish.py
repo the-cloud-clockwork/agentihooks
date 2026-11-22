@@ -217,3 +217,50 @@ def test_publish_with_unresolved_shell_effects_stays_closed(checkouts: dict[str,
 )
 def test_publish_recognition_does_not_change_other_invocations(command: str) -> None:
     assert conditions._publish_files(command) is None
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+@pytest.mark.parametrize("target", ["recorded", "primary", "live"])
+def test_publish_global_identity_option_keeps_feature_and_live_path_checks(
+    checkouts: dict[str, Path], target: str
+) -> None:
+    name = FILE if target == "recorded" else str(checkouts[target] / FILE)
+    command = shlex.join(["agentihooks", "swarm", SLUG, "--as", "engineer@123-1", "publish", "-m", "Fix", "--", name])
+    expected = None if target == "recorded" else conditions.GATE_MESSAGE
+    assert _guard(command, checkouts["primary"]) == expected
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+@pytest.mark.parametrize("name", [".claude/./conditions/pre-bash-proof.sh", ".claude//conditions/pre-bash-proof.sh"])
+@pytest.mark.parametrize("live", [False, True])
+def test_publish_normalizes_condition_operands_before_layer_checks(
+    checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch, name: str, live: bool
+) -> None:
+    if live:
+        monkeypatch.setattr(conditions, "_live_dirs", lambda: [checkouts["recorded"] / ".claude" / "conditions"])
+    expected = conditions.GATE_MESSAGE if live else None
+    assert _guard(_command(name), checkouts["primary"]) == expected
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+def test_publish_uses_the_configured_repository_without_a_local_override(
+    checkouts: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import store
+
+    config = Mock()
+    config.repo = str(checkouts["primary"])
+    storage = Mock()
+    storage.config.return_value = config
+    connect = Mock(return_value=storage)
+    monkeypatch.setattr(store, "connect", connect)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REPO")
+    assert _guard(_command(FILE), checkouts["primary"]) is None
+    connect.assert_called_once_with()
+    storage.config.assert_called_once_with(SLUG)
+
+
+@pytest.mark.feature("conditions-publish-task-worktree")
+def test_publish_keeps_unknown_working_folder_and_other_swarm_closed(checkouts: dict[str, Path]) -> None:
+    assert conditions.write_guard("Bash", {"command": _command(FILE)}, SID) == conditions.GATE_MESSAGE
+    assert _guard(_command(FILE).replace(SLUG, "another-swarm"), checkouts["primary"]) == conditions.GATE_MESSAGE

@@ -911,6 +911,7 @@ def _ordinary_target(token: str, bases: list[str | None]) -> bool:
 
 def _publish_files(command: str) -> tuple[str, list[str] | None] | None:
     import shlex
+    from argparse import ArgumentParser
 
     try:
         words = shlex.split(command)
@@ -920,23 +921,26 @@ def _publish_files(command: str) -> tuple[str, list[str] | None] | None:
         if words[1:4] != ["-m", "scripts.github_app_cli", "exec"]:
             return None
         words = words[4:]
-    if len(words) < 4 or (Path(words[0]).name, words[1], words[3]) != ("agentihooks", "swarm", "publish"):
+    if len(words) < 2 or (Path(words[0]).name, words[1]) != ("agentihooks", "swarm"):
         return None
-    slug = words[2]
-    lexer = shlex.shlex(command, posix=False, punctuation_chars=";&|<>()\n")
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    if any(
-        re.fullmatch(r"[;&|<>()\n]+", token) or (not token.startswith("'") and re.search(r"[$`]", token))
-        for token in lexer
-    ):
-        return slug, None
     from scripts.swarm.cli import build_parser
 
+    parser: ArgumentParser = build_parser()
     try:
-        args = build_parser().parse_args(words[2:])
-    except SystemExit:
-        return slug, None
+        args, unknown = parser.parse_known_args(words[2:])
+        lexer = shlex.shlex(command, posix=False, punctuation_chars=";&|<>()\n")
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except (ValueError, SystemExit):
+        return None
+    if args.command != "publish":
+        return None
+    if unknown or any(
+        re.fullmatch(r"[;&|<>()\n]+", token) or (not token.startswith("'") and re.search(r"[$`]", token))
+        for token in tokens
+    ):
+        return args.slug, None
     return args.slug, args.files
 
 
@@ -1035,7 +1039,7 @@ def _touches_live(name: str, tool_input: dict, cwd: str | None) -> bool:
         if invocation is not None:
             files = invocation[1]
             return files is None or (
-                any(_touches_conditions(path) for path in files) and not _staged_command(command, cwd)
+                any(_touches_conditions(str(Path(path))) for path in files) and not _staged_command(command, cwd)
             )
         return not _read_only_shell(command, cwd) and not _staged_command(command, cwd)
     return False

@@ -629,7 +629,11 @@
         "tests/hooks/test_conditions_publish.py::test_publish_resolves_only_files_and_keeps_quoted_message_text",
         "tests/hooks/test_conditions_publish.py::test_publish_message_paths_do_not_trigger_task_reads",
         "tests/hooks/test_conditions_publish.py::test_publish_with_unresolved_shell_effects_stays_closed",
-        "tests/hooks/test_conditions_publish.py::test_publish_recognition_does_not_change_other_invocations"
+        "tests/hooks/test_conditions_publish.py::test_publish_recognition_does_not_change_other_invocations",
+        "tests/hooks/test_conditions_publish.py::test_publish_global_identity_option_keeps_feature_and_live_path_checks",
+        "tests/hooks/test_conditions_publish.py::test_publish_normalizes_condition_operands_before_layer_checks",
+        "tests/hooks/test_conditions_publish.py::test_publish_uses_the_configured_repository_without_a_local_override",
+        "tests/hooks/test_conditions_publish.py::test_publish_keeps_unknown_working_folder_and_other_swarm_closed"
       ]
     },
     {
