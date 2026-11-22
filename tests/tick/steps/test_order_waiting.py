@@ -145,6 +145,38 @@ def test_an_ordered_task_and_an_ordered_phase_are_each_one_finding(store: Any) -
 
 
 @pytest.mark.feature("swarm-order-waiting-finding")
+def test_an_order_with_work_in_flight_or_a_shorter_wait_never_hides_one_that_waited_longer(store: Any) -> None:
+    from scripts.swarm.health import order_waiting
+
+    rows = [
+        task("t1", state="claimed", claimed_by="engineer@one"),
+        task("t7", phase="p2", title="Rooms", ordered={**ORDER, "at": 9}),
+    ]
+    ledger = ledger_doc(rows, p1=ORDER)
+    order_waiting.observe(store, SLUG, ledger, START)
+    rows[0].update(state="open", claimed_by="")
+    order_waiting.observe(store, SLUG, ledger, START + 20 * MINUTE)
+    order_waiting.observe(store, SLUG, ledger, START + 31 * MINUTE)
+    assert list(order_waiting.read(store, SLUG)["orders"]) == ["phases/p1", "tasks/t7"]
+    assert [found.subject for found in order_waiting.findings(store, SLUG)] == ["tasks/t7"]
+
+
+@pytest.mark.feature("swarm-order-waiting-finding")
+def test_the_order_is_read_with_the_doctor_fix_phase_of_its_swarm(store: Any) -> None:
+    from scripts.doctor import loop, priming
+    from scripts.swarm.health import order_waiting
+    from scripts.swarm.store import SwarmConfig
+
+    store.create(SwarmConfig("fix", "/repo", max_eng=1, max_ci=1, template=priming.TEMPLATE))
+    rows = [task("t1", phase=loop.FIX_PHASE), task("t9")]
+    ledger = ledger_doc(rows, record("phases/p1", "focus"), **{loop.FIX_PHASE: ORDER})
+    item = f"phases/{loop.FIX_PHASE}"
+    held = {"since": START, "title": "Ship", "unfinished": 1, "claimable": 0, "reasons": ["a focus elsewhere holds it"]}
+    assert order_waiting.observe(store, SLUG, ledger, START) == {item: held}
+    assert order_waiting.observe(store, "fix", ledger, START) == {item: {**held, "claimable": 1, "reasons": []}}
+
+
+@pytest.mark.feature("swarm-order-waiting-finding")
 def test_the_step_notes_the_orders_of_the_pass_state(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import cli
     from scripts.swarm.health import order_waiting

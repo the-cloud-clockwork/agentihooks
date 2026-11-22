@@ -12656,6 +12656,8 @@
         "tests/tick/steps/test_order_waiting.py::test_an_order_with_no_open_task_a_done_order_and_a_ledger_without_orders_raise_none",
         "tests/tick/steps/test_order_waiting.py::test_each_pass_stores_its_time_and_keeps_the_time_an_order_was_first_seen_waiting",
         "tests/tick/steps/test_order_waiting.py::test_an_ordered_task_and_an_ordered_phase_are_each_one_finding",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_with_work_in_flight_or_a_shorter_wait_never_hides_one_that_waited_longer",
+        "tests/tick/steps/test_order_waiting.py::test_the_order_is_read_with_the_doctor_fix_phase_of_its_swarm",
         "tests/tick/steps/test_order_waiting.py::test_the_step_notes_the_orders_of_the_pass_state",
         "tests/tick/steps/test_order_waiting.py::test_the_finding_is_in_the_swarm_status_findings_and_goes_to_the_master_inbox"
       ]
