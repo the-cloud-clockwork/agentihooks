@@ -4501,14 +4501,11 @@ A phase plan task's `steering.md` carries no Enhancement target block.
 | Symptom | Cause and action |
 |---|---|
 | `done --slice <target>` refused with `tasks/<task> has invalid slice task ids: <target>` | The target is not on the ledger, sits in a phase other than the enhancement task's, or is itself a plan task. Block the task with that evidence; the master moves or recreates the target. |
-| `done --slice <target>` refused with `tasks/<task> slice tasks carry no plan link: <target>. publish the plan with agentihooks ledger publish-plan <file> --phase <phase id>, then link each task with task set <id> plan_url=<link>` | Step 5 did not set the target's `plan_url`. Run steps 4 and 5, then `done` again. |
+| `done --slice <target>` refused with `tasks/<task> slice tasks carry no plan link: <target>.`, followed by a hint to publish the plan and link each task with `plan_url` | Step 5 did not set the target's `plan_url`. Run steps 4 and 5, then `done` again. |
 | `done --slice <target>` refused with `tasks/<task> slice tasks lack valid plan ranges or anchors: <target>` | The target's `plan_lines` no longer match its anchor in the phase's plan, for example after another plan was published into the phase. Run step 5 again against the plan the phase now links. |
 | Step 4 refused with `plan task sections need a slice marker above each heading` | The section's parts sit at the plan's task level. Add one title above the section, as in the example, and publish again. |
 | Step 5 refused with `slice anchor <anchor> is missing or repeated in its phase` | The anchor is not in the published plan, or appears twice. Fix the anchor line in `plan.md`, publish again, then repeat step 5. |
 | Step 5 refused with `plan slice <anchor> already belongs to open task <task>` | Another open task already holds that anchor. Give the target its own anchor in `plan.md`, publish again, then repeat step 5. |
-
-The `carry no plan link` refusal names the `agentihooks ledger publish-plan` form; from the planner's prompt, publish
-with the step 4 command, `agentihooks api --slug <slug> --as <planner> publish-plan <plan file> --phase <phase>`.
 
 ### Split tasks across pull requests
 
