@@ -39,20 +39,29 @@ def problems(text: str, resolves: Callable[[str], object], slug: str, mission: s
     opened = check.section(text, "Mission").partition("\n")[0].strip()
     named = [number for heading in ACCOUNTED for number in _named(text, heading)]
     count = len(expert_mission.deliverables(mission))
+    numbers = [str(number) for number in range(1, count + 1)]
     return [
         *check.problems(text.replace(line, expert_mission.address(slug, mission)), resolves, HANDOFF),
         *([] if opened == line else [f"## Mission must open with the mission line: {line}"]),
-        *(f"D{n} names no deliverable; the mission has {count}" for n in sorted(set(named)) if not 1 <= n <= count),
-        *(_accounted(n, named.count(n)) for n in range(1, count + 1) if named.count(n) != 1),
+        *(_stray(written, count) for written in sorted(set(named) - set(numbers), key=lambda n: (len(n), n))),
+        *(_accounted(number, named.count(number)) for number in numbers if named.count(number) != 1),
     ]
 
 
-def _named(text: str, heading: str) -> list[int]:
+def _named(text: str, heading: str) -> list[str]:
+    """The deliverable number each bullet of the section starts with, as written."""
     found = (DELIVERABLE.match(bullet) for bullet in check.bullets(check.section(text, heading)))
-    return [int(match.group(1)) for match in found if match]
+    return [match.group(1) for match in found if match]
 
 
-def _accounted(number: int, times: int) -> str:
+def _stray(written: str, count: int) -> str:
+    return (
+        f"D{written} names no deliverable, the mission has {count}; number the bullet after the deliverable it "
+        "accounts for or drop the number"
+    )
+
+
+def _accounted(number: str, times: int) -> str:
     if not times:
         return f"deliverable D{number} is named by no Done or Pending bullet; start one with D{number}"
     return f"deliverable D{number} is named by {times} bullets; name it once, under Done or under Pending"

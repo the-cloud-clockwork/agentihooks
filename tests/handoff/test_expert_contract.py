@@ -133,6 +133,7 @@ def test_the_mission_line_may_be_followed_by_the_experts_own_words() -> None:
         ),
         (D3, D3 + "- D4 A fourth thing\n", [_stray("4")]),
         (D3, D3 + "- D7 A seventh thing\n- D0 Nothing\n", [_stray("0"), _stray("7")]),
+        (D3, D3 + "- D10 A tenth thing\n- D9 A ninth thing\n", [_stray("9"), _stray("10")]),
         (D1, "- D01 Each cause proven against the live ledger, run 4471 green\n", [_stray("01"), _unnamed(1)]),
         (
             D1,

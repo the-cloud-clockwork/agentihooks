@@ -2456,7 +2456,7 @@ def cmd_handoff(store: RedisStore, args: argparse.Namespace) -> None:
     agent: AgentRecord = _me(store, args)
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
-    found = handoff_contracts.problems(store, args.slug, agent, text, Resolver(args.slug, store.redis, ledger.item))
+    found = handoff_contracts.problems(text, Resolver(args.slug, store.redis, ledger.item), store, args.slug, agent)
     if found:
         raise SwarmError(handoff_check.refusal(found))
     envelope, transfer = _hand_off(store, args.slug, agent, text, args.reason, ledger)

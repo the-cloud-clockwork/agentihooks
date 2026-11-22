@@ -5,9 +5,10 @@ from typing import Any
 
 from scripts.handoff import check, expert
 from scripts.swarm import expert_launch, expert_lineage
+from scripts.swarm.store import AgentRecord
 
 
-def problems(store: Any, slug: str, agent: Any, text: str, resolves: Callable[[str], object]) -> list[str]:
+def problems(text: str, resolves: Callable[[str], object], store: Any, slug: str, agent: AgentRecord) -> list[str]:
     """The problems of a handoff document under the contract its author is held to: an expert's against the saved
     mission of its lineage, any other agent's against Handoff v2."""
     if agent.lane != expert_launch.LANE:
