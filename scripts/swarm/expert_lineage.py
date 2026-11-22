@@ -5,10 +5,20 @@ digest, so every expert that ever occupies the lineage's seat reads the same wor
 ends; this module is the only writer of the lineage records and of the saved missions.
 """
 
-from dataclasses import dataclass, replace
+import json
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
-__all__ = ["Lineage", "get", "listed", "mission", "replace", "saved", "start", "stop"]
+from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
+from scripts.swarm import expert_launch, expert_mission, naming
+from scripts.swarm.store import SwarmError
+
+LINEAGES = "expert-lineages"
+MISSIONS = "expert-missions"
+SEQUENCE = "expert-seq"
+RUNNING = "running"
+STOPPED = "stopped"
 
 
 @dataclass(frozen=True)
@@ -31,29 +41,75 @@ class Lineage:
 
 def start(store: Any, slug: str, text: str, source: str, effort: str, by: str, at: int) -> Lineage:
     """Save the mission text and open a running lineage for it; a malformed mission or another effort is refused."""
-    raise NotImplementedError
+    found = expert_mission.problems(text)
+    if found:
+        raise SwarmError("mission refused; fix the document and start again:\n" + "\n".join(f"- {p}" for p in found))
+    if effort not in expert_launch.EFFORTS:
+        raise SwarmError(f"an expert runs at effort {' or '.join(expert_launch.EFFORTS)}, not {effort}")
+    name = naming.seat_label(expert_launch.LANE, int(store.redis.incr(store.key(slug, SEQUENCE))))
+    lineage = Lineage(
+        id=name,
+        seat=seat_address(slug, name),
+        mission=expert_mission.address(slug, text),
+        title=expert_mission.title(text),
+        source=source,
+        effort=effort,
+        state=RUNNING,
+        started_by=by,
+        started_at=at,
+    )
+    store.redis.hset(store.key(slug, MISSIONS), expert_mission.digest(text), text)
+    store.redis.hset(store.key(slug, LINEAGES), name, json.dumps(asdict(lineage)))
+    return lineage
 
 
 def get(store: Any, slug: str, name: str) -> Lineage:
     """The lineage of that id; an unknown id is refused."""
-    raise NotImplementedError
+    raw = store.redis.hget(store.key(slug, LINEAGES), name)
+    if not raw:
+        raise SwarmError(f"swarm {slug} has no expert lineage {name}")
+    return Lineage(**json.loads(raw))
 
 
 def listed(store: Any, slug: str) -> list[Lineage]:
     """Every lineage of the swarm in the order started."""
-    return []
+    rows = [Lineage(**json.loads(raw)) for raw in store.redis.hgetall(store.key(slug, LINEAGES)).values()]
+    return sorted(rows, key=lambda row: (row.started_at, len(row.id), row.id))
 
 
 def mission(store: Any, slug: str, lineage: Lineage) -> str:
     """The saved mission text of the lineage; a mission that is gone or no longer matches its address is refused."""
-    raise NotImplementedError
+    text = store.redis.hget(store.key(slug, MISSIONS), lineage.mission.rpartition("/")[2]) or ""
+    if expert_mission.address(slug, text) != lineage.mission:
+        raise SwarmError(f"the saved mission of lineage {lineage.id} is missing or does not match {lineage.mission}")
+    return text
 
 
 def saved(store: Any, slug: str, digest: str) -> bool:
     """Whether the swarm holds a saved mission under that digest."""
-    return False
+    return bool(store.redis.hexists(store.key(slug, MISSIONS), digest))
 
 
 def stop(store: Any, slug: str, name: str, by: str, note: str, at: int) -> Lineage:
     """End a running lineage by its starter's order; a note says why, and a lineage that already ended is refused."""
-    raise NotImplementedError
+    if not note.strip():
+        raise SwarmError("stopping a lineage needs a note that says why")
+    return _end(store, slug, name, lambda found: replace(found, state=STOPPED, ended_by=by, ended_at=at, note=note))
+
+
+def _end(store: Any, slug: str, name: str, change: Callable[[Lineage], Lineage]) -> Lineage:
+    key = store.key(slug, LINEAGES)
+
+    def write(pipe: Any) -> Lineage:
+        raw = pipe.hget(key, name)
+        if not raw:
+            raise SwarmError(f"swarm {slug} has no expert lineage {name}")
+        found = Lineage(**json.loads(raw))
+        if found.state != RUNNING:
+            raise SwarmError(f"expert lineage {name} is {found.state}, not {RUNNING}")
+        ended = change(found)
+        pipe.multi()
+        pipe.hset(key, name, json.dumps(asdict(ended)))
+        return ended
+
+    return store.redis.transaction(write, key, value_from_callable=True)

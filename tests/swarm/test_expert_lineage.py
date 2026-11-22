@@ -308,20 +308,20 @@ def test_status_lists_each_lineage_with_its_state_effort_expert_and_title(
     assert run("sw", "expert", "status") == 0
     assert capsys.readouterr().out == "no expert lineage\n"
     started(store, at=1)
-    started(store, effort="max", at=2)
+    started(store, effort="max", by="operator", at=2)
     started(store, at=3)
     seated(store, EXPERT, "expert-1", state="finished")
     seated(store, SECOND_EXPERT, "expert-1")
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0009", "eng", "expert-2"))
-    expert_lineage.stop(store, "sw", "expert-3", MASTER, "superseded", 4)
+    expert_lineage.stop(store, "sw", "expert-3", ENGINEER, "superseded", 4)
     assert run("sw", "expert", "status") == 0
     assert capsys.readouterr().out.splitlines() == [
-        f"expert-1 running at xhigh, {SECOND_EXPERT}: {TITLE}",
-        f"expert-2 running at max, no expert yet: {TITLE}",
-        f"expert-3 stopped at xhigh, no expert yet: {TITLE}",
+        f"expert-1 running at xhigh, {SECOND_EXPERT}: {TITLE} (started by {MASTER})",
+        f"expert-2 running at max, no expert yet: {TITLE} (started by operator)",
+        f"expert-3 stopped at xhigh, no expert yet: {TITLE} (started by {MASTER}, ended by {ENGINEER}: superseded)",
     ]
     assert run("sw", "expert", "status", "expert-2") == 0
-    assert capsys.readouterr().out == f"expert-2 running at max, no expert yet: {TITLE}\n"
+    assert capsys.readouterr().out == f"expert-2 running at max, no expert yet: {TITLE} (started by operator)\n"
     assert run("sw", "expert", "status", "expert-7") == 1
     assert capsys.readouterr().err == "swarm: swarm sw has no expert lineage expert-7\n"
 

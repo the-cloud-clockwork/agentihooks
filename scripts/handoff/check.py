@@ -20,8 +20,9 @@ ADDRESS = re.compile(
     r"|recap:[\w.-]+@[\w.-]+"
     r"|inbox:\w+"
     r"|seat:[\w-]+"
+    r"|mission:[\w.-]+/[0-9a-f]{64}"
 )
-ADDRESS_FORMS = "a GitHub issue or pull request link, ledger:, workspace:, recap:, inbox: or seat:"
+ADDRESS_FORMS = "a GitHub issue or pull request link, ledger:, workspace:, recap:, inbox:, seat: or mission:"
 FILE_EXT = "py|md|json|jsonl|toml|ya?ml|sh|txt|js|ts|tsx|css|html|cfg|ini|lock|rs|go|sql|env|log"
 FILE_NAME = re.compile(rf"[\w.@/-]*\w\.(?:{FILE_EXT})(?::\d+)*")
 PATH_START = ("/", "~/", "./", "../")
@@ -139,18 +140,18 @@ def _read_first(body, resolves):
 
 def headings(text: str) -> list[str]:
     """The name of every section heading of the document in the order written, a fenced block's lines left out."""
-    return []
+    return [name for name, _ in _sections(text.splitlines())]
 
 
 def leaks(text: str) -> list[str]:
     """The problem a credential value in the text raises, whatever secret mode the session runs in."""
-    return []
+    names = secrets.scan(text, mode="standard")
+    return [f"credential value found ({', '.join(names)}); refer to it by its variable name"] if names else []
 
 
-def _wording(text):
+def _wording(text: str) -> list[str]:
     prose = "\n".join(line for line in text.splitlines() if line.strip() != MARKER)
-    names = secrets.scan(prose, mode="standard")
-    found = [f"credential value found ({', '.join(names)}); refer to it by its variable name"] if names else []
+    found = leaks(prose)
     found += [f"file path {path}; name the module, type or command instead" for path in _paths(prose)]
     found += [
         f"line number {where}; name the function or behaviour instead"
