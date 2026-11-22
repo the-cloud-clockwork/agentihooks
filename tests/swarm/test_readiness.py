@@ -62,11 +62,12 @@ def queued(bus, lane, view):
 
 
 WINDOW = BusConfig().dedupe_window_ms
+LATER = NOW + WINDOW
 ORDER = {"at": 1, "by": "operator"}
 
 
 def waiting(view, task_id, age=WINDOW):
-    return readiness.offer(view.rows[task_id], view, NOW - age)
+    return readiness.offer(view.rows[task_id], view, LATER - age)
 
 
 def test_ready_is_open_in_scope_unmerged_and_unheld():
@@ -291,13 +292,13 @@ def test_behind_names_the_old_waiting_offers_ahead_of_an_urgent_or_focused_offer
     focus = [{"verb": "focus", "target": "tasks/f"}]
     view = snapshot(doc([task("n1"), task("n2"), task("u", rank="urgent"), task("f")], freezes=focus))
     n1, n2, u, f = (waiting(view, name) for name in ("n1", "n2", "u", "f"))
-    assert readiness.behind([n1, waiting(view, "n2", WINDOW - 1)], [waiting(view, "u", 0)], view, NOW) == {n1.id}
-    assert readiness.behind([n1, u, n2], [], view, NOW) == {n1.id}
-    assert readiness.behind([n1, n2], [waiting(view, "f", 0)], view, NOW) == {n1.id, n2.id}
-    assert readiness.behind([u, n1], [waiting(view, "f", 0)], view, NOW) == {n1.id}
-    assert readiness.behind([u, f, n1, n2], [], view, NOW) == set()
-    assert readiness.behind([n1, n2], [], view, NOW) == set()
-    assert readiness.behind([], [waiting(view, "u", 0)], view, NOW) == set()
+    assert readiness.behind([n1, waiting(view, "n2", WINDOW - 1)], [waiting(view, "u", 0)], view, LATER) == {n1.id}
+    assert readiness.behind([n1, u, n2], [], view, LATER) == {n1.id}
+    assert readiness.behind([n1, n2], [waiting(view, "f", 0)], view, LATER) == {n1.id, n2.id}
+    assert readiness.behind([u, n1], [waiting(view, "f", 0)], view, LATER) == {n1.id}
+    assert readiness.behind([u, f, n1, n2], [], view, LATER) == set()
+    assert readiness.behind([n1, n2], [], view, LATER) == set()
+    assert readiness.behind([], [waiting(view, "u", 0)], view, LATER) == set()
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
@@ -305,13 +306,13 @@ def test_behind_names_the_old_waiting_offers_ahead_of_an_offer_of_a_higher_class
     later = {"at": 9, "by": "operator"}
     view = snapshot(doc([task("n"), task("o", ordered=ORDER), task("o2", ordered=later), task("u", rank="urgent")]))
     n, o, o2, u = (waiting(view, name) for name in ("n", "o", "o2", "u"))
-    assert readiness.behind([n, o], [], view, NOW) == {n.id}
-    assert readiness.behind([n, o, u], [], view, NOW) == {n.id, o.id}
-    assert readiness.behind([o, n], [waiting(view, "u", 0)], view, NOW) == {o.id, n.id}
-    assert readiness.behind([o2, n], [waiting(view, "o", 0)], view, NOW) == {n.id}
-    assert readiness.behind([o2], [waiting(view, "o", 0)], view, NOW) == set()
-    assert readiness.behind([waiting(view, "n", WINDOW - 1), o], [], view, NOW) == set()
-    assert readiness.behind([u, o, n], [], view, NOW) == set()
+    assert readiness.behind([n, o], [], view, LATER) == {n.id}
+    assert readiness.behind([n, o, u], [], view, LATER) == {n.id, o.id}
+    assert readiness.behind([o, n], [waiting(view, "u", 0)], view, LATER) == {o.id, n.id}
+    assert readiness.behind([o2, n], [waiting(view, "o", 0)], view, LATER) == {n.id}
+    assert readiness.behind([o2], [waiting(view, "o", 0)], view, LATER) == set()
+    assert readiness.behind([waiting(view, "n", WINDOW - 1), o], [], view, LATER) == set()
+    assert readiness.behind([u, o, n], [], view, LATER) == set()
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
