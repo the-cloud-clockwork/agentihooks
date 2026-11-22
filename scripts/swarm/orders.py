@@ -3,8 +3,6 @@
 from collections.abc import Callable
 from typing import Any, cast
 
-from scripts.swarm import freeze
-
 MARK = "ordered"
 
 
@@ -31,8 +29,10 @@ def stamps(doc: dict[str, Any]) -> dict[str, int]:
             found[task["id"]] = min(times)
     if not found:
         return found
+    from scripts.swarm import freeze
+
     rows = {task["id"]: task for task in tasks}
-    reach = _reach(doc, tasks)
+    reach = _reach(freeze.waits(doc), tasks)
     spread: dict[str, int] = {}
     for at in sorted(set(found.values())):
         seeds = [name for name, own in found.items() if own == at]
@@ -52,10 +52,11 @@ def closed(row: dict[str, Any]) -> bool:
     return done(row) or bool(row.get("out_of_scope"))
 
 
-def _reach(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> Callable[[dict[str, Any]], list[str]]:
+def _reach(
+    waits_on: Callable[[dict[str, Any]], list[str]], tasks: list[dict[str, Any]]
+) -> Callable[[dict[str, Any]], list[str]]:
     """Where a task's order time goes next: the work it waits on, the task it is merged into and the plan tasks that
     enhance it; nowhere from a row that is done, out of scope or no task of the ledger."""
-    waits_on = freeze.waits(doc)
     plans: dict[str, list[str]] = {}
     for task in tasks:
         if task.get("enhances"):
