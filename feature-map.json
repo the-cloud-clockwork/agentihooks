@@ -7432,7 +7432,6 @@
         "tests/swarm_ledger/test_warm_writer.py::test_the_checkout_moves_only_to_a_new_revision",
         "tests/swarm_ledger/test_warm_writer.py::test_the_writer_command_serves_the_home_socket_until_sigterm",
         "tests/swarm_ledger/test_warm_writer_parity.py::test_each_refusal_answers_alike_over_the_socket_and_in_process",
-        "tests/swarm_ledger/test_warm_writer_parity.py::test_a_writer_below_the_floor_is_refused_alike_over_the_socket_and_in_process",
         "tests/swarm_ledger/test_warm_writer_parity.py::test_a_conflicting_write_retries_once_and_lands_alike_over_the_socket_and_in_process",
         "tests/swarm_ledger/test_warm_writer_parity.py::test_each_audit_effect_is_left_alike_over_the_socket_and_in_process"
       ]

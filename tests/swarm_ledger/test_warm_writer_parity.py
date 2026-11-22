@@ -62,13 +62,14 @@ GENERATIONS = "SELECT slug, generation FROM ledgers WHERE slug IN (%s, %s) ORDER
 @dataclass
 class Twins:
     """Two ledgers made from the same content in one store, the write hooks each fired with the state it received,
-    and the request metric samples each request left."""
+    and the reply and request metric samples each request left."""
 
     store: Any
     here: str
     there: str
     fired: list[tuple[str, str, Any]] = field(default_factory=list)
     samples: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
+    replies: dict[str, tuple[Any, ...]] = field(default_factory=dict)
 
     def hooks(self, slug: str) -> list[tuple[str, Any]]:
         """The write hooks fired for ``slug`` with the state each received, in order."""
@@ -77,12 +78,14 @@ class Twins:
 
 @dataclass(frozen=True)
 class Refusal:
-    """One refused write: the caller sending it, its operations, whether it names an operation id, whether its guards
-    are stale, what arms the refusal and the status it answers."""
+    """One refused write: the caller sending it, its operations, the status it answers, the words only its own refusal
+    leaves in the reply or the ledger, whether it names an operation id, whether its guards are stale and what arms
+    the refusal."""
 
     caller: str
     ops: tuple[dict[str, Any], ...]
     status: int
+    reason: str
     identified: bool = True
     stale: bool = False
     arm: Callable[[pytest.MonkeyPatch], None] | None = None
@@ -198,6 +201,7 @@ def sent(twins: Twins, slug: str, send: Callable[[], tuple[int, bytes]]) -> tupl
     else:
         found = ("answered", status, alike(json.loads(body), slug))
     twins.samples[slug] = [(row[1], row[2]) for row in list(request_metrics.SAMPLES)[before:]]
+    twins.replies[slug] = found
     return found
 
 
@@ -226,7 +230,9 @@ def rows(store: Any, slug: str, sql: str) -> list[Any]:
     with store.connect() as connection:
         found = connection.execute(sql, (slug,)).fetchall()
     return [
-        alike([json.loads(item) if isinstance(item, str) and item[:1] in "[{" else item for item in row], slug)
+        alike(
+            [json.loads(item) if isinstance(item, str) and item.startswith(("[", "{")) else item for item in row], slug
+        )
         for row in found
     ]
 
@@ -262,11 +268,13 @@ def over_budget(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 REFUSALS = {
-    "schema": Refusal("", (COMMENT,), 400, identified=False),
-    "authority": Refusal("eng@ab-1", (COMMENT,), 403),
-    "duplicate": Refusal("", (REPEAT,), 200, arm=duplicated),
-    "write-gate": Refusal("", (TALK,), 200, arm=over_budget),
-    "revision": Refusal("", (COMMENT,), 409, stale=True),
+    "schema": Refusal("", (COMMENT,), 400, '"code": "schema_invalid"', identified=False),
+    "authority": Refusal("eng@ab-1", (COMMENT,), 403, '"code": "forbidden"'),
+    "duplicate": Refusal("", (REPEAT,), 200, 'task t2 repeats task t1 \\"Parity task\\"', arm=duplicated),
+    "write-gate": Refusal(
+        "", (TALK,), 200, f"{talk.REFUSED}: {WORKER} made {talk.BUDGET} talk writes", arm=over_budget
+    ),
+    "revision": Refusal("", (COMMENT,), 409, '"code": "revision_conflict"', stale=True),
 }
 
 
@@ -287,6 +295,7 @@ def test_each_refusal_answers_alike_over_the_socket_and_in_process(
         expected, answered = both(twins, writer, payload)
     assert expected[:2] == ("answered", case.status)
     assert answered == expected
+    assert case.reason in json.dumps([expected, state(twins.store, twins.here)])
     if case.status == 200:
         assert expected[2]["applied"] == []
         assert expected[2]["rejected"] == [case.ops[0]["id"]]
@@ -311,7 +320,6 @@ def raised_floor() -> Iterator[int]:
     run("UPDATE writer_floor SET version = %s WHERE name = 'ledger'", (postgres.REQUIRED,))
 
 
-@pytest.mark.feature("ledger-warm-writer")
 @pytest.mark.parametrize("store", SHARED, indirect=True)
 def test_a_writer_below_the_floor_is_refused_alike_over_the_socket_and_in_process(
     twins: Twins, writer: Path, raised_floor: int
@@ -327,6 +335,7 @@ def test_a_writer_below_the_floor_is_refused_alike_over_the_socket_and_in_proces
     assert expected == ("raised", "Refused", refusal)
     assert answered == expected
     assert run(GENERATIONS, (twins.here, twins.there)) == generations
+    assert run("SELECT version FROM writer_floor WHERE name = 'ledger'") == [(raised_floor,)]
 
 
 def answered_over(where: Path) -> Callable[[str, str, dict[str, Any] | None], dict[str, Any]]:
@@ -397,8 +406,9 @@ EFFECTS: dict[str, Callable[[Twins, str], Any]] = {
     "request-metrics": lambda twins, slug: twins.samples[slug],
     "inbox-relay": lambda twins, slug: twins.hooks(slug),
     "ack": acked,
+    "write-ack": lambda twins, slug: twins.replies[slug],
 }
-FILLED = {"events", "outbox", "inbox-relay", "ack"}
+FILLED = {"events", "outbox", "inbox-relay", "ack", "write-ack"}
 
 
 @pytest.mark.feature("ledger-warm-writer")
@@ -420,4 +430,6 @@ def test_each_audit_effect_is_left_alike_over_the_socket_and_in_process(
     assert read(twins, twins.there) == read(twins, twins.here)
     if effect in FILLED:
         assert read(twins, twins.here) not in (None, [])
+    else:
+        assert read(twins, twins.here) == []
     assert state(twins.store, twins.there) == state(twins.store, twins.here)
