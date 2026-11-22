@@ -53,14 +53,27 @@ def _change(short: str, data: dict[str, Any]) -> tuple[str, str, str]:
     return f"{repository}@{data['tag']}", data["url"], ""
 
 
+def _label(short: str, data: dict[str, Any], pull: str) -> str:
+    """Return the plain words naming the change of a review event of kind ``short``: its pull request number, the
+    pull request its merge queue group tests, or its release tag, with the repository name."""
+    repository = (pull or data.get("repository") or data["url"]).split("/")[4]
+    number = pull.rsplit("/", 1)[-1]
+    if short == "pr":
+        return f"pull request {number} of {repository}"
+    if short == "mq":
+        tested = f" for pull request {number}" if pull else ""
+        return f"the merge queue group{tested} of {repository}"
+    return f"release {data['tag']} of {repository}"
+
+
 def review_task(short: str, data: dict[str, Any], doc: dict[str, Any]) -> dict[str, Any]:
     """Return the review lane task for the change a review event of kind ``short`` names, with the phase of the
     author task whose pull request it carries."""
     ident, link, pull = _change(short, data)
     author = next((t for t in doc["tasks"] if pull and str(t.get("pr_url", "")).lower() == pull.lower()), None)
     noun = NOUNS[short]
-    named = f"Review the {noun} of {link.split('/')[4]}"
-    by = f" Author task {author['id']}." if author else ""
+    named = f"Review {_label(short, data, pull)}"
+    by = f" Author task {author['id']}." if author else " No swarm task carries this change."
     return {
         "task": f"review-{short}-{hashlib.sha256(ident.lower().encode()).hexdigest()[:12]}",
         "title": f"Review this {noun}" if ledger_comments.problems(named, "item") else named,

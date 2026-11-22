@@ -66,6 +66,7 @@ def test_one_pull_opened_event_queues_exactly_one_review_task_and_a_repeat_queue
     [(slug, task, by)] = ledger.added
     assert (slug, by, task["lane"], task["kind"], task["phase"]) == (SLUG, "swarm", "review", "review", "p1")
     assert PULL in task["description"] and "t1" in task["description"]
+    assert task["title"] == "Review pull request 7 of widgets"
     publish(bus, "pull.opened", {"url": PULL}, PULL, NOW + 2)
     assert run(bus, ledger, doc({"id": task["task"]})) == []
     assert len(ledger.added) == 1
@@ -81,6 +82,8 @@ def test_a_merge_group_and_a_release_each_queue_one_review_task() -> None:
     assert (group["phase"], f"{REPO}/commit/a1" in group["description"]) == ("p1", True)
     assert (release["phase"], f"{REPO}/releases/tag/v1.2.3" in release["description"]) == ("", True)
     assert len({group["task"], release["task"]}) == 2
+    assert group["title"] == "Review the merge queue group for pull request 7 of widgets"
+    assert "No swarm task carries this change." in release["description"]
 
 
 @pytest.mark.feature("swarm-review-trigger")
