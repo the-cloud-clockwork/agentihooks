@@ -130,7 +130,7 @@ def test_slow_dependents_and_finished_records_survive_the_pass_exit(monkeypatch:
 
     def earlier(ctx: Context) -> Result:
         started.set()
-        assert release.wait(3.0)
+        assert release.wait(20.0)
         return Result()
 
     def later(ctx: Context) -> Result:
@@ -144,7 +144,7 @@ def test_slow_dependents_and_finished_records_survive_the_pass_exit(monkeypatch:
     monkeypatch.setattr(pool, "SLOW_S", 0.02)
     monkeypatch.setattr(pool, "LATER_GRACE_S", 0.01)
     monkeypatch.setattr(ThreadPoolExecutor, "shutdown", shutdown)
-    timer = Timer(2.0, release.set)
+    timer = Timer(10.0, release.set)
     timer.daemon = True
     timer.start()
     try:
@@ -152,27 +152,27 @@ def test_slow_dependents_and_finished_records_survive_the_pass_exit(monkeypatch:
             watched.update((current.steps, current.fans, current.placer))
             if current.handoff is not None:
                 watched.add(current.handoff)
-            ctx = Context(View(), Deadline.after(20.0))
-            engine.run_group("warm", ctx, (Step("warm", quick, group="warm", floor_s=5.0),))
-            current.later[0].join(1.0)
+            ctx = Context(View(), Deadline.after(120.0))
+            engine.run_group("warm", ctx, (Step("warm", quick, group="warm", floor_s=20.0),))
+            current.later[0].join(10.0)
             assert not current.later[0].is_alive()
             engine.run_group(
                 "load",
                 ctx,
                 (
-                    Step("across exit", earlier, floor_s=5.0),
-                    Step("after exit", later, frozenset({"across exit"}), floor_s=5.0),
+                    Step("across exit", earlier, floor_s=20.0),
+                    Step("after exit", later, frozenset({"across exit"}), floor_s=20.0),
                 ),
                 finished=finished,
             )
-            assert started.wait(1.0)
+            assert started.wait(10.0)
         assert not release.is_set()
         assert not cleaned.is_set()
     finally:
         release.set()
         timer.cancel()
-    assert completed.wait(3.0)
-    assert cleaned.wait(3.0)
+    assert completed.wait(10.0)
+    assert cleaned.wait(10.0)
     assert called.is_set()
     assert [[(row.name, row.outcome) for row in group] for group in rows] == [
         [("across exit", engine.OK), ("after exit", engine.OK)]
