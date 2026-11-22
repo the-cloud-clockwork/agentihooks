@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import promotion_watch
+from scripts.swarm import promotion_watch, release_wait
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
@@ -1752,3 +1752,29 @@ def test_a_launch_hotfix_promoted_past_a_red_check_still_files_its_fixer_and_clo
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: tick-pattern-tree"]
     assert [source for _, source, _ in ledger.raised] == ["promotion"]
     assert ledger.closed == []
+
+
+@pytest.mark.feature("master-release-item")
+def test_a_green_promotion_tells_the_master_once_to_check_the_release_rollout(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(release_wait, "lookup", lambda config: (["v2.17.900", "v2.17.901"], ""))
+    config: Any = SimpleNamespace(repo="/repo", repo_origin="github.com/o/r")
+    ledger: Any = Ledger(
+        [{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "open"}],
+        [{"id": "al-1", "source": "promotion", "text": "red", "state": "open"}],
+    )
+    store.redis.set(promotion_watch.key(SLUG, "seen"), 900)
+    actions = promotion_watch.refresh(SLUG, config, store, ledger, ledger.doc(), NOW, gh([GREEN]))
+    assert ledger.closed == [(SLUG, "al-1", "Dev push run 901 of Tests passed.")]
+    assert actions[-1] == "told the master to check the rollout of v2.17.901"
+    item = (
+        "Release v2.17.901 is out from dev push run 901 of Tests: https://github.com/o/r/actions/runs/901. "
+        "Check that the hub, controller and hive images rolled out to v2.17.901."
+    )
+    assert master_items(store) == [item]
+    later = NOW + promotion_watch.REFRESH_MS
+    assert promotion_watch.refresh(SLUG, config, store, ledger, ledger.doc(), later, gh([GREEN])) == []
+    newer = gh([{**GREEN, "id": 902}])
+    assert promotion_watch.refresh(SLUG, config, store, ledger, ledger.doc(), later * 2, newer) == []
+    assert master_items(store) == [item]
