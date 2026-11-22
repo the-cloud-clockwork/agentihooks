@@ -222,7 +222,9 @@ def _launch_triggers(store: RedisStore, slug: str, found: list[dict[str, Any]]) 
     return live
 
 
-def _spawn(slug, config, store, runtime, found, now_ms):
+def _spawn(
+    slug: str, config: Any, store: RedisStore, runtime: Any, found: list[dict[str, Any]], now_ms: int
+) -> list[str]:
     found = _launch_triggers(store, slug, found)
     if not found:
         return []
