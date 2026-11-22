@@ -128,6 +128,15 @@ def test_done_and_out_of_scope_work_carries_no_order_time_and_passes_none_on() -
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
+def test_a_done_or_out_of_scope_phase_passes_its_order_time_to_no_task() -> None:
+    phases = [{"id": "p1", "ordered": order(4), "done": True}, {"id": "p2", "ordered": order(5), "out_of_scope": True}]
+    tasks = [task("a"), task("b", phase="p2"), task("c", ordered=order(7), done=True), task("d", ordered=order(8))]
+    assert orders.stamps(doc(tasks, phases)) == {"d": 8}
+    assert [orders.closed(row) for row in (*phases, tasks[2], tasks[0])] == [True, True, True, False]
+    assert orders.closed({"state": "done"}) and not orders.closed({"state": "pr", "done": False})
+
+
+@pytest.mark.feature("ready-ordered-offer-first")
 def test_tasks_that_wait_on_each_other_end_with_the_earliest_order_time() -> None:
     tasks = [task("a", ordered=order(4), depends_on=["b"]), task("b", ordered=order(2), depends_on=["a"])]
     assert orders.stamps(doc(tasks)) == {"a": 2, "b": 2}
