@@ -218,6 +218,26 @@ def test_a_hand_made_cron_is_adopted_in_place_of_an_older_code_owned_one(env: En
     assert seat_crons.scheduler().get(old).state == "cancelled"
 
 
+@pytest.mark.feature("master-handoff-carries-orders")
+@pytest.mark.parametrize("hand_made_first", [True, False])
+def test_a_hand_made_cron_is_adopted_in_place_of_the_code_owned_one_wherever_it_is_listed(
+    env: Env, monkeypatch: pytest.MonkeyPatch, hand_made_first: bool
+) -> None:
+    created()
+    run(SLUG, "start")
+    [mine] = [view["id"] for view in aimed() if view["expression"] == LOOP]
+    hand = by_hand(LOOP)
+    listed = seat_crons.aimed
+
+    def ordered(on: Any, seat: str) -> list[dict[str, Any]]:
+        return sorted(listed(on, seat), key=lambda view: (view["id"] == hand) != hand_made_first)
+
+    monkeypatch.setattr(seat_crons, "aimed", ordered)
+    run(SLUG, "start")
+    assert [view["id"] for view in aimed() if view["expression"] == LOOP] == [hand]
+    assert seat_crons.scheduler().get(mine).state == "cancelled"
+
+
 @pytest.mark.feature("master-seat-durable-crons")
 def test_the_progress_sheet_cron_follows_the_master_seat_script(env: Env) -> None:
     created()

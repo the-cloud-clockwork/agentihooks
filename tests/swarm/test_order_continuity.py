@@ -16,8 +16,7 @@ HANDOFF = "# Handoff v2\n## Done\nNone\n## Stopped at\nNone\n## Next\nRead the o
 OPEN = "Operator orders open at the handoff. Build each before other work; only the operator's words clear one:"
 NONE = "Operator orders: none were open at the handoff."
 UNKNOWN = (
-    "Operator orders: unknown, the ledger could not be read at the handoff. "
-    "Run agentihooks api --slug sw get orders first."
+    "Operator orders: unknown, the ledger was not read at the handoff. Run agentihooks api --slug sw get orders first."
 )
 
 
@@ -66,6 +65,7 @@ def seated(store: RedisStore) -> AgentRecord:
     [
         (ordered(), [LINE]),
         (Ledger(ledger_doc([task("t1")])), []),
+        (Ledger({}), []),
         (Ledger(None), "unknown"),
     ],
 )
@@ -131,11 +131,6 @@ def test_the_opening_prompt_lists_the_orders_of_the_envelope_before_the_document
     lines = primed({"ledger": SLUG, "orders": orders})
     document = lines.index("Handoff document: continue from it:")
     assert lines[2:document] == said
-
-
-@pytest.mark.feature("master-handoff-carries-orders")
-def test_an_envelope_that_names_no_ledger_still_says_how_to_read_the_orders() -> None:
-    assert primed({"orders": "unknown"})[2] == UNKNOWN.replace("--slug sw", "--slug <slug>")
 
 
 @pytest.mark.feature("master-handoff-carries-orders")

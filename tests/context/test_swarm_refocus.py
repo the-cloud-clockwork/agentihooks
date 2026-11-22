@@ -288,6 +288,8 @@ def test_master_block_clips_active_phases_to_two_shares_when_the_block_fits():
 
 @pytest.mark.feature("master-handoff-carries-orders")
 def test_the_master_block_lists_phases_under_an_operator_order_first_by_id_and_title() -> None:
+    from scripts.swarm.health import order_check
+
     ledger = {
         "title": "T",
         "overview": "O",
@@ -297,12 +299,15 @@ def test_the_master_block_lists_phases_under_an_operator_order_first_by_id_and_t
             {"id": "p3", "title": "Shipped", "description": "Old", "done": True, "ordered": {"at": 3}},
             {"id": "p4", "title": "Rooms", "description": "More", "ordered": {"at": 5, "by": "operator"}},
             {"id": "p5", "title": "Odd", "description": "Bad mark", "ordered": "yes"},
+            {"id": "p6", "title": "Parked", "description": "Dropped", "out_of_scope": True, "ordered": {"at": 1}},
         ],
     }
     assert refocus.build_block(ledger, "master", 1500) == (
         "=== SWARM REFOCUS: T ===\n" + OBLIGATIONS + "Plan: O\nPriorities: \n"
-        "Active phases: operator order p4 Rooms; operator order p2 Seats; Active: Restore intent; Odd: Bad mark"
+        "Active phases: operator order p4 Rooms; operator order p2 Seats; Active: Restore intent; Odd: Bad mark; "
+        "Parked: Dropped"
     )
+    assert [entry["item"] for entry in order_check.read(ledger, "")] == ["phases/p4", "phases/p2"]
 
 
 @pytest.mark.feature("master-handoff-carries-orders")
@@ -336,11 +341,12 @@ def test_listing_the_ordered_phases_loads_no_claim_gate_code() -> None:
         "from hooks.context import swarm_refocus\n"
         "phases = [{'id': 'p1', 'title': 'Seats', 'ordered': {'at': 1}}]\n"
         "block = swarm_refocus.build_block({'phases': phases}, 'master', 1500)\n"
-        "print('operator order p1 Seats' in block, 'scripts.swarm.freeze' in sys.modules)\n"
+        "gate = ('scripts.swarm.freeze', 'scripts.swarm.claim_hold', 'scripts.swarm.phase_state')\n"
+        "print('operator order p1 Seats' in block, [name for name in gate if name in sys.modules])\n"
     )
     root = Path(refocus.__file__).parents[2]
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, cwd=root)
-    assert done.stdout.split() == ["True", "False"]
+    assert done.stdout.split() == ["True", "[]"]
 
 
 @pytest.mark.parametrize("ledger", [{}, {"phases": [{}], "priorities": [{}]}])
