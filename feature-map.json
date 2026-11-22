@@ -10190,6 +10190,7 @@
         "tests/swarm/test_orders.py::test_the_order_time_travels_through_every_link_of_the_work_it_reaches",
         "tests/swarm/test_orders.py::test_the_earliest_order_wins_wherever_two_orders_meet",
         "tests/swarm/test_orders.py::test_done_and_out_of_scope_work_carries_no_order_time_and_passes_none_on",
+        "tests/swarm/test_orders.py::test_a_done_or_out_of_scope_phase_passes_its_order_time_to_no_task",
         "tests/swarm/test_orders.py::test_tasks_that_wait_on_each_other_end_with_the_earliest_order_time",
         "tests/swarm/test_orders.py::test_a_malformed_order_mark_counts_as_no_mark",
         "tests/swarm/test_orders.py::test_a_well_formed_order_mark_gives_its_time",
@@ -12907,6 +12908,28 @@
         "tests/ci_lab/test_plant_publish.py::test_rest_reruns_never_rewind_a_completed_plant",
         "tests/ci_lab/test_plant_publish.py::test_rest_rejects_an_unexpected_object_identity_before_moving_the_ref",
         "tests/ci_lab/test_plant_publish.py::test_rest_rejects_a_divergent_ref_without_writing_objects"
+      ]
+    },
+    {
+      "id": "swarm-orders-read",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "One ledger API read, GET orders or agentihooks api get orders, lists every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first: the item, its title, who filed the order, when and on what proof, the ids of the done tasks under it, every task under it that is neither done nor out of scope with its lane, state and claim gate verdict, the claimable count, the count claimed or in a pull request, and one plain line. A done or out of scope order and a mark with no whole number time are left out. When the open orders pass the reply limit the read answers 413 and names the focus read that lists one order's tasks.",
+      "seam": "scripts.swarm.health.order_check.read, scripts.swarm_ledger.api.routes.ledger_read at orders through the ledger swarm port, and ledger get orders",
+      "tests": [
+        "tests/swarm/test_order_check.py::test_an_ordered_phase_lists_every_task_under_it_with_its_verdict_and_counts",
+        "tests/swarm/test_order_check.py::test_an_ordered_task_lists_itself_and_an_order_with_no_task_lists_none",
+        "tests/swarm/test_order_check.py::test_orders_read_oldest_first_and_an_entry_he_wrote_reads_as_the_request",
+        "tests/swarm/test_order_check.py::test_a_done_or_out_of_scope_order_and_a_malformed_mark_are_left_out",
+        "tests/swarm/test_order_check.py::test_an_out_of_scope_task_under_an_order_is_not_counted_as_unfinished_work",
+        "tests/swarm/test_order_check.py::test_a_task_whose_phase_waits_for_its_planner_reads_that_reason",
+        "tests/swarm/test_order_check.py::test_each_task_under_an_order_reads_the_reason_the_claim_gate_holds_it",
+        "tests/swarm/test_order_check.py::test_ledger_get_orders_prints_every_open_order_through_the_ledger_api",
+        "tests/swarm_ledger/test_orders_api.py::test_the_orders_read_serves_every_open_order",
+        "tests/swarm/test_order_check.py::test_an_orders_read_past_the_reply_limit_names_the_read_that_fits",
+        "tests/swarm/test_order_check.py::test_the_orders_route_reads_with_the_fix_phase_of_its_own_swarm_and_revises_its_reply",
+        "tests/swarm/test_order_check.py::test_an_order_mark_that_names_no_author_and_no_proof_reads_with_an_empty_author"
       ]
     },
     {
