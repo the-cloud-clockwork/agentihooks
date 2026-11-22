@@ -155,7 +155,7 @@ def _ram_room(available: int, total: int, pending: int) -> int:
     return (available * 100 - (100 - HOST_PERCENT) * total) // (100 * AGENT_MB) - pending
 
 
-def _pod(measured: dict, pending: int, figure: AgentCpu) -> list[tuple[int, str, str]]:
+def _pod(measured: dict[str, Any], pending: int, figure: AgentCpu) -> list[tuple[int, str, str]]:
     held = _held(pending)
     limits = []
     if all(field in measured for field in POD_CPU_FIELDS):
@@ -195,7 +195,9 @@ def _first(measured: dict, pending: int) -> list[tuple[int, str, str]]:
     return limits or [(0, MISSING, "no memory reading")]
 
 
-def _swarm(measured: dict, agents: int, max_agents: int | None, figure: AgentCpu) -> list[tuple[int, str, str]]:
+def _swarm(
+    measured: dict[str, Any], agents: int, max_agents: int | None, figure: AgentCpu
+) -> list[tuple[int, str, str]]:
     cpus, total = measured["cpus"], measured["total_mb"]
     cpu = int(SWARM_PERCENT * cpus / figure.centi) - agents
     ram = SWARM_PERCENT * total // (100 * AGENT_MB) - agents
@@ -211,7 +213,7 @@ def _swarm(measured: dict, agents: int, max_agents: int | None, figure: AgentCpu
 
 
 def room(
-    measured: dict | None,
+    measured: dict[str, Any] | None,
     swarm_agents: int | None = None,
     pending: int = 0,
     max_agents: int | None = None,
