@@ -12905,6 +12905,20 @@
       ]
     },
     {
+      "id": "mutation-stats-flake-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stats-flake-ledger",
+      "behaviour": "Mutation stats retries retain the first failure message and traceback in a separate flake ledger and job reports; clean buckets write no rows, caller settings are restored, uploaded parts include current retry records and stats cache records and key construction remain unchanged.",
+      "seam": "scripts.ci_mutation.selection.collect_shard_stats and scripts.ci_mutation.selection.load_or_collect_stats",
+      "tests": [
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_records_a_test_that_fails_once_then_passes_its_rerun_in_the_flake_ledger",
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_with_no_rerun_points_the_flake_ledger_beside_its_output_and_writes_no_row",
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_gives_the_caller_back_its_flake_ledger_setting",
+        "tests/test_ci_mutation_stats.py::test_a_collected_stats_part_keeps_its_bucket_flake_rows_beside_the_part_and_out_of_the_stats_cache",
+        "tests/test_ci_mutation_stats_cache.py::test_collection_parts_reuse_stats_and_keep_the_new_head_identity"
+      ]
+    },
+    {
       "id": "test-wait-bound-ratchet",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-wait-bound-ratchet",
