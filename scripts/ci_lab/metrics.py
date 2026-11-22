@@ -353,14 +353,35 @@ class Latest:
         self.started_ms: int | None = None
         self.built: tuple[Load, int] | None = None
 
+    def _rebuild(self) -> tuple[Load, int]:
+        started = self.clock()
+        self.started_ms = started
+        built = (self.build(started), started)
+        self.built = built
+        return built
+
+    def _background(self) -> None:
+        try:
+            self._rebuild()
+        finally:
+            self.building.release()
+
     def read(self) -> tuple[Load, int]:
         """The last finished load snapshot and the clock reading its build started at, building the first one."""
-        started = self.clock()
-        return self.build(started), started
+        built = self.built
+        if built is None:
+            with self.building:
+                built = self.built or self._rebuild()
+        return built
 
     def refresh(self) -> None:
         """Start one background build once a build has started, the last one started at least ``refresh_ms`` ago and
         none runs."""
+        started = self.started_ms
+        if started is None or self.clock() - started < self.refresh_ms:
+            return
+        if self.building.acquire(blocking=False):
+            threading.Thread(target=self._background, name="ci-lab-load-refresh", daemon=True).start()
 
 
 def respond(snapshot: Callable[[], Load], registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:
