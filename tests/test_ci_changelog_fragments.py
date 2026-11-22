@@ -183,7 +183,7 @@ def test_a_pull_request_that_adds_no_branch_fragment_is_red_naming_the_path(
 
 
 @pytest.mark.feature("changelog-fragment-required-on-pull-request")
-@pytest.mark.parametrize("event", ["workflow_dispatch", None])
+@pytest.mark.parametrize("event", ["workflow_dispatch", "push", "merge_group", None])
 def test_a_run_outside_a_pull_request_that_adds_no_fragment_stays_green(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, event: str | None
 ) -> None:
@@ -204,3 +204,18 @@ def test_a_pull_request_that_adds_its_branch_fragment_is_green(
     base, head = _trees(tmp_path, {"changelog.d/team-eng-1.md": CLEAN_FIXTURE.read_text()})
     assert main(["--base", base, "--head", head, "--branch", "team/eng-1"]) == 0
     assert capsys.readouterr().out.splitlines() == ["Changelog fragments: 1 added, 0 problems"]
+
+
+@pytest.mark.feature("changelog-fragment-required-on-pull-request")
+def test_a_pull_request_that_adds_only_a_misnamed_fragment_is_red_naming_both(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    base, head = _trees(tmp_path, {"changelog.d/notes.md": CLEAN_FIXTURE.read_text()})
+    assert main(["--base", base, "--head", head, "--branch", "team/eng-1"]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "Changelog fragments: 1 added, 2 problems",
+        "::error::changelog.d/notes.md: a pull request from the branch team/eng-1 adds its fragment as "
+        "changelog.d/team-eng-1.md",
+        "::error::changelog.d/team-eng-1.md: a pull request from the branch team/eng-1 adds no fragment at this path",
+    ]

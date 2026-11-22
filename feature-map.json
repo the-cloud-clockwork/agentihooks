@@ -13028,7 +13028,8 @@
       "tests": [
         "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_no_branch_fragment_is_red_naming_the_path",
         "tests/test_ci_changelog_fragments.py::test_a_run_outside_a_pull_request_that_adds_no_fragment_stays_green",
-        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_its_branch_fragment_is_green"
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_its_branch_fragment_is_green",
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_only_a_misnamed_fragment_is_red_naming_both"
       ]
     }
   ],
