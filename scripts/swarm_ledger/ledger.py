@@ -692,7 +692,7 @@ def unordered(state: dict[str, Any], order: dict[str, Any]) -> dict[str, str]:
     if order["id"] not in (state.get("rejected") or ()):
         return {}
     said: list[str] = state.get("_meta", {}).get("warnings", [])
-    reason = "; ".join(text for text in said if text.startswith(f"order on {order['item']} ")) or unexplained(order)
+    reason = next((text for text in said if text.startswith(f"order on {order['item']} ")), unexplained(order))
     print(f"not ordered: {reason}", file=sys.stderr)
     return {"not_ordered": reason}
 

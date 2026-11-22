@@ -500,11 +500,33 @@ def test_an_add_that_files_nothing_new_leaves_the_entry_it_names_unordered(monke
 
 
 @pytest.mark.feature("ledger-order-at-filing")
-def test_an_order_sent_as_a_filing_without_its_add_is_refused():
+def test_the_not_ordered_reason_is_the_servers_refusal_of_that_order(monkeypatch, capsys):
+    said = ["task t9 depends on unknown tasks: t8", "order on phases/p8 refused: no", "order on phases/p7 refused: yes"]
+
+    def call(slug, ops):
+        return {"rejected": [ops[1]["id"]], "applied": [ops[0]["id"]], "_meta": {"warnings": said}}
+
+    monkeypatch.setattr(ledger, "call", call)
+    monkeypatch.setattr("sys.argv", ["ledger", "--slug", SLUG, "--as", MASTER, "phase", "add", "p7", "Seats", *HIS])
+    ledger.main()
+    printed = capsys.readouterr()
+    assert json.loads(printed.out)["not_ordered"] == "order on phases/p7 refused: yes"
+    assert printed.err == "not ordered: order on phases/p7 refused: yes\n"
+
+
+@pytest.mark.feature("ledger-order-at-filing")
+def test_an_order_sent_as_a_filing_marks_only_the_entry_its_own_call_added():
     state, rejected = order("tasks/t1", quote=QUOTE, filing=True)
     assert len(rejected) == 1
     assert refusals(state) == [f"order on tasks/t1 refused: {NOT_ADDED}"]
     assert unmarked(state, "tasks/t1")
+    added = {"op": "task_add", "id": "add-t7", "by": MASTER, "task": "t7", "title": "Fix the writer"}
+    filed = {"op": "order_set", "id": "order-t1", "by": MASTER, "item": "tasks/t1", "quote": QUOTE, "filing": True}
+    state, rejected = core.sync(SLUG, ops=[{**added, "lane": "eng", "phase": "p1"}, filed])
+    assert rejected == ["order-t1"]
+    assert refusals(state) == [f"order on tasks/t1 refused: {NOT_ADDED}"]
+    assert unmarked(state, "tasks/t1")
+    assert row(state, "tasks/t7")["title"] == "Fix the writer"
 
 
 @pytest.mark.feature("ledger-order-at-filing")
