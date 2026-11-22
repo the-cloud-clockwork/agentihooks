@@ -2691,6 +2691,28 @@
       ]
     },
     {
+      "id": "ledger-copy-after-commit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2853",
+      "behaviour": "Ledger host copies are saved or removed only after the Postgres transaction commits, discarded on rollback or failed commit, and never replaced by an older deferred generation.",
+      "seam": "SQLiteLedgerRepository._entry and purge, PostgresLedgerRepository, Connection.commit and rollback, host_entries.Copies",
+      "rules": [
+        "ledger-host-copy-inside-entry"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_slow_host_copy_observes_a_committed_postgres_transaction",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_entry_is_never_written_to_the_host",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_failed_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_closing_without_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_purge_drops_the_copy_after_its_queued_save",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_deferred_older_copy_never_replaces_a_newer_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_successful_commit_runs_each_pending_host_copy_once",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_purge_keeps_its_committed_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_cannot_lower_a_newer_deferred_copy_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_during_a_save_preserves_the_newer_host_generation"
+      ]
+    },
+    {
       "id": "ledger-cold-write",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-write-full-load",
@@ -8826,6 +8848,16 @@
       ]
     },
     {
+      "id": "quota-wait-no-session-cron",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-wait-scheduler-timer",
+      "behaviour": "Quota WAIT directs swarm sessions to bounded swarm waits naming the reset time and standalone sessions to a scheduler timer aimed at the current session, with no session cron instruction and the existing reset safety buffer.",
+      "seam": "hooks.context.quota_policy.render",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_wait_directive_carries_a_cron_for_the_reset"
+      ]
+    },
+    {
       "id": "master-primary-login-reserve-2pct",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-reserve-2pct",
@@ -12003,6 +12035,18 @@
       ]
     },
     {
+      "id": "ci-tool-constraint-files",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-locks",
+      "behaviour": "Every CI tool set has one checked in constraint file under .github/ci-tools: parser, audit, semgrep, build, browser and crypto, and lint tools. Each line of each file is one exact pin, the lock generator writes exactly these files with every root it resolves satisfied by its pin, and the parser file pins the PyYAML version the announced protected workflow candidate installs.",
+      "seam": "bash .github/scripts/lock-ci-tools.sh run with a recording uv, against the checked in .github/ci-tools constraint files",
+      "tests": [
+        "tests/test_ci_test_dependencies.py::test_every_ci_tool_constraint_line_is_an_exact_pin",
+        "tests/test_ci_test_dependencies.py::test_the_ci_tool_generator_writes_each_checked_in_file",
+        "tests/test_ci_test_dependencies.py::test_the_parser_constraint_pins_the_announced_pyyaml"
+      ]
+    },
+    {
       "id": "lab-sandbox-bwrap-pull-request-tier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-bwrap-ci",
@@ -12160,6 +12204,34 @@
       "tests": [
         "tests/swarm/test_naming.py::test_an_agent_number_past_four_digits_builds_and_parses",
         "tests/swarm/test_naming.py::test_names_lists_an_agent_above_ten_thousand_once_build_is_uncapped"
+      ]
+    },
+    {
+      "id": "expert-kind-and-launch-pin",
+      "origin": "operator",
+      "operator_words": "we need to create another swarm branch of agents profile \"expert\" that agenr exper profile will always use claude code fable model mandarory and effort default xhigh, the operator can chose to set max, and the agents will behave like a swarm agent but the difference is that they will not claim tasks",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "An expert is its own agent kind with its own name counter and a numbered lineage seat, and every expert launch or resume runs Claude Code on the Fable model at effort xhigh, or max when its lineage asks for it, whatever the swarm effort range, a lane setting, a saved handoff launch or a recorded session says; an expert launch that lands on another harness is refused.",
+      "seam": "naming.TYPES and templates.DEFAULT_PROFILES for the kind, expert_launch.pin called by HerdrRuntime.spawn and HerdrRuntime.resume, effort_range.bounds for the expert lane, and expert_launch.on_pin through the live check scripts.feature_checks.expert_launch_pin over the agent records",
+      "semgrep_rule": "feature-expert-launch-pin",
+      "tests": [
+        "tests/swarm/test_expert_kind.py::test_an_expert_name_builds_parses_and_counts_on_its_own",
+        "tests/swarm/test_expert_kind.py::test_a_fresh_expert_launch_runs_claude_code_on_fable_at_xhigh",
+        "tests/swarm/test_expert_kind.py::test_the_lineage_effort_decides_the_launch_effort_whatever_the_swarm_range",
+        "tests/swarm/test_expert_kind.py::test_a_successor_launches_fable_at_the_lineage_effort_whatever_its_predecessor_ran",
+        "tests/swarm/test_expert_kind.py::test_an_expert_launch_that_lands_on_another_harness_is_refused",
+        "tests/swarm/test_expert_kind.py::test_a_resumed_expert_relaunches_fable_inside_its_pin",
+        "tests/swarm/test_expert_launch.py::test_an_expert_pick_is_pinned_to_fable_at_the_effort_asked_for_or_xhigh",
+        "tests/swarm/test_expert_launch.py::test_a_recorded_launch_is_on_the_pin_only_with_claude_a_fable_model_and_a_pin_effort",
+        "tests/test_expert_launch_pin_check.py::test_working_experts_on_the_pin_pass_and_are_listed",
+        "tests/test_expert_launch_pin_check.py::test_a_working_expert_off_the_pin_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_launch_pin"
       ]
     },
     {

@@ -551,11 +551,18 @@ class SQLiteLedgerRepository:
             fragments = document(state, None if whole else cached.fragments)
             entry = Entry(row[0], None, fragments.value, fragments, writer)
             self._remember(slug, entry)
-            if self.copies is not None:
-                self.copies.keep(slug, entry, whole)
+            self._keep(connection, slug, entry, whole)
         if whole:
             heap.release()
         return entry
+
+    def _keep(self, connection: sqlite3.Connection, slug: str, entry: Entry, whole: bool) -> None:
+        if self.copies is not None:
+            self.copies.keep(slug, entry, whole)
+
+    def _drop(self, connection: sqlite3.Connection, slug: str) -> None:
+        if self.copies is not None:
+            self.copies.drop(slug)
 
     def _refreshed(self, connection, slug: str, cached: Entry | None, generation: int) -> tuple:
         if cached is None:
@@ -867,8 +874,7 @@ class SQLiteLedgerRepository:
         for table in (*PER_LEDGER, artifact_files.TABLE, media_files.TABLE):
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
-        if self.copies is not None:
-            self.copies.drop(slug)
+        self._drop(connection, slug)
 
     def registry(self, name: str, connection) -> dict:
         return {key: json.loads(value) for key, value in connection.execute(REGISTRY, (name,))}
