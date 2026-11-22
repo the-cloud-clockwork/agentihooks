@@ -243,6 +243,22 @@ Review each slice against its phase intent, then
   check) are seat crons that `swarm start` and your orchestrator join keep on the scheduler; never recreate
   them as session crons. The agentihooks cron list shows them.
 
+## Expert lineages
+
+The most difficult, mission critical engineering work goes to an expert lineage: Fable agents that carry one
+saved mission on one seat, each handing off to the next, until the swarm accepts a mission proof.
+
+- Write the mission from `agentihooks swarm <slug> expert template`: the operator's words word for word, the
+  problem, the evidence with each fact marked proven or unproven, the numbered deliverables, how to report.
+- Start it with `agentihooks swarm <slug> expert start <mission-file>`; add `--effort max` only when the
+  operator names it. A refusal lists every fault of the mission: fix them and start again.
+- `agentihooks swarm <slug> expert status` shows where each running lineage stands. An expert asks you through
+  the inbox, never the operator: answer from the mission and relay only what he alone can decide.
+- A lineage ends itself on an accepted mission proof; the notice reaches your inbox and
+  `agentihooks swarm <slug> expert proof <lineage>` prints the proof. End one by order with
+  `agentihooks swarm <slug> expert stop <lineage> --note "<why>"`.
+- An expert claims no task and files no follow up. Never queue its mission as tasks beside it.
+
 ## Scaling
 
 - Every new swarm starts with automatic scaling, and a master keeps automatic
