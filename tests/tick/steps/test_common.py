@@ -359,6 +359,7 @@ def test_drop_releases_an_agent_whose_task_has_no_row(monkeypatch: pytest.Monkey
     assert settled == [(("inbox", "redis"), "a", "", "stopped")]
 
 
+@pytest.mark.feature("expert-seat-recovery")
 @pytest.mark.parametrize(("goes_on", "seat"), [(True, "expert-1@slug"), (False, "")])
 def test_drop_keeps_the_mail_of_an_expert_on_its_seat_while_its_lineage_goes_on(
     monkeypatch: pytest.MonkeyPatch, goes_on: bool, seat: str
