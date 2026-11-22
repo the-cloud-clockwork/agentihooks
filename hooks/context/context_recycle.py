@@ -42,6 +42,7 @@ _EXPERT_INSTRUCTIONS = (
     "The next expert of your lineage continues the mission from it."
 )
 _HEAD = "CONTEXT RECYCLE — this session holds {used}k tokens, at or over the {limit}k limit. Write a handoff document "
+_DIRECTIVE = _HEAD + _INSTRUCTIONS
 _QUICK_INSTRUCTIONS = (
     "in Handoff v2 form: the line # Handoff v2, then ## Intent, ## Done, ## Stopped at, ## Decisions and promises, "
     "## Next and ## Read first, each once and in that order, None under a heading with nothing to say, and "
@@ -269,7 +270,7 @@ def gate(
     command = str(tool_input.get("command") or "")
     if tool_name == "Bash" and _allowed_command(command, slug):
         return _handoff_refusal(command, slug, env)
-    told = _HEAD + _instructions(env) + (_EXPERT_ALLOWED if _expert(env) else _ALLOWED)
+    told = _HEAD + _EXPERT_INSTRUCTIONS + _EXPERT_ALLOWED if _expert(env) else _DIRECTIVE + _ALLOWED
     return "BLOCKED: " + told.format(used=used // 1000, limit=_gate_limit(), slug=slug)
 
 
