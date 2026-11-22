@@ -1,5 +1,6 @@
 """A hive drain or a hive loss leaves one fyi item at the master seat of each swarm the hive served, once per change."""
 
+import hashlib
 import json
 from collections.abc import Iterator
 from dataclasses import replace
@@ -312,4 +313,33 @@ def test_a_failed_master_send_logs_every_loss_and_still_sends_the_other_masters_
         f"hub: hive {LOST_HIVE} of swarm sw lost; exited execution execution-a of task task-execution-a",
         f"hub: hive {LOST_HIVE} of swarm other lost; exited execution execution-c of task task-execution-c",
         f"hub: hive {LOST_HIVE} of swarm sw lost; its master item failed (redis is down)",
+    ]
+
+
+def _id(*parts: object) -> str:
+    return hashlib.sha256(":".join(str(part) for part in parts).encode()).hexdigest()[:12]
+
+
+@pytest.mark.feature("master-hive-drain-item")
+def test_each_master_item_id_names_its_hive_swarm_and_change_so_a_later_release_never_resends_it(
+    store: RedisStore, hub: SimpleNamespace
+) -> None:
+    from scripts.hive import presence
+
+    _quiet(store)
+    _agents(store)
+    sweep.sweep(store, NOW_MS)
+    record = registry.show(store.redis, HIVE)
+    assert record is not None
+    entry = record["drains"][-1]
+    _start(hub, "sw", "engineer@1", "execution-a")
+    presence.beat(hub.bus, LOST_HIVE, T0)
+
+    _poll_until(hub, T0 + presence.TTL_MS)
+
+    drain = _id("drain", HIVE, "sw", entry["at"], entry["owner"], entry["reason"])
+    loss = _id("lost", LOST_HIVE, "sw", "exited:started:execution-a")
+    assert [item.id for item in _master(store, "sw")] == [drain, loss]
+    assert [item.id for item in _master(store, "other")] == [
+        _id("drain", HIVE, "other", entry["at"], entry["owner"], entry["reason"])
     ]
