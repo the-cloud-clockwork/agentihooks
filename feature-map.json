@@ -7398,7 +7398,7 @@
       "id": "ledger-warm-writer",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-daemon",
-      "behaviour": "One warm ledger writer per host answers each ledger API request on an owner only unix socket in the agentihooks home with the in process answer, as the caller and with the headers the request names, so a socket write, read or refusal returns the same status, body and rows as the in process call. A second writer refuses a live socket, a stale socket file is replaced, and the writer returns once the checkout moves after finishing requests in flight.",
+      "behaviour": "One warm ledger writer per host answers each ledger API request on an owner only unix socket in the agentihooks home with the in process answer, as the caller and with the headers the request names, so a socket write, read or refusal returns the same status, body and rows as the in process call. A second writer refuses a live socket, a stale socket file is replaced, and the writer returns once the checkout moves after finishing requests in flight. A writer that cannot open its store, or whose socket file was removed, still closes and leaves no socket behind.",
       "seam": "scripts.swarm_ledger.warm_writer.serve and ask over scripts.tick.adapters.database_ledger.replied, the answer the in process transport uses",
       "tests": [
         "tests/swarm_ledger/test_warm_writer.py::test_a_socket_write_returns_the_in_process_reply_and_leaves_the_same_rows",

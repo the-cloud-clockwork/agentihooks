@@ -113,8 +113,8 @@ def serve(where: Path, stopped: threading.Event, check_s: float = CHECK_S) -> in
             server.shutdown()
             listening.join()
     finally:
-        server.server_close()
         where.unlink(missing_ok=True)
+        server.server_close()
     return 0
 
 
