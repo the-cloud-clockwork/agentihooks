@@ -68,14 +68,15 @@ def orders_unread(built: dict[str, Any], agent: AgentRecord) -> dict[str, Any]:
 def with_orders(built: dict[str, Any], store: RedisStore, ledger: Any, agent: AgentRecord) -> dict[str, Any]:
     """A master's envelope with one plain line per open operator order, unknown when the ledger could not be read;
     any other lane's envelope as it is."""
-    if agent.lane != MASTER:
-        return built
+    unread = orders_unread(built, agent)
+    if "orders" not in unread:
+        return unread
     slug: str = built["ledger"]
     try:
         found = order_check.read(ledger.state(slug), freeze.fix_phase(store.config(slug)))
     except SwarmError:
-        return orders_unread(built, agent)
-    return {**built, "orders": [entry["line"] for entry in found]}
+        return unread
+    return {**unread, "orders": [entry["line"] for entry in found]}
 
 
 def _launch(store, slug, agent):

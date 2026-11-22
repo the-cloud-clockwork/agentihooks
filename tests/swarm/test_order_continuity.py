@@ -95,7 +95,7 @@ def test_a_master_handoff_through_the_swarm_command_stores_the_open_orders(store
 @pytest.mark.feature("master-handoff-carries-orders")
 def test_a_ledger_that_cannot_be_read_never_stops_a_master_handoff(store: RedisStore) -> None:
     found, _ = cli._hand_off(store, SLUG, seated(store), HANDOFF, "recycle", Ledger(None))
-    assert found["orders"] == "unknown"
+    assert found["orders"] == "unknown" and UNKNOWN in primed(found)
     assert store.handoff(SLUG, MASTER) == HANDOFF
     assert [agent.state for agent in store.agents(SLUG)] == ["finished"]
 
