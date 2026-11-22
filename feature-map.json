@@ -12142,6 +12142,41 @@
       ]
     },
     {
+      "id": "expert-handoff-contract",
+      "origin": "operator",
+      "operator_words": "they will have exactly the same seat, hand off etc, context limit etx but the difference is that they will hace their own expert-handoff skill, that will be exactly very detailed of the original task, the original task must be a path or db saved task, and then then all yhe details done, pending assumptiona, testes, validation ethat that agent did, so the next expert continues exactly where the last agent left",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "An expert hands its lineage's seat off with the same command, envelope, transfer and derived recap as every agent, and its document is held to the expert handoff: it opens with the mission line of the saved mission, names every deliverable of that mission once as done or pending, and carries the assumptions, the tests and the validation, with evidence or the word hypothesis on every done, tests and validation bullet. Every other agent is held to Handoff v2 as before. At the context limit an expert is told the expert form, may still read its mission, and its document is checked against the expert handoff before the command runs.",
+      "seam": "handoff.check.problems under a Contract; handoff.expert.problems for the mission line, the deliverable accounting and the evidence; handoff.contracts.problems called by cli.cmd_handoff and by the context limit gate; context_recycle.directive and gate for an expert; the live check scripts.feature_checks.expert_handoffs over the documents the running lineages hold",
+      "semgrep_rule": "feature-expert-handoff-contract",
+      "tests": [
+        "tests/handoff/test_expert_contract.py::test_a_conforming_expert_handoff_has_no_problems",
+        "tests/handoff/test_expert_contract.py::test_the_mission_section_opens_with_the_mission_line_of_the_lineage",
+        "tests/handoff/test_expert_contract.py::test_each_deliverable_of_the_mission_is_named_once_by_a_done_or_a_pending_bullet",
+        "tests/handoff/test_expert_contract.py::test_done_tests_and_validation_bullets_carry_evidence_or_the_word_hypothesis",
+        "tests/handoff/test_expert_contract.py::test_each_handoff_fault_is_named_under_the_ten_headings_all_at_once",
+        "tests/handoff/test_expert_contract.py::test_a_mission_title_that_names_a_file_is_the_runtimes_wording_and_passes_the_wording_rules",
+        "tests/swarm/test_expert_handoff_command.py::test_an_experts_conforming_handoff_is_stored_under_its_lineage_and_finishes_the_expert",
+        "tests/swarm/test_expert_handoff_command.py::test_an_experts_handoff_v2_document_is_refused_with_each_fault_and_stores_nothing",
+        "tests/swarm/test_expert_handoff_command.py::test_a_worker_is_held_to_handoff_v2_and_its_expert_document_is_refused",
+        "tests/swarm/test_expert_handoff_command.py::test_the_contract_follows_the_lane_of_the_author",
+        "tests/test_context_recycle_expert.py::test_at_the_hard_gate_an_expert_is_told_the_expert_handoff_form",
+        "tests/test_context_recycle_expert.py::test_in_the_preparation_window_an_expert_is_told_the_expert_handoff_form",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_experts_work_is_denied_with_the_expert_form_and_its_allowed_steps",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_expert_still_reads_its_mission",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_experts_handoff_is_checked_against_the_expert_contract_before_the_command",
+        "tests/test_expert_handoffs_check.py::test_each_conforming_handoff_of_a_running_lineage_passes_and_is_listed",
+        "tests/test_expert_handoffs_check.py::test_a_handoff_of_a_running_lineage_that_breaks_the_contract_fails_with_each_fault"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_handoffs"
+      ]
+    },
+    {
       "id": "lane-model-harness-compatibility",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",
