@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -80,7 +81,7 @@ def _host(store: RedisStore, tmp_path: Path, namespace: str = "") -> remove.Host
         clock=clock,
         wall=lambda: NOW_MS / 1000,
         home=tmp_path,
-        ledger=lambda: ledger,
+        ledger=lambda: cast(remove.TaskLedger, ledger),
         namespace=lambda: namespace,
         worktrees=tmp_path / "worktrees",
     )
@@ -203,7 +204,7 @@ def hub(store: RedisStore) -> Iterator[SimpleNamespace]:
     from scripts.hub import hive_loss
 
     clock = Mock(return_value=T0)
-    bus = memory.open_bus(BusConfig(), clock=clock)
+    bus = cast(Any, memory.open_bus(BusConfig(), clock=clock))
     loss = hive_loss.HiveLoss(bus, clock, store)
     loss._emit = Mock()
     yield SimpleNamespace(bus=bus, clock=clock, loss=loss)
