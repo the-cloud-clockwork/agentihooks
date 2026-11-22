@@ -1156,8 +1156,8 @@ still install `.[dev,all]`.
 ### Adding a planner dependency
 
 `test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pins`
-in `tests/test_ci_workflow.py` keeps the step, the planner and `pyproject.toml`
-in agreement. `PLANNER_PACKAGES` in the same file maps each installed
+in `tests/test_ci_workflow.py` keeps the step, the planner and
+`.github/test-requirements.lock` in agreement. `PLANNER_PACKAGES` in the same file maps each installed
 distribution to its import name:
 
 ```python
@@ -1167,9 +1167,9 @@ PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "t
 The test makes two checks:
 
 1. The step's `run` line equals the retry wrapper followed by
-   `uv pip install --system` and the `pyproject.toml` specifier of every
-   `PLANNER_PACKAGES` distribution, quoted and sorted by distribution name.
-   Specifiers are looked up in the project dependencies and the `dev` extra.
+   `uv pip install --system --constraint` with the workflow revision's test
+   requirements lock and the exact lock pin of every `PLANNER_PACKAGES`
+   distribution, quoted and sorted by distribution name.
 2. The third party top level modules imported by `scripts.ci_mutation.plan`,
    `scripts.ci_mutation.__main__` and every `scripts` or `tests` module they
    reach equal the `PLANNER_PACKAGES` import names. Module level imports count,
@@ -1181,17 +1181,18 @@ When a planner module gains a module level import of another third party
 package, change three places in one pull request:
 
 1. Declare the package in the project dependencies or the `dev` extra of
-   `pyproject.toml`, if it is not there yet.
+   `pyproject.toml`, if it is not there yet, and regenerate
+   `.github/test-requirements.lock` so it pins the package.
 2. Add it to `PLANNER_PACKAGES`, distribution name to import name.
-3. Add its `pyproject.toml` specifier to the step, in sorted order. For a
-   hypothetical `packaging>=24.0` dependency the step becomes:
+3. Add its exact lock pin to the step, in sorted order. For a hypothetical
+   `packaging==24.2` lock pin the step becomes:
 
 ```yaml
-        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "packaging>=24.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "packaging==24.2" "pytest==9.1.1" "pyyaml==6.0.3" "tomlkit==0.15.2"
 ```
 
-A changed specifier in `pyproject.toml`, such as a new mutmut pin, also needs
-the same change in the step, or the test fails.
+A changed pin in `.github/test-requirements.lock`, such as a new mutmut
+version, also needs the same change in the step, or the test fails.
 
 ### Inspect the plan job
 
