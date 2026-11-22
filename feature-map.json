@@ -12312,7 +12312,11 @@
         "tests/swarm/test_expert_complete.py::test_the_master_and_the_operator_read_the_proof_a_lineage_ended_on",
         "tests/test_expert_proofs_check.py::test_each_completed_lineage_whose_proof_conforms_passes_and_is_listed",
         "tests/test_expert_proofs_check.py::test_a_completed_lineage_whose_proof_is_gone_or_breaks_the_contract_fails_by_name",
-        "tests/test_context_recycle_expert.py::test_over_the_limit_an_expert_still_ends_its_lineage_on_a_proof"
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_expert_still_ends_its_lineage_on_a_proof",
+        "tests/handoff/test_mission_proof.py::test_the_word_proof_alone_shows_nothing_in_a_mission_proof",
+        "tests/handoff/test_mission_proof.py::test_every_deliverables_bullet_names_a_deliverable",
+        "tests/handoff/test_mission_proof.py::test_a_marker_shaped_line_inside_a_section_is_content_and_hides_nothing",
+        "tests/swarm/test_expert_complete.py::test_a_completion_cut_short_is_finished_by_running_it_again"
       ],
       "live_check": [
         "python",
@@ -12327,8 +12331,8 @@
       "ordered_at": "2026-11-22",
       "ledger_item": "ledger:rig-grade-swarm/phases/p130",
       "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
-      "behaviour": "The end of an expert's turn is refused while its lineage runs, and the refusal names the three ways on: keep working, hand off near the context limit, or end the lineage on a mission proof. The turn ends once the lineage ended, once the expert handed its seat off, and while a declared wait holds. The gate ships at deny, is set per swarm like every gate and sits in the gate registry, so the status line, the ledger page and the gate log carry it.",
-      "seam": "gates.expert_stop.ExpertStop.decide on a Stop call; gates.entry.GATES and gates.catalog.defaults; the live check scripts.feature_checks.expert_stop_gate over the gate modes of each running swarm",
+      "behaviour": "The end of an expert's turn is refused while its lineage runs, and the refusal names the three ways on: keep working, hand off near the context limit, or end the lineage on a mission proof. The turn ends once the lineage ended, once the expert handed its seat off, and while a declared wait holds. The exit command refuses an expert whose lineage runs, so a handoff and a mission proof are its only ways off the seat. The gate ships at deny, is set per swarm like every gate and sits in the gate registry, so the status line, the ledger page and the gate log carry it.",
+      "seam": "gates.expert_stop.ExpertStop.decide on a Stop call; expert_commands.seated for the exit command; gates.entry.GATES and gates.catalog.defaults; the live check scripts.feature_checks.expert_stop_gate over the gate modes of each running swarm",
       "semgrep_rule": "feature-expert-stop-gate",
       "tests": [
         "tests/gates/test_expert_stop.py::test_an_expert_of_a_running_lineage_is_told_how_to_go_on_instead_of_stopping",
@@ -12336,7 +12340,8 @@
         "tests/gates/test_expert_stop.py::test_an_expert_whose_lineage_ended_stops",
         "tests/gates/test_expert_stop.py::test_a_declared_wait_lets_the_expert_stop_until_it_ends",
         "tests/test_expert_stop_gate_check.py::test_each_swarm_that_keeps_the_gate_at_enforce_passes_and_is_listed",
-        "tests/test_expert_stop_gate_check.py::test_a_swarm_that_loosens_the_gate_fails_by_name"
+        "tests/test_expert_stop_gate_check.py::test_a_swarm_that_loosens_the_gate_fails_by_name",
+        "tests/swarm/test_expert_complete.py::test_an_expert_is_held_to_its_seat_while_its_lineage_runs"
       ],
       "live_check": [
         "python",

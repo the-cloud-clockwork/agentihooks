@@ -235,6 +235,25 @@ def test_a_completion_cut_short_is_finished_by_running_it_again(
 
 
 @pytest.mark.feature("expert-stop-gate")
+def test_an_expert_is_held_to_its_seat_while_its_lineage_runs(working: RedisStore) -> None:
+    [expert] = [agent for agent in working.agents("sw") if agent.name == EXPERT]
+    with pytest.raises(SwarmError) as refused:
+        expert_commands.seated(working, "sw", expert)
+    assert str(refused.value) == (
+        f"{EXPERT} works lineage expert-1, which still runs: an expert leaves its seat by a handoff or a mission proof"
+    )
+    for free in (
+        None,
+        replace(expert, state="finished"),
+        replace(expert, lane="eng"),
+        replace(expert, task="expert-9"),
+    ):
+        expert_commands.seated(working, "sw", free)
+    expert_lineage.stop(working, "sw", "expert-1", MASTER, "the order changed", 5)
+    expert_commands.seated(working, "sw", expert)
+    assert expert_lineage.get(working, "sw", "expert-1").state == "stopped"
+
+
 def test_an_expert_of_a_running_lineage_cannot_leave_its_seat_through_exit(
     working: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

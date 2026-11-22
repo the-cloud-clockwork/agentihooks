@@ -30,6 +30,7 @@ NOTICE = (
     "`agentihooks swarm {slug} expert proof {id}`."
 )
 RECAPPED = ("Deliverables", "Validation", "Open items")
+SEATED = "{name} works lineage {lineage}, which still runs: an expert leaves its seat by a handoff or a mission proof"
 
 
 def register(sub: Any) -> None:
@@ -116,7 +117,8 @@ def cmd_mission(store: Any, args: argparse.Namespace) -> None:
 
 
 def cmd_complete(store: Any, args: argparse.Namespace) -> None:
-    """End the lineage the calling expert works, on a mission proof that passes; a faulty proof changes nothing."""
+    """End the lineage the calling expert works, on a mission proof that passes; a faulty proof changes nothing. Run
+    again with the proof the lineage ended on, it finishes what a failure cut short after that end."""
     agent = _occupant(store, args)
     lineage = expert_lineage.get(store, args.slug, agent.task)
     _, text = _document(args.proof, "mission proof")
@@ -125,14 +127,15 @@ def cmd_complete(store: Any, args: argparse.Namespace) -> None:
     if found:
         raise SwarmError(REFUSED + "".join(f"\n- {fault}" for fault in found))
     at = now_ms()
-    ended = expert_lineage.complete(store, args.slug, lineage.id, agent.name, text, at)
+    kept = expert_lineage.proof(store, args.slug, lineage.id) == text
+    ended = lineage if kept else expert_lineage.complete(store, args.slug, lineage.id, agent.name, text, at)
+    inbox = InboxStore(store.redis)
+    notice = NOTICE.format(slug=args.slug, id=ended.id, title=ended.title)
+    inbox.send(agent.name, seat_address(args.slug, MASTER), notice)
     recap = "\n\n".join(f"## {heading}\n{check.section(text, heading)}" for heading in RECAPPED)
     store.memory.add_recap(agent.seat, agent.name, agent.task, recap, at)
     store.put_agent(args.slug, replace(agent, state="finished"))
-    inbox = InboxStore(store.redis)
     exits.settle(inbox, agent.name, "", "completed its mission and left")  # pyright: ignore[reportUnknownMemberType]
-    notice = NOTICE.format(slug=args.slug, id=ended.id, title=ended.title)
-    inbox.send(agent.name, seat_address(args.slug, MASTER), notice)
     print(json.dumps(asdict(ended)))
 
 
@@ -181,6 +184,14 @@ def occupant(agents: list[Any], lineage: str) -> str:
     """The name of the expert that holds the lineage's seat now, empty while it has none."""
     held = (a.name for a in agents if a.lane == expert_launch.LANE and a.task == lineage and a.state != "finished")
     return next(held, "")
+
+
+def seated(store: Any, slug: str, agent: Any) -> None:
+    """Refuse an expert that would leave its seat while its lineage runs; anyone else passes."""
+    if agent is None or agent.lane != expert_launch.LANE or agent.state == "finished":
+        return
+    if any(lineage.id == agent.task for lineage in expert_lineage.running(store, slug)):
+        raise SwarmError(SEATED.format(name=agent.name, lineage=agent.task))
 
 
 def _who() -> Who:

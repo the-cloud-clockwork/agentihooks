@@ -44,7 +44,7 @@ PROOF = check.Contract(
     ),
     evidenced=("Deliverables", "Validation", "Smoke tests", "Regression tests", "Semgrep rules", "Feature map"),
     marker="<!-- mission complete -->",
-    hypotheses=False,
+    shown=True,
 )
 ACCOUNTED = ("Done", "Pending")
 CHECKED = PROOF.evidenced[1:]
@@ -79,6 +79,11 @@ def proof_problems(
     return [
         *check.problems(text.replace(line, expert_mission.address(slug, mission)), resolves, PROOF),
         *_opening(text, line),
+        *(
+            f"Deliverables bullet {number} names no deliverable; start it with D and its number"
+            for number, bullet in enumerate(check.bullets(proven), 1)
+            if not DELIVERABLE.match(bullet)
+        ),
         *_strangers(named, count),
         *(_proven(n, named.count(n)) for n in range(1, count + 1) if named.count(n) != 1),
         *(

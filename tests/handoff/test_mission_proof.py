@@ -13,6 +13,7 @@ ADDRESS = expert_mission.address("sw", GOOD)
 HEADINGS = "Mission, Deliverables, Validation, Smoke tests, Regression tests, Semgrep rules, Feature map, Open items"
 UNSHOWN = "carries no evidence; add the run, command or link that shows it"
 GUESSED = "is labelled hypothesis; a proof holds only what was shown"
+STRAY = "Deliverables bullet {number} names no deliverable; start it with D and its number"
 PLAN, FIRST, SECOND = (f"https://github.com/o/r/pull/{number}" for number in (12, 14, 15))
 D1 = "- D1 Each cause proven against the live ledger, run 4471\n"
 D2 = f"- D2 The plan file, merged in {PLAN}\n"
@@ -87,7 +88,7 @@ def test_a_proof_of_every_deliverable_with_nothing_open_has_no_problems() -> Non
     "old,new,found",
     [
         (D3, "", [_unnamed(3)]),
-        (D1, "- Each cause proven for D1, run 4471\n", [_unnamed(1)]),
+        (D1, "- Each cause proven for D1, run 4471\n", [STRAY.format(number=1), _unnamed(1)]),
         (D2, D2 + D2, ["deliverable D2 is named by 2 bullets; name it once under Deliverables"]),
         (D3, D3 + "- D4 A fourth thing, run 4474\n", ["D4 names no deliverable; the mission has 3"]),
         (D3, D3 + "- D0 Nothing, run 4475\n", ["D0 names no deliverable; the mission has 3"]),
@@ -204,9 +205,7 @@ def test_the_word_proof_still_stands_in_a_handoff() -> None:
     "stray", ["- D1a One more note, run 4476\n", "- The plan held up, run 4477\n", "- d2 again, run 4478\n"]
 )
 def test_every_deliverables_bullet_names_a_deliverable(stray: str) -> None:
-    assert _problems(_swap(D3, D3 + stray)) == [
-        "Deliverables bullet 4 names no deliverable; start it with D and its number"
-    ]
+    assert _problems(_swap(D3, D3 + stray)) == [STRAY.format(number=4)]
 
 
 @pytest.mark.feature("expert-lineage-ends-on-proof")
