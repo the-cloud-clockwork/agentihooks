@@ -1,6 +1,7 @@
 """Refuse a changelog fragment a pull request adds unless it is named from the branch and opens with a section heading."""
 
 import argparse
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -43,8 +44,8 @@ def added(base: Path, head: Path) -> list[str]:
     return [name for name in files if not (base / name).exists()]
 
 
-def grade(base: Path, head: Path, branch: str) -> tuple[list[str], list[str]]:
-    """Return the fragments the head adds and one problem per misnamed fragment and per heading fault."""
+def grade(base: Path, head: Path, branch: str, required: bool) -> tuple[list[str], list[str]]:
+    """Return the added fragments and one problem per misnamed fragment, heading fault and missing required fragment."""
     if not branch:
         raise ValueError("no branch name was given, so the check cannot name the fragment a pull request adds")
     expected = expected_name(branch)
@@ -54,6 +55,8 @@ def grade(base: Path, head: Path, branch: str) -> tuple[list[str], list[str]]:
         if name != expected:
             problems.append(f"{name}: a pull request from the branch {branch} adds its fragment as {expected}")
         problems += [f"{name}: {problem}" for problem in heading_problems((head / name).read_text())]
+    if required and expected not in fragments:
+        problems.append(f"{expected}: a pull request from the branch {branch} adds no fragment at this path")
     return fragments, problems
 
 
@@ -65,7 +68,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--branch", required=True)
     args = parser.parse_args(argv)
     try:
-        fragments, problems = grade(args.base, args.head, args.branch)
+        fragments, problems = grade(
+            args.base, args.head, args.branch, os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
+        )
     except ValueError as exc:
         print(f"::error::{exc}")
         return 1
