@@ -1,0 +1,192 @@
+"""The mission proof: the document a lineage ends on, with every deliverable proven and nothing left open."""
+
+import pytest
+
+from scripts.handoff import check, expert
+from scripts.swarm import expert_mission
+from tests.swarm.test_expert_mission import GOOD
+
+pytestmark = pytest.mark.unit
+
+LINE = expert_mission.line("sw", GOOD)
+ADDRESS = expert_mission.address("sw", GOOD)
+HEADINGS = "Mission, Deliverables, Validation, Smoke tests, Regression tests, Semgrep rules, Feature map, Open items"
+UNSHOWN = "carries no evidence; add the run, command or link that shows it"
+GUESSED = "is labelled hypothesis; a proof holds only what was shown"
+PLAN, FIRST, SECOND = (f"https://github.com/o/r/pull/{number}" for number in (12, 14, 15))
+D1 = "- D1 Each cause proven against the live ledger, run 4471\n"
+D2 = f"- D2 The plan file, merged in {PLAN}\n"
+D3 = f"- D3 The implementation, merged in {FIRST} and {SECOND}\n"
+VALIDATED = "- The deployed tick claimed the batch, `agentihooks swarm sw status` printed 3 claims\n"
+SMOKED = "- The released command ran on the controller, run 4480\n"
+REGRESSED = "- The batch claim tests are green on dev, run 4481\n"
+RULED = "- Rule feature-batch-claim holds on dev, run 4482\n"
+MAPPED = "- Entry batch-claim graded with its live check, run 4483\n"
+PROVEN = {
+    "Validation": VALIDATED,
+    "Smoke tests": SMOKED,
+    "Regression tests": REGRESSED,
+    "Semgrep rules": RULED,
+    "Feature map": MAPPED,
+}
+VALID = f"""# Mission proof
+## Mission
+{LINE}
+## Deliverables
+{D1}{D2}{D3}## Validation
+{VALIDATED}## Smoke tests
+{SMOKED}## Regression tests
+{REGRESSED}## Semgrep rules
+{RULED}## Feature map
+{MAPPED}## Open items
+None
+<!-- mission complete -->
+"""
+FAULTY = f"""# Expert handoff
+## Mission
+{LINE}
+## Validation
+- Checked by hand
+## Deliverables
+- D1 Each cause proven, run 4471
+- D2 The plan file, run 4472
+- D3 The implementation, run 4473
+## Pending
+- D3 one more pass
+## Smoke tests
+## Regression tests
+- Green on dev, run 4481
+## Semgrep rules
+- Rule holds, run 4482
+## Feature map
+- Entry graded, run 4483
+<!-- handoff complete -->
+"""
+
+
+def _swap(old: str, new: str, text: str = VALID) -> str:
+    assert old in text
+    return text.replace(old, new, 1)
+
+
+def _problems(text: str, unmerged: tuple[str, ...] = ()) -> list[str]:
+    return expert.proof_problems(text, lambda address: True, lambda url: url not in unmerged, "sw", GOOD)
+
+
+def _unnamed(number: int) -> str:
+    return f"deliverable D{number} is named by no Deliverables bullet; start one with D{number}"
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+def test_a_proof_of_every_deliverable_with_nothing_open_has_no_problems() -> None:
+    assert _problems(VALID) == []
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+@pytest.mark.parametrize(
+    "old,new,found",
+    [
+        (D3, "", [_unnamed(3)]),
+        (D1, "- Each cause proven for D1, run 4471\n", [_unnamed(1)]),
+        (D2, D2 + D2, ["deliverable D2 is named by 2 bullets; name it once under Deliverables"]),
+        (D3, D3 + "- D4 A fourth thing, run 4474\n", ["D4 names no deliverable; the mission has 3"]),
+        (D3, D3 + "- D0 Nothing, run 4475\n", ["D0 names no deliverable; the mission has 3"]),
+        (D1, "- D1 Each cause proven against the live ledger\n", [f"Deliverables bullet 1 {UNSHOWN}"]),
+        (D2, "- D2 The plan file, a hypothesis until it merges\n", [f"Deliverables bullet 2 {GUESSED}"]),
+        (D2, f"- D2 Hypothesis: the plan file merged in {PLAN}\n", [f"Deliverables bullet 2 {GUESSED}"]),
+    ],
+)
+def test_each_deliverable_of_the_mission_is_proven_by_one_evidenced_bullet(
+    old: str, new: str, found: list[str]
+) -> None:
+    assert _problems(_swap(old, new)) == found
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+@pytest.mark.parametrize("heading", list(PROVEN))
+def test_each_check_section_holds_at_least_one_evidenced_bullet(heading: str) -> None:
+    assert _problems(_swap(PROVEN[heading], "None\n")) == [
+        f"## {heading} holds no bullet; name at least one check with its evidence"
+    ]
+    assert _problems(_swap(PROVEN[heading], "Checked, run 4490.\n")) == [
+        f"## {heading} holds no bullet; name at least one check with its evidence"
+    ]
+    assert _problems(_swap(PROVEN[heading], "- Checked by hand\n")) == [f"{heading} bullet 1 {UNSHOWN}"]
+    guessed = PROVEN[heading] + "- A hypothesis: it also holds under load, run 4491\n"
+    assert _problems(_swap(PROVEN[heading], guessed)) == [f"{heading} bullet 2 {GUESSED}"]
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+@pytest.mark.parametrize("left", ["- D3 needs one more pass", "One doc line is missing.", "none", "None."])
+def test_a_proof_with_anything_left_open_is_refused(left: str) -> None:
+    assert _problems(_swap("## Open items\nNone\n", f"## Open items\n{left}\n")) == [
+        "## Open items must be None; a lineage ends with nothing open"
+    ]
+
+
+def test_an_empty_open_items_section_is_told_to_say_none_once() -> None:
+    assert _problems(_swap("## Open items\nNone\n", "## Open items\n\n")) == [
+        "## Open items is empty; write None when there is nothing to say"
+    ]
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+def test_every_pull_request_named_under_deliverables_is_merged() -> None:
+    assert _problems(VALID, unmerged=(FIRST,)) == [f"pull request {FIRST} is not merged"]
+    assert _problems(VALID, unmerged=(SECOND, PLAN)) == [
+        f"pull request {PLAN} is not merged",
+        f"pull request {SECOND} is not merged",
+    ]
+    elsewhere = _swap(VALIDATED, f"- Reviewed in https://github.com/o/r/pull/99, run 4484\n{VALIDATED}")
+    assert _problems(elsewhere, unmerged=("https://github.com/o/r/pull/99",)) == []
+    assert _problems(_swap(D2, D2.replace("merged in", f"merged in {PLAN} then")), unmerged=(PLAN,)) == [
+        f"pull request {PLAN} is not merged"
+    ]
+
+
+@pytest.mark.parametrize("opened", [ADDRESS, expert_mission.line("other", GOOD), "None"])
+def test_the_mission_section_opens_with_the_mission_line_of_the_lineage(opened: str) -> None:
+    assert _problems(_swap(f"## Mission\n{LINE}\n", f"## Mission\n{opened}\n")) == [
+        f"## Mission must open with the mission line: {LINE}"
+    ]
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+def test_each_fault_of_a_proof_is_named_under_its_eight_headings_all_at_once() -> None:
+    assert _problems(FAULTY, unmerged=()) == [
+        "the first line must be # Mission proof",
+        f"## Pending is not one of the eight headings: {HEADINGS}",
+        "## Open items is missing",
+        f"the headings are out of order; keep {HEADINGS}",
+        "## Smoke tests is empty; write None when there is nothing to say",
+        "the completion marker <!-- mission complete --> must be the last line",
+        f"Validation bullet 1 {UNSHOWN}",
+        "## Smoke tests holds no bullet; name at least one check with its evidence",
+    ]
+
+
+def test_a_handoff_marker_does_not_end_a_proof() -> None:
+    assert _problems(_swap("<!-- mission complete -->", "<!-- handoff complete -->")) == [
+        "the completion marker <!-- mission complete --> must be the last line"
+    ]
+
+
+def test_a_handoff_v2_that_ends_on_the_proof_marker_is_told_its_own_marker_and_nothing_else() -> None:
+    handoff = (
+        "# Handoff v2\n## Intent\n- Refuse a malformed handoff\n## Done\nNone\n## Stopped at\n- Seam two\n"
+        "## Decisions and promises\n- Keep the cache out\n## Next\n- Run it\n## Read first\nNone\n"
+        "<!-- mission complete -->\n"
+    )
+    assert check.problems(handoff, lambda address: False) == [
+        "the completion marker <!-- handoff complete --> must be the last line"
+    ]
+
+
+def test_a_mission_title_that_names_a_file_passes_the_wording_rules() -> None:
+    mission = GOOD.replace("Keep an ordered batch built", "Split scripts/swarm/cli.py under line 3000")
+    text = VALID.replace(LINE, expert_mission.line("sw", mission))
+    assert expert.proof_problems(text, lambda address: True, lambda url: True, "sw", mission) == []
+    pathed = _swap("The deployed tick", "The tick in hooks/context/recycle.py", text)
+    assert expert.proof_problems(pathed, lambda address: True, lambda url: True, "sw", mission) == [
+        "file path hooks/context/recycle.py; name the module, type or command instead"
+    ]

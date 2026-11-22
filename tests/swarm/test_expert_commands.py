@@ -145,7 +145,7 @@ def test_status_lists_each_running_lineage_and_shows_an_ended_one_by_name(
     assert capsys.readouterr().out == f"expert-2 running at max, no expert yet: {TITLE} (started by operator)\n"
     assert run("sw", "expert", "status", "expert-3") == 0
     assert capsys.readouterr().out == (
-        f"expert-3 stopped at xhigh, no expert yet: {TITLE} (started by {MASTER}, ended by {ENGINEER}: superseded)\n"
+        f"expert-3 stopped at xhigh: {TITLE} (started by {MASTER}, ended by {ENGINEER}: superseded)\n"
     )
     assert run("sw", "expert", "status", "expert-7") == 1
     assert capsys.readouterr().err == "swarm: swarm sw has no expert lineage expert-7\n"

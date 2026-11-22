@@ -105,6 +105,21 @@ def stop(store: Any, slug: str, name: str, by: str, note: str, at: int) -> Linea
     return _end(store, slug, name, lambda found: replace(found, state=STOPPED, ended_by=by, ended_at=at, note=note))
 
 
+def complete(store: Any, slug: str, name: str, by: str, proof: str, at: int) -> Lineage:
+    """End a running lineage on the mission proof its expert handed in, and keep that proof."""
+    raise NotImplementedError
+
+
+def proof(store: Any, slug: str, name: str) -> str:
+    """The mission proof the lineage ended on, empty when it holds none."""
+    raise NotImplementedError
+
+
+def every(store: Any, slug: str) -> list[Lineage]:
+    """Every lineage the swarm ever started, in the order of their ids."""
+    raise NotImplementedError
+
+
 def _end(store: Any, slug: str, name: str, change: Callable[[Lineage], Lineage]) -> Lineage:
     key = store.key(slug, LINEAGES)
 

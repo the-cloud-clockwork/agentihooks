@@ -47,6 +47,13 @@ def problems(text: str, resolves: Callable[[str], object], slug: str, mission: s
     ]
 
 
+def proof_problems(
+    text: str, resolves: Callable[[str], object], merged: Callable[[str], object], slug: str, mission: str
+) -> list[str]:
+    """Every structural problem of a mission proof for the lineage that works the given saved mission text."""
+    raise NotImplementedError
+
+
 def _named(text: str, heading: str) -> list[int]:
     found = (DELIVERABLE.match(bullet) for bullet in check.bullets(check.section(text, heading)))
     return [int(match.group(1)) for match in found if match]
