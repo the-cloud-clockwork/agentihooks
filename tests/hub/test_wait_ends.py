@@ -38,6 +38,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(waits, "required_green", lambda target, head: True)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
+    store.put_agent("sw", AgentRecord(name="engineer@a1b2c3-0002", lane="eng", task="t2", seat="eng-2@sw"))
     pulls = {URL: GREEN}
     reads: list[str] = []
 
@@ -54,7 +55,9 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     def told() -> list[str]:
         return [item.text for item in InboxStore(store.redis).inbox("eng-1@sw")]
 
-    return SimpleNamespace(store=store, pulls=pulls, reads=reads, react=react, hold=hold, told=told)
+    return SimpleNamespace(
+        store=store, pulls=pulls, reads=reads, github=github, ledger=ledger, react=react, hold=hold, told=told
+    )
 
 
 @pytest.mark.parametrize(
@@ -114,6 +117,17 @@ def test_a_duplicate_event_sends_no_second_item(rig: SimpleNamespace) -> None:
     rig.react.handle(_event())
     rig.react.handle(_event())
     assert rig.told() == [_ended(f"checks on {URL}, now green")]
+
+
+@pytest.mark.feature("wait-ends-on-pull-event")
+def test_a_merge_wait_on_an_open_dependency_pull_request_holds_on_its_event(rig: SimpleNamespace) -> None:
+    held = {"kind": "merge", "target": OTHER}
+    rig.hold(held)
+    rig.pulls[OTHER] = PullRequest("OPEN", None, 1, True, True, failed=("unit",))
+    late = wait_ends.WaitEnds(rig.store, rig.ledger, rig.github, clock=lambda: waits.FRESH_MS + 5_000)
+    late.handle(_event("merge.dequeued", OTHER))
+    assert idle.wait(rig.store.redis, "sw", ME) == {"until": 10_000_000, "reason": "", "at": 1, "on": held}
+    assert rig.told() == []
 
 
 @pytest.mark.feature("wait-ends-on-pull-event")
