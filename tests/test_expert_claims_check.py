@@ -7,6 +7,7 @@ import pytest
 
 from scripts.feature_checks import expert_claims as check
 from scripts.swarm.store import SwarmError
+from tests.swarm.client_class import client_class
 
 pytestmark = pytest.mark.unit
 
@@ -88,8 +89,7 @@ def test_with_no_store_given_the_check_reads_the_swarm_store_and_the_ledger(
     found = Store(("rig",))
     monkeypatch.setattr(swarm_store, "redis_client", lambda: client)
     monkeypatch.setattr(swarm_store, "RedisStore", lambda redis: found if redis is client else None)
-    monkeypatch.setattr(
-        ledger_client, "LedgerClient", lambda: SimpleNamespace(tasks=_ledger({"rig": [_row("t1", EXPERT)]}))
-    )
+    ledger = SimpleNamespace(tasks=_ledger({"rig": [_row("t1", EXPERT)]}))
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(ledger))
     assert check.main() == 1
     assert capsys.readouterr().out == f"FAIL: rig task t1 is claimed by the expert {EXPERT}\n"

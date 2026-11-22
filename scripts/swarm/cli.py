@@ -2169,10 +2169,11 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
         result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
         hotfix = args.action == "queue" and _hotfix_master(store, args)
-        master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
+        caller = _me(store, args) if args.action != "state" and not hotfix else None
+        master = args.action == "queue" and caller is not None and caller.lane == MASTER
         stalled = master_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
         hotfix = hotfix or stalled is not None
-        tasked = args.action != "state" and not hotfix and _me(store, args).lane != expert_launch.LANE
+        tasked = caller is not None and not hotfix and caller.lane != expert_launch.LANE
         agent = _worker(store, args) if tasked else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)

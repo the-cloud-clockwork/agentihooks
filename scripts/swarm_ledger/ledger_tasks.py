@@ -583,7 +583,7 @@ def rank_refusal(by, field="rank"):
 
 
 def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
-    if refused := expert_refusal(op["by"], "changes no task"):
+    if refused := expert_refusal(op.get("by", ""), "changes no task"):
         return refused
     if (
         meta is not None

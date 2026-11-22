@@ -119,6 +119,13 @@ def test_a_master_still_changes_a_task() -> None:
     assert rejected == [] and rows(state)["t1"]["difficulty"] == "M"
 
 
+def test_a_task_change_that_names_no_author_is_judged_as_before() -> None:
+    change = {"item": "tasks/t1", "fields": {"state": "open"}}
+    assert ledger_tasks.update_refusal({"tasks": [], "phases": []}, change, {"outcomes": {"t1": {}}}) == (
+        "committed outcomes require controller reconciliation"
+    )
+
+
 @pytest.mark.feature("expert-claims-nothing")
 def test_an_expert_neither_groups_nor_releases_nor_splits_tasks() -> None:
     state, rejected, warning = sent(grouped(EXPERT))
