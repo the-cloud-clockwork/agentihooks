@@ -912,6 +912,79 @@ def test_every_ci_tool_install_pins_an_exact_version_under_a_checked_in_constrai
             {"tools/plant.py": f'ARGV = ("pip", "install", "--constraint", "{PLANT_LOCK}", "pyyaml==6.0.3")\n'},
             id="python file a step runs with a versioned interpreter",
         ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "ruff==0.15.12\n--requirement=loose.txt\n",
+                ".github/ci-tools/loose.txt": "pytest>=8\n",
+            },
+            {".github/ci-tools/loose.txt": "pytest==9.0.1\n"},
+            id="requirements lock including a floating file by an equals option",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "-rloose.txt\n",
+                ".github/ci-tools/loose.txt": "pytest>=8\n",
+            },
+            {".github/ci-tools/loose.txt": "pytest==9.0.1\n"},
+            id="requirements lock including a floating file with no space",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "--editable=git+https://example.com/x.git\n",
+            },
+            {".github/ci-tools/tools.lock": "ruff==0.15.12\n"},
+            id="editable url line in a requirements lock",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"pip install -c {PLANT_LOCK} -r .github/ci-tools/tools.lock"),
+                ".github/ci-tools/tools.lock": "-e.[dev]\n",
+            },
+            {".github/ci-tools/tools.lock": "ruff==0.15.12\n"},
+            id="editable line with no space in a requirements lock",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job(f"uv pip install --system -c {CONSTRAINTS} pyyaml==6.0.3"),
+                CONSTRAINTS: "--constraint test-requirements.lock\n",
+                LOCK: PLANT_PINS + "coverage>=7.4\n",
+            },
+            {LOCK: PLANT_PINS},
+            id="floating line in the lock the test constraints chain",
+        ),
+        pytest.param(
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\nARGS = ["ruff==0.15.12"]\nfor ARGS in (["ruff"],):\n'
+                    '    CMD = ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n'
+                )
+            },
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\nARGS = ["ruff==0.15.12"]\nfor NAMES in (["ruff"],):\n'
+                    '    CMD = ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n'
+                )
+            },
+            id="python list name rebound by a loop",
+        ),
+        pytest.param(
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\nARGS = ["ruff==0.15.12"]\n\n\ndef install(ARGS):\n'
+                    '    return ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n'
+                )
+            },
+            {
+                "scripts/ci_plant.py": (
+                    f'LOCK = "{LOCK}"\nARGS = ["ruff==0.15.12"]\n\n\ndef install(names):\n'
+                    '    return ["uv", "pip", "install", "--constraint", LOCK, *ARGS]\n'
+                )
+            },
+            id="python list name shadowed by a parameter",
+        ),
     ],
 )
 def test_the_install_walker_reports_a_planted_floating_install(
@@ -994,6 +1067,14 @@ def test_the_install_walker_reports_a_planted_floating_install(
                 ".github/ci-tools/hashed.lock": "ruff==0.15.12 \\\n    --hash=sha256:0000\n",
             },
             id="hash continued constraint line",
+        ),
+        pytest.param(
+            {
+                ".github/workflows/plant.yml": _job("pip install -r .github/ci-tools/tools.lock ruff==0.15.12"),
+                ".github/ci-tools/tools.lock": "-r pins.txt\n",
+                ".github/ci-tools/pins.txt": "ruff==0.15.12\n",
+            },
+            id="requirements lock nesting a pinned file",
         ),
     ],
 )
