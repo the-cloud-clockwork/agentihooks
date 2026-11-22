@@ -83,15 +83,22 @@ def relayed(op, meta) -> str:
     return verified(op["by"], op["quote"]) if master else ""
 
 
-def orchestrator_words(op: dict[str, Any], ctx: Any) -> str:
-    """The verified quoted span of an orchestrator's relay, or empty with the refusal recorded on ctx."""
-    if ctx.meta["members"].get(op["by"], {}).get("role") != "orchestrator":
-        ctx.refused.append(f"relay on {op['item']} refused: {op['by']} is not an orchestrator of this ledger")
+def orchestrator(op: dict[str, Any], ctx: Any, what: str) -> bool:
+    """Whether the op's author is the ledger's orchestrator, with the refusal recorded on ctx when it is not."""
+    if ctx.meta["members"].get(op["by"], {}).get("role") == "orchestrator":
+        return True
+    ctx.refused.append(f"{what} on {op['item']} refused: {op['by']} is not an orchestrator of this ledger")
+    return False
+
+
+def orchestrator_words(op: dict[str, Any], ctx: Any, what: str = "relay") -> str:
+    """The verified quoted span of an orchestrator's op, or empty with the refusal recorded on ctx."""
+    if not orchestrator(op, ctx, what):
         return ""
     words = verified(op["by"], op["quote"])
     if not words:
         ctx.refused.append(
-            f"relay on {op['item']} refused: the server could not verify at least three quoted operator words "
+            f"{what} on {op['item']} refused: the server could not verify at least three quoted operator words "
             "in its recorded prompts or answers"
         )
     return words
