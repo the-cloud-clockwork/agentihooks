@@ -395,12 +395,12 @@ def test_the_claim_key_yields_focus_when_the_lane_share_is_full(store):
 
 @pytest.mark.feature("swarm-plan-cap-floor")
 @pytest.mark.parametrize(
-    ("weight", "found", "caps", "seats", "head"),
+    ("found", "fields", "seats", "head"),
     [
-        (50, focus_split, {"max_eng": 2}, {"eng": 2, "ci": 0, "plan": 0}, ["h"]),
-        (100, focus_split, {"max_eng": 2}, {"eng": 2, "ci": 0, "plan": 0}, ["h"]),
-        (100, focused_plan, {"max_plan": 0}, {"eng": 0, "ci": 0, "plan": 1}, ["p2"]),
-        (100, held_plan, {"max_plan": 1}, {"eng": 0, "ci": 0, "plan": 1}, ["p1"]),
+        (focus_split, {"focus_weight": 50, "max_eng": 2}, {"eng": 2, "ci": 0, "plan": 0}, ["h"]),
+        (focus_split, {"focus_weight": 100, "max_eng": 2}, {"eng": 2, "ci": 0, "plan": 0}, ["h"]),
+        (focused_plan, {"focus_weight": 100, "max_plan": 0}, {"eng": 0, "ci": 0, "plan": 1}, ["p2"]),
+        (held_plan, {"focus_weight": 100, "max_plan": 1}, {"eng": 0, "ci": 0, "plan": 1}, ["p1"]),
     ],
     ids=["half weight", "full weight", "plan work under a stored zero cap", "plan lane share full"],
 )
@@ -408,13 +408,12 @@ def test_at_delegate_the_queue_holds_only_focused_work_at_any_focus_weight(
     store: RedisStore,
     home: Any,
     shipped: Any,
-    weight: int,
     found: Callable[[], dict[str, Any]],
-    caps: dict[str, int],
+    fields: dict[str, int],
     seats: dict[str, int],
     head: list[str],
 ) -> None:
-    config = store.update(SLUG, autonomy="delegate", focus_weight=weight, **caps)
+    config = store.update(SLUG, autonomy="delegate", **fields)
     store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"effective": seats}))
     ledger = Ledger()
     rank_pass(SLUG, config, store, ledger, found(), NOW)
