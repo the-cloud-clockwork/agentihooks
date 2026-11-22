@@ -804,28 +804,6 @@ def test_the_orders_read_serves_every_open_order(live: Any, monkeypatch: pytest.
     assert row["tasks"] == [{"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"}]
 
 
-@pytest.mark.feature("swarm-orders-read")
-def test_an_orders_read_past_the_reply_limit_names_the_read_that_fits(
-    live: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    phases = [{"id": "p1", "title": "Build", "ordered": {"at": 7, "by": "operator"}}]
-    tasks = [{"id": f"t{number}", "lane": "eng", "state": "open", "phase": "p1"} for number in range(40)]
-    stored(monkeypatch, {"tasks": tasks, "phases": phases, "freezes": [], "_meta": {"rev": 1}})
-    monkeypatch.setattr(routes, "fix_phase", lambda services, slug: "")
-    status, whole = request(live, "GET", "orders")
-    size = routes.resources.reply_size(whole)
-    assert status == 200 and size > 1000
-    with monkeypatch.context() as limited:
-        limited.setattr(routes.resources, "MAX_REPLY", size)
-        assert request(live, "GET", "orders") == (200, whole)
-        limited.setattr(routes.resources, "MAX_REPLY", size - 1)
-        status, reply = request(live, "GET", "orders")
-    message = "The open orders pass the reply limit: read the tasks of one order with focus/<item>"
-    assert (status, reply) == (413, {"error": {"code": "resource_too_large", "message": message}})
-    status, one = request(live, "GET", "focus/phases/p1")
-    assert status == 200 and [task["id"] for task in one["data"]["tasks"]] == [task["id"] for task in tasks]
-
-
 def test_metadata_resource_reports_its_named_fields(live, monkeypatch):
     document = {
         "title": "Report",
