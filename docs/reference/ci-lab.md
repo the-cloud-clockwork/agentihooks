@@ -40,7 +40,7 @@ Both services run from the installed wheel, which ships `hooks`, `scripts` and `
 |---|---|---|
 | `tests/ci_lab/test_wheel_imports.py` | Pull request tests | Any module of `scripts.ci_lab`, or `scripts.ci_test_plan`, imports the `tests` package |
 | `shipped-code-imports-tests` | Semgrep incident rules | New code under `scripts` or `hooks` imports the `tests` package |
-| Import the lab scheduler's modules inside the swarm image | Swarm container smoke | The built swarm image cannot import the scheduler, interaction, test expansion or the CI test planner |
+| Import the lab scheduler's modules inside the swarm image | Swarm container smoke | The built swarm image cannot import a module of `scripts.ci_lab`, the executors and mutation expansion the scheduler loads at call time included, or the CI test planner |
 
 `docker/ci-lab/smoke.sh` also imports the worker's executors, test runner and pricing inside the
 built CI lab image.
@@ -138,10 +138,10 @@ grading passes with a half second sleep, then exit:
 agentihooks ci-lab-scheduler --interval 0.5 --passes 3
 ```
 
-`--passes 0` also runs indefinitely. A finite run starts both listeners, consumes heads, grades
+`--passes 0` also runs indefinitely. A finite run starts all three listeners, consumes heads, grades
 work and ticks the relay just like the service; use `--self-test` for an offline check. Each
 pass prints its scheduler and relay actions to standard output. The CLI has no host or port
-options: it binds all interfaces on 8800 and 9108. The chart or container network controls
+options: it binds all interfaces on 8800, 8801 and 9108. The chart or container network controls
 which clients can reach them.
 
 ### Verify the running service
@@ -175,6 +175,7 @@ with `{"error": "a grade lookup names one full commit sha"}`. See
 |---|---|
 | Startup fails before either listener appears | Check that `CI_LAB_RUNTIME_CONFIG` names a readable YAML file and run the runtime validator; missing required environment names also prevent startup |
 | Startup fails while reading the repository | Check `git` on `PATH`, the shared mirror mount, private mirror store permissions, repository authentication and access to `dev` |
+| Startup fails with a `jsonschema.ValidationError` | Dev's `delivery.yaml` breaks its schema; the retry policy read validates it. See the troubleshooting table of [Retry policy](#retry-policy) |
 | Startup cannot reach a dependency | Check the Redis and object store settings and bus authentication; provision the lab heads stream and consumers before starting the scheduler |
 | The scheduler port is reachable but metrics are not | Route port 9108 separately and request `/metrics`; port 8800 serves the scheduler API |
 | Capacity shows zero slots or an estimate differs from observed duration | Check worker lease polls and their free slot offers; the load discards stale offers and uses fixed unit estimates |
@@ -200,7 +201,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
 | `CI_LAB_WORK_ROOT` | no | yes | Folder of the worker's private git store, its trees, venvs and unit runs and reports |
-| `CI_LAB_MANIFEST` | no | yes | Path of the dependency manifest JSON a test unit's batch is checked against |
+| `CI_LAB_MANIFEST` | no | yes | Legacy manifest path accepted by worker settings; test batches carry their selected dependency records in the lease and do not read this file |
 | `CI_LAB_FLAKES` | no | yes | Path of the flake ledger a test unit appends to when its retry passes |
 | `CI_LAB_MUTATION_CACHE` | no | yes | Folder of the mutation stats cache, keyed by tree content |
 | `CI_LAB_KILLERS` | no | yes | Path of the kill memory that orders a mutant's tests, its remembered killer first |
@@ -221,14 +222,17 @@ environment refuses to start. It exits 1 and names each variable it found. Only 
 
 | Port | Service | Serves |
 |---|---|---|
-| `8800` | scheduler | The lease API workers call, the [control routes](#control-routes) a swarm calls, [`/capacity`](#capacity-document) and [`/grades/<sha>`](#grades-of-a-commit) |
+| `8800` | scheduler | The lease API workers call, [`/capacity`](#capacity-document) and [`/grades/<sha>`](#grades-of-a-commit); the control paths answer 404 here |
+| `8801` | scheduler | The [control routes](#control-routes) a swarm calls, and nothing else |
 | `9108` | scheduler and worker | Prometheus metrics at `/metrics` |
 
 ## Control routes
 
-The scheduler port serves three routes a swarm calls with `Authorization: Bearer <token>`, the token being the
-scheduler's `CI_LAB_CONTROL_TOKEN`. Any other token, or a scheduler without one, answers 401 and changes nothing. A
-head is a pull request head commit or its head branch. The state lives in the lab Redis.
+The control port, `8801`, serves three routes a swarm calls with `Authorization: Bearer <token>`, the token being the
+scheduler's `CI_LAB_CONTROL_TOKEN`. Any other token, or a scheduler without one, answers 401 and changes nothing; any
+other path answers 404. The lease port does not serve them, so a network policy can open the control port to hive
+pods while the lease port stays closed. A head is a pull request head commit or its head branch. The state lives in
+the lab Redis.
 
 | Route | Body | Effect |
 |---|---|---|
@@ -239,9 +243,9 @@ head is a pull request head commit or its head branch. The state lives in the la
 `agentihooks swarm <slug> panic on --fix <url>` marks the fix branches and the recorded fixer branches hotfix and
 pauses `pull_request` except them, printing `lab paused pull request grading except <heads>`; `panic off`, and the
 release of an automatic panic, resume the lab only when that swarm's panic paused it. `agentihooks swarm <slug> merge priority <url>` marks
-the pull request head hotfix and records the lab's reply under `lab` in the queue journal. The swarm reads the lab
-address set with `agentihooks swarm <slug> set lab-url=<address>` and the token from `CI_LAB_CONTROL_TOKEN` on its
-host.
+the pull request head hotfix and records the lab's reply under `lab` in the queue journal. The swarm sends these
+orders to port `8801` on the host of the lab address set with `agentihooks swarm <slug> set lab-url=<address>`, with
+the token from `CI_LAB_CONTROL_TOKEN` on its host.
 
 ## Metrics
 
@@ -268,8 +272,9 @@ host.
 | `ci_lab_github_rate_remaining` | | `GITHUB_RATE_REMAINING` |
 | `ci_lab_verdict_mismatch_total` | `gate` | `VERDICT_MISMATCH_TOTAL` |
 
-The scheduler sets every metric its queue, lease and worker state answers, on one
-`scripts.ci_lab.metrics.Registry` the `Scheduler` builds and `listen` serves on 9108:
+The scheduler sets every metric its queue, lease and worker state answers, the node mirror's age
+and the GitHub calls left, on one `scripts.ci_lab.metrics.Registry` the `Scheduler` builds and
+`listen` serves on 9108:
 
 | Metric | Set from |
 |---|---|
@@ -281,12 +286,14 @@ The scheduler sets every metric its queue, lease and worker state answers, on on
 | `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `cache="verdict"`: each verdict store lookup a grade's placement makes; `cache="git"` and `cache="uv"`: the lookups a finished attempt's report carries under `caches` |
 | `ci_lab_heads_graded_total` | Each grade a pass closes, by class and conclusion |
 | `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | Each expired lease a pass requeues or marks lost |
+| `ci_lab_mirror_age_seconds` | `metrics.observe_mirror` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the epoch second in the `fetched-at` stamp under `CI_LAB_GIT_MIRROR`, never below zero; no sample while the stamp is missing or holds no whole number. The node cache writes that stamp; the scheduler's own fetch writes none |
+| `ci_lab_github_rate_remaining` | `metrics.observe_rate` on every check runs answer the scheduler's and the relay's `Checks` posters get, retries and refusals included: its `x-ratelimit-remaining` header when that holds a whole number; an answer without one keeps the last value |
 
 A worker unit's report carries `caches` from `scripts.ci_lab.caches.report`: per revision it
 leased, a git hit when the pod store already held the commit and a miss when `Mirror.fetch`
 fetched it; per venv, a uv hit when it reused one and a miss when `venvs.venv_for` built it.
-`ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` and `ci_lab_verdict_mismatch_total`
-answer from no queue, lease or worker state and stay without samples. The counters live in the
+`ci_lab_verdict_mismatch_total` answers from no queue, lease or worker state and stays without
+samples. The counters live in the
 scheduler process and start from zero when it restarts, so KEDA triggers and alerts read them
 through `rate()` or `increase()`.
 
@@ -327,7 +334,9 @@ The scheduler service builds the snapshot on every request with
 A worker's lease poll records its free slots when the poll starts and what its grants leave when
 it returns (`Queue.offer`); each load forgets the offers older than the ready window with
 `Queue.prune`, one script that reads and deletes, so an offer a worker renews meanwhile stays.
-A queue job no live grade holds counts toward the busy slots only.
+A queue job no live grade holds counts toward the busy slots only. The load reads only the slots
+and lease start of each pending and leased job, with `Queue.slots`: HMGET in one pipeline that
+opens no transaction, so it builds no job record however long the queue grows.
 Until the lab records measured unit durations, every estimate is the fixed `UNIT_ESTIMATE_S`.
 
 ### Load snapshot
@@ -533,7 +542,7 @@ inhibit_rules:
 |---|---|---|---|---|
 | `CILabQueueWaitHigh` | The predicted wait of the hotfix, pull request or queue class is over 1200 seconds, the 20 minute default past which the [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold) holds new eng claims. A [wait the lab cannot predict](#a-wait-the-lab-cannot-predict) reads `+Inf` and fires it too, while the claim hold reads that wait as 0. Promotion and backfill never fire it | 10 minutes | class | Slots busy against slots total, and whether the worker pool sits at its maximum |
 | `CILabWorkersPending` | At least one `ci-lab-worker-*` pod in `ci-lab` is Pending | 15 minutes | the pool | The `cluster-autoscaler-oci-status` ConfigMap for the CI pool, and whether no CI node can make room by preempting pods below a worker's priority, see [Worker scheduling priority](#worker-scheduling-priority) |
-| `CILabBudgetShedding` | `ci_lab_class_shed` is 1 for a class: the day's core budget left fell below that class's shed fraction, so its units wait for the budget to reset. Only backfill, promotion and queue shed | 5 minutes | class | Budget left on the dashboard and the shed fractions in the runtime config at `CI_LAB_RUNTIME_CONFIG` |
+| `CILabBudgetShedding` | `ci_lab_class_shed` is 1 for a class: the share of the day's core budget spent reached that class's shed fraction or a more urgent class's, so its units wait for the budget to reset. Only backfill, promotion and queue shed | 5 minutes | class | Budget left on the dashboard and the shed fractions in the runtime config at `CI_LAB_RUNTIME_CONFIG` |
 | `CILabPullRequestBlockedByCap` | Pull request units are queued, every slot is busy, and any HorizontalPodAutoscaler in `ci-lab`, in the deployed chart the one KEDA builds from the [worker ScaledObject](#packing), wants at least its maximum replicas. An autoscaler at its maximum in another namespace does not count | 10 minutes | the pool; its value is the queued pull request units | The worker maximum and the CI node cap; raising either is the operator's elasticity budget |
 | `CILabSchedulerBlind` | Prometheus holds no `ci_lab_slots_wanted` series while the `ci-lab-scheduler` Deployment asks for at least one replica. A scheduler scaled to zero, or no Deployment, keeps it silent | 10 minutes | the scheduler | The scheduler's scrape target and port `9108`; the worker ScaledObject sizes the worker pool from this gauge and holds `elasticity.floorWorkers` while it is missing |
 | `CILabCacheMissRatioHigh` | The git or uv node cache missed more than half its lookups over 30 minutes, with at least 10 misses. A cache with misses and no hit series counts its hits as 0. The verdict cache never fires it | 15 minutes | cache | The node cache DaemonSet on the CI nodes and the age of its git mirror |
@@ -608,30 +617,33 @@ Only the scheduler sets lab series. The worker serves `/metrics` on 9108 through
 `metrics.serve_registry` from a registry of its own that observes nothing, so its exposition holds
 the `HELP` and `TYPE` lines and no sample: a worker scrape target reads up without doubling the
 scheduler's series, which already count every unit from its report. `scripts.ci_lab.scheduler.listen`
-binds the metrics port with a fresh `metrics.Registry`, and every `GET /metrics` sets these from
-the scheduler's load snapshot through `metrics.observe_load`:
+serves the `Scheduler`'s own `metrics.Registry` on the metrics port, so one exposition carries the
+gauges each scrape sets and the counters the scheduler's passes keep. Every `GET /metrics` sets
+these from the scheduler's load snapshot through `metrics.observe_load`:
 
 - `ci_lab_units_queued`, `ci_lab_units_running`, `ci_lab_class_shed` and
   `ci_lab_queue_wait_seconds`, once for each of the five classes
-- `ci_lab_slots_total`, `ci_lab_slots_busy` and `ci_lab_budget_fraction`
+- `ci_lab_slots_total`, `ci_lab_slots_busy`, `ci_lab_slots_wanted` and `ci_lab_budget_fraction`
+- `ci_lab_workers_ready` and `ci_lab_units_overdue`
 
-On agentihooks `dev` of 18 November 2026, no service code sets the other contract metrics. The
-registry writes their `HELP` and `TYPE` lines with no sample, so Prometheus stores no series for
-them:
+These gauges hold a sample from the first scrape of a running scheduler. Every other series has
+none until the scheduler first sets or counts it: the registry writes only the `HELP` and `TYPE`
+lines of a metric with no sample, so Prometheus stores no series for it until then.
+[Metrics](#metrics) gives what each value counts.
 
-| Series | Read by | Until a service sets it |
+| Series | Read by | Set by |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` on every scrape |
-| `ci_lab_units_overdue` | `CILabUnitsOverdue` | The alert cannot fire |
-| `ci_lab_workers_ready` | Workers ready against desired | The `heartbeat` line stays empty |
-| `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
-| `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `Scheduler._place` counts the `verdict` cache and `metrics.observe_unit` counts the `git` and `uv` lookups a unit report carries, so the alert and panel wait only on a running scheduler |
-| `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | `shadow.Shadow` counts it in a registry of its own and has no live caller, so the alert cannot fire |
-| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_records` sets the unit duration when a caller runs it; no code sets the other two |
-
-`Scheduler._reap` counts `ci_lab_units_redelivered_total` and `ci_lab_units_lost_total` on the
-registry the metrics port serves, one for each expired lease it requeues or marks lost. No alert or
-panel reads them; the [Worker loss drill](#worker-loss-drill) reads them.
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `metrics.observe_load`, from `scripts.ci_lab.budget.slots_wanted` on every scrape, so `CILabSchedulerBlind` fires only while Prometheus scrapes no running scheduler |
+| `ci_lab_units_overdue` | `CILabUnitsOverdue` | `metrics.observe_load`, on every scrape |
+| `ci_lab_workers_ready` | Workers ready against desired, as its `heartbeat` line | `metrics.observe_load`, on every scrape |
+| `ci_lab_core_seconds_total` | Core minutes per merged pull request | `metrics.observe_unit`, which `Scheduler._finished` calls once for each finished attempt whose worker uploaded a report |
+| `ci_lab_heads_graded_total` | Core minutes per merged pull request | `Scheduler._advance`, once for each grade it closes |
+| `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `Scheduler._place` counts the `verdict` cache and `metrics.observe_unit` counts the `git` and `uv` lookups a unit report carries |
+| `ci_lab_unit_duration_seconds` | No alert or panel | `metrics.observe_unit`, from the report's `seconds` |
+| `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | No alert or panel; the [Worker loss drill](#worker-loss-drill) reads them | `Scheduler._reap`, one for each expired lease it requeues or marks lost |
+| `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | No service. `shadow.Shadow` counts it on the registry its caller passes, and no service builds a `Shadow`, so the alert cannot fire and the panel stays empty |
+| `ci_lab_mirror_age_seconds` | No alert or panel | `metrics.observe_mirror`, on every scheduler scrape, from its local mirror's `fetched-at` stamp. A missing or invalid stamp removes the sample |
+| `ci_lab_github_rate_remaining` | No alert or panel | `metrics.observe_rate`, called by `Checks._request` with each check runs response. A valid `x-ratelimit-remaining` header sets the sample; a missing or invalid header leaves the previous sample unchanged |
 
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the
 `ci-lab-scheduler` and `ci-lab-worker` Deployments, the worker pods, and the KEDA ScaledObject
@@ -717,14 +729,15 @@ docker run --rm -v "$work:/w" -w /w --entrypoint promtool prom/prometheus:v3.4.1
 The test file names `ci-lab.rules.yml`, so the rule groups are written there first. promtool
 prints `SUCCESS` for the file, or `FAILED:` with each case that missed and the alerts it got.
 
-List the series the scheduler's metrics port sets, with no service, from an agentihooks checkout:
+List the series every scrape of the scheduler's metrics port sets, with no service, from an
+agentihooks checkout:
 
 ```bash
 python -c 'from scripts.ci_lab import metrics; from scripts.ci_lab.capacity import Load; r = metrics.Registry(); metrics.observe_load(r, Load(pending={"pull_request": (120.0,)}, running={"queue": 1}, slots_total=4, slots_busy=1, frees_in=(60.0,))); print(sorted({line.split("{")[0].split(" ")[0] for line in r.render().splitlines() if not line.startswith("#")}))'
 ```
 
 ```text
-['ci_lab_budget_fraction', 'ci_lab_class_shed', 'ci_lab_queue_wait_seconds', 'ci_lab_slots_busy', 'ci_lab_slots_total', 'ci_lab_units_queued', 'ci_lab_units_running']
+['ci_lab_budget_fraction', 'ci_lab_class_shed', 'ci_lab_queue_wait_seconds', 'ci_lab_slots_busy', 'ci_lab_slots_total', 'ci_lab_slots_wanted', 'ci_lab_units_overdue', 'ci_lab_units_queued', 'ci_lab_units_running', 'ci_lab_workers_ready']
 ```
 
 ### Verify
@@ -769,9 +782,9 @@ deployed the observability stack.
 | `kubectl get prometheusrule` lists no `ci-lab` | `ops-config` has not synced the merge, or its sync failed | `kubectl -n argocd get application ops-config -o jsonpath='{.status.sync.status} {.status.sync.revision}{"\n"}'`; the revision must be a `dev` commit holding the rule file |
 | The object exists but the rules API has no `ci-lab` group | The `release: kube-prometheus-stack` label is missing or changed, so the Prometheus rule selector skips the object | Restore the label; `test_the_rule_file_holds_exactly_the_nine_lab_alerts` pins it |
 | Every lab alert stays inactive and the lab panels read No data | Prometheus holds no lab series: the lab chart's objects and the scheduler's ServiceMonitor are not in the cluster | `count by (__name__) ({__name__=~"ci_lab_.+"})` in Prometheus lists the lab series it holds |
-| `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` replica exists | No service code sets `ci_lab_slots_wanted`, or the scrape target is down | `up` for the scheduler target. With the target up, `curl -fsS http://<scheduler>:9108/metrics \| grep '^ci_lab_slots_wanted'` prints nothing until a service sets the gauge |
+| `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` replica exists | Prometheus scrapes no running scheduler: its target is down, or no ServiceMonitor selects its metrics port. A running scheduler sets `ci_lab_slots_wanted` on every scrape | `up` for the scheduler target; with no target, check the scheduler's ServiceMonitor. `curl -fsS http://<scheduler>:9108/metrics \| grep '^ci_lab_slots_wanted'` prints one sample from a running scheduler |
 | Spend estimate reads No data | No node carries both CI taints, and `count` over no series is empty rather than 0 | Expected while the CI pool has no node |
-| Core minutes per merged pull request reads No data or Infinity | The core and graded head counters are not exported, or no queue head was graded green in the range | See [Lab series the rules read](#lab-series-the-rules-read); widen the range |
+| Core minutes per merged pull request reads No data or Infinity | Since it started, the scheduler has counted no finished attempt or no green queue grade, so a counter has no series yet, or no queue head was graded green in the range | See [Lab series the rules read](#lab-series-the-rules-read); widen the range |
 | `CILabVerdictMismatch` keeps firing after the gate agrees again | It looks back one hour | Expected; it clears an hour after the last new mismatch of that gate |
 | The promtool job fails after an annotation edit | promtool compares `summary` and `description` exactly | Update the case's `exp_annotations` in the same pull request |
 | A firing lab alert sends no second ntfy message | A group that keeps firing repeats only every 6 hours | Read the alert in the Alertmanager API above; a change to the group sends after 5 minutes |
@@ -849,7 +862,7 @@ The worker count:
 
 | `elasticity.enabled` | Replicas |
 |---|---|
-| `true`, the shipped value | The Deployment carries no `replicas`. The `ci-lab-worker` KEDA ScaledObject sizes it from `max_over_time(sum(ci_lab_slots_wanted)[2m:15s])` at a target of `worker.slots` per worker, between `elasticity.floorWorkers` (3) and `workersPerNode × nodeMax` (3 × 7 = 21), and holds `floorWorkers` after `elasticity.fallbackFailures` (3) failed reads of that query |
+| `true`, the shipped value | The Deployment carries no `replicas`. The `ci-lab-worker` KEDA ScaledObject sizes it from `max_over_time(sum(ci_lab_slots_wanted)[2m:15s])` at a target of `worker.slots` per worker, between `elasticity.floorWorkers` (1) and `workersPerNode × nodeMax` (3 × 7 = 21), and holds `floorWorkers` after `elasticity.fallbackFailures` (3) failed reads of that query |
 | `false` | `worker.replicas` (3), one node of workers |
 
 `elasticity.nodeMax` (7) is the CI pool maximum of the OCI cluster autoscaler, the middle field
@@ -964,7 +977,7 @@ console port and another LAN service were refused.
 | `worker.mutation.cap` | `1` | `CI_LAB_MUTATION_CAP` |
 | `worker.resources` | 5 CPU, `8Gi` and `20Gi` ephemeral, requests equal to limits | Container resources, copied as written |
 | `elasticity.enabled` | `true` | Renders the ScaledObject and drops `replicas` from the Deployment |
-| `elasticity.floorWorkers` | `3` | ScaledObject minimum and fallback replicas |
+| `elasticity.floorWorkers` | `1` | ScaledObject minimum and fallback replicas |
 | `elasticity.workersPerNode` | `3` | Workers per CI node: a factor of the ScaledObject maximum and its scale up step |
 | `elasticity.nodeMax` | `7` | CI pool node maximum: the other factor of the ScaledObject maximum |
 | `elasticity.pollingInterval` | `15` | Seconds between the ScaledObject's trigger reads |
@@ -1042,9 +1055,10 @@ List the workers and their nodes:
 kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker -o wide
 ```
 
-The binpack score sends each worker to the fullest CI node it fits, so at the floor of three
-workers with one CI node that has room, expect all three on the same `NODE`. The chart does not
-force it: a worker scheduled while that node was full goes elsewhere. Read the node's requests:
+The binpack score sends each worker to the fullest CI node it fits. The floor,
+`elasticity.floorWorkers`, is one worker. With three workers and one CI node that has room, expect
+all three on the same `NODE`. The chart does not force it: a worker scheduled while that node was
+full goes elsewhere. Read the node's requests:
 
 ```bash
 node=$(kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
@@ -1088,14 +1102,16 @@ or from trees they already hold.
 - The worker's `/metrics` on 9108 serves its own empty registry, so a scrape holds no samples, and
   the chart defines no PodMonitor or ServiceMonitor for the worker pods. The policy admits the
   monitoring Prometheus to 9108 for when one exists.
-- No code sets `ci_lab_mirror_age_seconds`, so the scheduler exports no mirror age sample.
+- The scheduler sets `ci_lab_mirror_age_seconds` from the `fetched-at` stamp under its own
+  `CI_LAB_GIT_MIRROR`, which its fetch never writes, so the series has a sample only when that
+  path is a mirror the node cache refreshes, and it shows no other node's mirror.
 - The worker fetches a head it lacks from the node mirror only. The chart sets neither
   `AGENTIHOOKS_LAB_REMOTE` nor `CI_LAB_REPOSITORY`, and the policy reaches neither GitHub nor the
   lab remote, so the executor of a head the node mirror does not hold yet raises at its fetch and
   leaves the unit's lease for the scheduler to reap.
-- A head whose `uv.lock` digest differs from the image's baked venv builds its venv with
-  `uv sync` under `env -i`, which drops `UV_CACHE_DIR`, and the build needs a package index this
-  policy does not reach. See [Head venv builds](#head-venv-builds).
+- A head whose `.github/test-requirements.lock` digest differs from the image's baked venv builds
+  its venv with `uv venv` and `uv pip install` under `env -i`, which drops `UV_CACHE_DIR`, and the
+  build needs a package index this policy does not reach. See [Head venv builds](#head-venv-builds).
 - Nothing writes `/work/manifest.json`, so the test executor raises `FileNotFoundError` when it
   reads its dependency manifest. The worker delivers nothing for the unit and the scheduler
   reaps the lease; the [retry policy](#retry-policy) requeues it
@@ -1114,7 +1130,7 @@ its done criteria name are not recorded:
 | Egress only to DNS, the scheduler and MinIO | The live probe on a CI node described under [Network](#network) |
 | Three workers on one node, with `kubectl describe node` near 15 of 16 CPU requested | Not recorded; the figure in the verify steps above is computed |
 | A worker git hit from the node mirror | Not recorded |
-| The scheduler exporting `ci_lab_mirror_age_seconds` | Not delivered: no code sets it |
+| The scheduler exporting `ci_lab_mirror_age_seconds` | `metrics.observe_mirror` sets it at each read of the metrics port; a live sample on a CI node is not recorded |
 
 ### Troubleshooting
 
@@ -1129,7 +1145,11 @@ its done criteria name are not recorded:
 | The worker log repeats `ci-lab worker: lease call failed, retrying in <n>s` | The scheduler is not answering on 8800, or answers with a server error: it is rolling, restarting or down. The worker keeps running, retries after a backoff that doubles from 1 up to 10 seconds, and leases again on the first answer | `kubectl -n ci-lab get deploy ci-lab-scheduler` and `kubectl -n ci-lab logs deploy/ci-lab-scheduler --since 10m` |
 | The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
 | A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
-| A venv build fails with `uv sync for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
+| A venv build fails with `uv venv for <tree> ended with code` or `uv pip install for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
+| The worker log reads `ci-lab worker: unit <job> crashed: FileNotFoundError(2, 'No such file or directory')` and the traceback's last line names `<tree>/.github/test-requirements.lock` | The head does not track the test requirements lock, so `executors.lockfile_digest` cannot key the unit's venv. The unit never reports, its lease expires, and the [retry policy](#retry-policy) requeues it once and marks it lost on the second expiry | `git ls-tree <head> .github/test-requirements.lock` prints nothing; see [Which venv a unit gets](#which-venv-a-unit-gets) |
+| The same crash, with the traceback naming `<tree>/uv.lock` | The worker runs an image older than pull request 12536, which hashed the untracked `uv.lock`; every unit crashes this way | `kubectl -n ci-lab get deploy ci-lab-worker -o jsonpath='{.spec.template.spec.containers[0].image}'`, then roll the workers onto a release that carries the fix |
+| `ci_lab_cache_misses_total{cache="uv"}` rises once per pod for each lock digest the worker image did not bake | Those heads' `.github/test-requirements.lock` differs from the lock the image baked, so each pod builds `/work/venvs/<digest>` once for it; a pod whose baked marker matches a head's lock records no uv miss for it | Compare the two digests as in [Verify the venv keying](#verify-the-venv-keying); an image built from a commit with the same lock runs those units on the baked venv |
+| A venv build fails with `uv venv for <tree> ended with code None` or `uv pip install for <tree> ended with code None` | The step ran past the unit time limit, `Pod.timeout`, 1800 seconds, and the sandbox killed it | The kept build log the error names; no marker is written, so the next unit with that digest builds again |
 | Uploads time out or are refused | The MinIO egress rule does not match the object store's pods | `minio.namespace`, `minio.pods` and `minio.port` against `kubectl get pods -n <namespace> --show-labels` |
 | A sandboxed unit fails at bubblewrap with `Operation not permitted` | The pod runs under a seccomp profile that refuses namespace calls, or the node kernel restricts user namespaces | The pod's `seccompProfile`, then the namespace probe in the [sandbox verify](#unit-sandbox) steps on the node |
 | A worker pod is evicted for ephemeral storage | `/work`, `/tmp` and the logs passed 20 GiB | `kubectl -n ci-lab get events --field-selector reason=Evicted` |
@@ -1572,7 +1592,7 @@ the autoscaler adds. `kubectl uncordon <node>` makes the node schedulable again.
 ### Lower the worker floor
 
 The KEDA ScaledObject `ci-lab-worker` sizes the worker Deployment as [Packing](#packing) describes,
-and [Configuration](#configuration) lists every `elasticity` value. `elasticity.floorWorkers`, 3 by
+and [Configuration](#configuration) lists every `elasticity` value. `elasticity.floorWorkers`, 1 by
 default, is both its `minReplicaCount` and the `fallback` replicas it holds after
 `elasticity.fallbackFailures` failed trigger reads. The trigger sets `ignoreNullValues` to
 `"false"`, so a missing `ci_lab_slots_wanted` series counts as a failed read.
@@ -1849,12 +1869,17 @@ For a repository the URL matches, it writes two git config entries:
 **Which repositories match.** The lab serves one repository per URL, so the remote goes only to the
 repository the URL names. Each URL is reduced to its repository name: the last part after a `/` or
 `:`, without a trailing `/` or `.git`, in lowercase. The remote is added only when the lab URL
-yields a name and that name equals the name of the checkout's `origin`. Host and owner are not
-compared.
+yields a name and that name equals the name of the checkout's `origin`. When the lab URL also names
+an owner, the part before the repository name in the path of a URL with a scheme or of an scp
+address such as `git@host:owner/repo.git`, that owner must equal the origin's owner, in lowercase.
+A lab URL with the repository at the root of its path, a local path and a `file://` URL name no
+owner and match on the name alone. The host is not compared. `wt.sh` compares the name alone.
 
 | `AGENTIHOOKS_LAB_REMOTE` | `origin` | Gets `lab` |
 |---|---|---|
-| `http://<lab host>/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name `agentihooks` |
+| `http://<lab host>/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name `agentihooks` and the lab URL names no owner |
+| `http://<lab host>/the-cloud-clockwork/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name the owner `the-cloud-clockwork` and `agentihooks` |
+| `http://<lab host>/other-owner/agentihooks.git` | `git@github.com:the-cloud-clockwork/agentihooks.git` | No, the lab URL names another owner |
 | `http://<lab host>/agentihooks.git` | `https://github.com/the-cloud-clockwork/agentihooks-bundle` | No, the origin names `agentihooks-bundle` |
 | unset or empty | any | No |
 
@@ -1897,7 +1922,7 @@ holds the token, without printing it.
 
 | Symptom | Cause | Check |
 |---|---|---|
-| `git remote -v` lists no `lab` | The process that made the workspace had no `AGENTIHOOKS_LAB_REMOTE`, or the URL names another repository | `test -n "${AGENTIHOOKS_LAB_REMOTE:-}" && echo set \|\| echo unset` in that process's environment, then compare the last part of the lab URL with `git remote get-url origin` |
+| `git remote -v` lists no `lab` | The process that made the workspace had no `AGENTIHOOKS_LAB_REMOTE`, or the URL names another repository | `test -n "${AGENTIHOOKS_LAB_REMOTE:-}" && echo set \|\| echo unset` in that process's environment, then compare the last part of the lab URL, and the owner before it when the URL names one, with `git remote get-url origin` |
 | A hive checkout lacks `lab` while a fresh worktree has it | The checkout was cloned after the daemon started, or the daemon started without the variable | Restart the daemon, or run `wt.sh new` against that checkout |
 | `lab` points at an old URL | The workspace was carried before the URL changed | The next `wt.sh new`, `publish --via lab` or daemon start sets the new URL; the old URL's helper entry stays and is unused |
 | A push to `lab` fails authentication | The pushing shell has no `AGENTIHOOKS_LAB_REMOTE_TOKEN`, so the helper sends an empty password, or it holds another value than the lab expects | The third verify command; set the variable in the environment the agent runs in |
@@ -2008,11 +2033,13 @@ annotation restarts the receiver. Every notice sender needs the same value.
 
 ### Verify
 
+{% raw %}
 ```bash
 kubectl -n agentihooks-swarm get pushsecret agentihooks-ci-lab-notice
 kubectl -n agentihooks-swarm get externalsecret agentihooks-swarm-github-webhook
 kubectl -n agentihooks-swarm get secret agentihooks-swarm-github-webhook --template='{{range $k,$v:=.data}}{{$k}} {{end}}'
 ```
+{% endraw %}
 
 The PushSecret reports `Synced`, the ExternalSecret reports ready, and the key listing names
 `AGENTIHOOKS_CI_LAB_NOTICE_SECRET`. It prints key names only, never values.
@@ -2047,6 +2074,7 @@ and `ci.lab.head.push` at stream sequence 9 for an agentihooks head pushed by
 | A notice answers `400` | A field is missing, empty or not a string, or the body is not JSON | [Send a head notice](#send-a-head-notice) |
 | A GitHub delivery answers `400` while its signature is valid | The body is not JSON, or the delivery lacks a field the receiver reads; [Heads it records](#heads-it-records) says what was recorded before the answer | `kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-github-webhook` for the delivery id, then the delivery's payload in the GitHub webhook settings |
 | A request answers `503` and the log shows `could not record the event` | The publish failed: the stream does not exist yet, or the NATS credential lacks `ci.lab.head.*` | `stream info` as above; the hub creates the stream on its next start. On `/github` the pull request observations were recorded before the failure, and a GitHub redelivery records the head |
+| A `pull_request` delivery, merge queue actions included, or a completed `check_suite` delivery answers `503` with `nats: no response from stream` in its traceback | The receiver's NATS credential allows the logical `swarm.*.pull.*`, `swarm.*.merge.*` and `swarm.*.checks.completed` subjects but not their `legacy.swarm.*` form, so its unscoped events log keeps the logical subject, which no stream holds ([Existing swarms through the subject change](swarm-bus-scope.md#existing-swarms-through-the-subject-change)). The pull request observation fails first, so the lab head of the same delivery is lost too. This was the cause on 19 November 2026 (#12458) | `/connz?auth=true` on each bus node's monitoring endpoint lists the receiver connection's publish allow list, which must name the `legacy.swarm.*` form of its eight pull, merge and checks subjects; `/subsz?test=swarm.<swarm>.pull.pushed` matches nothing. Grant them to `swarm-github-webhook` in the deployment repository's `users.yaml`, as its pull request 1911 did, then redeliver from GitHub |
 
 ## Lab remote service
 
@@ -2185,6 +2213,7 @@ which the lab answers `401`.
 
 ### Verify
 
+{% raw %}
 ```bash
 kubectl -n ci-lab get statefulset ci-lab-remote
 kubectl -n ci-lab get pushsecret ci-lab-remote-token
@@ -2192,6 +2221,7 @@ kubectl -n ci-lab get externalsecret ci-lab-remote
 kubectl -n ci-lab get secret ci-lab-remote --template='{{range $k,$v:=.data}}{{$k}} {{end}}'
 kubectl -n ci-lab get service ci-lab-remote ci-lab-remote-lan
 ```
+{% endraw %}
 
 The StatefulSet shows `1/1` ready, the PushSecret `Synced`, the ExternalSecret ready, the key
 listing `CI_LAB_REMOTE_TOKEN` and the LAN Service its external address. The key listing prints key
@@ -2285,7 +2315,7 @@ key; the builders are pure and read no file, clock or network.
 |---|---|---|
 | `toolchain` | `interpreter` | Python version the unit runs on |
 | `toolchain` | `tools` | Tool name to version, such as ruff, basedpyright, semgrep |
-| `toolchain` | `lockfile` | Blob id of `uv.lock` |
+| `toolchain` | `lockfile` | Blob id of `.github/test-requirements.lock` |
 | `toolchain` | `pyproject` | Blob id of `pyproject.toml`, which holds the tool and pytest configuration |
 | `toolchain` | `image` | Digest of the worker image |
 | `toolchain` | `environment` | The environment key: each variable the unit reads, with its value |
@@ -2303,11 +2333,9 @@ key; the builders are pure and read no file, clock or network.
 | `stats` | `scope` | Source to changed lines, for the sources the test file reaches |
 | `stats` | `measured` | Whether the inputs come from measured coverage |
 | `stats` | `discovery` | Digest of the discovery inputs |
-| `stats` | `sources` | Path to sha256 of each configuration file, `uv.lock` among them, and each `scripts/ci_mutation/` file |
+| `stats` | `sources` | Path to sha256 of each configuration file, `.github/test-requirements.lock` and `.github/test-excludes.txt` among them, and each `scripts/ci_mutation/` file |
 | `stats` | `options` | The pytest options, in order |
-| `stats` | `interpreter` | `sys.version` |
-| `stats` | `platform` | `sys.platform` |
-| `stats` | `versions` | Distribution name to version |
+| `stats` | `lockfile` | sha256 of the head's `.github/test-requirements.lock`, or null without one |
 | `mutant` | `module` | Path of the module that holds the function |
 | `mutant` | `function` | Name of the changed function |
 | `mutant` | `definition` | Digest of the function's whole definition text, from `scripts.dep_manifest.unit_hashes` |
@@ -2329,9 +2357,14 @@ key; the builders are pure and read no file, clock or network.
   (default JSON separators), so its digest equals `StoredStats.identity` for the same inputs and
   the lab reuses the stats the cache already holds. Its file inputs are sha256 digests of the file
   bytes, the one exception to blob ids, because the stats cache identity hashes them that way.
-  Its lockfile and pyproject inputs are the `uv.lock` and `pyproject.toml` entries of `sources`.
-- A change to `uv.lock` or `pyproject.toml` rekeys every unit kind. A grade is keyed by its head,
-  which names both files.
+  Its lockfile and pyproject inputs are the `.github/test-requirements.lock` and `pyproject.toml`
+  entries of `sources`.
+  Its runtime is the `lockfile` input, never the interpreter or installed packages of the process
+  computing it, so the scheduler keys a stats unit exactly as the worker's stats cache stores it
+  for the same head. Every CI install and the baked lab worker venv install from that file, with
+  `.github/test-excludes.txt` as their excludes list, which `sources` keys.
+- A change to `.github/test-requirements.lock` or `pyproject.toml` rekeys every unit kind. A grade
+  is keyed by its head, which names both files.
 - The lab runs pytest itself, so no workflow file under `.github/` changes a test verdict. The
   pytest invocation, which a workflow used to define, is the test input instead. This replaces the
   manifest's `.github/` prefix invalidation, as the lab's test expansion design specifies; the
@@ -2412,11 +2445,12 @@ key; the builders are pure and read no file, clock or network.
    as `hold`, so the other grades keep posting and a restarted scheduler keeps the hold. A grade
    whose units are all final closes only once every one of its check runs is posted. The failed
    check of a head that cannot expand is outside these holds: it is tried once, since its dropped
-   head keeps no grade to retry from. The refusal text
-   `GitHub App cannot supply scoped contents write credentials` is the one message
-   `GitHubAppAuth.get_token` raises for any refused token, so for the check runs token, which asks
-   for checks write only, read the App installation's `permissions.checks` in the org
-   installations listing.
+   head keeps no grade to retry from. `GitHubAppAuth.get_token` names the permissions a refused
+   token asked for and GitHub's answer, such as
+   `GitHub App cannot supply scoped checks write credentials: GitHub answered 422` for the check
+   runs token, or `GitHub answered 201 with a token outside that scope` when the minted token lacks
+   a requested permission or repository; for a refused check runs token, read the App
+   installation's `permissions.checks` in the org installations listing.
 
 Expansion frames a head by its class (`scripts.ci_lab.scheduler.frame`): a pull request or hotfix grade
 keeps the lab gates the pull request rules require and names every other required job as a gate without
@@ -2449,7 +2483,14 @@ draft pull request. The relay keeps the id of each check run it creates on the g
 the check run's name as GitHub answers and seeds its poster with those ids before it posts, so a
 relay retried after the service restarts, such as one whose pull request call failed after its
 posts, creates no second completed check run. The ids the scheduler keeps under gate names for its
-own posts, such as shadow check runs of the same grade, never seed the relay.
+own posts, such as shadow check runs of the same grade, never seed the relay. A relay whose git or
+HTTP call fails is named `retry <head> for <branch>: <error>` and stays pending for the next tick.
+A relay whose push, check runs or pull requests token the App refuses is named
+`held <head> for <branch> for a later pass: <refusal>`, stays pending and holds every pending head
+of its repository for `POST_HOLD_MS`; the heads of other repositories still relay in the same
+tick, and the first tick after the hold relays the held heads again. The hold lives in the relay's
+memory, as the scheduler's repository post hold does, so a restarted service tries the held heads
+on its first tick.
 
 A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<run>` is the grade
 key of the repository, head, base, class and grader revision. Live grades sit in
@@ -2627,8 +2668,10 @@ workflow order. On dev it prints:
 
 #### A head that cannot expand
 
-The pass that releases a head from its lane catches a `ValueError`, `KeyError`,
-`yaml.YAMLError`, `jsonschema.ValidationError` or failed git command from expansion. It records
+The pass that releases a head from its lane catches a `ValueError`, `KeyError`, `SyntaxError`,
+`yaml.YAMLError`, `jsonschema.ValidationError` or failed git command from expansion. A promotion or
+backfill head raises the `SyntaxError` when a changed Python file under `hooks/` or `scripts/` does
+not parse, as mutation expansion compares that file with its base. It records
 the action `cannot expand <head>: <error>` and drops the head: the head has already left
 `agentihooks-ci:waiting` and is not put back, so it gets no grade. `Scheduler._refuse` then posts
 one completed `lab-shadow/required` check run with conclusion `failure` on the head, whose summary
@@ -2639,7 +2682,8 @@ check that the App token, GitHub or the network refuses is recorded as
 keeps no grade, and the pass goes on. A head pushed to a grade ref gets no check run, since
 GitHub does not hold that head. A manifest fetch that raises `FetchPending` or
 `FetchUnanswered` holds the head again instead, as
-`holding <head>: <error>`; [Test units](#test-units) describes both. The scheduler service prints
+`holding <head>: <error>`, until the tenth `FetchUnanswered` in a row drops the head with this
+check run; [Test units](#test-units) describes both. The scheduler service prints
 each action on its own line:
 
 ```bash
@@ -2652,6 +2696,30 @@ kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
 | `<gate> names two gate steps` | Two gate steps resolve to the same gate name |
 | `'steps'` or `'jobs'` | The called workflow has no `jobs`, or one of its jobs has neither `steps` nor `uses` |
 | A YAML parse error | A workflow file directly in `.github/workflows` at the grader revision does not parse, even one that no static job calls |
+| `no dependency manifest at or before <base>` | A merge group, promotion or backfill head needs [test units](#test-units) and no commit on the base's first parent chain has a stored or fetchable manifest |
+| A `jsonschema` message, such as `0 is less than the minimum of 1` or `Additional properties are not allowed ('max' was unexpected)` | The grader revision's `delivery.yaml` breaks its schema. A hotfix, pull request or merge group head reads it for its authoritative gates and a merge group head also for its [entry limit](#configure-the-entry-limit), so every such head graded at that revision is dropped. The lines after the message name the schema rule and the instance path, such as `On instance['lab']['queue']['full_suite_entries']` |
+
+#### A head no node mirror can hold
+
+Each CI node's cache mirrors only the repository's `refs/heads/*` and `refs/pull/*/head` refs, so a
+worker cannot fetch a commit no such ref reaches, such as the head of an ejected merge group whose
+`gh-readonly-queue` branch is gone. Before the scheduler expands a released head it asks
+`MirrorExpander.reachable`, which lists those refs with `git ls-remote` and accepts the head when a
+ref names it or when the dev branch head, fetched into the scheduler's mirror, descends from it. It
+never fetches the head itself, since GitHub may no longer serve it. Any non-zero exit of the
+ancestor check reads as not reachable, including the exit 128 git gives for a head the scheduler's
+mirror does not hold. A head that check refuses is retired with the action
+`retiring <head>: no branch or pull request head ref of <repo> carries <head>`: it gets no grade and
+no unit, so no worker leases one. A pull request head also gets one completed `lab-shadow/required`
+check run with conclusion `failure` and that summary; a hotfix, merge group, promotion or backfill
+head gets none. Such a pull request head is never the current head of a pull request, since GitHub
+keeps `refs/pull/<n>/head` on each pull request's last head, so the post marks a superseded commit
+and holds no merge. That post is tried once, like the cannot expand post: a refusal by the App
+token, GitHub or the network ends the same action with
+`; cannot post the failed required check on <head>: <error>`, is not retried, and the pass goes
+on. A head pushed to a grade ref skips the reachability check, since the lab remote serves it. A
+failed `git ls-remote` raises like any other failed git command, so the head takes the
+[cannot expand](#a-head-that-cannot-expand) path.
 
 #### The worker reads the same workflows
 
@@ -2659,8 +2727,18 @@ The static executor finds its gate again on the worker. `scripts.ci_lab.executor
 name)` runs `discover` over the grader tree it cut for the lease, with `ci_wiring.load(grader_tree)`
 as the reusable workflows, and returns the gate step the unit names. When that discovery raises,
 or the grader workflow has no gate step of that name, the unit ends with no outcome. The worker
-prints `ci-lab worker: unit <job> crashed: <error>` to its standard error and the lease expires,
-so the unit follows the expired lease rule of step 6 of the [Scheduler loop](#scheduler-loop).
+prints `ci-lab worker: unit <job> crashed: <error>` and its traceback to its standard error and the
+lease expires, so the unit follows the expired lease rule of step 6 of the
+[Scheduler loop](#scheduler-loop).
+
+#### What a failed static unit's check run shows
+
+A gate's check run text shows, ahead of its unit keys, the last 4096 characters of each failed
+static unit's stored log, `lab/static/<digest>/log.txt`, with secret patterns redacted, in a fence
+under the unit key, so a reader of the check run alone sees which diagnostic failed the gate. The
+blocks together stay within half of GitHub's 65535 character text limit; past it the blocks that
+fit end with a note that the later ones are left out. A passing unit, a failed unit with no stored
+or an empty log, and the required check show only unit keys.
 
 #### Limitations
 
@@ -2723,6 +2801,13 @@ tree, the blob ids of the files its tests opened outside the manifest (their rec
 list), the pytest invocation and the toolchain. The expander reads every head file in one
 `git cat-file --batch` for the fingerprints.
 
+A batch starts as one test file. A file is split only when its tests' summed durations pass 60
+seconds and none of its tests carries an xdist group. `expand_tests._parts` then deals its tests,
+longest first, each to the lightest part, and keeps the smallest part count from two up whose
+parts each fit 60 seconds; when no count below the file's test count fits, every test is its own
+batch. A test that `.test_durations` does not list counts 0 seconds, and a head with no
+`.test_durations` file expands with no durations, so each of its test files is one batch.
+
 | Head | Unit job |
 |---|---|
 | Pull request, hotfix | No test units; the manifest is not read |
@@ -2743,10 +2828,14 @@ the lab's GitHub App scopes to actions read (`manifests.Actions`, one per reposi
 never fetched again. A commit without such a run or artifact, an expired artifact, an archive
 GitHub answers is gone (410) and a manifest recorded for another commit fetch nothing; a refused
 or unanswered request or an archive without a readable `packed.json` raises `manifests.FetchRefused`.
-A request GitHub never answered, a token mint without an answer included, or answered with a server
-error raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
-lane with the quiet window restarted, so the first pass after that window fetches again; any other
-refusal drops the head with its reason. The service runs each fetch off the scheduler pass through
+A request GitHub never answered or answered with a server error, including token mint requests,
+raises its subclass `manifests.FetchUnanswered`, and the scheduler puts the head back in its
+lane with the quiet window restarted, so the first pass after that window fetches again. The
+head's waiting entry counts these fetches in a row, and the `UNANSWERED_FETCHES`th (10) drops the
+head as `cannot expand <head>: 10 manifest fetches in a row got no answer or a server error, the
+last: <error>` and posts its failed `lab-shadow/required` check run naming them, so a head GitHub
+keeps failing ends with a lab status. Any other refusal drops the head with its reason. The service
+runs each fetch off the scheduler pass through
 `manifests.Background`, at most `WORKERS` (4) at once: while a fetch runs the call raises
 `manifests.FetchPending`, and the scheduler puts the head back in its lane with its quiet window
 unchanged, so the next pass reads the finished fetch and a manifest request GitHub never answers
@@ -2758,6 +2847,25 @@ than that is answered only from the store. A head that needs test units and find
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
 
+A test batch's manifest, the dependency records of its tests, lives in the object store at
+`lab/test/<digest>/manifest.json` beside its verdict, written once when a grade start holds the batch
+for a job. Neither the grade state nor the job hash in Redis carries it, so neither grows with a
+batch's records, and the lease path reads it from there into the lease reply. Scheduler startup
+reads and rewrites no stored grade or job.
+
+Release 2.17.1095 copied each manifest into every grade slot and job hash and restored missing ones
+at startup over every live grade, which took the swarm Redis from about 4 GiB to 25 GiB.
+`python -m scripts.ci_lab compact`, run once with the scheduler environment before the scheduler
+starts on a release without that copy, moves every manifest a live grade's slot or a queued, leased
+or finished job hash still carries to its object store path and removes it from Redis. It finds those
+records through the live grade set and the queue's state sets, so the lab's Redis user, which may not
+SCAN, runs it. An unfinished test slot whose batch has no stored manifest gets the batch's slice of the
+packed manifest at its grade's commit. A grade the scheduler writes while the command runs stays as
+the scheduler wrote it, manifests included, so run the command again while `grades written meanwhile`
+reads above zero. The command prints its counts as
+JSON: `grade manifests moved`, `job manifests moved`, `grades stripped`, `jobs stripped`,
+`batches sliced`, `batches without a packed manifest` and `grades written meanwhile`.
+
 A batch verdict lists the files the batch opened outside its tests' manifest records. The expander
 puts the `commit` of the manifest it keyed a head's test units on in the plan's `manifest`, and the
 grade's state keeps it; a pull request or hotfix grade keys no test units and keeps none. When the
@@ -2768,8 +2876,10 @@ sorted list, where `<digest>` is `digests.digest` of that note. A grade with no 
 no note. The object store is write once, so the packed `<commit>.json` manifests are never rewritten,
 and the same tests and list write one note per commit. A `StoredManifests` read that finds a stored
 manifest merges each note of that manifest's commit into the `outside` list of each test record the
-note names, sorted and without duplicates, and skips a test the manifest lacks; the next expansion
-keys those tests on the measured tree and the batch on the noted files' blob ids. A note written
+note names, sorted and without duplicates; the next expansion keys those tests on the measured tree
+and the batch on the noted files' blob ids. A test module path a note names that the manifest lists
+no record for goes into the manifest's `unlisted` mapping instead, with the same merge, and an unknown
+test node id is skipped. A note written
 while grades keyed on an older commit's manifest never reaches a newer commit's records or keys. A
 manifest the read fetches has no note yet. Every read first removes, through `Objects.remove`, each
 note of the repository whose commit has no stored `<commit>.json`, which includes the notes at
@@ -2789,13 +2899,135 @@ block. The clauses are in the
 batches the rule picks, or every batch on `FULL`, the expander adds one unit per test module in the
 entries' changes that the head holds and the manifest lists no test of, built by
 `expand_tests.unlisted_units`: its member is the module's path and its key is the module's broad
-fingerprint over the head tree, as
+fingerprint over the head tree and the files its `unlisted` notes name, as
 [Test files the manifest does not know](delivery-tiers.md#test-files-the-manifest-does-not-know)
 describes.
 
 Since a push grade folds only the static gates,
 [Post merge testing with automatic revert](../research/post-merge-testing.md) measures the red
 `dev` rate from the Tests workflow's runs on GitHub, not from lab push grades.
+
+#### Configure the entry limit
+
+`lab.queue.full_suite_entries` in `delivery.yaml` is the most entries a merge group may hold before
+the `entries` clause sends it to the whole suite. The `queue` block and the key are optional:
+`interaction.entry_limit` returns `FULL_SUITE_ENTRIES` (5), the merge queue's largest group, when
+either is left out. Dev's `delivery.yaml` sets neither, so dev merge groups run at a limit of 5.
+
+```yaml
+lab:
+  authoritative: []
+  mutation:
+    run_on: every_push
+    mutants_per_changed_line: all
+    arid: []
+  check_prefix: lab
+  queue:
+    authoritative: []
+    full_suite_entries: 3
+```
+
+With `full_suite_entries: 3`, a group of four or five entries runs every batch, and a group of one
+to three runs only the batches its entries invalidate unless another clause holds. The expander
+reads the key from the grader revision on every expansion, and a merge group's grader is its base,
+so a change applies to the first merge group whose base holds it, with no scheduler restart.
+
+`queue` accepts only `authoritative` and `full_suite_entries`, and `full_suite_entries` is an
+integer of at least 1. Expansion validates the whole document against `delivery.DELIVERY_SCHEMA`
+with `jsonschema` directly, so its error carries no `delivery.yaml` path prefix, while
+`delivery.lab(root)` reports the same refusal with one:
+
+| `queue` value | First line of the expansion error | `delivery.lab(root)` error |
+|---|---|---|
+| `{full_suite_entries: 0}` | `0 is less than the minimum of 1` | `delivery.yaml lab.queue.full_suite_entries: 0 is less than the minimum of 1` |
+| `{full_suite_entries: 2.5}` | `2.5 is not of type 'integer'` | `delivery.yaml lab.queue.full_suite_entries: 2.5 is not of type 'integer'` |
+| `{max: 2}` | `Additional properties are not allowed ('max' was unexpected)` | `delivery.yaml lab.queue: Additional properties are not allowed ('max' was unexpected)` |
+| `[]` | `[] is not of type 'object'` | `delivery.yaml lab.queue: [] is not of type 'object'` |
+
+A refused document drops the head as [a head that cannot expand](#a-head-that-cannot-expand): the
+action is `cannot expand <head>: ` followed by the whole `jsonschema` message, whose next lines name
+the schema rule and `On instance['lab']['queue']['full_suite_entries']`. Validate the file in a
+checkout before it reaches dev:
+
+```bash
+python -c 'from pathlib import Path; from scripts.ci_lab import delivery; delivery.lab(Path("."))'
+```
+
+#### Check which clause a merge group took
+
+The scheduler records the chosen batches, not the clause. The script below rebuilds the group from
+a checkout that holds both commits, the way `MirrorExpander` does, and prints the clause
+`interaction.full_reason` returns for the `harness`, `entries` and `overlap` clauses, or `None`.
+It passes an empty manifest, so the `cache` clause never holds here:
+
+```bash
+cat > clause.sh <<'OUTER'
+python - "$1" "$2" <<'EOF'
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+from scripts import ci_select, dep_manifest
+from scripts.ci_lab import interaction
+
+base, head = sys.argv[1:3]
+root = Path(".")
+commits = subprocess.check_output(["git", "rev-list", "--first-parent", f"{base}..{head}"], text=True).split()
+entries = tuple(tuple(dep_manifest.changes(root, f"{commit}^", commit)) for commit in commits)
+changes = tuple(dep_manifest.changes(root, base, head))
+group = interaction.Group(changes, entries, ci_select.pyproject_reaches_tests(root, base, head))
+lab = yaml.safe_load(subprocess.check_output(["git", "show", f"{base}:delivery.yaml"], text=True))["lab"]
+limit = interaction.entry_limit(lab)
+print(f"entries {len(entries)} of limit {limit}")
+print("clause", interaction.full_reason(group, {"tests": {}}, (), limit))
+EOF
+OUTER
+bash clause.sh <base> <head>
+```
+
+Run against dev's own first parent chain, three squash merges stay under the default limit and
+seven do not:
+
+```text
+$ bash clause.sh "$(git rev-parse dev~3)" "$(git rev-parse dev)"
+entries 3 of limit 5
+clause None
+$ bash clause.sh "$(git rev-parse dev~7)" "$(git rev-parse dev)"
+entries 7 of limit 5
+clause entries
+```
+
+A group that merged has its head on dev, so its base and head are both on dev's first parent
+chain. An ejected group's commits leave with its `gh-readonly-queue` branch, so check it while it
+runs.
+
+| Guard | What it holds |
+|---|---|
+| `test_a_pull_request_or_hotfix_head_expands_no_test_units` | A pull request or hotfix head gets no test units |
+| `test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate` | A merge group runs only the batches holding an invalidated test |
+| `test_a_merge_group_head_whose_entries_invalidate_no_test_runs_no_batch` | A group whose entries invalidate no test holds an empty `unit` job |
+| `test_a_merge_group_head_runs_every_batch_when_an_interaction_clause_holds` | Every batch runs when a clause holds |
+| `test_a_promotion_or_backfill_head_runs_every_batch_without_reading_the_cache` | Promotion and backfill heads run every batch and read no verdict |
+| `test_a_head_without_stored_durations_keeps_each_test_file_whole` | No `.test_durations` keeps each test file one batch |
+| `test_a_head_that_needs_test_units_without_a_manifest_cannot_expand` | A head that needs test units and has no manifest cannot expand |
+| `test_a_merge_group_head_refuses_an_entry_limit_the_delivery_schema_refuses` | `full_suite_entries: 0` raises `0 is less than the minimum of 1` |
+| `test_a_head_whose_grader_delivery_breaks_its_schema_is_dropped_with_its_reason` | A schema refusal drops the head with its reason and no grade |
+
+The tests are in `tests/ci_lab/test_scheduler.py` and map to the `lab-scheduler-test-units` entry
+of `feature-map.json`.
+
+#### Troubleshooting
+
+| Symptom | Cause | Check |
+|---|---|---|
+| A merge group, promotion or backfill head gets no grade and the log reads `cannot expand <head>: no dependency manifest at or before <base>` | No commit on the base's first parent chain has a manifest stored, and none of its newest 10 commits has a fetchable `dep-manifest-packed` artifact from a dev push run of the Tests workflow | `gh run list --workflow test.yml --branch dev --event push --limit 10` lists those runs; an artifact older than 7 days has expired |
+| `cannot expand <head>: 0 is less than the minimum of 1`, or another `jsonschema` message | The grader revision's `delivery.yaml` breaks its schema | [Configure the entry limit](#configure-the-entry-limit); run `delivery.lab` in a checkout of `<base>` |
+| A merge group runs every batch | A clause of `interaction.full_reason` holds, or the entries' changes invalidate every test | Run the [clause check](#check-which-clause-a-merge-group-took). When it prints `None`, either the `cache` clause held, which the script does not evaluate, or an entry changes a global input `dep_manifest.global_input` names, such as `pyproject.toml`, `.github/test-requirements.lock`, `.test_durations` or a `.py` file outside `hooks/`, `scripts/` and `tests/`, or a `tests/` module whose name does not start with `test_`; `git diff --name-only <base> <head>` names the files. The `cache` clause holds when more than half the manifest's tests sit in batches whose key has no stored verdict, as on a new or emptied store |
+| A merge group's `unit` job holds no test units and passes | No entry changes a file a manifest test reads, as in a group of documentation changes, and no entry adds a test module the manifest does not list | `git diff --name-only <base> <head>`; the result is expected |
+| A merge group runs tests no entry touches | A batch runs whole when it holds one invalidated test, and an entry that changes a global input of the manifest, such as `.github/test-requirements.lock`, invalidates every test | The batch's members in the unit, and each entry's changes |
+| The log repeats `holding <head>: <error>` | A manifest fetch is still running or GitHub did not answer it | The manifest paragraph above describes both holds |
 
 ### Mutation units
 
@@ -2870,8 +3102,8 @@ dev = [
 source_paths = ["hooks/", "scripts/"]
 ```
 
-A `ValueError`, `KeyError`, failed git command, YAML error or schema validation error raised in
-expansion makes the scheduler print
+A `ValueError`, `KeyError`, `SyntaxError`, failed git command, YAML error or schema validation
+error raised in expansion makes the scheduler print
 `cannot expand <head>: <error>` and drop the head; nothing of it is graded, and the head gets a
 failed `lab-shadow/required` check run naming the error (see
 [A head that cannot expand](#a-head-that-cannot-expand)).
@@ -3058,6 +3290,7 @@ completes when every part is final and fails when any part fails.
 | `cannot expand <head>: <checkout>/pyproject.toml pins no mutmut version` | The head's `pyproject.toml` holds no quoted `mutmut==<version>` | Pin mutmut in the head's `pyproject.toml` |
 | `cannot expand <head>: no dependency manifest at or before <base>` | No manifest is stored or fetchable on the base's first parent chain | Read [Test units](#test-units) for how the lab fetches manifests |
 | `cannot expand <head>:` naming a failed `git worktree add` | The repository's store lacks the head commit, or `CI_LAB_MIRROR_STORE` is not writable | `git -C <store> cat-file -t <head>` and the folder's permissions |
+| `cannot expand <head>: <message> (<unknown>, line <n>)` | A changed Python file under `hooks/` or `scripts/` on a promotion or backfill head does not parse | `python -m py_compile <file>` on a checkout of the head names the line |
 | Every row of a failed mutant unit reads `no tests` | No test of the head reaches the changed function | Add a test that calls the function |
 | Rows read `survived` | A test runs the function but none fails against the mutant | Assert on the behaviour the mutant changes |
 | Rows read `suspicious` | A mutant's child crashed or was killed | Read the unit's log |
@@ -3097,10 +3330,10 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 
 | Kind | Trees | Executor inputs |
 |---|---|---|
-| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `uv.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
-| `test` | head, read only | the batch, the venv of the head's `uv.lock` digest, `CI_LAB_MANIFEST`, `CI_LAB_FLAKES` and one pytest worker per slot |
-| `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root and `CI_LAB_MUTATION_CACHE` |
-| `mutant` | the same private trampolined copy | `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
+| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
+| `test` | head, read only | the batch and its selected manifest records, read from the object store into its lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
+| `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
+| `mutant` | the same private trampolined copy | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
 
 The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
 from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
@@ -3158,9 +3391,10 @@ or a report that breaks the rule.
 |---|---|---|
 | `agentihooks-ci:verdict:<kind>:<key>` | string | The verdict as JSON with sorted keys, no expiry |
 | `agentihooks-ci:disabled` | set | The kinds `get` never returns a verdict for |
+| `agentihooks-ci:unfiled` | hash | Per kind, the JSON list of the reuse audit's mismatches whose ledger task is not filed yet; see [What a mismatch does](#what-a-mismatch-does) |
 
-The constants are `PREFIX` (`agentihooks-ci:`), `INDEX` (`agentihooks-ci:verdict:`) and
-`DISABLED`. Other lab keys share the prefix, such as the daily CI budget at
+The constants are `PREFIX` (`agentihooks-ci:`), `INDEX` (`agentihooks-ci:verdict:`),
+`DISABLED` and `UNFILED`. Other lab keys share the prefix, such as the daily CI budget at
 `agentihooks-ci:budget:<YYYY-MM-DD>`, so a pattern that targets verdicts is
 `agentihooks-ci:verdict:*`, never `agentihooks-ci:*`. An index value reads:
 
@@ -3299,6 +3533,11 @@ says otherwise; on `LocalObjects` it is a `file://` URI. An upload is not write 
 to the same URL replaces the object. A presigned URL grants a write to that one object until it
 expires, so keep it out of logs.
 
+The scheduler builds its `S3Objects` with `scheduler.storage`, whose client signs SigV4 URLs over
+the host alone, region `us-east-1` and path style, so a worker's PUT may carry any `Content-Type`.
+A SigV2 URL, which botocore signs when no signature version is set, also signs the `Content-Type`:
+the form type urllib adds to every worker PUT then makes MinIO answer 403 `SignatureDoesNotMatch`.
+
 Workers ask the scheduler's lease API on port `8800`:
 
 ```http
@@ -3379,8 +3618,10 @@ Change chart values through that repository's delivery process. Pod recreation a
 restarts below retain the deployed code.
 
 The scheduler supports startup reindexing. The node recovery steps use the deployment's
-node-cache DaemonSet. The mirror age gauge still has no samples, as listed in
-[Metrics](#metrics); a successful fetch log alone does not prove the fresh-node metric requirement.
+node-cache DaemonSet. The mirror age gauge is one unlabelled series read from the `fetched-at`
+stamp under the scheduler's own `CI_LAB_GIT_MIRROR`, as listed in [Metrics](#metrics), so it
+shows no other node's mirror; a successful fetch log alone does not prove the fresh-node metric
+requirement.
 
 ### Deployment recovery runbook
 
@@ -3432,9 +3673,10 @@ kubectl -n ci-lab logs -l app.kubernetes.io/component=node-cache -c warm --tail 
 
 A successful refresh logs `mirror fetched`, followed by `uv cache warmed for lock <blob>` or
 `uv cache current for lock <blob>`. The stamp advances before uv warming, so a failed package
-install can follow a successful git fetch. Once the worker exports `ci_lab_mirror_age_seconds`,
-verify that a fresh node's sample is below `mirror.intervalSeconds` after one completed loop.
-Until then, retain the fetch output as cache evidence and leave the metric acceptance unproven.
+install can follow a successful git fetch. When the scheduler's `CI_LAB_GIT_MIRROR` is a node
+cache mirror, verify that its `ci_lab_mirror_age_seconds` sample is below `mirror.intervalSeconds`
+after one completed loop. For every other node, read its `fetched-at` stamp with the commands
+above and retain the fetch output as cache evidence.
 
 ### Recover an interrupted refresh or deleted cache
 
@@ -3536,7 +3778,7 @@ and the deployed scheduler's `reindexed N verdicts` line to prove full recovery.
 | `mirror fetched` followed by `node cache refresh failed` | The stamp was already updated; inspect repository lockfile access, package downloads and uv cache permissions |
 | Refresh repeatedly skips | Another run holds `git/.warm.lock`; confirm that run's state before treating a stale mirror lock as the cause |
 | Refresh fails after cache directory deletion | Recreate the affected node-cache pod and workers holding deleted mounts |
-| Mirror age sample is absent | The gauge is not exported yet; the fetch stamp and logs do not satisfy the metric requirement |
+| Mirror age sample is absent | The scheduler found no `fetched-at` stamp holding a whole number under its `CI_LAB_GIT_MIRROR` at the scrape; check that path is a node cache mirror and read its stamp |
 | No reindex line | Check the exact environment value and startup dependency errors; the chart's default `false` omits the variable |
 | Reindex prints zero | Existing entries are preserved, or no matching reports exist in the configured bucket; check the endpoint, bucket and report objects |
 | Scheduler readiness is delayed during recovery | Reindex reads every report before serving; inspect startup logs and object store access, then disable the startup setting after recovery |
@@ -3567,7 +3809,7 @@ caller supplies its own ports.
 
 | Field | Type | What the audit does with it |
 |---|---|---|
-| `store` | `store.Store` | Reads each cached verdict with `get` and stops reuse with `disable` |
+| `store` | `store.Store` | Reads each cached verdict with `get`, stops reuse with `disable` and keeps each kind's mismatches with `keep_unfiled` until `filed` |
 | `lab` | `audit.Lab` | Lists the units to compare and grades them |
 | `tasks` | `audit.Tasks` | Files one task per differing kind with `add_task(slug, fields, by)`; `scripts.swarm.ledger_client.LedgerClient` has that method |
 | `slug` | `str` | The ledger the tasks go to |
@@ -3644,12 +3886,15 @@ comparison, so each later audit spends a grade on a disabled kind for nothing.
 
 ### What a mismatch does
 
-When any unit differs, the audit:
+The audit first reads the mismatches an earlier audit could not file with `audit.unfiled(store)`
+and puts them ahead of the ones it finds itself. When any mismatch remains, the audit:
 
-1. Disables every differing kind with `Store.disable`, all of them before it files any task. The
-   whole kind stops hitting, its agreeing units included; other kinds keep hitting.
-2. Files one task per kind, in sorted kind order, with `tasks.add_task(slug, fields, "swarm")`.
-   `"swarm"` is `audit.SENDER`.
+1. Disables every differing kind with `Store.disable` and records its mismatches with
+   `Store.keep_unfiled`, all of them before it files any task. The whole kind stops hitting, its
+   agreeing units included; other kinds keep hitting.
+2. Files one task per kind, in sorted kind order, with `tasks.add_task(slug, fields, "swarm")`,
+   and drops the kind's record with `Store.filed` once the ledger takes the task. `"swarm"` is
+   `audit.SENDER`.
 3. Raises `CILabVerdictMismatch`.
 
 Each task carries these fields:
@@ -3679,9 +3924,13 @@ regraded verdicts differ from the cached ones for static, test
 ```
 
 When the ledger refuses a task, the exception `add_task` raised propagates and
-`CILabVerdictMismatch` is not raised. Every differing kind is already disabled, so none is reused,
-but the refused kind and every later kind in sorted order have no task. The audit keeps no copy of
-its mismatches, so on this path the differing units and their runs are lost with the exception.
+`CILabVerdictMismatch` is not raised. Every differing kind is already disabled, so none is reused.
+The refused kind and every later kind in sorted order have no task, and their mismatches stay in
+`agentihooks-ci:unfiled` with each cached verdict, regraded verdict, cached run and audit run. The
+next `promotion_audit` or `sample` files those tasks again with the same units, under its own audit
+run's task id, although it no longer compares the disabled kind, and raises `CILabVerdictMismatch`
+naming them. `audit.unfiled(store)` returns the recorded mismatches as `audit.Mismatch` values,
+ordered by kind.
 
 ### Enable reuse again
 
@@ -3695,6 +3944,10 @@ verdicts.enable("test")
 
 It removes the kind from `agentihooks-ci:disabled`. A Redis flush empties that set too, which
 enables every kind again; see [Disable and enable a kind](#disable-and-enable-a-kind).
+
+`enable` leaves the kind's entry in `agentihooks-ci:unfiled`. A kind enabled before its task is
+filed is disabled again by the next audit, which files the recorded units; a recorded unit that
+differs again in that audit is listed twice in the task.
 
 ### Use it
 
@@ -3922,11 +4175,24 @@ Each scheduler pass applies the counts on two paths:
 |---|---|
 | A lease expires | `queue.Queue.reap` moves the job back to pending with one more `attempts` while `attempts` is below `lab.retry.lost`, else sets its state and outcome to `lost` |
 | A worker completes a lease | `decide` reads the job's outcome and `attempts`; on `retry`, `queue.Queue.retry` moves the job back to pending with one more `attempts` and the unit stays open, else the outcome is final |
-| A unit's executor raises | The unit stops heartbeating and its lease is never completed, so it reaches the scheduler as an expired lease. The worker prints `ci-lab worker: unit <job> crashed: <repr of the error>` to standard error on its next lease cycle |
+| A unit's executor raises | The unit stops heartbeating and its lease is never completed, so it reaches the scheduler as an expired lease. The worker prints `ci-lab worker: unit <job> crashed: <repr of the error>` to standard error on its next lease cycle, followed by the error's traceback, whose last line names the path a missing file error could not open |
 
 A worker that completes a lease with `crash` therefore runs once more under the default
 `lost: 1`, and a second `crash` is final and red. `tests/ci_lab/test_retry.py` covers the decision
 table, and the `lab-scheduler-test-units` feature tests cover the scheduler's retry path.
+
+`queue.Queue.retry` moves only a job whose state is `done`: it adds one to `attempts`, clears the
+job's worker and outcome and adds it back to the pending set under the same job id with a new
+sequence number; a job in any other state is left as it is and the call returns `False`. A job
+reaping marked `lost` never reaches it, since reaping marks a job `lost` only once its `attempts`
+reached `lab.retry.lost`, where `decide` is `final`.
+
+An attempt that is run again leaves no trace in the verdict store: the scheduler stores a verdict,
+report and log only for the final attempt, and only when that attempt is graded and uploaded a
+report. Each finished attempt with an uploaded report is still counted once in the unit metrics of
+its class and charged to the day's budget, because `queue.Queue.tally` marks the attempt by its
+`attempts` number. With `retry: {failed: 1}`, a unit that fails and then passes stores one passing
+verdict, and both attempts count when both uploaded a report.
 
 ### Troubleshooting
 
@@ -3939,6 +4205,8 @@ table, and the `lab-scheduler-test-units` feature tests cover the scheduler's re
 | `DeliveryError` naming `lab.retry` | A count is negative, not an integer, a boolean, or the block holds another key or is not a mapping | Match the message to the error table in [Configure the counts](#configure-the-counts) |
 | `TypeError` from `retry.policy` | The block was not validated and holds an unknown key | Read the block with `delivery.lab(root)` first |
 | Changing `lab.retry` leaves reruns unchanged | The scheduler reads the counts only when it starts | Restart the scheduler service after the change reaches dev |
+| The scheduler exits at start with a `jsonschema.ValidationError`, such as `-1 is less than the minimum of 0` | Dev's `delivery.yaml` breaks its schema; `build` reads the counts through `MirrorExpander.retries`, which validates the whole document before any listener binds | Run `delivery.lab` in a checkout of dev, as in [Configure the entry limit](#configure-the-entry-limit), and fix the file by pull request |
+| A unit ran twice but the store holds one verdict | The first attempt was run again, so only the final attempt's verdict is stored | Expected; the unit metrics count each attempt that uploaded a report |
 
 ## Shadow comparison
 
@@ -4028,8 +4296,9 @@ not these rows. See [CI lab shadow acceptance report](lab-shadow.md).
   variables. A private variable replaces a whitelisted variable of the same name.
 - A port range from its `PortAllocator`, given back when the run ends.
 - No network unless the caller passes `net=True`.
-- Its own session. A timeout sends `SIGKILL` to the whole process group, and the outcome's code is
-  `None`.
+- Its own session. When the unit exits, cleanly, with a failure or at its timeout, the sandbox sends
+  `SIGKILL` to the whole process group, so no child it left behind outlives the run. A timeout's
+  outcome code is `None`.
 
 | Variable | Value |
 |---|---|
@@ -4119,16 +4388,19 @@ Limitations:
 ### Head venv builds
 
 `venvs.venv_for(lockfile_digest, tree, root, build)` returns the baked image venv when its
-marker holds the digest. Otherwise it builds `root/<digest>` once, under a lock per digest, by
-running uv in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time limit). The
-executors pass `Pod.build`, the pod's ports, whitelist and unit time limit.
+marker holds the digest. The executors pass the sha256 of the head's tracked
+`.github/test-requirements.lock` (`venvs.LOCKFILE`), the file the image hashes into that marker;
+`uv.lock` is not tracked and is never read. Otherwise it builds `root/<digest>` once (`root` is
+`Pod.venvs`, `/work/venvs` on the worker Deployment), under a lock per digest, by running uv
+in a `Sandbox` from `build` (`venvs.Build`: ports, whitelist and time limit). The executors pass
+`Pod.build`, the pod's ports, whitelist and unit time limit.
 
 | Part | Value |
 |---|---|
-| Command | the worker's `uv` with `sync --frozen --no-install-project --all-extras --python <worker python> --project <tree>` |
+| Commands | the worker's `uv` with `venv --clear --python <worker python> root/<digest>`, then `pip install --python root/<digest>/bin/python --constraint <tree>/.github/test-requirements.lock --excludes <tree>/.github/test-excludes.txt -r <tree>/pyproject.toml --extra dev --extra all` |
 | Runs from | the head tree, with network, under `env -i` and no bubblewrap |
-| Environment | `build.whitelist`, `PATH` (the whitelist's, else `/bin:/usr/bin`), `UV_PROJECT_ENVIRONMENT=root/<digest>` and the sandbox's private folders |
-| Run folder | under `root/builds`, removed after a build that ends with code 0 |
+| Environment | `build.whitelist`, `PATH` (the whitelist's, else `/bin:/usr/bin`) and the sandbox's private folders |
+| Run folder | one per command under `root/builds`, removed after the command ends with code 0 |
 
 uv and every build hook it starts get no other worker variable in their environment. A build
 that runs past the unit time limit or ends with a
@@ -4137,6 +4409,85 @@ builds again. A worker without `uv` on its `PATH` raises
 `uv is not installed, so a venv cannot be built`. The build is isolated by environment only:
 it runs as the worker's user with no PID namespace, so it can still read and write the host
 filesystem, `/proc` included.
+
+#### Which venv a unit gets
+
+Every unit kind selects its venv the same way before it runs: the `static` and `tests` executors
+from the shared head tree, and `mutation`, for both `stats` and `mutant` units, from its private
+trampolined copy of the head. Each calls
+`venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)`, where
+`executors.lockfile_digest(tree)` is the sha256 of the bytes of
+`<tree>/.github/test-requirements.lock`:
+
+| Case | Venv the unit runs on | uv cache lookup in the unit's report |
+|---|---|---|
+| The digest equals the text of `/opt/agentihooks-venv/lockfile.sha256` | The baked image venv `/opt/agentihooks-venv`, used as it is, without taking the build lock | hit |
+| An earlier unit on this pod built the digest | `<CI_LAB_WORK_ROOT>/venvs/<digest>`, whose `lockfile.sha256` holds the digest | hit |
+| Neither | `<CI_LAB_WORK_ROOT>/venvs/<digest>`, built by the two commands above, then marked with the digest | miss |
+| The head has no `.github/test-requirements.lock` | None: `lockfile_digest` raises `FileNotFoundError` and the unit crashes before it runs | none, no report |
+
+`<CI_LAB_WORK_ROOT>` is `/work` on the worker Deployment, so a pod keeps its built venvs at
+`/work/venvs/<digest>`, the build lock of each digest at `/work/venvs/<digest>.lock` and the run
+folders of builds in progress or kept after a failure under `/work/venvs/builds`. Units on the
+same pod that need the same digest wait on that lock, and only the first one builds. `/work` is an
+`emptyDir`: built venvs count against the pod's 20 GiB `ephemeral-storage` limit, nothing removes
+the venv of a digest no head uses any more, and a new pod starts with none of them. The
+[uv cache](ci-lab-node-cache.md) under `/cache/uv` is read only to the worker, and the build's
+`env -i` drops `UV_CACHE_DIR`, so a build does not read it.
+
+The image writes the marker when it bakes the venv. `docker/ci-lab/Dockerfile` installs the
+project with `--constraint .github/test-requirements.lock --excludes .github/test-excludes.txt`
+into `/opt/agentihooks-venv`, then runs
+`sha256sum .github/test-requirements.lock | cut -d ' ' -f 1 > /opt/agentihooks-venv/lockfile.sha256`.
+The `CI lab image` workflow runs `docker/ci-lab/smoke.sh <image> <digest>` with the sha256 of the
+lock it built from, and the smoke fails when the baked marker holds any other digest. A push to
+`dev` that changes `.github/test-requirements.lock` or `.github/test-excludes.txt` runs that
+workflow and publishes the `dev` tag, which the chart's `worker.image.tag` names with
+`imagePullPolicy: Always`, so worker pods created after it carry a venv baked from the new lock.
+A head whose lock matches the commit the image was built from therefore runs on the baked venv,
+and any other lock costs one build per pod.
+
+A change to `.github/test-requirements.lock` gives the head's units a new venv: the worker
+computes a new digest and builds that venv on each pod that leases one of them. It also rekeys
+the head's static, test and stats units. The scheduler keys the `toolchain.lockfile` input of
+static and test units on the git blob id of the same file in `MirrorExpander.expand`, and the
+`runtime` of stats units on the sha256 of its bytes through `stats_cache.runtime_digest`, so no
+verdict stored under the old lock answers them. Mutant unit keys, built in `expand_mutation`,
+take neither input. A head without the lock is still expanded, with an empty `lockfile` input and
+a null stats `runtime`, and its units then crash on the worker as the last row above shows.
+
+#### Verify the venv keying
+
+From a checkout, print the digest a head's units select their venv by:
+
+```bash
+head=origin/dev
+git show "$head:.github/test-requirements.lock" | sha256sum | cut -d ' ' -f 1
+```
+
+Read the digest the running worker image baked, and the venvs that pod built:
+
+```bash
+pod=$(kubectl -n ci-lab get pods -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl -n ci-lab exec "$pod" -- cat /opt/agentihooks-venv/lockfile.sha256
+kubectl -n ci-lab exec "$pod" -- sh -c 'ls /work/venvs; cat /work/venvs/*/lockfile.sha256'
+```
+
+When the first command and the baked marker print the same digest, the head's units run on the
+baked venv and `/work/venvs` gains no folder for it. Otherwise the first unit of that head on the
+pod builds `/work/venvs/<digest>`, and its marker prints the digest once the build ends.
+`executors.settings` creates `/work/venvs` when the worker starts, so on a pod that has built no
+venv `ls` prints nothing and `cat` fails with `No such file or directory` on the unmatched
+pattern. The uv lookups reach the scheduler's counters, read as in
+[Verify the running service](#verify-the-running-service):
+
+```bash
+curl -fsS http://lab:9108/metrics | grep -E '^ci_lab_cache_(hits|misses)_total\{cache="uv"\}'
+```
+
+Misses rise once per pod and lock while a new lock is first leased, and hits rise for every other
+unit.
 
 ### Use it
 
@@ -4493,3 +4844,46 @@ job:
 | A pull request changed sandbox code and no `writer-lock / lab-sandbox` check ran | The changed path is not one of `LAB_SANDBOX_INPUTS`, which match whole, or the Tests workflow skipped its `writer-lock` job | The `Select lab sandbox inputs` step log in the `writer-lock / inputs` job; or dispatch `Writer lock` on the branch as in [Run it by hand](#run-it-by-hand) |
 | The protected grader refuses the pull request with `The head changes the frozen gate file .github/workflows/writer-lock.yml ...` | The head changes the workflow to a blob the base registry does not accept | Announce the blob first, as in [Change the job](#change-the-job) |
 | `writer-lock.yml/lab-sandbox: runs-on must be ubuntu-latest for a hosted job` | The job's `runs-on` was routed to a self hosted runner label | Restore `runs-on: ubuntu-latest`; the self hosted runners have no bubblewrap, so every real case would skip |
+
+## Static plant proofs
+
+Run `python -m scripts.ci_lab grade --plant lint` from a repository checkout to prove
+an import sorting fault. Use `--plant gate-script` to prove that a head cannot teach its
+own comment grader to accept a new directive. Test and mutation plants are separate proofs.
+
+The command also accepts every JSON plant name in the catalog, including dotted names such as
+`lint.lint-check`. A plant keeps its full discovered step in `gate`; grading reads that step's job
+check and requires its named diagnostic. The JSON result and summary row include `green_run` and
+`red_run`, the exact grade identifiers for the two check links. `lint.threshold-pins` is the shorter
+alias for the threshold pin plant; its full gate identity is unchanged.
+
+Static execution reads `tests/ci_lab/static_gate_exclusions.json` from the protected
+grader revision. Pull requests and hotfixes use their base; promotion and backfill
+use the integrated head. Only exact gate name matches are excluded. Each affected
+calling job keeps Actions authority. The protected Actions readers apply the same
+calling job filter for pull requests and merge groups. A missing catalog preserves existing plans,
+and malformed policy refuses expansion. The protected catalog records the reason
+for each exclusion.
+
+The command creates an unchanged twin and its planted child from `origin/dev`, with fixed
+commit identity and dates. It preserves the checkout, HEAD and normal index. `--base`
+selects another protected revision; `--repository` overrides the GitHub URL inferred from
+`origin`; `--timeout` bounds each grade wait in seconds, with a default of 900.
+
+Both commits use a branch under `diffcheck/lab-plant-`, derived from the plant and base.
+The twin is pushed and must pass before the plant is pushed. A rerun on the same base
+reuses those commits; another base gets a separate branch. No plant pull request is opened.
+
+The authenticated push receiver must recognize that prefix, resolve both heads against
+trusted `dev` and grade them in the pull request class with their merge base as grader.
+Proofs runners hold no lab notice secret and make no request to the receiver. An ordinary
+promotion grade cannot satisfy this proof: its grade identity and grader differ.
+
+Only checks carrying the exact grade key are read. The twin's required check must pass;
+the plant's required check must fail with `lint` as its only failing static gate. Failed
+pushes, expired or incomplete grades and other failing gates fail the command. The failing
+gate must carry its expected diagnostic in the trusted check output text: Ruff `I001` or
+`forbidden comment`. A check title or summary cannot satisfy that requirement.
+
+Success prints a JSON row. When `GITHUB_STEP_SUMMARY` is set, the command also appends a row
+with green and red GitHub check links, which remain usable outside the cluster.

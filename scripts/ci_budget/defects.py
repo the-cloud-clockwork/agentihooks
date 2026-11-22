@@ -10,7 +10,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts import ci_budget
 from scripts.swarm import ci_speed, metrics_ci, metrics_outbox
@@ -79,13 +79,13 @@ def defect(item: dict, jobs: list[dict]) -> str | None:
     )
     if stages:
         slowest = max(stages, key=stages.get)
-        budget = ci_budget.BUDGETS.get(slowest)
+        budget = ci_budget.budget(slowest, jobs)
         against = f"against {_spoken(budget)}" if budget else "with no budget"
         text += f" Its slowest stage {slowest} took {_spoken(stages[slowest])} {against}."
     return text
 
 
-def _stage_evidence(redis, slug: str, item: dict, jobs: list[dict], now_ms: int) -> tuple:
+def _stage_evidence(redis: Any, slug: str, item: dict, jobs: list[dict], now_ms: int) -> tuple:
     cache = key(slug, "stages")
     gate = next(job for job in jobs if job["name"] == ci_budget.GATE and job.get("completed_at"))
     sample = {
@@ -93,7 +93,7 @@ def _stage_evidence(redis, slug: str, item: dict, jobs: list[dict], now_ms: int)
         "stages": {
             stage: spent
             for stage, spent in ci_budget.stages(jobs).items()
-            if stage != "gate-required" and stage in ci_budget.BUDGETS and spent > ci_budget.BUDGETS[stage]
+            if stage != "gate-required" and (budget := ci_budget.budget(stage, jobs)) is not None and spent > budget
         },
         "url": item.get("html_url") or gate["html_url"],
     }

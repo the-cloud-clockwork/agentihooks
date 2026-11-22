@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import signal
+import sqlite3
 import sys
 import threading
 import uuid
@@ -745,9 +746,9 @@ def _passes(
         number += 1
         try:
             _finishing(store, service, proof_swarm, lock)
-        except LedgerUnreachable as exc:
+        except (LedgerUnreachable, sqlite3.Error) as exc:
             print(f"controller: pass ended, next pass after one tick: {exc}", file=sys.stderr, flush=True)
-            _journal_pass(number, "ledger_unreachable")
+            _journal_pass(number, "ledger_unreachable" if isinstance(exc, LedgerUnreachable) else "ledger_storage")
             if once:
                 return 1
             _tick_wait(lease.tick_ms() / 1000)

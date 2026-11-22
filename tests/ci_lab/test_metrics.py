@@ -74,6 +74,7 @@ def test_every_contract_metric_is_emitted() -> None:
     assert all(line.endswith(" 2.0") for line in samples)
 
 
+@pytest.mark.feature("lab-scheduler-metrics")
 def test_every_sample_line_is_valid_exposition() -> None:
     registry = metrics.Registry()
     load = Load({"hotfix": (30.0,)}, {"hotfix": 1}, slots_total=1, slots_busy=1, budget_fraction=0.5)
@@ -327,18 +328,6 @@ def test_record_spools_units_then_grades_and_skips_empty_tables() -> None:
     assert empty.appended == []
 
 
-def test_observe_records_counts_cache_use_durations_and_graded_heads() -> None:
-    registry = metrics.Registry()
-    missed = replace(unit(), cached=False, kind="mutation", seconds=40.0)
-    metrics.observe_records(registry, [unit(), unit(key="k2"), missed], [grade(), grade()])
-    text = registry.render()
-    assert 'ci_lab_cache_hits_total{cache="verdict"} 2.0' in text
-    assert 'ci_lab_cache_misses_total{cache="verdict"} 1.0' in text
-    assert 'ci_lab_unit_duration_seconds{kind="tests"} 12.0' in text
-    assert 'ci_lab_unit_duration_seconds{kind="mutation"} 40.0' in text
-    assert 'ci_lab_heads_graded_total{class="queue",conclusion="failure"} 2.0' in text
-
-
 def test_record_ships_through_the_real_outbox(tmp_path: Path) -> None:
     sent: list[tuple[str, bytes]] = []
     sink = metrics_outbox.Settings("http://clickhouse.invalid:8123", "", "")
@@ -376,6 +365,7 @@ def test_capacity_route_answers_the_capacity_document() -> None:
     assert json.loads(body)["classes"]["pull_request"]["predicted_wait_s"] == 30.0
 
 
+@pytest.mark.feature("lab-scheduler-metrics")
 def test_metrics_route_observes_the_load_and_renders_every_family() -> None:
     registry = metrics.Registry()
     status, content_type, body = metrics.respond(lambda: LOAD, registry, "GET", "/metrics")

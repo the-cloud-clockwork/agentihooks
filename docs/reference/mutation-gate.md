@@ -1133,7 +1133,7 @@ still install `.[dev,all]`.
 | Package | Specifier | Declared in `pyproject.toml` | Planner module that imports it at module level |
 |---|---|---|---|
 | `mutmut` | `==3.6.0` | `dev` extra | `scripts.ci_mutation.selection` |
-| `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `tests.test_collection_imports` |
+| `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `scripts.ci_mutation.selection` |
 | `pyyaml` | `>=6.0` | project dependencies | `scripts.dep_manifest` (imported as `yaml`) |
 | `tomlkit` | `>=0.12` | project dependencies | `scripts.ci_mutation.runner` |
 
@@ -1342,7 +1342,7 @@ mutmut stops a mutant at its first failing test, and a shard runs the test that 
 
 For example, a function traced by tests of 2, 8 and 30 seconds costs 55.6 worker seconds per mutant without a killer. Once the 2 second test has killed one of its mutants, each mutant costs 8.1. Durations follow the same rules as split planning: the maximum observed duration, at least 5.6 seconds or the largest observed duration when a test has none. Shard sizing, the shard target and limit, and the 1080 second shard budget are unchanged; a lower estimate places more mutants on fewer shards.
 
-The `mutation-stats` parts also keep each test file's statistics in one merged `mutation-test-stats-v2-<os>-` cache per run, which every part restores, so an unchanged test file is not traced again even when it moves to another part. A single part saves the cache itself; with more parts each uploads only the entries it wrote, and the first `mutation-shard` job restores the previous merged cache, lays the parts over it and saves it. An entry is reused when the gate code, configuration, runner options, installed packages (the project itself by its release, since its build number changes with every commit), the test file and everything it imports or names as a file are unchanged (except `.test_durations`, which CI rewrites from dev on every run and which only orders and splits tests), together with the changed lines of each source among them. A file that reaches a dynamic import whose target is not a literal is also checked against every repository module its statistics bucket loaded and what those import or name; a collection that recorded no modules falls back to every Python module in the repository. Each part prints `Mutation stats cache: reused N test files; collect M` in its **Collect one stats part for every mutation shard** step. When a lookup misses, a second line, `Mutation stats cache: misses {...}; changed inputs [...]`, counts each miss reason and names the five inputs that changed most often. The [dev stats seed](#dev-stats-seed) adds the merged pull requests' entries to the dev cache that a new pull request's first run restores.
+The `mutation-stats` parts also keep each test file's statistics in one merged `mutation-test-stats-v2-<os>-` cache per run, which every part restores, so an unchanged test file is not traced again even when it moves to another part. A single part saves the cache itself; with more parts each uploads only the entries it wrote, and the first `mutation-shard` job restores the previous merged cache, lays the parts over it and saves it. An entry is reused when the gate code, configuration, runner options, the sha256 of `.github/test-requirements.lock` and the `.github/test-excludes.txt` list every test install reads, the test file and everything it imports or names as a file are unchanged (except `.test_durations`, which CI rewrites from dev on every run and which only orders and splits tests), together with the changed lines of each source among them. A file that reaches a dynamic import whose target is not a literal is also checked against every repository module its statistics bucket loaded and what those import or name; a collection that recorded no modules falls back to every Python module in the repository. Each part prints `Mutation stats cache: reused N test files; collect M` in its **Collect one stats part for every mutation shard** step. When a lookup misses, a second line, `Mutation stats cache: misses {...}; changed inputs [...]`, counts each miss reason and names the five inputs that changed most often. The [dev stats seed](#dev-stats-seed) adds the merged pull requests' entries to the dev cache that a new pull request's first run restores.
 
 The pull request Tests run carries killing tests between its runs. A kill is recorded per function as the failing test's node id, in a file named by a digest of the function name. The run keeps them per ref in an actions cache:
 
@@ -1486,8 +1486,24 @@ A pull request run saves its `mutation-test-stats-v2-<os>-` cache on the pull re
 `scripts.ci_stats_seed` works in this order:
 
 1. **Merged pull requests.** It starts from the commit in `seeded.sha` in the cache folder, the head the last saved seed reached, or from `--before` when that file is missing. When that commit is not an ancestor of the head, it starts from the head's parent. It reads at most 50 commit subjects up to the head and keeps the number of each subject that ends in `(#N)`.
-2. **Harvest, newest pull request first.** For each number it reads the pull request's head commit. A 404 prints `Mutation stats seed: #N is not a readable pull request` and moves on. It lists up to ten `pull_request` Tests runs at that head and, for each run, up to a hundred artifacts, keeping the unexpired ones named `mutation-test-stats-cache-*`, which the `mutation-plan` and `mutation-stats` jobs upload with seven day retention. It downloads them lowest id first and copies their `.json`, `.index` and `.shared` files and `context.sha` into the folder. The first run that has any stats artifact ends that pull request. An `.index` pointer that a newer pull request already supplied is not replaced by an older one.
+2. **Harvest, newest pull request first.** For each number it reads the pull request's head commit. A 404 prints `Mutation stats seed: #N is not a readable pull request` and moves on. It lists up to ten `pull_request` Tests runs at that head and, for each run, up to ten pages of a hundred artifacts, stopping at the first page with fewer than a hundred. Each page is a separate gh call that is asked again under [Retry](#retry) when it fails with anything other than a timeout or an HTTP 404 answer. It keeps the unexpired artifacts named `mutation-test-stats-cache-*`, which the `mutation-plan` and `mutation-stats` jobs upload with seven day retention. It downloads them lowest id first and copies their `.json`, `.index` and `.shared` files and `context.sha` into the folder. The first run that has any stats artifact ends that pull request. An `.index` pointer that a newer pull request already supplied is not replaced by an older one.
 3. **Prune and record.** It drops `.index` pointers that are broken or name a record made under another `context.sha`, the records no kept pointer names, and the shared input files no kept record names. It writes the head to `seeded.sha` and prints one summary line.
+
+### Call the seed
+
+```bash
+python -m scripts.ci_stats_seed FOLDER --head HEAD_SHA --before BEFORE_SHA
+```
+
+| Argument | Meaning |
+|---|---|
+| `FOLDER` | The stats cache folder, required. It is created with its parents when missing and reused when present |
+| `--head` | The pushed head commit, required. Subjects are read up to it, and it is written to `seeded.sha` at the end |
+| `--before` | The push's previous head, required. It is the start only when `seeded.sha` is missing |
+
+A missing `--head` or `--before` stops the seed with an argparse usage error and exit status 2, before any git or gh call. The seed runs `git` in the current directory, so it needs a clone that holds both commits; the job checks out the full history.
+
+The seed takes no credential argument. Each call runs `gh api repos/{owner}/{repo}/<path>`, where gh fills the owner and repository from the current directory's repository, or from `GH_REPO` when it is set, and authenticates with `GH_TOKEN`. The workflow step sets `GH_TOKEN` to the App token with actions read and pull requests read, `--head` to `$GITHUB_SHA` and `--before` to the push event's `before` commit.
 
 ### Budget and timeouts
 

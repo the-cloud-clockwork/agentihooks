@@ -271,10 +271,10 @@ def test_coverage_shards_ship_the_reused_tests_dev_coverage_to_sonar_and_the_rat
     steps = _steps("unit")
     names = list(steps)
     kept = steps["Keep the reused tests' dev coverage"]
-    assert "package=scripts\n" in kept["run"]
-    assert "if [[ ! -f scripts/reused_coverage.py ]]; then package=tests; fi\n" in kept["run"]
-    assert 'python -m "$package.reused_coverage"' in kept["run"]
-    assert 'cd "$RUNNER_TEMP/grader"' in kept["run"]
+    assert kept["run"].startswith(
+        'git worktree add --detach "$RUNNER_TEMP/grader" "$GRADER"\n'
+        'cd "$RUNNER_TEMP/grader"\npython -m scripts.reused_coverage --repo'
+    )
     assert kept["env"]["GRADER"] == "${{ github.event_name == 'pull_request' && 'origin/dev' || github.sha }}"
     assert '--out "$GITHUB_WORKSPACE/reused-coverage/.coverage"' in kept["run"]
     assert '--captures-out "$GITHUB_WORKSPACE/js-coverage"' in kept["run"]
@@ -284,6 +284,53 @@ def test_coverage_shards_ship_the_reused_tests_dev_coverage_to_sonar_and_the_rat
     assert "reused-coverage/" in steps["Upload coverage"]["with"]["path"]
     combine = (ROOT / ".github" / "coverage" / "combine.sh").read_text()
     assert "coverage-3.12-$shard/reused-coverage/.coverage" in combine
+
+
+def _keep_in_unit(root: Path, grader: dict[str, bytes]) -> subprocess.CompletedProcess[str]:
+    """Run the unit job's dev coverage step with a grader whose dev commit also holds these files."""
+    workspace, runner = root / "workspace", root / "runner"
+    commit = _history(workspace, {"hooks/a.py": OLD.encode(), **grader}, {"hooks/a.py": NEW.encode()})
+    (runner / "dev-coverage").mkdir(parents=True)
+    _record(runner / "dev-coverage" / ".coverage", {"tests/test_a.py::one|run": {"hooks/a.py": [(-1, 2), (2, -1)]}})
+    (workspace / "reused.json").write_text(json.dumps({"tests": ["tests/test_a.py::one"], "files": []}))
+    env = {
+        **os.environ,
+        "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": str(runner),
+        "GITHUB_WORKSPACE": str(workspace),
+        "GRADER": commit,
+        "COMMIT": commit,
+    }
+    run = _steps("unit")["Keep the reused tests' dev coverage"]["run"]
+    return subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", run], cwd=workspace, env=env, capture_output=True, text=True, check=False
+    )
+
+
+@pytest.mark.feature("reused-coverage-scripts-module")
+def test_the_unit_shards_keep_reused_coverage_with_the_scripts_filter_alone_and_never_the_tests_package(
+    tmp_path: Path,
+) -> None:
+    graded = (ROOT / "scripts" / "reused_coverage.py").read_text().replace("Kept the dev", "The grader kept the dev")
+    shipped = {
+        f"scripts/{name}": (ROOT / "scripts" / name).read_bytes() for name in ("coverage_check.py", "dep_manifest.py")
+    }
+    shipped["scripts/__init__.py"] = b""
+    shipped["scripts/reused_coverage.py"] = graded.encode()
+    shipped["tests.py"] = b"raise ModuleNotFoundError(\"No module named 'tests'\", name='tests')\n"
+    kept = _keep_in_unit(tmp_path / "shipped", shipped)
+    assert kept.returncode == 0, kept.stderr
+    assert "The grader kept the dev coverage of 1 reused tests" in kept.stdout
+    carried = tmp_path / "shipped" / "workspace" / "reused-coverage" / ".coverage"
+    assert _arcs(carried) == {"hooks/a.py": {(-4, 5), (5, -4)}}
+    legacy = {
+        "scripts/__init__.py": b"",
+        "tests/__init__.py": b"",
+        "tests/reused_coverage.py": b"raise SystemExit('the tests package filter ran')\n",
+    }
+    stderr = _keep_in_unit(tmp_path / "legacy", legacy).stderr
+    assert (tmp_path / "legacy" / "runner" / "grader" / "tests" / "reused_coverage.py").is_file()
+    assert "the tests package filter ran" not in stderr
 
 
 def test_a_function_with_repeated_short_lines_keeps_its_own_lines_after_an_earlier_function_changes():

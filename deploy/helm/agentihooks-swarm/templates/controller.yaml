@@ -166,8 +166,8 @@ spec:
     {{- if gt $replicas 1 }}
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      maxSurge: 0
+      maxUnavailable: 1
     {{- else }}
     type: Recreate
     {{- end }}
@@ -316,15 +316,9 @@ spec:
             {{- else }}
             exec:
               command:
-                - python
-                - -c
-                - >-
-                  import os; from scripts.swarm import lease; from scripts.swarm.store import connect;
-                  from scripts.swarm.commands import hive_id;
-                  from scripts.swarm.controller_probes import HOST_SWARMS_ENV, standing_by, ticked; store = connect();
-                  held = [] if standing_by(os.environ, store, hive_id) else ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, ""));
-                  stale = [slug for slug in held if not lease.current(store, slug)];
-                  assert not stale, f"no live controller lease for {stale}"
+                - agentihooks
+                - controller
+                - live
             {{- end }}
             {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
           env:

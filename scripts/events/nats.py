@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import datetime
+import hashlib
 import logging
 import sys
 import threading
@@ -36,6 +37,7 @@ from .nats_names import existing_consumer, existing_stream, queue_binding, root_
 from .resource_names import legacy_queue_stream, legacy_stream_name
 from .resource_names import queue_stream as resource_queue_stream
 from .scope import RoutedLog, queue_lane, require_owner
+from .serve_timing import ServeTiming
 from .subjects import PREFIX, consumer_name, inbox, stream_name
 from .subjects import subject as event_subject
 
@@ -227,6 +229,21 @@ class NatsDelivery:
         self._loop.submit(_release(js, self._msg, subject, stream, self.attempt, delay_ms))
 
 
+def _undecodable(message: Msg) -> Envelope:
+    metadata = message.metadata
+    return Envelope(
+        id=f"{metadata.stream}:{metadata.sequence.stream}",
+        type="undecodable",
+        swarm="unknown",
+        entity="message",
+        key=message.subject,
+        version=0,
+        time=0,
+        author="events",
+        data={"subject": message.subject, "payload": base64.b64encode(message.data).decode("ascii")},
+    )
+
+
 class NatsConsumer:
     def __init__(
         self,
@@ -247,24 +264,49 @@ class NatsConsumer:
         self._credentials = credentials
 
     def fetch(self, batch: int, timeout_ms: int) -> list[NatsDelivery]:
-        return [NatsDelivery(self._loop, msg) for msg in self._loop.run(self._fetch(batch, timeout_ms))]
+        return self._loop.run(self._fetch(batch, timeout_ms))
 
-    async def _fetch(self, batch: int, timeout_ms: int) -> list:
-        try:
-            messages = await self._subscription.fetch(batch, timeout=_seconds(max(timeout_ms, MIN_FETCH_MS)))
-        except asyncio.TimeoutError:
-            return []
-        deliveries = []
-        for msg in messages:
-            if _attempt(msg) > self._policy.max_deliver:
-                event = Envelope.decode(msg.data)
-                await _publish_dead(
-                    self._js, event, self._identity, self._policy.max_deliver, self._swarm, self._credentials
-                )
+    async def _fetch(self, batch: int, timeout_ms: int) -> list[NatsDelivery]:
+        loop = asyncio.get_running_loop()
+        timeout = _seconds(max(timeout_ms, MIN_FETCH_MS))
+        deadline = loop.time() + timeout
+        dead_streams = {DEAD_STREAM, "AGENTIHOOKS_DEAD"}
+        if self._swarm is not None:
+            dead_streams.update((stream_name(self._swarm, "DEAD"), legacy_stream_name(self._swarm, "DEAD")))
+        while loop.time() < deadline:
+            try:
+                messages = await self._subscription.fetch(batch, timeout=timeout)
+            except asyncio.TimeoutError:
+                return []
+            deliveries = list[NatsDelivery]()
+            parts = 0
+            for msg in messages:
+                try:
+                    delivery = NatsDelivery(self._loop, msg)
+                    if (
+                        delivery.event.type in {"dead_payload_chunk", "dead_lettered"}
+                        and msg.metadata.stream in dead_streams
+                    ):
+                        if delivery.event.type == "dead_payload_chunk":
+                            await msg.term()
+                            parts += 1
+                            continue
+                        delivery.event = await _hydrate_dead(self._js, msg, delivery.event)
+                except (ValueError, RecursionError):
+                    event = _undecodable(msg)
+                    attempts = _attempt(msg)
+                else:
+                    if delivery.attempt <= self._policy.max_deliver:
+                        deliveries.append(delivery)
+                        continue
+                    event = delivery.event
+                    attempts = self._policy.max_deliver
+                await _publish_dead(self._js, event, self._identity, attempts, self._swarm, self._credentials)
                 await msg.term()
-            else:
-                deliveries.append(msg)
-        return deliveries
+            if deliveries or not parts:
+                return deliveries
+            timeout = max(deadline - loop.time(), 0.001)
+        return []
 
 
 async def _publish(js, subject: str, stream: str, event: Envelope) -> bool:
@@ -288,6 +330,22 @@ async def _publish_dead(
     legacy = legacy_stream_name(swarm, "DEAD") if swarm is not None else "AGENTIHOOKS_DEAD"
     stream = await root_stream(js, desired, legacy, credentials)
     target = event_subject(swarm, "dead", letter.id) if swarm is not None else f"dead.{event.swarm}.{letter.id}"
+    limit = js._nc.max_payload - nats_payload.KV_HEADER_BUDGET
+    if event.type == "undecodable" and len(letter.encode()) > limit:
+        template = replace(letter, id=f"{letter.id}-00000000", type="dead_payload_chunk", data={"payload": ""})
+        size = limit - len(template.encode())
+        payload = cast(str, event.data["payload"])
+        parts = list[str]()
+        for index, start in enumerate(range(0, len(payload), size)):
+            part = replace(template, id=f"{letter.id}-{index:08x}", data={"payload": payload[start : start + size]})
+            await _publish_letter(js, part, stream, f"{target.rsplit('.', 1)[0]}.{part.id}")
+            parts.append(part.id)
+        original = replace(event, data={"subject": event.data["subject"], "payload_parts": parts})
+        letter = replace(letter, data={**letter.data, "event": original.to_dict()})
+    await _publish_letter(js, letter, stream, target)
+
+
+async def _publish_letter(js: JetStreamContext, letter: Envelope, stream: str, target: str) -> None:
     try:
         await nats_payload.publish(
             js,
@@ -297,9 +355,33 @@ async def _publish_dead(
             headers={MSG_ID: letter.id, "Nats-Expected-Last-Subject-Sequence": "0"},
         )
     except APIError:
-        stored = await js.get_last_msg(stream, target)
-        if Envelope.decode(stored.data).id != letter.id:
+        stored = Envelope.decode((await js.get_last_msg(stream, target)).data or b"")
+        if stored.id != letter.id or letter.type == "dead_payload_chunk" and stored.data != letter.data:
             raise
+
+
+async def _hydrate_dead(js: JetStreamContext, message: Msg, letter: Envelope) -> Envelope:
+    original = cast(dict[str, Any] | None, cast(dict[str, Any], letter.data).get("event"))
+    if letter.type != "dead_lettered" or not isinstance(original, dict) or original.get("type") != "undecodable":
+        return letter
+    data = cast(dict[str, Any] | None, original.get("data"))
+    if not isinstance(data, dict) or "payload_parts" not in data:
+        return letter
+    payload = list[str]()
+    prefix = message.subject.rsplit(".", 1)[0]
+    for identity in cast(list[str], data["payload_parts"]):
+        try:
+            stored = await js.get_last_msg(message.metadata.stream, f"{prefix}.{identity}")
+        except NotFoundError:
+            target = f"{prefix}.{hashlib.sha256(identity.encode()).hexdigest()}"
+            stored = await js.get_last_msg(message.metadata.stream, target)
+        part = Envelope.decode(stored.data or b"")
+        if part.id != identity or part.type != "dead_payload_chunk":
+            raise ValueError("dead letter payload part differs")
+        payload.append(cast(str, part.data["payload"]))
+    restored = {key: value for key, value in data.items() if key != "payload_parts"}
+    restored["payload"] = "".join(payload)
+    return replace(letter, data={**letter.data, "event": {**original, "data": restored}})
 
 
 class NatsEventLog:
@@ -610,6 +692,7 @@ class NatsBus:
         self._buckets: dict[str, NatsStateStore] = {}
         self._views: dict[str, Bus] = {}
         self._serving = ThreadPoolExecutor(SERVE_WORKERS)
+        self._serve_timing = ServeTiming(SERVE_WORKERS)
         try:
             self._nc = self._loop.run(_first_connect(url, config))
             self._js = self._nc.jetstream()
@@ -727,22 +810,23 @@ class NatsBus:
 
         def answer(msg: Msg, received_ns: int) -> None:
             waited = (time.monotonic_ns() - received_ns) // 1_000_000
-            if wait_ms is not None and waited >= wait_ms:
-                print(
-                    f"bus: dropped a request on {msg.subject!r} after it waited {waited} ms in the serve queue, "
-                    f"past its requester's {wait_ms} ms wait",
-                    file=sys.stderr,
-                )
-                return
-            token = SERVE_WAITED_MS.set(waited)
-            try:
-                reply = handler(msg.subject, msg.data)
-                nats_payload.validate(self._nc, msg.reply, reply)
-                self._loop.run(msg.respond(reply))
-            except Exception as error:
-                self._loop.run(_unreported(error))
-            finally:
-                SERVE_WAITED_MS.reset(token)
+            with self._serve_timing.request(msg.subject, waited):
+                if wait_ms is not None and waited >= wait_ms:
+                    print(
+                        f"bus: dropped a request on {msg.subject!r} after it waited {waited} ms in the serve queue, "
+                        f"past its requester's {wait_ms} ms wait",
+                        file=sys.stderr,
+                    )
+                    return
+                token = SERVE_WAITED_MS.set(waited)
+                try:
+                    reply = handler(msg.subject, msg.data)
+                    nats_payload.validate(self._nc, msg.reply, reply)
+                    self._loop.run(msg.respond(reply))
+                except Exception as error:
+                    self._loop.run(_unreported(error))
+                finally:
+                    SERVE_WAITED_MS.reset(token)
 
         async def respond(msg: Msg) -> None:
             self._serving.submit(answer, msg, time.monotonic_ns())

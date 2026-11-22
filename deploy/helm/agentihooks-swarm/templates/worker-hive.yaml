@@ -198,6 +198,8 @@ spec:
               value: {{ $workers.prefer | default "" | quote }}
             - name: HIVE_CAPABILITIES
               value: {{ join "," ($workers.capabilities | default list) | quote }}
+            - name: HIVE_PINNED
+              value: {{ ternary "yes" "no" (eq (toString $workers.pinned) "true") | quote }}
             - name: HIVE_REPOSITORIES
               value: {{ $workers.repositories | toJson | quote }}
             - name: HIVE_CREDENTIAL_FILE

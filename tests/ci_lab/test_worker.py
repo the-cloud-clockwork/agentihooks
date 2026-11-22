@@ -71,6 +71,10 @@ class Calls(worker.Client):
         return super().complete(job, token, outcome)
 
 
+class SinkServer(ThreadingHTTPServer):
+    request_queue_size = 40
+
+
 class Sink:
     def __init__(self) -> None:
         self.bodies: dict[str, bytes] = {}
@@ -82,7 +86,7 @@ class Sink:
             request.end_headers()
 
         handler = type("SinkHandler", (BaseHTTPRequestHandler,), {"do_PUT": put})
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.server = SinkServer(("127.0.0.1", 0), handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
 
@@ -165,10 +169,7 @@ def slow() -> Iterator[Slow]:
 
 @pytest.fixture
 def scheduler(lab: Counted, sink: Sink) -> Iterator[str]:
-    import fakeredis
-
-    routes = lease_api.ControlRoutes(fakeredis.FakeRedis(decode_responses=True), "", lambda: 0)
-    server = lease_api.serve("127.0.0.1", 0, lab, Signer(sink.url), routes)
+    server = lease_api.serve("127.0.0.1", 0, lab, Signer(sink.url))
     _serving(server)
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()
@@ -253,6 +254,23 @@ def test_every_slot_runs_a_unit_at_once(scheduler: str, jobs: queue.Queue, tmp_p
     assert [found(jobs, f"h1:test:{key}").outcome for key in keys] == ["passed"] * 40
 
 
+@pytest.mark.feature("lab-worker-sink-backlog")
+def test_the_sink_listens_with_room_for_forty_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
+    backlogs: list[int] = []
+    activate = ThreadingHTTPServer.server_activate
+
+    def observed(server: ThreadingHTTPServer) -> None:
+        backlogs.append(server.request_queue_size)
+        activate(server)
+
+    monkeypatch.setattr(ThreadingHTTPServer, "server_activate", observed)
+    upload = Sink()
+    upload.server.server_close()
+
+    assert len(backlogs) == 1
+    assert backlogs[0] >= 40
+
+
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_a_full_pod_waits_for_its_first_unit_to_end_while_the_second_still_runs(
     scheduler: str, lab: Counted, jobs: queue.Queue, tmp_path: Path
@@ -302,6 +320,30 @@ def test_a_crash_stops_the_heartbeat_and_the_lease_reaps(
     assert "ci-lab worker: unit h1:test:a crashed: RuntimeError('unit process crashed')\n" in capsys.readouterr().err
     clock.now += lab.ttl_ms + 1
     assert lab.reap(clock.now) == [("h1:test:a", "pending")]
+
+
+@pytest.mark.feature("lab-worker-crash-traceback")
+def test_a_crash_logs_the_traceback_naming_the_missing_path(
+    scheduler: str, jobs: queue.Queue, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    missing = tmp_path / "tree" / "uv.lock"
+
+    def crash(lease: worker.Lease) -> worker.Finished:
+        missing.read_bytes()
+        return finished(tmp_path, lease)
+
+    crashing = pod(scheduler, {"test": crash})
+
+    crashing.run_once()
+
+    assert crashing.drain() == []
+    line = "ci-lab worker: unit h1:test:a crashed: FileNotFoundError(2, 'No such file or directory')\n"
+    _, crashed, trace = capsys.readouterr().err.partition(line)
+    assert crashed == line
+    assert trace.startswith("Traceback (most recent call last):\n")
+    assert ", in crash\n" in trace
+    assert trace.endswith(f"FileNotFoundError: [Errno 2] No such file or directory: {str(missing)!r}\n")
 
 
 @pytest.mark.feature("lab-worker-pod-loop")

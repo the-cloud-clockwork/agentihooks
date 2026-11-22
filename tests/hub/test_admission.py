@@ -848,6 +848,88 @@ def test_a_repeat_ask_while_the_hives_own_admission_holds_its_turn_is_held_and_a
 
 
 @pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.parametrize("holder", ["", "another-offer token"], ids=["lapsed", "taken"])
+def test_a_repeat_ask_while_the_hives_own_admission_still_claims_past_its_turn_key_is_held(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, holder: str
+) -> None:
+    from scripts.hive import admission as hive_admission
+    from scripts.swarm import tick
+
+    turn, offer = admission.turn_key("hive-a"), rig.admitter._key(SLUG, ask())
+    mark = f"{offer}:claiming"
+    other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
+    write = rig.admitter._mark
+    asked: list[dict[str, Any] | None] = []
+    marked: list[Any] = []
+
+    def lapsed(*args: Any) -> dict[str, Any] | None:
+        rig.store.redis.delete(turn)
+        if holder:
+            rig.store.redis.set(turn, holder)
+        asked.extend([other.admit(SLUG, ask()), other.admit(SLUG, ask(hive="hive-b"))])
+        marked.extend([rig.store.redis.get(mark), rig.store.redis.pttl(mark)])
+        written: dict[str, Any] | None = write(*args)
+        return written
+
+    monkeypatch.setattr(rig.admitter, "_mark", lapsed)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert asked == [{"held": hive_admission.ADMITTING}, None]
+    assert marked[0] == "hive-a"
+    assert tick.LEASE_MS - 5_000 < marked[1] <= tick.LEASE_MS
+    assert rig.store.redis.exists(mark) == 0
+    assert other.admit(SLUG, ask()) == admitted
+    assert [agent.name for agent in rig.store.agents(SLUG)] == [admitted["name"]]
+    assert len(rig.ledger.writes) == 1
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+@pytest.mark.parametrize("ending", ["refused", "raised"])
+def test_an_admission_claim_that_ends_without_an_admission_leaves_no_claiming_mark(
+    rig: SimpleNamespace, ending: str
+) -> None:
+    mark = f"{rig.admitter._key(SLUG, ask())}:claiming"
+    marked: list[Any] = []
+
+    def refuse(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        marked.append(rig.store.redis.get(mark))
+        if ending == "raised":
+            raise ConnectionError("ledger down")
+        return {**rig.rows["t1"], "state": "claimed", "claimed_by": "other"}
+
+    rig.ledger.update_task = refuse
+
+    if ending == "raised":
+        with pytest.raises(ConnectionError, match="^ledger down$"):
+            rig.admitter.admit(SLUG, ask())
+    else:
+        assert rig.admitter.admit(SLUG, ask()) is None
+
+    assert marked == ["hive-a"]
+    assert rig.store.redis.exists(mark) == 0
+    assert rig.store.claimant(SLUG, "t1") is None
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
+def test_an_admission_claim_leaves_a_claiming_mark_another_hive_wrote_in_place(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mark = f"{rig.admitter._key(SLUG, ask())}:claiming"
+    write = rig.admitter._mark
+
+    def overwritten(*args: Any) -> dict[str, Any] | None:
+        rig.store.redis.set(mark, "hive-b")
+        written: dict[str, Any] | None = write(*args)
+        return written
+
+    monkeypatch.setattr(rig.admitter, "_mark", overwritten)
+
+    assert rig.admitter.admit(SLUG, ask()) is not None
+    assert rig.store.redis.get(mark) == "hive-b"
+
+
+@pytest.mark.feature("hub-admission-hive-asks-again")
 def test_a_repeat_ask_whose_own_ask_was_kept_before_its_turn_answers_that_admission(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1612,6 +1694,38 @@ def test_the_hub_admits_a_launch_for_a_hive_with_no_registry_record(
     assert admitted is not None
     assert admitted["hive"] == "hive-a"
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hub-admission-pinned-hive")
+def test_the_hub_admits_a_launch_for_a_pinned_hive_on_an_older_release(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.hive import registry
+
+    _released(rig, monkeypatch, "2.17.825", "2.17.843")
+    registry.beat(rig.store.redis, "hive-a", {"pinned": "yes"})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hub-admission-pinned-hive")
+@pytest.mark.parametrize("pinned", ["no", "", "true"])
+def test_the_hub_refuses_a_hive_not_marked_pinned_yes_on_an_older_release(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], pinned: str
+) -> None:
+    from scripts.hive import registry
+
+    _released(rig, monkeypatch, "2.17.825", "2.17.843")
+    registry.beat(rig.store.redis, "hive-a", {"pinned": pinned})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted == {"held": "release 2.17.825 below hub release 2.17.843"}
+    assert rig.store.claimant(SLUG, "t1") is None
 
 
 @pytest.mark.feature("hub-admission-carries-ledger-intent")
