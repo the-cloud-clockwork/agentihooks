@@ -123,8 +123,8 @@ def _drop(on: Scheduler, views: list[dict[str, Any]]) -> None:
 def ensure(on: Scheduler, config: SwarmConfig, home: Path) -> None:
     """Keep each seat cron the swarm wants on the scheduler: the first live cron aimed at the front door seat on its
     schedule is adopted, the rest are cancelled, a missing one is added and an unwanted one is cancelled. A stopping or
-    stopped swarm wants none. A retired drift check cron aimed at the seat is cancelled, because its duties arrive as
-    seat inbox items."""
+    stopped swarm wants none. A retired drift check cron aimed at the seat is cancelled, because release, green
+    promotion and hive drain seat items carry its rollout checks."""
     where = place(config, home)
     seat = front_door.seat(config.slug)
     with held(on.state, on.name(LOCK), WAIT_S):
