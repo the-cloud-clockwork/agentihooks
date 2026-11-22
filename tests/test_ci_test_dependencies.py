@@ -204,6 +204,9 @@ CONTROL = {"&&", "||", ";", "|", "&", "(", ")", "|&", ";;"}
 REDIRECT = {">", ">>", "<", "<<", "<<<", ">&", "<&", "&>", "&>>", ">|", "<>"}
 CONSTRAINT_FLAGS = {"-c", "--constraint", "--constraints"}
 REQUIREMENT_FLAGS = {"-r", "--requirement", "--requirements", "--with-requirements"}
+NAMED_OPTIONS = {"--with", "--from", "--spec", "--with-executables-from"}
+EDITABLE_OPTIONS = {"-e", "--editable", "--with-editable"}
+INSTALLING = NAMED_OPTIONS | EDITABLE_OPTIONS | REQUIREMENT_FLAGS
 VALUED = (
     CONSTRAINT_FLAGS
     | REQUIREMENT_FLAGS
@@ -224,6 +227,7 @@ VALUED = (
         "--with",
         "--from",
         "--with-editable",
+        "--with-executables-from",
         "-t",
         "--target",
         "--prefix",
@@ -246,6 +250,7 @@ VALUED = (
         "--config-setting",
         "--config-settings",
         "--global-option",
+        "--install-option",
         "-P",
         "--upgrade-package",
         "--reinstall-package",
@@ -293,7 +298,7 @@ ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=.*")
 ENV_REFERENCE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
 SHELL_RUN = re.compile(r"(?:\$\{?\w+\}?/)?((?:[\w.-]+/)*[\w.-]+\.sh)\b")
 MODULE_RUN = re.compile(r"\bpython3?\b[^\n;&|]*?\s-m\s+([A-Za-z_]\w*(?:\.\w+)*)")
-FILE_RUN = re.compile(r"\bpython3?\s+(?:-\w+\s+)*((?:[\w.-]+/)*[\w.-]+\.py)\b")
+FILE_RUN = re.compile(r"\bpython(?:\d+(?:\.\d+)*)?\s+(?:-\w+\s+)*((?:[\w.-]+/)*[\w.-]+\.py)\b")
 LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 INTENTIONAL_SMOKES = {
     ".github/workflows/publish-pypi.yml: pip install --no-cache-dir 'agentihooks==$VERSION'": (
@@ -463,15 +468,21 @@ def _python_words(node: ast.expr, names: dict[str, str | list[str]]) -> list[str
 
 
 def _python_names(tree: ast.Module, root: Path) -> dict[str, str | list[str]]:
-    names: dict[str, str | list[str]] = {}
+    imported: dict[str, str] = {}
     for statement in tree.body:
         if isinstance(statement, ast.ImportFrom):
-            names |= _imported_strings(statement, root)
-    for node in ast.walk(tree):
-        pair = _assigned(node)
-        if pair is None:
+            imported |= _imported_strings(statement, root)
+    pairs = [pair for node in ast.walk(tree) if (pair := _assigned(node)) is not None]
+    rebound = [
+        node.target.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name)
+    ]
+    bound = Counter([*imported, *(name for name, _ in pairs), *rebound])
+    names: dict[str, str | list[str]] = {name: value for name, value in imported.items() if bound[name] == 1}
+    for name, value in pairs:
+        if bound[name] != 1:
             continue
-        name, value = pair
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
             names[name] = value.value
         elif isinstance(value, (ast.List, ast.Tuple)):
@@ -483,10 +494,10 @@ def _python_argvs(path: Path, root: Path) -> Iterator[list[str]]:
     tree = ast.parse(path.read_text())
     names = _python_names(tree, root)
     for node in ast.walk(tree):
-        if isinstance(node, (ast.List, ast.Tuple)) and any(
-            isinstance(element, ast.Constant) and element.value in INSTALLER_WORDS for element in node.elts
-        ):
-            yield [word for element in node.elts for word in _python_words(element, names)]
+        if isinstance(node, (ast.List, ast.Tuple)):
+            words = [word for element in node.elts for word in _python_words(element, names)]
+            if INSTALLER_WORDS.intersection(words):
+                yield words
 
 
 def _commands(path: Path, root: Path) -> Iterator[tuple[list[str], dict[str, str]]]:
@@ -561,7 +572,7 @@ def _arguments(kind: str, args: list[str]) -> tuple[list[tuple[str, str]], list[
             flag, equals, value = word.partition("=")
             options.append((flag, value if equals or flag not in VALUED else next(words, "")))
         elif kind in RUNNERS:
-            return options, [] if any(flag == "--from" for flag, _ in options) else [word]
+            return options, [] if any(flag in {"--from", "--spec"} for flag, _ in options) else [word]
         else:
             targets.append(word)
     return options, targets
@@ -591,14 +602,22 @@ def _pins(path: Path, follow: bool = True) -> set[tuple[str, str]]:
         chained = path.parent / words[-1] if words[:1] in (["-c"], ["--constraint"]) else None
         if chained is not None and follow and chained.is_file():
             pins |= _pins(chained, follow=False)
-        elif (pin := _pin(line.split("#", 1)[0].strip())) is not None:
+        elif (pin := _pin(line.split("#", 1)[0].strip().removesuffix("\\").strip())) is not None:
             pins.add(pin)
     return pins
 
 
-def _floating_lines(path: Path) -> list[str]:
-    texts = [line.split("#", 1)[0].strip() for line in path.read_text().splitlines()]
-    return [text for text in texts if text and not text.startswith("-") and _pin(text) is None]
+def _floating_lines(path: Path, seen: frozenset[Path] = frozenset()) -> list[str]:
+    floating: list[str] = []
+    for line in path.read_text().splitlines():
+        text = line.split("#", 1)[0].strip().removesuffix("\\").strip()
+        flag, _, value = text.partition(" ")
+        nested = path.parent / value.strip()
+        if flag in REQUIREMENT_FLAGS and nested.is_file():
+            floating += [] if nested in seen | {path} else _floating_lines(nested, seen | {path})
+        elif flag in REQUIREMENT_FLAGS | EDITABLE_OPTIONS or (text[:1] not in {"", "-"} and _pin(text) is None):
+            floating.append(text)
+    return floating
 
 
 def _constraint_file(value: str, root: Path) -> Path | None:
@@ -614,7 +633,7 @@ def _constraint_file(value: str, root: Path) -> Path | None:
 
 
 def _constraint_files(kind: str, options: list[tuple[str, str]], env: dict[str, str], root: Path) -> list[Path]:
-    values = [value for flag, value in options if flag in CONSTRAINT_FLAGS]
+    values = [value for flag, value in options if flag in CONSTRAINT_FLAGS | REQUIREMENT_FLAGS]
     values += [
         value
         for flag, pip_args in options
@@ -639,24 +658,33 @@ def _spec_problems(named: list[str], files: list[Path]) -> list[str]:
 
 
 def _requirement_problems(options: list[tuple[str, str]], root: Path) -> list[str]:
-    problems: list[str] = []
-    for flag, value in options:
-        if flag not in REQUIREMENT_FLAGS or value.rsplit("/", 1)[-1] == "pyproject.toml":
-            continue
-        lock = _constraint_file(value, root)
-        if lock is None or lock == root / CONSTRAINTS:
-            problems.append(f"requirements file {value} is not a checked in lock")
-        else:
-            problems += [f"requirements file {value} holds {text}" for text in _floating_lines(lock)]
-    return problems
+    return [
+        f"requirements file {value} is not a checked in lock"
+        for flag, value in options
+        if flag in REQUIREMENT_FLAGS
+        and value.rsplit("/", 1)[-1] != "pyproject.toml"
+        and _constraint_file(value, root) in {None, root / CONSTRAINTS}
+    ]
+
+
+def _lock_problems(files: list[Path], root: Path) -> list[str]:
+    return [
+        f"{file.relative_to(root).as_posix()} holds {text}"
+        for file in dict.fromkeys(files)
+        if file != root / CONSTRAINTS
+        for text in _floating_lines(file)
+    ]
 
 
 def _problems(kind: str, args: list[str], env: dict[str, str], root: Path) -> tuple[str, ...]:
     options, targets = _arguments(kind, [_expand(arg, env) for arg in args])
     named = [target for target in targets if not _path_target(target)]
-    named += [value for flag, value in options if flag in {"--with", "--from"}]
+    named += [value for flag, value in options if flag in NAMED_OPTIONS]
+    named += [value for flag, value in options if flag in EDITABLE_OPTIONS and not _path_target(value)]
+    if not targets and not any(flag in INSTALLING for flag, _ in options):
+        return ()
     files = _constraint_files(kind, options, env, root)
-    problems = [*_spec_problems(named, files), *_requirement_problems(options, root)]
+    problems = [*_spec_problems(named, files), *_requirement_problems(options, root), *_lock_problems(files, root)]
     return (*problems, *(() if files else (UNCONSTRAINED,)))
 
 
