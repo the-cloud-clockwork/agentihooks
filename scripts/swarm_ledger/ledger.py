@@ -353,6 +353,11 @@ def held(state):
     return {"queued": True} if state.get("queued") else {}
 
 
+def declined(state: dict[str, Any], sent: dict[str, Any]) -> bool:
+    """Whether the server refused the op."""
+    return sent["id"] in (state.get("rejected") or ())
+
+
 def send(args: Any, kind: str, /, **fields: Any) -> dict[str, Any]:
     return post(args, [op(kind, args, **fields)])
 
@@ -367,7 +372,7 @@ def post(args: Any, ops: list[dict[str, Any]]) -> dict[str, Any]:
         if lead and isinstance(exc.code, str):
             raise type(exc)(lead + exc.code) from None
         raise
-    if len(ops) == 1 or first["id"] in (state.get("rejected") or ()):
+    if len(ops) == 1 or declined(state, first):
         refused(state, ops, lead=lead)
     if lead and not state.get("applied"):
         sys.exit(f"{lead}the ledger server did not apply it")
@@ -687,24 +692,27 @@ def his_words(args: argparse.Namespace, what: str) -> None:
         sys.exit(f"{what} {NOT_HIS}")
 
 
-def unordered(state: dict[str, Any], order: dict[str, Any]) -> dict[str, str]:
-    """The output field for an add whose order the server refused, said on standard error too."""
-    if order["id"] not in (state.get("rejected") or ()):
-        return {}
+def order_refusal(state: dict[str, Any], order: dict[str, Any]) -> str:
+    """The server's reason for refusing the order, empty when it took it."""
+    if not declined(state, order):
+        return ""
     said: list[str] = state.get("_meta", {}).get("warnings", [])
-    reason = next((text for text in said if text.startswith(f"order on {order['item']} ")), unexplained(order))
-    print(f"not ordered: {reason}", file=sys.stderr)
-    return {"not_ordered": reason}
+    return next((text for text in said if text.startswith(f"order on {order['item']} ")), unexplained(order))
 
 
 def filing(args: argparse.Namespace, kind: str, item: str, fields: dict[str, Any]) -> dict[str, str]:
-    """Send an add, with its order when the operator's words come with it."""
+    """Send an add, with its order when the operator's words come with it, and say so when the server files the add
+    and refuses the order."""
     if not vars(args).get("quote"):
         send(args, kind, **fields)
         return {}
     his_words(args, "order")
     order = op("order_set", args, item=item, quote=args.quote, filing=True)
-    return unordered(post(args, [op(kind, args, **fields), order]), order)
+    reason = order_refusal(post(args, [op(kind, args, **fields), order]), order)
+    if not reason:
+        return {}
+    print(f"not ordered: {reason}", file=sys.stderr)
+    return {"not_ordered": reason}
 
 
 def order_command(args: argparse.Namespace) -> None:

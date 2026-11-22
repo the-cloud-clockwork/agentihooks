@@ -27,7 +27,7 @@ def check(op: dict[str, Any]) -> None:
         raise ValueError("order ops take by, the relaying agent's name, or none for the operator")
     if not ITEM_RE.fullmatch(str(op.get("item"))):
         raise ValueError("an order names phases/<id> or tasks/<id>")
-    if op.get("filing", True) is not True:
+    if "filing" in op and op["filing"] is not True:
         raise ValueError("filing is true on an order sent with the add of its item")
     given = [key for key in PROOFS if key in op]
     for key in given:

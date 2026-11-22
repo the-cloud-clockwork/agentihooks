@@ -452,6 +452,17 @@ def test_an_add_whose_order_the_server_refuses_is_filed_and_says_it_is_not_order
 
 
 @pytest.mark.feature("ledger-order-at-filing")
+def test_words_the_server_cannot_verify_leave_the_add_filed_and_not_ordered(monkeypatch, capsys):
+    monkeypatch.setattr(ledger, "his_words", lambda args, what: None)
+    cli(monkeypatch, "task", "add", "t7", "Fix the writer", "--phase", "p1", "--quote", "ship the warm writer first")
+    reason = f"order on tasks/t7 refused: {UNVERIFIED}"
+    printed = capsys.readouterr()
+    assert json.loads(printed.out) == {"task": "t7", "added": "Fix the writer", "not_ordered": reason}
+    assert printed.err == f"not ordered: {reason}\n"
+    assert unmarked(core.sync(SLUG)[0], "tasks/t7")
+
+
+@pytest.mark.feature("ledger-order-at-filing")
 def test_an_order_refused_with_no_reason_from_the_server_still_says_it_is_not_ordered(monkeypatch, capsys):
     monkeypatch.setattr(ledger, "call", lambda slug, ops: {"rejected": [ops[1]["id"]], "applied": [ops[0]["id"]]})
     monkeypatch.setattr("sys.argv", ["ledger", "--slug", SLUG, "--as", MASTER, "phase", "add", "p7", "Seats", *HIS])
