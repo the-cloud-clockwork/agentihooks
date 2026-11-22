@@ -31,6 +31,15 @@ class Ledger:
         self.added.append((slug, task, by))
 
 
+class Store:
+    def __init__(self, config: SimpleNamespace) -> None:
+        self._config = config
+
+    def config(self, slug: str) -> SimpleNamespace:
+        assert slug == SLUG
+        return self._config
+
+
 def review() -> Any:
     return import_module("scripts.tick.steps.review")
 
@@ -105,10 +114,12 @@ def test_a_ledger_refusal_is_skipped_and_never_fails_the_pass(capsys: pytest.Cap
 def test_the_step_is_inert_without_a_review_lane_or_a_running_swarm(
     monkeypatch: pytest.MonkeyPatch, state: str, cap: int
 ) -> None:
-    module = review()
-    monkeypatch.setattr(module, "_bus", lambda: pytest.fail("the step opened a bus"))
-    values = {"config": SimpleNamespace(state=state, max_review=cap)}
+    module, bus, ledger = review(), open_bus(BusConfig()), Ledger()
+    publish(bus, "pull.opened", {"url": PULL}, PULL)
+    monkeypatch.setattr(module, "_bus", lambda: bus)
+    values = {"store": Store(SimpleNamespace(state=state, max_review=cap)), "slug": SLUG, "ledger": ledger}
     assert module._review_pass(SimpleNamespace(), values.__getitem__) == []
+    assert ledger.added == []
 
 
 @pytest.mark.feature("swarm-review-trigger")
@@ -117,7 +128,7 @@ def test_the_step_runs_the_pass_on_the_swarm_bus(monkeypatch: pytest.MonkeyPatch
     publish(bus, "pull.opened", {"url": PULL}, PULL)
     monkeypatch.setattr(module, "_bus", lambda: bus)
     values = {
-        "config": SimpleNamespace(state="running", max_review=1),
+        "store": Store(SimpleNamespace(state="running", max_review=1)),
         "slug": SLUG,
         "doc": doc(),
         "ledger": ledger,

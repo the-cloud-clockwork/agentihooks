@@ -102,11 +102,11 @@ def review_pass(bus: Bus, slug: str, doc: dict[str, Any], ledger: Any, now_ms: i
 def _review_pass(tick: Any, get: Callable[[str], Any]) -> list[str]:
     """Return the actions of the review pass step, given the tick module and a reader of the pass state; the step
     is inert unless the swarm runs with a review lane cap above zero on a shared bus."""
-    config = get("config")
-    if config.state not in ACTIVE or config.max_review <= 0:
-        return []
     bus = _bus()
     if bus is None:
+        return []
+    config = get("store").config(get("slug"))
+    if config.state not in ACTIVE or config.max_review <= 0:
         return []
     return review_pass(bus, get("slug"), get("doc"), get("ledger"), tick.now_ms())
 
@@ -117,7 +117,7 @@ registry.register(
         "wrapper phases",
         held(_review_pass),
         needs=frozenset(),
-        reads=hook_domains("config", "doc"),
+        reads=hook_domains("doc"),
         writes=frozenset(),
         lane=Lane("tick"),
         effects=frozenset({"ledger"}),
