@@ -1,33 +1,36 @@
+from typing import Any
+
 import pytest
 
 from scripts.swarm import orders
 
 pytestmark = pytest.mark.unit
 
-PHASES = [{"id": "p1"}, {"id": "p2"}]
+Row = dict[str, Any]
+PHASES: list[Row] = [{"id": "p1"}, {"id": "p2"}]
 
 
-def task(task_id, phase="p1", **fields):
+def task(task_id: str, phase: str = "p1", **fields: Any) -> Row:
     return {"id": task_id, "phase": phase, "state": "open", "lane": "eng", **fields}
 
 
-def order(at):
+def order(at: int) -> Row:
     return {"at": at, "by": "operator"}
 
 
-def doc(tasks, phases=PHASES):
+def doc(tasks: list[Row], phases: list[Row] = PHASES) -> Row:
     return {"tasks": tasks, "phases": phases}
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
-def test_a_ledger_with_no_order_mark_has_no_order_time():
+def test_a_ledger_with_no_order_mark_has_no_order_time() -> None:
     assert orders.stamps(doc([task("a"), task("b", depends_on=["a"])])) == {}
     assert orders.stamps({"tasks": [task("a")]}) == {}
     assert orders.stamps({}) == {}
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
-def test_a_task_carries_the_earlier_of_its_own_order_time_and_its_phases():
+def test_a_task_carries_the_earlier_of_its_own_order_time_and_its_phases() -> None:
     phases = [{"id": "p1"}, {"id": "p2", "ordered": order(9)}]
     tasks = [
         task("own", ordered=order(7)),
@@ -40,7 +43,7 @@ def test_a_task_carries_the_earlier_of_its_own_order_time_and_its_phases():
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
-def test_the_work_an_ordered_task_waits_on_carries_its_order_time():
+def test_the_work_an_ordered_task_waits_on_carries_its_order_time() -> None:
     tasks = [
         task("o", ordered=order(5), depends_on=["d1"], parked_on=["k"]),
         task("d1", depends_on=["d2", "gone"]),
@@ -52,14 +55,14 @@ def test_the_work_an_ordered_task_waits_on_carries_its_order_time():
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
-def test_every_task_of_a_phase_an_ordered_phase_waits_on_carries_its_order_time():
+def test_every_task_of_a_phase_an_ordered_phase_waits_on_carries_its_order_time() -> None:
     phases = [{"id": "p1"}, {"id": "p2", "depends_on": ["p1"], "ordered": order(4)}, {"id": "p3"}]
     tasks = [task("a"), task("b"), task("c", phase="p2"), task("other", phase="p3")]
     assert orders.stamps(doc(tasks, phases)) == {"a": 4, "b": 4, "c": 4}
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
-def test_the_plan_task_that_enhances_ordered_work_and_what_it_waits_on_carry_the_order_time():
+def test_the_plan_task_that_enhances_ordered_work_and_what_it_waits_on_carry_the_order_time() -> None:
     tasks = [
         task("o", ordered=order(6)),
         task("thin", lane="plan", enhances="o", depends_on=["before"]),
@@ -71,7 +74,7 @@ def test_the_plan_task_that_enhances_ordered_work_and_what_it_waits_on_carry_the
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
-def test_the_lead_an_ordered_task_is_merged_into_and_what_it_waits_on_carry_the_order_time():
+def test_the_lead_an_ordered_task_is_merged_into_and_what_it_waits_on_carry_the_order_time() -> None:
     tasks = [
         task("member", ordered=order(8), merged_into="lead"),
         task("lead", depends_on=["dep"]),
@@ -82,7 +85,20 @@ def test_the_lead_an_ordered_task_is_merged_into_and_what_it_waits_on_carry_the_
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
-def test_the_earliest_order_wins_wherever_two_orders_meet():
+def test_the_order_time_travels_through_every_link_of_the_work_it_reaches() -> None:
+    tasks = [
+        task("o", ordered=order(6), depends_on=["dep"]),
+        task("dep", merged_into="lead"),
+        task("thin", lane="plan", enhances="dep"),
+        task("lead", parked_on=["parked"]),
+        task("parked"),
+        task("plain"),
+    ]
+    assert orders.stamps(doc(tasks)) == {"o": 6, "dep": 6, "thin": 6, "lead": 6, "parked": 6}
+
+
+@pytest.mark.feature("ready-ordered-offer-first")
+def test_the_earliest_order_wins_wherever_two_orders_meet() -> None:
     tasks = [
         task("late", ordered=order(5), depends_on=["shared"]),
         task("early", ordered=order(3), depends_on=["shared", "late"]),
@@ -95,7 +111,7 @@ def test_the_earliest_order_wins_wherever_two_orders_meet():
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
-def test_done_and_out_of_scope_work_carries_no_order_time_and_passes_none_on():
+def test_done_and_out_of_scope_work_carries_no_order_time_and_passes_none_on() -> None:
     tasks = [
         task("done", ordered=order(1), state="done", depends_on=["behind"]),
         task("scoped", ordered=order(1), out_of_scope=True, depends_on=["behind"]),
@@ -111,7 +127,7 @@ def test_done_and_out_of_scope_work_carries_no_order_time_and_passes_none_on():
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
-def test_tasks_that_wait_on_each_other_end_with_the_earliest_order_time():
+def test_tasks_that_wait_on_each_other_end_with_the_earliest_order_time() -> None:
     tasks = [task("a", ordered=order(4), depends_on=["b"]), task("b", ordered=order(2), depends_on=["a"])]
     assert orders.stamps(doc(tasks)) == {"a": 2, "b": 2}
     tasks = [task("a", ordered=order(4), depends_on=["b"]), task("b", depends_on=["c"]), task("c", depends_on=["a"])]
@@ -120,7 +136,7 @@ def test_tasks_that_wait_on_each_other_end_with_the_earliest_order_time():
 
 @pytest.mark.parametrize("mark", ["yes", 7, None, [], {}, {"by": "operator"}, {"at": "7"}, {"at": 7.5}, {"at": True}])
 @pytest.mark.feature("ready-ordered-offer-first")
-def test_a_malformed_order_mark_counts_as_no_mark(mark):
+def test_a_malformed_order_mark_counts_as_no_mark(mark: object) -> None:
     phases = [{"id": "p1", "ordered": mark}, {"id": "p2"}]
     tasks = [task("a", ordered=mark, depends_on=["b"]), task("b"), task("c")]
     assert orders.stamps(doc(tasks, phases)) == {}
@@ -128,7 +144,7 @@ def test_a_malformed_order_mark_counts_as_no_mark(mark):
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
-def test_a_well_formed_order_mark_gives_its_time():
+def test_a_well_formed_order_mark_gives_its_time() -> None:
     assert orders.marked({"ordered": {"at": 0}}) == 0
     assert (
         orders.marked({"ordered": {"at": 1795300000000, "by": "master@c0ffee-0001", "quote": "Build it"}})
