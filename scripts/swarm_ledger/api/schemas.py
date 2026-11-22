@@ -109,7 +109,7 @@ FIELDS = {
     "phase_review": "by item state note override rounds escalated",
     "phase_append": "by phases",
     "relay": "by item text quote",
-    "order_set": "by item quote request",
+    "order_set": "by item quote request filing",
     "order_clear": "by item quote",
     "answer": "by item text",
     "verdict": "item verdict",
@@ -131,6 +131,7 @@ FIELDS = {
 TYPES = {
     "long": {"type": "boolean"},
     "notice": {"const": True},
+    "filing": {"const": True},
     "to": {"const": "operator"},
     "needs_operator": {"type": "boolean"},
     "artifact": {"type": "boolean"},

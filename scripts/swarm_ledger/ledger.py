@@ -139,7 +139,6 @@ EXPORT_TIMEOUT = 30
 TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("task_split", "halves", "split")}
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
 NOT_HIS = "refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
-UNORDERED = "filed without its order: "
 ORDER_USAGE = "order takes ITEM with --quote WORDS or --request ENTRY, and --clear only with --quote WORDS"
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
@@ -359,7 +358,7 @@ def send(args: Any, kind: str, /, **fields: Any) -> dict[str, Any]:
 
 
 def post(args: Any, ops: list[dict[str, Any]]) -> dict[str, Any]:
-    """One ledger call for the ops, exiting with the server's reasons when it refuses one."""
+    """One ledger call for the ops, exiting with the server's reasons when it refuses the first of them."""
     first = ops[0]
     lead = f"task {first['task']} was not added: " if first["op"] == "task_add" else ""
     try:
@@ -368,8 +367,8 @@ def post(args: Any, ops: list[dict[str, Any]]) -> dict[str, Any]:
         if lead and isinstance(exc.code, str):
             raise type(exc)(lead + exc.code) from None
         raise
-    filed = len(ops) > 1 and first["id"] not in (state.get("rejected") or ())
-    refused(state, ops, lead=UNORDERED if filed else lead)
+    if len(ops) == 1 or first["id"] in (state.get("rejected") or ()):
+        refused(state, ops, lead=lead)
     if lead and not state.get("applied"):
         sys.exit(f"{lead}the ledger server did not apply it")
     for warning in state.get("_meta", {}).get("warnings", []):
@@ -613,8 +612,7 @@ def cmd_phase(args: argparse.Namespace) -> None:
         from scripts.swarm_ledger import ledger_phase_cli
 
         kind, fields = ledger_phase_cli.operation(args)
-        filing(args, kind, f"phases/{args.state}", fields)
-        print(json.dumps(fields))
+        print(json.dumps({**fields, **filing(args, kind, f"phases/{args.state}", fields)}))
         return
     if args.state not in ("done", "open") or args.values:
         sys.exit("phase takes ID done|open, add ID TITLE, or set ID FIELD=VALUE")
@@ -689,12 +687,24 @@ def his_words(args: argparse.Namespace, what: str) -> None:
         sys.exit(f"{what} {NOT_HIS}")
 
 
-def filing(args: argparse.Namespace, kind: str, item: str, fields: dict[str, Any]) -> dict[str, Any]:
+def unordered(state: dict[str, Any], order: dict[str, Any]) -> dict[str, str]:
+    """The output field for an add whose order the server refused, said on standard error too."""
+    if order["id"] not in (state.get("rejected") or ()):
+        return {}
+    said: list[str] = state.get("_meta", {}).get("warnings", [])
+    reason = "; ".join(text for text in said if text.startswith(f"order on {order['item']} ")) or unexplained(order)
+    print(f"not ordered: {reason}", file=sys.stderr)
+    return {"not_ordered": reason}
+
+
+def filing(args: argparse.Namespace, kind: str, item: str, fields: dict[str, Any]) -> dict[str, str]:
     """Send an add, with its order when the operator's words come with it."""
     if not vars(args).get("quote"):
-        return send(args, kind, **fields)
+        send(args, kind, **fields)
+        return {}
     his_words(args, "order")
-    return post(args, [op(kind, args, **fields), op("order_set", args, item=item, quote=args.quote)])
+    order = op("order_set", args, item=item, quote=args.quote, filing=True)
+    return unordered(post(args, [op(kind, args, **fields), order]), order)
 
 
 def order_command(args: argparse.Namespace) -> None:
@@ -827,14 +837,14 @@ def _add_task(args: argparse.Namespace, title: str, fields: dict[str, Any]) -> d
         doc = call(args.slug) if args.kind == "plan" else None
         fields["workspace"] = str(ledger_workspace.folder(args.slug, args.id))
     row = {"task": args.id, "title": title, "lane": args.lane, "phase": args.phase, "description": args.description}
-    filing(args, "task_add", f"tasks/{args.id}", {**row, **fields})
+    noted = filing(args, "task_add", f"tasks/{args.id}", {**row, **fields})
     if args.scaffold:
         try:
             ledger_workspace.scaffold(args.slug, task, doc)
         except OSError as exc:
             print(f"task {args.id} was added; its work folder was not created: {exc}", file=sys.stderr)
-            return {"workspace_error": str(exc)}
-    return {}
+            return {"workspace_error": str(exc), **noted}
+    return noted
 
 
 def _task_add_fields(args: argparse.Namespace) -> dict[str, Any]:
@@ -1160,8 +1170,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     task.add_argument(
         "--quote",
-        help="task set rank=...: the operator's words, so the rank stays his; "
-        "task add: his words, so the task is filed as his order",
+        help="task set rank=...: the operator's words, so the rank stays his, "
+        "and task add: his words, filing the task as his order",
     )
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")

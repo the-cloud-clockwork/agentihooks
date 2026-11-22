@@ -23,6 +23,10 @@ USAGE = "order takes ITEM with --quote WORDS or --request ENTRY, and --clear onl
 NO_AUTHOR = "order ops take by, the relaying agent's name, or none for the operator"
 NO_ITEM = "an order names phases/<id> or tasks/<id>"
 NO_PROOF = "an agent's order needs quote, the operator's words, or request, the id of an entry he wrote"
+NO_TEXT = "must be text up to 20000 characters"
+NOT_ADDED = "this call did not add the entry"
+NO_ORCHESTRATOR = "is not an orchestrator of this ledger"
+HIS = ("--quote", QUOTE)
 
 
 @pytest.fixture(autouse=True)
@@ -69,15 +73,19 @@ def refusals(state):
     return [warning for warning in state["_meta"]["warnings"] if warning.startswith("order on ")]
 
 
+def unmarked(state, item):
+    events = [event for event in state["_meta"]["events"] if event["kind"] in ("ordered", "order cleared")]
+    return "ordered" not in row(state, item) and not events and f"{item}/ordered" not in state["_meta"]["stamps"]
+
+
 def cli(monkeypatch, *argv, by=MASTER):
     def call(slug, ops=None):
         state, rejected = core.sync(slug, ops=ops)
         return {**state, "rejected": rejected, "applied": [op["id"] for op in ops or [] if op["id"] not in rejected]}
 
     monkeypatch.setattr(ledger, "call", call)
-    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", by, *argv])
-    handler = vars(args).get("handler") or getattr(ledger, f"cmd_{args.command}")
-    handler(args)
+    monkeypatch.setattr("sys.argv", ["ledger", "--slug", SLUG, "--as", by, *argv])
+    ledger.main()
 
 
 def spied(monkeypatch):
@@ -118,7 +126,7 @@ def test_an_entry_an_agent_wrote_orders_nothing():
     for request in (comment, "no-such-entry"):
         state, rejected = order("phases/p1", request=request)
         assert len(rejected) == 1
-        assert "ordered" not in row(state, "phases/p1")
+        assert unmarked(state, "phases/p1")
         assert refusals(state) == [f"order on phases/p1 refused: the entry {request} is not one the operator wrote"]
 
 
@@ -127,7 +135,7 @@ def test_an_entry_an_agent_wrote_orders_nothing():
 def test_words_the_operator_never_said_order_nothing(quote):
     state, rejected = order("tasks/t1", quote=quote)
     assert len(rejected) == 1
-    assert "ordered" not in row(state, "tasks/t1")
+    assert unmarked(state, "tasks/t1")
     assert refusals(state) == [f"order on tasks/t1 refused: {UNVERIFIED}"]
 
 
@@ -137,8 +145,8 @@ def test_only_the_orchestrator_relays_an_order(proof):
     operator_words.record(ENGINEER, SAID)
     state, rejected = order("phases/p1", by=ENGINEER, **proof)
     assert len(rejected) == 1
-    assert "ordered" not in row(state, "phases/p1")
-    assert refusals(state) == [f"order on phases/p1 refused: {ENGINEER} is not an orchestrator of this ledger"]
+    assert unmarked(state, "phases/p1")
+    assert refusals(state) == [f"order on phases/p1 refused: {ENGINEER} {NO_ORCHESTRATOR}"]
 
 
 @pytest.mark.feature("ledger-order-mark")
@@ -167,13 +175,17 @@ def test_the_operators_own_order_keeps_the_words_he_gives_unchecked():
 
 
 @pytest.mark.feature("ledger-order-mark")
-def test_a_second_order_keeps_the_first_mark():
+def test_a_second_order_keeps_the_first_mark_and_still_needs_its_proof():
     first = row(order("phases/p1", quote=QUOTE)[0], "phases/p1")["ordered"]
     events = len(core.sync(SLUG)[0]["_meta"]["events"])
     state, rejected = order("phases/p1", by=None)
     assert rejected == []
     assert row(state, "phases/p1")["ordered"] == first
     assert len(state["_meta"]["events"]) == events
+    state, rejected = order("phases/p1", quote="ship the warm writer first")
+    assert len(rejected) == 1
+    assert refusals(state) == [f"order on phases/p1 refused: {UNVERIFIED}"]
+    assert row(state, "phases/p1")["ordered"] == first
 
 
 @pytest.mark.feature("ledger-order-mark")
@@ -181,7 +193,7 @@ def test_only_the_operator_or_his_words_clear_an_order():
     order("phases/p1", quote=QUOTE)
     state, rejected = write("order_clear", by=ENGINEER, item="phases/p1", quote=QUOTE)
     assert len(rejected) == 1
-    assert refusals(state) == [f"order on phases/p1 refused: {ENGINEER} is not an orchestrator of this ledger"]
+    assert refusals(state) == [f"order on phases/p1 refused: {ENGINEER} {NO_ORCHESTRATOR}"]
     state, rejected = write("order_clear", by=MASTER, item="phases/p1", quote="drop the reviewer seats")
     assert len(rejected) == 1
     assert refusals(state) == [f"order on phases/p1 refused: {UNVERIFIED}"]
@@ -201,26 +213,39 @@ def test_only_the_operator_or_his_words_clear_an_order():
 
 
 @pytest.mark.feature("ledger-order-mark")
-def test_clearing_an_item_that_carries_no_order_changes_nothing():
+def test_clearing_an_item_that_carries_no_order_changes_nothing_and_still_needs_its_proof():
     events = len(core.sync(SLUG)[0]["_meta"]["events"])
     state, rejected = write("order_clear", item="tasks/t1")
     assert rejected == []
     assert len(state["_meta"]["events"]) == events
     state, rejected = write("order_clear", by=ENGINEER, item="tasks/t1", quote=QUOTE)
     assert len(rejected) == 1
+    assert refusals(state) == [f"order on tasks/t1 refused: {ENGINEER} {NO_ORCHESTRATOR}"]
+    state, rejected = write("order_clear", by=MASTER, item="tasks/t1", quote="ship the warm writer first")
+    assert len(rejected) == 1
+    assert refusals(state) == [f"order on tasks/t1 refused: {UNVERIFIED}"]
 
 
 @pytest.mark.feature("ledger-order-mark")
-def test_phase_and_task_updates_keep_the_order():
-    order("phases/p1", quote=QUOTE)
-    order("tasks/t1", quote=QUOTE)
-    write("phase_update", by=MASTER, item="phases/p1", fields={"title": "Build the seats"})
-    state, rejected = write("task_update", by=MASTER, item="tasks/t1", fields={"territory": ["ledger"]})
+def test_updates_a_split_and_a_group_keep_the_order():
+    for name, title in (("g1", "Wire the reviewer panes"), ("g2", "Record the seat costs")):
+        added = {"task": name, "title": title, "lane": "eng", "phase": "p1", "difficulty": "S"}
+        assert write("task_add", by=MASTER, **added)[1] == []
+    marked = ("phases/p1", "tasks/t1", "tasks/g1", "tasks/g2")
+    for item in marked:
+        assert order(item, quote=QUOTE)[1] == []
+    assert write("phase_update", by=MASTER, item="phases/p1", fields={"title": "Build the seats"})[1] == []
+    assert write("task_update", by=MASTER, item="tasks/t1", fields={"description": "Seats first"})[1] == []
+    assert write("task_split", by=MASTER, item="tasks/t1", halves=["first", "second"])[1] == []
+    state, rejected = write("task_group", by=MASTER, item="tasks/g1", members=["g2"])
     assert rejected == []
     assert row(state, "phases/p1")["title"] == "Build the seats"
-    assert row(state, "phases/p1")["ordered"]["quote"] == HEARD
-    assert row(state, "tasks/t1")["territory"] == ["ledger"]
-    assert row(state, "tasks/t1")["ordered"]["quote"] == HEARD
+    assert (row(state, "tasks/t1")["description"], row(state, "tasks/t1")["split"]) == (
+        "Seats first",
+        ["first", "second"],
+    )
+    assert row(state, "tasks/g2")["merged_into"] == "g1"
+    assert [row(state, item)["ordered"]["quote"] for item in marked] == [HEARD] * 4
 
 
 @pytest.mark.feature("ledger-order-mark")
@@ -232,29 +257,33 @@ def test_phase_and_task_updates_keep_the_order():
         ({"op": "order_set", "by": MASTER, "item": "tasks/", "quote": QUOTE}, NO_ITEM),
         ({"op": "order_set", "by": MASTER, "quote": QUOTE}, NO_ITEM),
         ({"op": "order_set", "by": MASTER, "item": "phases/p1"}, NO_PROOF),
-        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": QUOTE, "request": "c1"}, NO_PROOF),
+        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "filing": True}, NO_PROOF),
         (
-            {"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": "  "},
-            "quote must be text up to 20000 characters",
+            {"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": QUOTE, "request": "c1"},
+            "an order takes quote or request, not both",
         ),
         (
-            {"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": 7},
-            "quote must be text up to 20000 characters",
+            {"op": "order_set", "item": "phases/p1", "quote": QUOTE, "request": "c1"},
+            "an order takes quote or request, not both",
         ),
-        (
-            {"op": "order_set", "by": MASTER, "item": "phases/p1", "request": ""},
-            "request must be text up to 20000 characters",
-        ),
+        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": "  "}, f"quote {NO_TEXT}"),
+        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": 7}, f"quote {NO_TEXT}"),
+        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "request": ""}, f"request {NO_TEXT}"),
+        ({"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": "x" * 20001}, f"quote {NO_TEXT}"),
         ({"op": "order_set", "by": "operator", "item": "phases/p1", "quote": QUOTE}, NO_AUTHOR),
         ({"op": "order_set", "by": 7, "item": "phases/p1", "quote": QUOTE}, NO_AUTHOR),
         ({"op": "order_set", "by": "no name", "item": "phases/p1", "quote": QUOTE}, NO_AUTHOR),
         (
             {"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": QUOTE, "rank": "urgent"},
-            "order_set takes only item quote request",
+            "order_set takes only item quote request filing",
         ),
         (
-            {"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": "x" * 20001},
-            "quote must be text up to 20000 characters",
+            {"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": QUOTE, "filing": False},
+            "filing is true on an order sent with the add of its item",
+        ),
+        (
+            {"op": "order_set", "by": MASTER, "item": "phases/p1", "quote": QUOTE, "filing": "yes"},
+            "filing is true on an order sent with the add of its item",
         ),
         (
             {"op": "order_clear", "by": MASTER, "item": "phases/p1"},
@@ -262,6 +291,10 @@ def test_phase_and_task_updates_keep_the_order():
         ),
         (
             {"op": "order_clear", "by": MASTER, "item": "phases/p1", "request": "c1"},
+            "order_clear takes only item quote",
+        ),
+        (
+            {"op": "order_clear", "by": MASTER, "item": "phases/p1", "quote": QUOTE, "filing": True},
             "order_clear takes only item quote",
         ),
     ],
@@ -276,8 +309,10 @@ def test_a_malformed_order_is_refused_at_check(op, message):
 def test_a_well_formed_order_passes_check():
     for op in (
         {"op": "order_set", "item": "phases/p1"},
+        {"op": "order_set", "item": "phases/p1", "request": "c1"},
         {"op": "order_set", "by": MASTER, "item": "tasks/t1", "quote": "x" * 20000},
         {"op": "order_set", "by": MASTER, "item": "tasks/t1", "request": "c1"},
+        {"op": "order_set", "by": MASTER, "item": "tasks/t1", "quote": QUOTE, "filing": True},
         {"op": "order_clear", "item": "tasks/t1"},
         {"op": "order_clear", "by": MASTER, "item": "tasks/t1", "quote": QUOTE},
     ):
@@ -286,8 +321,9 @@ def test_a_well_formed_order_passes_check():
 
 @pytest.mark.feature("ledger-order-mark")
 def test_order_ops_are_in_the_api_contract_and_target_their_item():
-    assert schemas.FIELDS["order_set"] == "by item quote request"
+    assert schemas.FIELDS["order_set"] == "by item quote request filing"
     assert schemas.FIELDS["order_clear"] == "by item quote"
+    assert schemas.operation_schema("order_set")["properties"]["filing"] == {"const": True}
     for kind in ("order_set", "order_clear"):
         assert schemas.target({"op": kind, "id": "o1", "item": "phases/p1"}) == "phases/p1"
 
@@ -364,7 +400,9 @@ def test_phase_add_with_his_words_files_and_orders_the_phase_in_one_call(monkeyp
     assert row(state, "phases/p7")["title"] == "Reviewer seats"
     mark = row(state, "phases/p7")["ordered"]
     assert mark == {"at": mark["at"], "by": MASTER, "quote": HEARD}
-    assert json.loads(capsys.readouterr().out)["title"] == "Reviewer seats"
+    printed = capsys.readouterr()
+    assert json.loads(printed.out)["title"] == "Reviewer seats"
+    assert ("not_ordered" in json.loads(printed.out), printed.err) == (False, "")
 
 
 @pytest.mark.feature("ledger-order-at-filing")
@@ -375,7 +413,7 @@ def test_task_add_with_his_words_files_and_orders_the_task_in_one_call(monkeypat
     state = real(SLUG)[0]
     assert row(state, "tasks/t7")["title"] == "Fix the writer"
     assert row(state, "tasks/t7")["ordered"]["quote"] == HEARD
-    assert json.loads(capsys.readouterr().out)["task"] == "t7"
+    assert json.loads(capsys.readouterr().out) == {"task": "t7", "added": "Fix the writer"}
 
 
 @pytest.mark.feature("ledger-order-at-filing")
@@ -396,13 +434,77 @@ def test_filing_with_words_he_never_said_writes_nothing(monkeypatch, argv):
 
 
 @pytest.mark.feature("ledger-order-at-filing")
-def test_a_filing_whose_order_the_server_refuses_says_the_entry_was_filed(monkeypatch):
+@pytest.mark.parametrize(
+    ("argv", "item"),
+    [
+        (["task", "add", "t7", "Fix the writer", "--phase", "p1"], "tasks/t7"),
+        (["phase", "add", "p7", "Reviewer seats"], "phases/p7"),
+    ],
+)
+def test_an_add_whose_order_the_server_refuses_is_filed_and_says_it_is_not_ordered(monkeypatch, capsys, argv, item):
     operator_words.record("planner", SAID)
+    cli(monkeypatch, *argv, "--quote", QUOTE, by="planner")
+    reason = f"order on {item} refused: planner {NO_ORCHESTRATOR}"
+    printed = capsys.readouterr()
+    assert json.loads(printed.out)["not_ordered"] == reason
+    assert printed.err == f"not ordered: {reason}\n"
+    assert "ordered" not in row(core.sync(SLUG)[0], item)
+
+
+@pytest.mark.feature("ledger-order-at-filing")
+def test_an_order_refused_with_no_reason_from_the_server_still_says_it_is_not_ordered(monkeypatch, capsys):
+    monkeypatch.setattr(ledger, "call", lambda slug, ops: {"rejected": [ops[1]["id"]], "applied": [ops[0]["id"]]})
+    monkeypatch.setattr("sys.argv", ["ledger", "--slug", SLUG, "--as", MASTER, "phase", "add", "p7", "Seats", *HIS])
+    ledger.main()
+    reason = (
+        "order_set on phases/p7 refused without a reason from the server: "
+        "check that the entry exists, that you may change it and that its text is not empty"
+    )
+    printed = capsys.readouterr()
+    assert json.loads(printed.out)["not_ordered"] == reason
+    assert printed.err == f"not ordered: {reason}\n"
+
+
+@pytest.mark.feature("ledger-order-at-filing")
+def test_a_scaffolded_task_whose_order_is_refused_still_gets_its_work_folder(monkeypatch, capsys):
+    made = []
+
+    def full(slug, task, doc=None):
+        raise OSError("full")
+
+    monkeypatch.setattr(ledger.ledger_workspace, "scaffold", lambda slug, task, doc: made.append(task["id"]))
+    operator_words.record("planner", SAID)
+    cli(monkeypatch, "task", "add", "t7", "Fix the writer", "--phase", "p1", "--scaffold", *HIS, by="planner")
+    assert made == ["t7"]
+    assert json.loads(capsys.readouterr().out)["not_ordered"] == f"order on tasks/t7 refused: planner {NO_ORCHESTRATOR}"
+    monkeypatch.setattr(ledger.ledger_workspace, "scaffold", full)
+    cli(monkeypatch, "task", "add", "t8", "Mend the reader", "--phase", "p1", "--scaffold", *HIS, by="planner")
+    printed = json.loads(capsys.readouterr().out)
+    refused = f"order on tasks/t8 refused: planner {NO_ORCHESTRATOR}"
+    assert (printed["workspace_error"], printed["not_ordered"]) == ("full", refused)
+
+
+@pytest.mark.feature("ledger-order-at-filing")
+def test_an_add_that_files_nothing_new_leaves_the_entry_it_names_unordered(monkeypatch, capsys):
     with pytest.raises(SystemExit) as refused:
-        cli(monkeypatch, "task", "add", "t7", "Fix the writer", "--phase", "p1", "--quote", QUOTE, by="planner")
-    reason = "order on tasks/t7 refused: planner is not an orchestrator of this ledger"
-    assert refused.value.code == f"filed without its order: {reason}"
-    assert "ordered" not in row(core.sync(SLUG)[0], "tasks/t7")
+        cli(monkeypatch, "task", "add", "t1", "Build it again", "--phase", "p1", "--quote", QUOTE)
+    assert str(refused.value.code).startswith('task t1 was not added: task t1 already exists as "Build it" (open)')
+    assert str(refused.value.code).endswith(f"; order on tasks/t1 refused: {NOT_ADDED}")
+    capsys.readouterr()
+    cli(monkeypatch, "phase", "add", "p1", "Build again", "--quote", QUOTE)
+    printed = capsys.readouterr()
+    assert json.loads(printed.out)["not_ordered"] == f"order on phases/p1 refused: {NOT_ADDED}"
+    state = core.sync(SLUG)[0]
+    assert unmarked(state, "tasks/t1") and unmarked(state, "phases/p1")
+    assert row(state, "phases/p1")["title"] == "Build"
+
+
+@pytest.mark.feature("ledger-order-at-filing")
+def test_an_order_sent_as_a_filing_without_its_add_is_refused():
+    state, rejected = order("tasks/t1", quote=QUOTE, filing=True)
+    assert len(rejected) == 1
+    assert refusals(state) == [f"order on tasks/t1 refused: {NOT_ADDED}"]
+    assert unmarked(state, "tasks/t1")
 
 
 @pytest.mark.feature("ledger-order-at-filing")
@@ -432,7 +534,8 @@ def test_a_filing_the_outbox_holds_prints_what_it_filed(monkeypatch, capsys):
     monkeypatch.setattr(ledger, "call", lambda slug, ops: sent.extend(ops) or {"queued": ops[0]["id"]})
     args = ["--slug", SLUG, "--as", MASTER, "phase", "add", "p7", "Reviewer seats", "--quote", QUOTE]
     ledger.cmd_phase(ledger.build_parser().parse_args(args))
-    assert [(op["op"], op.get("item")) for op in sent] == [("phase_add", None), ("order_set", "phases/p7")]
+    sent_as = [(op["op"], op.get("item"), op.get("filing")) for op in sent]
+    assert sent_as == [("phase_add", None, None), ("order_set", "phases/p7", True)]
     assert json.loads(capsys.readouterr().out)["title"] == "Reviewer seats"
 
 
@@ -443,8 +546,8 @@ def test_a_filing_the_outbox_holds_prints_what_it_filed(monkeypatch, capsys):
         ("phase", "--quote QUOTE phase add: the operator's words, filing the phase as his order"),
         (
             "task",
-            "--quote QUOTE task set rank=...: the operator's words, so the rank stays his; "
-            "task add: his words, so the task is filed as his order",
+            "--quote QUOTE task set rank=...: the operator's words, so the rank stays his, "
+            "and task add: his words, filing the task as his order",
         ),
     ],
 )
@@ -469,5 +572,7 @@ def test_only_phase_add_takes_his_words(monkeypatch, argv):
 @pytest.mark.parametrize("action", ["group", "split"])
 def test_the_other_task_actions_still_take_no_quote(monkeypatch, action):
     with pytest.raises(SystemExit) as refused:
-        cli(monkeypatch, "task", action, "t1", "t2", "--quote", QUOTE)
-    assert str(refused.value.code).startswith(f"task {action} takes no --quote")
+        cli(monkeypatch, "task", action, "t1", "t2", *HIS)
+    assert refused.value.code == (
+        f"task {action} takes no --quote: run task set <id> rank=<rank> --quote <his words> after it"
+    )
