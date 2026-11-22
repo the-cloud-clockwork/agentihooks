@@ -86,6 +86,17 @@ def get(store: Any, slug: str, name: str) -> Lineage:
     return Lineage(**json.loads(raw))
 
 
+def runs(store: Any, slug: str, name: str) -> bool:
+    """Whether a lineage of that id is among the running ones. An id the swarm does not hold is not running, so the
+    reap asks this of any expert record without raising."""
+    return any(lineage.id == name for lineage in running(store, slug))
+
+
+def goes_on(store: Any, slug: str, agent: Any) -> bool:
+    """Whether the agent is an expert whose lineage still runs: its seat is kept for it or gets a successor."""
+    return agent.lane == expert_launch.LANE and runs(store, slug, agent.task)
+
+
 def running(store: Any, slug: str) -> list[Lineage]:
     """The lineages of the swarm that have not ended, in the order started. The set of their ids bounds the read, so
     code that runs every pass never reads the lineages that ended."""

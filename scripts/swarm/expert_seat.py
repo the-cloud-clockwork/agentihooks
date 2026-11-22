@@ -33,6 +33,8 @@ NOTICED = "expert-proof"
 RECAPPED = ("Deliverables", "Validation", "Open items")
 COMPLETED = "completed its mission and left"
 LEFT = "left when its lineage {lineage} ended"
+SWARM = "swarm"
+RETURNED = "expert lineage {id} is {state} and no expert holds its seat any more"
 WHAT = "expert of lineage {lineage}"
 SPAWNED = "spawned expert {name} on lineage {lineage} as its expert number {number}"
 WAITS = "lineage {lineage} waits: {error}"
@@ -113,9 +115,9 @@ def _closed(slug: str, store: Any, lineage: expert_lineage.Lineage) -> list[str]
 
 
 def _end(slug: str, store: Any, agent: AgentRecord) -> list[str]:
-    """Finish the unfinished expert of a lineage that no longer runs: its open mail is withdrawn with the reason and
-    the handoff left on its seat is cleared. An expert of a lineage the swarm does not hold ends the same way, so one
-    stray record never stops the pass."""
+    """Finish the unfinished expert of a lineage that no longer runs: its open mail is withdrawn with the reason,
+    the handoff left on its seat is cleared and the mail still open on that seat goes back to the master. An expert
+    of a lineage the swarm does not hold ends the same way, so one stray record never stops the pass."""
     try:
         state: str = expert_lineage.get(store, slug, agent.task).state
     except SwarmError:
@@ -123,6 +125,7 @@ def _end(slug: str, store: Any, agent: AgentRecord) -> list[str]:
     reason = STOPPED if state == expert_lineage.STOPPED else LEFT
     SEAT.exits.settle(InboxStore(store.redis), agent.name, "", reason.format(lineage=agent.task))
     store.clear_handoff(slug, agent.task)
+    returned(store, slug, agent.seat, agent.task, state)
     store.put_agent(slug, replace(agent, state="finished"))
     return [ENDED.format(name=agent.name, lineage=agent.task, state=state)]
 
@@ -145,6 +148,7 @@ def close(store: Any, slug: str, ended: expert_lineage.Lineage, text: str) -> No
         store.memory.add_recap(ended.seat, ended.ended_by, ended.id, recap, ended.ended_at)
     SEAT.exits.settle(inbox, ended.ended_by, "", COMPLETED)
     store.clear_handoff(slug, ended.id)
+    returned(store, slug, ended.seat, ended.id, ended.state)
     agents: list[AgentRecord] = store.agents(slug)
     for agent in agents:
         if agent.name == ended.ended_by and agent.state != "finished":
@@ -167,6 +171,15 @@ def keep_handoff(
     built: dict[str, Any] = SEAT.envelope.build(store, slug, author, reason, None, at)
     store.put_handoff(slug, lineage.id, text, seat=lineage.seat, envelope=built)
     SEAT.transfers.record(store, slug, author, reason, text, at)
+
+
+def returned(store: Any, slug: str, seat: str, lineage: str, state: str) -> None:
+    """Send the mail still open on the seat of a lineage that ended to the master's seat with the reason, so no
+    message waits on a seat nobody will hold again."""
+    inbox = InboxStore(store.redis)
+    for item in inbox.open_items(seat):
+        reason = RETURNED.format(id=lineage, state=state)
+        inbox.redirect(item.id, SWARM, seat_address(slug, MASTER), reason, expected_address=seat)
 
 
 def _launch(
