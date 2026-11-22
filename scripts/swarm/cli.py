@@ -2566,7 +2566,9 @@ def cmd_restack(store, args):
 
 
 def cmd_confirm_handoff(store: RedisStore, args: argparse.Namespace) -> None:
-    handoff_commands.confirm(store, args, _me(store, args), HerdrRuntime().live_names())
+    agent = _me(store, args)
+    live = HerdrRuntime().live_names()
+    handoff_commands.confirm(store, args.slug, args.transfer, agent, args.next, live, now_ms())
 
 
 def cmd_restore_decision(store, args):
