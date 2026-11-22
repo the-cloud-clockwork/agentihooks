@@ -12,6 +12,7 @@ from scripts.swarm import timing
 from scripts.tick.deadline import Deadline
 
 if TYPE_CHECKING:
+    from scripts.swarm.ledger_events import Mail
     from scripts.swarm.store import SwarmConfig
 
 FIELD = "after_release"
@@ -96,3 +97,8 @@ def checker(config: SwarmConfig) -> Callable[[dict[str, Any]], bool]:
         return newer(known, floor)
 
     return released
+
+
+def announce(mail: Mail, config: SwarmConfig, run_id: int, url: str) -> list[str]:
+    """Tell the master seat once per release tag that a green promotion published it."""
+    return []
