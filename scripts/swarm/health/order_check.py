@@ -38,8 +38,8 @@ def open_order(name: str, row: dict[str, Any], at: int, seen: focus_check.View) 
     neither done nor out of scope."""
     item = f"{name}/{row['id']}"
     mark: dict[str, Any] = row[orders.MARK]
-    under = _under(name, item, row, seen)
-    found = focus_check.target(item, replace(seen, covered={**seen.covered, item: under}))
+    members = _under(name, item, row, seen)
+    found = focus_check.target(item, replace(seen, covered={**seen.covered, item: members}))
     tasks: list[dict[str, Any]] = [task for task in found["tasks"] if not orders.closed(seen.rows[task["id"]])]
     entry = {
         "item": item,
@@ -49,7 +49,7 @@ def open_order(name: str, row: dict[str, Any], at: int, seen: focus_check.View) 
         **{key: mark[key] for key in PROOFS if key in mark},
         "claimable": sum(task["verdict"] == focus_check.CLAIMABLE for task in tasks),
         "busy": sum(task["state"] in focus_check.BUSY for task in tasks),
-        "done": [task["id"] for task in under if orders.done(task)],
+        "done": [task["id"] for task in members if orders.done(task)],
         "tasks": tasks,
     }
     return {**entry, "line": line(entry)}
