@@ -58,6 +58,7 @@ def _email(place: Place) -> bool:
         return False
 
 
+RETIRED = ("7,37 * * * *",)
 CRONS = (
     SeatCron(
         "3,23,53 * * * *",
@@ -65,13 +66,6 @@ CRONS = (
         "pull request or done, list the urgent tasks and each open pull request of a focused task with what blocks it "
         "and what can run in parallel, queue priority for green unblockers, reopen pull request tasks whose owner is "
         "gone and decide every follow up. Act on each. " + QUIET,
-        _always,
-    ),
-    SeatCron(
-        "7,37 * * * *",
-        "Drift check (seat cron): read agentihooks swarm {slug} status and every target a merged fix touches, the hub, "
-        "controller, hive join and hive images, against the newest release and dev; reopen, focus or roll what is "
-        "stuck. " + QUIET,
         _always,
     ),
     SeatCron(
@@ -129,11 +123,13 @@ def _drop(on: Scheduler, views: list[dict[str, Any]]) -> None:
 def ensure(on: Scheduler, config: SwarmConfig, home: Path) -> None:
     """Keep each seat cron the swarm wants on the scheduler: the first live cron aimed at the front door seat on its
     schedule is adopted, the rest are cancelled, a missing one is added and an unwanted one is cancelled. A stopping or
-    stopped swarm wants none."""
+    stopped swarm wants none. A retired drift check cron aimed at the seat is cancelled, because its duties arrive as
+    seat inbox items."""
     where = place(config, home)
     seat = front_door.seat(config.slug)
     with held(on.state, on.name(LOCK), WAIT_S):
         live = aimed(on, seat)
+        _drop(on, [view for view in live if view["expression"] in RETIRED])
         for cron in CRONS:
             found = [view for view in live if view["expression"] == cron.expression]
             if config.state in ENDED or not cron.wanted(where):
