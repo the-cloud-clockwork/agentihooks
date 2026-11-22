@@ -125,8 +125,7 @@ def _end(slug: str, store: Any, agent: AgentRecord) -> list[str]:
     reason = STOPPED if state == expert_lineage.STOPPED else LEFT
     SEAT.exits.settle(InboxStore(store.redis), agent.name, "", reason.format(lineage=agent.task))
     store.clear_handoff(slug, agent.task)
-    if state != GONE:
-        returned(store, slug, agent.seat, agent.task, state)
+    returned(store, slug, agent.seat, agent.task, state)
     store.put_agent(slug, replace(agent, state="finished"))
     return [ENDED.format(name=agent.name, lineage=agent.task, state=state)]
 
