@@ -147,7 +147,7 @@ def ensure(on: Scheduler, config: SwarmConfig, home: Path) -> None:
             _drop(on, [view for view in found if view is not adopted])
             if adopted is None:
                 slot = InboxSlot(seat)
-                commands.add_cron(on, OWNER, slot, text, expression=cron.expression)  # pyright: ignore[reportUnknownMemberType]  # pyright: ignore[reportUnknownMemberType]
+                commands.add_cron(on, OWNER, slot, text, expression=cron.expression)  # pyright: ignore[reportUnknownMemberType]
 
 
 def cancel(on: Scheduler, slug: str) -> None:
