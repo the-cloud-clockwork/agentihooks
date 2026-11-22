@@ -8763,6 +8763,38 @@ make that visible.
 The master reads the focus read every loop; the master refocus block and the swarm master skill carry that
 obligation.
 
+### Operator orders
+
+A phase or task the operator ordered carries his order as a mark: when it was ordered, who filed it and his words or
+the id of the entry he wrote. An order puts its tasks ahead of the rest, after urgent and focused work, and holds
+nothing; a focus stays the hold for "only this runs".
+
+- **Writing it.** `agentihooks api --slug <slug> --as <name> phase add <phase id> "<title>" --quote "<his words>"` and
+  `task add <task id> "<title>" --phase <phase id> --quote "<his words>"` file the entry and mark it in one call.
+  `agentihooks api --slug <slug> --as <name> order phases/<phase id> --quote "<his words>"` marks work already filed;
+  it takes `tasks/<task id>` too, and `--request <entry id>` in place of the quote names a chat line or comment he
+  wrote. The operator writes the mark himself; the ledger orchestrator writes it with his recorded words or an entry
+  he wrote. Any other author, words he never said and an entry an agent wrote are refused with the reason. Words
+  that are not his recorded words stop an add before it files anything; an add whose order the server refuses is
+  still filed and reports `not_ordered` with that reason.
+- **Clearing it.** `agentihooks api --slug <slug> --as <name> order <item> --clear --quote "<his words>"`. Only the
+  operator, or the orchestrator quoting his recorded words, clears an order. Done work needs no clearing: it drops
+  out of the orders read by itself.
+- **What it changes.** Among the tasks a lane may claim, the hub offers urgent and focused work first, then the
+  tasks under an order, oldest order first, then the rest (see [Offer order](hives.md#offer-order)). A task's order
+  time is the earlier of its own mark and its phase's; the work it waits on, the plan task that enhances it and the
+  lead it is merged into carry the same time. The claim gate is not touched: an order never holds, releases or
+  preempts a task, and while a focus has open work an ordered task outside it waits like every other.
+- **Reading it.** The orders read above lists every open order with the verdict on each unfinished task under it.
+- **Across a master seat change.** A master's handoff envelope lists one line per open order and the successor's
+  opening prompt shows them, the master refocus block lists the phases under an order first, and the master loop
+  seat cron reads the orders every loop.
+- **Order waiting finding.** Every ten minutes the slow lane `order waiting` step notes each open order whose
+  unfinished tasks have nothing claimed or in a pull request. Once it has seen an order in that state for more
+  than thirty minutes, forty at that cadence, an `order waiting` health finding names the order, its unfinished and
+  claimable counts and each reason the claim gate holds its tasks, and the findings pass sends it to the master
+  inbox for a verdict. A claim taken and released between two sightings is not seen.
+
 ### How a freeze hold is named
 
 Every claim filter asks one place why an open task may not be claimed: its post merge proof window, its phase, a
