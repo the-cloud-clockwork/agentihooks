@@ -50,6 +50,8 @@ ACCOUNTED = ("Done", "Pending")
 CHECKED = PROOF.evidenced[1:]
 DELIVERABLE = re.compile(r"D(\d+)\b")
 PULL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
+ACCOUNTS = "number the bullet after the deliverable it accounts for or drop the number"
+PROVES = "number the bullet after the deliverable it proves"
 
 
 def problems(text: str, resolves: Callable[[str], object], slug: str, mission: str) -> list[str]:
@@ -61,8 +63,8 @@ def problems(text: str, resolves: Callable[[str], object], slug: str, mission: s
     return [
         *check.problems(text.replace(line, expert_mission.address(slug, mission)), resolves, HANDOFF),
         *_opening(text, line),
-        *_strangers(named, count),
-        *(_accounted(n, named.count(n)) for n in range(1, count + 1) if named.count(n) != 1),
+        *_strangers(named, count, ACCOUNTS),
+        *(_accounted(number, named.count(number)) for number in _expected(count) if named.count(number) != 1),
     ]
 
 
@@ -84,8 +86,8 @@ def proof_problems(
             for number, bullet in enumerate(check.bullets(proven), 1)
             if not DELIVERABLE.match(bullet)
         ),
-        *_strangers(named, count),
-        *(_proven(n, named.count(n)) for n in range(1, count + 1) if named.count(n) != 1),
+        *_strangers(named, count, PROVES),
+        *(_proven(number, named.count(number)) for number in _expected(count) if named.count(number) != 1),
         *(
             f"## {heading} holds no bullet; name at least one check with its evidence"
             for heading in CHECKED
@@ -101,22 +103,31 @@ def _opening(text: str, line: str) -> list[str]:
     return [] if opened == line else [f"## Mission must open with the mission line: {line}"]
 
 
-def _numbers(body: str) -> list[int]:
+def _numbers(body: str) -> list[str]:
+    """The deliverable number each bullet of a section body starts with, as written."""
     found = (DELIVERABLE.match(bullet) for bullet in check.bullets(body))
-    return [int(match.group(1)) for match in found if match]
+    return [match.group(1) for match in found if match]
 
 
-def _strangers(named: list[int], count: int) -> list[str]:
-    return [f"D{n} names no deliverable; the mission has {count}" for n in sorted(set(named)) if not 1 <= n <= count]
+def _expected(count: int) -> list[str]:
+    """The numbers a mission of that many deliverables names them by."""
+    return [str(number) for number in range(1, count + 1)]
 
 
-def _accounted(number: int, times: int) -> str:
+def _strangers(named: list[str], count: int, fix: str) -> list[str]:
+    return [
+        f"D{written} names no deliverable, the mission has {count}; {fix}"
+        for written in sorted(set(named) - set(_expected(count)), key=lambda n: (len(n), n))
+    ]
+
+
+def _accounted(number: str, times: int) -> str:
     if not times:
         return f"deliverable D{number} is named by no Done or Pending bullet; start one with D{number}"
     return f"deliverable D{number} is named by {times} bullets; name it once, under Done or under Pending"
 
 
-def _proven(number: int, times: int) -> str:
+def _proven(number: str, times: int) -> str:
     if not times:
         return f"deliverable D{number} is named by no Deliverables bullet; start one with D{number}"
     return f"deliverable D{number} is named by {times} bullets; name it once under Deliverables"

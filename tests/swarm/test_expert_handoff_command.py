@@ -146,6 +146,7 @@ def test_a_worker_is_held_to_handoff_v2_and_its_expert_document_is_refused(
     assert store.handoff("sw", "t1") == V2 and state(store, ENGINEER) == ["finished"]
 
 
+@pytest.mark.feature("expert-handoff-contract")
 @pytest.mark.parametrize("gone", ["mission", "lineage"])
 def test_an_expert_whose_lineage_or_saved_mission_is_gone_is_refused_by_name(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], gone: str
@@ -168,21 +169,21 @@ def test_the_contract_follows_the_lane_of_the_author(store: RedisStore) -> None:
 
     agents = {agent.name: agent for agent in store.agents("sw")}
     for text in (VALID, V2):
-        assert contracts.problems(store, "sw", agents[EXPERT], text, resolves) == expert.problems(
+        assert contracts.problems(text, resolves, store, "sw", agents[EXPERT]) == expert.problems(
             text, resolves, "sw", GOOD
         )
-        assert contracts.problems(store, "sw", agents[ENGINEER], text, resolves) == check.problems(text, resolves)
-    assert contracts.problems(store, "sw", agents[EXPERT], VALID, resolves) == []
-    assert contracts.problems(store, "sw", agents[ENGINEER], V2, resolves) == []
-    assert contracts.problems(store, "sw", agents[EXPERT], V2, resolves) != []
-    assert contracts.problems(store, "sw", agents[ENGINEER], VALID, resolves) != []
+        assert contracts.problems(text, resolves, store, "sw", agents[ENGINEER]) == check.problems(text, resolves)
+    assert contracts.problems(VALID, resolves, store, "sw", agents[EXPERT]) == []
+    assert contracts.problems(V2, resolves, store, "sw", agents[ENGINEER]) == []
+    assert contracts.problems(V2, resolves, store, "sw", agents[EXPERT]) != []
+    assert contracts.problems(VALID, resolves, store, "sw", agents[ENGINEER]) != []
 
 
 def test_the_contract_of_an_expert_reads_the_mission_of_its_own_lineage(store: RedisStore) -> None:
     later = GOOD.replace("Keep an ordered batch built", "Keep a second batch built")
     second = expert_lineage.start(store, "sw", later, "/missions/next.md", "max", "operator", 3_000)
     agent = AgentRecord("expert@a1b2c3-0003", "expert", second.id, seat=second.seat, state="working")
-    found = contracts.problems(store, "sw", agent, VALID, lambda address: True)
+    found = contracts.problems(VALID, lambda address: True, store, "sw", agent)
     assert found == [OPENS.replace(LINE, f"{second.mission} Keep a second batch built")]
     with pytest.raises(SwarmError, match="swarm other has no expert lineage expert-2"):
-        contracts.problems(store, "other", agent, VALID, lambda address: True)
+        contracts.problems(VALID, lambda address: True, store, "other", agent)

@@ -4346,6 +4346,174 @@ merges `dev` into its branch only on a real conflict. The engineer skill adds on
 where the repo has a merge queue, a green head is queued as it stands, because the merge group tests it on top of
 the newest `dev`, and the agent also merges `dev` when GitHub refuses the enqueue.
 
+### Opening prompt for a plan task that enhances a thin task
+
+A thin task is one too thin or vague for an engineer to claim. A plan lane task whose record carries
+`enhances: <target task id>` hands a planner that one target: the planner scouts it, writes one plan section for it,
+publishes the section and points the target at it. Pull request
+[#12925](https://github.com/the-cloud-clockwork/agentihooks/pull/12925) gives such a task its own steps in the opening
+prompt and an Enhancement target block in `steering.md`.
+
+#### Which steps the prompt carries
+
+The spawn prompt reads `enhances` before the task's kind. When it is set, the enhancement steps replace the per kind
+steps. Every other prompt line is the one any plan task gets: identity, task line and description, work folder, seat
+history, crew and ledger lines, handoff and block lines. A plan task without `enhances` keeps the phase plan steps
+exactly as they were: slice only its phase and close with `done --slice <ids>`, naming the tasks it cut.
+
+The prompt does not work out why the target is thin. Its first enhancement line points at the enhancement task's own
+description, which is expected to list the rules the thin check failed. The thin check,
+`scripts.swarm.thin_task.thin`, returns one line per failed rule:
+
+| Rule | Line the thin check returns |
+|---|---|
+| Description under 40 words | `Task <id> has a description under 40 words.` |
+| No done when sentence | `Task <id> has no done when sentence.` |
+| No territory | `Task <id> names no territory.` |
+| A `code` or `ci` task that names no seam | `Task <id> is <kind> work that names no seam.` |
+
+A description names a seam with the word seam or seams, a backticked name, a call shape such as `refresh(`, a dotted
+or snake case name, an endpoint path, or an `agentihooks` or `python -m` command. A task is never thin when it has a
+`plan_slice`, is itself a `plan` task, or has its `enhancement` field set to `planned` or `skipped`. The check only
+returns these lines: no code on `dev` copies them into a description or creates the enhancement task.
+
+For swarm `demo`, planner `planner@abcdef-0001` and target `t-login` in phase `p1`, the enhancement steps read:
+
+```text
+This plan task enhances task t-login, too thin or vague for an engineer to claim: the thin check failed it on the rules this task's description lists. steering.md holds its title, phase, territory and description.
+Work it end to end, then stop:
+1. Read steering.md: the target task's record and the project and mission intent.
+2. Read task t-login with agentihooks api --slug demo --as planner@abcdef-0001 get tasks/t-login, then have scouter sub agents read the code it names: the code areas and their callers, the tests and feature map entries that cover them, and what might break. Edit no code.
+3. Write one plan section for task t-login in plan.md in your work folder: a slice anchor line <!-- slice: <anchor> --> above its heading, the seams the tests observe, the six recon headings What will be built, Code areas touched, What might break, Regression tests, Resources needed and Protection plan, the pull request body sections Summary, Seams, Tests and Proof, and a Done when sentence.
+4. Publish it into the target's phase: agentihooks api --slug demo --as planner@abcdef-0001 publish-plan <plan file> --phase p1.
+5. Point task t-login at its section and clarify it: agentihooks api --slug demo --as planner@abcdef-0001 task set t-login plan_url=<plan link> plan_slice=<anchor> description="<clarified scope, seams and Done when sentence>".
+6. Propose work outside task t-login as a follow up: agentihooks api --slug demo --as planner@abcdef-0001 followup add "<plain words>".
+7. Leave the crew with agentihooks api --slug demo --as planner@abcdef-0001 leave, then close with agentihooks swarm demo done --slice t-login. The swarm then closes this session; stop working.
+```
+
+The commands carry the planner's own prefixes: `agentihooks api --slug <slug> --as <planner>` for ledger reads and
+writes, and `agentihooks swarm <slug>` for `done`. The phase in step 4 is the enhancement task's own phase, or the
+literal `<phase id>` when the task has none, so an enhancement task belongs in its target's phase.
+
+Each step leaves this behind:
+
+| Step | Result |
+|---|---|
+| 2 | Scouter findings on the target's code areas, callers, tests, feature map entries and risks; no code edits. |
+| 3 | One section in `plan.md` in the work folder, under a `<!-- slice: <anchor> -->` line. |
+| 4 | The plan published as a ledger plan; `publish-plan --phase` points the phase's plan link at it, replacing the link the phase had. |
+| 5 | The target's `plan_url`, `plan_slice` and clarified `description`. The ledger works out the target's `plan_lines` from the anchor and refuses an anchor the plan lacks. |
+| 6 | A ledger follow up for work outside the target. |
+| 7 | The enhancement task done, its proof slice naming the target. |
+
+`publish-plan` asks for a slice marker above every heading at the plan's task level. That level is the shallowest
+heading level, or the one below it when the shallowest level holds a single heading such as the plan title. Give
+`plan.md` one title above the section, so the section heading is the task level and its parts sit below it without
+markers of their own. The target's `plan_lines` then run from the marker to the end of the section. A `plan.md` that
+holds only the section, with its parts one level below its heading, is refused with
+`plan task sections need a slice marker above each heading`. A `plan.md` that carries every part step 3 asks for:
+
+```markdown
+# Login enhancement plan
+
+<!-- slice: login-session -->
+## Login page keeps the session
+
+### Summary
+The login page keeps the session across a reload.
+
+### Seams
+`scripts.auth.session.refresh` renews the session cookie; `tests/auth/test_session.py` observes it.
+
+### What will be built
+A session refresh on page load, so a reload keeps the signed in user.
+
+### Code areas touched
+`scripts/auth/session.py` and its caller in `scripts/auth/login.py`.
+
+### What might break
+Sign out, which clears the same cookie.
+
+### Regression tests
+`tests/auth/test_session.py` covers refresh; sign out has no test, so the task adds one first.
+
+### Resources needed
+No new service; the session store keeps its current size.
+
+### Protection plan
+Land the sign out test against the current code, then change the refresh.
+
+### Tests
+A reload test and the new sign out test.
+
+### Proof
+The CI run with both tests green.
+
+Done when a reload of the login page keeps the session and the session tests pass in CI.
+```
+
+#### The Enhancement target block in steering.md
+
+Hub admission writes `steering.md` into the work folder before each launch, from the current ledger document, and
+replaces any copy an earlier life left, so the block shows the target as it stands at that launch.
+`task add --scaffold` also writes the file when the task is added. The block follows the task heading, its
+description, the plan pointer line when the task has a plan, and any proof contract rows. It comes before Plan
+evidence, which holds the project and mission intent:
+
+```text
+# enhance-t-login: Plan the login task
+
+The thin check failed task t-login on: description under 40 words, no done when sentence, no named seam. Its description: Fix login.
+
+Enhancement target
+- Task: t-login: Login page keeps the session
+- Phase: p1
+- Territory: scripts/auth, tests/auth
+- Description: Fix login.
+
+Plan evidence
+```
+
+A title, phase or description the target does not set prints empty after its label, and a target with no territory
+prints `- Territory: none`. When `enhances` names a task that is not on the ledger, the block holds one task line
+that tells the planner to block:
+
+```text
+Enhancement target
+- Task: t-login is not in the ledger: block this task.
+```
+
+The prompt still lists all seven steps in that case; only `steering.md` says to block. Block before step 2:
+
+```bash
+agentihooks swarm <slug> block "<plain words naming the missing target>"
+```
+
+A phase plan task's `steering.md` carries no Enhancement target block.
+
+#### Limits and troubleshooting
+
+- No ledger command writes `enhances`: `task add` does not store it and `task set` does not accept it. The prompt
+  and steering above render for a task record that already carries the field.
+- Nothing grades the plan section's content. `done --slice <target>` checks only that the target is on the ledger in
+  the enhancement task's phase, is not a plan task, and carries a `plan_url` and `plan_lines` that match its anchor.
+- A kind change (`task set <task> kind=<kind>`) rewrites `steering.md` without the ledger document, which drops the
+  Enhancement target and Plan evidence blocks until the next launch writes the file again. Read the target with
+  `agentihooks api --slug <slug> --as <planner> get tasks/<target>` meanwhile.
+- `tests/swarm/test_enhance_prompt.py`, feature map entry `planner-enhancement-prompt`, compares both prompts byte
+  for byte with `tests/swarm/phase_plan_prompt.golden` and `tests/swarm/enhancement_prompt.golden`, and checks the
+  steering block lines. A deliberate change to either set of steps fails the golden test until its golden file is
+  regenerated in the same pull request.
+
+| Symptom | Cause and action |
+|---|---|
+| `done --slice <target>` refused with `tasks/<task> has invalid slice task ids: <target>` | The target is not on the ledger, sits in a phase other than the enhancement task's, or is itself a plan task. Block the task with that evidence; the master moves or recreates the target. |
+| `done --slice <target>` refused with `tasks/<task> slice tasks carry no plan link: <target>.`, followed by a hint to publish the plan and link each task with `plan_url` | Step 5 did not set the target's `plan_url`. Run steps 4 and 5, then `done` again. |
+| `done --slice <target>` refused with `tasks/<task> slice tasks lack valid plan ranges or anchors: <target>` | The target's `plan_lines` no longer match its anchor in the phase's plan, for example after another plan was published into the phase. Run step 5 again against the plan the phase now links. |
+| Step 4 refused with `plan task sections need a slice marker above each heading` | The section's parts sit at the plan's task level. Add one title above the section, as in the example, and publish again. |
+| Step 5 refused with `slice anchor <anchor> is missing or repeated in its phase` | The anchor is not in the published plan, or appears twice. Fix the anchor line in `plan.md`, publish again, then repeat step 5. |
+| Step 5 refused with `plan slice <anchor> already belongs to open task <task>` | Another open task already holds that anchor. Give the target its own anchor in `plan.md`, publish again, then repeat step 5. |
+
 ### Split tasks across pull requests
 
 A `code` or `ci` task can declare two to four halves for separate pull requests while keeping one task and its completion proof. A planned task names each half by a plan line range; a task with no plan names each half by a label (see [Labelled halves for tasks without a plan](#labelled-halves-for-tasks-without-a-plan)). Declare the split **before recording any pull request**. The ranges must be ordered, must not overlap and, when the task has `plan_lines`, must cover that range completely.

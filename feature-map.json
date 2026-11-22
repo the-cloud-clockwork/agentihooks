@@ -4547,10 +4547,34 @@
     {
       "id": "swarm-manual-caps",
       "origin": "inventory",
-      "behaviour": "Manual lane caps hold against lane demand.",
+      "behaviour": "Manual lane caps hold against lane demand, except a zero planner cap, which counts as one while plan work is ready.",
       "seam": "agentihooks swarm set max-eng-agents and max-ci-agents",
       "tests": [
         "tests/swarm/test_lane_caps_owner.py::test_manual_caps_hold_against_lane_demand"
+      ]
+    },
+    {
+      "id": "swarm-plan-cap-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-cap-floor",
+      "behaviour": "While plan work is ready the quota decision keeps one planner seat under a stored zero planner cap, in manual scaling and in auto scaling with the room full, taking the seat from the larger engineer or CI ceiling; the dispatcher lane caps keep one planner while a plan lane task is open; swarm start and a set that scales engineers or CI up restore a stored zero planner cap to its default, and a zero typed in the same set holds.",
+      "seam": "scripts.swarm.capacity.autoscaled, scripts.swarm.plan_cap_floor, scripts.swarm.dispatcher.lane_caps, agentihooks swarm start and agentihooks swarm set",
+      "tests": [
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_under_a_stored_zero_manual_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_zero_manual_cap_holds_while_no_plan_work_is_ready",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_manual_plan_cap_above_zero_is_kept",
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_when_live_agents_fill_the_room",
+        "tests/swarm/test_plan_cap_floor.py::test_the_plan_seat_comes_from_the_larger_lane_ceiling",
+        "tests/swarm/test_plan_cap_floor.py::test_the_ceilings_are_unchanged_without_ready_plan_work",
+        "tests/swarm/test_plan_cap_floor.py::test_a_plan_ceiling_already_granted_is_unchanged",
+        "tests/swarm/test_plan_cap_floor.py::test_a_frozen_plan_task_gets_no_planner_seat_under_a_stored_zero_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_the_claim_key_keeps_the_focus_order_of_plan_work_under_a_stored_zero_cap",
+        "tests/swarm/test_dispatcher.py::test_lane_caps_name_each_lane_with_its_own_cap",
+        "tests/swarm/test_dispatcher.py::test_at_delegate_the_queue_holds_only_focused_work_at_any_focus_weight",
+        "tests/swarm/test_dispatcher.py::test_below_delegate_proposals_name_only_focused_work_at_full_focus_weight",
+        "tests/swarm/test_plan_cap_floor.py::test_start_restores_a_stored_zero_plan_cap_to_its_default",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_restores_a_stored_zero_plan_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_keeps_a_stored_plan_cap_above_zero"
       ]
     },
     {
@@ -5814,6 +5838,62 @@
         "tests/swarm_ledger/test_ledger_relay.py::test_a_relay_to_the_notes_list_adds_a_new_operator_note_carrying_his_quoted_words",
         "tests/swarm_ledger/test_ledger_relay.py::test_a_relay_to_the_notes_list_with_words_never_recorded_is_refused_and_adds_no_note",
         "tests/swarm_ledger/test_ledger_relay.py::test_the_check_and_cli_take_the_notes_list_as_the_relay_item"
+      ]
+    },
+    {
+      "id": "ledger-order-mark",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "A phase or a task carries the operator's order as a mark holding when it was ordered, who filed it and his words or the id of the entry he wrote. The operator writes it himself; the ledger orchestrator writes it with his recorded words, stored as he wrote them, or with an entry he wrote. Any other author, words he never said, an entry an agent wrote and an item the ledger does not hold are refused with the reason and write nothing. An order takes one proof. A second order keeps the first mark and still needs its proof. Phase and task updates, a split and a group keep the mark, and only the operator or the orchestrator with his recorded words clears it.",
+      "seam": "ledger_core.sync with the order_set and order_clear ops, their rows in the ledger API schema, and agentihooks api order",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_orchestrator_marks_an_item_with_the_operators_words_as_he_wrote_them",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_ledger_entry_the_operator_wrote_marks_the_item_it_asks_for",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_entry_an_agent_wrote_orders_nothing",
+        "tests/swarm_ledger/test_ledger_orders.py::test_words_the_operator_never_said_order_nothing",
+        "tests/swarm_ledger/test_ledger_orders.py::test_only_the_orchestrator_relays_an_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_order_on_an_item_the_ledger_does_not_hold_is_refused",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_operator_marks_an_item_himself",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_operators_own_order_keeps_the_words_he_gives_unchecked",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_second_order_keeps_the_first_mark_and_still_needs_its_proof",
+        "tests/swarm_ledger/test_ledger_orders.py::test_only_the_operator_or_his_words_clear_an_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_clearing_an_item_that_carries_no_order_changes_nothing_and_still_needs_its_proof",
+        "tests/swarm_ledger/test_ledger_orders.py::test_updates_a_split_and_a_group_keep_the_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_malformed_order_is_refused_at_check",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_well_formed_order_passes_check",
+        "tests/swarm_ledger/test_ledger_orders.py::test_order_ops_are_in_the_api_contract_and_target_their_item",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_marks_and_clears_through_the_cli",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_ledger_entry_point_runs_an_order_the_outbox_holds_as_queued",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_takes_a_request_and_refuses_words_he_never_said",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_needs_exactly_one_proof_and_clears_only_on_his_words",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_help_names_the_order_command_and_its_flags"
+      ]
+    },
+    {
+      "id": "ledger-order-at-filing",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "Adding a phase or a task with the operator's quoted words files it and marks it as his order in one ledger call. Words he never said stop the command before anything is written. An order sent with an add marks the entry only when that call added it. When the server files the entry and refuses the order, the command still finishes the add, work folder included, and reports the entry as not ordered with the server's reason in its output and on standard error; a task the server refuses to add still reads as not added. Without his words the add is sent alone, and phase set, phase done, task group and task split take no quote.",
+      "seam": "agentihooks api phase add --quote and agentihooks api task add --quote",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_orders.py::test_phase_add_with_his_words_files_and_orders_the_phase_in_one_call",
+        "tests/swarm_ledger/test_ledger_orders.py::test_task_add_with_his_words_files_and_orders_the_task_in_one_call",
+        "tests/swarm_ledger/test_ledger_orders.py::test_filing_with_words_he_never_said_writes_nothing",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_add_whose_order_the_server_refuses_is_filed_and_says_it_is_not_ordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_words_the_server_cannot_verify_leave_the_add_filed_and_not_ordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_order_refused_with_no_reason_from_the_server_still_says_it_is_not_ordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_scaffolded_task_whose_order_is_refused_still_gets_its_work_folder",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_add_that_files_nothing_new_leaves_the_entry_it_names_unordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_not_ordered_reason_is_the_servers_refusal_of_that_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_order_sent_as_a_filing_marks_only_the_entry_its_own_call_added",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_task_the_server_refuses_to_add_still_reads_as_not_added",
+        "tests/swarm_ledger/test_ledger_orders.py::test_filing_without_his_words_sends_the_add_alone",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_filing_the_outbox_holds_prints_what_it_filed",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_help_names_the_quote_that_files_an_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_only_phase_add_takes_his_words",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_other_task_actions_still_take_no_quote"
       ]
     },
     {
@@ -8245,6 +8325,19 @@
       ]
     },
     {
+      "id": "type-env-ready-fast-path",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-env-fast-path",
+      "behaviour": "A ready CI type environment is reused under a shared lock on its per digest lock file, so a prepush returns at once while another worktree's type gate run holds that shared lock for its whole grade. Only a missing environment takes the exclusive lock, and the ready marker is checked again under it, so builders racing for one digest build it once. A reuse still waits while a build holds the exclusive lock, and never prunes other environments.",
+      "seam": "scripts.type_env.environment through its per digest lock file and the uv build commands it runs",
+      "tests": [
+        "tests/test_type_env.py::test_a_ready_environment_returns_while_a_grade_holds_its_shared_lock",
+        "tests/test_type_env.py::test_builders_racing_for_one_environment_build_it_once",
+        "tests/test_type_env.py::test_reuse_waits_while_a_build_holds_the_lock",
+        "tests/test_type_env.py::test_reuse_leaves_other_environments_in_place"
+      ]
+    },
+    {
       "id": "design-rules-body-change-graded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-design-rules-body-change-types",
@@ -8671,6 +8764,22 @@
       ]
     },
     {
+      "id": "hive-spoke-spawn-fresh-quota-rows",
+      "origin": "regression",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-spoke-fresh-quota-rows",
+      "behaviour": "A long running hive spoke reads fresh quota rows at every spawn once a spawn has read them for itself, so it admits a spawn the hub placed when the accounts have free seats again, and the spawn it places still adds one session to its account; quota rows a tick pass read are kept for every spawn in that pass.",
+      "seam": "HerdrRuntime.spawn quota rows on a runtime without a tick pass, read through HerdrRuntime._quota_read and re-read by HerdrRuntime._quota_refresh",
+      "rules": [
+        "quota-rows-read-once-per-process"
+      ],
+      "tests": [
+        "tests/swarm/test_quota_handoff.py::test_a_spawn_keeps_the_quota_rows_its_tick_pass_read",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_reads_fresh_quota_rows_after_its_first_quota_handoff",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_still_counts_the_session_it_placed_on_fresh_rows"
+      ]
+    },
+    {
       "id": "controller-hive-refusal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
@@ -8845,6 +8954,16 @@
       "tests": [
         "tests/codex_session/test_attach.py::test_an_admitted_execution_waits_for_its_harness_and_then_attaches",
         "tests/codex_session/test_attach.py::test_a_classified_or_running_execution_without_an_app_server_still_refuses"
+      ]
+    },
+    {
+      "id": "quota-wait-no-session-cron",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-wait-scheduler-timer",
+      "behaviour": "Quota WAIT directs swarm sessions to bounded swarm waits naming the reset time and standalone sessions to a scheduler timer aimed at the current session, with no session cron instruction and the existing reset safety buffer.",
+      "seam": "hooks.context.quota_policy.render",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_wait_directive_carries_a_cron_for_the_reset"
       ]
     },
     {
@@ -12261,8 +12380,8 @@
       "ordered_at": "2026-11-22",
       "ledger_item": "ledger:rig-grade-swarm/phases/p130",
       "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
-      "behaviour": "An expert hands its lineage's seat off with the same command, envelope, transfer and derived recap as every agent, and its document is held to the expert handoff: it opens with the mission line of the saved mission, names every deliverable of that mission once as done or pending, and carries the assumptions, the tests and the validation, with evidence or the word hypothesis on every done, tests and validation bullet. Every other agent is held to Handoff v2 as before. At the context limit an expert is told the expert form, may still read its mission, and its document is checked against the expert handoff before the command runs.",
-      "seam": "handoff.check.problems under a Contract; handoff.expert.problems for the mission line, the deliverable accounting and the evidence; handoff.contracts.problems called by cli.cmd_handoff and by the context limit gate; context_recycle.directive and gate for an expert; the live check scripts.feature_checks.expert_handoffs over the documents the running lineages hold",
+      "behaviour": "An expert hands its lineage's seat off with the same command, envelope, transfer and derived recap as every agent, and its document is held to the expert handoff: it opens with the mission line of the saved mission, names every deliverable of that mission once as done or pending, and carries the assumptions, the tests and the validation, with evidence or the word hypothesis on every done, tests and validation bullet. Every other agent is held to Handoff v2 as before. At the context limit an expert is told the expert form, alone may still read its mission, and its document is checked against the expert handoff before the command runs; an expert whose lineage or saved mission is gone is refused by name there as by the command.",
+      "seam": "handoff.check.problems under a Contract; handoff.expert.problems for the mission line, the deliverable accounting and the evidence; handoff.contracts.problems called by cli.cmd_handoff and by the context limit gate; context_recycle.directive and gate for an expert; the live check scripts.feature_checks.expert_handoffs over the documents the running lineages hold, whose Read first addresses resolved when the command took them and are not resolved again",
       "semgrep_rule": "feature-expert-handoff-contract",
       "tests": [
         "tests/handoff/test_expert_contract.py::test_a_conforming_expert_handoff_has_no_problems",
@@ -12274,14 +12393,19 @@
         "tests/swarm/test_expert_handoff_command.py::test_an_experts_conforming_handoff_is_stored_under_its_lineage_and_finishes_the_expert",
         "tests/swarm/test_expert_handoff_command.py::test_an_experts_handoff_v2_document_is_refused_with_each_fault_and_stores_nothing",
         "tests/swarm/test_expert_handoff_command.py::test_a_worker_is_held_to_handoff_v2_and_its_expert_document_is_refused",
+        "tests/swarm/test_expert_handoff_command.py::test_an_expert_whose_lineage_or_saved_mission_is_gone_is_refused_by_name",
         "tests/swarm/test_expert_handoff_command.py::test_the_contract_follows_the_lane_of_the_author",
         "tests/test_context_recycle_expert.py::test_at_the_hard_gate_an_expert_is_told_the_expert_handoff_form",
         "tests/test_context_recycle_expert.py::test_in_the_preparation_window_an_expert_is_told_the_expert_handoff_form",
+        "tests/test_context_recycle_expert.py::test_a_worker_and_a_master_keep_the_handoff_v2_form",
         "tests/test_context_recycle_expert.py::test_over_the_limit_an_experts_work_is_denied_with_the_expert_form_and_its_allowed_steps",
         "tests/test_context_recycle_expert.py::test_over_the_limit_an_expert_still_reads_its_mission",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_a_worker_and_a_master_are_denied_the_mission_command_like_any_other_work",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_expert_whose_saved_mission_or_lineage_is_gone_is_refused_by_name",
         "tests/test_context_recycle_expert.py::test_over_the_limit_an_experts_handoff_is_checked_against_the_expert_contract_before_the_command",
         "tests/test_expert_handoffs_check.py::test_each_conforming_handoff_of_a_running_lineage_passes_and_is_listed",
-        "tests/test_expert_handoffs_check.py::test_a_handoff_of_a_running_lineage_that_breaks_the_contract_fails_with_each_fault"
+        "tests/test_expert_handoffs_check.py::test_a_handoff_of_a_running_lineage_that_breaks_the_contract_fails_with_each_fault",
+        "tests/test_expert_handoffs_check.py::test_a_handoff_whose_saved_mission_is_gone_fails_by_name"
       ],
       "live_check": [
         "python",
@@ -13022,6 +13146,19 @@
       "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint job's dependency audit step",
       "tests": [
         "tests/test_ci_dependency_audit.py::test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home"
+      ]
+    },
+    {
+      "id": "ci-tool-installs-pinned-walk",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-walk-test",
+      "behaviour": "Every pip, uv pip, uvx, uv tool and pipx install in the CI workflows, composite actions, step templates and the shell and Python scripts CI runs pins each named package to one exact version that its checked in constraint pins too: the test requirements lock, the test constraints file while it chains that lock, a file in the CI tools folder, or such a lock passed with -r. Each such lock and CI tools file pins every line exactly, nested requirement files in any option form included, and any other requirements file fails. A command that names nothing to install, such as a command lookup, is not graded. Python sources are read as argv list displays with their names and splats resolved; Python shell strings, argv lists joined with plus, bash -c and backtick strings and installers held in variables are not read. Intentional clean install smokes are exempt once each by their install with a reason, and today's floating installs sit on an allowlist the walking test holds equal to its measurement, so an unlisted floating install or a pinned install still listed turns it red.",
+      "seam": "tests.test_ci_test_dependencies._floating_ci_installs over .github, scripts/ci_* and the shell scripts and Python modules their run lines name",
+      "tests": [
+        "tests/test_ci_test_dependencies.py::test_every_ci_tool_install_pins_an_exact_version_under_a_checked_in_constraint",
+        "tests/test_ci_test_dependencies.py::test_the_install_walker_reports_a_planted_floating_install",
+        "tests/test_ci_test_dependencies.py::test_the_install_walker_passes_pinned_and_non_install_commands",
+        "tests/test_ci_test_dependencies.py::test_each_intentional_install_smoke_is_a_measured_install_with_a_reason"
       ]
     },
     {

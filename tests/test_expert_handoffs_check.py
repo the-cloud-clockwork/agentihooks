@@ -97,6 +97,7 @@ def test_a_handoff_of_a_running_lineage_that_breaks_the_contract_fails_with_each
     ]
 
 
+@pytest.mark.feature("expert-handoff-contract")
 def test_a_handoff_whose_saved_mission_is_gone_fails_by_name(capsys: pytest.CaptureFixture[str]) -> None:
     store = Store(("rig",))
     _started(store, "rig")

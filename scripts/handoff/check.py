@@ -113,12 +113,15 @@ def _title(lines: list[str], title: str) -> list[str]:
     return [] if first == title else [f"the first line must be {title}"]
 
 
+def _counted(headings: tuple[str, ...]) -> str:
+    """How many headings a contract has, in a word up to ten and in digits beyond."""
+    return COUNTS[len(headings)] if len(headings) < len(COUNTS) else str(len(headings))
+
+
 def _headings(names: list[str], headings: tuple[str, ...]) -> list[str]:
     listed = ", ".join(headings)
     found = [
-        f"## {name} is not one of the {COUNTS[len(headings)]} headings: {listed}"
-        for name in names
-        if name not in headings
+        f"## {name} is not one of the {_counted(headings)} headings: {listed}" for name in names if name not in headings
     ]
     for heading in headings:
         count = names.count(heading)

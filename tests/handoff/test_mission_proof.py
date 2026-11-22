@@ -78,6 +78,10 @@ def _unnamed(number: int) -> str:
     return f"deliverable D{number} is named by no Deliverables bullet; start one with D{number}"
 
 
+def _stranger(number: str) -> str:
+    return f"D{number} names no deliverable, the mission has 3; number the bullet after the deliverable it proves"
+
+
 @pytest.mark.feature("expert-lineage-ends-on-proof")
 def test_a_proof_of_every_deliverable_with_nothing_open_has_no_problems() -> None:
     assert _problems(VALID) == []
@@ -90,8 +94,10 @@ def test_a_proof_of_every_deliverable_with_nothing_open_has_no_problems() -> Non
         (D3, "", [_unnamed(3)]),
         (D1, "- Each cause proven for D1, run 4471\n", [STRAY.format(number=1), _unnamed(1)]),
         (D2, D2 + D2, ["deliverable D2 is named by 2 bullets; name it once under Deliverables"]),
-        (D3, D3 + "- D4 A fourth thing, run 4474\n", ["D4 names no deliverable; the mission has 3"]),
-        (D3, D3 + "- D0 Nothing, run 4475\n", ["D0 names no deliverable; the mission has 3"]),
+        (D3, D3 + "- D4 A fourth thing, run 4474\n", [_stranger("4")]),
+        (D3, D3 + "- D0 Nothing, run 4475\n", [_stranger("0")]),
+        (D3, D3 + "- D10 A tenth thing, run 4476\n- D9 A ninth thing, run 4477\n", [_stranger("9"), _stranger("10")]),
+        (D1, "- D01 Each cause proven against the live ledger, run 4471\n", [_stranger("01"), _unnamed(1)]),
         (D1, "- D1 Each cause proven against the live ledger\n", [f"Deliverables bullet 1 {UNSHOWN}"]),
         (D2, "- D2 The plan file, a hypothesis until it merges\n", [f"Deliverables bullet 2 {GUESSED}"]),
         (D2, f"- D2 Hypothesis: the plan file merged in {PLAN}\n", [f"Deliverables bullet 2 {GUESSED}"]),
