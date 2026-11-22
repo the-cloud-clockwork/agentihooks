@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.ci_mutation.runner import run_gate
+from tests.test_ci_mutation_stats import place_flake_ledger
 
 
 def _no_pytest(self, params, **kwargs):
@@ -23,7 +24,9 @@ def _refuse_named(mutant_name, error):
 
 
 @pytest.mark.parametrize("lines", [{1}, {2}, {2, 5}])
-def test_gate_runs_only_changed_line_mutants_including_untested_code(tmp_path, monkeypatch, lines):
+def test_gate_runs_only_changed_line_mutants_including_untested_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lines: set[int]
+) -> None:
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     (tmp_path / "scripts").mkdir()
     (tmp_path / "hooks").mkdir()
@@ -38,6 +41,7 @@ def test_gate_runs_only_changed_line_mutants_including_untested_code(tmp_path, m
         "def covered(value):\n    return value + 1\n\ndef untested(value):\n    return value + 2\n"
     )
     (tmp_path / "tests").mkdir()
+    place_flake_ledger(tmp_path / "tests")
     (tmp_path / "tests/test_sample.py").write_text(
         "from scripts.sample import covered\n\ndef test_value():\n    assert covered(1) == 2\n"
     )
@@ -53,7 +57,9 @@ def test_gate_runs_only_changed_line_mutants_including_untested_code(tmp_path, m
     assert result["untouched_survivors"] == []
 
 
-def test_gate_collects_stats_when_a_selected_test_changes_directory(tmp_path, monkeypatch):
+def test_gate_collects_stats_when_a_selected_test_changes_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     (tmp_path / "scripts").mkdir()
     (tmp_path / "hooks").mkdir()
@@ -66,6 +72,7 @@ def test_gate_collects_stats_when_a_selected_test_changes_directory(tmp_path, mo
     )
     (tmp_path / "scripts/sample.py").write_text("def covered(value):\n    return value + 1\n")
     (tmp_path / "tests").mkdir()
+    place_flake_ledger(tmp_path / "tests")
     (tmp_path / "tests/test_sample.py").write_text(
         "from scripts.sample import covered\n\n"
         "def test_value(tmp_path, monkeypatch):\n    monkeypatch.chdir(tmp_path)\n    assert covered(1) == 2\n"
@@ -78,12 +85,15 @@ def test_gate_collects_stats_when_a_selected_test_changes_directory(tmp_path, mo
 
 
 @pytest.mark.parametrize("child, fault", [(False, False), (True, False), (True, True)])
-def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child, fault):
+def test_gate_imports_store_from_scratch_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, child: bool, fault: bool
+) -> None:
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     root = Path(__file__).parents[1]
     for name in ("hooks", "scripts"):
         shutil.copytree(root / name, tmp_path / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     (tmp_path / "tests").mkdir()
+    place_flake_ledger(tmp_path / "tests")
     probe = (
         "from scripts.swarm.store import _whole\n"
         "assert _whole('7') == 7\n"
@@ -828,6 +838,7 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
     from scripts.ci_mutation.selection import IMPORT_GROUPS, stats_shards
 
     (tmp_path / "tests").mkdir()
+    place_flake_ledger(tmp_path / "tests")
     files = [f"tests/test_{name}.py" for name in "abcdef"]
     for path in files:
         (tmp_path / path).write_text("def test_x():\n    pass\n")
@@ -875,6 +886,7 @@ def test_selected_test_ids_take_their_own_durations_share_their_file_shard_and_b
     from scripts.ci_mutation.selection import file_seconds, keep_selected_tests, stats_shards
 
     (tmp_path / "tests").mkdir()
+    place_flake_ledger(tmp_path / "tests")
     for name in "abc":
         (tmp_path / f"tests/test_{name}.py").write_text("def test_x():\n    pass\n")
     (tmp_path / "tests/test_b.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
@@ -925,6 +937,7 @@ def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist
     from scripts.ci_mutation.selection import split_files
 
     (tmp_path / "tests").mkdir()
+    place_flake_ledger(tmp_path / "tests")
     files = [f"tests/test_{name}.py" for name in "abcdef"]
     for path in files:
         (tmp_path / path).write_text("import pytest\n\npytestmark = pytest.mark.xdist_group('shared-port')\n")
@@ -973,6 +986,7 @@ def test_statistics_parts_split_one_file_without_losing_new_parameter_cases(tmp_
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     (tmp_path / "tests").mkdir()
+    place_flake_ledger(tmp_path / "tests")
     test = "tests/test_sample.py"
     (tmp_path / test).write_text(
         "import pytest\n"
@@ -1081,6 +1095,7 @@ def test_sizing_against_a_stats_cache_of_the_observed_shape_finishes_in_seconds(
     from scripts.ci_mutation.plan import stats_part_count
 
     (tmp_path / "tests").mkdir()
+    place_flake_ledger(tmp_path / "tests")
     files = [f"tests/test_{index}.py" for index in range(40)]
     for path in files:
         (tmp_path / path).write_text("def test_one():\n    pass\n")
@@ -1315,7 +1330,9 @@ def test_only_the_timing_half_of_each_budget_test_carries_the_wall_clock_marker(
         assert "pytest.mark.wall_clock" not in decorators[functional], functional
 
 
-def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, capsys):
+def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     from collections import defaultdict
 
     from scripts.ci_mutation.selection import collect_parallel_stats
@@ -1330,9 +1347,15 @@ def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, ca
     class TestRunner:
         _pytest_add_cli_args = ["-q"]
 
-        def run_stats(self, *, tests):
+        def run_stats(self, *, tests: list[str]) -> int:
             assert os.environ["MUTANT_UNDER_TEST"] == "stats"
-            basetemp = Path(self._pytest_add_cli_args[-1].removeprefix("--basetemp="))
+            basetemp = Path(
+                next(
+                    arg.removeprefix("--basetemp=")
+                    for arg in self._pytest_add_cli_args
+                    if arg.startswith("--basetemp=")
+                )
+            )
             assert basetemp.is_dir()
             assert basetemp.name.startswith("mutation-stats-")
             for test in tests:
@@ -1362,7 +1385,7 @@ def test_parallel_stats_merge_every_shard_and_fail_on_any_red_shard(tmp_path, ca
     assert len(saved) == 1
 
 
-def _gate_tree(tmp_path, monkeypatch):
+def _gate_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     (tmp_path / "scripts").mkdir()
     (tmp_path / "hooks").mkdir()
@@ -1374,6 +1397,7 @@ def _gate_tree(tmp_path, monkeypatch):
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     (tmp_path / "tests").mkdir()
+    place_flake_ledger(tmp_path / "tests")
     (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
 
 
