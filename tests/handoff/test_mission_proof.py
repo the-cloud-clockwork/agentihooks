@@ -235,7 +235,7 @@ def test_an_address_under_a_read_first_section_a_proof_does_not_have_is_still_as
         asked.append(address)
         return False
 
-    stray = _swap("## Open items\n", f"## Read first\n- {ADDRESS} the mission\n## Open items\n")
+    stray = _swap("## Open items\n", f"## Read first\n- {LINE}\n## Open items\n")
     assert expert.proof_problems(stray, resolves, lambda url: True, "sw", GOOD) == [
         f"## Read first is not one of the eight headings: {HEADINGS}",
         f"Read first entry 1: {ADDRESS} does not resolve",
