@@ -25,6 +25,7 @@ class Store:
         self.swarms, self.stopped = swarms, stopped
         self.redis: Any = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
         self.documents: dict[tuple[str, str], str] = {}
+        self.envelopes: dict[tuple[str, str], dict[str, Any]] = {}
 
     def slugs(self) -> list[str]:
         return list(self.swarms)
@@ -37,6 +38,9 @@ class Store:
 
     def handoff(self, slug: str, task: str) -> str:
         return self.documents.get((slug, task), "")
+
+    def handoff_envelope(self, slug: str, task: str) -> dict[str, Any] | None:
+        return self.envelopes.get((slug, task))
 
 
 def _started(store: Store, slug: str, count: int = 1) -> list[expert_lineage.Lineage]:
@@ -95,6 +99,26 @@ def test_a_handoff_of_a_running_lineage_that_breaks_the_contract_fails_with_each
         f"FAIL: rig lineage expert-2: {wrong}; deliverable D3 is named by no Done or Pending bullet; start one with D3",
         "FAIL: rig lineage expert-3: the first line must be # Expert handoff",
     ]
+
+
+@pytest.mark.feature("expert-seat-step")
+def test_the_handoff_a_lineage_was_started_from_is_held_to_handoff_v2(capsys: pytest.CaptureFixture[str]) -> None:
+    store = Store(("rig",))
+    _started(store, "rig", 3)
+    store.documents = {
+        ("rig", "expert-1"): V2,
+        ("rig", "expert-2"): V2.replace("## Intent\n", "## Intend\n"),
+        ("rig", "expert-3"): V2,
+    }
+    store.envelopes = {("rig", "expert-1"): {"reason": "operator"}, ("rig", "expert-2"): {"reason": "operator"}}
+    assert check.main(store) == 1
+    seeded, faulty, unseeded = capsys.readouterr().out.splitlines()
+    assert seeded == "rig lineage expert-1 holds the conforming Handoff v2 it was started from"
+    assert faulty == (
+        "FAIL: rig lineage expert-2: ## Intend is not one of the six headings: Intent, Done, Stopped at, Decisions "
+        "and promises, Next, Read first; ## Intent is missing"
+    )
+    assert unseeded.startswith("FAIL: rig lineage expert-3: the first line must be # Expert handoff; ")
 
 
 @pytest.mark.feature("expert-handoff-contract")
