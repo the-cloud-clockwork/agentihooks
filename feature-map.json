@@ -12446,6 +12446,32 @@
       ]
     },
     {
+      "id": "expert-claims-nothing",
+      "origin": "operator",
+      "operator_words": "the agents will behave like a swarm agent but the difference is that they will not claim tasks, they will have purpose built, they will go with one only mission / Chain of experts a a linage of  a mission, they dont pick tasks",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "An expert claims no ledger task and picks no work. The swarm command's worker verbs (issue, review, branch, publish, pr, done, block, trace-plan, progress, park, ready, restack) refuse it by name, and it still queues and dequeues its own pull requests, with no task gate. The ledger refuses an expert a task add, any task change, a follow up, a task group, its release and a task split, and tells it to do the work inside its mission or ask the master.",
+      "seam": "cli._worker and cli.cmd_merge for an expert; ledger_tasks.expert_refusal through add_refusal and update_refusal; ledger_agent_ops._add_item for a follow up; ledger_groups.REFUSED_LANES for a group, its release and a split; the live check scripts.feature_checks.expert_claims over the ledger tasks of every running swarm",
+      "semgrep_rule": "feature-expert-claims-nothing",
+      "tests": [
+        "tests/swarm/test_expert_worker_verbs.py::test_an_expert_runs_no_worker_verb",
+        "tests/swarm/test_expert_worker_verbs.py::test_an_expert_queues_and_dequeues_its_pull_request_with_no_task_gate",
+        "tests/swarm_ledger/test_expert_refusals.py::test_an_expert_adds_no_task",
+        "tests/swarm_ledger/test_expert_refusals.py::test_an_expert_files_no_follow_up",
+        "tests/swarm_ledger/test_expert_refusals.py::test_an_expert_changes_no_task_and_so_claims_none",
+        "tests/swarm_ledger/test_expert_refusals.py::test_an_expert_neither_groups_nor_releases_nor_splits_tasks",
+        "tests/test_expert_claims_check.py::test_each_swarm_whose_tasks_no_expert_claims_passes_and_is_listed",
+        "tests/test_expert_claims_check.py::test_a_task_claimed_by_an_expert_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_claims"
+      ]
+    },
+    {
       "id": "expert-mission-and-lineage",
       "origin": "operator",
       "operator_words": "we need to abstract the instructions style you gave to that agent / they will go with one only mission, or task like we did now / the original task must be a path or db saved task",
