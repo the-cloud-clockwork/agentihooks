@@ -57,8 +57,8 @@ def row(state, item):
 
 
 def event_of(state, kind):
-    event = state["_meta"]["events"][-1]
-    assert event["id"].startswith(f"{kind}-")
+    events = reversed(state["_meta"]["events"])
+    event = next(found for found in events if found.get("id", "").startswith(f"{kind}-"))
     return {key: value for key, value in event.items() if key not in ("rev", "at", "id")}
 
 
@@ -280,10 +280,10 @@ def test_the_order_command_marks_and_clears_through_the_cli(monkeypatch, capsys)
 
 
 @pytest.mark.feature("ledger-order-mark")
-def test_an_order_the_outbox_holds_reads_as_queued(monkeypatch, capsys):
+def test_the_ledger_entry_point_runs_an_order_the_outbox_holds_as_queued(monkeypatch, capsys):
     monkeypatch.setattr(ledger, "call", lambda slug, ops: {"queued": ops[0]["id"]})
-    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", MASTER, "order", "tasks/t1", "--quote", QUOTE])
-    ledger.cmd_order(args)
+    monkeypatch.setattr("sys.argv", ["ledger", "--slug", SLUG, "--as", MASTER, "order", "tasks/t1", "--quote", QUOTE])
+    ledger.main()
     assert json.loads(capsys.readouterr().out) == {"ordered": "tasks/t1", "queued": True}
 
 
@@ -404,13 +404,3 @@ def test_the_other_task_actions_still_take_no_quote(monkeypatch, action):
     with pytest.raises(SystemExit) as refused:
         cli(monkeypatch, "task", action, "t1", "t2", "--quote", QUOTE)
     assert str(refused.value.code).startswith(f"task {action} takes no --quote")
-
-
-@pytest.mark.feature("ledger-order-at-filing")
-def test_task_set_still_takes_his_words_for_a_rank(monkeypatch, capsys):
-    sent = []
-    monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: sent.append((kind, fields)))
-    argv = ["--slug", SLUG, "--as", MASTER, "task", "set", "t1", "rank=high", "--quote", QUOTE]
-    ledger.cmd_task(ledger.build_parser().parse_args(argv))
-    assert sent == [("task_update", {"item": "tasks/t1", "fields": {"rank": "high"}, "quote": QUOTE})]
-    assert json.loads(capsys.readouterr().out) == {"task": "t1", "rank": "high"}

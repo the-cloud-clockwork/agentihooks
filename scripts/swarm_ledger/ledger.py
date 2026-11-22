@@ -354,16 +354,21 @@ def held(state):
     return {"queued": True} if state.get("queued") else {}
 
 
-def send(args: Any, kind: str, /, *more: dict[str, Any], **fields: Any) -> dict[str, Any]:
-    ops: list[dict[str, Any]] = [op(kind, args, **fields), *more]
-    lead = f"task {fields['task']} was not added: " if kind == "task_add" else ""
+def send(args: Any, kind: str, /, **fields: Any) -> dict[str, Any]:
+    return post(args, [op(kind, args, **fields)])
+
+
+def post(args: Any, ops: list[dict[str, Any]]) -> dict[str, Any]:
+    """One ledger call for the ops, exiting with the server's reasons when it refuses one."""
+    first = ops[0]
+    lead = f"task {first['task']} was not added: " if first["op"] == "task_add" else ""
     try:
         state: dict[str, Any] = call(args.slug, ops)
     except SystemExit as exc:
         if lead and isinstance(exc.code, str):
             raise type(exc)(lead + exc.code) from None
         raise
-    filed = ops[0]["id"] not in state.get("rejected", ())
+    filed = len(ops) > 1 and first["id"] not in state.get("rejected", ())
     refused(state, ops, lead=UNORDERED if filed else lead)
     if lead and not state.get("applied"):
         sys.exit(f"{lead}the ledger server did not apply it")
@@ -608,7 +613,7 @@ def cmd_phase(args: argparse.Namespace) -> None:
         from scripts.swarm_ledger import ledger_phase_cli
 
         kind, fields = ledger_phase_cli.operation(args)
-        send(args, kind, *filing_order(args, f"phases/{args.state}"), **fields)
+        filing(args, kind, f"phases/{args.state}", fields)
         print(json.dumps(fields))
         return
     if args.state not in ("done", "open") or args.values:
@@ -684,12 +689,12 @@ def his_words(args: argparse.Namespace, what: str) -> None:
         sys.exit(f"{what} {NOT_HIS}")
 
 
-def filing_order(args: argparse.Namespace, item: str) -> list[dict[str, Any]]:
-    """The order op an add files with."""
+def filing(args: argparse.Namespace, kind: str, item: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """Send an add, with its order when the operator's words come with it."""
     if not vars(args).get("quote"):
-        return []
+        return send(args, kind, **fields)
     his_words(args, "order")
-    return [op("order_set", args, item=item, quote=args.quote)]
+    return post(args, [op(kind, args, **fields), op("order_set", args, item=item, quote=args.quote)])
 
 
 def cmd_order(args: argparse.Namespace) -> None:
@@ -811,7 +816,7 @@ def cmd_hierarchy(args) -> None:
     hierarchy_backfill.run(args)
 
 
-def refuse_misplaced_quote(args: argparse.Namespace) -> None:
+def refuse_unset_quote(args: argparse.Namespace) -> None:
     if vars(args).get("quote") and args.action not in ("add", "set"):
         sys.exit(f"task {args.action} takes no --quote: run task set <id> rank=<rank> --quote <his words> after it")
 
@@ -821,17 +826,8 @@ def _add_task(args: argparse.Namespace, title: str, fields: dict[str, Any]) -> d
         task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **fields}
         doc = call(args.slug) if args.kind == "plan" else None
         fields["workspace"] = str(ledger_workspace.folder(args.slug, args.id))
-    send(
-        args,
-        "task_add",
-        *filing_order(args, f"tasks/{args.id}"),
-        task=args.id,
-        title=title,
-        lane=args.lane,
-        phase=args.phase,
-        description=args.description,
-        **fields,
-    )
+    row = {"task": args.id, "title": title, "lane": args.lane, "phase": args.phase, "description": args.description}
+    filing(args, "task_add", f"tasks/{args.id}", {**row, **fields})
     if args.scaffold:
         try:
             ledger_workspace.scaffold(args.slug, task, doc)
@@ -930,7 +926,7 @@ def task_branch_fields(args: argparse.Namespace, fields: dict) -> dict:
 
 
 def cmd_task(args):
-    refuse_misplaced_quote(args)
+    refuse_unset_quote(args)
     if args.action == "add":
         if args.id == "-":
             args.id = ledger_tasks.next_id(resource(args.slug, "tasks", collection=True))
@@ -1036,6 +1032,7 @@ def build_parser() -> argparse.ArgumentParser:
     order.add_argument("--quote", help="the operator's recorded words")
     order.add_argument("--request", help="id of the operator chat line or comment that ordered the work")
     order.add_argument("--clear", action="store_true", help="remove the mark, with --quote")
+    order.set_defaults(handler=cmd_order)
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")
@@ -1163,7 +1160,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     task.add_argument(
         "--quote",
-        help="the operator's words: task add files the task as his order, task set rank=... keeps the rank his",
+        help="task set rank=...: the operator's words, so the rank stays his; "
+        "task add: his words, so the task is filed as his order",
     )
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
@@ -1176,7 +1174,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main():
+def main() -> None:
     from scripts.gates import Who
     from scripts.gates.identity import refusal
 
@@ -1188,7 +1186,8 @@ def main():
     args.name = resolve_name(args.name) if args.name else args.name
     if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy", "get", "tasks")):
         sys.exit("--slug and --as are required")
-    globals()[f"cmd_{args.command.replace('-', '_')}"](args)
+    handler = vars(args).get("handler") or globals()[f"cmd_{args.command.replace('-', '_')}"]
+    handler(args)
 
 
 if __name__ == "__main__":
