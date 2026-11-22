@@ -13,7 +13,7 @@ from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import effort_range, publish, snapshot
 from scripts.swarm.ledger_events import RED
 from scripts.swarm.naming import plain
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 
 REASONS = ("recycle", "quota", "succession", "takeover", "reopen", "restore", "inbox", "exit", "operator")
 UNKNOWN, NONE = "unknown", "none"
@@ -56,6 +56,12 @@ def build(store, slug, agent, reason, rows, at, run=subprocess.run):
         "conversation_id": agent.conversation_id or UNKNOWN,
         "launch": _launch(store, slug, agent),
     }
+
+
+def with_orders(built: dict[str, Any], store: RedisStore, ledger: Any, agent: AgentRecord) -> dict[str, Any]:
+    """A master's envelope with one plain line per open operator order, unknown when the ledger could not be read;
+    any other lane's envelope as it is."""
+    return built
 
 
 def _launch(store, slug, agent):

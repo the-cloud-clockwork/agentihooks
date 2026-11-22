@@ -286,6 +286,39 @@ def test_master_block_clips_active_phases_to_two_shares_when_the_block_fits():
     )
 
 
+@pytest.mark.feature("master-handoff-carries-orders")
+def test_the_master_block_lists_phases_under_an_operator_order_first_by_id_and_title() -> None:
+    ledger = {
+        "title": "T",
+        "overview": "O",
+        "phases": [
+            {"id": "p1", "title": "Active", "description": "Restore intent"},
+            {"id": "p2", "title": "Seats", "description": "Long text", "ordered": {"at": 7, "by": "operator"}},
+            {"id": "p3", "title": "Shipped", "description": "Old", "done": True, "ordered": {"at": 3}},
+            {"id": "p4", "title": "Rooms", "description": "More", "ordered": {"at": 5, "by": "operator"}},
+            {"id": "p5", "title": "Odd", "description": "Bad mark", "ordered": "yes"},
+        ],
+    }
+    assert refocus.build_block(ledger, "master", 1500) == (
+        "=== SWARM REFOCUS: T ===\n" + OBLIGATIONS + "Plan: O\nPriorities: \n"
+        "Active phases: operator order p4 Rooms; operator order p2 Seats; Active: Restore intent; Odd: Bad mark"
+    )
+
+
+@pytest.mark.feature("master-handoff-carries-orders")
+def test_the_ordered_phases_lead_the_phases_share_when_it_is_clipped() -> None:
+    phases = [
+        {"id": "p1", "title": "Active", "description": "y" * 10000},
+        {"id": "p2", "title": "Seats", "description": "z" * 10000, "ordered": {"at": 7, "by": "operator"}},
+    ]
+    lead = "operator order p2 Seats; Active: "
+    assert refocus.build_block({"title": "T", "overview": "O", "phases": phases}, "master", 1500) == (
+        "=== SWARM REFOCUS: T ===\n"
+        + OBLIGATIONS
+        + f"Plan: O\nPriorities: \nActive phases: {lead}{'y' * (599 - len(lead))}…"
+    )
+
+
 @pytest.mark.parametrize("ledger", [{}, {"phases": [{}], "priorities": [{}]}])
 def test_master_sparse_ledger_keeps_obligations_without_invented_intent(ledger):
     phases = ": " if ledger else ""
