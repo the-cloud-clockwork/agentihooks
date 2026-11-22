@@ -7411,6 +7411,7 @@
         "tests/swarm_ledger/test_warm_writer.py::test_a_raised_reply_names_the_error_class_and_its_arguments",
         "tests/swarm_ledger/test_warm_writer.py::test_an_error_class_nested_in_another_is_rebuilt_by_its_qualified_name",
         "tests/swarm_ledger/test_warm_writer.py::test_an_error_the_caller_cannot_rebuild_is_raised_as_a_runtime_error_naming_it",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_reply_naming_a_callable_that_is_not_an_error_class_never_calls_it",
         "tests/swarm_ledger/test_warm_writer.py::test_a_connection_fails_where_no_writer_listens_and_carries_its_timeout",
         "tests/swarm_ledger/test_warm_writer.py::test_the_writer_socket_is_owner_only_in_the_agentihooks_home",
         "tests/swarm_ledger/test_warm_writer.py::test_a_second_writer_on_a_live_socket_returns_one_and_leaves_the_first_answering",

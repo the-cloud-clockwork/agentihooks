@@ -73,16 +73,21 @@ def raised(exc: Exception) -> bytes:
 
 
 def reraised(body: bytes) -> Exception:
-    """The error a ``raised`` reply carries, rebuilt as the class the writer raised, else a runtime error naming it."""
+    """The error a ``raised`` reply carries, rebuilt as the error class the writer raised, else a runtime error naming
+    it; only a loaded module or one of agentihooks' own is imported, and only an error class is called."""
     carried = json.loads(body)
+    module, name = carried["module"], carried["name"]
+    fallback = RuntimeError(f"the ledger writer raised {module}.{name}: {carried['args']}")
+    if module not in sys.modules and not module.startswith("scripts."):
+        return fallback
     try:
-        kind: Any = functools.reduce(getattr, carried["name"].split("."), importlib.import_module(carried["module"]))
-        error = kind(*carried["args"])
-    except (ImportError, AttributeError, TypeError):
-        error = None
-    if isinstance(error, Exception):
-        return error
-    return RuntimeError(f"the ledger writer raised {carried['module']}.{carried['name']}: {carried['args']}")
+        kind: Any = functools.reduce(getattr, name.split("."), importlib.import_module(module))
+        if not (isinstance(kind, type) and issubclass(kind, Exception)):
+            return fallback
+        return kind(*carried["args"])
+    except Exception as exc:
+        fallback.__cause__ = exc
+        return fallback
 
 
 class Answering(socketserver.StreamRequestHandler):

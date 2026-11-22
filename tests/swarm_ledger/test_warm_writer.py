@@ -347,21 +347,41 @@ def test_an_error_class_nested_in_another_is_rebuilt_by_its_qualified_name() -> 
 
 @pytest.mark.feature("ledger-warm-writer")
 @pytest.mark.parametrize(
-    ("module", "name", "args"),
+    ("module", "name", "args", "cause"),
     [
-        ("scripts.nowhere", "Gone", ["x"]),
-        ("builtins", "KeyError.missing", ["x"]),
-        ("builtins", "UnicodeDecodeError", ["x"]),
-        ("builtins", "str", ["x"]),
+        ("nowhere", "Gone", ["x"], None),
+        ("scripts.nowhere", "Gone", ["x"], ModuleNotFoundError),
+        ("builtins", "KeyError.missing", ["x"], AttributeError),
+        ("builtins", "UnicodeDecodeError", ["x"], TypeError),
+        ("builtins", "str", ["x"], None),
+        ("os", "system", ["exit 0"], None),
     ],
-    ids=["module", "name", "arguments", "not-an-error"],
+    ids=["foreign-module", "module", "name", "arguments", "not-an-error", "callable"],
 )
 def test_an_error_the_caller_cannot_rebuild_is_raised_as_a_runtime_error_naming_it(
-    module: str, name: str, args: list[str]
+    module: str, name: str, args: list[str], cause: type[Exception] | None
 ) -> None:
     error = warm_writer.reraised(json.dumps({"module": module, "name": name, "args": args}).encode())
     assert type(error) is RuntimeError
     assert error.args == (f"the ledger writer raised {module}.{name}: {args}",)
+    assert type(error.__cause__) is (type(None) if cause is None else cause)
+
+
+CALLED: list[str] = []
+
+
+def called(text: str) -> str:
+    """A callable that is not an error class and records each call."""
+    CALLED.append(text)
+    return text
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_a_reply_naming_a_callable_that_is_not_an_error_class_never_calls_it() -> None:
+    error = warm_writer.reraised(json.dumps({"module": __name__, "name": "called", "args": ["x"]}).encode())
+    assert CALLED == []
+    assert type(error) is RuntimeError
+    assert error.__cause__ is None
 
 
 @pytest.mark.feature("ledger-warm-writer")
