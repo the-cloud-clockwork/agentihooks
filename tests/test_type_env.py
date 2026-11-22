@@ -271,6 +271,7 @@ def test_builders_racing_for_one_environment_build_it_once(tmp_path: Path, monke
     assert sorted(len(uv.calls) for uv in stubs) == [0, 2]
 
 
+@pytest.mark.feature("type-env-ready-fast-path")
 def test_reuse_waits_while_a_build_holds_the_lock(tmp_path: Path) -> None:
     root = _root(tmp_path)
     home = tmp_path / "home"
@@ -289,6 +290,7 @@ def test_reuse_waits_while_a_build_holds_the_lock(tmp_path: Path) -> None:
     assert returned == [python]
 
 
+@pytest.mark.feature("type-env-ready-fast-path")
 def test_reuse_leaves_other_environments_in_place(tmp_path: Path) -> None:
     root = _root(tmp_path)
     home = tmp_path / "home"
