@@ -434,6 +434,7 @@ class HerdrRuntime:
 
         read = self.quota_accounts or capacity.accounts
         self._quota_accounts = read(dict(os.environ), now, refresh=refresh)
+        self._quota_spawn_rows = False
         self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
         if requirements:
@@ -580,7 +581,7 @@ class HerdrRuntime:
     def _rotation(self, requested: str, environ: dict[str, str], prefer: Sequence[str] = ()) -> tuple[str, str]:
         """(agent, reason) from the pass quota rows, read through ``quota_accounts`` when the pass has none yet."""
         if not requested and not hasattr(self, "_quota_accounts") and self.quota_accounts is not None:
-            self._quota_accounts = self.quota_accounts(environ, time.time(), refresh=False)
+            self._quota_read(environ)
         if requested or not hasattr(self, "_quota_accounts"):
             return self.choose(requested, environ)
         from scripts.swarm.capacity import offered, pick
@@ -591,12 +592,31 @@ class HerdrRuntime:
             (seat.harness, "rotation") if seat else (agent_choice.fallback(self._quota_accounts), agent_choice.ALL_FULL)
         )
 
-    def _quota_transfer(self, saved, profile, environ, lane, want, planned=None):
+    def _quota_read(self, environ: dict[str, str]) -> None:
+        """Read the quota rows for a spawn and mark them its own, so the next spawn reads them again."""
+        read = self.quota_accounts or capacity.accounts
+        self._quota_accounts = read(environ, time.time(), refresh=False)
+        self._quota_spawn_rows = True
+
+    def _quota_refresh(self, environ: dict[str, str]) -> None:
+        """Re-read quota rows a spawn read for itself; rows a tick pass or the constructor gave stay."""
+        if getattr(self, "_quota_spawn_rows", False):
+            with self._reserving:
+                self._quota_read(environ)
+
+    def _quota_transfer(
+        self,
+        saved: dict[str, Any],
+        profile: str,
+        environ: dict[str, str],
+        lane: str,
+        want: str,
+        planned: tuple[str, str | None] | None = None,
+    ) -> dict[str, Any]:
         from scripts.swarm import capacity, quota_handoff
 
         if not hasattr(self, "_quota_accounts"):
-            read = self.quota_accounts or capacity.accounts
-            self._quota_accounts = read(environ, time.time(), refresh=False)
+            self._quota_read(environ)
         thresholds = quota_handoff.Thresholds.from_env(environ)
         allocation = getattr(self, "_quota_allocations", {}).get(lane)
         predecessor = (saved["harness"], saved.get("account"))
@@ -767,6 +787,7 @@ class HerdrRuntime:
 
     def spawn(self, config: Any, lane: str, name: str, task: Any) -> Placed:
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
+        self._quota_refresh(environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or profile_choice.transfer(task)
         decision = self._profile_decision(config, lane, task, saved, relaunch, environ)
