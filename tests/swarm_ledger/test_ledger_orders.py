@@ -47,7 +47,7 @@ def write(kind, by=None, **fields):
     return core.sync(SLUG, ops=[op])
 
 
-def order(item, by=MASTER, **fields):
+def order(item, by: str | None = MASTER, **fields):
     return write("order_set", by=by, item=item, **fields)
 
 
