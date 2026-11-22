@@ -74,6 +74,18 @@ def same_revision(root: Path | str) -> str:
     return "same"
 
 
+def paced(interval: float, timeout: float | None = None) -> None:
+    """A scheduler wait bounded by its own interval that sleeps it, as the scheduler does when unavailable."""
+    assert timeout == interval == 0.05
+    time.sleep(interval)
+
+
+def still(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve from a checkout that never moves, paced by a sleeping scheduler wait."""
+    still(monkeypatch)
+    monkeypatch.setattr(ledger_server, "scheduled_wait", paced)
+
+
 def serving(where: Path, stopped: threading.Event) -> threading.Thread:
     """A writer serving on ``where`` in a thread until ``stopped``, its socket bound."""
     served = threading.Thread(target=warm_writer.serve, args=(where, stopped, 0.05), daemon=True)
@@ -87,7 +99,7 @@ def serving(where: Path, stopped: threading.Event) -> threading.Thread:
 @pytest.fixture
 def writer(memory_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """A warm writer answering on a socket in a short tmpfs folder."""
-    monkeypatch.setattr(warm_writer, "revision", same_revision)
+    still(monkeypatch)
     where = memory_path / "w.sock"
     stopped = threading.Event()
     served = serving(where, stopped)
@@ -292,7 +304,7 @@ def test_the_writer_socket_is_owner_only_in_the_agentihooks_home(
     memory_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(config, "AGENTIHOOKS_HOME", memory_path)
-    monkeypatch.setattr(warm_writer, "revision", same_revision)
+    still(monkeypatch)
     previous = os.umask(0o022)
     stopped = threading.Event()
     served = serving(warm_writer.socket_path(), stopped)
@@ -325,7 +337,7 @@ def test_a_second_writer_on_a_live_socket_returns_one_and_leaves_the_first_answe
 
 @pytest.mark.feature("ledger-warm-writer")
 def test_a_stale_socket_file_is_replaced_by_a_new_writer(memory_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(warm_writer, "revision", same_revision)
+    still(monkeypatch)
     where = memory_path / "w.sock"
     left = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     left.bind(str(where))
@@ -366,7 +378,7 @@ def test_a_live_writer_too_busy_to_accept_the_probe_keeps_its_socket(
 def test_a_stalled_client_neither_holds_other_requests_nor_keeps_the_writer_from_returning(
     memory_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(warm_writer, "revision", same_revision)
+    still(monkeypatch)
     monkeypatch.setattr(warm_writer.Answering, "timeout", 0.2)
     where = memory_path / "w.sock"
     stopped = threading.Event()
@@ -387,7 +399,7 @@ def test_a_stalled_client_neither_holds_other_requests_nor_keeps_the_writer_from
 def test_a_writer_whose_socket_file_was_removed_still_returns_cleanly(
     memory_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(warm_writer, "revision", same_revision)
+    still(monkeypatch)
     where = memory_path / "w.sock"
     stopped = threading.Event()
     codes: list[int] = []
@@ -434,6 +446,7 @@ def test_the_writer_finishes_a_request_in_flight_then_returns_once_the_checkout_
         return None, 200, b'{"late": 1}'
 
     monkeypatch.setattr(warm_writer, "revision", revision)
+    monkeypatch.setattr(ledger_server, "scheduled_wait", paced)
     monkeypatch.setattr(database_ledger, "replied", replied)
     where = memory_path / "w.sock"
     stopped, returned = threading.Event(), threading.Event()

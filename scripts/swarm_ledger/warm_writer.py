@@ -13,6 +13,7 @@ from typing import Any
 
 from hooks import config
 from scripts.scheduler.service import ROOT, revision
+from scripts.swarm_ledger import ledger_server
 from scripts.tick.adapters import database_ledger
 
 NAME = "ledger-writer.sock"
@@ -110,9 +111,10 @@ def serve(where: Path, stopped: threading.Event, check_s: float = CHECK_S) -> in
     listening = threading.Thread(target=server.serve_forever, args=(POLL_S,))
     listening.start()
     try:
-        while not stopped.wait(check_s):
+        while not stopped.is_set():
             if moved(loaded):
                 break
+            ledger_server.scheduled_wait(check_s, timeout=check_s)
     finally:
         server.shutdown()
         listening.join()
