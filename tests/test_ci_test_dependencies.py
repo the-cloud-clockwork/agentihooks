@@ -370,14 +370,11 @@ INTENTIONAL_SMOKES = {
 }
 FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/access-audit.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/brain-smoke.yml: uv pip install --python .venv/bin/python -e '.[all]'",
     ".github/workflows/branch-lanes.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/coverage-stability.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
     ".github/workflows/gate-protected.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/gate-required.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/hive-worker.yml: pip install PyYAML",
-    ".github/workflows/ledger-load.yml: uv pip install --python '$HOME/venv/bin/python' -e '.[all]'",
-    ".github/workflows/ledger-load.yml: uv pip install --python '$HOME/venv/bin/python' -e '.[all]'",
     ".github/workflows/lost-runner.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/publish-pypi.yml: pip install build",
     ".github/workflows/queue-retry.yml: pip install 'pyyaml>=6.0'",
@@ -405,7 +402,6 @@ FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
     ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
     ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
-    "scripts/ci_dependency_audit.py: uvx --with 'platformdirs!=4.14.8' pip-audit==2.10.1 -r requirements --no-deps --disable-pip --format json",
     "scripts/ci_duration_provenance.yml: pip install 'pyyaml>=6.0'",
     "scripts/ci_release.sh: pip install build",
     "scripts/ci_reuse_job.yml: pip install 'pyyaml>=6.0'",
