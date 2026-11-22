@@ -47,7 +47,9 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         reads.append(url)
         return pulls.get(url)
 
-    ledger = SimpleNamespace(task=lambda slug, task_id: {"id": task_id, "pr_url": URL})
+    ledger = SimpleNamespace(
+        task=lambda slug, task_id: {"id": task_id, "pr_url": URL} if (slug, task_id) == ("sw", "t1") else None
+    )
     react = wait_ends.WaitEnds(store, ledger, github, clock=lambda: 5_000)
 
     def hold(held: dict) -> None:
@@ -66,8 +68,14 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     [
         (CHECKS, "checks.completed", GREEN, f"checks on {URL}, now green"),
         (MERGE, "pull.merged", PullRequest("MERGED", 2, 1, False, True), f"pull request {URL}, now merged"),
+        (
+            {**MERGE, "queued": True},
+            "merge.dequeued",
+            GREEN,
+            f"pull request {URL}, now green; dropped from the merge queue; queue it again",
+        ),
     ],
-    ids=["checks-completed", "pull-merged"],
+    ids=["checks-completed", "pull-merged", "merge-dequeued"],
 )
 @pytest.mark.feature("wait-ends-on-pull-event")
 def test_a_pull_event_ends_a_matching_wait_with_one_item_and_the_polled_records(
@@ -157,7 +165,15 @@ def test_a_raising_wait_does_not_stop_the_other_waits_on_the_event(
 @pytest.mark.feature("wait-ends-on-pull-event")
 def test_the_hub_registry_wires_one_singleton_wait_end_reactor_per_pull_subject() -> None:
     bus = cast(Bus, memory.open_bus(BusConfig()))
-    found = {reactor.subject: reactor for reactor in registry.configured(bus) if reactor.name.startswith("wait-ends-")}
+
+    def clock() -> int:
+        return 7_000
+
+    found = {
+        reactor.subject: reactor
+        for reactor in registry.configured(bus, clock=clock)
+        if reactor.name.startswith("wait-ends-")
+    }
     assert sorted(found) == [
         "swarm.*.checks.completed",
         "swarm.*.merge.dequeued",
@@ -165,4 +181,6 @@ def test_the_hub_registry_wires_one_singleton_wait_end_reactor_per_pull_subject(
         "swarm.*.pull.merged",
     ]
     assert all(reactor.singleton for reactor in found.values())
+    owners = [cast(Any, reactor.handler).__self__ for reactor in found.values()]
+    assert [(owner.clock, owner.ledger.service) for owner in owners] == [(clock, True)] * 4
     bus.close()
