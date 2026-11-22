@@ -9958,7 +9958,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "Among the tasks a lane may claim, the hub readiness pass offers urgent and focused tasks first as before, then the tasks under an operator order, oldest order first, then the rest, each by ledger rank band. A task's order time is the earlier of its own mark and its phase's; the work an ordered task waits on, the plan task that enhances it and the lead it is merged into carry the earliest such time, and a mark that is not well formed counts as none. A waiting offer at least one dedupe window old moves behind a later offer of a higher class. An order never changes which tasks are offered: under a focus an ordered task outside it is not offered, and focused offers keep their order.",
+      "behaviour": "Among the tasks a lane may claim, the hub readiness pass offers urgent and focused tasks first as before, then the tasks under an operator order, oldest order first, then the rest, each by ledger rank band. A task's order time is the earlier of its own mark and its phase's; the work an ordered task waits on, the plan task that enhances it and the lead it is merged into carry the earliest such time, through every such link in turn, and a mark that is not well formed counts as none. A waiting offer at least one dedupe window old moves behind a later offer of a higher class. An order never changes which tasks are offered: under a focus an ordered task outside it is not offered, and focused offers keep their order.",
       "seam": "scripts.swarm.orders.stamps, scripts.swarm.readiness.offers and behind, and readiness.publish on the memory work queue read back through readiness.take",
       "tests": [
         "tests/swarm/test_orders.py::test_a_ledger_with_no_order_mark_has_no_order_time",
@@ -9967,6 +9967,7 @@
         "tests/swarm/test_orders.py::test_every_task_of_a_phase_an_ordered_phase_waits_on_carries_its_order_time",
         "tests/swarm/test_orders.py::test_the_plan_task_that_enhances_ordered_work_and_what_it_waits_on_carry_the_order_time",
         "tests/swarm/test_orders.py::test_the_lead_an_ordered_task_is_merged_into_and_what_it_waits_on_carry_the_order_time",
+        "tests/swarm/test_orders.py::test_the_order_time_travels_through_every_link_of_the_work_it_reaches",
         "tests/swarm/test_orders.py::test_the_earliest_order_wins_wherever_two_orders_meet",
         "tests/swarm/test_orders.py::test_done_and_out_of_scope_work_carries_no_order_time_and_passes_none_on",
         "tests/swarm/test_orders.py::test_tasks_that_wait_on_each_other_end_with_the_earliest_order_time",
@@ -9980,7 +9981,9 @@
         "tests/swarm/test_readiness.py::test_a_malformed_order_mark_leaves_the_offers_in_their_rank_order",
         "tests/swarm/test_readiness.py::test_a_later_ordered_offer_is_taken_after_an_urgent_one_and_before_older_normal_offers",
         "tests/swarm/test_readiness.py::test_an_old_normal_offer_moves_behind_a_later_ordered_offer_and_a_young_one_keeps_its_place",
-        "tests/swarm/test_readiness.py::test_an_ordered_offer_moves_behind_a_later_urgent_offer_and_stays_ahead_of_a_later_normal_one"
+        "tests/swarm/test_readiness.py::test_an_ordered_offer_moves_behind_a_later_urgent_offer_and_stays_ahead_of_a_later_normal_one",
+        "tests/swarm/test_readiness.py::test_an_ordered_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_of_an_urgent_one_until_it_ages",
+        "tests/swarm/test_readiness.py::test_a_focus_of_any_form_puts_its_tasks_in_the_first_class_for_offers_and_for_behind"
       ]
     },
     {

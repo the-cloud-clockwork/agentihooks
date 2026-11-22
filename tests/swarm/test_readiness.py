@@ -6,6 +6,7 @@ import pytest
 from scripts.events import memory
 from scripts.events.bus import Bus, WorkQueue
 from scripts.events.config import BusConfig, QueuePolicy
+from scripts.events.envelope import Envelope
 from scripts.inbox.store import InboxStore
 from scripts.swarm import preempt, readiness
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
@@ -66,7 +67,7 @@ LATER = NOW + WINDOW
 ORDER = {"at": 1, "by": "operator"}
 
 
-def waiting(view, task_id, age=WINDOW):
+def offer_aged(view: readiness.Snapshot, task_id: str, age: int = WINDOW) -> Envelope:
     return readiness.offer(view.rows[task_id], view, LATER - age)
 
 
@@ -291,27 +292,30 @@ def test_the_seat_a_preempted_normal_worker_frees_goes_to_the_urgent_offer_not_t
 def test_behind_names_the_old_waiting_offers_ahead_of_an_urgent_or_focused_offer() -> None:
     focus = [{"verb": "focus", "target": "tasks/f"}]
     view = snapshot(doc([task("n1"), task("n2"), task("u", rank="urgent"), task("f")], freezes=focus))
-    n1, n2, u, f = (waiting(view, name) for name in ("n1", "n2", "u", "f"))
-    assert readiness.behind([n1, waiting(view, "n2", WINDOW - 1)], [waiting(view, "u", 0)], view, LATER) == {n1.id}
+    n1, n2, u, f = (offer_aged(view, name) for name in ("n1", "n2", "u", "f"))
+    assert readiness.behind([n1, offer_aged(view, "n2", WINDOW - 1)], [offer_aged(view, "u", 0)], view, LATER) == {
+        n1.id
+    }
     assert readiness.behind([n1, u, n2], [], view, LATER) == {n1.id}
-    assert readiness.behind([n1, n2], [waiting(view, "f", 0)], view, LATER) == {n1.id, n2.id}
-    assert readiness.behind([u, n1], [waiting(view, "f", 0)], view, LATER) == {n1.id}
+    assert readiness.behind([n1, n2], [offer_aged(view, "f", 0)], view, LATER) == {n1.id, n2.id}
+    assert readiness.behind([u, n1], [offer_aged(view, "f", 0)], view, LATER) == {n1.id}
     assert readiness.behind([u, f, n1, n2], [], view, LATER) == set()
     assert readiness.behind([n1, n2], [], view, LATER) == set()
-    assert readiness.behind([], [waiting(view, "u", 0)], view, LATER) == set()
+    assert readiness.behind([], [offer_aged(view, "u", 0)], view, LATER) == set()
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
 def test_behind_names_the_old_waiting_offers_ahead_of_an_offer_of_a_higher_class() -> None:
     later = {"at": 9, "by": "operator"}
     view = snapshot(doc([task("n"), task("o", ordered=ORDER), task("o2", ordered=later), task("u", rank="urgent")]))
-    n, o, o2, u = (waiting(view, name) for name in ("n", "o", "o2", "u"))
+    n, o, o2, u = (offer_aged(view, name) for name in ("n", "o", "o2", "u"))
     assert readiness.behind([n, o], [], view, LATER) == {n.id}
     assert readiness.behind([n, o, u], [], view, LATER) == {n.id, o.id}
-    assert readiness.behind([o, n], [waiting(view, "u", 0)], view, LATER) == {o.id, n.id}
-    assert readiness.behind([o2, n], [waiting(view, "o", 0)], view, LATER) == {n.id}
-    assert readiness.behind([o2], [waiting(view, "o", 0)], view, LATER) == set()
-    assert readiness.behind([waiting(view, "n", WINDOW - 1), o], [], view, LATER) == set()
+    assert readiness.behind([o, n], [offer_aged(view, "u", 0)], view, LATER) == {o.id, n.id}
+    assert readiness.behind([o], [offer_aged(view, "n", 0), offer_aged(view, "u", 0)], view, LATER) == {o.id}
+    assert readiness.behind([o2, n], [offer_aged(view, "o", 0)], view, LATER) == {n.id}
+    assert readiness.behind([o2], [offer_aged(view, "o", 0)], view, LATER) == set()
+    assert readiness.behind([offer_aged(view, "n", WINDOW - 1), o], [], view, LATER) == set()
     assert readiness.behind([u, o, n], [], view, LATER) == set()
 
 
@@ -341,7 +345,7 @@ def test_the_tasks_of_an_ordered_phase_and_the_work_they_wait_on_are_offered_bef
 
 @pytest.mark.feature("ready-ordered-offer-first")
 def test_order_marks_change_the_order_of_offers_and_never_which_tasks_are_offered() -> None:
-    def offered(mark):
+    def offered(mark: dict[str, Any]) -> list[str]:
         tasks = [
             task("a"),
             task("b", lane="ci", **mark),
@@ -411,6 +415,35 @@ def test_an_ordered_offer_moves_behind_a_later_urgent_offer_and_stays_ahead_of_a
     view = snapshot(doc([ordered, task("n"), task("u", rank="urgent")]))
     assert readiness.publish(bus, view, clock.now) == ["ready:sw:u:0", "ready:sw:o:0", "ready:sw:n:0"]
     assert queued(bus, "eng", view) == ["u", "o", "n"]
+
+
+@pytest.mark.feature("ready-ordered-offer-first")
+def test_an_ordered_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_of_an_urgent_one_until_it_ages(
+    bus: Bus, clock: Clock
+) -> None:
+    ordered = task("o", ordered=ORDER)
+    readiness.publish(bus, snapshot(doc([ordered])), NOW)
+    clock.now += WINDOW - 1
+    view = snapshot(doc([ordered, task("u", rank="urgent")]))
+    assert readiness.publish(bus, view, clock.now) == ["ready:sw:u:0"]
+    clock.now += 1
+    assert readiness.publish(bus, view, clock.now) == ["ready:sw:o:0"]
+    assert queued(bus, "eng", view) == ["u", "o"]
+
+
+@pytest.mark.feature("ready-ordered-offer-first")
+@pytest.mark.parametrize(
+    ("target", "outside"),
+    [("phases/p1", {"phase": "p2"}), ("lane:eng", {"lane": "ci"}), ("kind:code", {"kind": "ops"})],
+)
+def test_a_focus_of_any_form_puts_its_tasks_in_the_first_class_for_offers_and_for_behind(
+    target: str, outside: dict[str, str]
+) -> None:
+    tasks = [task("b"), task("a", ordered=ORDER), task("z", ordered=ORDER, **outside)]
+    view = snapshot(doc(tasks, freezes=[{"verb": "focus", "target": target}]))
+    assert [event.key for event in readiness.offers(view, NOW)] == ["b", "a"]
+    z = offer_aged(view, "z")
+    assert readiness.behind([z], [offer_aged(view, "a", 0)], view, LATER) == {z.id}
 
 
 def test_publish_uses_the_given_queue_policy(bus):
