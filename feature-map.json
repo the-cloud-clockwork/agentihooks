@@ -6342,6 +6342,7 @@
         "tests/swarm/test_enhance_close.py::test_the_enhancement_op_refuses_a_task_the_ledger_does_not_hold",
         "tests/swarm/test_enhance_close.py::test_a_task_update_never_writes_an_enhancement",
         "tests/swarm/test_enhance_close.py::test_enhances_survives_task_add_and_the_hosted_schemas_accept_the_fields",
+        "tests/swarm/test_enhance_close.py::test_the_task_slice_check_grades_a_target_in_its_own_phase",
         "tests/swarm/test_enhance_close.py::test_the_plan_reader_fetches_a_hosted_ledger_with_its_loader"
       ]
     },

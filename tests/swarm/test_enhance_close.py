@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import claim_hold, enhance_review, plan_review
+from scripts.swarm import claim_hold, enhance_review, plan_review, slice_check
 from scripts.swarm import cli as swarm_cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_artifacts, ledger_enhancement, ledger_link, plan_read
@@ -392,6 +392,17 @@ def test_enhances_survives_task_add_and_the_hosted_schemas_accept_the_fields(thi
     assert task(ENHANCE)["enhances"] == TARGET
     assert "enhances" in schemas.FIELDS["task_add"].split()
     assert schemas.FIELDS["task_enhancement"].split() == ["by", "item", "enhancement"]
+
+
+@pytest.mark.feature("swarm-enhance-close")
+def test_the_task_slice_check_grades_a_target_in_its_own_phase() -> None:
+    target = {"id": "t5", "phase": "p1", "description": DONE_WHEN, "territory": ["a", "b"], "depends_on": ["t6", "t7"]}
+    tasks = [target, {"id": "t6", "phase": "p1"}, {"id": "t7", "phase": "p2"}]
+    doc = {"phases": [{"id": "p1"}, {"id": "p2"}], "tasks": tasks}
+    assert slice_check.task_problems(target, doc, slice_check.Limits(max_areas=1)) == [
+        "Task t5 names 2 areas, more than 1.",
+        "Task t5 depends on t7 in a phase that is not done.",
+    ]
 
 
 @pytest.mark.feature("swarm-enhance-close")
