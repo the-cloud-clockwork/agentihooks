@@ -1,14 +1,19 @@
 """Tests for the Redis grace window that keeps the controller alive through a short Redis restart."""
 
+import sys
+import textwrap
 import time
 from pathlib import Path
 from types import ModuleType
 from typing import cast
 
 import pytest
+import yaml
 
+from scripts import install
 from scripts.swarm import controller, controller_probes, lease, redis_grace
-from scripts.swarm.store import RedisStore, SwarmError, Unreachable
+from scripts.swarm.replica import REPLICA_ENV
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, Unreachable
 
 pytestmark = pytest.mark.unit
 
@@ -118,6 +123,71 @@ def test_a_live_probe_that_reaches_redis_clears_the_outage(home, monkeypatch):
 
     assert controller.main(["live"]) == 0
     assert not marker.exists()
+
+
+def api_disabled_liveness_command() -> list[str]:
+    """Exec command of the chart's controller liveness probe when the control API is disabled."""
+    chart = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm/templates/controller.yaml"
+    probe = chart.read_text().split("- name: controller\n", 1)[1].split("          livenessProbe:\n", 1)[1]
+    branch = probe.split("            {{- else }}\n", 1)[1].split("            {{- end }}", 1)[0]
+    return yaml.safe_load(textwrap.dedent(branch))["exec"]["command"]
+
+
+def probe_status(command: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
+    """Run a chart probe command in this process and answer the exit status the kubelet exec would read.
+
+    An uncaught exception of a ``python -c`` program exits 1 with its last traceback line on stderr, as the
+    interpreter does, so a test can tell a lapsed lease from a crash.
+    """
+    if command[:2] == ["python", "-c"]:
+        try:
+            exec(command[2], {})
+        except SystemExit as stop:
+            return int(stop.code or 0)
+        except Exception as error:
+            print(f"{type(error).__name__}: {error}", file=sys.stderr)
+            return 1
+        return 0
+    monkeypatch.setattr(sys, "argv", command)
+    try:
+        install.main()
+    except SystemExit as stop:
+        return int(stop.code or 0)
+    return 0
+
+
+@pytest.mark.feature("controller-liveness-rides-out-redis-outage")
+@pytest.mark.parametrize("replica", [{}, {REPLICA_ENV: "pod-standby"}], ids=["single", "standby"])
+def test_api_disabled_liveness_command_stays_live_while_redis_refuses_inside_the_grace_window(
+    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], replica: dict[str, str]
+) -> None:
+    monkeypatch.setattr("scripts.swarm.store.connect", refused)
+    monkeypatch.delenv(controller_probes.PORT_ENV, raising=False)
+    monkeypatch.delenv(REPLICA_ENV, raising=False)
+    for name, value in replica.items():
+        monkeypatch.setenv(name, value)
+    command = api_disabled_liveness_command()
+
+    assert [probe_status(command, monkeypatch) for _ in range(2)] == [0, 0]
+    assert "live inside the 120s Redis grace window" in capsys.readouterr().out
+
+
+@pytest.mark.feature("controller-liveness-rides-out-redis-outage")
+def test_api_disabled_liveness_command_fails_on_a_lapsed_lease_once_redis_answers(
+    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("fixture", "agentihooks", 2, 0))
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.controller.connect", lambda: store)
+    for name in (controller_probes.PORT_ENV, controller_probes.HOST_SWARMS_ENV, REPLICA_ENV):
+        monkeypatch.delenv(name, raising=False)
+
+    assert probe_status(api_disabled_liveness_command(), monkeypatch) == 1
+    out, err = capsys.readouterr()
+    assert "no live controller lease for ['fixture']" in out + err
 
 
 def test_ready_still_fails_while_redis_refuses(home, capsys):
