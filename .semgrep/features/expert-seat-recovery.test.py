@@ -15,7 +15,7 @@ def _owns(store, slug, agent, ledger):
     if agent.lane == MASTER:
         return True
     if agent.lane == expert_launch.LANE:
-        return expert_lineage.runs(store, slug, agent.task)
+        return expert_lineage.goes_on(store, slug, agent)
     task = ledger.task(slug, agent.task) or {}
     return task.get("claimed_by") == agent.name
 

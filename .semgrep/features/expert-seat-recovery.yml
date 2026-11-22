@@ -13,7 +13,7 @@ rules:
           def _owns(...):
             ...
             if $AGENT.lane == expert_launch.LANE:
-              return expert_lineage.runs(...)
+              return expert_lineage.goes_on(...)
             ...
     paths:
       include:

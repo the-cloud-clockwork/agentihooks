@@ -178,7 +178,8 @@ def returned(store: Any, slug: str, seat: str, lineage: str, state: str) -> None
     message waits on a seat nobody will hold again."""
     inbox = InboxStore(store.redis)
     for item in inbox.open_items(seat):
-        inbox.redirect(item.id, SWARM, seat_address(slug, MASTER), RETURNED.format(id=lineage, state=state))
+        reason = RETURNED.format(id=lineage, state=state)
+        inbox.redirect(item.id, SWARM, seat_address(slug, MASTER), reason, expected_address=seat)
 
 
 def _launch(

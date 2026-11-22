@@ -36,7 +36,7 @@ def _owns(store: RedisStore, slug: str, agent: AgentRecord, ledger: Any) -> bool
     if agent.lane == MASTER:
         return True
     if agent.lane == expert_launch.LANE:
-        return expert_lineage.runs(store, slug, agent.task)
+        return expert_lineage.goes_on(store, slug, agent)
     task = ledger.task(slug, agent.task) or {}
     return (
         task.get("state") in {"claimed", "pr"}
@@ -47,6 +47,7 @@ def _owns(store: RedisStore, slug: str, agent: AgentRecord, ledger: Any) -> bool
 
 RESUME_ATTEMPTS = 3
 CAPPED_REASON = f"it ended again after each of its last {RESUME_ATTEMPTS} resumes"
+UNCONFIRMED = "the handoff on its seat was never confirmed"
 CAPPED_HANDOFF = """## Intent
 Continue task {task}; {name} ended again after each of its last {attempts} resumes, so the swarm stopped resuming it.
 
@@ -114,9 +115,18 @@ def _hand_off_capped(store: RedisStore, slug: str, agent: AgentRecord, at: int) 
     transfers.record(store, slug, agent, "exit", text, at)
 
 
+def _handed(store: RedisStore, slug: str, agent: AgentRecord) -> str:
+    """Why the handoff stored for an agent's task sends it to a fresh agent. An expert's handoff leaves its seat once
+    the expert confirms it, so one another agent wrote was never confirmed."""
+    envelope: dict[str, Any] = store.handoff_envelope(slug, agent.task) or {}  # pyright: ignore[reportUnknownMemberType]
+    if agent.lane == expert_launch.LANE and envelope.get("agent") != agent.name:
+        return UNCONFIRMED
+    return "a handoff was submitted"
+
+
 def _reason(store: RedisStore, slug: str, agent: AgentRecord) -> str:
     if store.handoff(slug, agent.task):
-        return "a handoff was submitted"
+        return _handed(store, slug, agent)
     if not agent.conversation_id:
         return "resume failed because no conversation id was recorded"
     used = context_recycle._used(agent.conversation_id)
