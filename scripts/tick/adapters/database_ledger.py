@@ -214,10 +214,11 @@ def routed(timeout: float, slug: str, path: str, payload: dict[str, Any] | None 
         sock = warm_writer.connected(timeout)
     except OSError:
         return request(slug, path, payload)
-    try:
-        status, body = warm_writer.ask(sock, slug, path, payload)
-    except (OSError, EOFError, ValueError) as exc:
-        raise TimeoutError(f"the ledger writer took {path} on {slug} and sent no answer") from exc
+    with sock:
+        try:
+            status, body = warm_writer.ask(sock, slug, path, payload)
+        except (OSError, EOFError, ValueError) as exc:
+            raise TimeoutError(f"the ledger writer took {path} on {slug} and sent no answer") from exc
     return decoded(slug, path, Message(), status, body)
 
 

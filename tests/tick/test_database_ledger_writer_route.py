@@ -64,6 +64,7 @@ def writer(where: Path, reply: bytes, released: threading.Event | None = None) -
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(str(where))
     listener.listen(1)
+    listener.settimeout(10.0)
     heard: list[bytes] = []
 
     def answer() -> None:
