@@ -81,9 +81,14 @@ def test_a_missing_section_is_refused_by_name(heading: str) -> None:
 
 
 @pytest.mark.parametrize("heading", mission.HEADINGS)
-def test_a_section_written_twice_is_refused_by_name(heading: str) -> None:
-    found = mission.problems(GOOD + f"\n## {heading}\nAgain.\n")
-    assert f"## {heading} must appear once and appears 2 times" in found
+def test_a_section_written_twice_is_refused_by_name_and_is_not_called_out_of_order(heading: str) -> None:
+    found = mission.problems(GOOD + f"\n## {heading}\n1. Again.\n")
+    assert found == [f"## {heading} must appear once and appears 2 times"]
+
+
+def test_a_section_first_written_out_of_place_and_then_again_is_refused_for_both() -> None:
+    text = _swap("## The problem\n", "## How to report\nEarly.\n\n## The problem\n")
+    assert mission.problems(text) == ["## How to report must appear once and appears 2 times", ORDER]
 
 
 @pytest.mark.parametrize("heading", mission.HEADINGS)
@@ -160,7 +165,7 @@ def test_a_credential_value_is_refused_whatever_secret_mode_the_session_runs(
 
 
 def test_every_problem_is_reported_at_once() -> None:
-    text = "# Notes\n\n## The problem\nIt breaks.\n\n## What to deliver\n- fix it\n\n## The problem\nAgain.\n"
+    text = "# Notes\n\n## What to deliver\n- fix it\n\n## The problem\nIt breaks.\n\n## The problem\nAgain.\n"
     assert mission.problems(text) == [
         "the first line must be # Mission: followed by the mission's title",
         "## The operator's words must appear once and appears 0 times",

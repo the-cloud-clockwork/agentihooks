@@ -77,6 +77,11 @@ def listed(store: Any, slug: str) -> list[Lineage]:
     return sorted(rows, key=lambda row: (row.started_at, len(row.id), row.id))
 
 
+def running(store: Any, slug: str) -> list[Lineage]:
+    """The lineages of the swarm that have not ended, in the order started."""
+    raise NotImplementedError
+
+
 def mission(store: Any, slug: str, lineage: Lineage) -> str:
     """The saved mission text of the lineage; a mission that is gone or no longer matches its address is refused."""
     text = store.redis.hget(store.key(slug, MISSIONS), lineage.mission.rpartition("/")[2]) or ""

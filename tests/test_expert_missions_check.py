@@ -33,31 +33,38 @@ class Store:
         return ":".join(("fleet", slug, *parts))
 
 
-def test_a_fleet_with_no_lineage_passes_and_says_so(capsys: pytest.CaptureFixture[str]) -> None:
-    assert check.main(Store(("rig",))) == 0
-    assert capsys.readouterr().out == "no expert lineage\n"
+def test_a_fleet_with_no_running_lineage_passes_and_says_so(capsys: pytest.CaptureFixture[str]) -> None:
+    store = Store(("rig",))
+    assert check.main(store) == 0
+    assert capsys.readouterr().out == "no running expert lineage\n"
+    ended = expert_lineage.start(store, "rig", GOOD, SOURCE, "xhigh", "operator", 1)
+    expert_lineage.stop(store, "rig", ended.id, "operator", "superseded", 2)
+    store.redis.hdel(store.key("rig", "expert-missions"), DIGEST)
+    assert check.main(store) == 0
+    assert capsys.readouterr().out == "no running expert lineage\n"
 
 
 @pytest.mark.feature("expert-mission-and-lineage")
-def test_each_lineage_whose_mission_is_saved_passes_and_is_listed(capsys: pytest.CaptureFixture[str]) -> None:
+def test_each_running_lineage_whose_mission_is_saved_passes_and_is_listed(capsys: pytest.CaptureFixture[str]) -> None:
     store = Store(("rig", "old", "doctor"), stopped=("old",))
     expert_lineage.start(store, "rig", GOOD, SOURCE, "max", "operator", 1)
     second = expert_lineage.start(store, "rig", GOOD, SOURCE, "xhigh", "operator", 2)
     expert_lineage.stop(store, "rig", second.id, "operator", "superseded", 3)
+    expert_lineage.start(store, "rig", GOOD, SOURCE, "xhigh", "operator", 4)
     expert_lineage.start(store, "doctor", GOOD, SOURCE, "xhigh", "operator", 1)
     expert_lineage.start(store, "old", GOOD, SOURCE, "xhigh", "operator", 1)
     store.redis.hdel(store.key("old", "expert-missions"), DIGEST)
     assert check.main(store) == 0
     assert capsys.readouterr().out.splitlines() == [
-        f"doctor lineage expert-1 is running at xhigh with its mission saved as mission:doctor/{DIGEST}",
-        f"rig lineage expert-1 is running at max with its mission saved as mission:rig/{DIGEST}",
-        f"rig lineage expert-2 is stopped at xhigh with its mission saved as mission:rig/{DIGEST}",
+        f"doctor lineage expert-1 runs at xhigh with its mission saved as mission:doctor/{DIGEST}",
+        f"rig lineage expert-1 runs at max with its mission saved as mission:rig/{DIGEST}",
+        f"rig lineage expert-3 runs at xhigh with its mission saved as mission:rig/{DIGEST}",
     ]
 
 
 @pytest.mark.feature("expert-mission-and-lineage")
 @pytest.mark.parametrize("saved", ["another text", None])
-def test_a_lineage_whose_saved_mission_is_gone_or_changed_fails_by_name(
+def test_a_running_lineage_whose_saved_mission_is_gone_or_changed_fails_by_name(
     capsys: pytest.CaptureFixture[str], saved: str | None
 ) -> None:
     store = Store(("rig",))
@@ -72,7 +79,7 @@ def test_a_lineage_whose_saved_mission_is_gone_or_changed_fails_by_name(
     assert capsys.readouterr().out.splitlines() == [
         "FAIL: rig lineage expert-1: the saved mission of lineage expert-1 is missing or does not match "
         f"mission:rig/{DIGEST}",
-        "rig lineage expert-2 is running at xhigh with its mission saved as "
+        "rig lineage expert-2 runs at xhigh with its mission saved as "
         f"mission:rig/{hashlib.sha256(later.encode()).hexdigest()}",
     ]
 
@@ -89,5 +96,5 @@ def test_with_no_store_given_the_check_reads_the_swarm_store(
     monkeypatch.setattr(swarm_store, "RedisStore", lambda redis: found if redis is client else None)
     assert check.main() == 0
     assert capsys.readouterr().out == (
-        f"rig lineage expert-1 is running at max with its mission saved as mission:rig/{DIGEST}\n"
+        f"rig lineage expert-1 runs at max with its mission saved as mission:rig/{DIGEST}\n"
     )
