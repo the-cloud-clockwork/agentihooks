@@ -12622,7 +12622,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "One ledger API read, GET orders or agentihooks api get orders, lists every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first: the item, its title, who filed the order, when and on what proof, the ids of the done tasks under it, every task under it that is neither done nor out of scope with its lane, state and claim gate verdict, the claimable count, the count claimed or in a pull request, and one plain line. A done or out of scope order and a mark with no whole number time are left out.",
+      "behaviour": "One ledger API read, GET orders or agentihooks api get orders, lists every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first: the item, its title, who filed the order, when and on what proof, the ids of the done tasks under it, every task under it that is neither done nor out of scope with its lane, state and claim gate verdict, the claimable count, the count claimed or in a pull request, and one plain line. A done or out of scope order and a mark with no whole number time are left out. When the open orders pass the reply limit the read answers 413 and names the focus read that lists one order's tasks.",
       "seam": "scripts.swarm.health.order_check.read, scripts.swarm_ledger.api.routes.ledger_read at orders through the ledger swarm port, and ledger get orders",
       "tests": [
         "tests/swarm/test_order_check.py::test_an_ordered_phase_lists_every_task_under_it_with_its_verdict_and_counts",
@@ -12633,7 +12633,8 @@
         "tests/swarm/test_order_check.py::test_a_task_whose_phase_waits_for_its_planner_reads_that_reason",
         "tests/swarm/test_order_check.py::test_each_task_under_an_order_reads_the_reason_the_claim_gate_holds_it",
         "tests/swarm/test_order_check.py::test_ledger_get_orders_prints_every_open_order_through_the_ledger_api",
-        "tests/swarm_ledger/test_api_v1.py::test_the_orders_read_serves_every_open_order"
+        "tests/swarm_ledger/test_api_v1.py::test_the_orders_read_serves_every_open_order",
+        "tests/swarm_ledger/test_api_v1.py::test_an_orders_read_past_the_reply_limit_names_the_read_that_fits"
       ]
     },
     {

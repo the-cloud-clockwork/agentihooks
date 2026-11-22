@@ -119,7 +119,12 @@ def test_a_done_or_out_of_scope_order_and_a_malformed_mark_are_left_out() -> Non
 
 @pytest.mark.feature("swarm-orders-read")
 def test_an_out_of_scope_task_under_an_order_is_not_counted_as_unfinished_work() -> None:
-    tasks = [task("t1"), task("t2", out_of_scope=True), task("t3", state="claimed", out_of_scope=True)]
+    tasks = [
+        task("t1"),
+        task("t2", out_of_scope=True),
+        task("t3", state="claimed", out_of_scope=True),
+        task("t4", done=True),
+    ]
     [row] = order_check.read(ledger_doc(tasks, p1=ORDER), "")
     assert row["tasks"] == [{"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"}]
     assert (row["claimable"], row["busy"], row["done"]) == (1, 0, [])

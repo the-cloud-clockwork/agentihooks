@@ -23,14 +23,14 @@ def open_order(name: str, row: dict[str, Any], at: int, seen: focus_check.View) 
     item = f"{name}/{row['id']}"
     mark: dict[str, Any] = row[orders.MARK]
     found = focus_check.target(item, seen)
-    tasks: list[dict[str, Any]] = [task for task in found["tasks"] if task["verdict"] != focus_check.OUT_OF_SCOPE]
+    tasks: list[dict[str, Any]] = [task for task in found["tasks"] if not orders.closed(seen.rows[task["id"]])]
     entry = {
         "item": item,
         "title": row.get("title") or "",
         "by": mark.get("by") or "",
         "at": at,
         **{key: mark[key] for key in PROOFS if key in mark},
-        "claimable": found["claimable"],
+        "claimable": sum(task["verdict"] == focus_check.CLAIMABLE for task in tasks),
         "busy": sum(task["state"] in focus_check.BUSY for task in tasks),
         "done": found["done"],
         "tasks": tasks,
