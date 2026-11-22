@@ -9243,6 +9243,39 @@
       ]
     },
     {
+      "id": "ledger-command-line-write-timing",
+      "origin": "operator",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-baseline",
+      "behaviour": "Every ledger request a command line process answers in process is timed through request metrics as a server request is: with the ledger timing variable set it appends one line per request naming its method, route, wall, CPU, waits and the wall and CPU of each substep, among them the ledger copy adopt, refresh, whole load and document build, the guard read, the write gate, the apply under the ledger lock and the publish; without the variable nothing is written, inside a server request its substeps join that request, and server write records keep their four substep columns.",
+      "seam": "scripts.swarm_ledger.request_metrics.command around scripts.tick.adapters.database_ledger.request, with substeps from SQLiteLedgerRepository._entry, SQLiteLedgerRepository.apply_ops and scripts.swarm_ledger.api.mutations.apply",
+      "tests": [
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_comment_write_keeps_its_reply_and_leaves_no_timing_set",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_server_write_record_keeps_only_its_four_substep_columns",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_request_appends_one_timing_line_to_the_named_file",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_each_command_line_request_appends_its_own_line",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_request_writes_nothing_without_the_timing_variable",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_request_inside_a_server_request_joins_it_and_writes_no_line",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_comment_write_records_its_requests_and_write_substeps",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_fresh_repository_records_the_whole_load_of_its_ledger",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_fresh_repository_over_a_host_copy_records_its_adoption",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_write_under_the_ledger_lock_records_its_apply"
+      ]
+    },
+    {
+      "id": "ledger-write-timing-baseline-command",
+      "origin": "operator",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-baseline",
+      "behaviour": "agentihooks ledger time-writes runs the given number of agent comment writes one after another, each a fresh agentihooks api comment process on the named slug and task with a timing file of its own, and prints JSON with the load average before and after, each write's process wall and CPU, request and write wall and CPU, lock and Postgres waits and every substep's wall and CPU, and the median and max of each figure; a write that exits non zero stops the run with that exit code.",
+      "seam": "scripts.swarm_ledger.write_timing.main and scripts.swarm_ledger.write_timing.spawned, registered as the time-writes entry of scripts.swarm_ledger.TOOLS",
+      "tests": [
+        "tests/swarm_ledger/test_write_timing_command.py::test_each_write_is_a_fresh_agent_comment_process_with_its_own_timing_file",
+        "tests/swarm_ledger/test_write_timing_command.py::test_the_report_carries_each_write_and_the_median_and_max_of_every_figure",
+        "tests/swarm_ledger/test_write_timing_command.py::test_a_failing_write_stops_the_run_with_its_exit_code",
+        "tests/swarm_ledger/test_write_timing_command.py::test_a_write_process_gets_its_timing_file_and_keeps_its_exit_code",
+        "tests/swarm_ledger/test_write_timing_command.py::test_the_time_writes_command_is_a_ledger_tool"
+      ]
+    },
+    {
       "id": "ledger-export-shape-records",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1871-measure",

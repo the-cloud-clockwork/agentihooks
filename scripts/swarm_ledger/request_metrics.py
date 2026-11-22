@@ -8,7 +8,7 @@ import threading
 import time
 from _thread import LockType
 from collections import deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -24,6 +24,7 @@ SLOW_SECONDS = 5.0
 DEFAULT_RECORDS = 1000
 MAX_RECORDS = 10000
 JOURNAL_NAME = ".request-metrics.jsonl"
+TIMING_FILE = "AGENTIHOOKS_LEDGER_TIMING_FILE"
 WRITES = frozenset(("POST", "PUT", "PATCH", "DELETE"))
 STEPS = ("hierarchy_sync", "outbox_write", "refresh_record", "event_append")
 JOURNAL_WIDTHS = {"held": 2, "lost": 3, "evicted": 2, "start": 2, "flush": 2, "stop": 2, "s": 9 + len(STEPS)}
@@ -414,6 +415,12 @@ def step(name: str) -> Iterator[None]:
     finally:
         if timing is not None:
             timing.steps[name] = timing.steps.get(name, 0.0) + time.perf_counter() - wall
+
+
+@contextmanager
+def command(method: str, path: str) -> Generator[None]:
+    """Time one command line ledger request as a server request is timed."""
+    yield
 
 
 @contextmanager
