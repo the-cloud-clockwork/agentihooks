@@ -541,14 +541,18 @@ def _python_names(tree: ast.Module, root: Path) -> dict[str, str | list[str]]:
     return names
 
 
-def _python_argvs(path: Path, root: Path) -> Iterator[list[str]]:
+def _python_lists(path: Path, root: Path) -> Iterator[list[str]]:
     tree = ast.parse(path.read_text())
     names = _python_names(tree, root)
     for node in ast.walk(tree):
         if isinstance(node, (ast.List, ast.Tuple)):
-            words = [word for element in node.elts for word in _python_words(element, names)]
-            if INSTALLER_WORDS.intersection(words):
-                yield words
+            yield [word for element in node.elts for word in _python_words(element, names)]
+
+
+def _python_argvs(path: Path, root: Path) -> Iterator[list[str]]:
+    for words in _python_lists(path, root):
+        if INSTALLER_WORDS.intersection(words):
+            yield words
 
 
 def _commands(path: Path, root: Path) -> Iterator[tuple[list[str], dict[str, str]]]:
@@ -1145,32 +1149,49 @@ def test_each_intentional_install_smoke_is_a_measured_install_with_a_reason() ->
 
 
 BUILD_CONSTRAINT = "--dependency-constraints-txt"
+BUILD_PINS = f"{PLANT_PINS}setuptools==84.2.1\nsetuptools-scm==10.3.4\n"
+BUILD_PLANT = {
+    "pyproject.toml": '[build-system]\nrequires = ["setuptools>=80", "setuptools-scm>=9.2"]\n',
+    PLANT_LOCK: BUILD_PINS,
+}
 
 
 def _build_constraints(words: list[str]) -> list[str] | None:
     names = [word.rsplit("/", 1)[-1] for word in words]
     if "pyproject-build" not in names and not any(pair == ("-m", "build") for pair in zip(names, names[1:])):
         return None
-    joined = [value for word in words if (value := word.removeprefix(f"{BUILD_CONSTRAINT}=")) != word]
-    return joined + [value for flag, value in zip(words, words[1:]) if flag == BUILD_CONSTRAINT]
+    inline = [value for word in words if (value := word.removeprefix(f"{BUILD_CONSTRAINT}=")) != word]
+    return inline + [value for flag, value in zip(words, words[1:]) if flag == BUILD_CONSTRAINT]
 
 
-def _build_commands(path: Path) -> Iterator[list[str]]:
-    text = path.read_text()
-    runs = [text] if path.suffix == ".sh" else [run for run, _ in _yaml_runs(yaml.load(text, Loader=LOADER), {})]
-    for run in runs:
-        for line in run.replace("\\\n", " ").splitlines():
-            yield from _split(_words(line))
+def _build_commands(path: Path, root: Path) -> Iterator[list[str]]:
+    if path.suffix == ".py":
+        yield from _python_lists(path, root)
+    else:
+        text = path.read_text()
+        runs = [text] if path.suffix == ".sh" else [run for run, _ in _yaml_runs(yaml.load(text, Loader=LOADER), {})]
+        for run in runs:
+            for line in run.replace("\\\n", " ").splitlines():
+                yield from _split(_words(line))
+
+
+def _backend_names(root: Path) -> set[str]:
+    requires: list[str] = tomllib.loads((root / "pyproject.toml").read_text())["build-system"]["requires"]
+    return {canonicalize_name(Requirement(text).name) for text in requires}
+
+
+def _backend_lock(value: str, root: Path, backend: set[str]) -> bool:
+    lock = _constraint_file(value, root)
+    return lock is not None and lock.parent == root / CI_TOOLS and backend <= {name for name, _ in _pins(lock)}
 
 
 def _unconstrained_ci_builds(root: Path) -> list[str]:
+    backend = _backend_names(root)
     found: list[str] = []
     for path in _ci_sources(root):
-        if path.suffix == ".py":
-            continue
-        for words in _build_commands(path):
+        for words in _build_commands(path, root):
             values = _build_constraints(words)
-            if values is not None and not any(_constraint_file(value, root) for value in values):
+            if values is not None and not any(_backend_lock(value, root, backend) for value in values):
                 found.append(f"{path.relative_to(root).as_posix()}: {shlex.join(words)}")
     return found
 
@@ -1192,7 +1213,25 @@ def test_every_ci_package_build_constrains_its_isolated_backend() -> None:
         pytest.param(
             {"scripts/ci_plant.sh": f"python3 -m build --wheel {BUILD_CONSTRAINT} constraints.txt\n"},
             {"scripts/ci_plant.sh": f"python3 -m build --wheel {BUILD_CONSTRAINT}={PLANT_LOCK}\n"},
-            id="ci script build constrained outside the tool locks",
+            id="ci script build constrained by a file outside the tool locks",
+        ),
+        pytest.param(
+            {LOCK: BUILD_PINS, ".github/workflows/plant.yml": _job(f"python -m build {BUILD_CONSTRAINT} {LOCK}")},
+            {".github/workflows/plant.yml": _job(f"python -m build {BUILD_CONSTRAINT} {PLANT_LOCK}")},
+            id="build constrained by the test requirements lock",
+        ),
+        pytest.param(
+            {
+                ".github/ci-tools/parser.lock": "pyyaml==6.0.3\n",
+                ".github/workflows/plant.yml": _job(f"python -m build {BUILD_CONSTRAINT} .github/ci-tools/parser.lock"),
+            },
+            {".github/workflows/plant.yml": _job(f"python -m build {BUILD_CONSTRAINT} {PLANT_LOCK}")},
+            id="build constrained by a tool lock that leaves the backend floating",
+        ),
+        pytest.param(
+            {"scripts/ci_plant.py": 'ARGV = [sys.executable, "-m", "build"]\n'},
+            {"scripts/ci_plant.py": f'ARGV = [sys.executable, "-m", "build", "{BUILD_CONSTRAINT}", "{PLANT_LOCK}"]\n'},
+            id="python ci script build",
         ),
         pytest.param(
             {".github/scripts/plant.sh": "pyproject-build --sdist\n"},
@@ -1204,7 +1243,7 @@ def test_every_ci_package_build_constrains_its_isolated_backend() -> None:
 def test_the_build_walker_reports_a_planted_unconstrained_build(
     tmp_path: Path, planted: dict[str, str], pinned: dict[str, str]
 ) -> None:
-    _plant(tmp_path, {PLANT_LOCK: PLANT_PINS, **planted})
+    _plant(tmp_path, {**BUILD_PLANT, **planted})
     assert len(found := _unconstrained_ci_builds(tmp_path)) == 1, found
     _plant(tmp_path, pinned)
     assert _unconstrained_ci_builds(tmp_path) == []
