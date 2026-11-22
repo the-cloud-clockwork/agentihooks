@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import fakeredis
 import pytest
@@ -128,6 +128,29 @@ def test_a_merge_wait_on_an_open_dependency_pull_request_holds_on_its_event(rig:
     late.handle(_event("merge.dequeued", OTHER))
     assert idle.wait(rig.store.redis, "sw", ME) == {"until": 10_000_000, "reason": "", "at": 1, "on": held}
     assert rig.told() == []
+
+
+@pytest.mark.feature("wait-ends-on-pull-event")
+def test_a_raising_wait_does_not_stop_the_other_waits_on_the_event(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    other = "engineer@a1b2c3-0002"
+    rig.hold(CHECKS)
+    idle.declare_wait(rig.store.redis, "sw", other, 10_000_000, "", 1, on=CHECKS)
+    real = waits.end_one
+
+    def end_one(store: Any, slug: str, agent: AgentRecord, held: dict, reads: waits.Reads, now_ms: int) -> str:
+        if agent.name == ME:
+            raise RuntimeError("boom")
+        return real(store, slug, agent, held, reads, now_ms)
+
+    monkeypatch.setattr(waits, "end_one", end_one)
+    rig.react.handle(_event())
+    assert [item.text for item in InboxStore(rig.store.redis).inbox("eng-2@sw")] == [
+        _ended(f"checks on {URL}, now green").replace("task t1", "task t2")
+    ]
+    assert idle.wait(rig.store.redis, "sw", ME) == {"until": 10_000_000, "reason": "", "at": 1, "on": CHECKS}
+    assert f"wait of {ME} failed: boom" in capsys.readouterr().err
 
 
 @pytest.mark.feature("wait-ends-on-pull-event")
