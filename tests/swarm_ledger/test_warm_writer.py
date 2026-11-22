@@ -148,6 +148,7 @@ def recording(where: Path, reply: bytes) -> tuple[threading.Thread, list[bytes]]
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(str(where))
     listener.listen(1)
+    listener.settimeout(10.0)
     heard: list[bytes] = []
 
     def answer() -> None:
@@ -166,8 +167,11 @@ def test_a_socket_write_returns_the_in_process_reply_and_leaves_the_same_rows(tw
     with database_ledger.acting(""):
         expected = in_process(twins.here, "operations", payload)
         answered = over_socket(writer, twins.there, "operations", payload)
+        replayed = in_process(twins.here, "operations", payload)
+        answered_again = over_socket(writer, twins.there, "operations", payload)
     assert expected[0] == 200
     assert answered == expected
+    assert answered_again == replayed == expected
     assert state(twins.there) == state(twins.here)
     assert events(twins.there) == events(twins.here)
     assert len(events(twins.here)) == 2
@@ -335,6 +339,71 @@ def test_a_stale_socket_file_is_replaced_by_a_new_writer(memory_path: Path, monk
         stopped.set()
     served.join(10.0)
     assert not served.is_alive()
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_a_live_writer_too_busy_to_accept_the_probe_keeps_its_socket(
+    memory_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    where = memory_path / "w.sock"
+    left = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    left.bind(str(where))
+    left.close()
+    probes: list[tuple[float, Path | None]] = []
+
+    def busy(timeout: float, at: Path | None = None) -> socket.socket:
+        probes.append((timeout, at))
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(warm_writer, "connected", busy)
+    assert warm_writer.serve(where, threading.Event(), 0.05) == 1
+    assert probes == [(warm_writer.PROBE_S, where)]
+    assert where.exists()
+    assert f"a ledger writer already answers on {where}" in capsys.readouterr().err
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_a_stalled_client_neither_holds_other_requests_nor_keeps_the_writer_from_returning(
+    memory_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(warm_writer, "revision", same_revision)
+    monkeypatch.setattr(warm_writer.Answering, "timeout", 0.2)
+    where = memory_path / "w.sock"
+    stopped = threading.Event()
+    served = serving(where, stopped)
+    stalled = warm_writer.connected(10.0, where)
+    try:
+        with database_ledger.acting(""):
+            assert over_socket(where, "warm-missing", "tasks")[0] == 404
+        assert stalled.recv(1) == b""
+    finally:
+        stalled.close()
+        stopped.set()
+    served.join(10.0)
+    assert not served.is_alive()
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_a_writer_whose_socket_file_was_removed_still_returns_cleanly(
+    memory_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(warm_writer, "revision", same_revision)
+    where = memory_path / "w.sock"
+    stopped = threading.Event()
+    codes: list[int] = []
+    served = threading.Thread(target=lambda: codes.append(warm_writer.serve(where, stopped, 0.05)), daemon=True)
+    served.start()
+    deadline = time.monotonic() + 10.0
+    while not where.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    try:
+        with database_ledger.acting(""):
+            assert over_socket(where, "warm-missing", "tasks")[0] == 404
+        where.unlink()
+    finally:
+        stopped.set()
+    served.join(10.0)
+    assert codes == [0]
 
 
 @pytest.mark.feature("ledger-warm-writer")

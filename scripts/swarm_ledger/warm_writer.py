@@ -19,6 +19,7 @@ NAME = "ledger-writer.sock"
 CHECK_S = 5.0
 POLL_S = 0.5
 PROBE_S = 1.0
+READ_S = 10.0
 
 
 def socket_path() -> Path:
@@ -60,6 +61,8 @@ def ask(sock: socket.socket, slug: str, path: str, payload: dict[str, Any] | Non
 class Answering(socketserver.StreamRequestHandler):
     """One ledger API request on the writer socket, answered as the caller it names."""
 
+    timeout = READ_S
+
     def handle(self) -> None:
         """Reply with the in process answer's status line and body."""
         sent = self.rfile.read()
@@ -76,7 +79,9 @@ def bound(where: Path) -> socketserver.ThreadingUnixStreamServer | None:
     try:
         connected(PROBE_S, where).close()
         return None
-    except OSError:
+    except TimeoutError:
+        return None
+    except (FileNotFoundError, ConnectionRefusedError):
         where.unlink(missing_ok=True)
     previous = os.umask(0o177)
     try:
@@ -112,7 +117,7 @@ def serve(where: Path, stopped: threading.Event, check_s: float = CHECK_S) -> in
         server.shutdown()
         listening.join()
         server.server_close()
-        where.unlink()
+        where.unlink(missing_ok=True)
     return 0
 
 
