@@ -56,9 +56,10 @@ def row(state, item):
     return next(found for found in state[name] if found["id"] == item_id)
 
 
-def event_of(state):
+def event_of(state, kind):
     event = state["_meta"]["events"][-1]
-    return {key: value for key, value in event.items() if key not in ("rev", "at")}
+    assert event["id"].startswith(f"{kind}-")
+    return {key: value for key, value in event.items() if key not in ("rev", "at", "id")}
 
 
 def refusals(state):
@@ -91,7 +92,7 @@ def test_the_orchestrator_marks_an_item_with_the_operators_words_as_he_wrote_the
     assert mark == {"at": mark["at"], "by": MASTER, "quote": HEARD}
     assert mark["at"] > 0
     marks = {"relayed_by": MASTER, "relayed_from": "master pane", "quote": HEARD}
-    assert event_of(state) == {"by": "operator", "kind": "ordered", "target": item, "id": event_of(state)["id"]} | marks
+    assert event_of(state, "order_set") == {"by": "operator", "kind": "ordered", "target": item} | marks
     assert state["_meta"]["stamps"][f"{item}/ordered"]["by"] == "operator"
 
 
@@ -103,8 +104,7 @@ def test_a_ledger_entry_the_operator_wrote_marks_the_item_it_asks_for():
     mark = row(state, "phases/p1")["ordered"]
     assert mark == {"at": mark["at"], "by": MASTER, "request": asked}
     marks = {"relayed_by": MASTER, "relayed_from": "master pane", "request": asked}
-    ordered = {"by": "operator", "kind": "ordered", "target": "phases/p1", "id": event_of(state)["id"]}
-    assert event_of(state) == ordered | marks
+    assert event_of(state, "order_set") == {"by": "operator", "kind": "ordered", "target": "phases/p1"} | marks
 
 
 @pytest.mark.feature("ledger-order-mark")
@@ -151,7 +151,7 @@ def test_the_operator_marks_an_item_himself():
     assert rejected == []
     mark = row(state, "tasks/t1")["ordered"]
     assert mark == {"at": mark["at"], "by": "operator"}
-    assert event_of(state) == {"by": "operator", "kind": "ordered", "target": "tasks/t1", "id": event_of(state)["id"]}
+    assert event_of(state, "order_set") == {"by": "operator", "kind": "ordered", "target": "tasks/t1"}
 
 
 @pytest.mark.feature("ledger-order-mark")
@@ -186,16 +186,14 @@ def test_only_the_operator_or_his_words_clear_an_order():
     assert rejected == []
     assert "ordered" not in row(state, "phases/p1")
     marks = {"relayed_by": MASTER, "relayed_from": "master pane", "quote": "reviewer seats today before"}
-    cleared = {"by": "operator", "kind": "order cleared", "target": "phases/p1", "id": event_of(state)["id"]}
-    assert event_of(state) == cleared | marks
+    cleared = {"by": "operator", "kind": "order cleared", "target": "phases/p1"}
+    assert event_of(state, "order_clear") == cleared | marks
     assert state["_meta"]["stamps"]["phases/p1/ordered"]["rev"] == state["_meta"]["rev"]
     order("phases/p1", by=None)
     state, rejected = write("order_clear", item="phases/p1")
     assert rejected == []
     assert "ordered" not in row(state, "phases/p1")
-    assert event_of(state) == {"by": "operator", "kind": "order cleared", "target": "phases/p1"} | {
-        "id": event_of(state)["id"]
-    }
+    assert event_of(state, "order_clear") == cleared
 
 
 @pytest.mark.feature("ledger-order-mark")
@@ -279,6 +277,14 @@ def test_the_order_command_marks_and_clears_through_the_cli(monkeypatch, capsys)
     cli(monkeypatch, "order", "tasks/t1", "--clear", "--quote", QUOTE)
     assert json.loads(capsys.readouterr().out) == {"cleared": "tasks/t1"}
     assert "ordered" not in row(core.sync(SLUG)[0], "tasks/t1")
+
+
+@pytest.mark.feature("ledger-order-mark")
+def test_an_order_the_outbox_holds_reads_as_queued(monkeypatch, capsys):
+    monkeypatch.setattr(ledger, "call", lambda slug, ops: {"queued": ops[0]["id"]})
+    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", MASTER, "order", "tasks/t1", "--quote", QUOTE])
+    ledger.cmd_order(args)
+    assert json.loads(capsys.readouterr().out) == {"ordered": "tasks/t1", "queued": True}
 
 
 @pytest.mark.feature("ledger-order-mark")
@@ -398,3 +404,13 @@ def test_the_other_task_actions_still_take_no_quote(monkeypatch, action):
     with pytest.raises(SystemExit) as refused:
         cli(monkeypatch, "task", action, "t1", "t2", "--quote", QUOTE)
     assert str(refused.value.code).startswith(f"task {action} takes no --quote")
+
+
+@pytest.mark.feature("ledger-order-at-filing")
+def test_task_set_still_takes_his_words_for_a_rank(monkeypatch, capsys):
+    sent = []
+    monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: sent.append((kind, fields)))
+    argv = ["--slug", SLUG, "--as", MASTER, "task", "set", "t1", "rank=high", "--quote", QUOTE]
+    ledger.cmd_task(ledger.build_parser().parse_args(argv))
+    assert sent == [("task_update", {"item": "tasks/t1", "fields": {"rank": "high"}, "quote": QUOTE})]
+    assert json.loads(capsys.readouterr().out) == {"task": "t1", "rank": "high"}

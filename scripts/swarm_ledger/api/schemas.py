@@ -109,6 +109,8 @@ FIELDS = {
     "phase_review": "by item state note override rounds escalated",
     "phase_append": "by phases",
     "relay": "by item text quote",
+    "order_set": "by item quote request",
+    "order_clear": "by item quote",
     "answer": "by item text",
     "verdict": "item verdict",
     "artifact_add": "by task title file request plan",
@@ -268,7 +270,7 @@ def target(op: dict) -> str:
         return "notifications"
     if kind.startswith("artifact_"):
         return "artifacts"
-    if kind in ("claim", "retext", "relay", "answer", "verdict") or kind.startswith("blocker_"):
+    if kind in ("claim", "retext", "relay", "answer", "verdict") or kind.startswith(("blocker_", "order_")):
         return op["item"]
     return {
         "alert_claim": "alerts",
