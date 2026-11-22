@@ -838,7 +838,6 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
     from scripts.ci_mutation.selection import IMPORT_GROUPS, stats_shards
 
     (tmp_path / "tests").mkdir()
-    place_flake_ledger(tmp_path / "tests")
     files = [f"tests/test_{name}.py" for name in "abcdef"]
     for path in files:
         (tmp_path / path).write_text("def test_x():\n    pass\n")
@@ -886,7 +885,6 @@ def test_selected_test_ids_take_their_own_durations_share_their_file_shard_and_b
     from scripts.ci_mutation.selection import file_seconds, keep_selected_tests, stats_shards
 
     (tmp_path / "tests").mkdir()
-    place_flake_ledger(tmp_path / "tests")
     for name in "abc":
         (tmp_path / f"tests/test_{name}.py").write_text("def test_x():\n    pass\n")
     (tmp_path / "tests/test_b.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
@@ -937,7 +935,6 @@ def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist
     from scripts.ci_mutation.selection import split_files
 
     (tmp_path / "tests").mkdir()
-    place_flake_ledger(tmp_path / "tests")
     files = [f"tests/test_{name}.py" for name in "abcdef"]
     for path in files:
         (tmp_path / path).write_text("import pytest\n\npytestmark = pytest.mark.xdist_group('shared-port')\n")
@@ -986,7 +983,6 @@ def test_statistics_parts_split_one_file_without_losing_new_parameter_cases(tmp_
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     (tmp_path / "tests").mkdir()
-    place_flake_ledger(tmp_path / "tests")
     test = "tests/test_sample.py"
     (tmp_path / test).write_text(
         "import pytest\n"
@@ -1095,7 +1091,6 @@ def test_sizing_against_a_stats_cache_of_the_observed_shape_finishes_in_seconds(
     from scripts.ci_mutation.plan import stats_part_count
 
     (tmp_path / "tests").mkdir()
-    place_flake_ledger(tmp_path / "tests")
     files = [f"tests/test_{index}.py" for index in range(40)]
     for path in files:
         (tmp_path / path).write_text("def test_one():\n    pass\n")
