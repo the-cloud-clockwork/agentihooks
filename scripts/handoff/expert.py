@@ -50,6 +50,14 @@ ACCOUNTED = ("Done", "Pending")
 CHECKED = PROOF.evidenced[1:]
 DELIVERABLE = re.compile(r"D(\d+)\b")
 PULL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
+REFERENCE = re.compile(
+    r"(?:https?://)?(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:pull|issues)/\d+|(?:[\w.-]+/[\w.-]+)?#\d+\b",
+    re.IGNORECASE,
+)
+UNREAD = (
+    "{written} under Deliverables cannot be read as a merged pull request; write a pull request as its full link "
+    "https://github.com/<owner>/<repo>/pull/<number> and anything that is no pull request in words"
+)
 ACCOUNTS = "number the bullet after the deliverable it accounts for or drop the number"
 PROVES = "number the bullet after the deliverable it proves"
 
@@ -94,6 +102,11 @@ def proof_problems(
             if not check.bullets(check.section(text, heading))
         ),
         *_left(check.section(text, "Open items")),
+        *(
+            UNREAD.format(written=written)
+            for written in dict.fromkeys(REFERENCE.findall(proven))
+            if not PULL.fullmatch(written)
+        ),
         *(f"pull request {url} is not merged" for url in dict.fromkeys(PULL.findall(proven)) if not merged(url)),
     ]
 

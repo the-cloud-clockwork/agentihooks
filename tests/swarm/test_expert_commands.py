@@ -124,6 +124,29 @@ def test_a_mission_file_that_is_not_utf8_text_is_refused_by_name(
 
 
 @pytest.mark.feature("expert-mission-and-lineage")
+@pytest.mark.parametrize(
+    "action",
+    [
+        ("start", "MISSION"),
+        ("status",),
+        ("status", "expert-1"),
+        ("stop", "expert-1", "--note", "the order changed"),
+        ("mission", "expert-1"),
+        ("complete", "MISSION"),
+        ("proof", "expert-1"),
+    ],
+)
+def test_the_expert_verb_refuses_a_swarm_that_does_not_exist(
+    store: RedisStore, mission_file: Path, capsys: pytest.CaptureFixture[str], action: tuple[str, ...]
+) -> None:
+    argv = [str(mission_file) if part == "MISSION" else part for part in action]
+    assert run("nope", "expert", *argv) == 1
+    assert capsys.readouterr().err == "swarm: no swarm nope\n"
+    assert expert_lineage.running(store, "nope") == []
+    assert store.redis.exists(store.key("nope", "expert-seq")) == 0
+
+
+@pytest.mark.feature("expert-mission-and-lineage")
 def test_status_lists_each_running_lineage_and_shows_an_ended_one_by_name(
     store: RedisStore, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -203,6 +226,22 @@ def test_an_expert_reads_the_mission_of_its_own_lineage_and_no_other(
     assert capsys.readouterr().out == printed
     assert run("sw", "expert", "mission", "expert-1") == 1
     assert capsys.readouterr().err == f"swarm: {EXPERT} works lineage expert-2 and reads the mission of no other\n"
+
+
+@pytest.mark.parametrize(
+    "ending,printed",
+    [
+        ("Answer to MAX\n\n\n", "merges.\nAnswer to MAX\n"),
+        ("Answer in the pane.  \n", "merges.\nAnswer in the pane.  \n"),
+    ],
+)
+def test_a_mission_prints_as_saved_and_loses_only_the_line_ends_that_close_it(
+    store: RedisStore, capsys: pytest.CaptureFixture[str], ending: str, printed: str
+) -> None:
+    lineage = expert_lineage.start(store, "sw", GOOD + ending, "/missions/batch.md", "xhigh", MASTER, 1_000)
+    seated(store, EXPERT, lineage.id)
+    assert run("sw", "--as", EXPERT, "expert", "mission") == 0
+    assert capsys.readouterr().out.endswith(printed)
 
 
 def test_the_master_and_the_operator_read_a_named_mission_and_a_worker_none(

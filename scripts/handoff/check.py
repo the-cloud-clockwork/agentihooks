@@ -46,7 +46,9 @@ COMPLETION = re.compile(r"<!-- \w+ complete -->")
 class Contract:
     """The shape a document is held to: its title line, its headings in order, the sections whose bullets must each
     carry evidence, the completion marker that ends it and whether that evidence must be shown. Where it must, a
-    bullet labelled hypothesis and one that only says the word proof do not stand."""
+    bullet stands only on something to look at (a link, a run, a commit, an address, a backticked command or output):
+    the label hypothesis and the bare word proof do not stand. The check reads the form and cannot tell what a
+    backticked span holds."""
 
     title: str
     headings: tuple[str, ...]
