@@ -1045,7 +1045,7 @@ def test_each_beat_restarts_only_the_helper_threads_that_ended(monkeypatch):
     assert started[3:] == [(daemon.publish_herdr_stats, args, True)]
 
 
-def test_install_writes_the_service_and_enables_it(tmp_path):
+def test_install_writes_the_service_and_enables_it(tmp_path: Path) -> None:
     run = Mock(return_value=Mock(returncode=0))
     assert daemon.install("/bin/agentihooks", tmp_path, run)
     service = tmp_path / "agentihooks-hive.service"
@@ -1057,7 +1057,7 @@ def test_install_writes_the_service_and_enables_it(tmp_path):
     assert run.call_args_list[1].args[0] == ["systemctl", "--user", "enable", "--now", "agentihooks-hive.service"]
     run.reset_mock()
     daemon.install("/bin/agentihooks", tmp_path, run)
-    assert run.call_count == 1
+    assert run.call_count == 2
 
 
 @pytest.mark.feature("ledger-writer-hosts")
@@ -1679,11 +1679,11 @@ def test_install_refuses_a_missing_executable(monkeypatch, tmp_path):
     assert str(caught.value) == "agentihooks executable not found"
 
 
-def test_install_reloads_a_changed_service(tmp_path):
+def test_install_reloads_a_changed_service(tmp_path: Path) -> None:
     (tmp_path / "agentihooks-hive.service").write_text("old")
     run = Mock(return_value=Mock(returncode=0))
     assert daemon.install("/bin/agentihooks", tmp_path, run)
-    assert run.call_count == 2
+    assert run.call_count == 3
     assert (tmp_path / "agentihooks-hive.service").read_text() == daemon.unit("/bin/agentihooks")
 
 
