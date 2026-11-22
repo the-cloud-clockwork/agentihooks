@@ -503,6 +503,45 @@ class Stop(BaseException):
     pass
 
 
+@pytest.mark.feature("hub-and-webhook-stop-cleanly-on-interrupt")
+def test_sigint_during_a_pass_ends_the_hub_with_0_and_releases_its_leases(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def interrupt(event: Envelope) -> None:
+        signal.raise_signal(signal.SIGINT)
+        raise Stop
+
+    declared = registry.Registry([registry.Reactor("timers", "swarm.*.task.>", interrupt, singleton=True)])
+    opened = memory.open_bus(BusConfig())
+    opened.events.publish(SUBJECT, event("e1", 1))
+
+    def configured(bus: Any, source: Any = None) -> registry.Registry:
+        assert bus is opened
+        return declared
+
+    monkeypatch.setattr(registry, "configured", configured)
+    monkeypatch.setattr(runner, "open_bus", lambda config: opened)
+    monkeypatch.setenv("HOSTNAME", "hub-1")
+    leases = opened.state(lease.BUCKET)
+    terminate = signal.getsignal(signal.SIGTERM)
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        try:
+            code: object = runner.main(["run"])
+        except SystemExit as exited:
+            code = exited.code
+        except KeyboardInterrupt:
+            code = "KeyboardInterrupt escaped the hub command"
+        interrupted = signal.getsignal(signal.SIGINT)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    assert code == 0
+    assert lease.read(leases, "reactor.timers") == lease.LeaseState("hub-1", 0)
+    assert "Traceback" not in capsys.readouterr().err
+    assert interrupted is signal.default_int_handler
+    assert signal.getsignal(signal.SIGTERM) is terminate
+
+
 def test_the_hub_loop_idles_only_after_a_pass_with_every_reactor_on_standby(monkeypatch):
     passes = iter([{"page": ["handled"]}, {"page": ["standby"]}, {"page": []}])
 

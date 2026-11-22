@@ -1,0 +1,16 @@
+{
+  "body": "Reviewer seats read the change through the forge.",
+  "files": [
+    {"additions": 12, "changeType": "MODIFIED", "deletions": 3, "path": "scripts/example.py"},
+    {"additions": 4, "changeType": "ADDED", "deletions": 0, "path": "tests/test_example.py"}
+  ],
+  "headRefOid": "eac251ba7f4ed988ecfa0232d1f91fb5cbe900e2",
+  "number": 7,
+  "statusCheckRollup": [
+    {"__typename": "CheckRun", "completedAt": "2026-11-21T10:00:00Z", "conclusion": "SUCCESS", "detailsUrl": "https://github.com/o/r/actions/runs/1/job/2", "name": "lint", "startedAt": "2026-11-21T09:58:00Z", "status": "COMPLETED", "workflowName": "Tests"},
+    {"__typename": "CheckRun", "completedAt": "0001-01-01T00:00:00Z", "conclusion": "", "detailsUrl": "https://github.com/o/r/actions/runs/1/job/3", "name": "unit", "startedAt": "2026-11-21T09:58:00Z", "status": "IN_PROGRESS", "workflowName": "Tests"},
+    {"__typename": "StatusContext", "context": "sonar", "startedAt": "2026-11-21T09:59:00Z", "state": "FAILURE", "targetUrl": "https://sonar.example.com/dashboard"}
+  ],
+  "title": "Add the example",
+  "url": "https://github.com/o/r/pull/7"
+}

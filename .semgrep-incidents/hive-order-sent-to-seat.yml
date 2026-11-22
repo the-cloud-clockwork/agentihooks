@@ -1,0 +1,16 @@
+rules:
+  - id: hive-order-sent-to-seat
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive hand off order is sent to the agent's seat. Every session that holds the seat reads its mail, and an
+      agent's exit moves open mail back to the seat, so a successor started on another hive reads an order meant for
+      the life on the draining hive and hands off for nothing. Send the order to the agent's own name; the exit settle
+      closes it when that life leaves.
+    paths:
+      include:
+        - /scripts/hive/
+        - hive-order-sent-to-seat.py
+    pattern-either:
+      - pattern: $INBOX.send($SENDER, $AGENT.seat or $AGENT.name, $TEXT.format(..., hive=$HIVE, ...), ...)
+      - pattern: $INBOX.send($SENDER, $AGENT.seat, $TEXT.format(..., hive=$HIVE, ...), ...)

@@ -1486,8 +1486,24 @@ A pull request run saves its `mutation-test-stats-v2-<os>-` cache on the pull re
 `scripts.ci_stats_seed` works in this order:
 
 1. **Merged pull requests.** It starts from the commit in `seeded.sha` in the cache folder, the head the last saved seed reached, or from `--before` when that file is missing. When that commit is not an ancestor of the head, it starts from the head's parent. It reads at most 50 commit subjects up to the head and keeps the number of each subject that ends in `(#N)`.
-2. **Harvest, newest pull request first.** For each number it reads the pull request's head commit. A 404 prints `Mutation stats seed: #N is not a readable pull request` and moves on. It lists up to ten `pull_request` Tests runs at that head and, for each run, up to a hundred artifacts, keeping the unexpired ones named `mutation-test-stats-cache-*`, which the `mutation-plan` and `mutation-stats` jobs upload with seven day retention. It downloads them lowest id first and copies their `.json`, `.index` and `.shared` files and `context.sha` into the folder. The first run that has any stats artifact ends that pull request. An `.index` pointer that a newer pull request already supplied is not replaced by an older one.
+2. **Harvest, newest pull request first.** For each number it reads the pull request's head commit. A 404 prints `Mutation stats seed: #N is not a readable pull request` and moves on. It lists up to ten `pull_request` Tests runs at that head and, for each run, up to ten pages of a hundred artifacts, stopping at the first page with fewer than a hundred. Each page is a separate gh call that is asked again under [Retry](#retry) when it fails with anything other than a timeout or an HTTP 404 answer. It keeps the unexpired artifacts named `mutation-test-stats-cache-*`, which the `mutation-plan` and `mutation-stats` jobs upload with seven day retention. It downloads them lowest id first and copies their `.json`, `.index` and `.shared` files and `context.sha` into the folder. The first run that has any stats artifact ends that pull request. An `.index` pointer that a newer pull request already supplied is not replaced by an older one.
 3. **Prune and record.** It drops `.index` pointers that are broken or name a record made under another `context.sha`, the records no kept pointer names, and the shared input files no kept record names. It writes the head to `seeded.sha` and prints one summary line.
+
+### Call the seed
+
+```bash
+python -m scripts.ci_stats_seed FOLDER --head HEAD_SHA --before BEFORE_SHA
+```
+
+| Argument | Meaning |
+|---|---|
+| `FOLDER` | The stats cache folder, required. It is created with its parents when missing and reused when present |
+| `--head` | The pushed head commit, required. Subjects are read up to it, and it is written to `seeded.sha` at the end |
+| `--before` | The push's previous head, required. It is the start only when `seeded.sha` is missing |
+
+A missing `--head` or `--before` stops the seed with an argparse usage error and exit status 2, before any git or gh call. The seed runs `git` in the current directory, so it needs a clone that holds both commits; the job checks out the full history.
+
+The seed takes no credential argument. Each call runs `gh api repos/{owner}/{repo}/<path>`, where gh fills the owner and repository from the current directory's repository, or from `GH_REPO` when it is set, and authenticates with `GH_TOKEN`. The workflow step sets `GH_TOKEN` to the App token with actions read and pull requests read, `--head` to `$GITHUB_SHA` and `--before` to the push event's `before` commit.
 
 ### Budget and timeouts
 
