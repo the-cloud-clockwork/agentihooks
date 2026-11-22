@@ -15,6 +15,7 @@ from scripts.swarm.store import ASSIST, MANUAL, MASTER, AgentRecord, SwarmError
 BUTTONS = "use Approve plan or Send back on the phase in the ledger page"
 DECISIONS = {"approve": "approved", "send-back": "sent_back"}
 RECOMMEND = "post your recommendation as a comment on the phase"
+NAME_ONE = "name exactly one of a phase or --task <enhancement task id>"
 
 
 @dataclass(frozen=True)
@@ -22,7 +23,7 @@ class Decision:
     action: str
     note: str
     override: str
-    task: str = ""
+    task: str | None = None
 
 
 def refusal(agent, autonomy, phase, doc):
@@ -41,10 +42,10 @@ def refusal(agent, autonomy, phase, doc):
 
 
 def decide(
-    ledger: Any, slug: str, agent: AgentRecord, autonomy: str, phase_id: str, decision: Decision
+    ledger: Any, slug: str, agent: AgentRecord, autonomy: str, phase_id: str | None, decision: Decision
 ) -> dict[str, Any]:
     if bool(phase_id) == bool(decision.task):
-        raise SwarmError("name exactly one of a phase or --task <enhancement task id>")
+        raise SwarmError(NAME_ONE)
     if decision.task:
         return enhance_review.review(ledger, slug, agent, autonomy, decision)
     doc = pass_state(ledger, slug)

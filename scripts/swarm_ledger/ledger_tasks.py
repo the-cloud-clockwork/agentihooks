@@ -59,13 +59,11 @@ UPDATABLE = (
     "covers_job",
     "doc_items",
     "watchdog",
-    "enhancement",
     "enhances",
     "recovery",
     "review_rounds",
     "review_readers",
 )
-ENHANCEMENTS = ("", "needed", "planned", "skipped")
 BOOL_FIELDS = ("artifact", "follow_up", "workstation")
 HARNESSES = ("", "claude", "codex")
 DIFFICULTIES = ("S", "M", "L")
@@ -141,29 +139,10 @@ def check_lane(task: dict) -> None:
         raise ValueError("plan tasks must use the plan lane, and the plan lane accepts only plan tasks")
 
 
-def _author(op: dict[str, Any]) -> bool:
-    """Whether the op names a valid author: an agent name, or the operator setting only a task's enhancement."""
-    by = op.get("by")
-    if by == "operator":
-        return op["op"] == "task_update" and _mapping(op.get("fields")) and set(op["fields"]) == {"enhancement"}
-    return isinstance(by, str) and AUTHOR_RE.match(by) is not None
-
-
-def check_enhancement(fields: object) -> None:
-    if not _mapping(fields):
-        return
-    if fields.get("enhancement", "") not in ENHANCEMENTS:
-        raise ValueError(f"enhancement must be one of {ENHANCEMENTS}")
-    if not isinstance(fields.get("enhances", ""), str):
-        raise ValueError("enhances must be a string naming the task the plan task enhances")
-
-
 def check(op: dict[str, Any]) -> None:
-    if not _author(op):
-        raise ValueError(
-            "task ops need `by`, an agent name other than operator; the operator may set only a task's enhancement"
-        )
-    check_enhancement(op.get("fields") if op["op"] == "task_update" else op)
+    by = op.get("by")
+    if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
+        raise ValueError("task ops need `by`, an agent name other than operator")
     if op["op"] == "task_add":
         if (
             not isinstance(op.get("task"), str)
@@ -608,31 +587,7 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
-    return park_refusal(op, task) or urgent_update_refusal(op, task, doc) or enhancement_refusal(doc, op)
-
-
-def enhancement_refusal(doc: dict[str, Any], op: dict[str, Any]) -> str:
-    """Only the master or the operator skips a task's enhancement, an eng or ci worker never sets one, and planned
-    comes only from the master, the operator or the planner whose enhancement plan task for it is done."""
-    value, by = op["fields"].get("enhancement"), op["by"]
-    task = op["item"].split("/")[1]
-    if value == "skipped" and not _block_author(by):
-        return f"{by} cannot skip the enhancement of task {task}: only the master or the operator skips it"
-    lane = ports.swarm().naming.lane_of(by)
-    if value is not None and lane in WORKER_LANES:
-        return f"{by} works in the {lane} lane and cannot set the enhancement of task {task}: {PROPOSE}"
-    if value == "planned" and not (_block_author(by) or _closed_by(doc, task, by)):
-        return (
-            f"{by} cannot mark the enhancement of task {task} planned: its closed enhancement plan task, the master "
-            "or the operator does"
-        )
-    return ""
-
-
-def _closed_by(doc: dict[str, Any], task: str, by: str) -> bool:
-    return any(
-        (t.get("enhances"), t.get("claimed_by"), t.get("state")) == (task, by, "done") for t in doc.get("tasks", [])
-    )
+    return park_refusal(op, task) or urgent_update_refusal(op, task, doc)
 
 
 def urgent_update_refusal(op: dict, task: dict, doc: dict) -> str:

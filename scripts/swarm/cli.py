@@ -2843,8 +2843,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan = sub.add_parser("plan").add_subparsers(dest="action", required=True)
     for action in plan_review.DECISIONS:
         decision = plan.add_parser(action)
-        decision.add_argument("phase", nargs="?", default="")
-        decision.add_argument("--task", default="")
+        decision.add_argument("phase", nargs="?")
+        decision.add_argument("--task")
         decision.add_argument("--note", required=action == "send-back")
         if action == "approve":
             decision.add_argument("--override", default="")

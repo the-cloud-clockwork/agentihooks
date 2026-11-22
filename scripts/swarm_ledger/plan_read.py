@@ -230,8 +230,6 @@ def _served(env, slug: str, file_id: str) -> bytes:
 
 
 def fetched(slug: str, env: Mapping[str, str]) -> tuple[dict[str, Any] | None, Callable[[str, str], bytes] | None]:
-    """The ledger's tasks, phases and artifacts, from the hosted ledger or the local files, with the loader that reads
-    a stored plan; None for the document when the ledger does not exist."""
     from scripts.swarm_ledger import ledger_link
     from scripts.swarm_ledger.storage import read_ledger
 
@@ -243,7 +241,7 @@ def fetched(slug: str, env: Mapping[str, str]) -> tuple[dict[str, Any] | None, C
     return doc, functools.partial(_served, env) if hosted else None
 
 
-def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
+def main(argv=None, environ=None) -> int:
     env = os.environ if environ is None else environ
     parser = argparse.ArgumentParser(prog="agentihooks plan", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -258,11 +256,16 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
     task_id = None if args.phase else args.task or env.get("AGENTIHOOKS_SWARM_TASK", "")
     if task_id == "":
         raise SystemExit("plan read needs a task: pass --task or run it inside a swarm task session")
-    doc, load = fetched(slug, env)
+    from scripts.swarm_ledger import ledger_link
+    from scripts.swarm_ledger.storage import read_ledger
+
+    hosted = ledger_link.remote(env)
+    keys = ("tasks", "phases", "artifacts")
+    doc = _hosted(slug, keys) if hosted else read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, *keys)
     if doc is None:
         raise SystemExit(f"no ledger {slug}")
     try:
-        sys.stdout.write(read(doc, slug, task_id, args.phase, load))
+        sys.stdout.write(read(doc, slug, task_id, args.phase, functools.partial(_served, env) if hosted else None))
     except ValueError as error:
         raise SystemExit(str(error)) from None
     return 0

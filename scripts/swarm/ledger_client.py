@@ -295,6 +295,9 @@ class LedgerClient:
         state = self._call(slug, [_op("task_update", by, item=f"tasks/{task_id}", fields=fields, **guard)])
         return next((t for t in state.get("tasks", []) if t["id"] == task_id), {})
 
+    def set_enhancement(self, slug: str, task_id: str, value: str, by: str) -> None:
+        self._call(slug, [_op("task_enhancement", by, item=f"tasks/{task_id}", enhancement=value)])
+
     def rename_agent(self, slug, old, new):
         self._call(slug, [_op("agent_rename", "swarm", old=old, new=new)])
 
