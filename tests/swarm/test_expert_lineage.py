@@ -10,7 +10,7 @@ import pytest
 from scripts.handoff.resolve import Resolver
 from scripts.swarm import expert_lineage
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
-from tests.swarm.expert_fixture import ADDRESS, DIGEST, MASTER, TITLE, indexed, started, store, stored
+from tests.swarm.expert_fixture import ADDRESS, DIGEST, EXPERT, MASTER, TITLE, indexed, started, store, stored
 from tests.swarm.test_expert_mission import GOOD
 
 pytestmark = pytest.mark.unit
@@ -65,6 +65,14 @@ def test_the_running_lineages_list_in_the_order_started_whatever_their_ids(store
     late, early = started(store, at=9), started(store, at=3)
     assert [row.id for row in expert_lineage.running(store, "sw")] == [early.id, late.id] == ["expert-2", "expert-1"]
     assert expert_lineage.running(store, "other") == []
+
+
+def test_the_lineages_that_owe_their_closing_steps_list_in_the_order_of_their_ids(store: RedisStore) -> None:
+    ids = [started(store, at=5).id for _ in range(10)]
+    for name in (ids[9], ids[1]):
+        expert_lineage.complete(store, "sw", name, EXPERT, "the mission proof", 9)
+    assert [row.id for row in expert_lineage.closing(store, "sw")] == ["expert-2", "expert-10"]
+    assert expert_lineage.closing(store, "other") == []
 
 
 def test_a_malformed_mission_is_refused_with_every_fault_and_takes_no_lineage(store: RedisStore) -> None:
