@@ -9983,7 +9983,8 @@
         "tests/swarm/test_readiness.py::test_an_old_normal_offer_moves_behind_a_later_ordered_offer_and_a_young_one_keeps_its_place",
         "tests/swarm/test_readiness.py::test_an_ordered_offer_moves_behind_a_later_urgent_offer_and_stays_ahead_of_a_later_normal_one",
         "tests/swarm/test_readiness.py::test_an_ordered_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_of_an_urgent_one_until_it_ages",
-        "tests/swarm/test_readiness.py::test_a_focus_of_any_form_puts_its_tasks_in_the_first_class_for_offers_and_for_behind"
+        "tests/swarm/test_readiness.py::test_a_focus_of_any_form_puts_its_tasks_in_the_first_class_of_offers",
+        "tests/swarm/test_readiness.py::test_an_ordered_offer_a_focus_lets_through_moves_behind_a_later_offer_of_the_focus"
       ]
     },
     {

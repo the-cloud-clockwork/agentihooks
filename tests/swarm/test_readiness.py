@@ -431,19 +431,35 @@ def test_an_ordered_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_o
     assert queued(bus, "eng", view) == ["u", "o"]
 
 
+def focused(target: str, outside: dict[str, str]) -> readiness.Snapshot:
+    """A focus on the target over b, a and w, with the ordered task d outside it that w waits on."""
+    tasks = [
+        task("b", kind="code"),
+        task("a", kind="code", ordered=ORDER),
+        task("w", kind="code", depends_on=["d"]),
+        task("d", ordered=ORDER, **outside),
+    ]
+    phases = [{"id": "p1", "title": "build", "depends_on": []}, {"id": "p2", "title": "later", "depends_on": []}]
+    return snapshot(doc(tasks, phases=phases, freezes=[{"verb": "focus", "target": target}]))
+
+
 @pytest.mark.feature("ready-ordered-offer-first")
 @pytest.mark.parametrize(
     ("target", "outside"),
     [("phases/p1", {"phase": "p2"}), ("lane:eng", {"lane": "ci"}), ("kind:code", {"kind": "ops"})],
 )
-def test_a_focus_of_any_form_puts_its_tasks_in_the_first_class_for_offers_and_for_behind(
+def test_a_focus_of_any_form_puts_its_tasks_in_the_first_class_of_offers(target: str, outside: dict[str, str]) -> None:
+    assert [event.key for event in readiness.offers(focused(target, outside), NOW)] == ["b", "a", "d"]
+
+
+@pytest.mark.feature("ready-ordered-offer-first")
+@pytest.mark.parametrize(("target", "outside"), [("phases/p1", {"phase": "p2"}), ("kind:code", {"kind": "ops"})])
+def test_an_ordered_offer_a_focus_lets_through_moves_behind_a_later_offer_of_the_focus(
     target: str, outside: dict[str, str]
 ) -> None:
-    tasks = [task("b"), task("a", ordered=ORDER), task("z", ordered=ORDER, **outside)]
-    view = snapshot(doc(tasks, freezes=[{"verb": "focus", "target": target}]))
-    assert [event.key for event in readiness.offers(view, NOW)] == ["b", "a"]
-    z = offer_aged(view, "z")
-    assert readiness.behind([z], [offer_aged(view, "a", 0)], view, LATER) == {z.id}
+    view = focused(target, outside)
+    waited = offer_aged(view, "d")
+    assert readiness.behind([waited], [offer_aged(view, "a", 0)], view, LATER) == {waited.id}
 
 
 def test_publish_uses_the_given_queue_policy(bus):
