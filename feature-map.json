@@ -1950,6 +1950,30 @@
       ]
     },
     {
+      "id": "waits-end-keeps-item-woke-and-history",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-wake-on-pull-events",
+      "behaviour": "When the polled waits end pass ends a checked wait it sends its holder exactly one ended item, deletes the wait, sets the woke and waited keys to the pass time and records one wait history entry whose end is the pass time.",
+      "seam": "scripts.swarm.waits.end_pass read through scripts.swarm.idle wait, woke, waited and wait_history and the holder's seat inbox",
+      "tests": [
+        "tests/hub/test_wait_end_records.py::test_the_polled_pass_ends_a_green_checks_wait_with_one_item_woke_and_history"
+      ]
+    },
+    {
+      "id": "wait-ends-on-pull-event",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-wake-on-pull-events",
+      "behaviour": "A pull merged, pull closed, merge dequeued or checks completed event makes the hub re-check every checks or merge wait on that pull request through the polled pass's own resolution and end a resolved one at once with the same ended item, woke key and wait history; an event for another pull request, another wait kind or a finished agent reads nothing and leaves the wait, a pending resolution leaves it open, and a duplicate event sends no second item.",
+      "seam": "scripts.hub.wait_ends.WaitEnds.handle on hub events, the reactors scripts.hub.registry.configured wires, and scripts.swarm.waits.end_one",
+      "tests": [
+        "tests/hub/test_wait_ends.py::test_a_pull_event_ends_a_matching_wait_with_one_item_and_the_polled_records",
+        "tests/hub/test_wait_ends.py::test_an_event_leaves_a_wait_it_does_not_name_open_and_reads_nothing",
+        "tests/hub/test_wait_ends.py::test_an_event_whose_fresh_resolution_is_pending_leaves_the_wait_open",
+        "tests/hub/test_wait_ends.py::test_a_duplicate_event_sends_no_second_item",
+        "tests/hub/test_wait_ends.py::test_the_hub_registry_wires_one_singleton_wait_end_reactor_per_pull_subject"
+      ]
+    },
+    {
       "id": "tick-failing-waits-end-lets-checked-waits-lapse",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2564",
