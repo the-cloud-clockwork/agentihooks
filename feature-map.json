@@ -12981,7 +12981,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "One ledger API read, GET orders or agentihooks api get orders, lists every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first: the item, its title, who filed the order, when and on what proof, the ids of the done tasks under it, every task under it that is neither done nor out of scope with its lane, state and claim gate verdict, the claimable count, the count claimed or in a pull request, and one plain line. A task counts under an ordered phase when the plan graph puts it there, when its row names that phase or when it is merged into a lead whose row names it, so a read that carries no slices, as the tick holds one, lists the same tasks as the whole ledger. A done or out of scope order and a mark with no whole number time are left out. When the open orders pass the reply limit the read answers 413 and names the focus read that lists one order's tasks.",
+      "behaviour": "One ledger API read, GET orders or agentihooks api get orders, lists every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first: the item, its title, who filed the order, when and on what proof, the ids of the done tasks under it, every task under it that is neither done nor out of scope with its lane, state and claim gate verdict, the claimable count, the count claimed or in a pull request, and one plain line. A read that carries no slices, as the tick holds one, cannot climb from a task filed under a slice: there a task counts under an ordered phase when its row names that phase or when it is merged into a lead whose row names it, which lists the tasks the whole ledger lists, because the ledger refuses a task whose row names another phase than its slice. A done or out of scope order and a mark with no whole number time are left out. When the open orders pass the reply limit the read answers 413 and names the focus read that lists one order's tasks.",
       "seam": "scripts.swarm.health.order_check.read, scripts.swarm_ledger.api.routes.ledger_read at orders through the ledger swarm port, and ledger get orders",
       "tests": [
         "tests/swarm/test_order_check.py::test_an_ordered_phase_lists_every_task_under_it_with_its_verdict_and_counts",
@@ -12998,7 +12998,8 @@
         "tests/swarm/test_order_check.py::test_an_order_mark_that_names_no_author_and_no_proof_reads_with_an_empty_author",
         "tests/swarm/test_order_check.py::test_a_task_filed_under_a_slice_is_listed_on_a_read_that_carries_no_slices",
         "tests/swarm/test_order_check.py::test_one_ledger_reads_the_same_orders_with_and_without_its_slices",
-        "tests/swarm/test_order_check.py::test_a_member_merged_into_a_lead_under_a_slice_is_listed_on_a_read_that_carries_no_slices"
+        "tests/swarm/test_order_check.py::test_a_member_merged_into_a_lead_under_a_slice_is_listed_on_a_read_that_carries_no_slices",
+        "tests/swarm/test_order_check.py::test_a_whole_ledger_lists_a_task_under_the_phase_of_its_slice_whatever_phase_its_row_names"
       ]
     },
     {

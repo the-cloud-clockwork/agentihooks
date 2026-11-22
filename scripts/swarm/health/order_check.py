@@ -18,12 +18,28 @@ def line(entry: dict[str, Any]) -> str:
     return f"{head}: {counts}, {entry['busy']} claimed or in a pull request, {len(entry['done'])} done"
 
 
+def _named_phases(task: dict[str, Any], rows: dict[str, dict[str, Any]]) -> tuple[Any, Any]:
+    """The phase a task's row names and the phase the row of the lead it is merged into names."""
+    merged: Any = task.get("merged_into")
+    lead: dict[str, Any] = rows.get(merged, {})
+    return task.get("phase"), lead.get("phase")
+
+
+def _under(name: str, item: str, row: dict[str, Any], seen: focus_check.View) -> list[dict[str, Any]]:
+    """Every task under an order: the tasks the plan graph puts there or, for a phase read without its slices, the
+    tasks that name it, themselves or through the lead they are merged into."""
+    if name != "phases" or "slices" in seen.doc:
+        return focus_check.under(item, seen)
+    return [task for task in seen.doc["tasks"] if row["id"] in _named_phases(task, seen.rows)]
+
+
 def open_order(name: str, row: dict[str, Any], at: int, seen: focus_check.View) -> dict[str, Any]:
     """One order: who filed it, when and on what proof, and the claim gate verdict on every task under it that is
     neither done nor out of scope."""
     item = f"{name}/{row['id']}"
     mark: dict[str, Any] = row[orders.MARK]
-    found = focus_check.target(item, seen)
+    under = _under(name, item, row, seen)
+    found = focus_check.target(item, replace(seen, covered={**seen.covered, item: under}))
     tasks: list[dict[str, Any]] = [task for task in found["tasks"] if not orders.closed(seen.rows[task["id"]])]
     entry = {
         "item": item,
@@ -33,29 +49,10 @@ def open_order(name: str, row: dict[str, Any], at: int, seen: focus_check.View) 
         **{key: mark[key] for key in PROOFS if key in mark},
         "claimable": sum(task["verdict"] == focus_check.CLAIMABLE for task in tasks),
         "busy": sum(task["state"] in focus_check.BUSY for task in tasks),
-        "done": [task["id"] for task in focus_check.under(item, seen) if orders.done(task)],
+        "done": [task["id"] for task in under if orders.done(task)],
         "tasks": tasks,
     }
     return {**entry, "line": line(entry)}
-
-
-def _phases(task: dict[str, Any], rows: dict[str, dict[str, Any]]) -> tuple[Any, Any]:
-    """The phases a task counts under by name: the one its row names and the one the lead it is merged into names."""
-    merged: Any = task.get("merged_into")
-    lead: dict[str, Any] = rows.get(merged, {})
-    return task.get("phase"), lead.get("phase")
-
-
-def _named(name: str, row: dict[str, Any], seen: focus_check.View) -> focus_check.View:
-    """The view in which an ordered phase covers every task that counts under it by name beside those the plan graph
-    puts under it: a read that carries no slices cannot climb from a task filed under one. An ordered task covers
-    what the graph gives it."""
-    if name != "phases":
-        return seen
-    item = f"{name}/{row['id']}"
-    graphed = {task["id"] for task in seen.covered.get(item, [])}
-    tasks = [task for task in seen.doc["tasks"] if task["id"] in graphed or row["id"] in _phases(task, seen.rows)]
-    return replace(seen, covered={item: tasks})
 
 
 def read(doc: dict[str, Any], fix: str) -> list[dict[str, Any]]:
@@ -68,5 +65,5 @@ def read(doc: dict[str, Any], fix: str) -> list[dict[str, Any]]:
         for row in rows:
             at = orders.marked(row)
             if at is not None and not orders.closed(row):
-                found.append(open_order(name, row, at, _named(name, row, seen)))
+                found.append(open_order(name, row, at, seen))
     return sorted(found, key=lambda entry: entry["at"])

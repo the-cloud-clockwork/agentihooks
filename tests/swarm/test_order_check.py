@@ -219,6 +219,13 @@ def test_a_member_merged_into_a_lead_under_a_slice_is_listed_on_a_read_that_carr
     assert order_check.read(whole, "") == [row]
 
 
+@pytest.mark.feature("swarm-orders-read")
+def test_a_whole_ledger_lists_a_task_under_the_phase_of_its_slice_whatever_phase_its_row_names() -> None:
+    tasks = [task("t6", phase="p2", slice="slices/a.first")]
+    found = order_check.read(ledger_doc(tasks, p1=ORDER, p2={**ORDER, "at": 7}), "")
+    assert [[task["id"] for task in row["tasks"]] for row in found] == [["t6"], []]
+
+
 def served(tmp_path: Path, tasks: list[dict[str, Any]], *records: dict[str, Any]) -> Any:
     repo = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
     repo.import_document(SLUG, {**ledger_doc(tasks, *records, p1=ORDER), "_meta": {"rev": 1}})
