@@ -22,6 +22,12 @@ def cmd_ready(store, args):
     return problems
 
 
+def cmd_park(store, args):
+    # ruleid: feature-expert-handoff-contract
+    problems = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.item))
+    return problems
+
+
 def _handoff_refusal(command, slug):
     text = Path(tokens[4]).expanduser().read_text(encoding="utf-8")
     # ruleid: feature-expert-handoff-contract

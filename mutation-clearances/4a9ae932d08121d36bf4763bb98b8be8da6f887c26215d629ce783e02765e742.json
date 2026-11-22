@@ -1,0 +1,6 @@
+{
+  "scripts/handoff/check.py:scripts.handoff.check.x_leaks:ce4df63005b6355bc009f0aad226ec92efac6707b41f1293bca702d543cca50d": {
+    "reader": "standards_reader",
+    "reason": "Every mode except off, memory and strict selects the standard patterns, so this mode string scans the same."
+  }
+}

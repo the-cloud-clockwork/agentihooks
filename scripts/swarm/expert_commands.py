@@ -67,6 +67,7 @@ def cmd_template(store: Any, args: argparse.Namespace) -> None:
 
 def cmd_start(store: Any, args: argparse.Namespace) -> None:
     """Save the mission file and open a running lineage for it, for the master or the operator."""
+    store.config(args.slug)
     by = _starter(store, args.slug)
     path, text = _document(args.mission, "mission")
     lineage = expert_lineage.start(store, args.slug, text, str(path), args.effort, by, now_ms())
@@ -76,6 +77,7 @@ def cmd_start(store: Any, args: argparse.Namespace) -> None:
 def cmd_status(store: Any, args: argparse.Namespace) -> None:
     """Print where each running lineage stands, or the one named, running or ended: its state, its effort, its expert
     and its mission."""
+    store.config(args.slug)
     if args.lineage:
         rows = [expert_lineage.get(store, args.slug, args.lineage)]
     else:
@@ -103,12 +105,14 @@ def stands(lineage: expert_lineage.Lineage, expert: str) -> str:
 
 def cmd_stop(store: Any, args: argparse.Namespace) -> None:
     """End a running lineage with a note, for the master or the operator."""
+    store.config(args.slug)
     ended = expert_lineage.stop(store, args.slug, args.lineage, _starter(store, args.slug), args.note, now_ms())
     print(json.dumps(asdict(ended)))
 
 
 def cmd_mission(store: Any, args: argparse.Namespace) -> None:
     """Print the line that names a mission and its saved text: an expert's own, or the named one for its starter."""
+    store.config(args.slug)
     lineage = expert_lineage.get(store, args.slug, _readable(store, args))
     text = expert_lineage.mission(store, args.slug, lineage)
     print(expert_mission.line(args.slug, text))

@@ -164,6 +164,13 @@ def test_a_credential_value_is_refused_whatever_secret_mode_the_session_runs(
     assert check.leaks("no secret here") == []
 
 
+def test_two_kinds_of_credential_value_are_named_together() -> None:
+    aws, hub = "AKIA" + "IOSFODNN7EXAMPLE", "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+    assert check.leaks(f"both {aws} and {hub}") == [
+        "credential value found (aws_access_key, github_token); refer to it by its variable name"
+    ]
+
+
 def test_every_problem_is_reported_at_once() -> None:
     text = "# Notes\n\n## What to deliver\n- fix it\n\n## The problem\nIt breaks.\n\n## The problem\nAgain.\n"
     assert mission.problems(text) == [

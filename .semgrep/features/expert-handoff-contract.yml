@@ -5,18 +5,16 @@ rules:
     message: >-
       Ordered 2026-11-22, an expert hands its seat off with its own handoff: the mission, what is done and pending,
       the assumptions, the tests and the validation. The handoff command and the context limit gate judge a document
-      through scripts/handoff/contracts.py, which holds an expert to that contract. The handoff command never calls
-      the Handoff v2 check on its own, and the context limit hook calls it only for a session it has just found is no
-      expert or for a quick swarm member, which is never an expert.
+      through scripts/handoff/contracts.py, which holds an expert to that contract. Nothing in the swarm command line
+      or the context limit hook calls the Handoff v2 check on its own, except the ready command, which no expert
+      runs, the hook for a session it has just found is no expert, and the hook for a quick swarm member, which is
+      never an expert.
     pattern-either:
       - patterns:
-          - pattern-inside: |
-              def cmd_handoff(...):
+          - pattern: handoff_check.problems(...)
+          - pattern-not-inside: |
+              def cmd_ready(...):
                 ...
-          - pattern: handoff_check.problems(...)
-      - patterns:
-          - pattern: handoff_check.problems(...)
-          - pattern-not: handoff_check.problems($TEXT, Resolver(args.slug, ...))
           - pattern-not: handoff_check.problems($TEXT, quick_handoff.resolver(...))
           - pattern-not-inside: |
               if not _expert(...):
