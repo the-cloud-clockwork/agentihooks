@@ -1539,8 +1539,9 @@ def listen(
     """Bind the scheduler port's lease API, capacity and grades routes, the control port's control routes and the
     metrics port, the scheduler and metrics ports over loads whose budget fraction and shed classes come from the day's
     spending: the scheduler port builds one per capacity request, and the metrics port serves the last one its serve
-    loop refreshes every REFRESH_MS with that load's age, the counters the scheduler's passes keep and the age of the
-    node mirror at each scrape when one is given; the caller runs each serve_forever."""
+    loop rebuilt once REFRESH_MS had passed since the build before started, with that load's age, the counters the
+    scheduler's passes keep and the age of the node mirror at each scrape when one is given; the caller runs each
+    serve_forever."""
 
     def snapshot(now_ms: int) -> Load:
         return budget.observe(scheduler.load(now_ms), spending.status())

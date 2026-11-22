@@ -46,8 +46,9 @@ def _serving(run: Run, now: list[int]) -> Iterator[tuple[str, str]]:
     spending = budget.Budget(run.lab.client, lambda: now[0], POLICY)
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: now[0])
     servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now[0], (0, 0, 0))
-    for server in servers:
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+    loops = [threading.Thread(target=server.serve_forever, daemon=True) for server in servers]
+    for loop in loops:
+        loop.start()
     api, _, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
     try:
         yield api, f"{exposition}/metrics"
@@ -55,6 +56,8 @@ def _serving(run: Run, now: list[int]) -> Iterator[tuple[str, str]]:
         for server in servers:
             server.shutdown()
             server.server_close()
+        for loop in loops:
+            loop.join(10)
 
 
 def _poll(url: str, needle: str) -> str:
@@ -66,8 +69,8 @@ def _poll(url: str, needle: str) -> str:
     return text
 
 
-def _started(lab: Callable[..., Run]) -> Run:
-    run = lab({HEAD_A: plan({"lint": (unit(1), unit(2))})})
+def _started(make: Callable[..., Run]) -> Run:
+    run = make({HEAD_A: plan({"lint": (unit(1), unit(2))})})
     run.push(HEAD_A)
     run.tick(1000)
     return run

@@ -321,15 +321,16 @@ snapshot sets the queue, slot and `ci_lab_queue_wait_seconds` gauges through
 The scheduler service builds the snapshot with `scripts.ci_lab.scheduler.Scheduler.load` and
 serves it through `scripts.ci_lab.scheduler.listen`. Port 8800 builds one on every `/capacity`
 request. Port 9108 serves `/metrics` and `/capacity` from the last snapshot a
-`scripts.ci_lab.metrics.Latest` holds. Its first read builds the snapshot once, however many reads
-meet that build, and a failed first build fails its read so the next read builds again. Every
-later read answers at once with the last finished build and sets `ci_lab_load_age_seconds` to the
-seconds since that build started. Between requests the port's serve loop runs `Latest.refresh`,
+`scripts.ci_lab.metrics.Latest` holds. The port's first read builds the snapshot once, however many
+reads meet that build, and a failed first build fails its read so the next read builds again. Every
+later read of the port answers at once with the last finished build and sets
+`ci_lab_load_age_seconds` to the seconds since that build started. Between requests the port's serve loop runs `Latest.refresh`,
 which starts one background build, a daemon thread named `ci-lab-load-refresh`, once the last
-build started `REFRESH_MS` (15 seconds) ago and no build runs. Builds run one at a time, back to
-back while one takes longer than 15 seconds, so the served snapshot is at most one build plus the
-longer of 15 seconds and one build old; a failed build keeps the last snapshot, and the next waits
-until 15 seconds have passed since the failed one started.
+build started `REFRESH_MS` (15 seconds) ago and no build runs. The serve loop checks after each
+request and at least every half second, and builds run one at a time, back to back while one takes
+longer than 15 seconds, so the served snapshot is at most one build plus the longer of 15 seconds
+and one build, plus that half second, old. A failed build keeps the last snapshot, and the next
+waits until 15 seconds have passed since the failed one started.
 
 `Scheduler.load` builds each field from:
 

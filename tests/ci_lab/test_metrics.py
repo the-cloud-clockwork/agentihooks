@@ -538,6 +538,9 @@ def test_refresh_starts_one_daemon_build_at_the_interval_while_reads_keep_the_la
         assert [(worker.name, worker.daemon) for worker in workers] == [("ci-lab-load-refresh", True)]
     finally:
         gate.set()
+    for worker in workers:
+        worker.join(10)
+        assert not worker.is_alive()
     assert latest.building.acquire(timeout=10)
     latest.building.release()
     assert builds == [1000, 16_000]
@@ -549,9 +552,12 @@ def test_refresh_starts_one_daemon_build_at_the_interval_while_reads_keep_the_la
 def test_a_failed_refresh_keeps_the_last_load_and_the_next_waits_an_interval() -> None:
     now = [1000]
     builds: list[int] = []
+    workers: list[threading.Thread] = []
 
     def build(now_ms: int) -> Load:
         builds.append(now_ms)
+        if len(builds) > 1:
+            workers.append(threading.current_thread())
         if len(builds) == 2:
             raise ConnectionError("the queue store went away")
         return replace(LOAD, slots_busy=len(builds))
@@ -562,6 +568,8 @@ def test_a_failed_refresh_keeps_the_last_load_and_the_next_waits_an_interval() -
     latest.refresh()
     assert latest.building.acquire(timeout=10)
     latest.building.release()
+    workers[0].join(10)
+    assert not workers[0].is_alive()
     assert latest.read() == first
     now[0] = 30_999
     latest.refresh()
@@ -570,6 +578,8 @@ def test_a_failed_refresh_keeps_the_last_load_and_the_next_waits_an_interval() -
     latest.refresh()
     assert latest.building.acquire(timeout=10)
     latest.building.release()
+    workers[1].join(10)
+    assert not workers[1].is_alive()
     assert builds == [1000, 16_000, 31_000]
     assert latest.read() == (replace(LOAD, slots_busy=3), 31_000)
 
