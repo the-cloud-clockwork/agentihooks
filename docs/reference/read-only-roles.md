@@ -124,7 +124,7 @@ another file descriptor, such as `2>&1`, writes no file and passes.
 | `uniq` | the second operand |
 | `patch` | files named only at run time, unless `--dry-run` |
 | `gzip`, `gunzip`, `bzip2`, `bunzip2`, `xz`, `unxz`, `zstd`, `unzstd` | every operand, unless `-c`, `-l`, `-t`, `--stdout`, `--to-stdout`, `--list` or `--test` streams the output |
-| `tar` | files named only at run time, for any of the `x`, `c`, `r`, `u` or `A` modes or their long forms |
+| `tar` | files named only at run time, for the `x`, `c`, `r`, `u` and `A` modes and the long modes `--extract`, `--get`, `--create`, `--append`, `--update`, `--delete` and `--concatenate` |
 | `unzip` | files named only at run time, unless `-l`, `-t`, `-p`, `-v`, `-Z` or `-z` |
 | `curl` | the `-o` or `--output` value other than `-`; files named only at run time for `-O`, `--remote-name` or `--remote-name-all` |
 | `wget` | the `-O` or `--output-document` value; files named only at run time when it has none; nothing for `-O-` or `--spider` |
@@ -241,6 +241,14 @@ The shell `<phrase>` is one of:
   exit other than 0 or 2 lets the call through and names the condition in a
   one line context note.
 
+## Configuration
+
+No setting or environment switch turns these conditions off. They follow the
+profile chain: a session gets them when its chain includes `qa` or `reviewer`.
+`AGENTIHOOKS_SWARM` and `AGENTIHOOKS_SWARM_TASK` open the task folder, and
+`CLAUDE_CONFIG_DIR` moves the plans folder that `master` and `planner` may
+write.
+
 ## Harness support
 
 The conditions run on Claude Code and Codex. Both apply a `pre` deny; see
@@ -336,5 +344,5 @@ The task folder must be spelled out. A path built from `$AGENTIHOOKS_SWARM` or
 - Serena writes need an absolute path. A relative `relative_path` is refused,
   and `rename_symbol` is refused for every path.
 - A shim that crashes or times out lets the call through.
-- The guard has no setting or environment switch. A later profile layer that
-  ships a file with the same `<step>-<matcher>-<name>` replaces the shim.
+- A later profile layer that ships a file with the same
+  `<step>-<matcher>-<name>` replaces the shim.
