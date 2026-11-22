@@ -8748,6 +8748,13 @@ make that visible.
   since the focus while a task under it is open and none is claimed or in a pull request, otherwise null.
   `GET .../focus/<target>` answers one target in the same shape, or `404 resource_missing` when the target does not
   exist. The swarm's Doctor fix phase is read from the swarm store; without one the read uses no fix phase.
+- **One orders read.** `agentihooks api --slug <id> get orders` (ledger API `GET /api/v1/ledgers/<id>/orders`) lists
+  every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first:
+  `item`, `title`, `by`, `at`, his `quote` or the `request` entry id, `claimable`, `busy` (the count claimed or in a
+  pull request), `done` (the ids of done tasks under it), `tasks` (every task under it that is neither done nor out
+  of scope, with its `lane`, `state` and `verdict`) and `line`, one plain line. The reply is one page: when the open
+  orders pass the reply limit the read answers `413 resource_too_large` and names `focus/<item>`, which lists the
+  tasks of one order.
 - **Focus unclaimed finding.** Each tick the `focus unclaimed` step counts, for every task under a focus record
   whose verdict is `claimable`, the consecutive ticks it stays so; any other verdict drops the count. Past three
   ticks a `focus unclaimed` health finding names the task and the focus, and the findings pass sends it to the
