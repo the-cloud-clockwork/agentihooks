@@ -12,7 +12,7 @@ from typing import Any
 from scripts.events.envelope import Envelope
 from scripts.hub import lease
 from scripts.hub.registry import Reactor
-from scripts.inbox.store import Gone, InboxStore
+from scripts.inbox.store import CLOSED, Gone, InboxStore
 from scripts.swarm import ledger_events, waits
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.ledger_events import PullRequest
@@ -30,7 +30,12 @@ SUBJECTS = {
 KINDS = ("checks", "merge")
 TASK_SUBJECT = "swarm.*.task.*"
 REPLY_SUBJECT = "swarm.*.inbox-wake.requested"
-DEPENDENCY_CLOSED = "Task {closed}, which your task {task} depends on, is done."
+DEPENDENCY_CLOSED = "Task {closed}, which your task {task} depends on, has closed as done."
+
+
+class AnswerPending(RuntimeError):
+    def __init__(self, item_id: str) -> None:
+        super().__init__(f"answered item {item_id} is still open")
 
 
 class WaitEnds:
@@ -47,8 +52,7 @@ class WaitEnds:
         self.clock = clock
 
     def reactors(self) -> list[Reactor]:
-        """One singleton reactor per pull request subject sharing the pull handler, then the task and reply wait
-        ends."""
+        """One singleton reactor per pull request subject sharing the pull handler, then the task and reply ends."""
         return [
             *(Reactor(name, subject, self.handle, singleton=True) for name, subject in SUBJECTS.items()),
             Reactor("task-wait-ends", TASK_SUBJECT, self.task_changed, singleton=True),
@@ -79,7 +83,8 @@ class WaitEnds:
             self._tell_dependents(store, event.swarm, event.key)
 
     def replied(self, event: Envelope) -> None:
-        """End every reply wait on the item the woken message answers."""
+        """End every reply wait on the item the woken message answers, failing while that item is still open so the
+        hub redelivers the wake after it closes."""
         store = self.store = self.store or store_module.connect()
         inbox = InboxStore(store.redis)
         try:
@@ -88,8 +93,11 @@ class WaitEnds:
             return
         if not answered:
             return
+        held = _held(store, event.swarm, answered, ("reply",))
+        if held and _still_open(inbox, answered):
+            raise AnswerPending(answered)
         reads = waits.Reads({}, inbox, self.github, self.github)
-        _end_each(store, event.swarm, _held(store, event.swarm, answered, ("reply",)), reads, self.clock())
+        _end_each(store, event.swarm, held, reads, self.clock())
 
     def _tell_dependents(self, store: Any, slug: str, closed: str) -> None:
         """Send the live holder of every claimed open task whose depends_on names ``closed`` one item naming it."""
@@ -117,6 +125,14 @@ def _end_each(
             waits.end_one(store, slug, agent, wait, reads, now_ms)
         except Exception as exc:
             print(f"wait of {agent.name} failed: {exc}", file=sys.stderr)
+
+
+def _still_open(inbox: InboxStore, item_id: str) -> bool:
+    """Whether the inbox item ``item_id`` still exists and has not closed."""
+    try:
+        return inbox.locate(item_id).state not in CLOSED
+    except Gone:
+        return False
 
 
 def _held(
