@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "hive-member-queue-priority",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-queue-priority-noperm",
+      "behaviour": "A hive member queue call applies automatic priority through its restricted Redis ACL, preserves running groups and waiting order, and reports a denied priority write plainly after enqueue.",
+      "seam": "scripts.swarm.queue_priority.automatic",
+      "tests": [
+        "tests/hive/test_auth.py::test_a_member_queue_applies_priority_or_reports_a_permission_refusal"
+      ]
+    },
+    {
       "id": "lab-remote-repository-owner",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2713",
