@@ -4,9 +4,10 @@ rules:
     severity: ERROR
     message: >-
       Ordered 2026-11-16, every swarm ledger write goes through the ledger API to the database and the ledger server
-      write path is gone: the database ledger client sends every request through its transport to the ledger API
-      route code over the shared database, never over HTTP to the ledger server, and a hosted hub, whose admission
-      claims write the ledger in process, refuses to start without the shared database setting.
+      write path is gone: the database ledger client sends every request to the ledger API route code over the
+      shared database, in process or through the host warm writer's routed transport, never over HTTP to the ledger
+      server, and a hosted hub, whose admission claims write the ledger in process, refuses to start without the
+      shared database setting.
     patterns:
       - pattern-either:
           - patterns:
@@ -17,6 +18,11 @@ rules:
                   def client(base: str, timeout: float) -> ResourceClient:
                     ...
                     return ResourceClient(base, {}, timeout, transport=$TRANSPORT)
+          - patterns:
+              - pattern-inside: |
+                  def client(base: str, timeout: float) -> ResourceClient:
+                    ...
+              - pattern: ResourceClient(..., transport=None, ...)
           - patterns:
               - pattern: |
                   def main(argv: list[str]) -> int:

@@ -20,6 +20,11 @@ def client(base: str, timeout: float) -> ResourceClient:
     return ResourceClient(base, {}, timeout)
 
 
+def client(base: str, timeout: float) -> ResourceClient:
+    # ruleid: feature-ledger-api-writes
+    return ResourceClient(base, {}, timeout, transport=None)
+
+
 # ruleid: feature-ledger-api-writes
 def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
