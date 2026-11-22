@@ -51,6 +51,29 @@ def _durations(retried: bool, bounded: bool, install: str) -> dict[Any, Any]:
 
 
 @pytest.mark.feature("protected-grader-admits-pinned-tool-forms")
+def test_the_pinned_tool_form_pins_each_floating_parser_install_and_keeps_every_other_value() -> None:
+    other = _SPARSE + "/scripts/\n"
+    value = {
+        True: {"push": None},
+        "steps": [
+            {"run": f"python -m {DOUBLE}", "timeout-minutes": 5, "if": None},
+            {"run": f'"$RUNNER_TEMP/python" -I -m {SINGLE}\necho done\n', "continue-on-error": False},
+            {"with": {"sparse-checkout": _SPARSE, "fetch-depth": 1}},
+            {"with": {"sparse-checkout": other}},
+        ],
+    }
+    assert gate_protected._pinned_tool_form(value) == {
+        True: {"push": None},
+        "steps": [
+            {"run": f"python -m {PINNED}", "timeout-minutes": 5, "if": None},
+            {"run": f'"$RUNNER_TEMP/python" -I -m {PINNED}\necho done\n', "continue-on-error": False},
+            {"with": {"sparse-checkout": PINNED_SPARSE, "fetch-depth": 1}},
+            {"with": {"sparse-checkout": other}},
+        ],
+    }
+
+
+@pytest.mark.feature("protected-grader-admits-pinned-tool-forms")
 @pytest.mark.parametrize("factory", [ci_reuse.reuse_job, ci_reuse.paged_reuse_job, ci_reuse.retried_reuse_job])
 @pytest.mark.parametrize("install", [DOUBLE, PINNED, *NEAR_MISSES])
 def test_the_protected_reuse_job_admits_its_parser_install_floating_or_under_the_exact_pin_only(
