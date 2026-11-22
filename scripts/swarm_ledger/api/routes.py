@@ -89,6 +89,8 @@ def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
         return resources.hierarchy_read(services.repository, slug, path, query)
     if path.split("/")[0] == "focus":
         return focus_read(services, slug, path)
+    if path == "orders":
+        return orders_read(services, slug)
     if path == "architecture":
         from . import architecture
 
@@ -110,6 +112,13 @@ def focus_read(services: Services, slug: str, path: str) -> dict[str, Any]:
         raise APIError(404, "resource_missing", "No such target")
     reply: dict[str, Any] = {"data": found, "revision": resources.revision(found)}
     return resources.bounded({**reply, "next_cursor": None} if path == "focus" else reply)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+
+def orders_read(services: Services, slug: str) -> dict[str, Any]:
+    """Every open operator order with the claim gate verdict on each task under it."""
+    state = services.repository.current(slug).state
+    found: list[dict[str, Any]] = ports.swarm().order_check.read(state, fix_phase(services, slug))
+    return resources.bounded({"data": found, "revision": resources.revision(found), "next_cursor": None})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def fix_phase(services: Services, slug: str) -> str:
