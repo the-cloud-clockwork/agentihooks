@@ -437,10 +437,12 @@ def _assignments(words: list[str]) -> dict[str, str]:
     return {name: value for name, _, value in (word.partition("=") for word in words if ASSIGNMENT.fullmatch(word))}
 
 
-def _shell_commands(text: str, env: dict[str, str]) -> Iterator[tuple[list[str], dict[str, str]]]:
+def _shell_commands(
+    text: str, env: dict[str, str], keep: re.Pattern[str] = LINE
+) -> Iterator[tuple[list[str], dict[str, str]]]:
     scoped = dict(env)
     for line in text.replace("\\\n", " ").splitlines():
-        if not LINE.search(line):
+        if not keep.search(line):
             continue
         for words in _split(_words(line)):
             assigned = words[1:] if words[0] == "export" else words
@@ -546,14 +548,14 @@ def _python_argvs(path: Path, root: Path) -> Iterator[list[str]]:
             yield words
 
 
-def _commands(path: Path, root: Path) -> Iterator[tuple[list[str], dict[str, str]]]:
+def _commands(path: Path, root: Path, keep: re.Pattern[str] = LINE) -> Iterator[tuple[list[str], dict[str, str]]]:
     if path.suffix == ".py":
         yield from ((words, {}) for words in _python_argvs(path, root))
     elif path.suffix == ".sh":
-        yield from _shell_commands(path.read_text(), {})
+        yield from _shell_commands(path.read_text(), {}, keep)
     else:
         for run, env in _yaml_runs(yaml.load(path.read_text(), Loader=LOADER), {}):
-            yield from _shell_commands(run, env)
+            yield from _shell_commands(run, env, keep)
 
 
 def _run_targets(path: Path, root: Path) -> list[Path]:
@@ -1140,6 +1142,7 @@ def test_each_intentional_install_smoke_is_a_measured_install_with_a_reason() ->
 
 
 BUILD_CONSTRAINT = "--dependency-constraints-txt"
+BUILD_LINE = re.compile(r"build")
 BUILD_PINS = f"{PLANT_PINS}setuptools==84.2.1\nsetuptools-scm==10.3.4\n"
 BUILD_PLANT = {
     "pyproject.toml": '[build-system]\nrequires = ["setuptools>=80", "setuptools-scm>=9.2"]\n',
@@ -1159,25 +1162,28 @@ def _build_commands(path: Path, root: Path) -> Iterator[list[str]]:
     if path.suffix == ".py":
         yield from _python_lists(path, root)
     else:
-        text = path.read_text()
-        runs = [text] if path.suffix == ".sh" else [run for run, _ in _yaml_runs(yaml.load(text, Loader=LOADER), {})]
-        for run in runs:
-            for line in run.replace("\\\n", " ").splitlines():
-                yield from _split(_words(line))
+        yield from (words for words, _ in _commands(path, root, BUILD_LINE))
 
 
-def _backend_names(root: Path) -> set[str]:
+def _backend_requirements(root: Path) -> list[Requirement]:
     requires: list[str] = tomllib.loads((root / "pyproject.toml").read_text())["build-system"]["requires"]
-    return {canonicalize_name(Requirement(text).name) for text in requires}
+    return [Requirement(text) for text in requires]
 
 
-def _backend_lock(value: str, root: Path, backend: set[str]) -> bool:
+def _backend_lock(value: str, root: Path, backend: list[Requirement]) -> bool:
     lock = _constraint_file(value, root)
-    return lock is not None and lock.parent == root / CI_TOOLS and backend <= {name for name, _ in _pins(lock)}
+    if lock is None or lock.parent != root / CI_TOOLS:
+        return False
+    pins = dict(_pins(lock))
+    return all(
+        (version := pins.get(canonicalize_name(requirement.name))) is not None
+        and requirement.specifier.contains(version, prereleases=True)
+        for requirement in backend
+    )
 
 
 def _unconstrained_ci_builds(root: Path) -> list[str]:
-    backend = _backend_names(root)
+    backend = _backend_requirements(root)
     found: list[str] = []
     for path in _ci_sources(root):
         for words in _build_commands(path, root):
@@ -1220,7 +1226,15 @@ def test_every_ci_package_build_constrains_its_isolated_backend() -> None:
             id="build constrained by a tool lock that leaves the backend floating",
         ),
         pytest.param(
-            {"scripts/ci_plant.py": 'ARGV = [sys.executable, "-m", "build"]\n'},
+            {
+                ".github/ci-tools/old.lock": "setuptools==79.0.0\nsetuptools-scm==10.3.4\n",
+                ".github/workflows/plant.yml": _job(f"python -m build {BUILD_CONSTRAINT} .github/ci-tools/old.lock"),
+            },
+            {".github/workflows/plant.yml": _job(f"python -m build {BUILD_CONSTRAINT} {PLANT_LOCK}")},
+            id="build constrained by a tool lock that pins the backend below its requirement",
+        ),
+        pytest.param(
+            {"scripts/ci_plant.py": 'STAGES = ("lint", "build")\nARGV = [sys.executable, "-m", "build"]\n'},
             {"scripts/ci_plant.py": f'ARGV = [sys.executable, "-m", "build", "{BUILD_CONSTRAINT}", "{PLANT_LOCK}"]\n'},
             id="python ci script build",
         ),
