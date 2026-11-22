@@ -303,9 +303,10 @@ def test_ask_sends_the_caller_name_and_the_in_process_headers(
 def test_ask_raises_when_the_writer_closes_without_an_answer(memory_path: Path, reply: bytes) -> None:
     where = memory_path / "r.sock"
     thread, _ = recording(where, reply)
-    with pytest.raises(EOFError, match="the ledger writer closed with no answer"):
+    with pytest.raises(EOFError) as closed:
         warm_writer.ask(warm_writer.connected(10.0, where), "sw", "tasks", None)
     thread.join(10.0)
+    assert closed.value.args == ("the ledger writer closed with no answer",)
 
 
 class Outer:
@@ -519,7 +520,7 @@ def test_a_client_that_never_finishes_sending_cannot_hold_the_writer_open(
 
 @pytest.mark.feature("ledger-warm-writer")
 def test_the_writer_paces_probes_and_reads_by_its_named_windows() -> None:
-    assert (warm_writer.CHECK_S, warm_writer.POLL_S, warm_writer.PROBE_S, warm_writer.READ_S) == (5.0, 0.5, 1.0, 10.0)
+    assert (warm_writer.CHECK_S, warm_writer.PROBE_S, warm_writer.READ_S) == (5.0, 1.0, 10.0)
     assert warm_writer.Answering.timeout == warm_writer.READ_S
 
 
@@ -617,3 +618,38 @@ def test_the_writer_command_serves_the_home_socket_until_sigterm(monkeypatch: py
     assert where == warm_writer.socket_path()
     assert stopped.is_set()
     assert argv == ["agentihooks ledger writer", "serve"]
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_the_writer_command_names_itself_and_takes_only_serve(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as helped:
+        run(["writer", "--help"])
+    shown = capsys.readouterr().out
+    assert helped.value.code == 0
+    assert shown.startswith("usage: agentihooks ledger writer [-h] {serve}\n")
+    assert "\nRun this host's warm ledger writer.\n" in shown
+    with pytest.raises(SystemExit) as refused:
+        run(["writer", "stop"])
+    refusal = capsys.readouterr().err
+    assert refused.value.code == 2
+    assert "argument action: invalid choice:" in refusal
+    assert "stop" in refusal
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_a_new_writer_probes_its_own_socket_within_the_probe_window(
+    memory_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probes: list[tuple[float, Path | None]] = []
+
+    def missing(timeout: float, where: Path | None = None) -> socket.socket:
+        probes.append((timeout, where))
+        raise FileNotFoundError(where)
+
+    monkeypatch.setattr(warm_writer, "connected", missing)
+    where = memory_path / "w.sock"
+    server = warm_writer.bound(where)
+    assert server is not None
+    server.server_close()
+    where.unlink()
+    assert probes == [(warm_writer.PROBE_S, where)]

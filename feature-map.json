@@ -7584,7 +7584,9 @@
         "tests/swarm_ledger/test_warm_writer.py::test_a_connection_that_sends_nothing_gets_no_reply_and_no_error",
         "tests/swarm_ledger/test_warm_writer.py::test_the_writer_finishes_a_request_in_flight_then_returns_once_the_checkout_moves",
         "tests/swarm_ledger/test_warm_writer.py::test_the_checkout_moves_only_to_a_new_revision",
-        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_command_serves_the_home_socket_until_sigterm"
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_command_serves_the_home_socket_until_sigterm",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_command_names_itself_and_takes_only_serve",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_new_writer_probes_its_own_socket_within_the_probe_window"
       ]
     },
     {

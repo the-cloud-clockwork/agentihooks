@@ -20,7 +20,6 @@ from scripts.tick.adapters import database_ledger
 NAME = "ledger-writer.sock"
 RAISED = b"raised"
 CHECK_S = 5.0
-POLL_S = 0.5
 PROBE_S = 1.0
 READ_S = 10.0
 
@@ -33,7 +32,7 @@ def socket_path() -> Path:
 
 def connected(timeout: float, where: Path | None = None) -> socket.socket:
     """A connection to the host's ledger writer."""
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock = socket.socket(socket.AF_UNIX)
     sock.settimeout(timeout)
     try:
         sock.connect(str(where or socket_path()))
@@ -146,7 +145,7 @@ def serve(where: Path, stopped: threading.Event, check_s: float = CHECK_S) -> in
     try:
         loaded = revision(ROOT)
         database_ledger.services()
-        listening = threading.Thread(target=server.serve_forever, args=(POLL_S,))
+        listening = threading.Thread(target=server.serve_forever)
         listening.start()
         try:
             while not stopped.is_set() and not moved(loaded):
@@ -162,9 +161,9 @@ def serve(where: Path, stopped: threading.Event, check_s: float = CHECK_S) -> in
 
 def main() -> int:
     """``agentihooks ledger writer serve``: run this host's warm ledger writer."""
-    parser = argparse.ArgumentParser(prog=sys.argv[0], description="Run this host's warm ledger writer.")
+    parser = argparse.ArgumentParser(description="Run this host's warm ledger writer.")
     parser.add_argument("action", choices=["serve"])
-    parser.parse_args(sys.argv[1:])
+    parser.parse_args()
     stopped = threading.Event()
     signal.signal(signal.SIGTERM, lambda signum, frame: stopped.set())
     return serve(socket_path(), stopped)
