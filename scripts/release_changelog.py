@@ -172,7 +172,11 @@ def ask_model(change: Change, url: str, access: dict[str, str], model: str, open
         ) as response:
             content = json.loads(response.read())["choices"][0]["message"]["content"]
     except HTTPError as error:
-        raise ModelError(f"{model}: HTTP {error.code}") from None
+        detail = error.read().decode("utf-8", errors="replace")
+        for value in access.values():
+            if value:
+                detail = detail.replace(value, "[redacted]").replace(value.removeprefix("Bearer "), "[redacted]")
+        raise ModelError(f"{model}: HTTP {error.code}: {detail[:4000]}") from None
     except (URLError, OSError) as error:
         raise ModelError(f"{model}: {type(error).__name__}") from None
     except (ValueError, KeyError, IndexError, TypeError):
