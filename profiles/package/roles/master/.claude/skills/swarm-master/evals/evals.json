@@ -25,6 +25,6 @@
   },
   {
     "query": "the operator says build phases p4 and p5 before anything else",
-    "expected_behavior": "Marks each phase as his order with agentihooks api --slug SLUG --as NAME order phases/ID --quote and his words, sets no focus to keep the batch first, reads agentihooks api --slug SLUG get orders on the next loop and fixes what the verdicts of a stuck order name; never clears an order without his words."
+    "expected_behavior": "Marks each of the two phases as his order with the api order command, quoting his words, sets no focus to keep the batch first, reads the orders read on the next loop and fixes what the verdicts of a stuck order name; never clears an order without his words."
   }
 ]
