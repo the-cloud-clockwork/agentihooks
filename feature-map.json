@@ -12709,6 +12709,20 @@
       ]
     },
     {
+      "id": "mutation-stats-flake-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stats-flake-ledger",
+      "behaviour": "Mutation stats retries retain the first failure message and traceback in a separate flake ledger and job reports; clean buckets write no rows, caller settings are restored, uploaded parts include current retry records and stats cache records and key construction remain unchanged.",
+      "seam": "scripts.ci_mutation.selection.collect_shard_stats and scripts.ci_mutation.selection.load_or_collect_stats",
+      "tests": [
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_records_a_test_that_fails_once_then_passes_its_rerun_in_the_flake_ledger",
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_with_no_rerun_points_the_flake_ledger_beside_its_output_and_writes_no_row",
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_gives_the_caller_back_its_flake_ledger_setting",
+        "tests/test_ci_mutation_stats.py::test_a_collected_stats_part_keeps_its_bucket_flake_rows_beside_the_part_and_out_of_the_stats_cache",
+        "tests/test_ci_mutation_stats_cache.py::test_collection_parts_reuse_stats_and_keep_the_new_head_identity"
+      ]
+    },
+    {
       "id": "test-wait-bound-ratchet",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-wait-bound-ratchet",
@@ -13020,17 +13034,16 @@
       ]
     },
     {
-      "id": "mutation-stats-flake-ledger",
+      "id": "changelog-fragment-required-on-pull-request",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stats-flake-ledger",
-      "behaviour": "Mutation stats retries retain the first failure message and traceback in a separate flake ledger and job reports; clean buckets write no rows, caller settings are restored, uploaded parts include current retry records and stats cache records and key construction remain unchanged.",
-      "seam": "scripts.ci_mutation.selection.collect_shard_stats and scripts.ci_mutation.selection.load_or_collect_stats",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fragment-required",
+      "behaviour": "A pull request run whose head adds no changelog fragment named from its branch is refused with an error naming the missing path, also when that file already sits in the base; a dispatched run or a run with no event stays green, and a pull request that adds its branch fragment stays green.",
+      "seam": "scripts.ci_changelog_fragments.main reading GITHUB_EVENT_NAME, then scripts.ci_changelog_fragments.grade",
       "tests": [
-        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_records_a_test_that_fails_once_then_passes_its_rerun_in_the_flake_ledger",
-        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_with_no_rerun_points_the_flake_ledger_beside_its_output_and_writes_no_row",
-        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_gives_the_caller_back_its_flake_ledger_setting",
-        "tests/test_ci_mutation_stats.py::test_a_collected_stats_part_keeps_its_bucket_flake_rows_beside_the_part_and_out_of_the_stats_cache",
-        "tests/test_ci_mutation_stats_cache.py::test_collection_parts_reuse_stats_and_keep_the_new_head_identity"
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_no_branch_fragment_is_red_naming_the_path",
+        "tests/test_ci_changelog_fragments.py::test_a_run_outside_a_pull_request_that_adds_no_fragment_stays_green",
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_its_branch_fragment_is_green",
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_only_a_misnamed_fragment_is_red_naming_both"
       ]
     }
   ],
