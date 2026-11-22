@@ -312,7 +312,7 @@ def _recover(
             pushed=_pushed(agent, host),
         )
         built = envelope.build(store, slug, agent, "exit", None, at, run=host.run)
-        store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=built)
+        store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope.orders_unread(built, agent))
         transfers.record(store, slug, agent, "exit", text, at)
     names = ", ".join(agent.name for _, agent in remaining)
     return (

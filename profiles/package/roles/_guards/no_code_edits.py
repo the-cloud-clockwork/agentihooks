@@ -65,8 +65,23 @@ def _delegated(payload: dict, role: str) -> bool:
     )
 
 
+def _shell_deny(payload: dict, role: str, home: Path) -> str:
+    from hooks.context.read_only_shell import write_reason
+
+    cwd = Path(payload.get("cwd") or os.getcwd())
+    found = write_reason(str(payload["tool_input"].get("command") or ""), cwd, _allowed_roots(role, home))
+    if not found:
+        return ""
+    return (
+        f"{role} cannot write through the shell: the command {found}. "
+        "Reads, ~/scratchpad and the task folder stay open; send the change to its author."
+    )
+
+
 def deny_reason(payload: dict, role: str, home: Path) -> str:
     tool = payload["tool_name"].lower()
+    if tool == "bash":
+        return _shell_deny(payload, role, home)
     if tool not in BUILTIN_WRITES | SERENA_WRITES:
         return ""
     inputs = payload["tool_input"]

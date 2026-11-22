@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/expert_lineage.py:scripts.swarm.expert_lineage.x_mission:24fe4baa05f31d769092cd12c82cd427a5408e89a85f81faeb2a96b908f52fc7": {
+    "reader": "standards_reader",
+    "reason": "A missing text is replaced by a text that start refuses as a mission, so no saved address can equal its address. The check fails and raises the same error either way, and the placeholder is never returned."
+  }
+}

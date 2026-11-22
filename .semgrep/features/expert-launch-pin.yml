@@ -1,0 +1,28 @@
+rules:
+  - id: feature-expert-launch-pin
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-22, an expert always launches on Claude Code with the Fable model at effort xhigh or max: the
+      runtime's spawn and resume build their launch model arguments only from a pick that expert_launch.pin returned
+      earlier in the same function.
+    patterns:
+      - pattern-inside: |
+          def $LAUNCH(...):
+            ...
+      - metavariable-regex:
+          metavariable: $LAUNCH
+          regex: ^(spawn|resume)$
+      - pattern-either:
+          - patterns:
+              - pattern: _model_args($AGENT, $PICKED.__dict__, ...)
+              - pattern-not-inside: |
+                  $PICKED = expert_launch.pin(...)
+                  ...
+          - patterns:
+              - pattern: _model_args(...)
+              - pattern-not: _model_args($AGENT, $PICKED.__dict__, ...)
+    paths:
+      include:
+        - /scripts/swarm/runtime.py
+        - '*.test.py'

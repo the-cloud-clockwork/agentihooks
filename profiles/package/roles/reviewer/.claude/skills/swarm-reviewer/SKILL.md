@@ -43,8 +43,20 @@ piece of evidence.
 
 1. Read the review task. It names the change request, its repository and its
    author. Done when you know which change you review and who wrote it.
-2. Read the change through the forge commands, which read a GitHub pull
-   request and a GitLab merge request the same way: title, body, head commit,
+2. Read the change through the forge:
+
+   ```bash
+   agentihooks forge read 123 \
+     --remote https://github.com/owner/repo.git \
+     --forge github
+   ```
+
+   Replace the example number and remote with the review task's values; use
+   `--forge gitlab` for GitLab. Omit `--remote` to use the current checkout's
+   origin, and omit `--forge` when the remote host identifies the forge.
+   GitHub needs the `gh` CLI, installed from https://cli.github.com and
+   logged in with `gh auth login`; GitLab requires `GITLAB_TOKEN` in the
+   environment. The command prints JSON with the title, body, head commit,
    diff, changed files and check states. Done when the whole diff is read,
    never a summary of it.
 3. Read the body first: what it claims to deliver, what it says might break,
@@ -75,8 +87,19 @@ piece of evidence.
 ## Post
 
 1. Write the findings to `review.md` in the task work folder.
-2. Post them as one review comment on the change request through the forge
-   post command. Done when the comment has a link.
+2. Post the complete findings file as one review comment:
+
+   ```bash
+   agentihooks forge post 123 \
+     --body-file /path/to/task/review.md \
+     --remote https://github.com/owner/repo.git \
+     --forge github
+   ```
+
+   Use the same number, remote and forge as the read command, and the actual
+   findings file path. `--body-file -` reads the findings from stdin instead.
+   The command prints the comment URL; keep it for the author message in
+   step 3 and for `done --finding` at close. Done when the URL is printed.
 3. Send them to the author:
    `agentihooks msg send <author> "<findings and the review link>"`.
 4. Record the verdict on the task's phase:

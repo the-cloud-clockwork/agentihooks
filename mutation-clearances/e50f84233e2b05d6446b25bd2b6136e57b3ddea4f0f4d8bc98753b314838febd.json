@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/expert_commands.py:scripts.swarm.expert_commands.x__readable:1045066b7b3a7fb83426b2f07ff6732b693941e25b5d8be2e77b8bbd4973f103": {
+    "reader": "standards_reader",
+    "reason": "The value is read only as a truth value before the one branch that returns it, and an empty string and None are both false."
+  }
+}
