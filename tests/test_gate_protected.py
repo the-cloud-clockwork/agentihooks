@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 import yaml
 
-from scripts import ci_wiring, gate_protected
+from scripts import ci_frozen, ci_wiring, gate_protected
 from scripts.ci_lab import expressions
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -2883,6 +2883,29 @@ def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_curren
     )
     for path, accepted in registry.items():
         assert _git(_ROOT, "rev-parse", f"HEAD:{path}") in accepted, path
+
+
+def test_every_stored_frozen_candidate_is_its_own_announced_blob() -> None:
+    announced = {
+        blob for accepted in json.loads((_ROOT / gate_protected.FROZEN).read_text()).values() for blob in accepted
+    }
+    stored = sorted((_ROOT / ci_frozen.CANDIDATES).iterdir())
+    assert stored
+    for path in stored:
+        assert _git(_ROOT, "hash-object", "--no-filters", str(path)) == path.name, path.name
+        assert path.name in announced, path.name
+
+
+def test_the_ci_tool_pin_candidates_are_stored_for_admission() -> None:
+    registry = json.loads((_ROOT / gate_protected.FROZEN).read_text())
+    for frozen_path, blob in (
+        ("scripts/gate_protected.py", "086855f1d1e7a0ee44af2c05468b7bc33ee26856"),
+        (".github/workflows/gate-protected.yml", "ceb96c5d549c6766bc317390d4278f1d3644edd0"),
+    ):
+        stored = _ROOT / ci_frozen.CANDIDATES / blob
+        assert blob in registry[frozen_path], frozen_path
+        assert stored.is_file(), frozen_path
+        assert _git(_ROOT, "hash-object", "--no-filters", str(stored)) == blob, frozen_path
 
 
 @pytest.mark.feature("frozen-writer-lock-workflow")
