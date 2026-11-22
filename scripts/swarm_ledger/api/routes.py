@@ -22,6 +22,7 @@ from .services import Services
 WORKSPACE_RE = re.compile(r"tasks/[\w.-]+/workspace")
 FILE_RE = re.compile(r"files/(media|artifacts)/[\w.-]+")
 CONTEXT_RE = re.compile(r"swarm/context/[\w.-]+/[\w.:-]+")
+ORDERS_TOO_LARGE = "The open orders pass the reply limit: read the tasks of one order with focus/<item>"
 
 
 def body(handler: object, services: Services) -> dict:
@@ -115,10 +116,11 @@ def focus_read(services: Services, slug: str, path: str) -> dict[str, Any]:
 
 
 def orders_read(services: Services, slug: str) -> dict[str, Any]:
-    """Every open operator order with the claim gate verdict on each task under it."""
+    """Every open operator order with the claim gate verdict on each unfinished task under it."""
     state = services.repository.current(slug).state
     found: list[dict[str, Any]] = ports.swarm().order_check.read(state, fix_phase(services, slug))
-    return resources.bounded({"data": found, "revision": resources.revision(found), "next_cursor": None})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    reply = {"data": found, "revision": resources.revision(found), "next_cursor": None}
+    return resources.bounded(reply, ORDERS_TOO_LARGE)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def fix_phase(services: Services, slug: str) -> str:
