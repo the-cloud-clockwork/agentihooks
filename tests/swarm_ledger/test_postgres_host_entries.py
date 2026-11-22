@@ -201,3 +201,29 @@ def test_adoption_cannot_lower_a_newer_deferred_copy_generation(
     assert stored[0] == 200
     assert stored[1].state == {"new": True}
     assert copies.generations == {"copy": 200}
+
+
+@pytest.mark.feature("ledger-copy-after-commit")
+def test_adoption_during_a_save_preserves_the_newer_host_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    copies = host_entries.Copies(tmp_path / "entries", "database")
+    copies.keep("copy", Copy(100, '{"old":true}'), True)
+    write = host_entries.write
+
+    def write_then_adopt(file: Path, generation: int, text: str) -> None:
+        write(file, generation, text)
+        if generation == 200:
+            write(file, 300, '{"external":true}')
+            adopted = copies.adopt("copy", 300)
+            assert adopted is not None
+            assert adopted.generation == 300
+
+    monkeypatch.setattr(host_entries, "write", write_then_adopt)
+    copies.keep("copy", Copy(200, '{"pending":true}'), True)
+    copies.keep("copy", Copy(250, '{"intermediate":true}'), True)
+    stored = host_entries.read(host_entries.path(copies.held, ("database", "copy")), 300)
+    assert stored is not None
+    assert stored[0] == 300
+    assert stored[1].state == {"external": True}
+    assert copies.generations == {"copy": 300}
