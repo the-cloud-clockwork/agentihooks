@@ -365,7 +365,6 @@ FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/brain-smoke.yml: uv pip install --python .venv/bin/python -e '.[all]'",
     ".github/workflows/branch-lanes.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/coverage-stability.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
-    ".github/workflows/gate-protected.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/gate-required.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/hive-worker.yml: pip install PyYAML",
     ".github/workflows/ledger-load.yml: uv pip install --python '$HOME/venv/bin/python' -e '.[all]'",

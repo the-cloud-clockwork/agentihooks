@@ -7957,6 +7957,18 @@
       ]
     },
     {
+      "id": "protected-grader-admits-pinned-tool-forms",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-admit",
+      "behaviour": "The protected grader admits the reuse job, the durations provenance prefix and the branch lane preflight as dev holds them or with their floating PyYAML install replaced by the exact PyYAML 6.0.3 install under the parser constraint file, the shallow preflight sparse checkout then also taking the CI tools folder, and refuses any other version, any other constraint file, an unconstrained pin, and a pinned preflight install without that sparse checkout.",
+      "seam": "gate_protected._pinned_tool_form over reuse_jobs, _duration_problems and _preflight_problems",
+      "tests": [
+        "tests/test_gate_protected_pinned_tools.py::test_the_protected_reuse_job_admits_its_parser_install_floating_or_under_the_exact_pin_only",
+        "tests/test_gate_protected_pinned_tools.py::test_the_protected_durations_provenance_admits_its_parser_install_floating_or_under_the_exact_pin_only",
+        "tests/test_gate_protected_pinned_tools.py::test_the_branch_lane_preflight_admits_its_parser_install_floating_or_under_the_exact_pin_only"
+      ]
+    },
+    {
       "id": "gate-declarations-never-expire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
