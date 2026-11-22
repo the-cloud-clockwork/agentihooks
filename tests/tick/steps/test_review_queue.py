@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 SLUG = "crew"
 REPO = "https://github.com/acme/widgets"
 PULL = f"{REPO}/pull/7"
-NOW = 10_000_000
+NOW = 1_700_000_000_000
 
 
 class Ledger:
