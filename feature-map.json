@@ -249,6 +249,22 @@
       ]
     },
     {
+      "id": "swarm-launch-acknowledgements",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2677",
+      "behaviour": "The launches command reports each swarm agent's acknowledged hive and launch time through the public events reader, with null fields for missing or mismatched acknowledgements.",
+      "seam": "scripts.swarm.launch_starts.command and the swarm parser over execution_stop.started",
+      "tests": [
+        "tests/swarm/test_launch_starts.py::test_launches_parser_dispatches_the_public_command",
+        "tests/swarm/test_launch_starts.py::test_launches_print_acknowledged_and_missing_starts",
+        "tests/swarm/test_launch_starts.py::test_launches_print_reconstructed_acknowledgement_time",
+        "tests/swarm/test_launch_starts.py::test_launches_print_missing_acknowledgement",
+        "tests/swarm/test_launch_starts.py::test_launches_reject_mismatched_acknowledgements",
+        "tests/swarm/test_launch_starts.py::test_launches_close_the_bus_on_read_failure",
+        "tests/swarm/test_launch_starts.py::test_launches_print_an_empty_agent_list"
+      ]
+    },
+    {
       "id": "lab-store-incremental-fetch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-store-mirror-mount",
