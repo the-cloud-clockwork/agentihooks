@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, expert_commands, expert_lineage, expert_mission
 from scripts.swarm.store import AgentRecord, RedisStore
 from tests.swarm.expert_fixture import (
@@ -210,6 +211,24 @@ def test_the_master_stops_a_lineage_with_a_note(
     assert expert_lineage.get(store, "sw", "expert-1") == ended
     assert run("sw", "expert", "stop", "expert-1", "--note", "again") == 1
     assert capsys.readouterr().err == "swarm: expert lineage expert-1 is stopped, not running\n"
+
+
+@pytest.mark.feature("expert-seat-recovery")
+def test_stopping_a_lineage_sends_the_mail_waiting_on_its_seat_back_to_the_master(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    lineage = started(store)
+    inbox = InboxStore(store.redis)
+    waiting = inbox.send(ENGINEER, lineage.seat, "Read the new evidence")
+    acting(monkeypatch, MASTER)
+    assert run("sw", "expert", "stop", "expert-1", "--note", "the order changed") == 0
+    capsys.readouterr()
+    moved = inbox.get(waiting.id)
+    assert (moved.state, moved.address, moved.reason) == (
+        "pending",
+        "master@sw",
+        "expert lineage expert-1 is stopped and no expert holds its seat any more",
+    )
 
 
 @pytest.mark.feature("expert-mission-and-lineage")
