@@ -36,13 +36,7 @@ from scripts.tick.adapters import database_ledger
 URL = os.environ.get("LEDGER_TEST_POSTGRES_URL", "")
 STORES = ["sqlite", "postgres"] if URL else ["sqlite"]
 SHARED = ["postgres"] if URL else []
-CONTENT = {
-    "title": "Parity",
-    "overview": "o",
-    "size": "swarm",
-    "sources": [],
-    "phases": [{"title": "One", "description": "d"}],
-}
+CONTENT = {"title": "Parity", "overview": "o", "sources": [], "phases": [{"title": "One", "description": "d"}]}
 THREAD = "phases/p1/comments"
 STALE = "0" * 64
 WORKER = "engineer@323133-0440"
@@ -136,7 +130,7 @@ def twins(store: Any, monkeypatch: pytest.MonkeyPatch) -> Twins:
     stem = f"parity-{uuid.uuid4().hex[:8]}"
     found = Twins(store, f"{stem}-here", f"{stem}-there")
     for slug in (found.here, found.there):
-        store.create(slug, CONTENT)
+        store.create(slug, CONTENT, size="swarm")
     for hook in ("relay_to_inbox", "doctor_phrase", "deliver_alerts"):
         monkeypatch.setattr(api_service, hook, lambda slug, state, hook=hook: found.fired.append((hook, slug, state)))
     monkeypatch.setattr(ledger_server.authority, "fence", lambda slug, epoch: None)
