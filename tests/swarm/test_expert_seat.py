@@ -15,6 +15,7 @@ from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli, expert_lineage, expert_seat, naming, prompt
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import AgentRecord, RedisStore
+from scripts.swarm_ledger import ledger_workspace
 from tests.handoff.test_expert_contract import VALID as HANDOFF
 from tests.handoff.test_mission_proof import VALID as PROOF
 from tests.swarm.expert_fixture import ENGINEER, MASTER, TITLE, acting, indexed, mission_file, run, started, store
@@ -63,15 +64,28 @@ def rows(found: RedisStore) -> list[dict[str, Any]]:
     return listed
 
 
+class Placing(FakeRuntime):
+    """A fake runtime that keeps the swarm config each spawn was placed with."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.placed_with: list[Any] = []
+
+    def spawn(self, config: Any, lane: str, name: str, task: dict[str, Any]) -> Any:
+        self.placed_with.append(config)
+        return super().spawn(config, lane, name, task)
+
+
 @pytest.mark.feature("expert-seat-step")
 @pytest.mark.parametrize("effort", ["xhigh", "max"])
 def test_a_started_lineage_gets_one_expert_on_its_seat_with_the_launch_an_expert_is_held_to(
     store: RedisStore, effort: str
 ) -> None:
-    lineage, runtime = started(store, effort), FakeRuntime()
+    lineage, runtime = started(store, effort), Placing()
     actions = go(store, runtime)
     [expert] = experts(store)
     assert actions == [f"spawned expert {expert.name} on lineage expert-1 as its expert number 1"]
+    assert runtime.placed_with == [store.config("sw")]
     assert (expert.lane, expert.task, expert.seat, expert.state) == ("expert", "expert-1", lineage.seat, "working")
     parsed = naming.parse(expert.name)
     assert parsed is not None and parsed.kind == "expert"
@@ -236,6 +250,8 @@ def test_the_expert_of_a_stopped_lineage_is_finished_and_its_mail_closed_with_th
     assert inbox.get(asked.id).state == "cancelled"
     [told] = inbox.inbox(MASTER)
     assert told.text.startswith(f"{expert.name} left when its lineage expert-1 was stopped before closing your message")
+    left = inbox.seats.exit_of(expert.name)
+    assert (left["seat"], left["reason"]) == ("", "left when its lineage expert-1 was stopped")
     assert go(store, runtime, NOW + 2 * MINUTE) == [] and len(runtime.spawned) == 1
 
 
@@ -416,9 +432,21 @@ def test_an_expert_lost_without_a_handoff_leaves_its_successor_a_recovery_handof
     assert handoff_expert.problems(text, Resolver("sw", store.redis), "sw", GOOD) == []
     pending = [line for line in text.splitlines() if line.startswith("- D")]
     assert [line.split()[1] for line in pending] == ["D1", "D2", "D3"] and all("unknown" in line for line in pending)
+    assert all(f"unknown: {lost.name} left no account of it" in line for line in pending)
+    assert f"unknown: {lost.name} held this seat and ended without a handoff" in text
     read = text.split("## Read first\n")[1].splitlines()[:-1]
     assert [line.split()[1] for line in read] == [lineage.mission, *([f"recap:{lineage.seat}"] if recapped else [])]
-    assert (store.handoff_envelope("sw", "expert-1") or {}).get("reason") == expert_seat.REASON
+    assert read == [
+        f"- {lineage.mission} the mission every expert of this lineage works",
+        *([f"- recap:{lineage.seat} the last state an expert of this lineage handed over"] if recapped else []),
+    ]
+    assert store.handoff_seat("sw", "expert-1") == lineage.seat
+    envelope = store.handoff_envelope("sw", "expert-1") or {}
+    assert (envelope.get("reason"), envelope.get("seat"), envelope.get("agent")) == (
+        expert_seat.REASON,
+        lineage.seat,
+        lost.name,
+    )
     [row] = rows(store)
     assert (row["reason"], row["predecessor"], row["successor"], row["handoff"]) == (
         expert_seat.REASON,
@@ -545,6 +573,26 @@ def test_a_handoff_document_that_cannot_be_read_starts_no_lineage(
     assert run("sw", "expert", "start", str(mission_file), "--handoff", str(missing)) == 1
     assert capsys.readouterr().err == f"swarm: cannot read the handoff document {missing}: No such file or directory\n"
     assert indexed(store) == set()
+
+
+def test_the_read_first_addresses_of_a_start_handoff_are_resolved_in_the_swarm_it_starts_in(
+    store: RedisStore, mission_file: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    notes = ledger_workspace.folder("sw", "t1")
+    notes.mkdir(parents=True)
+    (notes / "progress.md").write_text("Seam one landed.\n", encoding="utf-8")
+    store.memory.add_recap("eng-1@sw", ENGINEER, "t1", "## Done\nNone", NOW)
+    document = mission_file.with_name("handoff.md")
+    listed = "## Read first\n- workspace:{task}/progress the notes of the session\n- recap:eng-1@sw the seat's recap"
+    document.write_text(V2.replace("## Read first\nNone", listed.format(task="t1")), encoding="utf-8")
+    acting(monkeypatch, MASTER)
+    assert run("sw", "expert", "start", str(mission_file), "--handoff", str(document)) == 0
+    capsys.readouterr()
+    assert indexed(store) == {"expert-1"}
+    document.write_text(V2.replace("## Read first\nNone", listed.format(task="t9")), encoding="utf-8")
+    assert run("sw", "expert", "start", str(mission_file), "--handoff", str(document)) == 1
+    assert "Read first entry 1: workspace:t9/progress does not resolve" in capsys.readouterr().err
+    assert indexed(store) == {"expert-1"}
 
 
 def test_a_session_named_without_a_handoff_document_is_refused(
