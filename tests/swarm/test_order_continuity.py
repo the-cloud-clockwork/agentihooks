@@ -11,7 +11,7 @@ from tests.swarm.test_order_check import ORDER, ledger_doc
 pytestmark = pytest.mark.unit
 
 SLUG = "sw"
-LINE = "phases/p1 Build: 1 open, 1 claimable, 0 claimed or in a pull request, 1 done"
+LINE = "phases/p1 Build: 1 unfinished, 1 claimable, 0 claimed or in a pull request, 1 done"
 HANDOFF = "# Handoff v2\n## Done\nNone\n## Stopped at\nNone\n## Next\nRead the orders.\n<!-- handoff complete -->\n"
 OPEN = "Operator orders open at the handoff. Build each before other work; only the operator's words clear one:"
 NONE = "Operator orders: none were open at the handoff."
@@ -123,7 +123,7 @@ def primed(found: dict[str, Any]) -> list[str]:
 @pytest.mark.feature("master-handoff-carries-orders")
 @pytest.mark.parametrize(
     ("orders", "said"),
-    [([LINE, "tasks/t9 Seats: 1 open"], [OPEN, LINE, "tasks/t9 Seats: 1 open"]), ([], [NONE]), ("unknown", [UNKNOWN])],
+    [([LINE, "tasks/t9 Seats"], [OPEN, LINE, "tasks/t9 Seats"]), ([], [NONE]), ("unknown", [UNKNOWN])],
 )
 def test_the_opening_prompt_lists_the_orders_of_the_envelope_before_the_document(
     orders: list[str] | str, said: list[str]
