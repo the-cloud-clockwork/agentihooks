@@ -48,6 +48,15 @@ def startup(
     cli = tools / "agentihooks"
     cli.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'if [[ "$*" == "ledger writer serve" ]]; then\n'
+        '  printf "%s|%s\\\\n" "${AGENTIHOOKS_SWARM_DATABASE_URL:-}" "$AGENTIHOOKS_HIVE_REDIS_URL" >> "$AGENTIHOOKS_HOME/writer-calls"\n'
+        '  exit "${WRITER_TEST_STATUS:-0}"\nfi\n'
+        'if [[ "$*" == "hive run" && -n "${WRITER_TEST_STATUS:-}" ]]; then\n'
+        "  for _ in {1..700}; do\n"
+        '    if [[ -f "$AGENTIHOOKS_HOME/writer-calls" ]] && (( $(wc -l < "$AGENTIHOOKS_HOME/writer-calls") >= 2 )); then exit 9; fi\n'
+        "    sleep 0.01\n"
+        "  done\n"
+        "  exit 8\nfi\n"
         'printf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
         'if [[ "$*" == "bundle unlink" ]]; then rm -f "$AGENTIHOOKS_HOME/linked-bundle"; fi\n'
         'if [[ "$1" == init ]]; then\n'
@@ -135,6 +144,21 @@ def startup(
         }
     result = subprocess.run(["bash", str(START)], env=env, capture_output=True, text=True)
     return result, log.read_text() if log.exists() else "", home, tmp_path / "repos/checkout"
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+@pytest.mark.parametrize("writer_status", ["0", "7"])
+def test_worker_restarts_the_writer_with_the_database_env_and_stops_with_the_hive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer_status: str
+) -> None:
+    monkeypatch.setenv("WRITER_TEST_STATUS", writer_status)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://writer.example.test/swarm")
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == 9, result.stderr
+    assert (home / "writer-calls").read_text().splitlines() == [
+        "postgresql://writer.example.test/swarm|redis://localhost:6379/15",
+        "postgresql://writer.example.test/swarm|redis://localhost:6379/15",
+    ]
 
 
 def test_a_container_restart_clears_the_previous_readiness_marker(tmp_path, monkeypatch):

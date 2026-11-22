@@ -1,5 +1,6 @@
 import subprocess
 from argparse import Namespace
+from pathlib import Path
 
 import pytest
 
@@ -144,6 +145,16 @@ def test_a_distributed_install_retires_every_engine_unit_it_finds(tmp_path, dist
         ["systemctl", "--user", "daemon-reload"],
         ["systemctl", "--user", "enable", "--now", "agentihooks-spoke.service"],
     ]
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_distributed_reconciliation_keeps_the_host_writer(tmp_path: Path, distributed: object) -> None:
+    writer = tmp_path / "agentihooks-ledger-writer.service"
+    writer.write_text("host writer")
+    calls = []
+    assert timer.ensure(BINARY, tmp_path, run=systemctl(calls))
+    assert writer.read_text() == "host writer"
+    assert not any("agentihooks-ledger-writer.service" in call for call in calls)
 
 
 def test_a_current_distributed_install_reloads_nothing_and_reports_the_spoke_enable(tmp_path, distributed):
