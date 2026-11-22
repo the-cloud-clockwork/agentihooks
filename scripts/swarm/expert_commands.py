@@ -6,9 +6,8 @@ lineage and no other, and it alone completes that lineage, on a mission proof th
 """
 
 import argparse
-import contextlib
 import json
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -17,21 +16,13 @@ from scripts.handoff import check
 from scripts.handoff import expert as handoff_expert
 from scripts.handoff.resolve import Resolver
 from scripts.handoff.transfers import now_ms
-from scripts.inbox import exits, outbox
-from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
-from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import clearance, expert_launch, expert_lineage, expert_mission, ledger_events
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm import clearance, expert_launch, expert_lineage, expert_mission, expert_seat, ledger_events
+from scripts.swarm.store import AgentRecord, SwarmError
 
 VACANT = "no expert yet"
+ORPHAN = "--from names the session a handoff document comes from; give the document with --handoff"
 ONLY = "only the expert that works a running lineage completes it, from its own session"
 REFUSED = "mission proof refused; fix what it names and run the command again:"
-NOTICE = (
-    "Expert lineage {id} completed its mission: {title}. Its mission proof was accepted; read it with "
-    "`agentihooks swarm {slug} expert proof {id}`."
-)
-NOTICED = "expert-proof"
-RECAPPED = ("Deliverables", "Validation", "Open items")
 SEATED = (
     "{name} works lineage {lineage}, which still runs: an expert leaves its seat by a handoff, "
     "`agentihooks swarm {slug} handoff <doc>`, or by a mission proof, `agentihooks swarm {slug} expert complete <proof>`"
@@ -45,6 +36,8 @@ def register(sub: Any) -> None:
     start = actions.add_parser("start")
     start.add_argument("mission")
     start.add_argument("--effort", default=expert_launch.DEFAULT_EFFORT)
+    start.add_argument("--handoff", default="")
+    start.add_argument("--from", dest="source", default="")
     start.set_defaults(handler=cmd_start)
     status = actions.add_parser("status")
     status.add_argument("lineage", nargs="?", default="")
@@ -71,12 +64,32 @@ def cmd_template(store: Any, args: argparse.Namespace) -> None:
 
 
 def cmd_start(store: Any, args: argparse.Namespace) -> None:
-    """Save the mission file and open a running lineage for it, for the master or the operator."""
+    """Save the mission file and open a running lineage for it, for the master or the operator. Given a handoff
+    document, the lineage starts from it: its first expert continues the session the document comes from."""
     store.config(args.slug)
     by = _starter(store, args.slug)
     path, text = _document(args.mission, "mission")
-    lineage = expert_lineage.start(store, args.slug, text, str(path), args.effort, by, now_ms())
+    handed = _start_handoff(store, args)
+    at = now_ms()
+    lineage = expert_lineage.start(store, args.slug, text, str(path), args.effort, by, at)
+    if handed:
+        author = AgentRecord(args.source or by, "", lineage.id, seat=lineage.seat)
+        expert_seat.keep_handoff(store, args.slug, lineage, author, handoff_expert.SEED, handed, at)
     print(json.dumps(asdict(lineage)))
+
+
+def _start_handoff(store: Any, args: argparse.Namespace) -> str:
+    """The Handoff v2 document a lineage is started from, empty when none is given; one that does not conform is
+    refused with its faults, and a session named without a document is refused."""
+    if not args.handoff:
+        if args.source:
+            raise SwarmError(ORPHAN)
+        return ""
+    _, text = _document(args.handoff, "handoff document")
+    found = check.problems(text, Resolver(args.slug, store.redis))
+    if found:
+        raise SwarmError(check.refusal(found))
+    return text
 
 
 def cmd_status(store: Any, args: argparse.Namespace) -> None:
@@ -112,6 +125,7 @@ def cmd_stop(store: Any, args: argparse.Namespace) -> None:
     """End a running lineage with a note, for the master or the operator."""
     store.config(args.slug)
     ended = expert_lineage.stop(store, args.slug, args.lineage, _starter(store, args.slug), args.note, now_ms())
+    store.clear_handoff(args.slug, ended.id)
     print(json.dumps(asdict(ended)))
 
 
@@ -139,24 +153,8 @@ def cmd_complete(store: Any, args: argparse.Namespace) -> None:
     at = now_ms()
     kept = expert_lineage.proof(store, args.slug, lineage.id) == text
     ended = lineage if kept else expert_lineage.complete(store, args.slug, lineage.id, agent.name, text, at)
-    _close(store, args.slug, agent, ended, text)
+    expert_seat.close(store, args.slug, ended, text)
     print(json.dumps(asdict(ended)))
-
-
-def _close(store: Any, slug: str, agent: Any, ended: expert_lineage.Lineage, text: str) -> None:
-    """Tell the master, keep the recap, settle the expert's mail and finish the expert, in that order. Each step can
-    run again: the notice is one inbox item under an id fixed by the lineage, the recap is kept once, and the expert
-    is finished last, so the command still finds it when a failure cut the steps short."""
-    inbox = InboxStore(store.redis)
-    notice = NOTICE.format(slug=slug, id=ended.id, title=ended.title)
-    with contextlib.suppress(DuplicateItem):
-        inbox.send(agent.name, seat_address(slug, MASTER), notice, item_id=outbox.stable_id(NOTICED, slug, ended.id))
-    recap = "\n\n".join(f"## {heading}\n{check.section(text, heading)}" for heading in RECAPPED)
-    kept: list[dict[str, Any]] = store.memory.recaps(agent.seat)
-    if not kept or kept[0]["text"] != recap:
-        store.memory.add_recap(agent.seat, agent.name, agent.task, recap, ended.ended_at)
-    exits.settle(inbox, agent.name, "", "completed its mission and left")  # pyright: ignore[reportUnknownMemberType]
-    store.put_agent(slug, replace(agent, state="finished"))
 
 
 def cmd_proof(store: Any, args: argparse.Namespace) -> None:

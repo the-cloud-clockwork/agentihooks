@@ -67,6 +67,7 @@ def test_the_operator_and_the_master_start_a_lineage_from_a_mission_file(
         "note": "",
     }
     assert expert_lineage.mission(store, "sw", expert_lineage.get(store, "sw", "expert-1")) == GOOD
+    assert store.handoff("sw", "expert-1") == "" and store.redis.hgetall(store.key("sw", "transfers")) == {}
 
 
 def test_start_takes_the_effort_the_operator_names_and_refuses_another(
@@ -290,6 +291,7 @@ def test_the_expert_verb_parses_each_action_to_its_handler() -> None:
     }
     assert (parsed["start"].mission, parsed["start"].effort) == ("mission.md", "max")
     assert parser.parse_args(["sw", "expert", "start", "mission.md"]).effort == "xhigh"
+    assert (parsed["start"].handoff, parsed["start"].source) == ("", "")
     assert (parsed["status"].lineage, parsed["status"].json) == ("expert-2", True)
     assert (parsed["stop"].lineage, parsed["stop"].note) == ("expert-2", "why")
     assert (parser.parse_args(["sw", "expert", "status"]).lineage, parsed["mission"].lineage) == ("", "expert-2")
