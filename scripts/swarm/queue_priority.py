@@ -7,8 +7,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from redis.exceptions import NoPermissionError
-
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import freeze, lab_control, merge_queue, queue_record, ready, staged_compatibility
 from scripts.swarm.store import RedisStore, SwarmError
@@ -218,6 +216,8 @@ def entitled(ledger: Any, slug: str, tasks: list[dict[str, Any]]) -> bool:
 def automatic(store: RedisStore, slug: str, url: str, ledger: Any) -> dict[str, Any] | None:
     """Move a pull request that just entered the merge queue ahead of the waiting entries when its task is urgent or
     focused, leaving the groups under test in place; None when no such task names it."""
+    from redis.exceptions import NoPermissionError
+
     tasks: list[dict[str, Any]] = ledger.tasks_targeting(slug, url)
     if not entitled(ledger, slug, tasks):
         return None
