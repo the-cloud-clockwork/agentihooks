@@ -30,6 +30,11 @@ def ledger_doc(tasks: list[dict[str, Any]], *records: dict[str, Any], **marks: A
     return {**doc(*records, tasks=tasks), "phases": phases(**marks)}
 
 
+def held_view(ledger: dict[str, Any]) -> dict[str, Any]:
+    """The ledger as a tick pass holds it: every part but its slices and plans."""
+    return {part: rows for part, rows in ledger.items() if part not in ("slices", "plans")}
+
+
 @pytest.mark.feature("swarm-orders-read")
 def test_an_ordered_phase_lists_every_task_under_it_with_its_verdict_and_counts() -> None:
     tasks = [
@@ -169,6 +174,56 @@ def test_each_task_under_an_order_reads_the_reason_the_claim_gate_holds_it() -> 
         "t3": "it waits on task t1",
     }
     assert fixed["claimable"] == 1
+
+
+@pytest.mark.feature("swarm-orders-read")
+def test_a_task_filed_under_a_slice_is_listed_on_a_read_that_carries_no_slices() -> None:
+    under = {"slice": "slices/a.first"}
+    tasks = [
+        task("t1", **under, state="pr"),
+        task("t2", **under),
+        task("t3"),
+        task("t4", **under, state="done"),
+        task("t9", phase="p2"),
+    ]
+    [row] = order_check.read(held_view(ledger_doc(tasks, p1=ORDER)), "")
+    assert [found["id"] for found in row["tasks"]] == ["t1", "t2", "t3"]
+    assert row["done"] == ["t4"]
+    assert row["line"] == "phases/p1 Build: 3 unfinished, 2 claimable, 1 claimed or in a pull request, 1 done"
+
+
+@pytest.mark.feature("swarm-orders-read")
+def test_one_ledger_reads_the_same_orders_with_and_without_its_slices() -> None:
+    under = {"slice": "slices/a.first"}
+    tasks = [
+        task("t1", **under, state="claimed", claimed_by="engineer@one"),
+        task("t2", **under, depends_on=["t9"]),
+        task("t3"),
+        task("t4", **under, state="done"),
+        task("t5", **under, out_of_scope=True),
+        task("t9", phase="p2"),
+    ]
+    whole = ledger_doc(tasks, p1=ORDER, p2={**ORDER, "at": 7})
+    found = order_check.read(whole, "")
+    assert order_check.read(held_view(whole), "") == found
+    assert [[task["id"] for task in row["tasks"]] for row in found] == [["t1", "t2", "t3"], ["t9"]]
+    assert [row["done"] for row in found] == [["t4"], []]
+
+
+@pytest.mark.feature("swarm-orders-read")
+def test_a_member_merged_into_a_lead_under_a_slice_is_listed_on_a_read_that_carries_no_slices() -> None:
+    tasks = [task("t1", slice="slices/a.first"), task("t7", phase="p2", merged_into="t1"), task("t8", phase="p2")]
+    whole = ledger_doc(tasks, p1=ORDER)
+    [row] = order_check.read(held_view(whole), "")
+    assert [found["id"] for found in row["tasks"]] == ["t1", "t7"]
+    assert order_check.read(whole, "") == [row]
+
+
+@pytest.mark.feature("swarm-orders-read")
+def test_a_whole_ledger_lists_a_task_under_the_phase_of_its_slice_whatever_phase_its_row_names() -> None:
+    tasks = [task("t6", phase="p2", slice="slices/a.first")]
+    found = order_check.read(ledger_doc(tasks, p1=ORDER, p2={**ORDER, "at": 7}), "")
+    assert [[task["id"] for task in row["tasks"]] for row in found] == [["t6"], []]
 
 
 def served(tmp_path: Path, tasks: list[dict[str, Any]], *records: dict[str, Any]) -> Any:

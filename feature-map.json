@@ -13137,7 +13137,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "One ledger API read, GET orders or agentihooks api get orders, lists every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first: the item, its title, who filed the order, when and on what proof, the ids of the done tasks under it, every task under it that is neither done nor out of scope with its lane, state and claim gate verdict, the claimable count, the count claimed or in a pull request, and one plain line. A done or out of scope order and a mark with no whole number time are left out. When the open orders pass the reply limit the read answers 413 and names the focus read that lists one order's tasks.",
+      "behaviour": "One ledger API read, GET orders or agentihooks api get orders, lists every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first: the item, its title, who filed the order, when and on what proof, the ids of the done tasks under it, every task under it that is neither done nor out of scope with its lane, state and claim gate verdict, the claimable count, the count claimed or in a pull request, and one plain line. A read that carries no slices, as the tick holds one, cannot climb from a task filed under a slice: there a task counts under an ordered phase when its row names that phase or when it is merged into a lead whose row names it, which lists the tasks the whole ledger lists, because the ledger refuses a task whose row names another phase than its slice. A done or out of scope order and a mark with no whole number time are left out. When the open orders pass the reply limit the read answers 413 and names the focus read that lists one order's tasks.",
       "seam": "scripts.swarm.health.order_check.read, scripts.swarm_ledger.api.routes.ledger_read at orders through the ledger swarm port, and ledger get orders",
       "tests": [
         "tests/swarm/test_order_check.py::test_an_ordered_phase_lists_every_task_under_it_with_its_verdict_and_counts",
@@ -13151,7 +13151,11 @@
         "tests/swarm_ledger/test_orders_api.py::test_the_orders_read_serves_every_open_order",
         "tests/swarm/test_order_check.py::test_an_orders_read_past_the_reply_limit_names_the_read_that_fits",
         "tests/swarm/test_order_check.py::test_the_orders_route_reads_with_the_fix_phase_of_its_own_swarm_and_revises_its_reply",
-        "tests/swarm/test_order_check.py::test_an_order_mark_that_names_no_author_and_no_proof_reads_with_an_empty_author"
+        "tests/swarm/test_order_check.py::test_an_order_mark_that_names_no_author_and_no_proof_reads_with_an_empty_author",
+        "tests/swarm/test_order_check.py::test_a_task_filed_under_a_slice_is_listed_on_a_read_that_carries_no_slices",
+        "tests/swarm/test_order_check.py::test_one_ledger_reads_the_same_orders_with_and_without_its_slices",
+        "tests/swarm/test_order_check.py::test_a_member_merged_into_a_lead_under_a_slice_is_listed_on_a_read_that_carries_no_slices",
+        "tests/swarm/test_order_check.py::test_a_whole_ledger_lists_a_task_under_the_phase_of_its_slice_whatever_phase_its_row_names"
       ]
     },
     {
@@ -13249,7 +13253,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "The slow lane tick step order waiting notes, every ten minutes, each open operator order whose unfinished tasks have nothing claimed or in a pull request and when it first saw that; an order with work in flight, with no unfinished task or done drops out. Past thirty minutes between its first sighting and the last one the order is an order waiting health finding naming the order, its unfinished and claimable counts and each distinct reason the claim gate holds its tasks, and the findings pass mails it to the master. Every figure is the last sighting's: at the step's cadence the finding comes with the sighting forty minutes after the first, a claim taken and released between two sightings is not seen, and a step that stops running is the step starvation finding's to report. A ledger with no order raises none.",
+      "behaviour": "The slow lane tick step order waiting notes, every ten minutes, each open operator order whose unfinished tasks have nothing claimed or in a pull request and when it first saw that; an order with work in flight, with no unfinished task or done drops out. The tasks of an order are those the orders read lists, so a task filed under a slice counts on the view the pass holds, which carries no slices. Past thirty minutes between its first sighting and the last one the order is an order waiting health finding naming the order, its unfinished and claimable counts and each distinct reason the claim gate holds its tasks, and the findings pass mails it to the master. Every figure is the last sighting's: at the step's cadence the finding comes with the sighting forty minutes after the first, a claim taken and released between two sightings is not seen, and a step that stops running is the step starvation finding's to report. A ledger with no order raises none.",
       "seam": "scripts.tick.steps.orders._order_waiting registered as tick step order waiting, scripts.swarm.health.order_waiting.observe and findings on a swarm store, and scripts.swarm.status.findings",
       "tests": [
         "tests/tick/steps/test_order_waiting.py::test_order_waiting",
@@ -13262,7 +13266,8 @@
         "tests/tick/steps/test_order_waiting.py::test_an_order_with_work_in_flight_or_a_shorter_wait_never_hides_one_that_waited_longer",
         "tests/tick/steps/test_order_waiting.py::test_the_order_is_read_with_the_doctor_fix_phase_of_its_swarm",
         "tests/tick/steps/test_order_waiting.py::test_the_step_notes_the_orders_of_the_pass_state",
-        "tests/tick/steps/test_order_waiting.py::test_the_finding_is_in_the_swarm_status_findings_and_goes_to_the_master_inbox"
+        "tests/tick/steps/test_order_waiting.py::test_the_finding_is_in_the_swarm_status_findings_and_goes_to_the_master_inbox",
+        "tests/tick/steps/test_order_waiting.py::test_a_view_without_slices_counts_every_task_filed_under_a_slice"
       ]
     },
     {
