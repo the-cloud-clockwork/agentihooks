@@ -32,7 +32,7 @@ def open_order(name: str, row: dict[str, Any], at: int, seen: focus_check.View) 
         **{key: mark[key] for key in PROOFS if key in mark},
         "claimable": sum(task["verdict"] == focus_check.CLAIMABLE for task in tasks),
         "busy": sum(task["state"] in focus_check.BUSY for task in tasks),
-        "done": found["done"],
+        "done": [task["id"] for task in focus_check.under(item, seen) if orders.done(task)],
         "tasks": tasks,
     }
     return {**entry, "line": line(entry)}

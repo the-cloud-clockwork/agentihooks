@@ -119,10 +119,8 @@ def orders_read(services: Services, slug: str) -> dict[str, Any]:
     """Every open operator order with the claim gate verdict on each unfinished task under it."""
     state = services.repository.current(slug).state
     found: list[dict[str, Any]] = ports.swarm().order_check.read(state, fix_phase(services, slug))
-    reply: dict[str, Any] = {"data": found, "revision": resources.revision(found), "next_cursor": None}  # pyright: ignore[reportUnknownMemberType]
-    if resources.reply_size(reply) > resources.MAX_REPLY:
-        raise APIError(413, "resource_too_large", ORDERS_TOO_LARGE)
-    return reply  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    reply = {"data": found, "revision": resources.revision(found), "next_cursor": None}
+    return resources.bounded(reply, ORDERS_TOO_LARGE)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def fix_phase(services: Services, slug: str) -> str:
