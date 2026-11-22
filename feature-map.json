@@ -8344,6 +8344,16 @@
       ]
     },
     {
+      "id": "type-gate-cpu-workers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-gate-workers-cpu",
+      "behaviour": "The type gate sizes its checker pool from process allowed CPUs minus one minute load, bounded to one through four workers. AGENTIHOOKS_TYPE_WORKERS overrides that selection within the same bounds.",
+      "seam": "scripts.type_gate.measure through the checker executor worker count",
+      "tests": [
+        "tests/test_type_gate_workers.py::test_measure_sizes_workers_from_allowed_cpus_and_load"
+      ]
+    },
+    {
       "id": "type-gate-repeatable-counts",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-strict-type-gate-flake",
