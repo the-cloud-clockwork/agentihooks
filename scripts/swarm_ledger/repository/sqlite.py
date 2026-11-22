@@ -541,21 +541,32 @@ class SQLiteLedgerRepository:
             if cached is not None and cached.generation >= row[0]:
                 return cached
             if cached is None and self.copies is not None:
-                cached = self.copies.adopt(slug, row[0])
-            state, writer = self._refreshed(connection, slug, cached, row[0])
+                with request_metrics.step("copy_adopt"):
+                    cached = self.copies.adopt(slug, row[0])
+            with request_metrics.step("copy_refresh"):
+                state, writer = self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
-                state = load(connection, slug)
-            if "events" in state["_meta"]:
-                state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
-            fragments = document(state, None if whole else cached.fragments)
-            entry = Entry(row[0], None, fragments.value, fragments, writer)
-            self._remember(slug, entry)
-            if self.copies is not None:
-                self.copies.keep(slug, entry, whole)
+                with request_metrics.step("copy_load"):
+                    state = load(connection, slug)
+            with request_metrics.step("copy_document"):
+                if "events" in state["_meta"]:
+                    state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
+                fragments = document(state, None if whole else cached.fragments)
+                entry = Entry(row[0], None, fragments.value, fragments, writer)
+                self._remember(slug, entry)
+                self._keep(connection, slug, entry, whole)
         if whole:
             heap.release()
         return entry
+
+    def _keep(self, connection: sqlite3.Connection, slug: str, entry: Entry, whole: bool) -> None:
+        if self.copies is not None:
+            self.copies.keep(slug, entry, whole)
+
+    def _drop(self, connection: sqlite3.Connection, slug: str) -> None:
+        if self.copies is not None:
+            self.copies.drop(slug)
 
     def _refreshed(self, connection, slug: str, cached: Entry | None, generation: int) -> tuple:
         if cached is None:
@@ -718,7 +729,13 @@ class SQLiteLedgerRepository:
             return row[0], meta, read_partial(connection, slug, (["tasks"],)).get("tasks") or []
 
     def apply_ops(
-        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
+        self,
+        slug: str,
+        changes: list | None = None,
+        ops: list | None = None,
+        gate: Any = None,
+        *,
+        copy_state: bool = True,
     ) -> tuple[dict, list]:
         from . import mutation
 
@@ -726,10 +743,11 @@ class SQLiteLedgerRepository:
         with request_metrics.locked(self.domain.LOCK.ledger(slug)), self.connect() as connection:
             with connection:
                 request_metrics.begin_ledger(connection, slug, BEGIN_IMMEDIATE)
-                entry = self._entry(connection, slug)
-                state = entry.for_write()
-                rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
-                written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
+                with request_metrics.step("apply_locked"):
+                    entry = self._entry(connection, slug)
+                    state = entry.for_write()
+                    rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
+                    written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
             artifact_files.drop(slug, ctx.unstored)
             media_files.drop(slug, ctx.unstored)
             self._remember(slug, written)
@@ -867,8 +885,7 @@ class SQLiteLedgerRepository:
         for table in (*PER_LEDGER, artifact_files.TABLE, media_files.TABLE):
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
-        if self.copies is not None:
-            self.copies.drop(slug)
+        self._drop(connection, slug)
 
     def registry(self, name: str, connection) -> dict:
         return {key: json.loads(value) for key, value in connection.execute(REGISTRY, (name,))}

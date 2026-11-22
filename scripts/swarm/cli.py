@@ -72,6 +72,7 @@ from scripts.swarm import (
     dispatch_seat,
     doc_report,
     done_gate,
+    enhance_review,
     failed_panes,
     git_https,
     hive_release,
@@ -91,6 +92,7 @@ from scripts.swarm import (
     phase_planning,
     phase_state,
     phases,
+    plan_cap_floor,
     plan_review,
     prerequisite_wait,
     priming_trace,
@@ -1039,6 +1041,7 @@ def cmd_start(store: RedisStore, args: argparse.Namespace) -> None:
     print(shape["summary"], flush=True)
     if shape["warning"]:
         print(f"warning: {shape['warning']}", file=sys.stderr, flush=True)
+    plan_cap_floor.restore(store, args.slug)
     _state(store, args, "running")
     seat_crons.on_start(store, args.slug)
     print(ledger_link.page_line(args.slug))
@@ -1380,7 +1383,7 @@ def _manual_count_step(counts):
     return {"masters_step": 0} if counts else {}
 
 
-def cmd_set(store, args):
+def cmd_set(store: RedisStore, args: argparse.Namespace) -> None:
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     counts, pairs = _split_master_pairs(args.pairs, "masters", masters.count_of)
     changes.update(_manual_count_step(counts))
@@ -1427,7 +1430,8 @@ def cmd_set(store, args):
             )
         changes[SETTABLE[key]] = int(value)
     changes = _engine_origin(store.config(args.slug), changes)
-    config = store.update(args.slug, **{**changes, **_pinned(changes)})
+    restored = plan_cap_floor.restored(store.config(args.slug), changes)
+    config = store.update(args.slug, **{**changes, **_pinned(changes), **restored})
     _store_master_counts(store, args.slug, counts, hives)
     _store_master_rules(store, args.slug, rules)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
@@ -2223,8 +2227,10 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
     if refused:
         raise SwarmError(refused)
     _feature_gate(store, args.slug, agent, proven, pull)
+    closing = enhance_review.close(args.slug, row, store.config(args.slug).autonomy)
     fields = {**done_gate.DONE, **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    enhance_review.settle(ledger, InboxStore(store.redis), args.slug, agent.name, closing)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
@@ -2443,9 +2449,9 @@ def cmd_progress(store, args):
     print(json.dumps({"agent": agent.name, "task": agent.task, "progress": line}))
 
 
-def cmd_plan(store, args):
+def cmd_plan(store: RedisStore, args: argparse.Namespace) -> None:
     agent, autonomy = _me(store, args), store.config(args.slug).autonomy
-    decision = plan_review.Decision(args.action, args.note, args.override)
+    decision = plan_review.Decision(args.action, args.note, args.override, args.task)
     result = plan_review.decide(LedgerClient(), args.slug, agent, autonomy, args.phase, decision)
     print(json.dumps(result))
 
@@ -2842,7 +2848,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan = sub.add_parser("plan").add_subparsers(dest="action", required=True)
     for action in plan_review.DECISIONS:
         decision = plan.add_parser(action)
-        decision.add_argument("phase")
+        decision.add_argument("phase", nargs="?")
+        decision.add_argument("--task")
         decision.add_argument("--note", required=action == "send-back")
         if action == "approve":
             decision.add_argument("--override", default="")
