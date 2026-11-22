@@ -88,6 +88,8 @@ class Pass:
     tracked: set[str] = field(default_factory=set[str], compare=False)
     handoff: ThreadPoolExecutor | None = field(default=None, compare=False)
     placer: ThreadPoolExecutor = field(default_factory=_placer, compare=False)
+    slow_origin: float = 0.0
+    slow_budgets: dict[str, float] | None = field(default=None, compare=False)
 
     def executor(self, name: str, placing: bool) -> ThreadPoolExecutor:
         """Return the workers step ``name`` runs on: the pass's one placement worker when it is ``placing`` under the
@@ -209,12 +211,21 @@ class _Beat:
         self.fire()
 
 
+def budget_slow(current: Pass, budgets: Mapping[str, float]) -> None:
+    scheduled = current.slow_budgets
+    if scheduled is None:
+        return
+    with current.guard:
+        scheduled.update(budgets)
+        current.slow.expires_at = max(current.slow.expires_at, current.slow_origin + sum(scheduled.values()))
+
+
 @contextmanager
 def running(
     mode: str = PARALLEL,
     workers: int = WORKERS,
     critical_s: float = CRITICAL_S,
-    slow_s: float = SLOW_S,
+    slow_s: float | None = None,
     heartbeat: Callable[[], object] | None = None,
     closing_s: float = CLOSING_S,
     reserves: Mapping[str, float] | None = None,
@@ -225,7 +236,8 @@ def running(
         raise ValueError(f"tick mode must be one of {PARALLEL}, {SEQUENTIAL}")
     if workers < 1:
         raise ValueError("a pass needs at least one worker")
-    lanes = (Deadline.after(critical_s), Deadline.after(slow_s))
+    lanes = (Deadline.after(critical_s), Deadline.after(SLOW_S if slow_s is None else slow_s))
+    slow_join = Deadline(lanes[1].expires_at, lanes[1].clock)
     current = Pass(
         mode,
         workers,
@@ -236,6 +248,8 @@ def running(
         closing_s,
         reserved(critical_s) if reserves is None else reserves,
         handoff=_handoff(workers),
+        slow_origin=slow_join.expires_at - SLOW_S,
+        slow_budgets={} if slow_s is None else None,
     )
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None
@@ -244,7 +258,7 @@ def running(
     finally:
         closing = current.closer[0].remaining if current.closer else 0.0
         for thread in current.later:
-            thread.join(max(current.slow.remaining, closing) + LATER_GRACE_S)
+            thread.join(max(slow_join.remaining, closing) + LATER_GRACE_S)
         current.steps.shutdown(wait=False, cancel_futures=True)
         if current.handoff is not None:
             current.handoff.shutdown(wait=False, cancel_futures=True)
