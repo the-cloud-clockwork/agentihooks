@@ -1,9 +1,11 @@
 from types import SimpleNamespace
+from typing import cast
 
 import fakeredis
 import pytest
 
 from scripts.events import memory
+from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.hub import registry, wait_ends
@@ -116,7 +118,7 @@ def test_a_duplicate_event_sends_no_second_item(rig: SimpleNamespace) -> None:
 
 @pytest.mark.feature("wait-ends-on-pull-event")
 def test_the_hub_registry_wires_one_singleton_wait_end_reactor_per_pull_subject() -> None:
-    bus = memory.open_bus(BusConfig())
+    bus = cast(Bus, memory.open_bus(BusConfig()))
     found = {reactor.subject: reactor for reactor in registry.configured(bus) if reactor.name.startswith("wait-ends-")}
     assert sorted(found) == [
         "swarm.*.checks.completed",
