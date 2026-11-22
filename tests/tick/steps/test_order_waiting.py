@@ -70,7 +70,7 @@ def test_an_order_with_open_tasks_and_nothing_in_flight_past_thirty_minutes_is_a
         "thirty minutes",
     )
     assert found.summary == (
-        "operator order phases/p1 Build: 4 open, 1 claimable, none claimed or in a pull request for 31 minutes"
+        "operator order phases/p1 Build: 4 unfinished, 1 claimable, none claimed or in a pull request for 31 minutes"
     )
     assert found.evidence == ("it waits on task t9", "the freeze on task t4 holds it")
     assert found.evidence_identity == (START,)
@@ -80,7 +80,7 @@ def test_an_order_with_open_tasks_and_nothing_in_flight_past_thirty_minutes_is_a
 def test_an_order_whose_open_tasks_are_all_claimable_says_nobody_claimed_one(store: Any) -> None:
     [found] = watched(store, ledger_doc([task("t1"), task("t2")], p1=ORDER), 45)
     assert found.summary == (
-        "operator order phases/p1 Build: 2 open, 2 claimable, none claimed or in a pull request for 45 minutes"
+        "operator order phases/p1 Build: 2 unfinished, 2 claimable, none claimed or in a pull request for 45 minutes"
     )
     assert found.evidence == (UNCLAIMED,)
 
@@ -106,6 +106,7 @@ def test_work_in_flight_under_an_order_drops_it_and_the_wait_starts_again(store:
 @pytest.mark.feature("swarm-order-waiting-finding")
 def test_an_order_with_no_open_task_a_done_order_and_a_ledger_without_orders_raise_none(store: Any) -> None:
     assert watched(store, ledger_doc([task("t5", state="done")], p1=ORDER), 90) == []
+    assert watched(store, ledger_doc([task("t2", out_of_scope=True)], p1=ORDER), 90) == []
     assert watched(store, ledger_doc([task("t1", state="done", ordered=ORDER)]), 90) == []
     assert watched(store, ledger_doc([task("t1")]), 90) == []
 
@@ -117,7 +118,7 @@ def test_each_pass_stores_its_time_and_keeps_the_time_an_order_was_first_seen_wa
     ledger = ledger_doc([task("t1"), task("t2", depends_on=["t9"]), task("t9", phase="p2")], p1=ORDER)
     order_waiting.observe(store, SLUG, ledger, START)
     noted = order_waiting.observe(store, SLUG, ledger, START + MINUTE)
-    waiting = {"since": START, "title": "Build", "open": 2, "claimable": 1, "held": ["it waits on task t9"]}
+    waiting = {"since": START, "title": "Build", "unfinished": 2, "claimable": 1, "held": ["it waits on task t9"]}
     assert noted == {"phases/p1": waiting}
     assert order_waiting.read(store, SLUG) == {"at": START + MINUTE, "orders": {"phases/p1": waiting}}
     assert store.redis.get(store.key(SLUG, "order-waiting")) is not None
@@ -130,11 +131,11 @@ def test_an_ordered_task_and_an_ordered_phase_are_each_one_finding(store: Any) -
     assert [(one.subject, one.summary) for one in found] == [
         (
             "phases/p1",
-            "operator order phases/p1 Build: 1 open, 1 claimable, none claimed or in a pull request for 40 minutes",
+            "operator order phases/p1 Build: 1 unfinished, 1 claimable, none claimed or in a pull request for 40 minutes",
         ),
         (
             "tasks/t7",
-            "operator order tasks/t7 Rooms: 1 open, 1 claimable, none claimed or in a pull request for 40 minutes",
+            "operator order tasks/t7 Rooms: 1 unfinished, 1 claimable, none claimed or in a pull request for 40 minutes",
         ),
     ]
 

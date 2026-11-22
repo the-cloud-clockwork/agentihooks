@@ -12642,7 +12642,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "The slow lane tick step order waiting notes, every ten minutes, each open operator order whose open tasks have nothing claimed or in a pull request and when it first saw that; an order with work in flight, with no open task or done drops out. Past thirty minutes the order is an order waiting health finding naming the order, its open and claimable counts and each distinct reason the claim gate holds its tasks, and the findings pass mails it to the master. A ledger with no order raises none.",
+      "behaviour": "The slow lane tick step order waiting notes, every ten minutes, each open operator order whose unfinished tasks have nothing claimed or in a pull request and when it first saw that; an order with work in flight, with no unfinished task or done drops out. Past thirty minutes the order is an order waiting health finding naming the order, its unfinished and claimable counts and each distinct reason the claim gate holds its tasks, and the findings pass mails it to the master. A ledger with no order raises none.",
       "seam": "scripts.tick.steps.orders._order_waiting registered as tick step order waiting, scripts.swarm.health.order_waiting.observe and findings on a swarm store, and scripts.swarm.status.findings",
       "tests": [
         "tests/tick/steps/test_order_waiting.py::test_order_waiting",
