@@ -51,7 +51,8 @@ CHECKED = PROOF.evidenced[1:]
 DELIVERABLE = re.compile(r"D(\d+)\b")
 PULL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 REFERENCE = re.compile(
-    r"(?:https?://)?(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:pull|issues)/\d+|(?:[\w.-]+/[\w.-]+)?#\d+\b",
+    r"(?:https?://)?(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:pull|issues)/\d+"
+    r"|(?:(?<![\w.-])[\w.-]{1,39}/[\w.-]{1,100})?#\d+\b",
     re.IGNORECASE,
 )
 UNREAD = (
