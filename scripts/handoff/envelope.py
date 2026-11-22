@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import effort_range, publish, snapshot
+from scripts.swarm import effort_range, freeze, publish, snapshot
+from scripts.swarm.health import order_check
 from scripts.swarm.ledger_events import RED
 from scripts.swarm.naming import plain
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
@@ -58,19 +59,22 @@ def build(store, slug, agent, reason, rows, at, run=subprocess.run):
     }
 
 
+def orders_unread(built: dict[str, Any], agent: AgentRecord) -> dict[str, Any]:
+    """A master's envelope naming its open operator orders unknown, for a handoff that reads no ledger; any other
+    lane's envelope as it is."""
+    return {**built, "orders": UNKNOWN} if agent.lane == MASTER else built
+
+
 def with_orders(built: dict[str, Any], store: RedisStore, ledger: Any, agent: AgentRecord) -> dict[str, Any]:
     """A master's envelope with one plain line per open operator order, unknown when the ledger could not be read;
     any other lane's envelope as it is."""
     if agent.lane != MASTER:
         return built
-    from scripts.swarm import freeze
-    from scripts.swarm.health import order_check
-
     slug: str = built["ledger"]
     try:
         found = order_check.read(ledger.state(slug), freeze.fix_phase(store.config(slug)))
     except SwarmError:
-        return {**built, "orders": UNKNOWN}
+        return orders_unread(built, agent)
     return {**built, "orders": [entry["line"] for entry in found]}
 
 

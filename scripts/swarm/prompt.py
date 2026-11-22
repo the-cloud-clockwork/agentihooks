@@ -68,7 +68,7 @@ OLDER_RECAPS = 3
 ORDERS_OPEN = "Operator orders open at the handoff. Build each before other work; only the operator's words clear one:"
 ORDERS_NONE = "Operator orders: none were open at the handoff."
 ORDERS_UNKNOWN = (
-    "Operator orders: unknown, the ledger could not be read at the handoff. "
+    "Operator orders: unknown, the ledger was not read at the handoff. "
     "Run agentihooks api --slug {slug} get orders first."
 )
 CARRIED = "hive_opening"
@@ -454,7 +454,7 @@ def order_lines(envelope: dict[str, Any]) -> list[str]:
         return []
     orders: list[str] | str = envelope["orders"]
     if isinstance(orders, str):
-        return [ORDERS_UNKNOWN.format(slug=envelope.get("ledger", "<slug>"))]
+        return [ORDERS_UNKNOWN.format(slug=envelope["ledger"])]
     return [ORDERS_OPEN, *orders] if orders else [ORDERS_NONE]
 
 

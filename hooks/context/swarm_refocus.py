@@ -52,7 +52,8 @@ def _master_block(ledger: dict, cap: int) -> str:
 
 
 def _phases(ledger: dict[str, Any]) -> str:
-    """The open phases: those under an operator order first, oldest order first, by id and title, then the rest."""
+    """The open phases: those an operator order stands on first, oldest order first, by id and title, then the
+    rest."""
     from scripts.swarm import orders
 
     ordered: list[tuple[int, str]] = []
@@ -60,7 +61,7 @@ def _phases(ledger: dict[str, Any]) -> str:
     for phase in ledger.get("phases", []):
         if phase.get("done"):
             continue
-        at = orders.marked(phase)
+        at = None if orders.closed(phase) else orders.marked(phase)
         if at is None:
             rest.append(f"{phase.get('title', '')}: {phase.get('description', '')}")
         else:

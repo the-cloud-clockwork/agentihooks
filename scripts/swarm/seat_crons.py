@@ -128,9 +128,9 @@ def _drop(on: Scheduler, views: list[dict[str, Any]]) -> None:
 
 
 def ensure(on: Scheduler, config: SwarmConfig, home: Path) -> None:
-    """Keep each seat cron the swarm wants on the scheduler: the first live cron aimed at the front door seat on its
-    schedule is adopted, unless the code owns it and its text is no longer the code's, the rest are cancelled, a
-    missing one is added and an unwanted one is cancelled. A stopping or stopped swarm wants none."""
+    """Keep each seat cron the swarm wants on the scheduler: on its schedule the first live cron a master made by
+    hand is adopted, else the first the code owns whose text is still the code's; the rest are cancelled, a missing
+    one is added and an unwanted one is cancelled. A stopping or stopped swarm wants none."""
     where = place(config, home)
     seat = front_door.seat(config.slug)
     with held(on.state, on.name(LOCK), WAIT_S):
@@ -143,7 +143,9 @@ def ensure(on: Scheduler, config: SwarmConfig, home: Path) -> None:
             text = cron.prompt.format(
                 slug=where.slug, folder=where.sheet.parent, sheet=where.sheet, email=where.email.parent
             )
-            adopted = next((view for view in found if view["owner"] != OWNER or view["payload"] == text), None)
+            by_hand = [view for view in found if view["owner"] != OWNER]
+            current = [view for view in found if view["owner"] == OWNER and view["payload"] == text]
+            adopted = next(iter(by_hand + current), None)
             _drop(on, [view for view in found if view is not adopted])
             if adopted is None:
                 slot = InboxSlot(seat)
