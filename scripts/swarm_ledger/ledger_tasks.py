@@ -104,6 +104,10 @@ URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
 PARENT_FIELDS = {"slice", "phase", "plan_slice", "plan_lines"}
 WORKER_LANES = ("eng", "ci")
+EXPERT_LANE = "expert"
+INSIDE = (
+    "an expert works one mission to its end: do the work inside the mission or ask the master with agentihooks msg send"
+)
 SWARM = "swarm"
 RANK_AUTHORS = ("operator", SWARM, "dispatcher")
 RANK_LANES = ("master", "dispatch")
@@ -516,10 +520,19 @@ def _add(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     return True
 
 
-def add_refusal(tasks, op, appended):
+def expert_refusal(by: str, cannot: str) -> str:
+    """Why the ledger refuses an expert that act, empty for anyone else."""
+    lane_of = ports.swarm().naming.lane_of
+
+    return f"{by} {cannot}: {INSIDE}" if lane_of(by) == EXPERT_LANE else ""
+
+
+def add_refusal(tasks: list[dict[str, Any]], op: dict[str, Any], appended: Any) -> str:
     lane_of = ports.swarm().naming.lane_of
 
     by, lane = op["by"], lane_of(op["by"])
+    if refused := expert_refusal(by, "cannot add tasks"):
+        return refused
     if lane in WORKER_LANES:
         return f"{by} works in the {lane} lane and cannot add tasks: {PROPOSE}"
     if lane != "plan":
@@ -570,6 +583,8 @@ def rank_refusal(by, field="rank"):
 
 
 def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
+    if refused := expert_refusal(op["by"], "changes no task"):
+        return refused
     if (
         meta is not None
         and op["item"].split("/")[1] in meta.get("outcomes", {})

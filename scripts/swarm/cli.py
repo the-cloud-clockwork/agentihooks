@@ -72,6 +72,7 @@ from scripts.swarm import (
     dispatch_seat,
     doc_report,
     done_gate,
+    expert_launch,
     failed_panes,
     git_https,
     hive_release,
@@ -1942,10 +1943,12 @@ def _me(store, args):
     return agent
 
 
-def _worker(store, args):
-    agent = _me(store, args)
+def _worker(store: RedisStore, args: argparse.Namespace) -> AgentRecord:
+    agent: AgentRecord = _me(store, args)
     if agent.lane == MASTER:
         raise SwarmError(f"{agent.name} is the swarm master; the master works no task")
+    if agent.lane == expert_launch.LANE:
+        raise SwarmError(f"{agent.name} is an expert; an expert works its mission and claims no task")
     return agent
 
 
@@ -2169,7 +2172,8 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
         master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
         stalled = master_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
         hotfix = hotfix or stalled is not None
-        agent = _worker(store, args) if args.action != "state" and not hotfix else None
+        tasked = args.action != "state" and not hotfix and _me(store, args).lane != expert_launch.LANE
+        agent = _worker(store, args) if tasked else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
             _require_target(store, args, agent)
@@ -2178,7 +2182,8 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
                 args.action,
                 args.url,
                 admit=lambda head: (
-                    (not hotfix and _queue_intent(store, args, agent, head)) or queue_exit.require_fresh(args.url, head)
+                    (agent is not None and _queue_intent(store, args, agent, head))
+                    or queue_exit.require_fresh(args.url, head)
                 ),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
