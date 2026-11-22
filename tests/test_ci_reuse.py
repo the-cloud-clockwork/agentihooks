@@ -307,6 +307,36 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
 
 
+@pytest.mark.feature("ci-reuse-templates-install-pinned-tools")
+def test_the_rendered_reuse_and_provenance_installs_run_their_template_lines() -> None:
+    from scripts import ci_reuse
+
+    workflow = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())
+    for rendered, template, name in (
+        (workflow["jobs"]["reuse"]["steps"], ci_reuse.reuse_job()["steps"], "Install metadata dependencies"),
+        (workflow["jobs"]["select"]["steps"], ci_reuse.duration_provenance_steps(), "Install provenance dependencies"),
+    ):
+        [step] = [step for step in rendered if step.get("name") == name]
+        [canonical] = [step for step in template if step.get("name") == name]
+        assert step["run"] == canonical["run"]
+
+
+@pytest.mark.feature("ci-reuse-templates-install-pinned-tools")
+def test_the_reuse_and_provenance_templates_install_pyyaml_at_the_parser_pin() -> None:
+    from scripts import ci_reuse
+
+    pinned = "-m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3"
+    [reuse] = [step for step in ci_reuse.reuse_job()["steps"] if step.get("name") == "Install metadata dependencies"]
+    [provenance] = [
+        step for step in ci_reuse.duration_provenance_steps() if step.get("name") == "Install provenance dependencies"
+    ]
+    assert reuse["run"] == f"python {pinned}"
+    assert provenance["run"].splitlines() == [
+        'python -m venv "$RUNNER_TEMP/provenance-python"',
+        f'"$RUNNER_TEMP/provenance-python/bin/python" -I {pinned}',
+    ]
+
+
 @pytest.mark.parametrize("reuse_repo", ["dynamic"], indirect=True)
 def test_a_full_pass_with_dynamic_mutation_shards_reuses(full_source, tmp_path):
     root, base, _, queue, env, _, _ = full_source
