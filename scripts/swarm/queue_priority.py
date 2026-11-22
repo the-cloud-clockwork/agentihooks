@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from redis.exceptions import NoPermissionError
+
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import freeze, lab_control, merge_queue, queue_record, ready, staged_compatibility
 from scripts.swarm.store import RedisStore, SwarmError
@@ -221,7 +223,7 @@ def automatic(store: RedisStore, slug: str, url: str, ledger: Any) -> dict[str, 
         return None
     try:
         return apply(store, slug, url, "swarm", tasks, queue_record.Journal(url))
-    except SwarmError as exc:
+    except (SwarmError, NoPermissionError) as exc:
         return {"url": url, "errors": [str(exc)]}
 
 

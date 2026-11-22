@@ -74,7 +74,7 @@ def test_a_member_can_drop_task_lifts_from_either_worker_version(redis_lib):
     assert admin.hget(drops, "t1") == "100.000005"
 
 
-def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patterns():
+def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patterns() -> None:
     calls = []
 
     class Recorder:
@@ -124,6 +124,9 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:checks:*",
                     f"~{ROOT}:swarm:*:merge-stall",
                     f"~{ROOT}:swarm:*:merge-stall-notice",
+                    f"~{ROOT}:swarm:*:queue-priority-active",
+                    f"~{ROOT}:swarm:*:queue-priority-displaced",
+                    f"~{ROOT}:swarm:*:merge-priority-order",
                     f"~{ROOT}:swarm:*:hive-placement-waits",
                     f"~{ROOT}:swarm:*:dev-red",
                     f"~{ROOT}:swarm:*:prerequisite-waits",
