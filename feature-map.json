@@ -12687,7 +12687,7 @@
         "tests/swarm/test_expert_recovery.py::test_an_expert_whose_lineage_ended_is_not_resumed",
         "tests/swarm/test_expert_recovery.py::test_an_expert_that_keeps_ending_gets_no_task_folder_handoff_and_its_successor_a_recovery_handoff",
         "tests/swarm/test_expert_recovery.py::test_the_mail_of_an_expert_dropped_while_its_lineage_runs_goes_on_with_its_seat",
-        "tests/swarm/test_expert_recovery.py::test_stopping_a_lineage_sends_the_mail_waiting_on_its_seat_back_to_the_master",
+        "tests/swarm/test_expert_commands.py::test_stopping_a_lineage_sends_the_mail_waiting_on_its_seat_back_to_the_master",
         "tests/swarm/test_expert_recovery.py::test_a_completed_lineage_sends_the_mail_waiting_on_its_seat_back_to_the_master",
         "tests/swarm/test_expert_recovery.py::test_a_restored_expert_is_told_to_read_its_mission_and_its_seat_recap"
       ],

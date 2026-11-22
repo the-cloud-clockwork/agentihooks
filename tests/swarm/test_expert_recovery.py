@@ -14,7 +14,7 @@ from scripts.swarm import dead_resume, expert_lineage, expert_seat, resume
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import AgentRecord, RedisStore
 from tests.handoff.test_mission_proof import VALID as PROOF
-from tests.swarm.expert_fixture import ENGINEER, MASTER, acting, run, started, store
+from tests.swarm.expert_fixture import ENGINEER, MASTER, started, store
 from tests.swarm.test_dead_resume import ResumingRuntime
 from tests.swarm.test_tick import tasks
 
@@ -193,20 +193,6 @@ def test_the_mail_of_an_expert_dropped_after_its_lineage_was_stopped_is_closed(
 
 
 @pytest.mark.feature("expert-seat-recovery")
-def test_stopping_a_lineage_sends_the_mail_waiting_on_its_seat_back_to_the_master(
-    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    lineage = started(store)
-    inbox = InboxStore(store.redis)
-    waiting = inbox.send(ENGINEER, lineage.seat, "Read the new evidence")
-    acting(monkeypatch, MASTER)
-    assert run("sw", "expert", "stop", "expert-1", "--note", "the order changed") == 0
-    capsys.readouterr()
-    moved = inbox.get(waiting.id)
-    assert (moved.state, moved.address, moved.reason) == ("pending", "master@sw", RETURNED.format(state="stopped"))
-
-
-@pytest.mark.feature("expert-seat-recovery")
 def test_a_completed_lineage_sends_the_mail_waiting_on_its_seat_back_to_the_master(
     store: RedisStore, runtime: Any
 ) -> None:
@@ -218,6 +204,7 @@ def test_a_completed_lineage_sends_the_mail_waiting_on_its_seat_back_to_the_mast
     expert_seat.close(store, "sw", ended, PROOF)
     moved = inbox.get(waiting.id)
     assert (moved.state, moved.address, moved.reason) == ("pending", "master@sw", RETURNED.format(state="complete"))
+    assert inbox.history(waiting.id)[-1]["by"] == "swarm"
 
 
 def test_the_seat_pass_sends_mail_that_reached_a_stopped_seat_back_when_it_ends_the_expert(
