@@ -7,7 +7,7 @@ from typing import Any
 
 from scripts.events.bus import Bus, StateConflict
 from scripts.events.envelope import Envelope
-from scripts.hive import execution_events, presence
+from scripts.hive import execution_events, master_notice, presence
 from scripts.hub import lease
 from scripts.hub.reconciler import event_slugs
 from scripts.hub.registry import Reactor
@@ -65,10 +65,10 @@ class HiveLoss:
                 break
             lost = self._judged(swarm, now) and presence.lost(self._bus.for_swarm(swarm), hive, now)
             if lost or prune:
-                settled, ended = self._settle(starts, lost, now)
+                settled, exits = self._settle(starts, lost, now)
                 done += settled
-                if ended:
-                    losses.append(f"hub: hive {hive} of swarm {swarm} lost; exited {', '.join(ended)}")
+                if exits:
+                    losses.append((swarm, hive, exits))
         else:
             if prune:
                 self._pruned = now
@@ -81,8 +81,8 @@ class HiveLoss:
                 return bool(found)
 
             self._edit(drop)
-            for line in losses:
-                print(line, file=sys.stderr)
+            for swarm, hive, exits in losses:
+                self._report(swarm, hive, exits)
 
     def _observe(self, now: int, watching: bool) -> None:
         """Record since when each swarm has been on the events engine, keeping the last record when the store fails."""
@@ -103,8 +103,9 @@ class HiveLoss:
         since = (self._entered or {}).get(swarm)
         return since is not None and now - max(self._watching, since) >= presence.TTL_MS
 
-    def _settle(self, starts: list[tuple[str, Envelope]], lost: bool, now: int) -> tuple[list[str], list[str]]:
-        done, ended = [], []
+    def _settle(self, starts: list[tuple[str, Envelope]], lost: bool, now: int) -> tuple[list[str], list[Envelope]]:
+        done: list[str] = []
+        exits: list[Envelope] = []
         for key, start in starts:
             claim = self._bus.for_swarm(start.swarm).state("spoke-work").get(key)
             value = json.loads(claim.value) if claim else {}
@@ -121,9 +122,15 @@ class HiveLoss:
                     data={**start.data, "reason": REASON},
                 )
                 self._emit(self._bus, exited)
-                ended.append(f"execution {start.key} of task {start.data['task']}")
+                exits.append(exited)
             done.append(key)
-        return done, ended
+        return done, exits
+
+    def _report(self, swarm: str, hive: str, exits: list[Envelope]) -> None:
+        """Log the lost hive with the executions it ended and tell the master of its swarm once."""
+        print(f"hub: hive {hive} of swarm {swarm} lost; exited {master_notice.ended(exits)}", file=sys.stderr)
+        if self._store is not None:
+            master_notice.lost(self._store.redis, swarm, hive, exits)
 
     def _edit(self, change: Callable[[dict[str, Any]], bool]) -> None:
         for _ in range(8):

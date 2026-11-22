@@ -202,6 +202,27 @@ def test_a_member_stop_while_another_member_serves_the_hive_sends_no_master_item
     assert [_master(store, slug) for slug in SWARMS] == [[], [], []]
 
 
+@pytest.mark.feature("master-hive-drain-item")
+def test_a_drain_run_as_the_hive_member_writes_no_master_item_the_relay_would_refuse(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import master_notice
+
+    registry.update(store.redis, HIVE, ["ui=no"])
+    _agents(store)
+    record = registry.update(
+        store.redis, HIVE, ["draining=yes"], drain=registry.Drain("worker", "the hive is stopping")
+    )
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "cluster")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", HIVE)
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://hive.example:6380/2")
+
+    master_notice.drained(store, HIVE, record)
+
+    worlds = [InboxStore(store.redis, world=world) for world in ("", HIVE)]
+    assert [inbox.inbox(f"master@{slug}") for inbox in worlds for slug in SWARMS] == [[]] * 6
+
+
 @pytest.fixture
 def hub(store: RedisStore) -> Iterator[SimpleNamespace]:
     """The hub hive loss pass on an in memory bus, over the three swarm store, with its exit publisher stubbed."""
