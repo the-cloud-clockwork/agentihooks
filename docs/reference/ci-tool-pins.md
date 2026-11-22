@@ -89,19 +89,21 @@ option value is graded instead.
 An install passes when every package it names carries one exact version, and
 a checked in constraint file passed to the same command pins that same version.
 
-**Named packages** are the positional targets, the values of `--with`,
-`--from`, `--spec` and `--with-executables-from`, and the values of `-e`,
-`--editable` and `--with-editable` that are not paths. Each must parse as a
+**Named packages** are the positional targets that are not paths, every value
+of `--with`, `--from`, `--spec` and `--with-executables-from`, and the values
+of `-e`, `--editable` and `--with-editable` that are not paths. Each must parse as a
 requirement with exactly one specifier, `==` or `===`, without a `*`
 wildcard. `pyyaml==6.0.3` passes. `pyyaml>=6.0`, `PyYAML`,
 `'pytest>=8.0,<9.2'` and `pytest==9.*` float.
 
-**Path targets** name no package and need no version: a target starting with
-`.`, `/` or `~`, containing `/`, ending `.whl`, `.tar.gz` or `.zip`, a
+**Path targets** given as a positional target, or to `-e`, `--editable` or
+`--with-editable`, name no package and need no version: a target starting
+with `.`, `/` or `~`, containing `/`, ending `.whl`, `.tar.gz` or `.zip`, a
 `file://` URL, or a direct reference such as
 `'agentihooks[dev,all] @ file://$WHEEL'`. A path target still needs a
-constraint, so its dependencies resolve to pinned versions. Any other URL,
-such as `git+https://...`, floats.
+constraint, so its dependencies resolve to pinned versions. A path given to
+`--with`, `--from` or `--spec` is graded as a package name and floats. Any
+other URL, such as `git+https://...`, floats.
 
 **Variables** in arguments, written `$NAME` or `${NAME}`, are replaced with
 values the walk knows: `env:` maps above the step, earlier assignments in the
@@ -114,8 +116,8 @@ resolve stays as written, so `"semgrep==$SEMGREP_VERSION"` floats unless
 - the values of `-c`, `--constraint` and `--constraints`;
 - the values of `-r`, `--requirement`, `--requirements` and
   `--with-requirements`, which then act as the constraint too;
-- `-c`, `--constraint` or `--constraints` inside a `pipx --pip-args`
-  string;
+- `-c`, `--constraint` or `--constraints` inside a `--pip-args` string, the
+  form `pipx` takes;
 - the `UV_CONSTRAINT` variable for the `uv pip install`, `uvx` and `uv tool`
   kinds, and `PIP_CONSTRAINT` for the `pip` and `pipx` kinds. Several files
   separated by spaces are allowed.
@@ -139,7 +141,9 @@ on one of its lines, resolved from the file's own folder, one level deep. So
 `.github/test-requirements.lock`.
 
 **Every line of a constraint file must be an exact pin.** The walk reads each
-constraint file an install names and follows nested `-r` lines without limit.
+constraint file an install names and follows nested `-r FILE`, `-rFILE`,
+`--requirement FILE` and `--requirement=FILE` lines, also spelled
+`--requirements`, without limit.
 `.github/test-constraints.txt` is the one exception: it holds ranges such as
 `pytest<9.2` on top of the lock it chains, so the walk reads
 `.github/test-requirements.lock` in its place.
@@ -185,8 +189,10 @@ command = ["uvx", "--constraint", AUDIT_LOCK, "pip-audit==2.10.1", "--format", "
 ## The floating install list
 
 `FLOATING_INSTALLS` holds one key per floating install that existed when the
-test landed. A key is the repository relative file, the kind and the
-arguments exactly as written, unexpanded, joined with `shlex.join`:
+test landed. A key is the repository relative file, the kind, and the words
+after the installer with their shell quoting removed and variables left
+unexpanded, quoted again with `shlex.join`. Words before the installer, such
+as a retry wrapper or `NAME=value` prefixes, are left out:
 
 ```text
 <path>: <kind> <arguments>
@@ -300,8 +306,8 @@ The script compiles each line with `uv pip compile --universal` for Python
 3.12, so a lock pins every dependency of its tools as well.
 `--exclude-newer` sets the upload date it resolves against, so a rerun ignores
 releases published after that date. To add or bump a tool, edit its `lock`
-line, or move the date to take newer releases, then regenerate every lock from
-the repository root:
+line, or move the `--exclude-newer` date in the script's `lock` function to
+take newer releases, then regenerate every lock from the repository root:
 
 ```bash
 bash .github/scripts/lock-ci-tools.sh
@@ -368,6 +374,10 @@ today:
 It also does not read `uv run --with`, `Dockerfile` installs, `.bash` files or
 `Makefile` recipes.
 
+A `-c` line inside a constraint file adds the pins of the file it names, but
+the walk does not check that file's own lines for floating versions; only
+nested `-r` files are checked.
+
 No CI check blocks adding a key to `FLOATING_INSTALLS`; review does.
 
 ## Delivery evidence
@@ -381,6 +391,7 @@ failed only the repository walking test and listed every measured floating
 install. The
 [green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44969293786)
 passed with the list filled from that output. After three review rounds, the
+pull request reports that the
 [review fix run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44987882535)
-passed all 65 test cases the module held at that run; the final head changed
+passed all 65 test cases the module then held, and that its final head changed
 only the feature map wording.
