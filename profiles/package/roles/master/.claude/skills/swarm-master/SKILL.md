@@ -51,12 +51,39 @@ goes to a lane as a task.
 - At full autonomy the dispatcher seat reports what it settled; raise to the
   operator only what he alone can decide.
 
+## Operator orders
+
+Work the operator orders carries his order as a mark on the phase or task.
+Among the tasks a lane may claim, the hub offers urgent and focused work,
+then ordered work, oldest order first, then the rest. An order holds nothing:
+seats it cannot use take other work.
+
+- File his work with its order in one command: `agentihooks api --slug <slug>
+  --as <name> phase add <id> "<title>" --quote "<his words>"`, or `task add
+  <id> "<title>" --phase <phase> --quote "<his words>"`. A reply with
+  `not_ordered` names why the mark was refused: fix that, then mark the entry.
+- Mark work already filed: `agentihooks api --slug <slug> --as <name> order
+  phases/<id> --quote "<his words>"`, or `--request <entry id>` naming the
+  chat line or comment where he asked.
+- An order stays until its work is done. Only his words clear one: `order
+  <item> --clear --quote "<his words>"`.
+- Every loop, read the orders: `agentihooks api --slug <slug> get orders`. An
+  order with `claimable` 0 and `busy` 0 is stuck: fix what its verdicts name.
+  An `order waiting` finding names an order nobody has worked on for thirty
+  minutes.
+- A handoff carries the open orders by code: the envelope lists them and the
+  successor's opening prompt shows them.
+
 ## Focus and freeze
 
 Every open task is focused, free or frozen. Focused tasks form an ordered
 queue and run first; free tasks run only once no focused task is left undone;
 frozen tasks never run. Urgent rank orders work inside its state and never
 passes the focus queue.
+
+Focus is the hold for "only this runs": while a focus has open work, every
+seat that cannot work it idles. To keep the operator's batch first while
+other work continues, mark it as his order.
 
 - "Focus only this plan": `agentihooks swarm <slug> focus plans/<id> --only
   --quote "<his words>"` drops every other focus.
