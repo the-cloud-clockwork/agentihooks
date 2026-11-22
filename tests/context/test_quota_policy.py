@@ -1,6 +1,8 @@
 """Tests for hooks.context.quota_policy — deterministic handoff / wait / stop."""
 
 import time
+from dataclasses import replace
+from datetime import datetime
 from unittest.mock import patch
 
 import pytest
@@ -295,14 +297,54 @@ def test_a_swarm_session_hands_off_through_its_seat(monkeypatch):
     assert "keeps your seat and task" in text
 
 
-def test_wait_directive_carries_a_cron_for_the_reset():
-    d = _decide(99.2, 50, [])
+@pytest.mark.feature("quota-wait-no-session-cron")
+@pytest.mark.parametrize(
+    ("swarm", "reset_delta", "minutes"),
+    [
+        (None, 1800, 32),
+        ("", 1800, 32),
+        ("quota-swarm", 1800, 32),
+        ("quota-swarm", 7200, 60),
+        ("quota-swarm", None, 2),
+        (None, None, 2),
+        ("quota-swarm", -119.5, 1),
+        ("quota-swarm", 0.5, 3),
+    ],
+    ids=[
+        "session",
+        "empty-swarm",
+        "swarm",
+        "long-wait",
+        "swarm-no-reset",
+        "session-no-reset",
+        "short-wait",
+        "round-up",
+    ],
+)
+def test_wait_directive_carries_a_cron_for_the_reset(
+    monkeypatch: pytest.MonkeyPatch, swarm: str | None, reset_delta: float | None, minutes: int
+) -> None:
+    now = 1_800_000_000.0
+    monkeypatch.setattr(qp.time, "time", lambda: now)
+    if swarm is None:
+        monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    else:
+        monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
+    reset = now + reset_delta if reset_delta is not None else None
+    d = replace(_decide(99.2, 50, []), five_reset=reset)
+    at = datetime.fromtimestamp((reset or now) + 120).astimezone().isoformat()
 
-    text = qp.render(d, "sess-1", "/tmp")
+    text = qp.render(d, "sess-1", "/repo")
 
     assert text.startswith("QUOTA WAIT")
-    assert 'cron "' in text
-    assert "CronCreate" in text
+    assert "CronCreate" not in text
+    assert at in text
+    if swarm:
+        assert f"agentihooks swarm {swarm} wait {minutes} --reason " in text
+        assert "agentihooks timer add" not in text
+    else:
+        assert f'agentihooks timer add --at "{at}" --session "sess-1"' in text
+        assert "agentihooks swarm" not in text
 
 
 def test_stop_directive_asks_for_another_account():
