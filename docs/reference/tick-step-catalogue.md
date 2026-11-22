@@ -27,7 +27,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | status publish | closing | closing | 2 | 60 | health findings | none | tick-status-publish-last-findings |
 | step starvation | closing | closing | 2 | 60 | none | inbox | tick-step-starvation |
 | dispatch seat | dispatch seat | tick | 2 | 60 | drained resume, sleeping | none | none |
-| expert seats | dispatch seat | tick | 2 | 60 | drained resume | coordination, inbox, runtime | expert-seat-step |
+| expert seats | dispatch seat | tick | 2 | 60 | drained resume, reap | coordination, inbox, runtime | expert-seat-step |
 | drained resume | drained resume | tick | 2 | 60 | automated cleanup, ledger state, master move fail over, master start watch, master wake, recover master, sleeping, stopped branch | none | none |
 | sleeping | drained resume | tick | 2 | 60 | automated cleanup, ledger state, stopped branch | none | none |
 | master down | master seats | tick | 2 | 60 | drained resume | none | none |

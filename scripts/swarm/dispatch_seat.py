@@ -248,11 +248,11 @@ def _spawn(slug, config, store, runtime, found, now_ms):
         return [f"dispatcher spawn failed: {failed.error}"]
     store.put_agent(slug, tick.placed_record(record, placed))
     _sent(store, slug, found)
-    _move_mail_home(store, record)
+    move_mail_home(store, record)
     return [f"spawned dispatcher {record.name} for {_count(found)}"]
 
 
-def _move_mail_home(store: RedisStore, record: AgentRecord) -> None:
+def move_mail_home(store: RedisStore, record: AgentRecord) -> None:
     """Runs just after launch, because the runtime picks the host inside spawn."""
     from scripts.inbox import exits
 

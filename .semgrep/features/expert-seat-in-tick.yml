@@ -12,12 +12,12 @@ rules:
       - pattern-not: |
           def _expert_seats(...):
             ...
-            $ACTIONS: $TYPE = tick.skip_refused(SEAT.expert_seat.run, ...)
+            $ACTIONS: $TYPE = $SWARM.skip_refused(SEAT.expert_seat.run, ...)
             ...
       - pattern-not: |
           def _expert_seats(...):
             ...
-            return tick.skip_refused(SEAT.expert_seat.run, ...)
+            return $SWARM.skip_refused(SEAT.expert_seat.run, ...)
     paths:
       include:
         - /scripts/tick/steps/experts.py
