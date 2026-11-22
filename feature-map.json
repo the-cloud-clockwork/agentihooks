@@ -4935,6 +4935,17 @@
       ]
     },
     {
+      "id": "kind-drain-agent-reads-session-mail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44956266312-1",
+      "behaviour": "The kind chart proof's scripted drain agent waits for its hive roll order in the mail a real session reads, so it sees the order wherever the hive drain addresses it and records its own recycle handoff on the draining hive before that hive stops.",
+      "seam": "the hand_off wait of deploy/helm/agentihooks-swarm/ci/hive-drain-agent.sh against scripts.hive.remove._order",
+      "tests": [
+        "tests/test_kind_drain_agent.py::test_the_kind_drain_agent_records_its_own_recycle_handoff_once_its_seat_holds_the_roll_order",
+        "tests/test_kind_drain_agent.py::test_the_kind_drain_agent_sees_the_roll_order_the_hive_drain_sends_to_its_name"
+      ]
+    },
+    {
       "id": "reply-wait-reads-every-inbox-world",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2152",
