@@ -306,6 +306,11 @@ def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str 
     return "\n".join(lines) + "\n"
 
 
+def build_expert(slug: str, repo: str, name: str, task: dict[str, Any], autonomy: str = DELEGATE) -> str:
+    """The opening of an expert: its lineage, its one saved mission, its obligation and the commands of its loop."""
+    raise NotImplementedError
+
+
 def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     if (carried := task.get(CARRIED)) is not None:
         return carried
