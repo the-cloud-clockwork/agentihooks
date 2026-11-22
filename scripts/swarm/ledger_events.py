@@ -728,7 +728,7 @@ class Mail:
         self.store.redis.set(marker, 1, ex=SENT_TTL_S)
         return True
 
-    def send(self, key, address, text, ref="", fyi=False):
+    def send(self, key: str, address: str, text: str, ref: str = "", fyi: bool = False) -> list[str]:
         if self.once(key, lambda: self.inbox.send(SENDER, address, text, ref=ref, fyi=fyi)):
             return [f"told {address}: {key}"]
         return []

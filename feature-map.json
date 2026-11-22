@@ -249,6 +249,22 @@
       ]
     },
     {
+      "id": "swarm-launch-acknowledgements",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2677",
+      "behaviour": "The launches command reports each swarm agent's acknowledged hive and launch time through the public events reader, with null fields for missing or mismatched acknowledgements.",
+      "seam": "scripts.swarm.launch_starts.command and the swarm parser over execution_stop.started",
+      "tests": [
+        "tests/swarm/test_launch_starts.py::test_launches_parser_dispatches_the_public_command",
+        "tests/swarm/test_launch_starts.py::test_launches_print_acknowledged_and_missing_starts",
+        "tests/swarm/test_launch_starts.py::test_launches_print_reconstructed_acknowledgement_time",
+        "tests/swarm/test_launch_starts.py::test_launches_print_missing_acknowledgement",
+        "tests/swarm/test_launch_starts.py::test_launches_reject_mismatched_acknowledgements",
+        "tests/swarm/test_launch_starts.py::test_launches_close_the_bus_on_read_failure",
+        "tests/swarm/test_launch_starts.py::test_launches_print_an_empty_agent_list"
+      ]
+    },
+    {
       "id": "lab-store-incremental-fetch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-store-mirror-mount",
@@ -2675,6 +2691,28 @@
       ]
     },
     {
+      "id": "ledger-copy-after-commit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2853",
+      "behaviour": "Ledger host copies are saved or removed only after the Postgres transaction commits, discarded on rollback or failed commit, and never replaced by an older deferred generation.",
+      "seam": "SQLiteLedgerRepository._entry and purge, PostgresLedgerRepository, Connection.commit and rollback, host_entries.Copies",
+      "rules": [
+        "ledger-host-copy-inside-entry"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_slow_host_copy_observes_a_committed_postgres_transaction",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_entry_is_never_written_to_the_host",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_failed_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_closing_without_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_purge_drops_the_copy_after_its_queued_save",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_deferred_older_copy_never_replaces_a_newer_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_successful_commit_runs_each_pending_host_copy_once",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_purge_keeps_its_committed_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_cannot_lower_a_newer_deferred_copy_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_during_a_save_preserves_the_newer_host_generation"
+      ]
+    },
+    {
       "id": "ledger-cold-write",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-write-full-load",
@@ -4916,6 +4954,17 @@
       ],
       "rules": [
         "hive-order-sent-to-seat"
+      ]
+    },
+    {
+      "id": "kind-drain-agent-reads-session-mail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44956266312-1",
+      "behaviour": "The kind chart proof's scripted drain agent waits for its hive roll order in the mail a real session reads, so it sees the order wherever the hive drain addresses it and records its own recycle handoff on the draining hive before that hive stops.",
+      "seam": "the hand_off wait of deploy/helm/agentihooks-swarm/ci/hive-drain-agent.sh against scripts.hive.remove._order",
+      "tests": [
+        "tests/test_kind_drain_agent.py::test_the_kind_drain_agent_records_its_own_recycle_handoff_once_its_seat_holds_the_roll_order",
+        "tests/test_kind_drain_agent.py::test_the_kind_drain_agent_sees_the_roll_order_the_hive_drain_sends_to_its_name"
       ]
     },
     {
@@ -8622,6 +8671,22 @@
       ]
     },
     {
+      "id": "hive-spoke-spawn-fresh-quota-rows",
+      "origin": "regression",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-spoke-fresh-quota-rows",
+      "behaviour": "A long running hive spoke reads fresh quota rows at every spawn once a spawn has read them for itself, so it admits a spawn the hub placed when the accounts have free seats again, and the spawn it places still adds one session to its account; quota rows a tick pass read are kept for every spawn in that pass.",
+      "seam": "HerdrRuntime.spawn quota rows on a runtime without a tick pass, read through HerdrRuntime._quota_read and re-read by HerdrRuntime._quota_refresh",
+      "rules": [
+        "quota-rows-read-once-per-process"
+      ],
+      "tests": [
+        "tests/swarm/test_quota_handoff.py::test_a_spawn_keeps_the_quota_rows_its_tick_pass_read",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_reads_fresh_quota_rows_after_its_first_quota_handoff",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_still_counts_the_session_it_placed_on_fresh_rows"
+      ]
+    },
+    {
       "id": "controller-hive-refusal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
@@ -8796,6 +8861,16 @@
       "tests": [
         "tests/codex_session/test_attach.py::test_an_admitted_execution_waits_for_its_harness_and_then_attaches",
         "tests/codex_session/test_attach.py::test_a_classified_or_running_execution_without_an_app_server_still_refuses"
+      ]
+    },
+    {
+      "id": "quota-wait-no-session-cron",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-wait-scheduler-timer",
+      "behaviour": "Quota WAIT directs swarm sessions to bounded swarm waits naming the reset time and standalone sessions to a scheduler timer aimed at the current session, with no session cron instruction and the existing reset safety buffer.",
+      "seam": "hooks.context.quota_policy.render",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_wait_directive_carries_a_cron_for_the_reset"
       ]
     },
     {
@@ -9152,6 +9227,21 @@
       ]
     },
     {
+      "id": "master-release-item",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-release-items",
+      "behaviour": "A green dev push run of Tests whose promote job succeeded sends the master seat one inbox item naming the release that promotion published, the run and the hub, controller and hive rollout to check. The item is keyed once per release tag, or once per run when the release tag lookup fails, so within the thirty day window of the ledger events mail markers a repeat pass or a later green run with no newer release sends nothing. A repository not on GitHub, or one with no stable tag, sends nothing, and red promotion fixer items keep their own key.",
+      "seam": "promotion_watch.refresh on a green promoted run; release_wait.announce with the ledger events Mail",
+      "tests": [
+        "tests/swarm/test_promotion_watch.py::test_a_green_promotion_tells_the_master_once_to_check_the_release_rollout",
+        "tests/swarm/test_promotion_watch.py::test_a_green_promotion_with_no_red_before_it_still_tells_the_master_of_its_release",
+        "tests/swarm/test_release_wait.py::test_a_published_release_tells_the_master_once_to_check_its_rollout",
+        "tests/swarm/test_release_wait.py::test_a_failed_tag_lookup_tells_the_master_once_per_promotion_run",
+        "tests/swarm/test_release_wait.py::test_a_repository_not_on_github_has_no_release_to_announce",
+        "tests/swarm/test_release_wait.py::test_a_repository_with_no_stable_tag_tells_the_master_nothing"
+      ]
+    },
+    {
       "id": "promotion-red-graded-job-fails-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2598",
@@ -9422,6 +9512,31 @@
       "seam": "tests/test_skill_frontmatter.py ROLES against the package roles folder and test_tick_pattern_rule_folds_into_every_role_persona",
       "tests": [
         "tests/test_skill_frontmatter.py::test_role_list_covers_every_package_role_folder"
+      ]
+    },
+    {
+      "id": "read-only-roles-refuse-shell-writes",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-readonly-shell-guard",
+      "behaviour": "A qa or reviewer session refuses a shell command that redirects output or tees into a file, or runs a file write command or an in place edit on a path, outside its scratchpad and its own swarm task folder; it also refuses git subcommands outside the read set, git -c and --output, gh pr checkout and gh repo clone anywhere, commands named by a variable, and writes hidden in a shell -c script, eval, command substitution, find -exec, find -delete, xargs or a script fed to a shell on its input; shell reads, writes to /dev/null and writes into its own folders still pass, and only the qa and reviewer roles carry the shell guard.",
+      "seam": "hooks.context.read_only_shell.write_reason, called by profiles.package.roles._guards.no_code_edits.deny_reason for Bash payloads, run by the qa and reviewer pre-bash-no_shell_writes condition shims",
+      "tests": [
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_refuses_a_shell_redirect_into_the_repository",
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_refuses_a_git_commit",
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_keeps_shell_reads",
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_writes_its_scratchpad_and_task_folder",
+        "tests/profiles/test_read_only_shell.py::test_only_the_read_only_roles_carry_the_shell_guard",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_refuses_each_shell_file_write",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_refuses_git_writes_and_hidden_writes",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_keeps_reads_and_writes_inside_its_own_folders",
+        "tests/profiles/test_read_only_shell.py::test_a_placeholder_never_counts_as_a_seat_folder",
+        "tests/profiles/test_read_only_shell.py::test_a_bare_cd_moves_to_the_home_folder",
+        "tests/profiles/test_read_only_shell.py::test_a_folder_stack_move_leaves_the_folder_unknown",
+        "tests/profiles/test_read_only_shell.py::test_a_nested_script_judges_relative_paths_from_the_shell_folder",
+        "tests/profiles/test_read_only_shell.py::test_an_unmatched_close_parenthesis_keeps_the_top_level_folder",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_appends_to_its_task_folder_with_a_heredoc",
+        "tests/profiles/test_read_only_shell.py::test_edit_tool_payloads_keep_the_edit_path"
       ]
     },
     {
@@ -9750,6 +9865,18 @@
         "tests/swarm/test_ready.py::test_a_red_pull_request_whose_reopen_the_ledger_refuses_logs_its_hold",
         "tests/swarm/test_ready.py::test_a_merged_split_pull_request_the_done_gate_refuses_logs_its_hold",
         "tests/swarm/test_waits.py::test_required_green_logs_the_github_error_it_holds_on"
+      ]
+    },
+    {
+      "id": "merge-pass-hold-reason-docs",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-hold-reason-docs-test",
+      "behaviour": "The swarm pillar hold reason table contains exactly the reason templates the merge pass writes, allowing prose placeholder names to differ; every missing row and a stale row fail the parity check.",
+      "seam": "AST of merge pass hold arguments and helper return templates compared with the isolated swarm pillar hold reason table",
+      "tests": [
+        "tests/swarm/test_merge_hold_docs.py::test_the_hold_reason_table_matches_the_reasons_the_merge_pass_writes",
+        "tests/swarm/test_merge_hold_docs.py::test_every_missing_hold_reason_row_fails",
+        "tests/swarm/test_merge_hold_docs.py::test_a_stale_hold_reason_row_fails"
       ]
     },
     {
@@ -12096,6 +12223,34 @@
       ]
     },
     {
+      "id": "expert-kind-and-launch-pin",
+      "origin": "operator",
+      "operator_words": "we need to create another swarm branch of agents profile \"expert\" that agenr exper profile will always use claude code fable model mandarory and effort default xhigh, the operator can chose to set max, and the agents will behave like a swarm agent but the difference is that they will not claim tasks",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "An expert is its own agent kind with its own name counter and a numbered lineage seat, and every expert launch or resume runs Claude Code on the Fable model at effort xhigh, or max when its lineage asks for it, whatever the swarm effort range, a lane setting, a saved handoff launch or a recorded session says; an expert launch that lands on another harness is refused.",
+      "seam": "naming.TYPES and templates.DEFAULT_PROFILES for the kind, expert_launch.pin called by HerdrRuntime.spawn and HerdrRuntime.resume, effort_range.bounds for the expert lane, and expert_launch.on_pin through the live check scripts.feature_checks.expert_launch_pin over the agent records",
+      "semgrep_rule": "feature-expert-launch-pin",
+      "tests": [
+        "tests/swarm/test_expert_kind.py::test_an_expert_name_builds_parses_and_counts_on_its_own",
+        "tests/swarm/test_expert_kind.py::test_a_fresh_expert_launch_runs_claude_code_on_fable_at_xhigh",
+        "tests/swarm/test_expert_kind.py::test_the_lineage_effort_decides_the_launch_effort_whatever_the_swarm_range",
+        "tests/swarm/test_expert_kind.py::test_a_successor_launches_fable_at_the_lineage_effort_whatever_its_predecessor_ran",
+        "tests/swarm/test_expert_kind.py::test_an_expert_launch_that_lands_on_another_harness_is_refused",
+        "tests/swarm/test_expert_kind.py::test_a_resumed_expert_relaunches_fable_inside_its_pin",
+        "tests/swarm/test_expert_launch.py::test_an_expert_pick_is_pinned_to_fable_at_the_effort_asked_for_or_xhigh",
+        "tests/swarm/test_expert_launch.py::test_a_recorded_launch_is_on_the_pin_only_with_claude_a_fable_model_and_a_pin_effort",
+        "tests/test_expert_launch_pin_check.py::test_working_experts_on_the_pin_pass_and_are_listed",
+        "tests/test_expert_launch_pin_check.py::test_a_working_expert_off_the_pin_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_launch_pin"
+      ]
+    },
+    {
       "id": "lane-model-harness-compatibility",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",
@@ -12989,6 +13144,19 @@
         "tests/swarm/test_urgent_hold.py::test_an_urgent_task_while_no_live_hive_has_admission_room_names_the_hive_and_raises_no_finding",
         "tests/swarm/test_urgent_hold.py::test_the_hive_admission_hold_stands_only_while_every_live_hive_is_read_at_zero_room",
         "tests/swarm/test_urgent_hold.py::test_a_release_wait_is_named_ahead_of_the_hive_admission_hold"
+      ]
+    },
+    {
+      "id": "changelog-fragment-required-on-pull-request",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fragment-required",
+      "behaviour": "A pull request run whose head adds no changelog fragment named from its branch is refused with an error naming the missing path, also when that file already sits in the base; a dispatched run or a run with no event stays green, and a pull request that adds its branch fragment stays green.",
+      "seam": "scripts.ci_changelog_fragments.main reading GITHUB_EVENT_NAME, then scripts.ci_changelog_fragments.grade",
+      "tests": [
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_no_branch_fragment_is_red_naming_the_path",
+        "tests/test_ci_changelog_fragments.py::test_a_run_outside_a_pull_request_that_adds_no_fragment_stays_green",
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_its_branch_fragment_is_green",
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_only_a_misnamed_fragment_is_red_naming_both"
       ]
     }
   ],
