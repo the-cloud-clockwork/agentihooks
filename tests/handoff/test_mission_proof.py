@@ -228,6 +228,21 @@ def test_each_fault_of_a_proof_is_named_under_its_eight_headings_all_at_once() -
     ]
 
 
+def test_an_address_under_a_read_first_section_a_proof_does_not_have_is_still_asked_for() -> None:
+    asked: list[str] = []
+
+    def resolves(address: str) -> bool:
+        asked.append(address)
+        return False
+
+    stray = _swap("## Open items\n", f"## Read first\n- {ADDRESS} the mission\n## Open items\n")
+    assert expert.proof_problems(stray, resolves, lambda url: True, "sw", GOOD) == [
+        f"## Read first is not one of the eight headings: {HEADINGS}",
+        f"Read first entry 1: {ADDRESS} does not resolve",
+    ]
+    assert asked == [ADDRESS]
+
+
 def test_a_handoff_marker_does_not_end_a_proof() -> None:
     assert _problems(_swap("<!-- mission complete -->", "<!-- handoff complete -->")) == [
         "the completion marker <!-- mission complete --> must be the last line"
