@@ -2,7 +2,7 @@
 
 import pytest
 
-from scripts.handoff.check import problems
+from scripts.handoff.check import Contract, problems
 
 pytestmark = pytest.mark.unit
 
@@ -47,3 +47,33 @@ def test_only_done_bullets_of_a_handoff_v2_need_evidence() -> None:
         "<!-- handoff complete -->\n"
     )
     assert problems(text, lambda address: False) == []
+
+
+def test_each_read_first_and_wording_fault_of_a_handoff_v2_document_is_named_word_for_word() -> None:
+    key = "AKIA" + "IOSFODNN7EXAMPLE"
+    text = (
+        "# Handoff v2\n"
+        "## Intent\nRefuse a malformed handoff.\n"
+        "## Done\nNone\n"
+        f"## Stopped at\nSeam two in hooks/context/recycle.py at line 142, beside {key}.\n"
+        "## Decisions and promises\nNone\n"
+        "## Next\n1. Run it.\n"
+        "## Read first\n- the spec of the change\n- ledger:sw/tasks/t1 what the task asks\n"
+        "<!-- handoff complete -->\n"
+    )
+    assert problems(text, lambda address: False) == [
+        "Read first entry 1 does not start with an address (a GitHub issue or pull request link, ledger:, "
+        "workspace:, recap:, inbox:, seat: or mission:)",
+        "Read first entry 2: ledger:sw/tasks/t1 does not resolve",
+        "credential value found (aws_access_key); refer to it by its variable name",
+        "file path hooks/context/recycle.py; name the module, type or command instead",
+        "line number line 142; name the function or behaviour instead",
+    ]
+
+
+def test_a_contract_of_more_than_ten_headings_counts_them_in_digits() -> None:
+    names = tuple(f"Part {number}" for number in range(1, 12))
+    wide = Contract("# Wide", names)
+    body = "".join(f"## {name}\nNone\n" for name in names)
+    text = f"# Wide\n{body}## Extra\nNone\n<!-- handoff complete -->\n"
+    assert problems(text, lambda address: True, wide) == [f"## Extra is not one of the 11 headings: {', '.join(names)}"]

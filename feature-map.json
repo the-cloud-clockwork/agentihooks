@@ -12161,14 +12161,19 @@
         "tests/swarm/test_expert_handoff_command.py::test_an_experts_conforming_handoff_is_stored_under_its_lineage_and_finishes_the_expert",
         "tests/swarm/test_expert_handoff_command.py::test_an_experts_handoff_v2_document_is_refused_with_each_fault_and_stores_nothing",
         "tests/swarm/test_expert_handoff_command.py::test_a_worker_is_held_to_handoff_v2_and_its_expert_document_is_refused",
+        "tests/swarm/test_expert_handoff_command.py::test_an_expert_whose_lineage_or_saved_mission_is_gone_is_refused_by_name",
         "tests/swarm/test_expert_handoff_command.py::test_the_contract_follows_the_lane_of_the_author",
         "tests/test_context_recycle_expert.py::test_at_the_hard_gate_an_expert_is_told_the_expert_handoff_form",
         "tests/test_context_recycle_expert.py::test_in_the_preparation_window_an_expert_is_told_the_expert_handoff_form",
+        "tests/test_context_recycle_expert.py::test_a_worker_and_a_master_keep_the_handoff_v2_form",
         "tests/test_context_recycle_expert.py::test_over_the_limit_an_experts_work_is_denied_with_the_expert_form_and_its_allowed_steps",
         "tests/test_context_recycle_expert.py::test_over_the_limit_an_expert_still_reads_its_mission",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_a_worker_and_a_master_are_denied_the_mission_command_like_any_other_work",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_expert_whose_saved_mission_or_lineage_is_gone_is_refused_by_name",
         "tests/test_context_recycle_expert.py::test_over_the_limit_an_experts_handoff_is_checked_against_the_expert_contract_before_the_command",
         "tests/test_expert_handoffs_check.py::test_each_conforming_handoff_of_a_running_lineage_passes_and_is_listed",
-        "tests/test_expert_handoffs_check.py::test_a_handoff_of_a_running_lineage_that_breaks_the_contract_fails_with_each_fault"
+        "tests/test_expert_handoffs_check.py::test_a_handoff_of_a_running_lineage_that_breaks_the_contract_fails_with_each_fault",
+        "tests/test_expert_handoffs_check.py::test_a_handoff_whose_saved_mission_is_gone_fails_by_name"
       ],
       "live_check": [
         "python",

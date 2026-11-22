@@ -146,6 +146,7 @@ def test_a_worker_is_held_to_handoff_v2_and_its_expert_document_is_refused(
     assert store.handoff("sw", "t1") == V2 and state(store, ENGINEER) == ["finished"]
 
 
+@pytest.mark.feature("expert-handoff-contract")
 @pytest.mark.parametrize("gone", ["mission", "lineage"])
 def test_an_expert_whose_lineage_or_saved_mission_is_gone_is_refused_by_name(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], gone: str

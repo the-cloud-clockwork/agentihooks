@@ -78,6 +78,13 @@ def _unnamed(number: int) -> str:
     return f"deliverable D{number} is named by no Done or Pending bullet; start one with D{number}"
 
 
+def _stray(number: str) -> str:
+    return (
+        f"D{number} names no deliverable, the mission has 3; number the bullet after the deliverable it accounts "
+        "for or drop the number"
+    )
+
+
 def _unevidenced(heading: str) -> str:
     return f"{heading} bullet 1 carries no evidence; add it or label the bullet hypothesis"
 
@@ -124,11 +131,13 @@ def test_the_mission_line_may_be_followed_by_the_experts_own_words() -> None:
             D3 + D3 + D3,
             ["deliverable D3 is named by 3 bullets; name it once, under Done or under Pending"],
         ),
-        (D3, D3 + "- D4 A fourth thing\n", ["D4 names no deliverable; the mission has 3"]),
+        (D3, D3 + "- D4 A fourth thing\n", [_stray("4")]),
+        (D3, D3 + "- D7 A seventh thing\n- D0 Nothing\n", [_stray("0"), _stray("7")]),
+        (D1, "- D01 Each cause proven against the live ledger, run 4471 green\n", [_stray("01"), _unnamed(1)]),
         (
-            D3,
-            D3 + "- D7 A seventh thing\n- D0 Nothing\n",
-            ["D0 names no deliverable; the mission has 3", "D7 names no deliverable; the mission has 3"],
+            D1,
+            D1 + "  - D1 its proof is run 4471\n",
+            ["deliverable D1 is named by 2 bullets; name it once, under Done or under Pending"],
         ),
     ],
 )
@@ -186,6 +195,12 @@ def test_each_handoff_fault_is_named_under_the_ten_headings_all_at_once() -> Non
 def test_the_contract_faults_come_before_the_mission_and_deliverable_faults() -> None:
     text = _swap(D3, "", _swap(f"## Mission\n{LINE}\n", f"## Mission\n{ADDRESS}\n", _swap(TESTED, "- Seam one\n")))
     assert _problems(text) == [_unevidenced("Tests"), OPENS, _unnamed(3)]
+
+
+def test_a_second_mission_section_is_refused_whichever_of_the_two_opens_with_the_mission_line() -> None:
+    twice = "## Mission appears more than once"
+    assert _problems(_swap("## Done\n", f"## Mission\n{ADDRESS}\n## Done\n")) == [twice, OPENS]
+    assert _problems(_swap(f"## Mission\n{LINE}\n", f"## Mission\n{ADDRESS}\n## Mission\n{LINE}\n")) == [twice]
 
 
 def test_a_read_first_address_that_does_not_resolve_is_refused() -> None:
