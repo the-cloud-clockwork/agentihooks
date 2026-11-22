@@ -287,6 +287,21 @@ def test_a_completed_lineage_is_closed_even_when_the_reap_dropped_its_dead_exper
     assert go(store, runtime, NOW + 2 * MINUTE) == [] and len(inbox.inbox("master@sw")) == 1
 
 
+def test_closing_a_lineage_again_writes_no_record_for_its_finished_expert(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started(store)
+    expert = launched(store, FakeRuntime())
+    ended = expert_lineage.complete(store, "sw", "expert-1", expert.name, PROOF, NOW + 1)
+    expert_seat.close(store, "sw", ended, PROOF)
+    [finished] = experts(store)
+    assert finished.state == "finished"
+    written: list[str] = []
+    monkeypatch.setattr(store, "put_agent", lambda slug, agent: written.append(agent.name))
+    expert_seat.close(store, "sw", ended, PROOF)
+    assert written == []
+
+
 def test_a_lineage_whose_closing_steps_finished_leaves_nothing_for_the_pass(store: RedisStore) -> None:
     started(store)
     runtime = FakeRuntime()
