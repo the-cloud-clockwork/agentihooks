@@ -19,6 +19,7 @@ NAME = "ledger-writer.sock"
 CHECK_S = 5.0
 POLL_S = 0.5
 PROBE_S = 1.0
+READ_S = 10.0
 
 
 def socket_path() -> Path:
@@ -61,6 +62,8 @@ def ask(sock: socket.socket, slug: str, path: str, payload: dict[str, Any] | Non
 class Answering(socketserver.StreamRequestHandler):
     """One ledger API request on the writer socket, answered as the caller it names."""
 
+    timeout = READ_S
+
     def handle(self) -> None:
         """Reply with the in process answer's status line and body."""
         sent = self.rfile.read()
@@ -73,9 +76,11 @@ class Answering(socketserver.StreamRequestHandler):
 
 
 def bound(where: Path) -> socketserver.ThreadingUnixStreamServer | None:
-    """The owner only writer server at ``where``, None while another writer answers there."""
+    """The owner only writer server at ``where``, None while another writer answers there or is too busy to accept."""
     try:
         connected(PROBE_S, where).close()
+        return None
+    except TimeoutError:
         return None
     except OSError:
         where.unlink(missing_ok=True)

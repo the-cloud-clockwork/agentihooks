@@ -410,6 +410,43 @@ def test_a_writer_whose_socket_file_was_removed_still_returns_cleanly(
 
 
 @pytest.mark.feature("ledger-warm-writer")
+def test_a_writer_too_busy_to_accept_keeps_its_socket(memory_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def busy(timeout: float, where: Path | None = None) -> socket.socket:
+        raise TimeoutError("timed out")
+
+    where = memory_path / "w.sock"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(str(where))
+        listener.listen(1)
+        monkeypatch.setattr(warm_writer, "connected", busy)
+        assert warm_writer.bound(where) is None
+        assert stat.S_ISSOCK(where.stat().st_mode)
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_a_client_that_never_finishes_sending_cannot_hold_the_writer_open(
+    memory_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(warm_writer, "revision", same_revision)
+    monkeypatch.setattr(warm_writer.Answering, "timeout", 0.2)
+    where = memory_path / "w.sock"
+    stopped = threading.Event()
+    served = serving(where, stopped)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stalled:
+        stalled.connect(str(where))
+        stalled.sendall(b'{"slug"')
+        stopped.set()
+        served.join(10.0)
+        assert not served.is_alive()
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_the_writer_paces_probes_and_reads_by_its_named_windows() -> None:
+    assert (warm_writer.CHECK_S, warm_writer.POLL_S, warm_writer.PROBE_S, warm_writer.READ_S) == (5.0, 0.5, 1.0, 10.0)
+    assert warm_writer.Answering.timeout == warm_writer.READ_S
+
+
+@pytest.mark.feature("ledger-warm-writer")
 def test_a_connection_that_sends_nothing_gets_no_reply_and_no_error(
     writer: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
