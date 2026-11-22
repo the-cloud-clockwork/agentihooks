@@ -142,7 +142,7 @@ NOT_HIS = "refused: the quote is not in an operator prompt or answer any master 
 ORDER_USAGE = "order takes ITEM with --quote WORDS or --request ENTRY, and --clear only with --quote WORDS"
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
-LEDGER_ITEM = re.compile(r"tasks|freezes|focus|(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
+LEDGER_ITEM = re.compile(r"tasks|freezes|focus|orders|(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (
@@ -801,7 +801,7 @@ def _duration(value):
 def _ledger_item(value: str) -> str:
     if not LEDGER_ITEM.fullmatch(value):
         raise argparse.ArgumentTypeError(
-            "name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes or focus"
+            "name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes, focus or orders"
         )
     return value
 
@@ -1087,7 +1087,7 @@ def build_parser() -> argparse.ArgumentParser:
     ).add_argument(
         "item",
         type=_ledger_item,
-        help="tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes or focus",
+        help="tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks, freezes, focus or orders",
     )
     tasks = sub.add_parser("tasks", help="list open tasks, one line each, filtered by state, lane or title text")
     for flag in ("--state", "--lane", "--text"):
