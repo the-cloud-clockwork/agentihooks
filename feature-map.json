@@ -8325,6 +8325,19 @@
       ]
     },
     {
+      "id": "type-env-ready-fast-path",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-env-fast-path",
+      "behaviour": "A ready CI type environment is reused under a shared lock on its per digest lock file, so a prepush returns at once while another worktree's type gate run holds that shared lock for its whole grade. Only a missing environment takes the exclusive lock, and the ready marker is checked again under it, so builders racing for one digest build it once. A reuse still waits while a build holds the exclusive lock, and never prunes other environments.",
+      "seam": "scripts.type_env.environment through its per digest lock file and the uv build commands it runs",
+      "tests": [
+        "tests/test_type_env.py::test_a_ready_environment_returns_while_a_grade_holds_its_shared_lock",
+        "tests/test_type_env.py::test_builders_racing_for_one_environment_build_it_once",
+        "tests/test_type_env.py::test_reuse_waits_while_a_build_holds_the_lock",
+        "tests/test_type_env.py::test_reuse_leaves_other_environments_in_place"
+      ]
+    },
+    {
       "id": "design-rules-body-change-graded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-design-rules-body-change-types",
