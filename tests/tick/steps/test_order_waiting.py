@@ -122,7 +122,7 @@ def test_each_pass_stores_its_time_and_keeps_the_time_an_order_was_first_seen_wa
     assert order_waiting.findings(store, SLUG) == []
     order_waiting.observe(store, SLUG, ledger, START)
     noted = order_waiting.observe(store, SLUG, ledger, START + MINUTE)
-    waiting = {"since": START, "title": "Build", "unfinished": 2, "claimable": 1, "held": ["it waits on task t9"]}
+    waiting = {"since": START, "title": "Build", "unfinished": 2, "claimable": 1, "reasons": ["it waits on task t9"]}
     assert noted == {"phases/p1": waiting}
     assert order_waiting.read(store, SLUG) == {"at": START + MINUTE, "orders": {"phases/p1": waiting}}
     assert store.redis.get(store.key(SLUG, "order-waiting")) is not None
@@ -145,7 +145,8 @@ def test_an_ordered_task_and_an_ordered_phase_are_each_one_finding(store: Any) -
 
 
 @pytest.mark.feature("swarm-order-waiting-finding")
-def test_the_step_notes_the_orders_of_the_pass_state(store: Any) -> None:
+def test_the_step_notes_the_orders_of_the_pass_state(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import cli
     from scripts.swarm.health import order_waiting
     from scripts.tick.steps import orders
 
@@ -153,10 +154,11 @@ def test_the_step_notes_the_orders_of_the_pass_state(store: Any) -> None:
     assert orders._order_waiting(SimpleNamespace(now_ms=lambda: START), state.__getitem__) == []
     assert order_waiting.read(store, SLUG)["at"] == START
     assert list(order_waiting.read(store, SLUG)["orders"]) == ["phases/p1"]
+    monkeypatch.setattr(cli, "now_ms", lambda: START + 10 * MINUTE)
     registered: Any = {step.name: step for step in registry.steps()}["order waiting"]
     assert registered.call(None, state.__getitem__) == []
     assert state["box"] == {}
-    assert order_waiting.read(store, SLUG)["at"] != START
+    assert order_waiting.read(store, SLUG)["at"] == START + 10 * MINUTE
     assert order_waiting.read(store, SLUG)["orders"]["phases/p1"]["since"] == START
 
 

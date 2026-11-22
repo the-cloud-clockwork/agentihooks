@@ -22,8 +22,9 @@ def read(store: RedisStore, slug: str) -> dict[str, Any]:
 
 
 def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[str, Any]:
-    """Note each open order with unfinished tasks and none claimed or in a pull request, keeping the time it was
-    first seen so; any other order drops out."""
+    """Note each open order with unfinished tasks and none claimed or in a pull request at this sighting, keeping the
+    time it was first seen so; any other order drops out. A claim taken and released between two sightings is not
+    seen."""
     before = read(store, slug).get("orders", {})
     waiting: dict[str, Any] = {}
     for entry in order_check.read(doc, freeze.fix_phase(store.config(slug))):
@@ -34,7 +35,7 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
             "title": entry["title"],
             "unfinished": len(entry["tasks"]),
             "claimable": entry["claimable"],
-            "held": sorted({task["verdict"] for task in entry["tasks"]} - {focus_check.CLAIMABLE}),
+            "reasons": sorted({task["verdict"] for task in entry["tasks"]} - {focus_check.CLAIMABLE}),
         }
     client: Any = store
     client.redis.set(store.key(slug, KEY), json.dumps({"at": at, "orders": waiting}))
@@ -43,7 +44,7 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
 
 def findings(store: RedisStore, slug: str) -> list[Finding]:
     """An order waiting finding for every order whose unfinished tasks had nothing claimed or in a pull request for
-    more than thirty minutes."""
+    more than thirty minutes between its first sighting and the last one; every figure is the last sighting's."""
     noted = read(store, slug)
     found: list[Finding] = []
     for item, row in noted.get("orders", {}).items():
@@ -56,7 +57,7 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
                 item,
                 f"operator order {item} {row['title']}: {row['unfinished']} unfinished, {row['claimable']} claimable, "
                 f"none claimed or in a pull request for {minutes} minutes",
-                tuple(row["held"]) or (UNCLAIMED,),
+                tuple(row["reasons"]) or (UNCLAIMED,),
                 "thirty minutes",
                 minutes,
                 evidence_identity=(row["since"],),
