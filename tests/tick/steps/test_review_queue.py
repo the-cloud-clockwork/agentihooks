@@ -6,10 +6,9 @@ from typing import Any
 
 import pytest
 
-from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
-from scripts.events.memory import open_bus
+from scripts.events.memory import MemoryBus, open_bus
 from scripts.events.subjects import subject
 from scripts.swarm.ledger_client import LedgerRefused
 
@@ -40,12 +39,12 @@ def doc(*extra: dict[str, Any]) -> dict[str, Any]:
     return {"tasks": [{"id": "t1", "pr_url": PULL, "phase": "p1"}, *extra], "phases": []}
 
 
-def publish(bus: Bus, kind: str, data: dict[str, Any], key: str = "k", time: int = NOW) -> None:
+def publish(bus: MemoryBus, kind: str, data: dict[str, Any], key: str = "k", time: int = NOW) -> None:
     event = Envelope(f"{kind}-{key}-{time}", kind, SLUG, kind.split(".")[0], key, 1, time, "github", data)
     bus.events.publish(subject(SLUG, *kind.split(".")), event)
 
 
-def run(bus: Bus, ledger: Ledger, state: dict[str, Any] | None = None) -> list[str]:
+def run(bus: MemoryBus, ledger: Ledger, state: dict[str, Any] | None = None) -> list[str]:
     return review().review_pass(bus, SLUG, state or doc(), ledger, NOW)
 
 

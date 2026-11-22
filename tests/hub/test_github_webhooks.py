@@ -558,23 +558,21 @@ def release(action="published", tag="v1.2.3"):
     }
 
 
-def untracked(lab=None):
-    bus = open_bus(BusConfig())
-    hub = Pulls(bus, fetch=lambda url: pytest.fail("unexpected fetch"), clock=lambda: 1000)
-    return bus, Ingress(hub, SECRET, lab and lab(bus)), bus.events.consumer("watch", "swarm.>")
+def untracked(payload):
+    payload["repository"] = {"html_url": "https://github.com/acme/gadgets"}
+    return payload
 
 
 def test_a_merge_group_for_an_untracked_repository_still_reaches_the_lab_and_publishes_no_swarm_event():
-    bus, ingress, swarm = untracked(lambda bus: LabIntake(bus.lab_heads, NOTICE_SECRET))
-    lab = bus.lab_heads.consumer("lab", "ci.lab.head.>")
-    assert deliver(ingress, "merge_group", merge_group()) == 200
+    ingress, swarm, lab = lab_setup()
+    assert deliver(ingress, "merge_group", untracked(merge_group())) == 200
     assert drain(swarm) == []
     assert [e.type for e in drain(lab)] == ["ci.lab.head.merge_group"]
 
 
 def test_a_release_for_an_untracked_repository_answers_ok_and_publishes_nothing():
-    _, ingress, swarm = untracked()
-    assert deliver(ingress, "release", release()) == 200
+    _, ingress, swarm = setup()
+    assert deliver(ingress, "release", untracked(release())) == 200
     assert drain(swarm) == []
 
 

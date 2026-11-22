@@ -651,6 +651,7 @@ def test_tracking_a_pull_request_records_its_swarms_for_the_repository():
     hub.track("other", OTHER)
     hub.track("crew", OTHER)
     entry = bus.state(pulls.BUCKET).get(pulls.repository_key(REPO.upper()))
+    assert entry is not None
     assert json.loads(entry.value) == ["crew", "other"]
 
 
