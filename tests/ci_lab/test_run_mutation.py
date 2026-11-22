@@ -20,6 +20,7 @@ from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.runner import run_gate
 from scripts.ci_mutation.selection import selected_mutant_names, selected_mutants
 from tests.mutation_self_plant import plant
+from tests.test_ci_mutation_stats import place_flake_ledger
 
 REPO = Path(__file__).resolve().parents[2]
 OPTIONS = ["-q", "-p", "no:cacheprovider", "-o", "addopts="]
@@ -406,6 +407,7 @@ def corpus(path: Path, mode: str) -> Path:
         (path / package).mkdir(parents=True)
     (path / "hooks/__init__.py").touch()
     (path / "scripts/__init__.py").touch()
+    place_flake_ledger(path / "tests")
     for folder in ("scripts/ci_mutation", "scripts/ci_lab"):
         shutil.copytree(REPO / folder, path / folder, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     (path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")

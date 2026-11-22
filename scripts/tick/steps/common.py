@@ -9,7 +9,7 @@ from dataclasses import replace
 from importlib import import_module
 from typing import Any
 
-from scripts.swarm import claim_lost
+from scripts.swarm import claim_lost, expert_lineage
 
 DROP_REFUSED = ", the store refused its drop, retrying next pass"
 
@@ -70,7 +70,7 @@ def _drop(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, 
     reopen = held and tick._reopen(slug, ledger, rows, agent.task, expected)
     if reopen and agent.seat:
         store.keep_seat(slug, agent.task, agent.seat)
-    _settle_exit(store, agent.name, agent.seat if reopen else "")
+    _settle_exit(store, agent.name, agent.seat if reopen or expert_lineage.goes_on(store, slug, agent) else "")
     return handed or (f", task {agent.task} reopened" if reopen else "")
 
 

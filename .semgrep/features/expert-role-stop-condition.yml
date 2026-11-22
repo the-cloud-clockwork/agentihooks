@@ -1,0 +1,14 @@
+rules:
+  - id: feature-expert-role-stop-condition
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-22, the expert profile holds an expert to its mission with no excuse for stopping short: the
+      role's Stop condition runs the expert-stop gate and no other.
+    patterns:
+      - pattern: raise SystemExit(main($GATES))
+      - pattern-not: raise SystemExit(main(["expert-stop"]))
+    paths:
+      include:
+        - /profiles/package/roles/expert/.claude/conditions/stop-expert_stop.py
+        - '*.test.py'
