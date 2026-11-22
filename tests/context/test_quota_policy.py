@@ -335,19 +335,24 @@ def test_wait_directive_carries_a_cron_for_the_reset(
     at = datetime.fromtimestamp((reset or now) + 120).astimezone().isoformat()
 
     text = qp.render(d, "sess-1", "/repo")
+    lines = text.splitlines()
 
     assert text.startswith("QUOTA WAIT")
     assert "CronCreate" not in text
     assert at in text
     if swarm:
-        assert f'agentihooks swarm {swarm} wait {minutes} --reason "quota reset at {at}"' in text
-        assert "If this wait ends before the reset time in its reason, declare another bounded wait "
-            "until that time, even if QUOTA WAIT no longer appears." in text
+        assert lines[1] == f'1. Run: agentihooks swarm {swarm} wait {minutes} --reason "quota reset at {at}"'
+        assert lines[2] == (
+            "If this wait ends before the reset time in its reason, declare another bounded wait "
+            "until that time, even if QUOTA WAIT no longer appears."
+        )
         assert "agentihooks timer add" not in text
     else:
-        assert f'agentihooks timer add --at "{at}" --session "sess-1"' in text
+        assert lines[1] == (
+            f'1. Run: agentihooks timer add --at "{at}" --session "sess-1" '
+            '"The 5-hour quota window has reset. Continue the task from where you stopped."'
+        )
         assert "agentihooks swarm" not in text
-        assert '"The 5-hour quota window has reset. Continue the task from where you stopped."' in text
 
 
 def test_stop_directive_asks_for_another_account():
