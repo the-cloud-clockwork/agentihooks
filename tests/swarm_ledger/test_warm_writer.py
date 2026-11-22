@@ -124,7 +124,8 @@ def state(slug: str) -> Any:
 
 def events(slug: str) -> list[tuple[Any, ...]]:
     """The event rows the shared store holds for ``slug``, their clock readings blanked."""
-    with storage.default().connect() as connection:
+    repository: Any = storage.default()
+    with repository.connect() as connection:
         rows = connection.execute(
             "SELECT key, revision, position, value FROM events WHERE slug=? ORDER BY position", (slug,)
         ).fetchall()
