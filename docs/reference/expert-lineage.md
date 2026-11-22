@@ -112,9 +112,10 @@ While its lineage runs, the end of an expert's turn is refused by the
 wait. The refusal names the ways on: keep working, hand off, complete on a
 proof, or declare the wait. An expert whose lineage ended on a proof but whose
 completion did not finish is refused too and told to run the completion again.
-Its default mode is `deny`. It is set like every gate, with
-`agentihooks swarm <id> set expert-stop-gate=<mode>`,
-where the mode is `deny`, `log only` or `skip`.
+Its default mode is `deny`. It is set like every gate, to one of three modes:
+`agentihooks swarm <id> set expert-stop-gate=deny`,
+`agentihooks swarm <id> set expert-stop-gate="log only"` (quoted, the name holds a space) or
+`agentihooks swarm <id> set expert-stop-gate=skip`.
 
 ## Not yet built
 

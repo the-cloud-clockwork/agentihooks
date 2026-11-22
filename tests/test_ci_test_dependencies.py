@@ -369,15 +369,10 @@ INTENTIONAL_SMOKES = {
     ),
 }
 FLOATING_INSTALLS: tuple[str, ...] = (
-    ".github/workflows/access-audit.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/branch-lanes.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/coverage-stability.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
     ".github/workflows/gate-protected.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/gate-required.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/hive-worker.yml: pip install PyYAML",
-    ".github/workflows/lost-runner.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/publish-pypi.yml: pip install build",
-    ".github/workflows/queue-retry.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
     ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
     ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2",
@@ -1140,3 +1135,28 @@ def test_each_intentional_install_smoke_is_a_measured_install_with_a_reason() ->
     assert Counter(finding.key for finding in smokes) == Counter(list(INTENTIONAL_SMOKES))
     assert all(UNCONSTRAINED in finding.reasons for finding in smokes)
     assert all(reason.strip() for reason in INTENTIONAL_SMOKES.values())
+
+
+@pytest.mark.feature("ci-small-workflows-install-the-parser-first")
+@pytest.mark.parametrize(
+    ("workflow", "job"),
+    [
+        ("access-audit.yml", "audit"),
+        ("gate-required.yml", "report"),
+        ("hive-worker.yml", "contracts"),
+        ("lost-runner.yml", "watch"),
+        ("queue-retry.yml", "retry"),
+    ],
+)
+def test_each_small_workflow_installs_pyyaml_before_its_repository_code(workflow: str, job: str) -> None:
+    steps = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"][job]["steps"]
+    lines = [line for step in steps for line in str(step.get("run", "")).splitlines()]
+    install = re.compile(r"\bpip3? install\b.*\bpyyaml\b", re.I)
+    repository_code = re.compile(
+        r"\bpython3?\s+(?:-\w+\s+)*(?:-m\s+scripts\.|\S*\.py\b)|\b(?:bash|sh)\s+\S*(?:deploy|scripts)/"
+    )
+    installs = [index for index, line in enumerate(lines) if install.search(line)]
+    code = [index for index, line in enumerate(lines) if repository_code.search(line)]
+    assert installs and code and installs[0] < code[0], (
+        f"PyYAML installs at {installs}, repository code at {code}: {lines}"
+    )
