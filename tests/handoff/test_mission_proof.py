@@ -13,6 +13,7 @@ ADDRESS = expert_mission.address("sw", GOOD)
 HEADINGS = "Mission, Deliverables, Validation, Smoke tests, Regression tests, Semgrep rules, Feature map, Open items"
 UNSHOWN = "carries no evidence; add the run, command or link that shows it"
 GUESSED = "is labelled hypothesis; a proof holds only what was shown"
+STRAY = "Deliverables bullet {number} names no deliverable; start it with D and its number"
 PLAN, FIRST, SECOND = (f"https://github.com/o/r/pull/{number}" for number in (12, 14, 15))
 D1 = "- D1 Each cause proven against the live ledger, run 4471\n"
 D2 = f"- D2 The plan file, merged in {PLAN}\n"
@@ -77,6 +78,10 @@ def _unnamed(number: int) -> str:
     return f"deliverable D{number} is named by no Deliverables bullet; start one with D{number}"
 
 
+def _stranger(number: str) -> str:
+    return f"D{number} names no deliverable, the mission has 3; number the bullet after the deliverable it proves"
+
+
 @pytest.mark.feature("expert-lineage-ends-on-proof")
 def test_a_proof_of_every_deliverable_with_nothing_open_has_no_problems() -> None:
     assert _problems(VALID) == []
@@ -87,10 +92,12 @@ def test_a_proof_of_every_deliverable_with_nothing_open_has_no_problems() -> Non
     "old,new,found",
     [
         (D3, "", [_unnamed(3)]),
-        (D1, "- Each cause proven for D1, run 4471\n", [_unnamed(1)]),
+        (D1, "- Each cause proven for D1, run 4471\n", [STRAY.format(number=1), _unnamed(1)]),
         (D2, D2 + D2, ["deliverable D2 is named by 2 bullets; name it once under Deliverables"]),
-        (D3, D3 + "- D4 A fourth thing, run 4474\n", ["D4 names no deliverable; the mission has 3"]),
-        (D3, D3 + "- D0 Nothing, run 4475\n", ["D0 names no deliverable; the mission has 3"]),
+        (D3, D3 + "- D4 A fourth thing, run 4474\n", [_stranger("4")]),
+        (D3, D3 + "- D0 Nothing, run 4475\n", [_stranger("0")]),
+        (D3, D3 + "- D10 A tenth thing, run 4476\n- D9 A ninth thing, run 4477\n", [_stranger("9"), _stranger("10")]),
+        (D1, "- D01 Each cause proven against the live ledger, run 4471\n", [_stranger("01"), _unnamed(1)]),
         (D1, "- D1 Each cause proven against the live ledger\n", [f"Deliverables bullet 1 {UNSHOWN}"]),
         (D2, "- D2 The plan file, a hypothesis until it merges\n", [f"Deliverables bullet 2 {GUESSED}"]),
         (D2, f"- D2 Hypothesis: the plan file merged in {PLAN}\n", [f"Deliverables bullet 2 {GUESSED}"]),
@@ -180,6 +187,47 @@ def test_a_handoff_v2_that_ends_on_the_proof_marker_is_told_its_own_marker_and_n
     assert check.problems(handoff, lambda address: False) == [
         "the completion marker <!-- handoff complete --> must be the last line"
     ]
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+@pytest.mark.parametrize("heading", ["Deliverables", *PROVEN])
+def test_the_word_proof_alone_shows_nothing_in_a_mission_proof(heading: str) -> None:
+    shown = D1 if heading == "Deliverables" else PROVEN[heading]
+    bare = "- D1 Each cause is fixed, proof attached\n" if heading == "Deliverables" else "- It holds, see the proof\n"
+    assert _problems(_swap(shown, bare)) == [f"{heading} bullet 1 {UNSHOWN}"]
+
+
+def test_the_word_proof_still_stands_in_a_handoff() -> None:
+    handoff = (
+        "# Handoff v2\n## Intent\n- Refuse a malformed handoff\n## Done\n- Seam one is green, see the proof\n"
+        "## Stopped at\n- Seam two\n## Decisions and promises\nNone\n## Next\n- Run it\n## Read first\nNone\n"
+        "<!-- handoff complete -->\n"
+    )
+    assert check.problems(handoff, lambda address: False) == []
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+@pytest.mark.parametrize(
+    "stray", ["- D1a One more note, run 4476\n", "- The plan held up, run 4477\n", "- d2 again, run 4478\n"]
+)
+def test_every_deliverables_bullet_names_a_deliverable(stray: str) -> None:
+    assert _problems(_swap(D3, D3 + stray)) == [STRAY.format(number=4)]
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+def test_a_marker_shaped_line_inside_a_section_is_content_and_hides_nothing() -> None:
+    hidden = _swap("## Open items\nNone\n", "## Open items\n<!-- mission complete -->\n- D3 needs one more pass\n")
+    assert _problems(hidden) == ["## Open items must be None; a lineage ends with nothing open"]
+    inside = _swap("## Open items\nNone\n", "## Open items\n<!-- mission complete -->\nNone\n")
+    assert _problems(inside) == ["## Open items must be None; a lineage ends with nothing open"]
+    assert check.section(inside, "Open items") == "<!-- mission complete -->\nNone"
+    handoff = (
+        "# Handoff v2\n## Intent\n- Refuse a malformed handoff\n## Done\nNone\n## Stopped at\n- Seam two\n"
+        "## Decisions and promises\nNone\n## Next\n<!-- handoff complete -->\n- Run it\n## Read first\nNone\n"
+        "<!-- handoff complete -->\n"
+    )
+    assert check.section(handoff, "Next") == "<!-- handoff complete -->\n- Run it"
+    assert check.section(handoff, "Read first") == "None"
 
 
 def test_a_mission_title_that_names_a_file_passes_the_wording_rules() -> None:

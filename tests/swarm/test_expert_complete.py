@@ -3,12 +3,13 @@
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import NamedTuple
 
 import pytest
 
-from scripts.inbox.store import InboxStore
-from scripts.swarm import expert_commands, expert_lineage, ledger_events
+from scripts.inbox.store import InboxError, InboxStore, Item
+from scripts.swarm import cli, expert_commands, expert_lineage, ledger_events
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore, SwarmError
 from tests.handoff.test_mission_proof import D1, D2, D3, FIRST, RULED, SECOND, VALID, VALIDATED
@@ -21,6 +22,7 @@ from tests.swarm.expert_fixture import (
     TITLE,
     acting,
     indexed,
+    operating,
     run,
     seated,
     started,
@@ -153,7 +155,7 @@ def test_only_the_expert_that_works_the_lineage_completes_it(
     if actor:
         acting(monkeypatch, actor)
     else:
-        monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+        operating(monkeypatch)
     assert run("sw", "expert", "complete", proof(tmp_path)) == 1
     assert capsys.readouterr().err == ONLY
     assert expert_lineage.get(working, "sw", "expert-1").state == "running"
@@ -165,6 +167,7 @@ def test_an_expert_that_already_left_its_seat_completes_nothing(
     seated(working, EXPERT, "expert-1", state="finished")
     assert run("sw", "expert", "complete", proof(tmp_path)) == 1
     assert capsys.readouterr().err == ONLY
+    working.drop_agent("sw", EXPERT)
     seated(working, EXPERT, "expert-1")
     assert run("sw", "expert", "complete", proof(tmp_path)) == 0
     capsys.readouterr()
@@ -203,6 +206,83 @@ def test_a_lineage_stopped_by_order_holds_no_proof(working: RedisStore) -> None:
     assert working.redis.hlen(working.key("sw", "expert-proofs")) == 0
 
 
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+def test_a_completion_cut_short_is_finished_by_running_it_again(
+    working: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    send = InboxStore.send
+    cut: list[str] = []
+
+    def failing(inbox: InboxStore, sender: str, address: str, text: str) -> Item:
+        if not cut:
+            cut.append(address)
+            raise InboxError("the inbox is down")
+        return send(inbox, sender, address, text)
+
+    monkeypatch.setattr(InboxStore, "send", failing)
+    assert run("sw", "expert", "complete", proof(tmp_path)) == 1
+    assert capsys.readouterr().err == "swarm: the inbox is down\n"
+    assert expert_lineage.get(working, "sw", "expert-1").state == "complete"
+    assert expert_lineage.proof(working, "sw", "expert-1") == VALID
+    assert state(working, EXPERT) == ["working"] and mail(working) == []
+    assert len(working.memory.recaps("expert-1@sw")) == 0
+    assert run("sw", "expert", "complete", proof(tmp_path, VALID.replace("run 4480", "run 4499"))) == 1
+    assert capsys.readouterr().err == "swarm: expert lineage expert-1 is complete, not running\n"
+    assert state(working, EXPERT) == ["working"] and mail(working) == []
+    assert run("sw", "expert", "complete", proof(tmp_path)) == 0
+    assert json.loads(capsys.readouterr().out) == asdict(expert_lineage.get(working, "sw", "expert-1"))
+    assert state(working, EXPERT) == ["finished"]
+    assert [sender for sender, _ in mail(working)] == [EXPERT]
+    assert [recap["text"] for recap in working.memory.recaps("expert-1@sw")] == [RECAP]
+
+
+@pytest.mark.feature("expert-stop-gate")
+def test_an_expert_is_held_to_its_seat_while_its_lineage_runs(working: RedisStore) -> None:
+    [expert] = [agent for agent in working.agents("sw") if agent.name == EXPERT]
+    with pytest.raises(SwarmError) as refused:
+        expert_commands.seated(working, "sw", expert)
+    assert str(refused.value) == (
+        f"{EXPERT} works lineage expert-1, which still runs: an expert leaves its seat by a handoff or a mission proof"
+    )
+    for free in (
+        None,
+        replace(expert, state="finished"),
+        replace(expert, lane="eng"),
+        replace(expert, task="expert-9"),
+    ):
+        expert_commands.seated(working, "sw", free)
+    expert_lineage.stop(working, "sw", "expert-1", MASTER, "the order changed", 5)
+    expert_commands.seated(working, "sw", expert)
+    assert expert_lineage.get(working, "sw", "expert-1").state == "stopped"
+
+
+def test_an_expert_of_a_running_lineage_cannot_leave_its_seat_through_exit(
+    working: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    reaped: list[str] = []
+    monkeypatch.setattr(cli, "HerdrRuntime", lambda: SimpleNamespace(reap_name=reaped.append))
+    assert run("sw", "exit") == 1
+    assert capsys.readouterr().err == (
+        f"swarm: {EXPERT} works lineage expert-1, which still runs: an expert leaves its seat by a handoff or a "
+        "mission proof\n"
+    )
+    assert state(working, EXPERT) == ["working"] and reaped == []
+    expert_lineage.stop(working, "sw", "expert-1", MASTER, "the order changed", 5)
+    assert run("sw", "exit") == 0
+    assert state(working, EXPERT) == ["finished"] and reaped == [EXPERT]
+
+
+def test_a_worker_still_leaves_through_exit(
+    working: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    reaped: list[str] = []
+    monkeypatch.setattr(cli, "HerdrRuntime", lambda: SimpleNamespace(reap_name=reaped.append))
+    acting(monkeypatch, ENGINEER)
+    assert run("sw", "exit") == 0
+    assert state(working, ENGINEER) == ["finished"] and reaped == [ENGINEER]
+    assert state(working, EXPERT) == ["working"]
+
+
 def test_a_proof_file_that_cannot_be_read_is_refused_by_name(
     working: RedisStore, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -230,7 +310,7 @@ def test_the_master_and_the_operator_read_the_proof_a_lineage_ended_on(
         if actor:
             acting(monkeypatch, actor)
         else:
-            monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+            operating(monkeypatch)
         assert run("sw", "expert", "proof", "expert-1") == 0
         assert capsys.readouterr().out == VALID
     assert run("sw", "expert", "status", "expert-1") == 0

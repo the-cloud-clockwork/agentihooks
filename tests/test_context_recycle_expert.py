@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 import hooks.context.context_recycle as recycle
+from scripts.handoff import expert
 from scripts.swarm import expert_lineage
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.handoff.test_expert_contract import OPENS, VALID
@@ -86,6 +87,7 @@ def test_in_the_preparation_window_an_expert_is_told_the_expert_handoff_form(mon
     )
 
 
+@pytest.mark.feature("expert-handoff-contract")
 @pytest.mark.parametrize("env", [ENGINEER, MASTER])
 def test_a_worker_and_a_master_keep_the_handoff_v2_form(env: dict[str, str]) -> None:
     told = recycle.directive("s1", env)
@@ -145,6 +147,32 @@ def test_over_the_limit_an_expert_still_ends_its_lineage_on_a_proof() -> None:
         assert denied is not None and denied.startswith("BLOCKED: " + HEAD), refused
 
 
+@pytest.mark.parametrize("env", [ENGINEER, MASTER])
+def test_over_the_limit_a_worker_and_a_master_are_denied_the_complete_command_like_any_other_work(
+    env: dict[str, str],
+) -> None:
+    command = "agentihooks swarm sw expert complete /home/u/scratchpad/proof.md"
+    denied = recycle.gate("Bash", {"command": command}, "s1", env)
+    assert denied is not None and denied == recycle.gate("Bash", {"command": "git commit -m more"}, "s1", env)
+
+
+@pytest.mark.feature("expert-handoff-contract")
+@pytest.mark.parametrize("env", [ENGINEER, MASTER])
+def test_over_the_limit_a_worker_and_a_master_are_denied_the_mission_command_like_any_other_work(
+    env: dict[str, str],
+) -> None:
+    denied = recycle.gate("Bash", {"command": "agentihooks swarm sw expert mission"}, "s1", env)
+    assert denied is not None and denied == recycle.gate("Bash", {"command": "git commit -m more"}, "s1", env)
+    assert denied.startswith("BLOCKED: CONTEXT RECYCLE") and "expert mission" not in denied
+
+
+def test_the_expert_form_names_the_title_and_every_heading_of_the_expert_handoff_in_its_order() -> None:
+    told = recycle.directive("s1", EXPERT) or ""
+    assert f"the line {expert.HANDOFF.title}, then ## {expert.HANDOFF.headings[0]}," in told
+    spots = [told.index(f"## {name}") for name in expert.HANDOFF.headings]
+    assert spots == sorted(spots)
+
+
 @pytest.mark.feature("expert-handoff-contract")
 def test_over_the_limit_an_experts_handoff_is_checked_against_the_expert_contract_before_the_command(
     store: RedisStore, tmp_path: Path
@@ -191,6 +219,33 @@ def test_an_expert_the_swarm_store_cannot_place_is_left_to_the_handoff_command(
 
     monkeypatch.setattr(store, "agents", down)
     monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    assert recycle.gate("Bash", _handoff(tmp_path, V2), "s1", EXPERT) is None
+
+
+@pytest.mark.feature("expert-handoff-contract")
+def test_over_the_limit_an_expert_whose_saved_mission_or_lineage_is_gone_is_refused_by_name(
+    store: RedisStore, tmp_path: Path
+) -> None:
+    [lineage] = expert_lineage.running(store, "sw")
+    store.redis.hdel(store.key("sw", expert_lineage.MISSIONS), lineage.mission.rpartition("/")[2])
+    assert recycle.gate("Bash", _handoff(tmp_path, VALID), "s1", EXPERT) == (
+        f"BLOCKED: the saved mission of lineage {lineage.id} is missing or does not match {lineage.mission}"
+    )
+    store.redis.hdel(store.key("sw", expert_lineage.LINEAGES), lineage.id)
+    assert recycle.gate("Bash", _handoff(tmp_path, VALID), "s1", EXPERT) == (
+        f"BLOCKED: swarm sw has no expert lineage {lineage.id}"
+    )
+
+
+def test_a_store_lost_while_the_contract_is_read_leaves_the_check_to_the_handoff_command(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from redis.exceptions import ConnectionError as RedisDown
+
+    def down(*found: object) -> expert_lineage.Lineage:
+        raise RedisDown("connection lost")
+
+    monkeypatch.setattr(expert_lineage, "get", down)
     assert recycle.gate("Bash", _handoff(tmp_path, V2), "s1", EXPERT) is None
 
 

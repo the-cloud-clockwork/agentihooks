@@ -31,11 +31,12 @@ URL = re.compile(r"\w+://\S+")
 TOKEN_SPLIT = re.compile(r"[\s`'\"()\[\]<>,;*]+")
 LINE_NUMBER = re.compile(r"(?i:\blines? \d+)|\bL\d+\b|\.\w+:\d+\b")
 BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
-EVIDENCE = re.compile(
-    r"\w+://\S+|`[^`]+`|#\d+|\brun \d+|\b\d{8,}\b|\b(?:ledger|workspace|recap|inbox):\S+|\bproof\b"
+SHOWN = re.compile(
+    r"\w+://\S+|`[^`]+`|#\d+|\brun \d+|\b\d{8,}\b|\b(?:ledger|workspace|recap|inbox):\S+"
     r"|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b",
     re.IGNORECASE,
 )
+EVIDENCE = re.compile(rf"{SHOWN.pattern}|\bproof\b", re.IGNORECASE)
 HYPOTHESIS = re.compile(r"\bhypothes[ie]s\b", re.IGNORECASE)
 COUNTS = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
 COMPLETION = re.compile(r"<!-- \w+ complete -->")
@@ -44,14 +45,14 @@ COMPLETION = re.compile(r"<!-- \w+ complete -->")
 @dataclass(frozen=True)
 class Contract:
     """The shape a document is held to: its title line, its headings in order, the sections whose bullets must each
-    carry evidence, the completion marker that ends it and whether a bullet labelled hypothesis stands without
-    evidence."""
+    carry evidence, the completion marker that ends it and whether that evidence must be shown. Where it must, a
+    bullet labelled hypothesis and one that only says the word proof do not stand."""
 
     title: str
     headings: tuple[str, ...]
     evidenced: tuple[str, ...] = ("Done",)
     marker: str = MARKER
-    hypotheses: bool = True
+    shown: bool = False
 
 
 V2 = Contract(TITLE, HEADINGS)
@@ -61,7 +62,7 @@ def problems(text: str, resolves: Callable[[str], object], contract: Contract = 
     """Every structural problem in the document under the contract, Handoff v2 unless another is given; empty when
     it conforms. resolves(address) says an address exists."""
     lines = text.splitlines()
-    sections = _sections(lines)
+    sections = _sections(_body(lines))
     bodies = {name: body for name, body in reversed(sections)}
     return [
         *_title(lines, contract.title),
@@ -73,7 +74,7 @@ def problems(text: str, resolves: Callable[[str], object], contract: Contract = 
         *(
             found
             for heading in contract.evidenced
-            for found in _evidence(heading, bodies.get(heading, []), contract.hypotheses)
+            for found in _evidence(heading, bodies.get(heading, []), contract.shown)
         ),
     ]
 
@@ -90,13 +91,21 @@ def _sections(lines: list[str]) -> list[tuple[str, list[str]]]:
             fenced = not fenced
         if not fenced and line.startswith("## "):
             sections.append((line[3:].strip(), []))
-        elif sections and not COMPLETION.fullmatch(line.strip()):
+        elif sections:
             sections[-1][1].append(line)
     return sections
 
 
+def _body(lines: list[str]) -> list[str]:
+    """The lines of the document without the completion marker that closes it, whichever document's marker it is. A
+    marker shaped line anywhere else is content."""
+    last = next((at for at in range(len(lines) - 1, -1, -1) if lines[at].strip()), -1)
+    closed = last >= 0 and COMPLETION.fullmatch(lines[last].strip()) is not None
+    return [*lines[:last], *lines[last + 1 :]] if closed else lines
+
+
 def section(text: str, heading: str) -> str:
-    return "\n".join(dict(_sections(text.splitlines())).get(heading, [])).strip()
+    return "\n".join(dict(_sections(_body(text.splitlines()))).get(heading, [])).strip()
 
 
 def _title(lines: list[str], title: str) -> list[str]:
@@ -104,12 +113,15 @@ def _title(lines: list[str], title: str) -> list[str]:
     return [] if first == title else [f"the first line must be {title}"]
 
 
+def _counted(headings: tuple[str, ...]) -> str:
+    """How many headings a contract has, in a word up to ten and in digits beyond."""
+    return COUNTS[len(headings)] if len(headings) < len(COUNTS) else str(len(headings))
+
+
 def _headings(names: list[str], headings: tuple[str, ...]) -> list[str]:
     listed = ", ".join(headings)
     found = [
-        f"## {name} is not one of the {COUNTS[len(headings)]} headings: {listed}"
-        for name in names
-        if name not in headings
+        f"## {name} is not one of the {_counted(headings)} headings: {listed}" for name in names if name not in headings
     ]
     for heading in headings:
         count = names.count(heading)
@@ -178,7 +190,7 @@ def leaks(text: str) -> list[str]:
 
 
 def _wording(text: str) -> list[str]:
-    prose = "\n".join(line for line in text.splitlines() if not COMPLETION.fullmatch(line.strip()))
+    prose = "\n".join(_body(text.splitlines()))
     found = leaks(prose)
     found += [f"file path {path}; name the module, type or command instead" for path in _paths(prose)]
     found += [
@@ -204,19 +216,18 @@ def bullets(body: str) -> list[str]:
     return _bullets(body.splitlines())
 
 
-def _evidence(heading: str, body: list[str], hypotheses: bool) -> list[str]:
+def _evidence(heading: str, body: list[str], shown: bool) -> list[str]:
     if _is_none(body):
         return []
-    found = (_unshown(heading, number, bullet, hypotheses) for number, bullet in enumerate(_bullets(body), 1))
+    found = (_unshown(heading, number, bullet, shown) for number, bullet in enumerate(_bullets(body), 1))
     return [fault for fault in found if fault]
 
 
-def _unshown(heading: str, number: int, bullet: str, hypotheses: bool) -> str:
+def _unshown(heading: str, number: int, bullet: str, shown: bool) -> str:
     """Why one bullet of an evidenced section does not stand, empty when it does."""
-    labelled = HYPOTHESIS.search(bullet) is not None
-    if labelled and not hypotheses:
-        return f"{heading} bullet {number} is labelled hypothesis; a proof holds only what was shown"
-    if labelled or EVIDENCE.search(bullet):
+    if HYPOTHESIS.search(bullet):
+        return f"{heading} bullet {number} is labelled hypothesis; a proof holds only what was shown" if shown else ""
+    if (SHOWN if shown else EVIDENCE).search(bullet):
         return ""
-    remedy = "add it or label the bullet hypothesis" if hypotheses else "add the run, command or link that shows it"
+    remedy = "add the run, command or link that shows it" if shown else "add it or label the bullet hypothesis"
     return f"{heading} bullet {number} carries no evidence; {remedy}"

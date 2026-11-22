@@ -124,5 +124,5 @@ def test_without_an_injected_store_and_clock_the_gate_reads_the_swarm_store_and_
     monkeypatch.setattr("scripts.handoff.transfers.now_ms", lambda: NOW)
     gate = ExpertStop()
     assert gate.decide(STOP, WHO, Verdicts(SLUG, gate.name, tmp_path)).reason == DENIED
-    idle.declare_wait(store.redis, SLUG, ME, NOW + 1, "a reply", NOW)
+    idle.declare_wait(store.redis, SLUG, ME, NOW + 60_000, "a reply", NOW)
     assert gate.decide(STOP, WHO, Verdicts(SLUG, gate.name, tmp_path)) == Decision()

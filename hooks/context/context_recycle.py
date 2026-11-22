@@ -56,19 +56,21 @@ _QUICK_ALLOWED = (
     "log, diff, show in the shell), writing under ~/scratchpad and `agentihooks quick handoff`, each as one command."
 )
 
-_ALLOWED = (
+_ALLOWED_UNTIL = (
     " Until the handoff every tool call is denied except reading files (cat, head, tail, ls, wc, grep and git status, "
-    "log, diff, show in the shell), writing the handoff document under "
-    "~/scratchpad, `agentihooks swarm {slug} handoff <doc> [--recap <recap>]`, `agentihooks swarm {slug} learned` "
-    "and `agentihooks api` comment, say, leave and ack, "
-    "each as one command."
+    "log, diff, show in the shell), writing the handoff document"
+)
+_ALLOWED_ALSO = (
+    "`agentihooks swarm {slug} learned` and `agentihooks api` comment, say, leave and ack, each as one command."
+)
+_ALLOWED = (
+    _ALLOWED_UNTIL + " under ~/scratchpad, `agentihooks swarm {slug} handoff <doc> [--recap <recap>]`, " + _ALLOWED_ALSO
 )
 _EXPERT_ALLOWED = (
-    " Until the handoff every tool call is denied except reading files (cat, head, tail, ls, wc, grep and git status, "
-    "log, diff, show in the shell), writing the handoff document or the mission proof under ~/scratchpad, "
-    "`agentihooks swarm {slug} expert mission`, `agentihooks swarm {slug} handoff <doc>`, "
-    "`agentihooks swarm {slug} expert complete <proof>`, "
-    "`agentihooks swarm {slug} learned` and `agentihooks api` comment, say, leave and ack, each as one command."
+    _ALLOWED_UNTIL
+    + " or the mission proof under ~/scratchpad, `agentihooks swarm {slug} expert mission`, "
+    + "`agentihooks swarm {slug} handoff <doc>`, `agentihooks swarm {slug} expert complete <proof>`, "
+    + _ALLOWED_ALSO
 )
 
 _READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS", "NotebookRead"})
@@ -235,7 +237,7 @@ def _shell_read(tokens: list[str]) -> bool:
     )
 
 
-def _allowed_command(command: str, slug: str) -> bool:
+def _allowed_command(command: str, slug: str, expert: bool) -> bool:
     tokens = _single_command(command)
     if tokens is None:
         return False
@@ -244,15 +246,15 @@ def _allowed_command(command: str, slug: str) -> bool:
     if len(tokens) < 3 or os.path.basename(tokens[0]) != "agentihooks":
         return False
     if tokens[1] == "swarm":
-        return _swarm_step(tokens[2:], slug)
+        return _swarm_step(tokens[2:], slug, expert)
     return tokens[1] == "ledger" and _ledger_step(tokens[2:]) in _LEDGER_STEPS
 
 
-def _swarm_step(args: list[str], slug: str) -> bool:
+def _swarm_step(args: list[str], slug: str, expert: bool) -> bool:
     if args[:2] == [slug, "learned"]:
         return len(args) == 3 or (len(args) == 5 and args[3] == "--maturity")
     if args[:2] == [slug, "expert"]:
-        return args[2:] == ["mission"] or (len(args) == 4 and args[2] == "complete")
+        return expert and (args[2:] == ["mission"] or (len(args) == 4 and args[2] == "complete"))
     return args[:2] == [slug, "handoff"] and (len(args) == 3 or (len(args) == 5 and args[3] == "--recap"))
 
 
@@ -269,9 +271,10 @@ def gate(
     if tool_name in _WRITE_TOOLS and _handoff_write(tool_input):
         return None
     command = str(tool_input.get("command") or "")
-    if tool_name == "Bash" and _allowed_command(command, slug):
+    expert = _expert(env)
+    if tool_name == "Bash" and _allowed_command(command, slug, expert):
         return _handoff_refusal(command, slug, env)
-    told = _HEAD + _EXPERT_INSTRUCTIONS + _EXPERT_ALLOWED if _expert(env) else _DIRECTIVE + _ALLOWED
+    told = _HEAD + _EXPERT_INSTRUCTIONS + _EXPERT_ALLOWED if expert else _DIRECTIVE + _ALLOWED
     return "BLOCKED: " + told.format(used=used // 1000, limit=_gate_limit(), slug=slug)
 
 
@@ -313,6 +316,8 @@ def _resolver(slug: str):
 
 
 def _handoff_refusal(command: str, slug: str, environ: Mapping[str, str]) -> str | None:
+    from scripts.swarm.store import SwarmError
+
     tokens = _single_command(command) or []
     if tokens[1:2] != ["swarm"] or tokens[3:4] != ["handoff"]:
         return None
@@ -320,25 +325,34 @@ def _handoff_refusal(command: str, slug: str, environ: Mapping[str, str]) -> str
         text = Path(tokens[4]).expanduser().read_text(encoding="utf-8")
     except OSError:
         return None
-    found = _problems(text, slug, environ)
+    try:
+        found = _problems(text, slug, environ)
+    except SwarmError as gone:
+        return f"BLOCKED: {gone}"
     return "BLOCKED: " + handoff_check.refusal(found) if found else None
 
 
 def _problems(text: str, slug: str, environ: Mapping[str, str]) -> list[str]:
-    """The problems of the document under the contract its author is held to; an expert the swarm store cannot place
-    is left to the handoff command, which checks it again."""
-    resolves = _resolver(slug)
+    """The problems of the document under the contract its author is held to. An expert the swarm store cannot place,
+    or a store that cannot be reached, is left to the handoff command, which checks it again; an expert whose lineage
+    or saved mission is gone raises the refusal that names it."""
     if not _expert(environ):
-        return handoff_check.problems(text, resolves)
+        return handoff_check.problems(text, _resolver(slug))
     from redis.exceptions import RedisError
 
     from scripts.handoff import contracts
+    from scripts.handoff.resolve import Resolver
     from scripts.swarm.store import SwarmError, connect
 
     try:
         store = connect()
         name = store.names.resolve(environ["AGENTIHOOKS_AGENT_NAME"])
         agent = next((found for found in store.agents(slug) if found.name == name), None)
-        return contracts.problems(store, slug, agent, text, resolves) if agent else []
     except (SwarmError, RedisError):
+        return []
+    if agent is None:
+        return []
+    try:
+        return contracts.problems(text, Resolver(slug, store.redis), store, slug, agent)
+    except RedisError:
         return []
