@@ -138,6 +138,8 @@ WRITE_TIMEOUT = postgres.LOCK_TRIES * postgres.LOCK_WAIT + REQUEST_TIMEOUT
 EXPORT_TIMEOUT = 30
 TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("task_split", "halves", "split")}
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
+NOT_HIS = "refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
+ORDER_USAGE = "order takes ITEM with --quote WORDS or --request ENTRY, and --clear only with --quote WORDS"
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
 LEDGER_ITEM = re.compile(r"tasks|freezes|focus|orders|(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -351,16 +353,27 @@ def held(state):
     return {"queued": True} if state.get("queued") else {}
 
 
-def send(args, kind, /, **fields):
-    ops = [op(kind, args, **fields)]
-    lead = f"task {fields['task']} was not added: " if kind == "task_add" else ""
+def declined(state: dict[str, Any], sent: dict[str, Any]) -> bool:
+    """Whether the server refused the op."""
+    return sent["id"] in (state.get("rejected") or ())
+
+
+def send(args: Any, kind: str, /, **fields: Any) -> dict[str, Any]:
+    return post(args, [op(kind, args, **fields)])
+
+
+def post(args: Any, ops: list[dict[str, Any]]) -> dict[str, Any]:
+    """One ledger call for the ops, exiting with the server's reasons when it refuses the first of them."""
+    first = ops[0]
+    lead = f"task {first['task']} was not added: " if first["op"] == "task_add" else ""
     try:
-        state = call(args.slug, ops)
+        state: dict[str, Any] = call(args.slug, ops)
     except SystemExit as exc:
         if lead and isinstance(exc.code, str):
             raise type(exc)(lead + exc.code) from None
         raise
-    refused(state, ops, lead=lead)
+    if len(ops) == 1 or declined(state, first):
+        refused(state, ops, lead=lead)
     if lead and not state.get("applied"):
         sys.exit(f"{lead}the ledger server did not apply it")
     for warning in state.get("_meta", {}).get("warnings", []):
@@ -597,13 +610,14 @@ def cmd_artifact_purge(args):
     print(json.dumps({"purged": event["count"], "artifacts": resource(args.slug, "counts")["artifacts"]}))
 
 
-def cmd_phase(args):
+def cmd_phase(args: argparse.Namespace) -> None:
+    if vars(args).get("quote") and args.id != "add":
+        sys.exit("phase takes --quote only with add: run order phases/<id> --quote <his words>")
     if args.id in ("add", "set") and args.values:
         from scripts.swarm_ledger import ledger_phase_cli
 
         kind, fields = ledger_phase_cli.operation(args)
-        send(args, kind, **fields)
-        print(json.dumps(fields))
+        print(json.dumps({**fields, **filing(args, kind, f"phases/{args.state}", fields)}))
         return
     if args.state not in ("done", "open") or args.values:
         sys.exit("phase takes ID done|open, add ID TITLE, or set ID FIELD=VALUE")
@@ -670,13 +684,49 @@ def cmd_alert(args):
     print(json.dumps({"alert": args.id, "action": args.action}))
 
 
-def cmd_relay(args):
+def his_words(args: argparse.Namespace, what: str) -> None:
+    """Exit unless the quoted words are the operator's."""
     import ledger_relay
 
     if not ledger_relay.verified(args.name, args.quote):
-        sys.exit(
-            "relay refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
-        )
+        sys.exit(f"{what} {NOT_HIS}")
+
+
+def order_refusal(state: dict[str, Any], order: dict[str, Any]) -> str:
+    """The server's reason for refusing the order, empty when it took it."""
+    if not declined(state, order):
+        return ""
+    said: list[str] = state.get("_meta", {}).get("warnings", [])
+    return next((text for text in said if text.startswith(f"order on {order['item']} ")), unexplained(order))
+
+
+def filing(args: argparse.Namespace, kind: str, item: str, fields: dict[str, Any]) -> dict[str, str]:
+    """Send an add, with its order when the operator's words come with it, and say so when the server files the add
+    and refuses the order."""
+    if not vars(args).get("quote"):
+        send(args, kind, **fields)
+        return {}
+    his_words(args, "order")
+    order = op("order_set", args, item=item, quote=args.quote, filing=True)
+    reason = order_refusal(post(args, [op(kind, args, **fields), order]), order)
+    if not reason:
+        return {}
+    print(f"not ordered: {reason}", file=sys.stderr)
+    return {"not_ordered": reason}
+
+
+def order_command(args: argparse.Namespace) -> None:
+    if bool(args.quote) == bool(args.request) or (args.clear and not args.quote):
+        sys.exit(ORDER_USAGE)
+    if args.quote:
+        his_words(args, "order")
+    proof = {"quote": args.quote} if args.quote else {"request": args.request}
+    state = send(args, "order_clear" if args.clear else "order_set", item=args.item, **proof)
+    print(json.dumps({"cleared" if args.clear else "ordered": args.item, **held(state)}))
+
+
+def cmd_relay(args: argparse.Namespace) -> None:
+    his_words(args, "relay")
     queued = held(send(args, "relay", item=args.item, text=args.text, quote=args.quote))
     print(json.dumps({"relayed": not queued, "item": args.item, **queued}))
 
@@ -784,33 +834,25 @@ def cmd_hierarchy(args) -> None:
     hierarchy_backfill.run(args)
 
 
-def refuse_unset_quote(args):
-    if vars(args).get("quote") and args.action != "set":
+def refuse_unset_quote(args: argparse.Namespace) -> None:
+    if vars(args).get("quote") and args.action not in ("add", "set"):
         sys.exit(f"task {args.action} takes no --quote: run task set <id> rank=<rank> --quote <his words> after it")
 
 
-def _add_task(args, title, fields):
+def _add_task(args: argparse.Namespace, title: str, fields: dict[str, Any]) -> dict[str, str]:
     if args.scaffold:
         task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **fields}
         doc = call(args.slug) if args.kind == "plan" else None
         fields["workspace"] = str(ledger_workspace.folder(args.slug, args.id))
-    send(
-        args,
-        "task_add",
-        task=args.id,
-        title=title,
-        lane=args.lane,
-        phase=args.phase,
-        description=args.description,
-        **fields,
-    )
+    row = {"task": args.id, "title": title, "lane": args.lane, "phase": args.phase, "description": args.description}
+    noted = filing(args, "task_add", f"tasks/{args.id}", {**row, **fields})
     if args.scaffold:
         try:
             ledger_workspace.scaffold(args.slug, task, doc)
         except OSError as exc:
             print(f"task {args.id} was added; its work folder was not created: {exc}", file=sys.stderr)
-            return {"workspace_error": str(exc)}
-    return {}
+            return {"workspace_error": str(exc), **noted}
+    return noted
 
 
 def _task_add_fields(args: argparse.Namespace) -> dict[str, Any]:
@@ -1002,6 +1044,13 @@ def build_parser() -> argparse.ArgumentParser:
     phase.add_argument(
         "--not-duplicate", default="", help="why the phase differs from the one it resembles; skips the duplicate check"
     )
+    phase.add_argument("--quote", help="phase add: the operator's words, filing the phase as his order")
+    order = sub.add_parser("order", help="mark phases/<id> or tasks/<id> as the operator's order")
+    order.add_argument("item")
+    order.add_argument("--quote", help="the operator's recorded words")
+    order.add_argument("--request", help="id of the operator chat line or comment that ordered the work")
+    order.add_argument("--clear", action="store_true", help="remove the mark, with --quote")
+    order.set_defaults(handler=order_command)
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")
@@ -1127,7 +1176,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="the failed dev job or unit test this task fixes, exactly as the promotion alert names it; "
         "the promotion watch files no task for it while this task is open",
     )
-    task.add_argument("--quote", help="task set rank=...: the operator's words, so the rank stays his")
+    task.add_argument(
+        "--quote",
+        help="task set rank=...: the operator's words, so the rank stays his, "
+        "and task add: his words, filing the task as his order",
+    )
     publish = sub.add_parser("publish-plan")
     publish.add_argument("path")
     publish.add_argument("--phase", required=True, help="comma separated ids of the phases the plan fills")
@@ -1139,7 +1192,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main():
+def main() -> None:
     from scripts.gates import Who
     from scripts.gates.identity import refusal
 
@@ -1151,7 +1204,8 @@ def main():
     args.name = resolve_name(args.name) if args.name else args.name
     if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy", "get", "tasks")):
         sys.exit("--slug and --as are required")
-    globals()[f"cmd_{args.command.replace('-', '_')}"](args)
+    handler = vars(args).get("handler") or globals()[f"cmd_{args.command.replace('-', '_')}"]
+    handler(args)
 
 
 if __name__ == "__main__":
