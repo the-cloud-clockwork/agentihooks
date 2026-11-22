@@ -132,6 +132,8 @@ def test_a_mission_file_that_is_not_utf8_text_is_refused_by_name(
         ("status", "expert-1"),
         ("stop", "expert-1", "--note", "the order changed"),
         ("mission", "expert-1"),
+        ("complete", "MISSION"),
+        ("proof", "expert-1"),
     ],
 )
 def test_the_expert_verb_refuses_a_swarm_that_does_not_exist(

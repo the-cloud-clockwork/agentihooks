@@ -4,11 +4,12 @@ import json
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import pytest
 
-from scripts.inbox.store import InboxError, InboxStore, Item
+from scripts.inbox import exits
+from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli, expert_commands, expert_lineage, ledger_events
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore, SwarmError
@@ -207,33 +208,56 @@ def test_a_lineage_stopped_by_order_holds_no_proof(working: RedisStore) -> None:
 
 
 @pytest.mark.feature("expert-lineage-ends-on-proof")
-def test_a_completion_cut_short_is_finished_by_running_it_again(
-    working: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("step", ["notice", "recap", "mail", "finish"])
+def test_a_completion_cut_short_at_any_step_is_finished_by_running_it_again(
+    working: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], step: str
 ) -> None:
-    send = InboxStore.send
-    cut: list[str] = []
-
-    def failing(inbox: InboxStore, sender: str, address: str, text: str) -> Item:
-        if not cut:
-            cut.append(address)
-            raise InboxError("the inbox is down")
-        return send(inbox, sender, address, text)
-
-    monkeypatch.setattr(InboxStore, "send", failing)
+    cut = _cut(monkeypatch, working, step)
     assert run("sw", "expert", "complete", proof(tmp_path)) == 1
-    assert capsys.readouterr().err == "swarm: the inbox is down\n"
+    assert capsys.readouterr().err == f"swarm: cut at the {step}\n"
+    assert cut == [step]
     assert expert_lineage.get(working, "sw", "expert-1").state == "complete"
     assert expert_lineage.proof(working, "sw", "expert-1") == VALID
-    assert state(working, EXPERT) == ["working"] and mail(working) == []
-    assert len(working.memory.recaps("expert-1@sw")) == 0
+    assert state(working, EXPERT) == ["working"]
     assert run("sw", "expert", "complete", proof(tmp_path, VALID.replace("run 4480", "run 4499"))) == 1
     assert capsys.readouterr().err == "swarm: expert lineage expert-1 is complete, not running\n"
-    assert state(working, EXPERT) == ["working"] and mail(working) == []
+    assert state(working, EXPERT) == ["working"]
     assert run("sw", "expert", "complete", proof(tmp_path)) == 0
     assert json.loads(capsys.readouterr().out) == asdict(expert_lineage.get(working, "sw", "expert-1"))
     assert state(working, EXPERT) == ["finished"]
     assert [sender for sender, _ in mail(working)] == [EXPERT]
     assert [recap["text"] for recap in working.memory.recaps("expert-1@sw")] == [RECAP]
+
+
+def _cut(monkeypatch: pytest.MonkeyPatch, store: RedisStore, step: str) -> list[str]:
+    """Make one step of the completion fail the first time it runs; the list names the step once it did."""
+    done: list[str] = []
+    owner, name = {
+        "notice": (InboxStore, "send"),
+        "recap": (type(store.memory), "add_recap"),
+        "mail": (exits, "settle"),
+        "finish": (RedisStore, "put_agent"),
+    }[step]
+    real = getattr(owner, name)
+
+    def failing(*given: Any, **named: Any) -> Any:
+        if not done:
+            done.append(step)
+            raise InboxError(f"cut at the {step}")
+        return real(*given, **named)
+
+    monkeypatch.setattr(owner, name, failing)
+    return done
+
+
+def test_nobody_completes_a_lineage_in_the_name_of_its_expert(
+    working: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    operating(monkeypatch)
+    assert run("sw", "--as", EXPERT, "expert", "complete", proof(tmp_path)) == 1
+    assert capsys.readouterr().err == ONLY
+    assert expert_lineage.get(working, "sw", "expert-1").state == "running"
+    assert state(working, EXPERT) == ["working"] and mail(working) == []
 
 
 @pytest.mark.feature("expert-stop-gate")
@@ -242,7 +266,8 @@ def test_an_expert_is_held_to_its_seat_while_its_lineage_runs(working: RedisStor
     with pytest.raises(SwarmError) as refused:
         expert_commands.seated(working, "sw", expert)
     assert str(refused.value) == (
-        f"{EXPERT} works lineage expert-1, which still runs: an expert leaves its seat by a handoff or a mission proof"
+        f"{EXPERT} works lineage expert-1, which still runs: an expert leaves its seat by a handoff, "
+        "`agentihooks swarm sw handoff <doc>`, or by a mission proof, `agentihooks swarm sw expert complete <proof>`"
     )
     for free in (
         None,
@@ -254,6 +279,20 @@ def test_an_expert_is_held_to_its_seat_while_its_lineage_runs(working: RedisStor
     expert_lineage.stop(working, "sw", "expert-1", MASTER, "the order changed", 5)
     expert_commands.seated(working, "sw", expert)
     assert expert_lineage.get(working, "sw", "expert-1").state == "stopped"
+
+
+@pytest.mark.feature("expert-stop-gate")
+def test_an_expert_whose_completion_did_not_finish_is_held_to_its_seat(working: RedisStore) -> None:
+    [expert] = [agent for agent in working.agents("sw") if agent.name == EXPERT]
+    expert_lineage.complete(working, "sw", "expert-1", EXPERT, VALID, 5)
+    with pytest.raises(SwarmError) as refused:
+        expert_commands.seated(working, "sw", expert)
+    assert str(refused.value) == (
+        "Lineage expert-1 ended on its mission proof, but its completion did not finish. Run "
+        "`agentihooks swarm sw expert complete <proof>` again with the same proof: it tells the master, keeps the "
+        "recap and ends your seat."
+    )
+    expert_commands.seated(working, "sw", replace(expert, state="finished"))
 
 
 def test_an_expert_of_a_running_lineage_cannot_leave_its_seat_through_exit(

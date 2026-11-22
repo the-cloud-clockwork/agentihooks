@@ -26,6 +26,11 @@ DENIED = (
     "deliverable is proven, end the lineage with `agentihooks swarm sw expert complete <proof>`. While you wait "
     'on something, declare it with `agentihooks swarm sw wait <minutes> --reason "<what>"`.'
 )
+UNFINISHED = (
+    "Lineage expert-1 ended on its mission proof, but its completion did not finish. Run "
+    "`agentihooks swarm sw expert complete <proof>` again with the same proof: it tells the master, keeps the recap "
+    "and ends your seat."
+)
 Stop = Callable[..., Decision]
 
 
@@ -71,13 +76,22 @@ def test_an_expert_that_handed_its_seat_off_stops(store: RedisStore, stop: Stop)
 
 
 @pytest.mark.feature("expert-stop-gate")
-@pytest.mark.parametrize("ended", ["stopped", "complete"])
-def test_an_expert_whose_lineage_ended_stops(store: RedisStore, stop: Stop, ended: str) -> None:
-    if ended == "stopped":
-        expert_lineage.stop(store, SLUG, "expert-1", "operator", "the order changed", 5)
-    else:
-        expert_lineage.complete(store, SLUG, "expert-1", ME, "# Mission proof\n", 5)
-    assert expert_lineage.get(store, SLUG, "expert-1").state == ended
+def test_an_expert_whose_lineage_its_starter_stopped_stops(store: RedisStore, stop: Stop) -> None:
+    expert_lineage.stop(store, SLUG, "expert-1", "operator", "the order changed", 5)
+    assert expert_lineage.get(store, SLUG, "expert-1").state == "stopped"
+    assert stop() == Decision()
+
+
+@pytest.mark.feature("expert-stop-gate")
+def test_an_expert_whose_completion_did_not_finish_is_told_to_run_it_again(store: RedisStore, stop: Stop) -> None:
+    expert_lineage.complete(store, SLUG, "expert-1", ME, "# Mission proof\n", 5)
+    assert expert_lineage.get(store, SLUG, "expert-1").state == "complete"
+    decision = stop()
+    assert (decision.allowed, decision.reason) == (False, UNFINISHED)
+    idle.declare_wait(store.redis, SLUG, ME, NOW + 60_000, "a reply", NOW)
+    assert stop().reason == UNFINISHED
+    [agent] = store.agents(SLUG)
+    store.put_agent(SLUG, replace(agent, state="finished"))
     assert stop() == Decision()
 
 
@@ -91,6 +105,7 @@ def test_a_declared_wait_lets_the_expert_stop_until_it_ends(store: RedisStore, s
     assert stop().reason == DENIED
 
 
+@pytest.mark.feature("expert-stop-gate")
 @pytest.mark.parametrize(
     "who",
     [
@@ -111,6 +126,7 @@ def test_an_expert_whose_lineage_record_is_gone_is_not_held(store: RedisStore, s
     assert stop() == Decision()
 
 
+@pytest.mark.feature("expert-stop-gate")
 def test_the_gate_entry_runs_it_by_name() -> None:
     from scripts.gates.entry import GATES
 

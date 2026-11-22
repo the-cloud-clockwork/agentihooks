@@ -151,6 +151,34 @@ def test_every_pull_request_named_under_deliverables_is_merged() -> None:
     ]
 
 
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+@pytest.mark.parametrize(
+    "written",
+    [
+        "#13200",
+        "http://github.com/o/r/pull/7",
+        "https://www.github.com/o/r/pull/7",
+        "github.com/o/r/pull/7",
+        "https://github.com/o/r/issues/7",
+    ],
+)
+def test_a_pull_request_under_deliverables_is_written_as_the_link_the_swarm_can_read(written: str) -> None:
+    assert _problems(_swap(D1, D1.rstrip("\n") + f", merged in {written}\n")) == [
+        f"{written} under Deliverables cannot be read as a merged pull request; write it as "
+        "https://github.com/<owner>/<repo>/pull/<number>"
+    ]
+
+
+def test_a_reference_outside_deliverables_is_not_held_to_the_link_form() -> None:
+    assert _problems(_swap(SMOKED, SMOKED.rstrip("\n") + ", see #13200 and github.com/o/r/pull/7\n")) == []
+
+
+def test_a_pull_request_link_with_a_page_behind_it_is_read_as_that_pull_request() -> None:
+    text = _swap(D2, f"- D2 The plan file, merged in {PLAN}/files\n")
+    assert _problems(text) == []
+    assert _problems(text, (PLAN,)) == [f"pull request {PLAN} is not merged"]
+
+
 @pytest.mark.parametrize("opened", [ADDRESS, expert_mission.line("other", GOOD), "None"])
 def test_the_mission_section_opens_with_the_mission_line_of_the_lineage(opened: str) -> None:
     assert _problems(_swap(f"## Mission\n{LINE}\n", f"## Mission\n{opened}\n")) == [
