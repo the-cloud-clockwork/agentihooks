@@ -21,6 +21,9 @@
   "lab capacity": [
    "running"
   ],
+  "order waiting": [
+   "running"
+  ],
   "orphans": [
    "orphan"
   ],
