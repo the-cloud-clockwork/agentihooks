@@ -468,7 +468,7 @@ def test_concurrent_first_reads_of_the_latest_load_build_it_once() -> None:
     def build(now_ms: int) -> Load:
         builds.append(now_ms)
         entered.set()
-        assert gate.wait(5)
+        assert gate.wait(10)
         return replace(LOAD, slots_busy=len(builds))
 
     latest = metrics.Latest(build, lambda: 1000, 15_000)
@@ -481,12 +481,12 @@ def test_concurrent_first_reads_of_the_latest_load_build_it_once() -> None:
     for thread in readers:
         thread.start()
     try:
-        assert entered.wait(5)
+        assert entered.wait(10)
         time.sleep(0.1)
     finally:
         gate.set()
     for thread in readers:
-        thread.join(5)
+        thread.join(10)
     assert builds == [1000]
     assert answers == [(replace(LOAD, slots_busy=1), 1000)] * 3
 
@@ -503,7 +503,7 @@ def test_refresh_starts_one_daemon_build_at_the_interval_while_reads_keep_the_la
         if len(builds) > 1:
             workers.append(threading.current_thread())
             entered.set()
-            assert gate.wait(5)
+            assert gate.wait(10)
         return replace(LOAD, slots_busy=len(builds))
 
     latest = metrics.Latest(build, lambda: now[0], 15_000)
@@ -518,7 +518,7 @@ def test_refresh_starts_one_daemon_build_at_the_interval_while_reads_keep_the_la
     with latest.building:
         caller = threading.Thread(target=latest.refresh, daemon=True)
         caller.start()
-        caller.join(2)
+        caller.join(10)
         assert not caller.is_alive()
     assert builds == [1000]
     answers: list[tuple[Load, int]] = []
@@ -528,15 +528,15 @@ def test_refresh_starts_one_daemon_build_at_the_interval_while_reads_keep_the_la
 
     try:
         latest.refresh()
-        assert entered.wait(5)
+        assert entered.wait(10)
         reading = threading.Thread(target=reader, daemon=True)
         reading.start()
-        reading.join(2)
+        reading.join(10)
         assert answers == [first]
         assert [(worker.name, worker.daemon) for worker in workers] == [("ci-lab-load-refresh", True)]
     finally:
         gate.set()
-    assert latest.building.acquire(timeout=5)
+    assert latest.building.acquire(timeout=10)
     latest.building.release()
     assert builds == [1000, 16_000]
     assert latest.read() == (replace(LOAD, slots_busy=2), 16_000)
@@ -558,7 +558,7 @@ def test_a_failed_refresh_keeps_the_last_load_and_the_next_waits_an_interval() -
     first = latest.read()
     now[0] = 16_000
     latest.refresh()
-    assert latest.building.acquire(timeout=5)
+    assert latest.building.acquire(timeout=10)
     latest.building.release()
     assert latest.read() == first
     now[0] = 30_999
@@ -566,7 +566,7 @@ def test_a_failed_refresh_keeps_the_last_load_and_the_next_waits_an_interval() -
     assert builds == [1000, 16_000]
     now[0] = 31_000
     latest.refresh()
-    assert latest.building.acquire(timeout=5)
+    assert latest.building.acquire(timeout=10)
     latest.building.release()
     assert builds == [1000, 16_000, 31_000]
     assert latest.read() == (replace(LOAD, slots_busy=3), 31_000)

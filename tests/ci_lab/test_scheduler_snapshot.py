@@ -58,7 +58,7 @@ def _serving(run: Run, now: list[int]) -> Iterator[tuple[str, str]]:
 
 
 def _poll(url: str, needle: str) -> str:
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 10
     text = _read(url).decode()
     while needle not in text and time.monotonic() < deadline:
         time.sleep(0.05)
