@@ -2691,6 +2691,28 @@
       ]
     },
     {
+      "id": "ledger-copy-after-commit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2853",
+      "behaviour": "Ledger host copies are saved or removed only after the Postgres transaction commits, discarded on rollback or failed commit, and never replaced by an older deferred generation.",
+      "seam": "SQLiteLedgerRepository._entry and purge, PostgresLedgerRepository, Connection.commit and rollback, host_entries.Copies",
+      "rules": [
+        "ledger-host-copy-inside-entry"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_slow_host_copy_observes_a_committed_postgres_transaction",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_entry_is_never_written_to_the_host",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_failed_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_closing_without_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_purge_drops_the_copy_after_its_queued_save",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_deferred_older_copy_never_replaces_a_newer_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_successful_commit_runs_each_pending_host_copy_once",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_purge_keeps_its_committed_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_cannot_lower_a_newer_deferred_copy_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_during_a_save_preserves_the_newer_host_generation"
+      ]
+    },
+    {
       "id": "ledger-cold-write",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-write-full-load",
