@@ -1186,11 +1186,7 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     assert (tmp_path / "agentihooks-new-intake.service").read_text() == added
     assert calls == [
         (["systemctl", "--user", "daemon-reload"], {**kw, "check": False}),
-        enable("agentihooks-scheduler.service"),
-        enable("agentihooks-inbox-waker.service"),
-        enable("agentihooks-quota-prober.service"),
-        enable("agentihooks-tick-watch.service"),
-        enable("agentihooks-ledger-writer.service"),
+        *[enable(name) for name in names[:-1]],
         enable("agentihooks-new-intake.service"),
         enable("agentihooks-swarm-waits.timer"),
     ]
