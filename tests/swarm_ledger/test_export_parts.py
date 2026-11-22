@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -118,3 +120,124 @@ def test_the_tick_view_parts_are_accepted(live: dict) -> None:
         "generation": whole["generation"],
         "data": {key: whole["data"][key] for key in view.PARTS if key in whole["data"]},
     }
+
+
+@pytest.mark.feature("tick-view-plan-graph")
+def test_the_held_tick_view_admits_tasks_under_focused_slices_and_plans(
+    live: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm import freeze
+    from scripts.swarm_ledger.repository import hierarchy
+    from scripts.tick import view
+    from tests.swarm_ledger.test_api_v1 import stored
+
+    document = request(live, "POST", "export", {"since": 0})[1]["data"]
+    document.update(
+        plans=[{"id": "plan-one"}, {"id": "plan-two"}],
+        phases=[
+            {"id": "phase-one", "plan": "plans/plan-one"},
+            {"id": "phase-two", "plan": "plans/plan-two"},
+            {"id": "phase-other"},
+        ],
+        slices=[
+            {"id": "slice-one", "phase": "phases/phase-one"},
+            {"id": "slice-two", "phase": "phases/phase-two"},
+        ],
+        tasks=[
+            {"id": "sliced", "slice": "slices/slice-one", "phase": "phase-one", "state": "open"},
+            {"id": "direct", "phase": "phase-one", "state": "open"},
+            {"id": "planned", "slice": "slices/slice-two", "phase": "phase-two", "state": "open"},
+            {"id": "other", "phase": "phase-other", "state": "open"},
+        ],
+        freezes=[
+            {"verb": "focus", "target": "phases/phase-one"},
+            {"verb": "focus", "target": "plans/plan-two"},
+        ],
+    )
+    stored(monkeypatch, document)
+
+    def reader(since: int, parts: tuple[str, ...], after: int | None) -> dict[str, Any]:
+        return parted(live, since, list(parts))
+
+    held = view.refreshed(tmp_path / "view.json", reader)
+    expected = frozenset({"sliced", "direct", "planned"})
+    assert freeze.admitted(document, hierarchy.project(document)[0]) == expected
+    assert freeze.admitted(held.document, hierarchy.project(held.document)[0]) == expected
+    assert held.document["slices"] == document["slices"]
+    assert held.document["plans"] == document["plans"]
+
+
+@pytest.mark.feature("tick-view-plan-graph")
+def test_a_changed_tick_part_contract_replaces_the_old_cache_at_the_same_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger.api.client import read_export_file, write_export_file
+    from scripts.tick import view
+
+    old_parts = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
+    monkeypatch.setattr(view, "PARTS", old_parts)
+    old_path = view.view_file("https://ledger.example", "proof", tmp_path)
+    write_export_file(old_path, 7, {"tasks": [], "_meta": {}})
+    new_parts = (*old_parts, "slices", "plans")
+    monkeypatch.setattr(view, "PARTS", new_parts)
+    new_path = view.view_file("https://ledger.example", "proof", tmp_path)
+    assert new_path != old_path
+    complete = {"tasks": [], "_meta": {}, "slices": [{"id": "slice-one"}], "plans": [{"id": "plan-one"}]}
+    calls: list[tuple[int, tuple[str, ...], int | None]] = []
+
+    def reader(since: int, parts: tuple[str, ...], after: int | None) -> dict[str, Any]:
+        calls.append((since, parts, after))
+        if since == 0:
+            return {"generation": 7, "data": complete}
+        return {"generation": 7, "changes": {"set": [], "drop": [], "lists": {}}}
+
+    assert view.refreshed(new_path, reader).document == complete
+    assert view.refreshed(new_path, reader).document == complete
+    assert calls == [(0, new_parts, None), (7, new_parts, None)]
+    assert read_export_file(new_path) == (7, complete)
+    assert read_export_file(old_path) == (7, {"tasks": [], "_meta": {}})
+
+
+@pytest.mark.feature("tick-view-plan-graph")
+def test_the_held_tick_view_patches_slice_and_plan_rows_in_order(tmp_path: Path) -> None:
+    from scripts.swarm_ledger.api.client import read_export_file
+    from scripts.swarm_ledger.api.routes import export_changes
+    from scripts.tick import view
+
+    before = {
+        "_meta": {"events": []},
+        "tasks": [],
+        "slices": [{"id": "slice-one", "phase": "phases/old"}, {"id": "slice-kept"}],
+        "plans": [{"id": "plan-one", "title": "Old"}, {"id": "plan-kept"}],
+    }
+    after = {
+        "_meta": {"events": []},
+        "tasks": [],
+        "slices": [{"id": "slice-kept"}, {"id": "slice-one", "phase": "phases/new"}],
+        "plans": [{"id": "plan-kept"}, {"id": "plan-one", "title": "New"}, {"id": "plan-added"}],
+    }
+    paths = {
+        json.dumps(["slices", '["id","slice-one",0]', "phase"]),
+        json.dumps(["plans", '["id","plan-one",0]', "title"]),
+        json.dumps(["plans", '["id","plan-added",0]']),
+    }
+    calls: list[int] = []
+
+    def reader(since: int, parts: tuple[str, ...], revision: int | None) -> dict[str, Any]:
+        calls.append(since)
+        if since == 0:
+            return {"generation": 6, "data": {key: value for key, value in before.items() if key in parts}}
+        changes = export_changes(after, paths, parts)
+        assert changes is not None
+        return {"generation": 7, **json.loads(changes)}
+
+    path = tmp_path / "view.json"
+    view.refreshed(path, reader)
+    held = view.refreshed(path, reader)
+    assert calls == [0, 6]
+    assert held.generation == 7
+    assert held.document["slices"] == after["slices"]
+    assert held.document["plans"] == after["plans"]
+    assert held.document["tasks"] == []
+    assert held.document["_meta"] == {"events": []}
+    assert read_export_file(path) == (7, held.document)

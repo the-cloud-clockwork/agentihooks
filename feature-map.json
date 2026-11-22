@@ -6628,6 +6628,18 @@
       "rules": []
     },
     {
+      "id": "tick-view-plan-graph",
+      "origin": "incident",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-view-slices-plans",
+      "behaviour": "The held tick ledger view carries slices and plans through full and delta reads so phase and plan focus admit descendant tasks, and a changed parts contract starts a complete cache.",
+      "seam": "Named ledger export parts, held tick view, hierarchy projection and freeze admission",
+      "tests": [
+        "tests/swarm_ledger/test_export_parts.py::test_the_held_tick_view_admits_tasks_under_focused_slices_and_plans",
+        "tests/swarm_ledger/test_export_parts.py::test_the_held_tick_view_patches_slice_and_plan_rows_in_order",
+        "tests/swarm_ledger/test_export_parts.py::test_a_changed_tick_part_contract_replaces_the_old_cache_at_the_same_generation"
+      ]
+    },
+    {
       "id": "swarm-tick-delta-reads",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c1",
