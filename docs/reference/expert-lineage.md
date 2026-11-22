@@ -97,18 +97,34 @@ agentihooks swarm <id> expert complete <proof file>
 | Carry evidence on every one of those bullets, with none labelled hypothesis | The bullet is named. |
 | Say `None` under Open items | The proof is refused while anything is open. |
 | Link only merged pull requests under Deliverables | Each unmerged one is named. |
+| Write each pull request under Deliverables as its full link | A `#number`, an issue link or a link in another form is named. |
 
 A refused proof changes nothing: the lineage keeps running and the expert does
 the open work. An accepted proof ends the lineage as `complete`, saves the
-proof, writes the seat recap, finishes the expert and tells the master.
+proof, tells the master, writes the seat recap and finishes the expert. If the
+command fails after it accepted the proof, running it again with the same proof
+finishes those steps; the master is told once.
 
 ## The Stop gate
 
 While its lineage runs, the end of an expert's turn is refused by the
 `expert-stop` gate, unless the expert handed its seat off or holds a declared
 wait. The refusal names the ways on: keep working, hand off, complete on a
-proof, or declare the wait. The gate ships at `deny`; its mode is set like
-every gate with `agentihooks swarm <id> set expert-stop-gate=...`.
+proof, or declare the wait. An expert whose lineage ended on a proof but whose
+completion did not finish is refused too and told to run the completion again.
+Its default mode is `enforce`; it is set like every gate with
+`agentihooks swarm <id> set expert-stop-gate=enforce|observe|off`.
+
+## Not yet built
+
+This page describes the whole lineage. Two parts arrive with the seat step that
+follows this change and do not run before it:
+
+- Launching the first expert of a started lineage and each successor after a
+  handoff. Until then `expert start` saves the mission and the lineage and no
+  session opens.
+- Closing the session of an expert whose lineage ended, and recovering a seat
+  whose expert was lost without a handoff.
 
 ## Checks
 
@@ -121,8 +137,8 @@ Each part has a live check the Doctor runs on its timer:
 | `python -m scripts.feature_checks.expert_handoffs` | Every handoff a running lineage holds conforms to the expert handoff. |
 | `python -m scripts.feature_checks.expert_claims` | No ledger task is claimed by an expert. |
 | `python -m scripts.feature_checks.expert_proofs` | Every completed lineage holds a proof that conforms. |
-| `python -m scripts.feature_checks.expert_stop_gate` | Every running swarm keeps the Stop gate at `deny`. |
-| `python -m scripts.feature_checks.expert_role` | The shipped expert role holds its persona, rule, both skills, Stop gate and identity pin. |
+| `python -m scripts.feature_checks.expert_stop_gate` | Every running swarm keeps the Stop gate at `enforce`. |
+| `python -m scripts.feature_checks.expert_role` | The shipped expert role holds its persona, rule, both skills, Stop gate, identity pin and prompt guard. |
 
 ## Troubleshooting
 

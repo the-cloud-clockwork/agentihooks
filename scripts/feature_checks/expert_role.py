@@ -19,6 +19,11 @@ PARTS = (
         f"{CONDITIONS}/pre-bash.agentihooks+bash.bash+bash.sh+bash.zsh+bash.eval-identity_pin.py",
         'main(["identity"])',
     ),
+    (
+        "prompt guard",
+        f"{CONDITIONS}/pre-bash.rm+bash.rmdir+bash.bash+bash.sh+bash.zsh+bash.eval-prompt_guard.py",
+        'main(["prompts"])',
+    ),
 )
 HELD = "the expert role holds its {part}"
 LACKS = "FAIL: the expert role lacks its {part}: {path}"
