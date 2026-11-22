@@ -12956,8 +12956,7 @@
       "behaviour": "The parser, lint tools, browser and crypto, coverage, comment gate grammar and mutation planning installs of the test workflow and every semgrep workflow install keep installing exactly their packages once pinned under their checked in constraint files.",
       "seam": "tests.test_ci_test_dependencies._installed_packages over the named install steps of .github/workflows/test.yml and .github/workflows/semgrep.yml",
       "tests": [
-        "tests/test_ci_test_dependencies.py::test_the_pinned_ci_tool_installs_keep_their_packages",
-        "tests/test_ci_test_dependencies.py::test_the_lab_verdict_install_reads_its_constraints_from_the_grader_checkout"
+        "tests/test_ci_test_dependencies.py::test_the_pinned_ci_tool_installs_keep_their_packages"
       ]
     },
     {
