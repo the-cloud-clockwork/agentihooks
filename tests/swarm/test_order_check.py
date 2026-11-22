@@ -9,6 +9,7 @@ import pytest
 from scripts.swarm.health import focus_check, order_check
 from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger.api import routes
+from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.repository import sqlite as store
 from tests.swarm.test_freeze import PLANS, doc, record, task
 from tests.swarm_ledger.api_fakes import as_services
@@ -170,11 +171,15 @@ def test_each_task_under_an_order_reads_the_reason_the_claim_gate_holds_it() -> 
     assert fixed["claimable"] == 1
 
 
+def served(tmp_path: Path, tasks: list[dict[str, Any]]) -> Any:
+    repo = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
+    repo.import_document(SLUG, {**ledger_doc(tasks, p1=ORDER), "_meta": {"rev": 1}})
+    return as_services(SimpleNamespace(repository=repo))
+
+
 @pytest.fixture
 def reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, bool]]:
-    repo = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
-    repo.import_document(SLUG, {**ledger_doc([task("t1")], p1=ORDER), "_meta": {"rev": 1}})
-    services = as_services(SimpleNamespace(repository=repo))
+    services = served(tmp_path, [task("t1")])
     seen: list[tuple[str, str, bool]] = []
 
     def resource(slug: str, path: str, collection: bool = False) -> Any:
@@ -197,3 +202,25 @@ def test_ledger_get_orders_prints_every_open_order_through_the_ledger_api(
     assert row["line"] == "phases/p1 Build: 1 unfinished, 1 claimable, 0 claimed or in a pull request, 0 done"
     assert row["tasks"] == [{"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"}]
     assert reads == [(SLUG, "orders", True)]
+
+
+@pytest.mark.feature("swarm-orders-read")
+def test_an_orders_read_past_the_reply_limit_names_the_read_that_fits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks = [task(f"t{number}") for number in range(40)]
+    services = served(tmp_path, tasks)
+    monkeypatch.setattr(routes, "fix_phase", lambda services, slug: "")
+    whole = routes.ledger_read(services, SLUG, "orders", {})
+    size = routes.resources.reply_size(whole)
+    assert size > 1000
+    with monkeypatch.context() as limited:
+        limited.setattr(routes.resources, "MAX_REPLY", size)
+        assert routes.ledger_read(services, SLUG, "orders", {}) == whole
+        limited.setattr(routes.resources, "MAX_REPLY", size - 1)
+        with pytest.raises(APIError) as refused:
+            routes.ledger_read(services, SLUG, "orders", {})
+    message = "The open orders pass the reply limit: read the tasks of one order with focus/<item>"
+    assert (refused.value.status, refused.value.code, str(refused.value)) == (413, "resource_too_large", message)
+    one = routes.ledger_read(services, SLUG, "focus/phases/p1", {})
+    assert [row["id"] for row in one["data"]["tasks"]] == [row["id"] for row in tasks]
