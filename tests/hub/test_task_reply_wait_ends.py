@@ -118,6 +118,21 @@ def test_a_reply_ends_a_reply_wait_on_the_answered_item_with_one_item(rig: Simpl
 
 
 @pytest.mark.feature("wait-ends-on-task-event")
+def test_a_reply_wake_before_its_answered_item_closes_is_redelivered_until_it_closes(rig: SimpleNamespace) -> None:
+    inbox = InboxStore(rig.store.redis)
+    asked = inbox.send(ME, "helper", "which branch?")
+    held = {"kind": "reply", "target": asked.id}
+    rig.hold(held)
+    answer = inbox.send("helper", ME, "the dev branch", ref=asked.id)
+    with pytest.raises(RuntimeError, match=asked.id):
+        rig.react.replied(_wake(answer.id))
+    assert idle.wait(rig.store.redis, "sw", ME) == {"until": 10_000_000, "reason": "", "at": 1, "on": held}
+    inbox.close(asked.id, "helper", "done", "replied")
+    rig.react.replied(_wake(answer.id))
+    assert rig.told() == [_ended(f"message {asked.id}, now done")]
+
+
+@pytest.mark.feature("wait-ends-on-task-event")
 def test_a_send_that_answers_nothing_leaves_the_reply_wait_open(rig: SimpleNamespace) -> None:
     inbox = InboxStore(rig.store.redis)
     asked = inbox.send(ME, "helper", "which branch?")
@@ -144,7 +159,7 @@ def test_the_live_holder_of_a_claimed_dependent_hears_once_when_its_dependency_i
     rig.rows["t2"]["depends_on"] = ["t9"]
     rig.react.task_changed(_task_event())
     rig.react.task_changed(_task_event())
-    assert rig.told("eng-2@sw") == ["Task t9, which your task t2 depends on, is done."]
+    assert rig.told("eng-2@sw") == ["Task t9, which your task t2 depends on, has closed as done."]
     assert rig.told() == []
 
 

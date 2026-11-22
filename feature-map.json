@@ -1979,7 +1979,7 @@
       "id": "wait-ends-on-task-event",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-wake-on-task-and-reply",
-      "behaviour": "A ledger task changed event to done or blocked makes the hub re-read that task and end every task wait naming it through the polled pass's own single wait end, with the same ended item, woke key and wait history; an event for another task or a fresh row that has not closed leaves the wait open, an event to a state that ends nothing reads nothing, and an inbox wake for a reply ends every reply wait on the item it answers while a send that answers nothing leaves it open.",
+      "behaviour": "A ledger task changed event to done or blocked makes the hub re-read that task and end every task wait naming it through the polled pass's own single wait end, with the same ended item, woke key and wait history; an event for another task or a fresh row that has not closed leaves the wait open, an event to a state that ends nothing reads nothing, and an inbox wake for a reply ends every reply wait on the item it answers, a wake that arrives before the answered item closes fails so the hub redelivers it, and a send that answers nothing leaves the wait open.",
       "seam": "scripts.hub.wait_ends.WaitEnds.task_changed and WaitEnds.replied on hub events, the task-wait-ends and reply-wait-ends reactors scripts.hub.registry.configured wires, and scripts.swarm.waits.end_one",
       "tests": [
         "tests/hub/test_task_reply_wait_ends.py::test_a_task_event_to_done_or_blocked_ends_a_task_wait_on_it_with_one_item_and_the_polled_records",
@@ -1987,6 +1987,7 @@
         "tests/hub/test_task_reply_wait_ends.py::test_a_task_event_to_a_state_that_ends_nothing_leaves_the_wait_open_and_reads_nothing",
         "tests/hub/test_task_reply_wait_ends.py::test_a_task_event_the_fresh_ledger_row_has_not_closed_leaves_the_wait_open",
         "tests/hub/test_task_reply_wait_ends.py::test_a_reply_ends_a_reply_wait_on_the_answered_item_with_one_item",
+        "tests/hub/test_task_reply_wait_ends.py::test_a_reply_wake_before_its_answered_item_closes_is_redelivered_until_it_closes",
         "tests/hub/test_task_reply_wait_ends.py::test_a_send_that_answers_nothing_leaves_the_reply_wait_open",
         "tests/hub/test_task_reply_wait_ends.py::test_the_hub_registry_wires_the_task_and_reply_wait_end_reactors_as_singletons"
       ]
