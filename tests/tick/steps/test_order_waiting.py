@@ -171,9 +171,15 @@ def test_the_order_is_read_with_the_doctor_fix_phase_of_its_swarm(store: Any) ->
     rows = [task("t1", phase=loop.FIX_PHASE), task("t9")]
     ledger = ledger_doc(rows, record("phases/p1", "focus"), **{loop.FIX_PHASE: ORDER})
     item = f"phases/{loop.FIX_PHASE}"
-    held = {"since": START, "title": "Ship", "unfinished": 1, "claimable": 0, "reasons": ["a focus elsewhere holds it"]}
-    assert order_waiting.observe(store, SLUG, ledger, START) == {item: held}
-    assert order_waiting.observe(store, "fix", ledger, START) == {item: {**held, "claimable": 1, "reasons": []}}
+    waiting = {
+        "since": START,
+        "title": "Ship",
+        "unfinished": 1,
+        "claimable": 0,
+        "reasons": ["a focus elsewhere holds it"],
+    }
+    assert order_waiting.observe(store, SLUG, ledger, START) == {item: waiting}
+    assert order_waiting.observe(store, "fix", ledger, START) == {item: {**waiting, "claimable": 1, "reasons": []}}
 
 
 @pytest.mark.feature("swarm-order-waiting-finding")
