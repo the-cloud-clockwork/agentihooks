@@ -4495,8 +4495,8 @@ A phase plan task's `steering.md` carries no Enhancement target block.
   `agentihooks api --slug <slug> --as <planner> get tasks/<target>` meanwhile.
 - `tests/swarm/test_enhance_prompt.py`, feature map entry `planner-enhancement-prompt`, compares both prompts byte
   for byte with `tests/swarm/phase_plan_prompt.golden` and `tests/swarm/enhancement_prompt.golden`, and checks the
-  steering block lines. The golden test stays red until a deliberate change to either set of steps regenerates its
-  golden file in the same pull request.
+  steering block lines. A deliberate change to either set of steps fails the golden test until its golden file is
+  regenerated in the same pull request.
 
 | Symptom | Cause and action |
 |---|---|
@@ -4506,6 +4506,9 @@ A phase plan task's `steering.md` carries no Enhancement target block.
 | Step 4 refused with `plan task sections need a slice marker above each heading` | The section's parts sit at the plan's task level. Add one title above the section, as in the example, and publish again. |
 | Step 5 refused with `slice anchor <anchor> is missing or repeated in its phase` | The anchor is not in the published plan, or appears twice. Fix the anchor line in `plan.md`, publish again, then repeat step 5. |
 | Step 5 refused with `plan slice <anchor> already belongs to open task <task>` | Another open task already holds that anchor. Give the target its own anchor in `plan.md`, publish again, then repeat step 5. |
+
+The `carry no plan link` refusal names the `agentihooks ledger publish-plan` form; from the planner's prompt, publish
+with the step 4 command, `agentihooks api --slug <slug> --as <planner> publish-plan <plan file> --phase <phase>`.
 
 ### Split tasks across pull requests
 
