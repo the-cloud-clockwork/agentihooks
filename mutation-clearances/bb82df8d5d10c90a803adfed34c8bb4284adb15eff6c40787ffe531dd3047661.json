@@ -1,0 +1,6 @@
+{
+  "scripts/handoff/resolve.py:scripts.handoff.resolve.x\u01c1Resolver\u01c1_mission:223c8e3bcf9c57110048fb88a73b932cff24a19dd1cb61fea02ee83b8804cd33": {
+    "reader": "standards_reader",
+    "reason": "Every resolver with a store is reached only after the address matches mission:[\\w.-]+/[0-9a-f]{64}, and \\w excludes the slash, so the text holds one slash and both splits are the same."
+  }
+}
