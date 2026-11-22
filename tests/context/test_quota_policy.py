@@ -340,11 +340,13 @@ def test_wait_directive_carries_a_cron_for_the_reset(
     assert "CronCreate" not in text
     assert at in text
     if swarm:
-        assert f"agentihooks swarm {swarm} wait {minutes} --reason " in text
+        assert f'agentihooks swarm {swarm} wait {minutes} --reason "quota reset at {at}"' in text
+        assert "If the reset is still ahead when this wait ends, follow the next QUOTA WAIT directive." in text
         assert "agentihooks timer add" not in text
     else:
         assert f'agentihooks timer add --at "{at}" --session "sess-1"' in text
         assert "agentihooks swarm" not in text
+        assert '"The 5-hour quota window has reset. Continue the task from where you stopped."' in text
 
 
 def test_stop_directive_asks_for_another_account():

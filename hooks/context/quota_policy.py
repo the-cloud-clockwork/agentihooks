@@ -5,13 +5,14 @@ statusline snapshot), the router cache for every other account and the live
 session count per account. Outcomes:
 
 - handoff: another account has room; move the task there with a handoff.
-- wait: only the 5-hour window is spent and the week still has room; set a
-  cron for the reset and stop.
+- wait: only the 5-hour window is spent and the week still has room; schedule
+  a wake for the reset and stop.
 - stop: nothing has room; stop and tell the operator.
 - push: the operator said "keep pushing"; continue to 100%.
 """
 
 import fcntl
+import math
 import os
 import time
 from collections.abc import Iterable
@@ -398,6 +399,20 @@ def _repo_slug(cwd: str) -> str:
     return path.name or "session"
 
 
+def _wait_command(reset: float, session_id: str, swarm: str | None) -> str:
+    at = datetime.fromtimestamp(reset).astimezone().isoformat()
+    if swarm:
+        minutes = min(60, max(1, math.ceil((reset - time.time()) / 60)))
+        return (
+            f'agentihooks swarm {swarm} wait {minutes} --reason "quota reset at {at}"\n'
+            "If the reset is still ahead when this wait ends, follow the next QUOTA WAIT directive."
+        )
+    return (
+        f'agentihooks timer add --at "{at}" --session "{session_id}" '
+        '"The 5-hour quota window has reset. Continue the task from where you stopped."'
+    )
+
+
 def render(d: Decision, session_id: str, cwd: str) -> str:
     account = d.account or "this login"
     head = f"{_trigger_text(d)} on {account}."
@@ -442,13 +457,10 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
         )
     if d.action == "wait":
         reset = (d.five_reset or time.time()) + 120
-        at = datetime.fromtimestamp(reset).astimezone()
-        cron = f"{at.minute} {at.hour} {at.day} {at.month} *"
         return (
             f"QUOTA WAIT — {head} The 7-day window still has {_pct(100 - d.week_used)} left and no other "
             f"account qualifies ({_others_text(d)}).\n"
-            f'1. CronCreate a one-shot job, cron "{cron}" (local time {at.strftime("%a %H:%M")}), recurring '
-            f'false, prompt: "The 5-hour quota window has reset. Continue the task from where you stopped."\n'
+            f"1. Run: {_wait_command(reset, session_id, swarm)}\n"
             f"2. Tell the operator this session waits until the reset at {reset_when(d.five_reset)}, then stop. "
             f"Tools are not blocked."
         )
