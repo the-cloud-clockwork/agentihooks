@@ -6,14 +6,16 @@ the slice check faults unless an override names its reason.
 
 import os
 from dataclasses import dataclass
+from typing import Any
 
-from scripts.swarm import phase_state, slice_check
+from scripts.swarm import enhance_review, phase_state, slice_check
 from scripts.swarm.ledger_client import pass_state
-from scripts.swarm.store import ASSIST, MANUAL, MASTER, SwarmError
+from scripts.swarm.store import ASSIST, MANUAL, MASTER, AgentRecord, SwarmError
 
 BUTTONS = "use Approve plan or Send back on the phase in the ledger page"
 DECISIONS = {"approve": "approved", "send-back": "sent_back"}
 RECOMMEND = "post your recommendation as a comment on the phase"
+NAME_ONE = "name exactly one of a phase or --task <enhancement task id>"
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,7 @@ class Decision:
     action: str
     note: str
     override: str
+    task: str | None = None
 
 
 def refusal(agent, autonomy, phase, doc):
@@ -38,7 +41,13 @@ def refusal(agent, autonomy, phase, doc):
     return ""
 
 
-def decide(ledger, slug, agent, autonomy, phase_id, decision):
+def decide(
+    ledger: Any, slug: str, agent: AgentRecord, autonomy: str, phase_id: str | None, decision: Decision
+) -> dict[str, Any]:
+    if bool(phase_id) == bool(decision.task):
+        raise SwarmError(NAME_ONE)
+    if decision.task:
+        return enhance_review.review(ledger, slug, agent, autonomy, decision)
     doc = pass_state(ledger, slug)
     phase = next((p for p in doc["phases"] if p["id"] == phase_id), None)
     if phase is None:

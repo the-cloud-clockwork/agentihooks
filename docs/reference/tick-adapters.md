@@ -1060,7 +1060,8 @@ is missing.
 
 `scripts.swarm.focus_budget.ranks(doc)` gives every task in the ledger document its focus rank, the position of the
 first focus record that covers it; `focus_budget.ordered` then sorts the hub's readiness offers focused tasks first,
-by ledger rank band, then by that rank (see [Offer order](../pillars/hives.md#offer-order)). The legacy tick spawn
+by class (urgent or focused, under an operator order, the rest) and ledger rank band, then by that rank (see
+[Offer order](../pillars/hives.md#offer-order)). The legacy tick spawn
 sorted its launch queue the same way until pull request
 [#11141](https://github.com/the-cloud-clockwork/agentihooks/pull/11141) removed it. Only `focus` records count:
 freeze records in the same `freezes` collection take no position.

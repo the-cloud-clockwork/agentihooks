@@ -22,7 +22,7 @@ from scripts.swarm import (
     refresh_job,
     timing,
 )
-from scripts.swarm.health import focus_unclaimed, ordering_dependencies, prompt_backlog, urgent_hold
+from scripts.swarm.health import focus_unclaimed, order_waiting, ordering_dependencies, prompt_backlog, urgent_hold
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
@@ -229,6 +229,7 @@ def test_the_phase_steps_observe_the_urgent_hold_and_dependency_audit_then_run_t
         ("phases", "inbox", STORE, "sw", "doc", "ledger"),
         ("after", "inbox", STORE, "sw", "ledger", box),
         ("call", focus_unclaimed.observe, STORE, "sw", "doc", 7),
+        ("call", order_waiting.observe, STORE, "sw", "doc", 7),
     ]
 
 

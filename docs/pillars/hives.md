@@ -1930,8 +1930,12 @@ The offers are sorted by three keys, in this order:
    when its target is a node in the task's ancestry, or a `lane:` or `kind:` selector whose value equals the task's
    lane or kind; see [Focus ranks in offer order](../reference/tick-adapters.md#focus-ranks-in-offer-order) for the
    full rules.
-2. **Ledger rank band.** `urgent`, then `high`, then `normal`, then `low`, read from the rank stored on the task row
-   by `scripts.swarm_ledger.ledger_rank.order`. A task with no rank counts as `normal`, except a documentation follow
+2. **Class, then ledger rank band.** A focused or `urgent` task comes first, by rank band. A task under an operator
+   order comes next, oldest order first and by rank band inside one order time: its order time is the earlier of
+   its own mark and its phase's, and the work it waits on carries the same time (see
+   [Operator orders](swarm.md#operator-orders)). Every other task follows, by rank band. The bands are `urgent`,
+   then `high`, then `normal`, then `low`, read from the rank stored on the task row by
+   `scripts.swarm_ledger.ledger_rank.order`. A task with no rank counts as `normal`, except a documentation follow
    up (profile `documentation` with `follow_up` set), which counts as `low`. `next` is stored as `urgent`.
 3. **Focus record position.** The position of the first focus record that covers the task; a task no record covers
    takes the count of focus records.
@@ -1947,8 +1951,9 @@ whatever their rank:
 - A task that joins the focus only because a focused task depends on it, is parked on it, or sits in a phase the
   focused task's phase waits on. It is offered, but no focus record covers it, so it has no focus position.
 
-With no focus record on the ledger, every offer is unfocused and goes out by rank band, in ledger order inside a
-band.
+With no focus record on the ledger, every offer is unfocused: `urgent` tasks go out first, then the tasks under an
+operator order, oldest order first, then the rest by rank band, in ledger order inside a band. An ordered `normal`
+task goes out ahead of an unordered `high` one.
 
 #### Offer order example
 
@@ -1976,6 +1981,9 @@ agentihooks swarm <slug> focus phases/<phase id> --only
 
 # Raise one task's rank band (master, planner or operator)
 agentihooks api --slug <slug> --as <name> task set <task id> rank=urgent
+
+# Mark a phase as the operator's order (the master, with his recorded words)
+agentihooks api --slug <slug> --as <name> order phases/<phase id> --quote "<his words>"
 
 # Clear a focus or a freeze record
 agentihooks swarm <slug> unfreeze phases/<phase id>
