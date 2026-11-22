@@ -31,23 +31,30 @@ URL = re.compile(r"\w+://\S+")
 TOKEN_SPLIT = re.compile(r"[\s`'\"()\[\]<>,;*]+")
 LINE_NUMBER = re.compile(r"(?i:\blines? \d+)|\bL\d+\b|\.\w+:\d+\b")
 BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
-EVIDENCE = re.compile(
-    r"\w+://\S+|`[^`]+`|#\d+|\brun \d+|\b\d{8,}\b|\b(?:ledger|workspace|recap|inbox):\S+|\bproof\b"
+SHOWN = re.compile(
+    r"\w+://\S+|`[^`]+`|#\d+|\brun \d+|\b\d{8,}\b|\b(?:ledger|workspace|recap|inbox):\S+"
     r"|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b",
     re.IGNORECASE,
 )
+EVIDENCE = re.compile(rf"{SHOWN.pattern}|\bproof\b", re.IGNORECASE)
 HYPOTHESIS = re.compile(r"\bhypothes[ie]s\b", re.IGNORECASE)
 COUNTS = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+COMPLETION = re.compile(r"<!-- \w+ complete -->")
 
 
 @dataclass(frozen=True)
 class Contract:
-    """The shape a handoff document is held to: its title line, its headings in order and the sections whose bullets
-    must each carry evidence."""
+    """The shape a document is held to: its title line, its headings in order, the sections whose bullets must each
+    carry evidence, the completion marker that ends it and whether that evidence must be shown. Where it must, a
+    bullet stands only on something to look at (a link, a run, a commit, an address, a backticked command or output):
+    the label hypothesis and the bare word proof do not stand. The check reads the form and cannot tell what a
+    backticked span holds."""
 
     title: str
     headings: tuple[str, ...]
     evidenced: tuple[str, ...] = ("Done",)
+    marker: str = MARKER
+    shown: bool = False
 
 
 V2 = Contract(TITLE, HEADINGS)
@@ -57,16 +64,20 @@ def problems(text: str, resolves: Callable[[str], object], contract: Contract = 
     """Every structural problem in the document under the contract, Handoff v2 unless another is given; empty when
     it conforms. resolves(address) says an address exists."""
     lines = text.splitlines()
-    sections = _sections(lines)
+    sections = _sections(_body(lines))
     bodies = {name: body for name, body in reversed(sections)}
     return [
         *_title(lines, contract.title),
         *_headings([name for name, _ in sections], contract.headings),
         *_empty(sections, contract.headings),
-        *_marker(lines),
+        *_marker(lines, contract.marker),
         *_read_first(bodies.get("Read first", []), resolves),
         *_wording(text),
-        *(found for heading in contract.evidenced for found in _evidence(heading, bodies.get(heading, []))),
+        *(
+            found
+            for heading in contract.evidenced
+            for found in _evidence(heading, bodies.get(heading, []), contract.shown)
+        ),
     ]
 
 
@@ -74,20 +85,29 @@ def refusal(found: list[str]) -> str:
     return "handoff refused; fix the document and run the command again:\n" + "\n".join(f"- {p}" for p in found)
 
 
-def _sections(lines):
-    sections, fenced = [], False
+def _sections(lines: list[str]) -> list[tuple[str, list[str]]]:
+    sections: list[tuple[str, list[str]]] = []
+    fenced = False
     for line in lines:
         if line.lstrip().startswith("```"):
             fenced = not fenced
         if not fenced and line.startswith("## "):
             sections.append((line[3:].strip(), []))
-        elif sections and line.strip() != MARKER:
+        elif sections:
             sections[-1][1].append(line)
     return sections
 
 
+def _body(lines: list[str]) -> list[str]:
+    """The lines of the document without the completion marker that closes it, whichever document's marker it is. A
+    marker shaped line anywhere else is content."""
+    last = next((at for at in range(len(lines) - 1, -1, -1) if lines[at].strip()), -1)
+    closed = last >= 0 and COMPLETION.fullmatch(lines[last].strip()) is not None
+    return [*lines[:last], *lines[last + 1 :]] if closed else lines
+
+
 def section(text: str, heading: str) -> str:
-    return "\n".join(dict(_sections(text.splitlines())).get(heading, [])).strip()
+    return "\n".join(dict(_sections(_body(text.splitlines()))).get(heading, [])).strip()
 
 
 def _title(lines: list[str], title: str) -> list[str]:
@@ -125,9 +145,9 @@ def _empty(sections: list[tuple[str, list[str]]], headings: tuple[str, ...]) -> 
     ]
 
 
-def _marker(lines):
+def _marker(lines: list[str], marker: str) -> list[str]:
     last = next((line.strip() for line in reversed(lines) if line.strip()), "")
-    return [] if last == MARKER else [f"the completion marker {MARKER} must be the last line"]
+    return [] if last == marker else [f"the completion marker {marker} must be the last line"]
 
 
 def _bullets(body):
@@ -172,7 +192,7 @@ def leaks(text: str) -> list[str]:
 
 
 def _wording(text: str) -> list[str]:
-    prose = "\n".join(line for line in text.splitlines() if line.strip() != MARKER)
+    prose = "\n".join(_body(text.splitlines()))
     found = leaks(prose)
     found += [f"file path {path}; name the module, type or command instead" for path in _paths(prose)]
     found += [
@@ -198,11 +218,18 @@ def bullets(body: str) -> list[str]:
     return _bullets(body.splitlines())
 
 
-def _evidence(heading: str, body: list[str]) -> list[str]:
+def _evidence(heading: str, body: list[str], shown: bool) -> list[str]:
     if _is_none(body):
         return []
-    return [
-        f"{heading} bullet {number} carries no evidence; add it or label the bullet hypothesis"
-        for number, bullet in enumerate(_bullets(body), 1)
-        if not EVIDENCE.search(bullet) and not HYPOTHESIS.search(bullet)
-    ]
+    found = (_unshown(heading, number, bullet, shown) for number, bullet in enumerate(_bullets(body), 1))
+    return [fault for fault in found if fault]
+
+
+def _unshown(heading: str, number: int, bullet: str, shown: bool) -> str:
+    """Why one bullet of an evidenced section does not stand, empty when it does."""
+    if HYPOTHESIS.search(bullet):
+        return f"{heading} bullet {number} is labelled hypothesis; a proof holds only what was shown" if shown else ""
+    if (SHOWN if shown else EVIDENCE).search(bullet):
+        return ""
+    remedy = "add the run, command or link that shows it" if shown else "add it or label the bullet hypothesis"
+    return f"{heading} bullet {number} carries no evidence; {remedy}"

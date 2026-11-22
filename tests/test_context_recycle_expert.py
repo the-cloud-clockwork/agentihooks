@@ -38,8 +38,9 @@ FORM = (
 HEAD = "CONTEXT RECYCLE — this session holds 700k tokens, at or over the 650k limit. Write a handoff document "
 ALLOWED = (
     " Until the handoff every tool call is denied except reading files (cat, head, tail, ls, wc, grep and git status, "
-    "log, diff, show in the shell), writing the handoff document under ~/scratchpad, "
+    "log, diff, show in the shell), writing the handoff document or the mission proof under ~/scratchpad, "
     "`agentihooks swarm sw expert mission`, `agentihooks swarm sw handoff <doc>`, "
+    "`agentihooks swarm sw expert complete <proof>`, "
     "`agentihooks swarm sw learned` and `agentihooks api` comment, say, leave and ack, each as one command."
 )
 
@@ -130,6 +131,30 @@ def test_over_the_limit_an_expert_still_reads_its_mission() -> None:
         )
         is None
     )
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+def test_over_the_limit_an_expert_still_ends_its_lineage_on_a_proof() -> None:
+    complete = "agentihooks swarm sw expert complete"
+    assert recycle.gate("Bash", {"command": f"{complete} /home/u/scratchpad/proof.md"}, "s1", EXPERT) is None
+    for refused in (
+        complete,
+        f"{complete} /home/u/scratchpad/proof.md --force",
+        "agentihooks swarm other expert complete /home/u/scratchpad/proof.md",
+        "agentihooks swarm sw expert stop expert-1 --note done",
+        "agentihooks swarm sw expert start /home/u/scratchpad/mission.md",
+    ):
+        denied = recycle.gate("Bash", {"command": refused}, "s1", EXPERT)
+        assert denied is not None and denied.startswith("BLOCKED: " + HEAD), refused
+
+
+@pytest.mark.parametrize("env", [ENGINEER, MASTER])
+def test_over_the_limit_a_worker_and_a_master_are_denied_the_complete_command_like_any_other_work(
+    env: dict[str, str],
+) -> None:
+    command = "agentihooks swarm sw expert complete /home/u/scratchpad/proof.md"
+    denied = recycle.gate("Bash", {"command": command}, "s1", env)
+    assert denied is not None and denied == recycle.gate("Bash", {"command": "git commit -m more"}, "s1", env)
 
 
 @pytest.mark.feature("expert-handoff-contract")

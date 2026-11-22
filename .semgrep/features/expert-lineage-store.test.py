@@ -28,6 +28,16 @@ def retire(store, slug, name):
     store.redis.srem(store.key(slug, expert_lineage.ACTIVE), name)
 
 
+def prove(store, slug, name, text):
+    # ruleid: feature-expert-lineage-store
+    store.redis.hset(store.key(slug, "expert-proofs"), name, text)
+
+
+def unprove(store, slug, name):
+    # ruleid: feature-expert-lineage-store
+    store.redis.hdel(store.key(slug, expert_lineage.PROOFS), name)
+
+
 def stand(store, slug):
     # ok: feature-expert-lineage-store
     return expert_lineage.running(store, slug)
@@ -41,3 +51,8 @@ def end_by_code(store, slug, name, by, note, at):
 def read(store, slug, lineage):
     # ok: feature-expert-lineage-store
     return expert_lineage.mission(store, slug, lineage)
+
+
+def shown(store, slug, name):
+    # ok: feature-expert-lineage-store
+    return expert_lineage.proof(store, slug, name)

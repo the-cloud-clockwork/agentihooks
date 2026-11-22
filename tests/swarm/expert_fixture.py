@@ -49,6 +49,12 @@ def acting(monkeypatch: pytest.MonkeyPatch, name: str, swarm: str = "sw") -> Non
     monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
 
 
+def operating(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Act as the operator: a session that carries no agent name and no swarm."""
+    for name in ("AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def started(store: RedisStore, effort: str = "xhigh", by: str = MASTER, at: int = 1_000) -> expert_lineage.Lineage:
     return expert_lineage.start(store, "sw", GOOD, "/missions/batch.md", effort, by, at)
 
