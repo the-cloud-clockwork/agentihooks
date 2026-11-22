@@ -729,7 +729,13 @@ class SQLiteLedgerRepository:
             return row[0], meta, read_partial(connection, slug, (["tasks"],)).get("tasks") or []
 
     def apply_ops(
-        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
+        self,
+        slug: str,
+        changes: list | None = None,
+        ops: list | None = None,
+        gate: Any = None,
+        *,
+        copy_state: bool = True,
     ) -> tuple[dict, list]:
         from . import mutation
 
