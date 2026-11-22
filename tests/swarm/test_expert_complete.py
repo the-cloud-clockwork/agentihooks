@@ -8,13 +8,15 @@ from typing import Any, NamedTuple
 
 import pytest
 
-from scripts.inbox import exits
+from scripts.inbox import exits, outbox
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli, expert_commands, expert_lineage, ledger_events
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore, SwarmError
-from tests.handoff.test_mission_proof import D1, D2, D3, FIRST, RULED, SECOND, VALID, VALIDATED
+from scripts.swarm_ledger import ledger_workspace
+from tests.handoff.test_mission_proof import D1, D2, D3, FIRST, HEADINGS, RULED, SECOND, VALID, VALIDATED
 from tests.swarm.expert_fixture import (
+    ADDRESS,
     CONTROLS,
     ENGINEER,
     EXPERT,
@@ -105,7 +107,12 @@ def test_the_expert_ends_its_lineage_on_a_proof_that_passes(
     assert expert_lineage.running(working, "sw") == [] and indexed(working) == set()
     assert state(working, EXPERT) == ["finished"]
     latest = working.memory.recaps("expert-1@sw")[0]
-    assert (latest["occupant"], latest["task"], latest["text"]) == (EXPERT, "expert-1", RECAP)
+    assert (latest["occupant"], latest["task"], latest["text"], latest["at"]) == (EXPERT, "expert-1", RECAP, 30_000)
+    inbox = InboxStore(working.redis)
+    told = [*inbox.pending_items("master@sw"), *inbox.pending_items(MASTER)]
+    assert [item.id for item in told] == [outbox.stable_id("expert-proof", "sw", "expert-1")]
+    left = inbox.seats.exit_of(EXPERT)
+    assert (left["seat"], left["reason"]) == ("", "completed its mission and left")
     assert mail(working) == [
         (
             EXPERT,
@@ -148,6 +155,18 @@ def test_a_proof_with_a_fault_is_refused_with_each_fault_and_the_lineage_still_r
     assert expert_lineage.running(working, "sw") == [lineage]
     assert state(working, EXPERT) == ["working"] and mail(working) == []
     assert len(working.memory.recaps("expert-1@sw")) == 0
+
+
+def test_the_addresses_a_proof_names_are_resolved_in_the_swarm_of_the_lineage(
+    working: RedisStore, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    notes = ledger_workspace.folder("sw", "t1")
+    notes.mkdir(parents=True)
+    (notes / "progress.md").write_text("Seam one landed.\n", encoding="utf-8")
+    listed = f"## Read first\n- {ADDRESS} the mission\n- workspace:t1/progress the notes\n## Open items\n"
+    assert run("sw", "expert", "complete", proof(tmp_path, VALID.replace("## Open items\n", listed))) == 1
+    assert capsys.readouterr().err == REFUSED + f"- ## Read first is not one of the eight headings: {HEADINGS}\n"
+    assert expert_lineage.get(working, "sw", "expert-1").state == "running"
 
 
 def test_a_pull_request_that_cannot_be_read_counts_as_not_merged(
