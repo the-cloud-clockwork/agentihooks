@@ -54,15 +54,15 @@ def startup(
         'if [[ "$*" == "ledger writer serve" ]]; then\n'
         '  printf "%s|%s\\\\n" "${AGENTIHOOKS_SWARM_DATABASE_URL:-}" "$AGENTIHOOKS_HIVE_REDIS_URL" >> "$AGENTIHOOKS_HOME/writer-calls"\n'
         '  if [[ "${WRITER_TEST_STATUS:-}" == active ]]; then\n'
-        '    printf %s "$$" > "$AGENTIHOOKS_HOME/writer.pid"\n'
         "    trap 'printf stopped > \"$AGENTIHOOKS_HOME/writer-stopped\"; exit 0' TERM INT\n"
+        '    printf %s "$$" > "$AGENTIHOOKS_HOME/writer.pid"\n'
         "    for _ in {1..300}; do sleep 0.01; done\n"
         "    exit 8\n"
         "  fi\n"
         '  exit "${WRITER_TEST_STATUS:-0}"\nfi\n'
         'if [[ "$*" == "hive run" && "${WRITER_TEST_STATUS:-}" == active ]]; then\n'
-        '  printf %s "$$" > "$AGENTIHOOKS_HOME/hive.pid"\n'
         "  trap 'printf stopped > \"$AGENTIHOOKS_HOME/hive-stopped\"; exit 0' TERM INT\n"
+        '  printf %s "$$" > "$AGENTIHOOKS_HOME/hive.pid"\n'
         "  for _ in {1..300}; do\n"
         '    if [[ "${WRITER_TEST_STOP:-}" == hive && -f "$AGENTIHOOKS_HOME/writer.pid" ]]; then exit 9; fi\n'
         "    sleep 0.01\n"
