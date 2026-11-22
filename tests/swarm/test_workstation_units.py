@@ -131,8 +131,8 @@ def test_every_systemctl_call_captures_text_output_within_thirty_seconds(tmp_pat
     assert seen == [unchecked, unchecked, {"capture_output": True, "text": True, "timeout": 30}]
 
 
-def test_a_distributed_install_retires_every_engine_unit_it_finds(tmp_path, distributed):
-    engine = [*timer.units(BINARY), *timer.tick_units(), *timer.DROPPED]
+def test_a_distributed_install_retires_every_engine_unit_it_finds(tmp_path: Path, distributed: object) -> None:
+    engine = list(timer.ENGINE)
     for name in engine:
         (tmp_path / name).write_text("[Unit]\n")
     calls = []

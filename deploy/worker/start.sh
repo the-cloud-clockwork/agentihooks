@@ -187,4 +187,25 @@ set_args=(ui=no ephemeral=yes draining=no "excluded=${HIVE_EXCLUDED-master}" "ma
 [[ -n "${HIVE_NAME:-}" ]] && set_args+=("name=${HIVE_NAME}")
 agentihooks hive set --keep --reason "the worker started" "$member" "${set_args[@]}"
 agentihooks hive set --reason "the chart sets the agent cap" "$member" "max-agents=${HIVE_MAX_AGENTS:-auto}"
-exec agentihooks hive run
+supervise_writer() {
+  trap 'kill "$(jobs -pr)" 2>/dev/null || true; wait 2>/dev/null || true' EXIT
+  trap 'exit 0' TERM INT
+  while true; do
+    agentihooks ledger writer serve &
+    wait "$!" || true
+    sleep 5 &
+    wait "$!" || true
+  done
+}
+supervise_writer &
+writer_supervisor=$!
+agentihooks hive run &
+hive_pid=$!
+stop_children() {
+  kill "$writer_supervisor" "$hive_pid" 2>/dev/null || true
+  wait "$writer_supervisor" "$hive_pid" 2>/dev/null || true
+}
+trap stop_children EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+wait "$hive_pid"
