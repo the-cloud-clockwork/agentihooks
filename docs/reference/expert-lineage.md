@@ -131,6 +131,7 @@ running lineage and keeps its seat:
 | An expert whose lineage was stopped | Closes its open mail with the reason, clears the handoff left on the seat and finishes it. |
 | A completed lineage whose closing steps are still owed | Runs them from the kept proof, with or without its expert's record: the master is told once, the recap is kept and the handoff left on the seat is cleared, even when the expert's session died right after its proof was accepted and the swarm already dropped it. |
 | An expert of a lineage the swarm does not hold | Finishes it and goes on with the other seats. |
+| A lineage whose part of the pass is refused by the swarm store or the inbox | Says so in one line that names the lineage and goes on with the others; a completed lineage keeps owing its closing steps until they finish. |
 
 A launch waits, and says why, while the swarm has no session slot, the host is
 full or the lineage is placed elsewhere. Nothing launches while the swarm is
