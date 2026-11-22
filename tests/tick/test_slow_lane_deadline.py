@@ -1,6 +1,7 @@
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from threading import Event, Thread
+from threading import Event, Thread, Timer
 from unittest.mock import Mock
 
 import pytest
@@ -115,8 +116,17 @@ def test_live_slow_budgets_keep_the_pass_join_inside_its_original_window(monkeyp
 
 @pytest.mark.feature("swarm-tick-slow-lane-live-budget")
 def test_slow_dependents_and_finished_records_survive_the_pass_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    release, started, completed, called = Event(), Event(), Event(), Event()
+    release, started, completed, called, cleaned = Event(), Event(), Event(), Event(), Event()
     rows: list[tuple[engine.StepRecord, ...]] = []
+    watched, closed = set[ThreadPoolExecutor](), set[ThreadPoolExecutor]()
+    original_shutdown = ThreadPoolExecutor.shutdown
+
+    def shutdown(executor: ThreadPoolExecutor, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        original_shutdown(executor, wait=wait, cancel_futures=cancel_futures)
+        if executor in watched:
+            closed.add(executor)
+            if closed == watched:
+                cleaned.set()
 
     def earlier(ctx: Context) -> Result:
         started.set()
@@ -133,11 +143,22 @@ def test_slow_dependents_and_finished_records_survive_the_pass_exit(monkeypatch:
 
     monkeypatch.setattr(pool, "SLOW_S", 0.02)
     monkeypatch.setattr(pool, "LATER_GRACE_S", 0.01)
+    monkeypatch.setattr(ThreadPoolExecutor, "shutdown", shutdown)
+    timer = Timer(2.0, release.set)
+    timer.daemon = True
+    timer.start()
     try:
-        with pool.running(workers=2):
+        with pool.running(workers=2) as current:
+            watched.update((current.steps, current.fans, current.placer))
+            if current.handoff is not None:
+                watched.add(current.handoff)
+            ctx = Context(View(), Deadline.after(20.0))
+            engine.run_group("warm", ctx, (Step("warm", quick, group="warm", floor_s=5.0),))
+            current.later[0].join(1.0)
+            assert not current.later[0].is_alive()
             engine.run_group(
                 "load",
-                Context(View(), Deadline.after(20.0)),
+                ctx,
                 (
                     Step("across exit", earlier, floor_s=5.0),
                     Step("after exit", later, frozenset({"across exit"}), floor_s=5.0),
@@ -145,9 +166,13 @@ def test_slow_dependents_and_finished_records_survive_the_pass_exit(monkeypatch:
                 finished=finished,
             )
             assert started.wait(1.0)
+        assert not release.is_set()
+        assert not cleaned.is_set()
     finally:
         release.set()
+        timer.cancel()
     assert completed.wait(3.0)
+    assert cleaned.wait(3.0)
     assert called.is_set()
     assert [[(row.name, row.outcome) for row in group] for group in rows] == [
         [("across exit", engine.OK), ("after exit", engine.OK)]

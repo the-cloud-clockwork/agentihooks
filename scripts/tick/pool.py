@@ -90,6 +90,7 @@ class Pass:
     placer: ThreadPoolExecutor = field(default_factory=_placer, compare=False)
     slow_origin: float = 0.0
     slow_budgets: dict[str, float] | None = field(default=None, compare=False)
+    later_done: list[Event] = field(default_factory=list[Event], compare=False)
 
     def executor(self, name: str, placing: bool) -> ThreadPoolExecutor:
         """Return the workers step ``name`` runs on: the pass's one placement worker when it is ``placing`` under the
@@ -151,7 +152,14 @@ class Pass:
 
     def detach(self, work: Callable[[], object]) -> None:
         """Start ``work`` under the caller's copied context on a daemon thread the pass joins when it ends."""
-        thread = Thread(target=copy_context().run, args=(work,), name="tick-slow-lane", daemon=True)
+        ended = Event()
+        thread = Thread(
+            target=copy_context().run,
+            args=(_detached, work, ended),
+            name="tick-slow-lane",
+            daemon=True,
+        )
+        self.later_done.append(ended)
         self.later.append(thread)
         thread.start()
 
@@ -211,6 +219,23 @@ class _Beat:
         self.fire()
 
 
+def _detached(work: Callable[[], object], ended: Event) -> None:
+    try:
+        work()
+    finally:
+        ended.set()
+
+
+def _finish_pass(current: Pass) -> None:
+    for ended in current.later_done:
+        ended.wait()
+    current.steps.shutdown(wait=False, cancel_futures=True)
+    if current.handoff is not None:
+        current.handoff.shutdown(wait=False, cancel_futures=True)
+    current.placer.shutdown(wait=False, cancel_futures=True)
+    current.fans.shutdown(wait=False, cancel_futures=True)
+
+
 def budget_slow(current: Pass, budgets: Mapping[str, float]) -> None:
     scheduled = current.slow_budgets
     if scheduled is None:
@@ -259,11 +284,10 @@ def running(
         closing = current.closer[0].remaining if current.closer else 0.0
         for thread in current.later:
             thread.join(max(slow_join.remaining, closing) + LATER_GRACE_S)
-        current.steps.shutdown(wait=False, cancel_futures=True)
-        if current.handoff is not None:
-            current.handoff.shutdown(wait=False, cancel_futures=True)
-        current.placer.shutdown(wait=False, cancel_futures=True)
-        current.fans.shutdown(wait=False, cancel_futures=True)
+        if all(ended.is_set() for ended in current.later_done):
+            _finish_pass(current)
+        else:
+            Thread(target=_finish_pass, args=(current,), name="tick-slow-cleanup", daemon=True).start()
         _ACTIVE.reset(token)
         if beat is not None:
             beat.close()
