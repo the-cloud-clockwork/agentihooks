@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from scripts.feature_checks import expert_lineage as check
+from scripts.feature_checks import expert_launch_pin as check
 from scripts.swarm.store import AgentRecord
 
 pytestmark = pytest.mark.unit

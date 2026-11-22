@@ -12091,7 +12091,7 @@
       "ledger_item": "ledger:rig-grade-swarm/phases/p130",
       "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
       "behaviour": "An expert is its own agent kind with its own name counter and a numbered lineage seat, and every expert launch or resume runs Claude Code on the Fable model at effort xhigh, or max when its lineage asks for it, whatever the swarm effort range, a lane setting, a saved handoff launch or a recorded session says; an expert launch that lands on another harness is refused.",
-      "seam": "naming.TYPES and templates.DEFAULT_PROFILES for the kind, expert_launch.pin called by HerdrRuntime.spawn and HerdrRuntime.resume, effort_range.bounds for the expert lane, and expert_launch.on_pin through the live check scripts.feature_checks.expert_lineage over the agent records",
+      "seam": "naming.TYPES and templates.DEFAULT_PROFILES for the kind, expert_launch.pin called by HerdrRuntime.spawn and HerdrRuntime.resume, effort_range.bounds for the expert lane, and expert_launch.on_pin through the live check scripts.feature_checks.expert_launch_pin over the agent records",
       "semgrep_rule": "feature-expert-launch-pin",
       "tests": [
         "tests/swarm/test_expert_kind.py::test_an_expert_name_builds_parses_and_counts_on_its_own",
@@ -12102,13 +12102,13 @@
         "tests/swarm/test_expert_kind.py::test_a_resumed_expert_relaunches_fable_inside_its_pin",
         "tests/swarm/test_expert_launch.py::test_an_expert_pick_is_pinned_to_fable_at_the_effort_asked_for_or_xhigh",
         "tests/swarm/test_expert_launch.py::test_a_recorded_launch_is_on_the_pin_only_with_claude_a_fable_model_and_a_pin_effort",
-        "tests/test_expert_lineage_check.py::test_working_experts_on_the_pin_pass_and_are_listed",
-        "tests/test_expert_lineage_check.py::test_a_working_expert_off_the_pin_fails_by_name"
+        "tests/test_expert_launch_pin_check.py::test_working_experts_on_the_pin_pass_and_are_listed",
+        "tests/test_expert_launch_pin_check.py::test_a_working_expert_off_the_pin_fails_by_name"
       ],
       "live_check": [
         "python",
         "-m",
-        "scripts.feature_checks.expert_lineage"
+        "scripts.feature_checks.expert_launch_pin"
       ]
     },
     {
