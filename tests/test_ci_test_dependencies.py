@@ -379,7 +379,6 @@ FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/ledger-load.yml: uv pip install --python '$HOME/venv/bin/python' -e '.[all]'",
     ".github/workflows/ledger-load.yml: uv pip install --python '$HOME/venv/bin/python' -e '.[all]'",
     ".github/workflows/lost-runner.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/publish-pypi.yml: pip install build",
     ".github/workflows/queue-retry.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
     ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
@@ -407,7 +406,6 @@ FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
     "scripts/ci_dependency_audit.py: uvx --with 'platformdirs!=4.14.8' pip-audit==2.10.1 -r requirements --no-deps --disable-pip --format json",
     "scripts/ci_duration_provenance.yml: pip install 'pyyaml>=6.0'",
-    "scripts/ci_release.sh: pip install build",
     "scripts/ci_reuse_job.yml: pip install 'pyyaml>=6.0'",
 )
 
