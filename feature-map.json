@@ -9805,6 +9805,18 @@
       ]
     },
     {
+      "id": "merge-pass-hold-reason-docs",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-hold-reason-docs-test",
+      "behaviour": "The swarm pillar hold reason table contains exactly the reason templates the merge pass writes, allowing prose placeholder names to differ; every missing row and a stale row fail the parity check.",
+      "seam": "AST of merge pass hold arguments and helper return templates compared with the isolated swarm pillar hold reason table",
+      "tests": [
+        "tests/swarm/test_merge_hold_docs.py::test_the_hold_reason_table_matches_the_reasons_the_merge_pass_writes",
+        "tests/swarm/test_merge_hold_docs.py::test_every_missing_hold_reason_row_fails",
+        "tests/swarm/test_merge_hold_docs.py::test_a_stale_hold_reason_row_fails"
+      ]
+    },
+    {
       "id": "hive-registry-unique-name-suffix",
       "origin": "inventory",
       "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another registered hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it, and a headless hive renamed to a held name takes the next free suffix.",
