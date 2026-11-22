@@ -171,9 +171,9 @@ def test_each_task_under_an_order_reads_the_reason_the_claim_gate_holds_it() -> 
     assert fixed["claimable"] == 1
 
 
-def served(tmp_path: Path, tasks: list[dict[str, Any]]) -> Any:
+def served(tmp_path: Path, tasks: list[dict[str, Any]], *records: dict[str, Any]) -> Any:
     repo = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
-    repo.import_document(SLUG, {**ledger_doc(tasks, p1=ORDER), "_meta": {"rev": 1}})
+    repo.import_document(SLUG, {**ledger_doc(tasks, *records, p1=ORDER), "_meta": {"rev": 1}})
     return as_services(SimpleNamespace(repository=repo))
 
 
@@ -224,3 +224,31 @@ def test_an_orders_read_past_the_reply_limit_names_the_read_that_fits(
     assert (refused.value.status, refused.value.code, str(refused.value)) == (413, "resource_too_large", message)
     one = routes.ledger_read(services, SLUG, "focus/phases/p1", {})
     assert [row["id"] for row in one["data"]["tasks"]] == [row["id"] for row in tasks]
+
+
+@pytest.mark.feature("swarm-orders-read")
+def test_the_orders_route_reads_with_the_fix_phase_of_its_own_swarm_and_revises_its_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    services = served(tmp_path, [task("t1"), task("t9", phase="p2")], record("phases/p2", "focus"))
+    asked: list[tuple[Any, str]] = []
+
+    def fix_phase(asking: Any, slug: str) -> str:
+        asked.append((asking, slug))
+        return "p1"
+
+    monkeypatch.setattr(routes, "fix_phase", fix_phase)
+    reply = routes.ledger_read(services, SLUG, "orders", {})
+    assert asked == [(services, SLUG)]
+    [row] = reply["data"]
+    assert (row["item"], row["claimable"], row["tasks"][0]["verdict"]) == ("phases/p1", 1, focus_check.CLAIMABLE)
+    assert reply == {"data": [row], "revision": routes.resources.revision([row]), "next_cursor": None}
+    monkeypatch.setattr(routes, "fix_phase", lambda asking, slug: "")
+    [held] = routes.ledger_read(services, SLUG, "orders", {})["data"]
+    assert (held["claimable"], held["tasks"][0]["verdict"]) == (0, "a focus elsewhere holds it")
+
+
+@pytest.mark.feature("swarm-orders-read")
+def test_an_order_mark_that_names_no_author_and_no_proof_reads_with_an_empty_author() -> None:
+    [row] = order_check.read(ledger_doc([task("t1")], p1={"at": 5}), "")
+    assert (row["by"], row["at"], "quote" in row, "request" in row) == ("", 5, False, False)

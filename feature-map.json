@@ -10015,7 +10015,7 @@
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
       "behaviour": "Among the tasks a lane may claim, the hub readiness pass offers urgent and focused tasks first as before, then the tasks under an operator order, oldest order first, then the rest, each by ledger rank band. A task's order time is the earlier of its own mark and its phase's; the work an ordered task waits on, the plan task that enhances it and the lead it is merged into carry the earliest such time, through every such link in turn, and a mark that is not well formed counts as none. A waiting offer at least one dedupe window old moves behind a later offer of a higher class. An order never changes which tasks are offered: under a focus an ordered task outside it is not offered, and focused offers keep their order.",
-      "seam": "scripts.swarm.orders.stamps, scripts.swarm.readiness.offers and behind, and readiness.publish on the memory work queue read back through readiness.take",
+      "seam": "scripts.swarm.orders.stamps, the walk it runs on (scripts.swarm.freeze.waits and reached), scripts.swarm.readiness.offers and behind, and readiness.publish on the memory work queue read back through readiness.take",
       "tests": [
         "tests/swarm/test_orders.py::test_a_ledger_with_no_order_mark_has_no_order_time",
         "tests/swarm/test_orders.py::test_a_task_carries_the_earlier_of_its_own_order_time_and_its_phases",
@@ -10030,6 +10030,8 @@
         "tests/swarm/test_orders.py::test_tasks_that_wait_on_each_other_end_with_the_earliest_order_time",
         "tests/swarm/test_orders.py::test_a_malformed_order_mark_counts_as_no_mark",
         "tests/swarm/test_orders.py::test_a_well_formed_order_mark_gives_its_time",
+        "tests/swarm/test_freeze.py::test_waits_names_what_each_task_of_the_ledger_waits_on",
+        "tests/swarm/test_freeze.py::test_reached_walks_from_every_seed_along_the_links_and_stops_at_cold_work",
         "tests/swarm/test_readiness.py::test_behind_names_the_old_waiting_offers_ahead_of_an_offer_of_a_higher_class",
         "tests/swarm/test_readiness.py::test_offers_put_urgent_tasks_first_then_ordered_ones_oldest_order_first_then_the_rest",
         "tests/swarm/test_readiness.py::test_the_tasks_of_an_ordered_phase_and_the_work_they_wait_on_are_offered_before_the_rest",
@@ -12690,7 +12692,9 @@
         "tests/swarm/test_order_check.py::test_each_task_under_an_order_reads_the_reason_the_claim_gate_holds_it",
         "tests/swarm/test_order_check.py::test_ledger_get_orders_prints_every_open_order_through_the_ledger_api",
         "tests/swarm_ledger/test_api_v1.py::test_the_orders_read_serves_every_open_order",
-        "tests/swarm/test_order_check.py::test_an_orders_read_past_the_reply_limit_names_the_read_that_fits"
+        "tests/swarm/test_order_check.py::test_an_orders_read_past_the_reply_limit_names_the_read_that_fits",
+        "tests/swarm/test_order_check.py::test_the_orders_route_reads_with_the_fix_phase_of_its_own_swarm_and_revises_its_reply",
+        "tests/swarm/test_order_check.py::test_an_order_mark_that_names_no_author_and_no_proof_reads_with_an_empty_author"
       ]
     },
     {
