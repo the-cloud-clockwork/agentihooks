@@ -6637,7 +6637,8 @@
         "tests/swarm_ledger/test_export_parts.py::test_the_held_tick_view_admits_tasks_under_focused_slices_and_plans",
         "tests/swarm_ledger/test_export_parts.py::test_the_held_tick_view_patches_slice_and_plan_rows_in_order",
         "tests/swarm_ledger/test_export_parts.py::test_a_changed_tick_part_contract_replaces_the_old_cache_at_the_same_generation"
-      ]
+      ],
+      "rules": ["tick-view-missing-plan-graph-parts"]
     },
     {
       "id": "swarm-tick-delta-reads",
