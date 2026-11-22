@@ -319,7 +319,7 @@ def test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task(
     store = _DropStore(claims)
     expected = {"claimed_by": "a", "claim_generation": row.get("claim_generation", 0)}
     ledger = _DropLedger({"state": "open", "claimed_by": ""}, live_row or {**row, **expected})
-    agent = SimpleNamespace(name="a", task="t1", seat="eng-1@slug")
+    agent = SimpleNamespace(name="a", lane="eng", task="t1", seat="eng-1@slug")
     rows: dict[str, dict[str, object]] = {"t1": dict(row)}
     options = {"refund": True} if refund else {}
     assert common._drop("slug", store, ledger, rows, agent, **options) == (", task t1 reopened" if reopened else "")
@@ -348,7 +348,7 @@ def test_drop_releases_an_agent_whose_task_has_no_row(monkeypatch: pytest.Monkey
     monkeypatch.setattr(tick.exits, "settle", lambda *args: settled.append(args))
     store = _DropStore(1)
     ledger = _DropLedger({"state": "open", "claimed_by": ""}, {})
-    agent = SimpleNamespace(name="a", task="gone", seat="eng-1@slug")
+    agent = SimpleNamespace(name="a", lane="eng", task="gone", seat="eng-1@slug")
     assert common._drop("slug", store, ledger, {}, agent, refund=True) == ""
     assert store.calls == [
         ("claim_generation", "slug", "gone"),
@@ -375,7 +375,7 @@ def _merge_wait_drop(
     row: dict[str, object] = {"id": "t1", "state": state, "claimed_by": "a", "claim_generation": 2, "pr_url": MERGING}
     store, ledger = _DropStore(1), _DropLedger(live, row)
     rows = {"t1": dict(row)}
-    agent = SimpleNamespace(name="a", task="t1", seat="eng-1@slug")
+    agent = SimpleNamespace(name="a", lane="eng", task="t1", seat="eng-1@slug")
     return common._drop("slug", store, ledger, rows, agent, refund=True), store, ledger, rows, seen
 
 
