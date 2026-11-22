@@ -54,7 +54,8 @@ piece of evidence.
    Replace the example number and remote with the review task's values; use
    `--forge gitlab` for GitLab. Omit `--remote` to use the current checkout's
    origin, and omit `--forge` when the remote host identifies the forge.
-   GitHub uses authenticated `gh`; GitLab requires `GITLAB_TOKEN` in the
+   GitHub needs the `gh` CLI, installed from https://cli.github.com and
+   logged in with `gh auth login`; GitLab requires `GITLAB_TOKEN` in the
    environment. The command prints JSON with the title, body, head commit,
    diff, changed files and check states. Done when the whole diff is read,
    never a summary of it.
@@ -97,7 +98,8 @@ piece of evidence.
 
    Use the same number, remote and forge as the read command, and the actual
    findings file path. `--body-file -` reads the findings from stdin instead.
-   The command prints the comment URL. Done when that link is recorded.
+   The command prints the comment URL; keep it for the author message in
+   step 3 and for `done --finding` at close. Done when the URL is printed.
 3. Send them to the author:
    `agentihooks msg send <author> "<findings and the review link>"`.
 4. Record the verdict on the task's phase:
