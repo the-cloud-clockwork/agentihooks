@@ -182,6 +182,49 @@ def test_a_handoff_v2_that_ends_on_the_proof_marker_is_told_its_own_marker_and_n
     ]
 
 
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+@pytest.mark.parametrize("heading", ["Deliverables", *PROVEN])
+def test_the_word_proof_alone_shows_nothing_in_a_mission_proof(heading: str) -> None:
+    shown = D1 if heading == "Deliverables" else PROVEN[heading]
+    bare = "- D1 Each cause is fixed, proof attached\n" if heading == "Deliverables" else "- It holds, see the proof\n"
+    assert _problems(_swap(shown, bare)) == [f"{heading} bullet 1 {UNSHOWN}"]
+
+
+def test_the_word_proof_still_stands_in_a_handoff() -> None:
+    handoff = (
+        "# Handoff v2\n## Intent\n- Refuse a malformed handoff\n## Done\n- Seam one is green, see the proof\n"
+        "## Stopped at\n- Seam two\n## Decisions and promises\nNone\n## Next\n- Run it\n## Read first\nNone\n"
+        "<!-- handoff complete -->\n"
+    )
+    assert check.problems(handoff, lambda address: False) == []
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+@pytest.mark.parametrize(
+    "stray", ["- D1a One more note, run 4476\n", "- The plan held up, run 4477\n", "- d2 again, run 4478\n"]
+)
+def test_every_deliverables_bullet_names_a_deliverable(stray: str) -> None:
+    assert _problems(_swap(D3, D3 + stray)) == [
+        "Deliverables bullet 4 names no deliverable; start it with D and its number"
+    ]
+
+
+@pytest.mark.feature("expert-lineage-ends-on-proof")
+def test_a_marker_shaped_line_inside_a_section_is_content_and_hides_nothing() -> None:
+    hidden = _swap("## Open items\nNone\n", "## Open items\n<!-- mission complete -->\n- D3 needs one more pass\n")
+    assert _problems(hidden) == ["## Open items must be None; a lineage ends with nothing open"]
+    inside = _swap("## Open items\nNone\n", "## Open items\n<!-- mission complete -->\nNone\n")
+    assert _problems(inside) == ["## Open items must be None; a lineage ends with nothing open"]
+    assert check.section(inside, "Open items") == "<!-- mission complete -->\nNone"
+    handoff = (
+        "# Handoff v2\n## Intent\n- Refuse a malformed handoff\n## Done\nNone\n## Stopped at\n- Seam two\n"
+        "## Decisions and promises\nNone\n## Next\n<!-- handoff complete -->\n- Run it\n## Read first\nNone\n"
+        "<!-- handoff complete -->\n"
+    )
+    assert check.section(handoff, "Next") == "<!-- handoff complete -->\n- Run it"
+    assert check.section(handoff, "Read first") == "None"
+
+
 def test_a_mission_title_that_names_a_file_passes_the_wording_rules() -> None:
     mission = GOOD.replace("Keep an ordered batch built", "Split scripts/swarm/cli.py under line 3000")
     text = VALID.replace(LINE, expert_mission.line("sw", mission))
