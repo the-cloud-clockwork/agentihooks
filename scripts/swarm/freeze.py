@@ -187,6 +187,11 @@ def _waits(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> Callable[[dict[s
     return waits_on
 
 
+def waits(doc: dict[str, Any]) -> Callable[[dict[str, Any]], list[str]]:
+    """What a task of the ledger waits on, as the focus queue reads it."""
+    return _waits(doc, doc.get("tasks") or [])
+
+
 def _stuck(
     task_id: str,
     rows: dict[str, dict[str, Any]],
