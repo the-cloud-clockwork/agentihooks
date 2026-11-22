@@ -82,6 +82,7 @@ GIT_LISTINGS: dict[str, frozenset[str]] = {
     "submodule": frozenset({"status"}),
 }
 BARE_LISTINGS = frozenset({"branch", "tag", "remote", "reflog", "submodule"})
+GIT_VALUES = frozenset({"-C", "--git-dir", "--work-tree", "--namespace"})
 GH_WRITES = frozenset({("pr", "checkout"), ("pr", "co"), ("repo", "clone")})
 GH_VALUES = frozenset({"-R", "--repo", "--hostname"})
 EXECS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
@@ -92,6 +93,7 @@ OPERATOR_CHARS = ";|()\n&<>"
 OPERATORS = frozenset(OPERATOR_CHARS)
 QUOTES = "'\""
 TICKED = "'\"`"
+ESCAPES = "'\"\\"
 DEPTHS = {"(": 1, ")": -1}
 PLACEHOLDER = "{}"
 UNKNOWN = "files named only at run time"
@@ -127,7 +129,7 @@ def _paren_end(command: str, start: int) -> int:
         depth += DEPTHS.get(command[index], 0)
         if depth == 0:
             return index + 1
-    return len(command)
+    return max(len(command), resume)
 
 
 def _word_end(command: str, start: int) -> int:
@@ -151,11 +153,13 @@ def _tokens(command: str) -> Iterator[tuple[bool, str]]:
     """The unquoted operator runs (True) and the words (False) of *command*, file descriptor numbers dropped."""
     resume = 0
     for index in range(len(command)):
-        if index < resume or command[index].isspace():
+        if index < resume:
             continue
         if command[index] in OPERATORS:
             resume = len(command) - len(command[index + 1 :].lstrip(OPERATOR_CHARS))
             yield True, command[index:resume]
+            continue
+        if command[index].isspace():
             continue
         resume = _word_end(command, index)
         if not (command[index:resume].isdigit() and command[resume : resume + 1] in ("<", ">")):
@@ -203,11 +207,16 @@ def _heredoc_scripts(command: str) -> list[str]:
 
 
 def _unquoted(word: str) -> str:
+    """*word* as the shell passes it on; a tilde the shell leaves unexpanded stays a literal folder name."""
     try:
         parts = shlex.split(word)
     except ValueError:
         return word
-    return parts[0] if len(parts) == 1 else word
+    if len(parts) != 1:
+        return word
+    prefix = word.partition("/")[0]
+    literal = prefix[:1] != "~" or any(char in prefix for char in ESCAPES)
+    return f"./{parts[0]}" if parts[0][:1] == "~" and literal else parts[0]
 
 
 def _fd(word: str) -> bool:
@@ -288,7 +297,7 @@ def _located(value: str, base: Path | None) -> Path | None:
     if value == UNKNOWN or _dynamic(value):
         return None
     try:
-        path = Path(value).expanduser()
+        path = Path(value).expanduser() if value[:1] == "~" else Path(value)
         if path.is_absolute():
             return path.resolve()
         return None if base is None else (base / path).resolve()
@@ -486,7 +495,7 @@ def _git_reason(words: list[str]) -> str:
     for word in rest:
         if word in ("-c", "--config-env") or word.startswith("--config-env="):
             return "runs git with -c configuration"
-        if word == "-C":
+        if word in GIT_VALUES:
             next(rest, "")
         elif not word.startswith("-"):
             return "" if _git_read(word, list(rest)) else f"runs git {word}"

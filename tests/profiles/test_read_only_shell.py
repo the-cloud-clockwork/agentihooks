@@ -279,6 +279,13 @@ def test_only_the_read_only_roles_carry_the_shell_guard() -> None:
         ("A=b=c rm app.py", "app.py"),
         ("dd of=app.py if=~/scratchpad/a", "app.py"),
         ("tar x", UNKNOWN),
+        ("git status\nrm -rf app.py", "app.py"),
+        ("echo ok\ntouch app.py", "app.py"),
+        ('echo $(rm "app.py', '"app.py'),
+        ('echo x > "~/scratchpad/f"', "./~/scratchpad/f"),
+        ("echo x > \\~/scratchpad/f", "./~/scratchpad/f"),
+        ("cd '~/scratchpad' && touch f", "f"),
+        ('echo x > ~"/scratchpad/f"', "./~/scratchpad/f"),
     ],
 )
 def test_a_reviewer_refuses_each_shell_file_write(home: Path, command: str, target: str) -> None:
@@ -455,6 +462,8 @@ def test_a_reviewer_refuses_git_writes_and_hidden_writes(home: Path, command: st
         "rm ~/scratchpad/.X",
         "Xvfb :1",
         "bash -x 'touch app.py'",
+        'echo x > ~/"scratchpad/f"',
+        "git --work-tree . status && git --git-dir .git log && git --namespace n show-ref",
     ],
 )
 def test_a_reviewer_keeps_reads_and_writes_inside_its_own_folders(home: Path, command: str) -> None:
