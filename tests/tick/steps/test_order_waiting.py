@@ -154,7 +154,7 @@ def test_the_step_notes_the_orders_of_the_pass_state(store: Any) -> None:
 @pytest.mark.feature("swarm-order-waiting-finding")
 def test_the_finding_is_in_the_swarm_status_findings_and_goes_to_the_master_inbox(store: Any) -> None:
     from scripts.inbox.store import InboxStore
-    from scripts.swarm import ledger_events
+    from scripts.swarm import ledger_events, status
     from scripts.swarm.health import order_waiting
     from scripts.swarm.store import MASTER, AgentRecord
 
@@ -163,6 +163,10 @@ def test_the_finding_is_in_the_swarm_status_findings_and_goes_to_the_master_inbo
     [found] = watched(store, ledger_doc([task("t1")], p1=ORDER), 31)
     assert found.id == "order-waiting/phases/p1"
     assert order_waiting.findings(store, SLUG) == [found]
+    shown = status.findings(store, SLUG, store.config(SLUG), [], [])
+    assert [(row["subject"], row["summary"]) for row in shown if row["kind"] == "order waiting"] == [
+        (found.subject, found.summary)
+    ]
     inbox = InboxStore(store.redis)
     shown = {"phases": [{"id": "p1", "title": "Build"}], "tasks": [], "_meta": {"rev": 1, "events": []}}
     ledger_events.findings_pass(inbox, store, SLUG, [{"id": found.id, **found.as_dict()}], shown)
