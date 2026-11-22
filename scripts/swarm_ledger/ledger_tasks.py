@@ -59,6 +59,7 @@ UPDATABLE = (
     "covers_job",
     "doc_items",
     "watchdog",
+    "enhances",
     "recovery",
     "review_rounds",
     "review_readers",
@@ -485,6 +486,7 @@ def _add(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
         "requires_harness",
         "needs",
         "covers_job",
+        "enhances",
         *ledger_kinds.WORKFLOW_FIELDS,
     ):
         if key in op:
