@@ -8848,6 +8848,16 @@
       ]
     },
     {
+      "id": "quota-wait-no-session-cron",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-wait-scheduler-timer",
+      "behaviour": "Quota WAIT directs swarm sessions to bounded swarm waits naming the reset time and standalone sessions to a scheduler timer aimed at the current session, with no session cron instruction and the existing reset safety buffer.",
+      "seam": "hooks.context.quota_policy.render",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_wait_directive_carries_a_cron_for_the_reset"
+      ]
+    },
+    {
       "id": "master-primary-login-reserve-2pct",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-reserve-2pct",
