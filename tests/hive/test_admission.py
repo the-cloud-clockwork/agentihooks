@@ -706,3 +706,15 @@ def test_the_load_average_guard_binds_on_a_pod_hive_once_its_own_load_reaches_th
         "swarm share, fits 0 more",
     )
     assert admission.room(reading(cpus=16, load5=13.0, used_cpus=9.0, pod_cpus=16.0, pod_load=6.39)).room == 7
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_a_pod_reading_with_pod_load_and_no_agents_keeps_the_half_cpu_room() -> None:
+    found = admission.room(reading(cpus=16, load5=0.0, pod_cpus=16.0, pod_load=6.7, agents={"claude": 0, "codex": 0}))
+    assert (found.room, found.reason) == (12, admission.CPU)
+
+
+@pytest.mark.feature("hive-admission-measured-agent-cpu")
+def test_a_workstation_reading_with_agents_and_no_pod_load_keeps_the_half_cpu_room() -> None:
+    found = admission.room(reading(cpus=16, load5=4.0, agents={"claude": 9}))
+    assert (found.room, found.reason) == (17, admission.CPU)

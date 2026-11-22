@@ -8362,6 +8362,17 @@
       ]
     },
     {
+      "id": "hive-admission-measured-agent-cpu",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hivecpu-measured-agent-cpu",
+      "behaviour": "Hive admission sizes each agent at the CPU its hive measures: the pod load over the agents the headroom reading counts, rounded up to the next 0.05 and never below 0.5, falling back to 0.5 when no agent runs or the reading has no pod load, overridden by AGENTIHOOKS_HIVE_AGENT_CPU, and every CPU detail names the figure and its source.",
+      "seam": "admission.room over a headroom reading with pod_load and agents, and admission.agent_cpu",
+      "tests": [
+        "tests/hive/test_admission.py::test_a_pod_reading_with_pod_load_and_no_agents_keeps_the_half_cpu_room",
+        "tests/hive/test_admission.py::test_a_workstation_reading_with_agents_and_no_pod_load_keeps_the_half_cpu_room"
+      ]
+    },
+    {
       "id": "hive-member-reads-every-hive-pending-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2555",
