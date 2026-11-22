@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 import yaml
 
+import hooks.context.context_recycle as recycle
 from scripts.inbox.cli import build_parser as msg_parser
 from scripts.swarm.cli import build_parser as swarm_parser
 from tests.test_package_internal_names import LEAKS
@@ -184,6 +185,12 @@ def test_the_skill_templates_carry_the_headings_the_swarm_checks() -> None:
     assert tuple(_template("expert-handoff")) == HANDOFF_HEADINGS == expert.HANDOFF.headings
     assert expert.PROOF.title in _skill("swarm-expert").read_text()
     assert expert.HANDOFF.title in _skill("expert-handoff").read_text()
+
+
+def test_the_skill_the_context_limit_names_ships_with_the_expert_role() -> None:
+    named = re.findall(r"the ([\w-]+) skill", recycle._EXPERT_INSTRUCTIONS)
+    assert named == ["expert-handoff"]
+    assert all((ROLE / ".claude" / "skills" / name / "SKILL.md").is_file() for name in named)
 
 
 def test_the_expert_rule_names_agentihooks_commands_that_parse() -> None:

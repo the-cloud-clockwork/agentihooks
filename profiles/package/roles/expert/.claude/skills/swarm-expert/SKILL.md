@@ -96,10 +96,15 @@ below and submit it with `agentihooks swarm <slug> expert complete <proof>`.
 The command refuses a proof with a fault and lists every fault: a deliverable
 with no bullet, a bullet with no evidence, a bullet labelled hypothesis, a
 check section with no bullet, an open item, a pull request under Deliverables
-that is not merged. A proof holds only what was shown. A refusal means work is
-still open: do that work, then submit again. On acceptance the
+that is not merged or not written as its full link (a `#number` or an issue
+link is refused there). A proof holds only what was shown. A refusal means work
+is still open: do that work, then submit again. On acceptance the
 lineage reads `complete`, the master is told, and the swarm closes your
 session.
+
+If the command fails after it accepted the proof, your lineage reads `complete`
+while you still hold the seat, and your stop is refused. Run the same command
+with the same proof again: it finishes telling the master and ends your seat.
 
 Completion criterion: `agentihooks swarm <slug> expert status <lineage>` reads
 `complete`, every inbox item you received is closed, and the session has
@@ -116,7 +121,7 @@ line numbers or credential values.
 ## Mission
 The mission line.
 ## Deliverables
-- D1 What was delivered, with its evidence: the merged pull request link, the run, or the command and its output.
+- D1 What was delivered, with its evidence: the merged pull request as its full link, the run, or the command and its output.
 - D2 One bullet per deliverable of the mission, each starting with D and its number.
 ## Validation
 - What you ran against the deployed result and what it printed.
