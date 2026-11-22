@@ -466,8 +466,8 @@ def test_a_stats_bucket_gives_the_caller_back_its_flake_ledger_setting(
 
         def run_stats(self, *, tests: list[str]) -> int:
             seen.append(os.environ.get("CI_FLAKES"))
-            os.environ.pop("CI_FLAKES")
             if fails:
+                os.environ.pop("CI_FLAKES")
                 raise RuntimeError("stats failed")
             return 0
 
@@ -522,7 +522,7 @@ def test_a_collected_stats_part_keeps_its_bucket_flake_rows_beside_the_part_and_
         return results
 
     monkeypatch.setattr("scripts.ci_mutation.stats_cache.collect_cached_stats", cached)
-    folder = tmp_path / ".mutation-stats"
+    folder = tmp_path / ".mutation-stats" / "group-0"
     with pytest.raises(SystemExit) as done:
         load_or_collect_stats(
             runner,

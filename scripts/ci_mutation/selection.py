@@ -356,6 +356,7 @@ def loaded_files(bases: list[Path], modules: dict[str, ModuleType] = sys.modules
 
 
 def run_stats_with_flake_ledger(test_runner: Any, tests: list[str], output: Path) -> int:
+    os.environ["MUTANT_UNDER_TEST"] = "stats"
     flakes = output.with_suffix(".flakes.jsonl")
     flakes.unlink(missing_ok=True)
     test_runner._pytest_add_cli_args.extend(["-p", "xdist", "-p", "tests.flake_ledger"])
@@ -371,7 +372,6 @@ def run_stats_with_flake_ledger(test_runner: Any, tests: list[str], output: Path
 
 
 def collect_shard_stats(runner: Any, test_runner: Any, tests: list[str], output: Path, basetemp: str) -> None:
-    os.environ["MUTANT_UNDER_TEST"] = "stats"
     os.environ["PY_IGNORE_IMPORTMISMATCH"] = "1"
     # Stats tracing slows every test, so a wall clock bound only holds in the unit shards.
     test_runner._pytest_add_cli_args = [
