@@ -22,6 +22,7 @@ HIVE = "proof"
 LOST_HIVE = "hive-a"
 T0 = 1_000_000
 SWARMS = ("sw", "other", "idle")
+PLACED = (("sw", "eng", "working"), ("sw", "ci", "working"), ("other", "eng", "working"), ("idle", "eng", "finished"))
 
 
 def _drained(reason: str, agents: str) -> str:
@@ -41,12 +42,16 @@ def store(monkeypatch: pytest.MonkeyPatch) -> RedisStore:
     return result
 
 
-def _agents(store: RedisStore, hive: str = HIVE) -> None:
-    """Two live agents of sw, one of other and a finished one of idle, all placed on ``hive``."""
-    store.put_agent("sw", AgentRecord("engineer@1", "eng", "t1", seat="eng-1@sw", hive=hive, state="working"))
-    store.put_agent("sw", AgentRecord("ci@2", "ci", "t2", seat="ci-1@sw", hive=hive, state="working"))
-    store.put_agent("other", AgentRecord("engineer@3", "eng", "t3", seat="eng-1@other", hive=hive, state="working"))
-    store.put_agent("idle", AgentRecord("engineer@4", "eng", "t4", seat="eng-1@idle", hive=hive, state="finished"))
+def _agents(store: RedisStore) -> dict[str, list[str]]:
+    """Two live agents of sw, one of other and a finished one of idle, all started on the hive; names per swarm."""
+    names: dict[str, list[str]] = {}
+    for slug, lane, state in PLACED:
+        record = AgentRecord(store.next_name(slug, lane), lane, f"t-{lane}", seat=f"{lane}-1@{slug}", hive=HIVE)
+        agent = store.start_execution(slug, replace(record, state="working"))
+        if state != "working":
+            store.put_agent(slug, replace(agent, state=state))
+        names.setdefault(slug, []).append(agent.name)
+    return {slug: sorted(found) for slug, found in names.items()}
 
 
 def _master(store: RedisStore, slug: str) -> list[Item]:
@@ -98,7 +103,7 @@ def test_a_sweep_drain_leaves_one_item_at_the_master_of_each_swarm_with_a_live_a
     store: RedisStore,
 ) -> None:
     _quiet(store)
-    _agents(store)
+    names = _agents(store)
 
     assert sweep.sweep(store, NOW_MS) == [
         f"drained quiet ephemeral hive {HIVE}",
@@ -106,8 +111,8 @@ def test_a_sweep_drain_leaves_one_item_at_the_master_of_each_swarm_with_a_live_a
     ]
 
     [item] = _master(store, "sw")
-    assert (item.sender, item.fyi, item.text) == ("swarm", True, _drained(sweep.REASON, "ci@2, engineer@1"))
-    assert _texts(store, "other") == [_drained(sweep.REASON, "engineer@3")]
+    assert (item.sender, item.fyi, item.text) == ("swarm", True, _drained(sweep.REASON, ", ".join(names["sw"])))
+    assert _texts(store, "other") == [_drained(sweep.REASON, ", ".join(names["other"]))]
     assert _texts(store, "idle") == []
 
 
@@ -128,21 +133,19 @@ def test_hive_set_draining_tells_each_master_once_and_again_after_an_undrain(
 ) -> None:
     monkeypatch.setattr(cli, "redis_client", lambda: store.redis)
     registry.update(store.redis, HIVE, ["ui=no"])
-    _agents(store)
+    names = _agents(store)
+    sw, other = ", ".join(names["sw"]), ", ".join(names["other"])
 
     assert cli.main(["set", HIVE, "draining=yes"]) == 0
     assert cli.main(["set", HIVE, "draining=yes"]) == 0
     assert cli.main(["set", HIVE, "ui=no"]) == 0
-    assert _texts(store, "sw") == [_drained("hive set", "ci@2, engineer@1")]
+    assert _texts(store, "sw") == [_drained("hive set", sw)]
 
     assert cli.main(["set", "--reason", "release roll", HIVE, "draining=no"]) == 0
     assert cli.main(["set", "--reason", "release roll", HIVE, "draining=yes"]) == 0
 
-    assert _texts(store, "sw") == [
-        _drained("hive set", "ci@2, engineer@1"),
-        _drained("release roll", "ci@2, engineer@1"),
-    ]
-    assert _texts(store, "other") == [_drained("hive set", "engineer@3"), _drained("release roll", "engineer@3")]
+    assert _texts(store, "sw") == [_drained("hive set", sw), _drained("release roll", sw)]
+    assert _texts(store, "other") == [_drained("hive set", other), _drained("release roll", other)]
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["draining"] == "yes"
 
 
@@ -151,34 +154,37 @@ def test_a_hive_remove_drain_tells_each_master_once_and_keeps_the_agent_orders(
     store: RedisStore, tmp_path: Path
 ) -> None:
     registry.update(store.redis, HIVE, ["ui=no"])
-    _agents(store)
+    names = _agents(store)
     plan = remove.Plan(HIVE, "anton-9", "p", wait_s=600)
 
     lines = remove.drain(store, plan, _host(store, tmp_path))
     remove.drain(store, plan, _host(store, tmp_path))
 
     assert lines[0].startswith(f"drained {HIVE}: 3 agents ordered to hand off; ")
-    assert _texts(store, "sw") == [_drained("hive remove", "ci@2, engineer@1")]
-    assert _texts(store, "other") == [_drained("hive remove", "engineer@3")]
+    assert _texts(store, "sw") == [_drained("hive remove", ", ".join(names["sw"]))]
+    assert _texts(store, "other") == [_drained("hive remove", ", ".join(names["other"]))]
     assert _texts(store, "idle") == []
     inbox = InboxStore(store.redis)
-    assert [item.text for item in inbox.inbox("engineer@1")] == [remove.ORDER.format(hive=HIVE, slug="sw")]
-    assert [item.text for item in inbox.inbox("engineer@3")] == [remove.ORDER.format(hive=HIVE, slug="other")]
+    for slug in ("sw", "other"):
+        for name in names[slug]:
+            assert [item.text for item in inbox.inbox(name)] == [remove.ORDER.format(hive=HIVE, slug=slug)]
 
 
 @pytest.mark.feature("master-hive-drain-item")
 def test_a_hive_stop_settle_tells_each_master_once_and_keeps_the_roll_orders(store: RedisStore, tmp_path: Path) -> None:
     registry.update(store.redis, HIVE, ["ui=no"])
-    _agents(store)
+    names = _agents(store)
 
     ended = remove.settle(store, HIVE, 600, _host(store, tmp_path))
 
     assert ended == f"hive {HIVE} drained: every agent handed off, 3 ordered to hand off"
-    assert _texts(store, "sw") == [_drained("the hive is stopping", "ci@2, engineer@1")]
-    assert _texts(store, "other") == [_drained("the hive is stopping", "engineer@3")]
+    assert _texts(store, "sw") == [_drained("the hive is stopping", ", ".join(names["sw"]))]
+    assert _texts(store, "other") == [_drained("the hive is stopping", ", ".join(names["other"]))]
     assert _texts(store, "idle") == []
-    roll = [item.text for item in InboxStore(store.redis).inbox("ci@2")]
-    assert roll == [remove.ROLL.format(hive=HIVE, slug="sw")]
+    inbox = InboxStore(store.redis)
+    for slug in ("sw", "other"):
+        for name in names[slug]:
+            assert [item.text for item in inbox.inbox(name)] == [remove.ROLL.format(hive=HIVE, slug=slug)]
 
 
 @pytest.mark.feature("master-hive-drain-item")
