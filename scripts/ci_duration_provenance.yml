@@ -17,7 +17,7 @@
   working-directory: ${{ github.workspace }}/provenance-grader
   run: |
     python -m venv "$RUNNER_TEMP/provenance-python"
-    "$RUNNER_TEMP/provenance-python/bin/python" -I -m pip install 'pyyaml>=6.0'
+    "$RUNNER_TEMP/provenance-python/bin/python" -I -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
 
 - name: Record the protected tested tree
   id: provenance
