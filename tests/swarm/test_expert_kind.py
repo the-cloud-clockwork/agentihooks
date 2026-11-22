@@ -21,7 +21,6 @@ from tests.swarm import profile_fixture
 
 pytestmark = pytest.mark.unit
 
-FEATURE = "expert-kind-and-launch-pin"
 NAME = "expert@a1b2c3-0001"
 SEAT = "expert-1@sw"
 PINS: dict[str, Any] = {"profile": "expert", "requires_harness": "claude"}
@@ -81,7 +80,7 @@ def _launch(
     return seen
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("expert-kind-and-launch-pin")
 def test_an_expert_name_builds_parses_and_counts_on_its_own(store: RedisStore) -> None:
     code = store.config("sw").code
     names = [store.next_name("sw", lane) for lane in ("expert", "eng", "expert")]
@@ -114,7 +113,7 @@ def test_the_expert_launch_range_is_xhigh_to_max_whatever_the_swarm_range(config
     assert effort_range.bounds(config, "expert") == ("xhigh", "max")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("expert-kind-and-launch-pin")
 def test_a_fresh_expert_launch_runs_claude_code_on_fable_at_xhigh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -123,7 +122,7 @@ def test_a_fresh_expert_launch_runs_claude_code_on_fable_at_xhigh(
     assert _passed(argv) == ["--model", "fable", "--effort", "xhigh"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("expert-kind-and-launch-pin")
 @pytest.mark.parametrize(
     "wanted,swarm_range,launched",
     [
@@ -152,7 +151,7 @@ def test_a_lane_setting_or_an_environment_default_never_moves_an_expert_launch(
     assert _passed(seen["argv"]) == ["--model", "fable", "--effort", "max"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("expert-kind-and-launch-pin")
 @pytest.mark.parametrize(
     "saved_model,saved_effort,wanted,launched",
     [("opus", "medium", "max", "max"), ("sonnet", "max", "", "xhigh"), ("fable", "low", "xhigh", "xhigh")],
@@ -183,7 +182,7 @@ def test_a_quota_transfer_with_no_saved_launch_still_launches_the_pin(
     assert _passed(argv) == ["--model", "fable", "--effort", "max"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("expert-kind-and-launch-pin")
 @pytest.mark.parametrize("pin", [{"requires_harness": "codex"}, {"requires_harness": ""}])
 def test_an_expert_launch_that_lands_on_another_harness_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pin: dict[str, str]
@@ -194,7 +193,7 @@ def test_an_expert_launch_that_lands_on_another_harness_is_refused(
     assert refused.value.status == "unsupported"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("expert-kind-and-launch-pin")
 @pytest.mark.parametrize(
     "recorded_model,recorded_effort,launched",
     [("fable", "max", "max"), ("opus", "medium", "xhigh"), ("claude-fable-5-2", "xhigh", "xhigh")],

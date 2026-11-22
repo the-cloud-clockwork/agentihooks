@@ -9,8 +9,6 @@ from scripts.feature_checks import expert_lineage as check
 
 pytestmark = pytest.mark.unit
 
-FEATURE = "expert-kind-and-launch-pin"
-
 
 def _agent(name: str, **fields: Any) -> SimpleNamespace:
     record: dict[str, Any] = {
@@ -48,11 +46,11 @@ def test_a_fleet_with_no_expert_passes_and_says_so(capsys: pytest.CaptureFixture
     assert capsys.readouterr().out == "no working expert\n"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("expert-kind-and-launch-pin")
 def test_working_experts_on_the_pin_pass_and_are_listed(capsys: pytest.CaptureFixture[str]) -> None:
     store = Store(
         {
-            "rig": [_agent("expert@a1b2c3-0001"), _agent("expert@a1b2c3-0002", model="claude-FABLE-5-2", effort="max")],
+            "rig": [_agent("expert@a1b2c3-0002", model="claude-FABLE-5-2", effort="max"), _agent("expert@a1b2c3-0001")],
             "doctor": [_agent("expert@d0c7e5-0001")],
         }
     )
@@ -64,7 +62,7 @@ def test_working_experts_on_the_pin_pass_and_are_listed(capsys: pytest.CaptureFi
     ]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("expert-kind-and-launch-pin")
 @pytest.mark.parametrize(
     "fields,ran",
     [
@@ -99,3 +97,16 @@ def test_an_expert_that_is_not_working_or_whose_swarm_stopped_is_not_judged(
     )
     assert _run(store) == 0
     assert capsys.readouterr().out == "no working expert\n"
+
+
+def test_with_no_store_given_the_check_reads_the_swarm_store(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import store as swarm_store
+
+    client = object()
+    found = Store({"rig": [_agent("expert@a1b2c3-0001", effort="max")]})
+    monkeypatch.setattr(swarm_store, "redis_client", lambda: client)
+    monkeypatch.setattr(swarm_store, "RedisStore", lambda redis: found if redis is client else None)
+    assert check.main() == 0
+    assert capsys.readouterr().out == "rig expert expert@a1b2c3-0001 runs claude fable at max\n"

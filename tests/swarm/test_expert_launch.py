@@ -8,8 +8,6 @@ from scripts.swarm.tick import SpawnError
 
 pytestmark = pytest.mark.unit
 
-FEATURE = "expert-kind-and-launch-pin"
-
 
 def test_the_pin_is_claude_code_on_fable_at_xhigh_or_max() -> None:
     assert (expert_launch.LANE, expert_launch.HARNESS, expert_launch.MODEL) == ("expert", "claude", "fable")
@@ -24,12 +22,12 @@ def test_another_lanes_pick_is_left_as_it_is(lane: str) -> None:
     assert expert_launch.hold(lane, picked, "codex", "max") is picked
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("expert-kind-and-launch-pin")
 @pytest.mark.parametrize(
     "wanted,held",
-    [("max", "max"), ("xhigh", "xhigh"), ("", "xhigh"), ("high", "xhigh"), ("low", "xhigh"), ("MAX", "xhigh")],
+    [("max", "max"), ("xhigh", "xhigh"), ("", "xhigh"), (None, "xhigh"), ("high", "xhigh"), ("MAX", "xhigh")],
 )
-def test_an_expert_pick_is_held_to_fable_at_its_lineage_effort_or_xhigh(wanted: str, held: str) -> None:
+def test_an_expert_pick_is_held_to_fable_at_its_lineage_effort_or_xhigh(wanted: str | None, held: str) -> None:
     picked = ModelPick("opus", "medium", source="handoff", confidence=0.4)
     assert expert_launch.hold("expert", picked, "claude", wanted) == ModelPick("fable", held, source="expert")
 

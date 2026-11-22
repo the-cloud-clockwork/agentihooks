@@ -12084,6 +12084,33 @@
       ]
     },
     {
+      "id": "expert-kind-and-launch-pin",
+      "origin": "operator",
+      "operator_words": "we need to create another swarm branch of agents profile \"expert\" that agenr exper profile will always use claude code fable model mandarory and effort default xhigh, the operator can chose to set max, and the agents will behave like a swarm agent but the difference is that they will not claim tasks",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "An expert is its own agent kind with its own name counter and a numbered lineage seat, and every expert launch or resume runs Claude Code on the Fable model at effort xhigh, or max when its lineage asks for it, whatever the swarm effort range, a lane setting, a saved handoff launch or a recorded session says; an expert launch that lands on another harness is refused.",
+      "seam": "naming.TYPES and templates.DEFAULT_PROFILES for the kind, expert_launch.hold called by HerdrRuntime.spawn and HerdrRuntime.resume, effort_range.bounds for the expert lane, and the live check scripts.feature_checks.expert_lineage over the agent records",
+      "semgrep_rule": "feature-expert-launch-pin",
+      "tests": [
+        "tests/swarm/test_expert_kind.py::test_an_expert_name_builds_parses_and_counts_on_its_own",
+        "tests/swarm/test_expert_kind.py::test_a_fresh_expert_launch_runs_claude_code_on_fable_at_xhigh",
+        "tests/swarm/test_expert_kind.py::test_the_lineage_effort_decides_the_launch_effort_whatever_the_swarm_range",
+        "tests/swarm/test_expert_kind.py::test_a_successor_launches_fable_at_the_lineage_effort_whatever_its_predecessor_ran",
+        "tests/swarm/test_expert_kind.py::test_an_expert_launch_that_lands_on_another_harness_is_refused",
+        "tests/swarm/test_expert_kind.py::test_a_resumed_expert_relaunches_fable_inside_its_pin",
+        "tests/swarm/test_expert_launch.py::test_an_expert_pick_is_held_to_fable_at_its_lineage_effort_or_xhigh",
+        "tests/test_expert_lineage_check.py::test_working_experts_on_the_pin_pass_and_are_listed",
+        "tests/test_expert_lineage_check.py::test_a_working_expert_off_the_pin_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_lineage"
+      ]
+    },
+    {
       "id": "lane-model-harness-compatibility",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2537",
