@@ -320,3 +320,11 @@ def test_a_repository_not_on_github_has_no_release_to_announce(
     mail = Mail(InboxStore(store.redis), store, "sw")
     assert release_wait.announce(mail, config(str(tmp_path), ""), 901, RUN_URL) == []
     assert fake.calls == [] and master_items(store) == []
+
+
+@pytest.mark.feature("master-release-item")
+def test_a_repository_with_no_stable_tag_tells_the_master_nothing(store: RedisStore, api: Callable[..., Api]) -> None:
+    api(["nightly", "v2.0.0-rc1"])
+    mail = Mail(InboxStore(store.redis), store, "sw")
+    assert release_wait.announce(mail, config(), 901, RUN_URL) == []
+    assert master_items(store) == []

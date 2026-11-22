@@ -114,10 +114,13 @@ def checker(config: SwarmConfig) -> Callable[[dict[str, Any]], bool]:
 
 def announce(mail: Mail, config: SwarmConfig, run_id: int, url: str) -> list[str]:
     """Tell the master seat once per release tag that a green promotion published it, once per run when the tags
-    cannot be read, and nothing for a repository not on GitHub."""
+    cannot be read, and nothing for a repository not on GitHub or with no stable tag."""
     if not repository(config):
         return []
-    tag = newest(tags(config))
+    found, why = lookup(config)
+    tag = newest(found)
+    if not tag and not why:
+        return []
     key, text = (f"release-{tag}", RELEASED) if tag else (f"promotion-green-{run_id}", UNREAD)
     if not mail.send(key, mail.master, text.format(tag=tag, run_id=run_id, url=url)):
         return []

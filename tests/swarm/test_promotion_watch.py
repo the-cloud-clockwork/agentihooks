@@ -1778,3 +1778,15 @@ def test_a_green_promotion_tells_the_master_once_to_check_the_release_rollout(
     newer = gh([{**GREEN, "id": 902}])
     assert promotion_watch.refresh(SLUG, config, store, ledger, ledger.doc(), later * 2, newer) == []
     assert master_items(store) == [item]
+
+
+@pytest.mark.feature("master-release-item")
+def test_a_green_promotion_with_no_red_before_it_still_tells_the_master_of_its_release(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(release_wait, "lookup", lambda config: (["v2.17.901"], ""))
+    config: Any = SimpleNamespace(repo="/repo", repo_origin="github.com/o/r")
+    ledger: Any = Ledger()
+    actions = promotion_watch.refresh(SLUG, config, store, ledger, ledger.doc(), NOW, gh([GREEN]))
+    assert ledger.closed == [] and actions == ["told the master to check the rollout of v2.17.901"]
+    assert len(master_items(store)) == 1
