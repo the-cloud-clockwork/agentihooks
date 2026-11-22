@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
-from threading import Thread
+from threading import Event, Thread
 from unittest.mock import Mock
 
 import pytest
@@ -111,3 +111,44 @@ def test_live_slow_budgets_keep_the_pass_join_inside_its_original_window(monkeyp
         assert current.critical.expires_at == critical
     assert thread.join.call_count == 1
     assert 0.0 < thread.join.call_args.args[0] <= 59.0 + pool.LATER_GRACE_S
+
+
+@pytest.mark.feature("swarm-tick-slow-lane-live-budget")
+def test_slow_dependents_and_finished_records_survive_the_pass_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    release, started, completed, called = Event(), Event(), Event(), Event()
+    rows: list[tuple[engine.StepRecord, ...]] = []
+
+    def earlier(ctx: Context) -> Result:
+        started.set()
+        assert release.wait(3.0)
+        return Result()
+
+    def later(ctx: Context) -> Result:
+        called.set()
+        return Result()
+
+    def finished(records: tuple[engine.StepRecord, ...]) -> None:
+        rows.append(records)
+        completed.set()
+
+    monkeypatch.setattr(pool, "SLOW_S", 0.02)
+    monkeypatch.setattr(pool, "LATER_GRACE_S", 0.01)
+    try:
+        with pool.running(workers=2):
+            engine.run_group(
+                "load",
+                Context(View(), Deadline.after(20.0)),
+                (
+                    Step("across exit", earlier, floor_s=5.0),
+                    Step("after exit", later, frozenset({"across exit"}), floor_s=5.0),
+                ),
+                finished=finished,
+            )
+            assert started.wait(1.0)
+    finally:
+        release.set()
+    assert completed.wait(3.0)
+    assert called.is_set()
+    assert [[(row.name, row.outcome) for row in group] for group in rows] == [
+        [("across exit", engine.OK), ("after exit", engine.OK)]
+    ]
