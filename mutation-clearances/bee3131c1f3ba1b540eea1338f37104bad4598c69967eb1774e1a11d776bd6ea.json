@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/expert_commands.py:scripts.swarm.expert_commands.x_cmd_start:0230e6c0aaa0e12192baaac0f260465025899a8d0284b991f46234900d714ec4": {
+    "reader": "standards-reader-6a-move",
+    "reason": "The author record of a start handoff reaches only envelope.build and transfers.record. envelope.build reads the lane only through == MASTER and != MASTER in _worktree and _launch, which answer the same for \"\" and \"XXXX\", and _launch returns {} because profile and harness are empty; transfers.record stores seat, task and name, never the lane."
+  }
+}

@@ -249,6 +249,22 @@
       ]
     },
     {
+      "id": "swarm-launch-acknowledgements",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2677",
+      "behaviour": "The launches command reports each swarm agent's acknowledged hive and launch time through the public events reader, with null fields for missing or mismatched acknowledgements.",
+      "seam": "scripts.swarm.launch_starts.command and the swarm parser over execution_stop.started",
+      "tests": [
+        "tests/swarm/test_launch_starts.py::test_launches_parser_dispatches_the_public_command",
+        "tests/swarm/test_launch_starts.py::test_launches_print_acknowledged_and_missing_starts",
+        "tests/swarm/test_launch_starts.py::test_launches_print_reconstructed_acknowledgement_time",
+        "tests/swarm/test_launch_starts.py::test_launches_print_missing_acknowledgement",
+        "tests/swarm/test_launch_starts.py::test_launches_reject_mismatched_acknowledgements",
+        "tests/swarm/test_launch_starts.py::test_launches_close_the_bus_on_read_failure",
+        "tests/swarm/test_launch_starts.py::test_launches_print_an_empty_agent_list"
+      ]
+    },
+    {
       "id": "lab-store-incremental-fetch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-store-mirror-mount",
@@ -2675,6 +2691,28 @@
       ]
     },
     {
+      "id": "ledger-copy-after-commit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2853",
+      "behaviour": "Ledger host copies are saved or removed only after the Postgres transaction commits, discarded on rollback or failed commit, and never replaced by an older deferred generation.",
+      "seam": "SQLiteLedgerRepository._entry and purge, PostgresLedgerRepository, Connection.commit and rollback, host_entries.Copies",
+      "rules": [
+        "ledger-host-copy-inside-entry"
+      ],
+      "tests": [
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_slow_host_copy_observes_a_committed_postgres_transaction",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_entry_is_never_written_to_the_host",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_failed_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_closing_without_commit_discards_the_pending_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_purge_drops_the_copy_after_its_queued_save",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_deferred_older_copy_never_replaces_a_newer_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_successful_commit_runs_each_pending_host_copy_once",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_a_rolled_back_purge_keeps_its_committed_host_copy",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_cannot_lower_a_newer_deferred_copy_generation",
+        "tests/swarm_ledger/test_postgres_host_entries.py::test_adoption_during_a_save_preserves_the_newer_host_generation"
+      ]
+    },
+    {
       "id": "ledger-cold-write",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-write-full-load",
@@ -4509,10 +4547,34 @@
     {
       "id": "swarm-manual-caps",
       "origin": "inventory",
-      "behaviour": "Manual lane caps hold against lane demand.",
+      "behaviour": "Manual lane caps hold against lane demand, except a zero planner cap, which counts as one while plan work is ready.",
       "seam": "agentihooks swarm set max-eng-agents and max-ci-agents",
       "tests": [
         "tests/swarm/test_lane_caps_owner.py::test_manual_caps_hold_against_lane_demand"
+      ]
+    },
+    {
+      "id": "swarm-plan-cap-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-cap-floor",
+      "behaviour": "While plan work is ready the quota decision keeps one planner seat under a stored zero planner cap, in manual scaling and in auto scaling with the room full, taking the seat from the larger engineer or CI ceiling; the dispatcher lane caps keep one planner while a plan lane task is open; swarm start and a set that scales engineers or CI up restore a stored zero planner cap to its default, and a zero typed in the same set holds.",
+      "seam": "scripts.swarm.capacity.autoscaled, scripts.swarm.plan_cap_floor, scripts.swarm.dispatcher.lane_caps, agentihooks swarm start and agentihooks swarm set",
+      "tests": [
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_under_a_stored_zero_manual_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_zero_manual_cap_holds_while_no_plan_work_is_ready",
+        "tests/swarm/test_plan_cap_floor.py::test_a_stored_manual_plan_cap_above_zero_is_kept",
+        "tests/swarm/test_plan_cap_floor.py::test_a_ready_plan_task_gets_a_planner_seat_when_live_agents_fill_the_room",
+        "tests/swarm/test_plan_cap_floor.py::test_the_plan_seat_comes_from_the_larger_lane_ceiling",
+        "tests/swarm/test_plan_cap_floor.py::test_the_ceilings_are_unchanged_without_ready_plan_work",
+        "tests/swarm/test_plan_cap_floor.py::test_a_plan_ceiling_already_granted_is_unchanged",
+        "tests/swarm/test_plan_cap_floor.py::test_a_frozen_plan_task_gets_no_planner_seat_under_a_stored_zero_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_the_claim_key_keeps_the_focus_order_of_plan_work_under_a_stored_zero_cap",
+        "tests/swarm/test_dispatcher.py::test_lane_caps_name_each_lane_with_its_own_cap",
+        "tests/swarm/test_dispatcher.py::test_at_delegate_the_queue_holds_only_focused_work_at_any_focus_weight",
+        "tests/swarm/test_dispatcher.py::test_below_delegate_proposals_name_only_focused_work_at_full_focus_weight",
+        "tests/swarm/test_plan_cap_floor.py::test_start_restores_a_stored_zero_plan_cap_to_its_default",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_restores_a_stored_zero_plan_cap",
+        "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_keeps_a_stored_plan_cap_above_zero"
       ]
     },
     {
@@ -4916,6 +4978,17 @@
       ],
       "rules": [
         "hive-order-sent-to-seat"
+      ]
+    },
+    {
+      "id": "kind-drain-agent-reads-session-mail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-44956266312-1",
+      "behaviour": "The kind chart proof's scripted drain agent waits for its hive roll order in the mail a real session reads, so it sees the order wherever the hive drain addresses it and records its own recycle handoff on the draining hive before that hive stops.",
+      "seam": "the hand_off wait of deploy/helm/agentihooks-swarm/ci/hive-drain-agent.sh against scripts.hive.remove._order",
+      "tests": [
+        "tests/test_kind_drain_agent.py::test_the_kind_drain_agent_records_its_own_recycle_handoff_once_its_seat_holds_the_roll_order",
+        "tests/test_kind_drain_agent.py::test_the_kind_drain_agent_sees_the_roll_order_the_hive_drain_sends_to_its_name"
       ]
     },
     {
@@ -5768,6 +5841,62 @@
       ]
     },
     {
+      "id": "ledger-order-mark",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "A phase or a task carries the operator's order as a mark holding when it was ordered, who filed it and his words or the id of the entry he wrote. The operator writes it himself; the ledger orchestrator writes it with his recorded words, stored as he wrote them, or with an entry he wrote. Any other author, words he never said, an entry an agent wrote and an item the ledger does not hold are refused with the reason and write nothing. An order takes one proof. A second order keeps the first mark and still needs its proof. Phase and task updates, a split and a group keep the mark, and only the operator or the orchestrator with his recorded words clears it.",
+      "seam": "ledger_core.sync with the order_set and order_clear ops, their rows in the ledger API schema, and agentihooks api order",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_orchestrator_marks_an_item_with_the_operators_words_as_he_wrote_them",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_ledger_entry_the_operator_wrote_marks_the_item_it_asks_for",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_entry_an_agent_wrote_orders_nothing",
+        "tests/swarm_ledger/test_ledger_orders.py::test_words_the_operator_never_said_order_nothing",
+        "tests/swarm_ledger/test_ledger_orders.py::test_only_the_orchestrator_relays_an_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_order_on_an_item_the_ledger_does_not_hold_is_refused",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_operator_marks_an_item_himself",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_operators_own_order_keeps_the_words_he_gives_unchecked",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_second_order_keeps_the_first_mark_and_still_needs_its_proof",
+        "tests/swarm_ledger/test_ledger_orders.py::test_only_the_operator_or_his_words_clear_an_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_clearing_an_item_that_carries_no_order_changes_nothing_and_still_needs_its_proof",
+        "tests/swarm_ledger/test_ledger_orders.py::test_updates_a_split_and_a_group_keep_the_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_malformed_order_is_refused_at_check",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_well_formed_order_passes_check",
+        "tests/swarm_ledger/test_ledger_orders.py::test_order_ops_are_in_the_api_contract_and_target_their_item",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_marks_and_clears_through_the_cli",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_ledger_entry_point_runs_an_order_the_outbox_holds_as_queued",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_takes_a_request_and_refuses_words_he_never_said",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_order_command_needs_exactly_one_proof_and_clears_only_on_his_words",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_help_names_the_order_command_and_its_flags"
+      ]
+    },
+    {
+      "id": "ledger-order-at-filing",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "Adding a phase or a task with the operator's quoted words files it and marks it as his order in one ledger call. Words he never said stop the command before anything is written. An order sent with an add marks the entry only when that call added it. When the server files the entry and refuses the order, the command still finishes the add, work folder included, and reports the entry as not ordered with the server's reason in its output and on standard error; a task the server refuses to add still reads as not added. Without his words the add is sent alone, and phase set, phase done, task group and task split take no quote.",
+      "seam": "agentihooks api phase add --quote and agentihooks api task add --quote",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_orders.py::test_phase_add_with_his_words_files_and_orders_the_phase_in_one_call",
+        "tests/swarm_ledger/test_ledger_orders.py::test_task_add_with_his_words_files_and_orders_the_task_in_one_call",
+        "tests/swarm_ledger/test_ledger_orders.py::test_filing_with_words_he_never_said_writes_nothing",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_add_whose_order_the_server_refuses_is_filed_and_says_it_is_not_ordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_words_the_server_cannot_verify_leave_the_add_filed_and_not_ordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_order_refused_with_no_reason_from_the_server_still_says_it_is_not_ordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_scaffolded_task_whose_order_is_refused_still_gets_its_work_folder",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_add_that_files_nothing_new_leaves_the_entry_it_names_unordered",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_not_ordered_reason_is_the_servers_refusal_of_that_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_an_order_sent_as_a_filing_marks_only_the_entry_its_own_call_added",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_task_the_server_refuses_to_add_still_reads_as_not_added",
+        "tests/swarm_ledger/test_ledger_orders.py::test_filing_without_his_words_sends_the_add_alone",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_filing_the_outbox_holds_prints_what_it_filed",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_help_names_the_quote_that_files_an_order",
+        "tests/swarm_ledger/test_ledger_orders.py::test_only_phase_add_takes_his_words",
+        "tests/swarm_ledger/test_ledger_orders.py::test_the_other_task_actions_still_take_no_quote"
+      ]
+    },
+    {
       "id": "ledger-followup-duplicates",
       "origin": "inventory",
       "behaviour": "A follow up repeating an open follow up or task is refused naming it, unless a plain words not duplicate reason is given and stored.",
@@ -6348,6 +6477,37 @@
       "seam": "scripts.size_limits.measure and scripts.size_limits.grade, called by the unit suite on the merge group head",
       "tests": [
         "tests/test_size_limits.py::test_the_checked_out_tree_holds_the_size_limits"
+      ]
+    },
+    {
+      "id": "swarm-enhance-close",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-close",
+      "behaviour": "Swarm done on a plan task that enhances a thin task refuses unless the target carries a plan slice whose section names a seam and holds every recon heading, pull request body section and a done when sentence. A complete close releases the target from its thin claim hold at full autonomy when the slice check finds nothing; otherwise the master approves or sends it back with plan approve or send-back and a task option at delegate and full, and the operator decides at manual and assist by setting the enhancement planned. A send back reopens the enhancement task with the note and keeps the target held, only the master or the operator may skip an enhancement, an eng or ci worker never sets one, only the closed enhancement plan task's planner, the master or the operator marks it planned, the task enhancement ledger operation is the only write of the field and takes only empty, needed, planned or skipped, and an ordinary plan task still closes on its slice proof.",
+      "seam": "scripts.swarm.enhance_review close, settle and review, called by swarm done and swarm plan approve or send-back --task, with the ledger_tasks enhancement field rules",
+      "tests": [
+        "tests/swarm/test_enhance_close.py::test_an_ordinary_plan_task_still_closes_on_its_slice_proof",
+        "tests/swarm/test_enhance_close.py::test_done_refuses_an_enhancement_whose_target_carries_no_plan_slice",
+        "tests/swarm/test_enhance_close.py::test_done_refuses_an_enhancement_of_a_task_the_ledger_does_not_hold",
+        "tests/swarm/test_enhance_close.py::test_done_refuses_an_incomplete_section_and_names_every_missing_part",
+        "tests/swarm/test_enhance_close.py::test_full_autonomy_closes_a_complete_enhancement_and_releases_the_target",
+        "tests/swarm/test_enhance_close.py::test_the_close_reads_the_target_section_through_the_hosted_loader",
+        "tests/swarm/test_enhance_close.py::test_full_autonomy_asks_the_master_when_the_slice_check_faults_the_target",
+        "tests/swarm/test_enhance_close.py::test_delegate_holds_the_target_until_the_master_approves_the_task",
+        "tests/swarm/test_enhance_close.py::test_the_operator_decides_an_enhancement_at_manual_and_assist",
+        "tests/swarm/test_enhance_close.py::test_send_back_reopens_the_enhancement_with_the_note_and_keeps_the_target_held",
+        "tests/swarm/test_enhance_close.py::test_a_review_refuses_an_enhancement_that_is_not_in_review",
+        "tests/swarm/test_enhance_close.py::test_a_review_names_exactly_one_of_a_phase_or_a_task",
+        "tests/swarm/test_enhance_close.py::test_the_enhancement_op_refuses_a_malformed_write",
+        "tests/swarm/test_enhance_close.py::test_only_the_master_or_the_operator_may_skip_an_enhancement",
+        "tests/swarm/test_enhance_close.py::test_an_eng_or_ci_worker_never_sets_an_enhancement",
+        "tests/swarm/test_enhance_close.py::test_only_a_closed_enhancement_the_master_or_the_operator_marks_a_task_planned",
+        "tests/swarm/test_enhance_close.py::test_the_master_or_the_operator_skips_an_enhancement",
+        "tests/swarm/test_enhance_close.py::test_the_enhancement_op_refuses_a_task_the_ledger_does_not_hold",
+        "tests/swarm/test_enhance_close.py::test_a_task_update_never_writes_an_enhancement",
+        "tests/swarm/test_enhance_close.py::test_enhances_survives_task_add_and_the_hosted_schemas_accept_the_fields",
+        "tests/swarm/test_enhance_close.py::test_the_task_slice_check_grades_a_target_in_its_own_phase",
+        "tests/swarm/test_enhance_close.py::test_the_plan_reader_fetches_a_hosted_ledger_with_its_loader"
       ]
     },
     {
@@ -8229,6 +8389,19 @@
       ]
     },
     {
+      "id": "type-env-ready-fast-path",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-env-fast-path",
+      "behaviour": "A ready CI type environment is reused under a shared lock on its per digest lock file, so a prepush returns at once while another worktree's type gate run holds that shared lock for its whole grade. Only a missing environment takes the exclusive lock, and the ready marker is checked again under it, so builders racing for one digest build it once. A reuse still waits while a build holds the exclusive lock, and never prunes other environments.",
+      "seam": "scripts.type_env.environment through its per digest lock file and the uv build commands it runs",
+      "tests": [
+        "tests/test_type_env.py::test_a_ready_environment_returns_while_a_grade_holds_its_shared_lock",
+        "tests/test_type_env.py::test_builders_racing_for_one_environment_build_it_once",
+        "tests/test_type_env.py::test_reuse_waits_while_a_build_holds_the_lock",
+        "tests/test_type_env.py::test_reuse_leaves_other_environments_in_place"
+      ]
+    },
+    {
       "id": "design-rules-body-change-graded",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-design-rules-body-change-types",
@@ -8460,7 +8633,7 @@
         "tests/tick/test_placement_worker.py::test_a_lock_taking_step_on_the_slow_lane_runs_on_the_placement_worker",
         "tests/tick/test_placement_worker.py::test_a_call_step_that_declares_the_placement_lock_runs_its_call_holding_it",
         "tests/tick/test_placement_worker.py::test_a_write_step_that_declares_the_placement_lock_runs_its_call_holding_it",
-        "tests/tick/test_placement_worker.py::test_the_eight_steps_that_place_agents_declare_the_placement_lock"
+        "tests/tick/test_placement_worker.py::test_the_nine_steps_that_place_agents_declare_the_placement_lock"
       ]
     },
     {
@@ -8655,6 +8828,22 @@
       ]
     },
     {
+      "id": "hive-spoke-spawn-fresh-quota-rows",
+      "origin": "regression",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-spoke-fresh-quota-rows",
+      "behaviour": "A long running hive spoke reads fresh quota rows at every spawn once a spawn has read them for itself, so it admits a spawn the hub placed when the accounts have free seats again, and the spawn it places still adds one session to its account; quota rows a tick pass read are kept for every spawn in that pass.",
+      "seam": "HerdrRuntime.spawn quota rows on a runtime without a tick pass, read through HerdrRuntime._quota_read and re-read by HerdrRuntime._quota_refresh",
+      "rules": [
+        "quota-rows-read-once-per-process"
+      ],
+      "tests": [
+        "tests/swarm/test_quota_handoff.py::test_a_spawn_keeps_the_quota_rows_its_tick_pass_read",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_reads_fresh_quota_rows_after_its_first_quota_handoff",
+        "tests/swarm/test_quota_handoff.py::test_a_spoke_spawn_still_counts_the_session_it_placed_on_fresh_rows"
+      ]
+    },
+    {
       "id": "controller-hive-refusal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
@@ -8829,6 +9018,16 @@
       "tests": [
         "tests/codex_session/test_attach.py::test_an_admitted_execution_waits_for_its_harness_and_then_attaches",
         "tests/codex_session/test_attach.py::test_a_classified_or_running_execution_without_an_app_server_still_refuses"
+      ]
+    },
+    {
+      "id": "quota-wait-no-session-cron",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-wait-scheduler-timer",
+      "behaviour": "Quota WAIT directs swarm sessions to bounded swarm waits naming the reset time and standalone sessions to a scheduler timer aimed at the current session, with no session cron instruction and the existing reset safety buffer.",
+      "seam": "hooks.context.quota_policy.render",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_wait_directive_carries_a_cron_for_the_reset"
       ]
     },
     {
@@ -9185,6 +9384,21 @@
       ]
     },
     {
+      "id": "master-release-item",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-release-items",
+      "behaviour": "A green dev push run of Tests whose promote job succeeded sends the master seat one inbox item naming the release that promotion published, the run and the hub, controller and hive rollout to check. The item is keyed once per release tag, or once per run when the release tag lookup fails, so within the thirty day window of the ledger events mail markers a repeat pass or a later green run with no newer release sends nothing. A repository not on GitHub, or one with no stable tag, sends nothing, and red promotion fixer items keep their own key.",
+      "seam": "promotion_watch.refresh on a green promoted run; release_wait.announce with the ledger events Mail",
+      "tests": [
+        "tests/swarm/test_promotion_watch.py::test_a_green_promotion_tells_the_master_once_to_check_the_release_rollout",
+        "tests/swarm/test_promotion_watch.py::test_a_green_promotion_with_no_red_before_it_still_tells_the_master_of_its_release",
+        "tests/swarm/test_release_wait.py::test_a_published_release_tells_the_master_once_to_check_its_rollout",
+        "tests/swarm/test_release_wait.py::test_a_failed_tag_lookup_tells_the_master_once_per_promotion_run",
+        "tests/swarm/test_release_wait.py::test_a_repository_not_on_github_has_no_release_to_announce",
+        "tests/swarm/test_release_wait.py::test_a_repository_with_no_stable_tag_tells_the_master_nothing"
+      ]
+    },
+    {
       "id": "promotion-red-graded-job-fails-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2598",
@@ -9246,6 +9460,39 @@
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_substep_run_twice_in_one_request_adds_both_times",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_the_summary_totals_each_write_substep_and_keeps_other_wall",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_journal_sample_carries_its_substeps_across_a_restore"
+      ]
+    },
+    {
+      "id": "ledger-command-line-write-timing",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-baseline",
+      "behaviour": "Every ledger request a command line process answers in process is timed through request metrics as a server request is: with the ledger timing variable set it appends one line per request naming its method, route, wall, CPU, waits and the wall and CPU of each substep, among them the ledger copy adopt, refresh, whole load and document build, the guard read, the write gate, the apply under the ledger lock and the publish; without the variable nothing is written, inside a server request its substeps join that request, and server write records keep their four substep columns. Substeps nest: the apply under the ledger lock holds the four write substeps and, on a cold copy, the copy substeps, which otherwise run inside the guard read.",
+      "seam": "scripts.swarm_ledger.request_metrics.command around scripts.tick.adapters.database_ledger.request, with substeps from SQLiteLedgerRepository._entry, SQLiteLedgerRepository.apply_ops and scripts.swarm_ledger.api.mutations.apply",
+      "tests": [
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_comment_write_keeps_its_reply_and_leaves_no_timing_set",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_server_write_record_keeps_only_its_four_substep_columns",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_request_appends_one_timing_line_to_the_named_file",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_each_command_line_request_appends_its_own_line",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_request_writes_nothing_without_the_timing_variable",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_request_inside_a_server_request_joins_it_and_writes_no_line",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_command_line_comment_write_records_its_requests_and_write_substeps",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_fresh_repository_records_the_whole_load_of_its_ledger",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_fresh_repository_over_a_host_copy_records_its_adoption",
+        "tests/swarm_ledger/test_command_line_write_timing.py::test_a_write_under_the_ledger_lock_records_its_apply"
+      ]
+    },
+    {
+      "id": "ledger-write-timing-baseline-command",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-baseline",
+      "behaviour": "agentihooks ledger time-writes runs the given number of agent comment writes one after another, each a fresh agentihooks api comment process on the named slug and task, run as python -m scripts.install, the console script's entry module, on the timer's own interpreter so it runs the timer's code, with a timing file of its own, and prints JSON with the load average before and after, each write's process wall and CPU, request and write wall and CPU, lock and Postgres waits and every substep's wall and CPU, and the median and max of each figure; a write that exits non zero stops the run with that exit code.",
+      "seam": "scripts.swarm_ledger.write_timing.main and scripts.swarm_ledger.write_timing.spawned, registered as the time-writes entry of scripts.swarm_ledger.TOOLS",
+      "tests": [
+        "tests/swarm_ledger/test_write_timing_command.py::test_each_write_is_a_fresh_agent_comment_process_with_its_own_timing_file",
+        "tests/swarm_ledger/test_write_timing_command.py::test_the_report_carries_each_write_and_the_median_and_max_of_every_figure",
+        "tests/swarm_ledger/test_write_timing_command.py::test_a_failing_write_stops_the_run_with_its_exit_code",
+        "tests/swarm_ledger/test_write_timing_command.py::test_a_write_process_gets_its_timing_file_and_keeps_its_exit_code",
+        "tests/swarm_ledger/test_write_timing_command.py::test_the_time_writes_command_is_a_ledger_tool"
       ]
     },
     {
@@ -9455,6 +9702,31 @@
       "seam": "tests/test_skill_frontmatter.py ROLES against the package roles folder and test_tick_pattern_rule_folds_into_every_role_persona",
       "tests": [
         "tests/test_skill_frontmatter.py::test_role_list_covers_every_package_role_folder"
+      ]
+    },
+    {
+      "id": "read-only-roles-refuse-shell-writes",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-readonly-shell-guard",
+      "behaviour": "A qa or reviewer session refuses a shell command that redirects output or tees into a file, or runs a file write command or an in place edit on a path, outside its scratchpad and its own swarm task folder; it also refuses git subcommands outside the read set, git -c and --output, gh pr checkout and gh repo clone anywhere, commands named by a variable, and writes hidden in a shell -c script, eval, command substitution, find -exec, find -delete, xargs or a script fed to a shell on its input; shell reads, writes to /dev/null and writes into its own folders still pass, and only the qa and reviewer roles carry the shell guard.",
+      "seam": "hooks.context.read_only_shell.write_reason, called by profiles.package.roles._guards.no_code_edits.deny_reason for Bash payloads, run by the qa and reviewer pre-bash-no_shell_writes condition shims",
+      "tests": [
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_refuses_a_shell_redirect_into_the_repository",
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_refuses_a_git_commit",
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_keeps_shell_reads",
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_writes_its_scratchpad_and_task_folder",
+        "tests/profiles/test_read_only_shell.py::test_only_the_read_only_roles_carry_the_shell_guard",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_refuses_each_shell_file_write",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_refuses_git_writes_and_hidden_writes",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_keeps_reads_and_writes_inside_its_own_folders",
+        "tests/profiles/test_read_only_shell.py::test_a_placeholder_never_counts_as_a_seat_folder",
+        "tests/profiles/test_read_only_shell.py::test_a_bare_cd_moves_to_the_home_folder",
+        "tests/profiles/test_read_only_shell.py::test_a_folder_stack_move_leaves_the_folder_unknown",
+        "tests/profiles/test_read_only_shell.py::test_a_nested_script_judges_relative_paths_from_the_shell_folder",
+        "tests/profiles/test_read_only_shell.py::test_an_unmatched_close_parenthesis_keeps_the_top_level_folder",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_appends_to_its_task_folder_with_a_heredoc",
+        "tests/profiles/test_read_only_shell.py::test_edit_tool_payloads_keep_the_edit_path"
       ]
     },
     {
@@ -9786,6 +10058,18 @@
       ]
     },
     {
+      "id": "merge-pass-hold-reason-docs",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-hold-reason-docs-test",
+      "behaviour": "The swarm pillar hold reason table contains exactly the reason templates the merge pass writes, allowing prose placeholder names to differ; every missing row and a stale row fail the parity check.",
+      "seam": "AST of merge pass hold arguments and helper return templates compared with the isolated swarm pillar hold reason table",
+      "tests": [
+        "tests/swarm/test_merge_hold_docs.py::test_the_hold_reason_table_matches_the_reasons_the_merge_pass_writes",
+        "tests/swarm/test_merge_hold_docs.py::test_every_missing_hold_reason_row_fails",
+        "tests/swarm/test_merge_hold_docs.py::test_a_stale_hold_reason_row_fails"
+      ]
+    },
+    {
       "id": "hive-registry-unique-name-suffix",
       "origin": "inventory",
       "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another registered hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it, and a headless hive renamed to a held name takes the next free suffix.",
@@ -9918,7 +10202,45 @@
         "tests/swarm/test_readiness.py::test_a_normal_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_of_a_later_urgent_offer",
         "tests/swarm/test_readiness.py::test_a_hive_that_cannot_place_the_urgent_offer_still_takes_the_older_normal_offer",
         "tests/swarm/test_readiness.py::test_an_urgent_offer_in_another_lane_leaves_the_older_normal_offers_in_place",
-        "tests/swarm/test_readiness.py::test_the_seat_a_preempted_normal_worker_frees_goes_to_the_urgent_offer_not_the_older_normal_one"
+        "tests/swarm/test_readiness.py::test_the_seat_a_preempted_normal_worker_frees_goes_to_the_urgent_offer_not_the_older_normal_one",
+        "tests/swarm/test_readiness.py::test_behind_names_the_old_waiting_offers_ahead_of_an_urgent_or_focused_offer"
+      ]
+    },
+    {
+      "id": "ready-ordered-offer-first",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "Among the tasks a lane may claim, the hub readiness pass offers urgent and focused tasks first as before, then the tasks under an operator order, oldest order first, then the rest, each by ledger rank band. A task's order time is the earlier of its own mark and its phase's; the work an ordered task waits on, the plan task that enhances it and the lead it is merged into carry the earliest such time, through every such link in turn, and a mark that is not well formed counts as none. A waiting offer at least one dedupe window old moves behind a later offer of a higher class. An order never changes which tasks are offered: under a focus an ordered task outside it is not offered, and focused offers keep their order.",
+      "seam": "scripts.swarm.orders.stamps, the walk it runs on (scripts.swarm.freeze.waits and reached), scripts.swarm.readiness.offers and behind, and readiness.publish on the memory work queue read back through readiness.take",
+      "tests": [
+        "tests/swarm/test_orders.py::test_a_ledger_with_no_order_mark_has_no_order_time",
+        "tests/swarm/test_orders.py::test_a_task_carries_the_earlier_of_its_own_order_time_and_its_phases",
+        "tests/swarm/test_orders.py::test_the_work_an_ordered_task_waits_on_carries_its_order_time",
+        "tests/swarm/test_orders.py::test_every_task_of_a_phase_an_ordered_phase_waits_on_carries_its_order_time",
+        "tests/swarm/test_orders.py::test_the_plan_task_that_enhances_ordered_work_and_what_it_waits_on_carry_the_order_time",
+        "tests/swarm/test_orders.py::test_the_lead_an_ordered_task_is_merged_into_and_what_it_waits_on_carry_the_order_time",
+        "tests/swarm/test_orders.py::test_the_order_time_travels_through_every_link_of_the_work_it_reaches",
+        "tests/swarm/test_orders.py::test_the_earliest_order_wins_wherever_two_orders_meet",
+        "tests/swarm/test_orders.py::test_done_and_out_of_scope_work_carries_no_order_time_and_passes_none_on",
+        "tests/swarm/test_orders.py::test_a_done_or_out_of_scope_phase_passes_its_order_time_to_no_task",
+        "tests/swarm/test_orders.py::test_tasks_that_wait_on_each_other_end_with_the_earliest_order_time",
+        "tests/swarm/test_orders.py::test_a_malformed_order_mark_counts_as_no_mark",
+        "tests/swarm/test_orders.py::test_a_well_formed_order_mark_gives_its_time",
+        "tests/swarm/test_freeze.py::test_waits_names_what_each_task_of_the_ledger_waits_on",
+        "tests/swarm/test_freeze.py::test_reached_walks_from_every_seed_along_the_links_and_stops_at_cold_work",
+        "tests/swarm/test_readiness.py::test_behind_names_the_old_waiting_offers_ahead_of_an_offer_of_a_higher_class",
+        "tests/swarm/test_readiness.py::test_offers_put_urgent_tasks_first_then_ordered_ones_oldest_order_first_then_the_rest",
+        "tests/swarm/test_readiness.py::test_the_tasks_of_an_ordered_phase_and_the_work_they_wait_on_are_offered_before_the_rest",
+        "tests/swarm/test_readiness.py::test_order_marks_change_the_order_of_offers_and_never_which_tasks_are_offered",
+        "tests/swarm/test_readiness.py::test_under_a_focus_an_ordered_task_outside_it_is_not_offered_and_focused_offers_keep_their_order",
+        "tests/swarm/test_readiness.py::test_a_malformed_order_mark_leaves_the_offers_in_their_rank_order",
+        "tests/swarm/test_readiness.py::test_a_later_ordered_offer_is_taken_after_an_urgent_one_and_before_older_normal_offers",
+        "tests/swarm/test_readiness.py::test_an_old_normal_offer_moves_behind_a_later_ordered_offer_and_a_young_one_keeps_its_place",
+        "tests/swarm/test_readiness.py::test_an_ordered_offer_moves_behind_a_later_urgent_offer_and_stays_ahead_of_a_later_normal_one",
+        "tests/swarm/test_readiness.py::test_an_ordered_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_of_an_urgent_one_until_it_ages",
+        "tests/swarm/test_readiness.py::test_a_focus_of_any_form_puts_its_tasks_in_the_first_class_of_offers",
+        "tests/swarm/test_readiness.py::test_an_ordered_offer_a_focus_lets_through_moves_behind_a_later_offer_of_the_focus"
       ]
     },
     {
@@ -11957,6 +12279,18 @@
       ]
     },
     {
+      "id": "ci-tool-constraint-files",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-locks",
+      "behaviour": "Every CI tool set has one checked in constraint file under .github/ci-tools: parser, audit, semgrep, build, browser and crypto, and lint tools. Each line of each file is one exact pin, the lock generator writes exactly these files with every root it resolves satisfied by its pin, and the parser file pins the PyYAML version the announced protected workflow candidate installs.",
+      "seam": "bash .github/scripts/lock-ci-tools.sh run with a recording uv, against the checked in .github/ci-tools constraint files",
+      "tests": [
+        "tests/test_ci_test_dependencies.py::test_every_ci_tool_constraint_line_is_an_exact_pin",
+        "tests/test_ci_test_dependencies.py::test_the_ci_tool_generator_writes_each_checked_in_file",
+        "tests/test_ci_test_dependencies.py::test_the_parser_constraint_pins_the_announced_pyyaml"
+      ]
+    },
+    {
       "id": "lab-sandbox-bwrap-pull-request-tier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-sandbox-bwrap-ci",
@@ -12114,6 +12448,287 @@
       "tests": [
         "tests/swarm/test_naming.py::test_an_agent_number_past_four_digits_builds_and_parses",
         "tests/swarm/test_naming.py::test_names_lists_an_agent_above_ten_thousand_once_build_is_uncapped"
+      ]
+    },
+    {
+      "id": "expert-kind-and-launch-pin",
+      "origin": "operator",
+      "operator_words": "we need to create another swarm branch of agents profile \"expert\" that agenr exper profile will always use claude code fable model mandarory and effort default xhigh, the operator can chose to set max, and the agents will behave like a swarm agent but the difference is that they will not claim tasks",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "An expert is its own agent kind with its own name counter and a numbered lineage seat, and every expert launch or resume runs Claude Code on the Fable model at effort xhigh, or max when its lineage asks for it, whatever the swarm effort range, a lane setting, a saved handoff launch or a recorded session says; an expert launch that lands on another harness is refused.",
+      "seam": "naming.TYPES and templates.DEFAULT_PROFILES for the kind, expert_launch.pin called by HerdrRuntime.spawn and HerdrRuntime.resume, effort_range.bounds for the expert lane, and expert_launch.on_pin through the live check scripts.feature_checks.expert_launch_pin over the agent records",
+      "semgrep_rule": "feature-expert-launch-pin",
+      "tests": [
+        "tests/swarm/test_expert_kind.py::test_an_expert_name_builds_parses_and_counts_on_its_own",
+        "tests/swarm/test_expert_kind.py::test_a_fresh_expert_launch_runs_claude_code_on_fable_at_xhigh",
+        "tests/swarm/test_expert_kind.py::test_the_lineage_effort_decides_the_launch_effort_whatever_the_swarm_range",
+        "tests/swarm/test_expert_kind.py::test_a_successor_launches_fable_at_the_lineage_effort_whatever_its_predecessor_ran",
+        "tests/swarm/test_expert_kind.py::test_an_expert_launch_that_lands_on_another_harness_is_refused",
+        "tests/swarm/test_expert_kind.py::test_a_resumed_expert_relaunches_fable_inside_its_pin",
+        "tests/swarm/test_expert_launch.py::test_an_expert_pick_is_pinned_to_fable_at_the_effort_asked_for_or_xhigh",
+        "tests/swarm/test_expert_launch.py::test_a_recorded_launch_is_on_the_pin_only_with_claude_a_fable_model_and_a_pin_effort",
+        "tests/test_expert_launch_pin_check.py::test_working_experts_on_the_pin_pass_and_are_listed",
+        "tests/test_expert_launch_pin_check.py::test_a_working_expert_off_the_pin_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_launch_pin"
+      ]
+    },
+    {
+      "id": "expert-claims-nothing",
+      "origin": "operator",
+      "operator_words": "the agents will behave like a swarm agent but the difference is that they will not claim tasks, they will have purpose built, they will go with one only mission / Chain of experts a a linage of  a mission, they dont pick tasks",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "An expert claims no ledger task and picks no work. The swarm command's worker verbs (issue, review, branch, publish, pr, done, block, trace-plan, progress, park, ready, restack) refuse it by name, and it still queues and dequeues its own pull requests, with no task gate. The ledger refuses an expert a task add, any task change, a follow up, a task group, its release and a task split, and tells it to do the work inside its mission or ask the master.",
+      "seam": "cli._worker and cli.cmd_merge for an expert; ledger_tasks.expert_refusal through add_refusal and update_refusal; ledger_agent_ops._add_item for a follow up; ledger_groups.REFUSED_LANES for a group, its release and a split; the live check scripts.feature_checks.expert_claims over the ledger tasks of every running swarm",
+      "semgrep_rule": "feature-expert-claims-nothing",
+      "tests": [
+        "tests/swarm/test_expert_worker_verbs.py::test_an_expert_runs_no_worker_verb",
+        "tests/swarm/test_expert_worker_verbs.py::test_an_expert_queues_and_dequeues_its_pull_request_with_no_task_gate",
+        "tests/swarm_ledger/test_expert_refusals.py::test_an_expert_adds_no_task",
+        "tests/swarm_ledger/test_expert_refusals.py::test_an_expert_files_no_follow_up",
+        "tests/swarm_ledger/test_expert_refusals.py::test_an_expert_changes_no_task_and_so_claims_none",
+        "tests/swarm_ledger/test_expert_refusals.py::test_an_expert_neither_groups_nor_releases_nor_splits_tasks",
+        "tests/test_expert_claims_check.py::test_each_swarm_whose_tasks_no_expert_claims_passes_and_is_listed",
+        "tests/test_expert_claims_check.py::test_a_task_claimed_by_an_expert_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_claims"
+      ]
+    },
+    {
+      "id": "expert-mission-and-lineage",
+      "origin": "operator",
+      "operator_words": "we need to abstract the instructions style you gave to that agent / they will go with one only mission, or task like we did now / the original task must be a path or db saved task",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "A mission follows one template (the operator's words, the problem, the evidence, the numbered deliverables, how to report) and a faulty one is refused with every fault named. The master or the operator starts a lineage from a mission file: the text is saved in the swarm store under its sha256, addressed mission:<swarm>/<sha256>, and a running lineage with its own numbered seat is recorded and indexed, so code that runs every pass reads the running lineages only. Status lists each running lineage with its expert and shows an ended one by name, stop ends one with a note and only once, and an expert reads the saved mission of its own lineage and no other.",
+      "seam": "expert_mission.problems, deliverables and address; expert_lineage.start, get, running, mission and stop over the swarm store; the swarm command expert template, start, status, stop and mission; handoff.resolve.Resolver for a mission address; the live check scripts.feature_checks.expert_missions over the running lineages",
+      "semgrep_rule": "feature-expert-lineage-store",
+      "tests": [
+        "tests/swarm/test_expert_mission.py::test_the_template_passes_its_own_check",
+        "tests/swarm/test_expert_mission.py::test_a_conforming_mission_has_no_problems_and_gives_its_title_and_deliverables",
+        "tests/swarm/test_expert_mission.py::test_the_same_text_has_the_same_address_and_another_text_or_swarm_another",
+        "tests/swarm/test_expert_lineage.py::test_start_saves_the_mission_and_records_a_running_lineage",
+        "tests/swarm/test_expert_lineage.py::test_each_start_takes_the_next_lineage_and_the_same_text_keeps_one_address",
+        "tests/swarm/test_expert_lineage.py::test_stop_ends_a_running_lineage_with_its_note_and_only_once",
+        "tests/swarm/test_expert_lineage.py::test_a_mission_address_resolves_while_the_swarm_holds_that_text",
+        "tests/swarm/test_expert_commands.py::test_the_operator_and_the_master_start_a_lineage_from_a_mission_file",
+        "tests/swarm/test_expert_commands.py::test_the_expert_verb_refuses_a_swarm_that_does_not_exist",
+        "tests/swarm/test_expert_commands.py::test_status_lists_each_running_lineage_and_shows_an_ended_one_by_name",
+        "tests/swarm/test_expert_commands.py::test_an_expert_reads_the_mission_of_its_own_lineage_and_no_other",
+        "tests/test_expert_missions_check.py::test_each_running_lineage_whose_mission_is_saved_passes_and_is_listed",
+        "tests/test_expert_missions_check.py::test_a_running_lineage_whose_saved_mission_is_gone_or_changed_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_missions"
+      ]
+    },
+    {
+      "id": "expert-handoff-contract",
+      "origin": "operator",
+      "operator_words": "they will have exactly the same seat, hand off etc, context limit etx but the difference is that they will hace their own expert-handoff skill, that will be exactly very detailed of the original task, the original task must be a path or db saved task, and then then all yhe details done, pending assumptiona, testes, validation ethat that agent did, so the next expert continues exactly where the last agent left",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "An expert hands its lineage's seat off with the same command, envelope, transfer and derived recap as every agent, and its document is held to the expert handoff: it opens with the mission line of the saved mission, names every deliverable of that mission once as done or pending, and carries the assumptions, the tests and the validation, with evidence or the word hypothesis on every done, tests and validation bullet. Every other agent is held to Handoff v2 as before. At the context limit an expert is told the expert form, alone may still read its mission, and its document is checked against the expert handoff before the command runs; an expert whose lineage or saved mission is gone is refused by name there as by the command.",
+      "seam": "handoff.check.problems under a Contract; handoff.expert.problems for the mission line, the deliverable accounting and the evidence; handoff.contracts.problems called by cli.cmd_handoff and by the context limit gate; context_recycle.directive and gate for an expert; the live check scripts.feature_checks.expert_handoffs over the documents the running lineages hold, whose Read first addresses resolved when the command took them and are not resolved again",
+      "semgrep_rule": "feature-expert-handoff-contract",
+      "tests": [
+        "tests/handoff/test_expert_contract.py::test_a_conforming_expert_handoff_has_no_problems",
+        "tests/handoff/test_expert_contract.py::test_the_mission_section_opens_with_the_mission_line_of_the_lineage",
+        "tests/handoff/test_expert_contract.py::test_each_deliverable_of_the_mission_is_named_once_by_a_done_or_a_pending_bullet",
+        "tests/handoff/test_expert_contract.py::test_done_tests_and_validation_bullets_carry_evidence_or_the_word_hypothesis",
+        "tests/handoff/test_expert_contract.py::test_each_handoff_fault_is_named_under_the_ten_headings_all_at_once",
+        "tests/handoff/test_expert_contract.py::test_a_mission_title_that_names_a_file_is_the_runtimes_wording_and_passes_the_wording_rules",
+        "tests/swarm/test_expert_handoff_command.py::test_an_experts_conforming_handoff_is_stored_under_its_lineage_and_finishes_the_expert",
+        "tests/swarm/test_expert_handoff_command.py::test_an_experts_handoff_v2_document_is_refused_with_each_fault_and_stores_nothing",
+        "tests/swarm/test_expert_handoff_command.py::test_a_worker_is_held_to_handoff_v2_and_its_expert_document_is_refused",
+        "tests/swarm/test_expert_handoff_command.py::test_an_expert_whose_lineage_or_saved_mission_is_gone_is_refused_by_name",
+        "tests/swarm/test_expert_handoff_command.py::test_the_contract_follows_the_lane_of_the_author",
+        "tests/test_context_recycle_expert.py::test_at_the_hard_gate_an_expert_is_told_the_expert_handoff_form",
+        "tests/test_context_recycle_expert.py::test_in_the_preparation_window_an_expert_is_told_the_expert_handoff_form",
+        "tests/test_context_recycle_expert.py::test_a_worker_and_a_master_keep_the_handoff_v2_form",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_experts_work_is_denied_with_the_expert_form_and_its_allowed_steps",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_expert_still_reads_its_mission",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_a_worker_and_a_master_are_denied_the_mission_command_like_any_other_work",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_expert_whose_saved_mission_or_lineage_is_gone_is_refused_by_name",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_experts_handoff_is_checked_against_the_expert_contract_before_the_command",
+        "tests/test_expert_handoffs_check.py::test_each_conforming_handoff_of_a_running_lineage_passes_and_is_listed",
+        "tests/test_expert_handoffs_check.py::test_a_handoff_of_a_running_lineage_that_breaks_the_contract_fails_with_each_fault",
+        "tests/test_expert_handoffs_check.py::test_a_handoff_whose_saved_mission_is_gone_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_handoffs"
+      ]
+    },
+    {
+      "id": "expert-lineage-ends-on-proof",
+      "origin": "operator",
+      "operator_words": "The only reason a chain of experts finish is when the last expert completed the task, validated, smoke and regression tested, semgrep and featur map created tested. Chain of experts a a linage of  a mission, they dont pick tasks, an exper linage keeps doing handoff until the missions is completedx then they finish and get terminated .",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "The expert that works a running lineage, and no one else, ends it with expert complete on a mission proof. The proof opens with the mission line of the saved mission, names every deliverable once as proven, holds at least one bullet with its evidence under validation, smoke tests, regression tests, Semgrep rules and feature map, labels nothing a hypothesis, leaves no open item and links only merged pull requests under its deliverables. A proof with a fault is refused with each fault named and the lineage keeps running. A proof that passes ends the lineage as complete with the proof saved, writes the seat recap, finishes the expert, settles its inbox and tells the master, who reads the proof with expert proof.",
+      "seam": "handoff.expert.proof_problems under the PROOF contract; expert_lineage.complete, proof and every; expert_commands.cmd_complete and cmd_proof; the context limit gate's allowed steps for an expert; the live check scripts.feature_checks.expert_proofs over the proofs the completed lineages hold",
+      "semgrep_rule": "feature-expert-ends-on-proof",
+      "tests": [
+        "tests/handoff/test_mission_proof.py::test_a_proof_of_every_deliverable_with_nothing_open_has_no_problems",
+        "tests/handoff/test_mission_proof.py::test_each_deliverable_of_the_mission_is_proven_by_one_evidenced_bullet",
+        "tests/handoff/test_mission_proof.py::test_each_check_section_holds_at_least_one_evidenced_bullet",
+        "tests/handoff/test_mission_proof.py::test_a_proof_with_anything_left_open_is_refused",
+        "tests/handoff/test_mission_proof.py::test_every_pull_request_named_under_deliverables_is_merged",
+        "tests/handoff/test_mission_proof.py::test_each_fault_of_a_proof_is_named_under_its_eight_headings_all_at_once",
+        "tests/swarm/test_expert_complete.py::test_the_expert_ends_its_lineage_on_a_proof_that_passes",
+        "tests/swarm/test_expert_complete.py::test_a_proof_with_a_fault_is_refused_with_each_fault_and_the_lineage_still_runs",
+        "tests/swarm/test_expert_complete.py::test_only_the_expert_that_works_the_lineage_completes_it",
+        "tests/swarm/test_expert_complete.py::test_the_master_and_the_operator_read_the_proof_a_lineage_ended_on",
+        "tests/test_expert_proofs_check.py::test_each_completed_lineage_whose_proof_conforms_passes_and_is_listed",
+        "tests/test_expert_proofs_check.py::test_a_completed_lineage_whose_proof_is_gone_or_breaks_the_contract_fails_by_name",
+        "tests/test_context_recycle_expert.py::test_over_the_limit_an_expert_still_ends_its_lineage_on_a_proof",
+        "tests/handoff/test_mission_proof.py::test_the_word_proof_alone_shows_nothing_in_a_mission_proof",
+        "tests/handoff/test_mission_proof.py::test_every_deliverables_bullet_names_a_deliverable",
+        "tests/handoff/test_mission_proof.py::test_a_marker_shaped_line_inside_a_section_is_content_and_hides_nothing",
+        "tests/swarm/test_expert_complete.py::test_a_completion_cut_short_at_any_step_is_finished_by_running_it_again",
+        "tests/handoff/test_mission_proof.py::test_a_pull_request_under_deliverables_is_written_as_the_link_the_swarm_can_read"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_proofs"
+      ]
+    },
+    {
+      "id": "expert-stop-gate",
+      "origin": "operator",
+      "operator_words": "their obligation is to complete absolutely 100% of the instructions given no exceptions, no workarounds, no excuses for not completing a task, no follow ups, all problems gets solved by the root not patches.",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "The end of an expert's turn is refused while its lineage runs, and the refusal names the four ways on: keep working, hand off near the context limit, end the lineage on a mission proof, or declare a wait. The turn ends once its starter stopped the lineage, once the expert left its seat by a handoff or a finished completion, and while a declared wait holds. An expert whose lineage ended on a proof but whose completion did not finish is told to run it again. The exit command refuses an expert whose lineage runs or whose completion did not finish, so a handoff and a mission proof are its only ways off the seat. The gate's default mode is enforce; it is set per swarm like every gate and sits in the gate registry, so the status line, the ledger page and the gate log carry it.",
+      "seam": "gates.expert_stop.ExpertStop.decide on a Stop call; expert_commands.seated for the exit command; gates.entry.GATES and gates.catalog.defaults; the live check scripts.feature_checks.expert_stop_gate over the gate modes of each running swarm",
+      "semgrep_rule": "feature-expert-stop-gate",
+      "tests": [
+        "tests/gates/test_expert_stop.py::test_an_expert_of_a_running_lineage_is_told_how_to_go_on_instead_of_stopping",
+        "tests/gates/test_expert_stop.py::test_an_expert_that_handed_its_seat_off_stops",
+        "tests/gates/test_expert_stop.py::test_an_expert_whose_lineage_its_starter_stopped_stops",
+        "tests/gates/test_expert_stop.py::test_an_expert_whose_completion_did_not_finish_is_told_to_run_it_again",
+        "tests/gates/test_expert_stop.py::test_a_declared_wait_lets_the_expert_stop_until_it_ends",
+        "tests/gates/test_expert_stop.py::test_no_other_session_is_held",
+        "tests/gates/test_expert_stop.py::test_the_gate_entry_runs_it_by_name",
+        "tests/swarm/test_expert_complete.py::test_an_expert_whose_completion_did_not_finish_is_held_to_its_seat",
+        "tests/test_expert_stop_gate_check.py::test_each_swarm_that_keeps_the_gate_at_enforce_passes_and_is_listed",
+        "tests/test_expert_stop_gate_check.py::test_a_swarm_that_loosens_the_gate_fails_by_name",
+        "tests/swarm/test_expert_complete.py::test_an_expert_is_held_to_its_seat_while_its_lineage_runs"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_stop_gate"
+      ]
+    },
+    {
+      "id": "expert-role-profile",
+      "origin": "operator",
+      "operator_words": "we need to abstract the instructions style you gave to that agent, and we need to create another swarm branch of agents profile \"expert\"",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "The package ships an expert role an agent mounts with no bundle: a persona that holds it to one saved mission with every instruction completed, no exception, workaround, excuse or follow up and causes fixed at the root; a rule with the commands of its loop; the swarm-expert and expert-handoff skills, whose templates carry the headings and markers the handoff and proof checks read; an identity pin, a prompt guard and a Stop condition that runs the expert Stop gate. The opening prompt of an expert names its seat, its lineage and its place in it, the mission command, the obligation, the waits, the handoff and the mission proof, and carries the priming every seat gets. The master skill and the toolbelt skill carry the lineage controls.",
+      "seam": "the expert role rendered with no bundle; prompt.build through the seat builders table and prompt.build_expert; the role's Stop condition shim; the live check scripts.feature_checks.expert_role over the shipped role",
+      "semgrep_rule": "feature-expert-role-stop-condition",
+      "tests": [
+        "tests/profiles/test_expert_role.py::test_the_expert_role_renders_alone_with_its_persona_its_rule_and_both_skills",
+        "tests/profiles/test_expert_role.py::test_the_expert_persona_holds_the_operators_obligation",
+        "tests/profiles/test_expert_role.py::test_the_expert_role_loads_its_identity_pin_its_prompt_guard_and_its_stop_gate",
+        "tests/profiles/test_expert_role.py::test_each_expert_skill_covers_its_loop_with_commands_that_parse",
+        "tests/profiles/test_expert_role.py::test_the_skill_templates_carry_the_headings_the_swarm_checks",
+        "tests/swarm/test_expert_prompt.py::test_the_first_expert_of_a_lineage_is_told_its_mission_its_obligation_and_its_loop",
+        "tests/swarm/test_expert_prompt.py::test_a_successor_is_told_to_confirm_the_handoff_it_inherits_and_carries_it",
+        "tests/swarm/test_expert_prompt.py::test_the_autonomy_and_the_role_argument_do_not_change_an_expert_prompt",
+        "tests/test_expert_role_check.py::test_a_stop_condition_that_runs_another_gate_fails",
+        "tests/test_expert_role_check.py::test_the_shipped_expert_role_holds_every_part_and_each_is_listed",
+        "tests/test_expert_role_check.py::test_a_role_whose_part_is_gone_or_emptied_fails_by_name"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_role"
+      ]
+    },
+    {
+      "id": "expert-seat-step",
+      "origin": "operator",
+      "operator_words": "Chain of experts a a linage of  a mission, they dont pick tasks, an exper linage keeps doing handoff until the missions is completedx then they finish and get terminated .",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "Every pass of the tick keeps the seat of each running expert lineage. An empty seat gets one expert, launched on Claude Code at the lineage's effort with the lineage, the mission and its number in the lineage; a seat that holds a record in any state gets no second one. After an accepted handoff the next expert launches on the same seat with the handoff and the transfer it confirms, and the handoff stays on the seat until that expert confirms it. A launch that fails leaves no record and a failed binding, one refused for room hands the transfer back, and no slot, a full host or a placement elsewhere holds the launch by name. An expert lost without a handoff leaves its successor one: the handoff it never confirmed, offered again, or a recovery handoff in the expert handoff form with every deliverable pending and unknown. The expert of a stopped lineage is finished with its open mail closed, and the expert of a completed lineage is closed from the kept proof with the master told once. Nothing launches while the swarm is paused, stopping, stopped or in panic. A lineage started from the Handoff v2 of a session that was not an expert gives its first expert that handoff to confirm.",
+      "seam": "swarm.expert_seat.run over a fake runtime and store; the tick step expert seats in tick.steps.experts; expert_lineage.launches, launched and unlaunched, closing and closed; expert_seat.close, drop_confirmed and keep_handoff; the confirm-handoff verb, swarm.handoff_commands.confirm, which calls drop_confirmed; the expert start --handoff and --from options; the live checks scripts.feature_checks.expert_seats over the experts of each running swarm and scripts.feature_checks.expert_handoffs over the handoff a lineage was started from",
+      "semgrep_rule": "feature-expert-seat-in-tick",
+      "tests": [
+        "tests/tick/steps/test_expert_seats.py::test_expert_seats",
+        "tests/tick/steps/test_expert_seats.py::test_the_step_runs_the_expert_seats_pass_and_nothing_while_panic_holds",
+        "tests/swarm/test_expert_seat.py::test_a_started_lineage_gets_one_expert_on_its_seat_with_the_launch_an_expert_is_held_to",
+        "tests/swarm/test_expert_seat.py::test_a_seat_that_holds_a_record_in_any_state_gets_no_second_expert",
+        "tests/swarm/test_expert_seat.py::test_the_next_expert_follows_an_accepted_handoff_onto_the_same_seat",
+        "tests/swarm/test_expert_seat.py::test_a_launch_that_fails_leaves_no_record_and_a_failed_binding_and_the_next_pass_tries_again",
+        "tests/swarm/test_expert_seat.py::test_nothing_launches_while_the_swarm_is_paused_stopping_or_stopped",
+        "tests/swarm/test_expert_seat.py::test_the_expert_of_a_stopped_lineage_is_finished_and_its_mail_closed_with_the_reason",
+        "tests/swarm/test_expert_seat.py::test_the_expert_of_a_completed_lineage_is_closed_from_the_kept_proof_and_the_master_told_once",
+        "tests/swarm/test_expert_seat.py::test_an_expert_lost_without_a_handoff_leaves_its_successor_a_recovery_handoff",
+        "tests/swarm/test_expert_seat.py::test_an_expert_lost_before_it_confirmed_its_handoff_has_that_handoff_offered_again",
+        "tests/swarm/test_expert_seat.py::test_an_expert_that_confirms_its_handoff_takes_it_off_the_seat_so_a_later_loss_is_a_recovery",
+        "tests/swarm/test_handoff_commands.py::test_an_experts_confirmation_prints_the_transfer_and_takes_the_handoff_off_its_lineage_seat",
+        "tests/swarm/test_expert_seat.py::test_a_lineage_started_from_a_handoff_gives_its_first_expert_that_handoff_to_confirm",
+        "tests/test_expert_handoffs_check.py::test_the_handoff_a_lineage_was_started_from_is_held_to_handoff_v2",
+        "tests/test_expert_seats_check.py::test_each_running_lineage_is_listed_with_the_one_expert_on_its_seat_or_none",
+        "tests/test_expert_seats_check.py::test_a_seat_two_experts_hold_and_an_expert_of_no_lineage_each_fail_by_name",
+        "tests/test_expert_lineage_docs.py::test_the_lineage_page_describes_how_a_seat_is_kept_and_marks_nothing_as_not_built"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_seats"
+      ]
+    },
+    {
+      "id": "expert-seat-recovery",
+      "origin": "operator",
+      "operator_words": "the agents will behave like a swarm agent but the difference is that they will not claim tasks",
+      "ordered_at": "2026-11-22",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
+      "behaviour": "An expert whose session is lost while its lineage runs, and that still holds its seat, is resumed in its own conversation and seat like a worker that holds its claim; one whose lineage ended, or that never confirmed the handoff on its seat, is not. After three resumes in a row that end again no task folder handoff is written for an expert: the expert seats pass writes the recovery handoff of its seat. The mail of an expert the tick drops while its lineage runs goes on with the seat; once the lineage ended it is closed. Mail still open on the seat of a lineage that is stopped or completes goes to the master's seat with the reason. An expert reopened after a restore is told to read its mission and the recap of its seat.",
+      "seam": "swarm.dead_resume.resumable and reopen with the fake ledger and the resuming runtime; tick.steps.common._drop through tick._drop; expert_seat.returned from expert stop, the completion's closing steps and the expert seats pass; swarm.resume.restored_text; the live check scripts.feature_checks.expert_seats over the experts of each running swarm",
+      "semgrep_rule": "feature-expert-seat-recovery",
+      "tests": [
+        "tests/swarm/test_expert_recovery.py::test_a_lost_expert_of_a_running_lineage_is_resumed_in_its_own_conversation_and_seat",
+        "tests/swarm/test_expert_recovery.py::test_an_expert_whose_lineage_ended_is_not_resumed",
+        "tests/swarm/test_expert_recovery.py::test_an_expert_that_keeps_ending_gets_no_task_folder_handoff_and_its_successor_a_recovery_handoff",
+        "tests/swarm/test_expert_recovery.py::test_the_mail_of_an_expert_dropped_while_its_lineage_runs_goes_on_with_its_seat",
+        "tests/tick/steps/test_common.py::test_drop_keeps_the_mail_of_an_expert_on_its_seat_while_its_lineage_goes_on",
+        "tests/swarm/test_expert_commands.py::test_stopping_a_lineage_sends_the_mail_waiting_on_its_seat_back_to_the_master",
+        "tests/swarm/test_expert_recovery.py::test_a_completed_lineage_sends_the_mail_waiting_on_its_seat_back_to_the_master",
+        "tests/swarm/test_expert_recovery.py::test_a_restored_expert_is_told_to_read_its_mission_and_its_seat_recap"
+      ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.expert_seats"
       ]
     },
     {
@@ -12551,6 +13166,60 @@
       ]
     },
     {
+      "id": "swarm-orders-read",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "One ledger API read, GET orders or agentihooks api get orders, lists every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first: the item, its title, who filed the order, when and on what proof, the ids of the done tasks under it, every task under it that is neither done nor out of scope with its lane, state and claim gate verdict, the claimable count, the count claimed or in a pull request, and one plain line. A read that carries no slices, as the tick holds one, cannot climb from a task filed under a slice: there a task counts under an ordered phase when its row names that phase or when it is merged into a lead whose row names it, which lists the tasks the whole ledger lists, because the ledger refuses a task whose row names another phase than its slice. A done or out of scope order and a mark with no whole number time are left out. When the open orders pass the reply limit the read answers 413 and names the focus read that lists one order's tasks.",
+      "seam": "scripts.swarm.health.order_check.read, scripts.swarm_ledger.api.routes.ledger_read at orders through the ledger swarm port, and ledger get orders",
+      "tests": [
+        "tests/swarm/test_order_check.py::test_an_ordered_phase_lists_every_task_under_it_with_its_verdict_and_counts",
+        "tests/swarm/test_order_check.py::test_an_ordered_task_lists_itself_and_an_order_with_no_task_lists_none",
+        "tests/swarm/test_order_check.py::test_orders_read_oldest_first_and_an_entry_he_wrote_reads_as_the_request",
+        "tests/swarm/test_order_check.py::test_a_done_or_out_of_scope_order_and_a_malformed_mark_are_left_out",
+        "tests/swarm/test_order_check.py::test_an_out_of_scope_task_under_an_order_is_not_counted_as_unfinished_work",
+        "tests/swarm/test_order_check.py::test_a_task_whose_phase_waits_for_its_planner_reads_that_reason",
+        "tests/swarm/test_order_check.py::test_each_task_under_an_order_reads_the_reason_the_claim_gate_holds_it",
+        "tests/swarm/test_order_check.py::test_ledger_get_orders_prints_every_open_order_through_the_ledger_api",
+        "tests/swarm_ledger/test_orders_api.py::test_the_orders_read_serves_every_open_order",
+        "tests/swarm/test_order_check.py::test_an_orders_read_past_the_reply_limit_names_the_read_that_fits",
+        "tests/swarm/test_order_check.py::test_the_orders_route_reads_with_the_fix_phase_of_its_own_swarm_and_revises_its_reply",
+        "tests/swarm/test_order_check.py::test_an_order_mark_that_names_no_author_and_no_proof_reads_with_an_empty_author",
+        "tests/swarm/test_order_check.py::test_a_task_filed_under_a_slice_is_listed_on_a_read_that_carries_no_slices",
+        "tests/swarm/test_order_check.py::test_one_ledger_reads_the_same_orders_with_and_without_its_slices",
+        "tests/swarm/test_order_check.py::test_a_member_merged_into_a_lead_under_a_slice_is_listed_on_a_read_that_carries_no_slices",
+        "tests/swarm/test_order_check.py::test_a_whole_ledger_lists_a_task_under_the_phase_of_its_slice_whatever_phase_its_row_names"
+      ]
+    },
+    {
+      "id": "master-handoff-carries-orders",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "A master seat change carries the operator's open orders by code. The handoff envelope of a master holds one plain line per open order, an empty list when none is open and unknown when the ledger could not be read, whether the master hands off through the swarm command or the stall pass recycles it; a ledger error never stops the handoff, and no other lane's envelope carries or reads orders. The recovery handoff a draining hive writes for a master still running at its deadline reads no ledger and names the orders unknown. The successor's opening prompt lists those lines before the handoff document. The master refocus block lists the open phases an order stands on first, oldest order first, by id and title, and they are the phases the orders read holds open: a done or out of scope phase is no order. Reading a mark there loads no claim gate code, because the refocus hook runs on every tool call. The master loop seat cron tells the master to read the orders every loop and that only the operator's words clear one; a seat cron the code owns whose text is no longer the code's is replaced once, and a cron a master added by hand stays adopted, wherever the scheduler lists it beside one the code owns.",
+      "seam": "scripts.handoff.envelope.with_orders, agentihooks swarm handoff for a master, the master stall recycle, the hive drain recovery handoff, scripts.swarm.prompt.handoff_lines, hooks.context.swarm_refocus.build_block for the master task and the crons agentihooks swarm start keeps aimed at master@<slug>",
+      "tests": [
+        "tests/swarm/test_order_continuity.py::test_a_master_envelope_carries_one_line_for_each_open_order",
+        "tests/swarm/test_order_continuity.py::test_an_engineer_envelope_carries_no_orders_and_reads_none",
+        "tests/swarm/test_order_continuity.py::test_a_master_envelope_reads_the_orders_with_the_fix_phase_of_its_swarm",
+        "tests/swarm/test_order_continuity.py::test_a_master_handoff_through_the_swarm_command_stores_the_open_orders",
+        "tests/swarm/test_order_continuity.py::test_a_ledger_that_cannot_be_read_never_stops_a_master_handoff",
+        "tests/swarm/test_order_continuity.py::test_an_engineer_handoff_through_the_swarm_command_reads_no_orders",
+        "tests/swarm/test_order_continuity.py::test_a_master_the_stall_pass_recycles_leaves_the_open_orders",
+        "tests/swarm/test_order_continuity.py::test_the_opening_prompt_lists_the_orders_of_the_envelope_before_the_document",
+        "tests/swarm/test_order_continuity.py::test_an_envelope_without_orders_primes_as_before",
+        "tests/context/test_swarm_refocus.py::test_the_master_block_lists_phases_under_an_operator_order_first_by_id_and_title",
+        "tests/context/test_swarm_refocus.py::test_the_ordered_phases_lead_the_phases_share_when_it_is_clipped",
+        "tests/context/test_swarm_refocus.py::test_an_ordered_phase_with_no_id_or_title_keeps_its_place",
+        "tests/context/test_swarm_refocus.py::test_listing_the_ordered_phases_loads_no_claim_gate_code",
+        "tests/swarm/test_seat_crons.py::test_the_master_loop_cron_reads_the_operator_orders_every_loop",
+        "tests/swarm/test_seat_crons.py::test_a_seat_cron_the_code_owns_with_an_older_text_is_replaced_once",
+        "tests/swarm/test_seat_crons.py::test_a_hand_made_cron_is_adopted_in_place_of_an_older_code_owned_one",
+        "tests/swarm/test_seat_crons.py::test_a_hand_made_cron_is_adopted_in_place_of_the_code_owned_one_wherever_it_is_listed",
+        "tests/hive/test_remove.py::test_a_master_still_running_at_the_deadline_gets_a_recovery_envelope_naming_its_orders_unknown"
+      ]
+    },
+    {
       "id": "swarm-focus-verdict",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
@@ -12610,6 +13279,28 @@
         "tests/tick/steps/test_focus_unclaimed.py::test_a_task_below_three_ticks_does_not_stop_the_finding_of_the_next_one",
         "tests/tick/steps/test_focus_unclaimed.py::test_no_stored_count_is_no_finding",
         "tests/tick/steps/test_focus_unclaimed.py::test_the_doctor_fix_phase_comes_from_the_swarm_config"
+      ]
+    },
+    {
+      "id": "swarm-order-waiting-finding",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "The slow lane tick step order waiting notes, every ten minutes, each open operator order whose unfinished tasks have nothing claimed or in a pull request and when it first saw that; an order with work in flight, with no unfinished task or done drops out. The tasks of an order are those the orders read lists, so a task filed under a slice counts on the view the pass holds, which carries no slices. Past thirty minutes between its first sighting and the last one the order is an order waiting health finding naming the order, its unfinished and claimable counts and each distinct reason the claim gate holds its tasks, and the findings pass mails it to the master. Every figure is the last sighting's: at the step's cadence the finding comes with the sighting forty minutes after the first, a claim taken and released between two sightings is not seen, and a step that stops running is the step starvation finding's to report. A ledger with no order raises none.",
+      "seam": "scripts.tick.steps.orders._order_waiting registered as tick step order waiting, scripts.swarm.health.order_waiting.observe and findings on a swarm store, and scripts.swarm.status.findings",
+      "tests": [
+        "tests/tick/steps/test_order_waiting.py::test_order_waiting",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_with_open_tasks_and_nothing_in_flight_past_thirty_minutes_is_a_finding",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_whose_open_tasks_are_all_claimable_says_nobody_claimed_one",
+        "tests/tick/steps/test_order_waiting.py::test_work_in_flight_under_an_order_drops_it_and_the_wait_starts_again",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_with_no_open_task_a_done_order_and_a_ledger_without_orders_raise_none",
+        "tests/tick/steps/test_order_waiting.py::test_each_pass_stores_its_time_and_keeps_the_time_an_order_was_first_seen_waiting",
+        "tests/tick/steps/test_order_waiting.py::test_an_ordered_task_and_an_ordered_phase_are_each_one_finding",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_with_work_in_flight_or_a_shorter_wait_never_hides_one_that_waited_longer",
+        "tests/tick/steps/test_order_waiting.py::test_the_order_is_read_with_the_doctor_fix_phase_of_its_swarm",
+        "tests/tick/steps/test_order_waiting.py::test_the_step_notes_the_orders_of_the_pass_state",
+        "tests/tick/steps/test_order_waiting.py::test_the_finding_is_in_the_swarm_status_findings_and_goes_to_the_master_inbox",
+        "tests/tick/steps/test_order_waiting.py::test_a_view_without_slices_counts_every_task_filed_under_a_slice"
       ]
     },
     {
@@ -12675,6 +13366,20 @@
         "tests/test_ci_mutation_stats_cache.py::test_test_ids_sharing_one_dependency_list_walk_its_closure_once_per_collection",
         "tests/test_ci_mutation_stats_cache.py::test_distinct_dependency_lists_in_one_collection_keep_their_own_closures",
         "tests/test_ci_mutation_stats_cache.py::test_the_discovery_digest_of_one_input_set_is_computed_once"
+      ]
+    },
+    {
+      "id": "mutation-stats-flake-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stats-flake-ledger",
+      "behaviour": "Mutation stats retries retain the first failure message and traceback in a separate flake ledger and job reports; clean buckets write no rows, caller settings are restored, uploaded parts include current retry records and stats cache records and key construction remain unchanged.",
+      "seam": "scripts.ci_mutation.selection.collect_shard_stats and scripts.ci_mutation.selection.load_or_collect_stats",
+      "tests": [
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_records_a_test_that_fails_once_then_passes_its_rerun_in_the_flake_ledger",
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_with_no_rerun_points_the_flake_ledger_beside_its_output_and_writes_no_row",
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_gives_the_caller_back_its_flake_ledger_setting",
+        "tests/test_ci_mutation_stats.py::test_a_collected_stats_part_keeps_its_bucket_flake_rows_beside_the_part_and_out_of_the_stats_cache",
+        "tests/test_ci_mutation_stats_cache.py::test_collection_parts_reuse_stats_and_keep_the_new_head_identity"
       ]
     },
     {
@@ -12785,10 +13490,34 @@
       "id": "ci-dependency-audit-platformdirs-pin",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2801",
-      "behaviour": "The dependency audit's pip-audit invocation excludes platformdirs 4.14.8 from its own resolution with a uv --with constraint, so a runner whose home directory is world-writable does not hit that release's refusal to create a cache directory there; the lint job's own grading step also writes a UV_CONSTRAINT file before calling the base's copy of the script, so a pull request's own audit stays green while the fix has not yet reached the base.",
+      "behaviour": "The dependency audit runs pip-audit through uvx with --constraints on the checked in audit lock, .github/ci-tools/audit.lock, read from the script's own tree, and the lock pins the audited pip-audit version and its whole closure, so a new upstream release such as platformdirs 4.14.8 cannot reach the audit; the lint job's grading step sets no constraint of its own and calls the base's copy of the script.",
       "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint job's dependency audit step",
       "tests": [
-        "tests/test_ci_dependency_audit.py::test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home"
+        "tests/test_ci_dependency_audit.py::test_audit_runs_pip_audit_under_the_checked_in_audit_constraint",
+        "tests/test_ci_dependency_audit.py::test_dependency_audit_is_a_lint_step_graded_by_the_base"
+      ]
+    },
+    {
+      "id": "ci-tool-installs-pinned-walk",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-walk-test",
+      "behaviour": "Every pip, uv pip, uvx, uv tool and pipx install in the CI workflows, composite actions, step templates and the shell and Python scripts CI runs pins each named package to one exact version that its checked in constraint pins too: the test requirements lock, the test constraints file while it chains that lock, a file in the CI tools folder, or such a lock passed with -r. Each such lock and CI tools file pins every line exactly, nested requirement files in any option form included, and any other requirements file fails. A command that names nothing to install, such as a command lookup, is not graded. Python sources are read as argv list displays with their names and splats resolved; Python shell strings, argv lists joined with plus, bash -c and backtick strings and installers held in variables are not read. Intentional clean install smokes are exempt once each by their install with a reason, and today's floating installs sit on an allowlist the walking test holds equal to its measurement, so an unlisted floating install or a pinned install still listed turns it red.",
+      "seam": "tests.test_ci_test_dependencies._floating_ci_installs over .github, scripts/ci_* and the shell scripts and Python modules their run lines name",
+      "tests": [
+        "tests/test_ci_test_dependencies.py::test_every_ci_tool_install_pins_an_exact_version_under_a_checked_in_constraint",
+        "tests/test_ci_test_dependencies.py::test_the_install_walker_reports_a_planted_floating_install",
+        "tests/test_ci_test_dependencies.py::test_the_install_walker_passes_pinned_and_non_install_commands",
+        "tests/test_ci_test_dependencies.py::test_each_intentional_install_smoke_is_a_measured_install_with_a_reason"
+      ]
+    },
+    {
+      "id": "ci-small-workflows-install-the-parser-first",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-small-workflows",
+      "behaviour": "The audit job of the access audit, the report job of Gate Required status, the watch job of the lost runner, the retry job of queue retry and the contracts job of the hive worker install PyYAML on a line ahead of the first line that runs repository Python or a repository script, so the scripts that import yaml always find it.",
+      "seam": "the run lines of each job's steps in its workflow under .github/workflows, read in step order",
+      "tests": [
+        "tests/test_ci_test_dependencies.py::test_each_small_workflow_installs_pyyaml_before_its_repository_code"
       ]
     },
     {
@@ -12986,6 +13715,19 @@
         "tests/swarm/test_urgent_hold.py::test_an_urgent_task_while_no_live_hive_has_admission_room_names_the_hive_and_raises_no_finding",
         "tests/swarm/test_urgent_hold.py::test_the_hive_admission_hold_stands_only_while_every_live_hive_is_read_at_zero_room",
         "tests/swarm/test_urgent_hold.py::test_a_release_wait_is_named_ahead_of_the_hive_admission_hold"
+      ]
+    },
+    {
+      "id": "changelog-fragment-required-on-pull-request",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fragment-required",
+      "behaviour": "A pull request run whose head adds no changelog fragment named from its branch is refused with an error naming the missing path, also when that file already sits in the base; a dispatched run or a run with no event stays green, and a pull request that adds its branch fragment stays green.",
+      "seam": "scripts.ci_changelog_fragments.main reading GITHUB_EVENT_NAME, then scripts.ci_changelog_fragments.grade",
+      "tests": [
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_no_branch_fragment_is_red_naming_the_path",
+        "tests/test_ci_changelog_fragments.py::test_a_run_outside_a_pull_request_that_adds_no_fragment_stays_green",
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_its_branch_fragment_is_green",
+        "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_only_a_misnamed_fragment_is_red_naming_both"
       ]
     }
   ],

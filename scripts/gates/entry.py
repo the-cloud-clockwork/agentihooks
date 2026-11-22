@@ -20,6 +20,7 @@ from scripts.gates.base import Call, Decision, Who
 from scripts.gates.brain import BrainGate
 from scripts.gates.build import BuildGate
 from scripts.gates.claim_stop import ClaimStop
+from scripts.gates.expert_stop import ExpertStop
 from scripts.gates.identity import PinnedIdentity
 from scripts.gates.intent import IntentGate
 from scripts.gates.node_caps import NodeCaps
@@ -50,6 +51,7 @@ GATES = {
         ReconGate(),
         BuildGate(),
         ClaimStop(),
+        ExpertStop(),
         PushStop(),
         QuietClaim(),
         OnePush(),
