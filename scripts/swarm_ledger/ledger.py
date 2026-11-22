@@ -47,10 +47,6 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   relay ITEM TEXT --quote WORDS       post the operator's decision from this pane as his answer to questions/<id>
                                       or his comment on another item; WORDS, of any length, must be in an operator
                                       prompt or AskUserQuestion answer any master or planner of this swarm recorded
-  order ITEM --quote WORDS | --request ENTRY [--clear]
-                                      mark phases/<id> or tasks/<id> as the operator's order with his recorded words
-                                      or the id of an entry he wrote; --clear removes the mark and takes --quote;
-                                      phase add and task add take --quote WORDS and file the entry as his order
   answer ITEM TEXT                    the master answers questions/<id> as itself at delegate or full autonomy,
                                       which clears it from Priorities; members other than a master seat cannot answer
   fold candidates | check PLAN | apply PLAN
@@ -358,7 +354,7 @@ def held(state):
     return {"queued": True} if state.get("queued") else {}
 
 
-def send(args: argparse.Namespace, kind: str, /, *more: dict[str, Any], **fields: Any) -> dict[str, Any]:
+def send(args: Any, kind: str, /, *more: dict[str, Any], **fields: Any) -> dict[str, Any]:
     ops: list[dict[str, Any]] = [op(kind, args, **fields), *more]
     lead = f"task {fields['task']} was not added: " if kind == "task_add" else ""
     try:
@@ -1035,11 +1031,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--not-duplicate", default="", help="why the phase differs from the one it resembles; skips the duplicate check"
     )
     phase.add_argument("--quote", help="phase add: the operator's words, filing the phase as his order")
-    order = sub.add_parser("order")
+    order = sub.add_parser("order", help="mark phases/<id> or tasks/<id> as the operator's order")
     order.add_argument("item")
-    order.add_argument("--quote", help="the operator's words")
+    order.add_argument("--quote", help="the operator's recorded words")
     order.add_argument("--request", help="id of the operator chat line or comment that ordered the work")
-    order.add_argument("--clear", action="store_true")
+    order.add_argument("--clear", action="store_true", help="remove the mark, with --quote")
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")
