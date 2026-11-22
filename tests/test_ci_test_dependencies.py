@@ -1155,6 +1155,12 @@ def test_each_intentional_install_smoke_is_a_measured_install_with_a_reason() ->
 def test_each_small_workflow_installs_pyyaml_before_its_repository_code(workflow: str, job: str) -> None:
     steps = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"][job]["steps"]
     lines = [line for step in steps for line in str(step.get("run", "")).splitlines()]
-    installs = [index for index, line in enumerate(lines) if re.search(r"\bpip install\b.*\bpyyaml\b", line, re.I)]
-    code = [index for index, line in enumerate(lines) if re.search(r"\bpython3? -m scripts\.|\bbash deploy/", line)]
-    assert installs and code and installs[0] < code[0], lines
+    install = re.compile(r"\bpip3? install\b.*\bpyyaml\b", re.I)
+    repository_code = re.compile(
+        r"\bpython3?\s+(?:-\w+\s+)*(?:-m\s+scripts\.|\S*\.py\b)|\b(?:bash|sh)\s+\S*(?:deploy|scripts)/"
+    )
+    installs = [index for index, line in enumerate(lines) if install.search(line)]
+    code = [index for index, line in enumerate(lines) if repository_code.search(line)]
+    assert installs and code and installs[0] < code[0], (
+        f"PyYAML installs at {installs}, repository code at {code}: {lines}"
+    )

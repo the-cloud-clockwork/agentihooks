@@ -12966,7 +12966,7 @@
       "id": "ci-small-workflows-install-the-parser-first",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-small-workflows",
-      "behaviour": "The access audit, Gate Required status, lost runner, queue retry and hive worker contracts jobs install PyYAML on a line ahead of the first line that runs repository Python or the hive chart proof script, so the scripts that import yaml always find it.",
+      "behaviour": "The audit job of the access audit, the report job of Gate Required status, the watch job of the lost runner, the retry job of queue retry and the contracts job of the hive worker install PyYAML on a line ahead of the first line that runs repository Python or a repository script, so the scripts that import yaml always find it.",
       "seam": "the run lines of each job's steps in its workflow under .github/workflows, read in step order",
       "tests": [
         "tests/test_ci_test_dependencies.py::test_each_small_workflow_installs_pyyaml_before_its_repository_code"
