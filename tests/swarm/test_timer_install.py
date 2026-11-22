@@ -1139,7 +1139,9 @@ def test_hosts_work_reads_the_swarm_store_and_keeps_the_units_when_it_cannot(mon
     assert real_hosts_work() is True
 
 
-def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anton(tmp_path, monkeypatch):
+def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anton(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     cancelled = []
     monkeypatch.setattr(timer, "unschedule", lambda: cancelled.append(True))
     monkeypatch.setattr(timer, "schedule", lambda caller: pytest.fail("the tick was scheduled"))
@@ -1159,6 +1161,7 @@ def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anto
         ["systemctl", "--user", "daemon-reload"],
     ]
     assert sorted(path.name for path in unit_dir.iterdir()) == [
+        "agentihooks-ledger-writer.service",
         "agentihooks-quota-prober.service",
         "agentihooks-scheduler.service",
     ]
