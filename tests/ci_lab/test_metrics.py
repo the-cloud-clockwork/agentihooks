@@ -74,6 +74,7 @@ def test_every_contract_metric_is_emitted() -> None:
     assert all(line.endswith(" 2.0") for line in samples)
 
 
+@pytest.mark.feature("lab-scheduler-metrics")
 def test_every_sample_line_is_valid_exposition() -> None:
     registry = metrics.Registry()
     load = Load({"hotfix": (30.0,)}, {"hotfix": 1}, slots_total=1, slots_busy=1, budget_fraction=0.5)
@@ -364,6 +365,7 @@ def test_capacity_route_answers_the_capacity_document() -> None:
     assert json.loads(body)["classes"]["pull_request"]["predicted_wait_s"] == 30.0
 
 
+@pytest.mark.feature("lab-scheduler-metrics")
 def test_metrics_route_observes_the_load_and_renders_every_family() -> None:
     registry = metrics.Registry()
     status, content_type, body = metrics.respond(lambda: LOAD, registry, "GET", "/metrics")
