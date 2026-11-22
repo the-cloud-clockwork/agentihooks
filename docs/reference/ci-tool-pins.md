@@ -1,7 +1,7 @@
 ---
 title: CI tool install pins
 parent: Reference
-nav_order: 44
+nav_order: 52
 ---
 
 # CI tool install pins
@@ -10,7 +10,7 @@ Every tool CI installs must be pinned to one exact version that a checked in
 constraint file pins too. A walking test in the unit suite reads every
 `pip install`, `uv pip install`, `uvx`, `uv tool` and `pipx` command that CI
 can run and fails on any install that floats. A floating install lets a new
-upstream release change CI without a commit: on 20 November an unpinned
+upstream release change CI without a commit: on 20 November 2026 an unpinned
 `platformdirs` release broke the `pip-audit` run through `uvx`, and every pull
 request's lint failed for hours.
 
@@ -18,7 +18,7 @@ The test is
 `test_every_ci_tool_install_pins_an_exact_version_under_a_checked_in_constraint`
 in `tests/test_ci_test_dependencies.py`, under feature map entry
 `ci-tool-installs-pinned-walk`. Installs that floated when the test landed are
-listed in `FLOATING_INSTALLS` in the same file. Three deliberate clean install
+listed in `FLOATING_INSTALLS` in the same file. The deliberate clean install
 smokes are listed in `INTENTIONAL_SMOKES`, each with a reason.
 
 ## What the walk reads
@@ -139,8 +139,10 @@ on one of its lines, resolved from the file's own folder, one level deep. So
 `.github/test-requirements.lock`.
 
 **Every line of a constraint file must be an exact pin.** The walk reads each
-file an install names, with `.github/test-requirements.lock` read in place of
-`.github/test-constraints.txt`, and follows nested `-r` lines without limit.
+constraint file an install names and follows nested `-r` lines without limit.
+`.github/test-constraints.txt` is the one exception: it holds ranges such as
+`pytest<9.2` on top of the lock it chains, so the walk reads
+`.github/test-requirements.lock` in its place.
 Comments and trailing backslashes are ignored. It reports:
 
 - a requirement line without one exact `==` pin;
@@ -190,13 +192,15 @@ arguments exactly as written, unexpanded, joined with `shlex.join`:
 <path>: <kind> <arguments>
 ```
 
-For example:
+For example, a workflow step `pip install "pyyaml>=6.0"` in
+`.github/workflows/example.yml` and a script line
+`pip install "tool==$TOOL_VERSION"` in `scripts/ci_example.sh`, with
+`TOOL_VERSION` unset, have these keys:
 
 ```python
 FLOATING_INSTALLS: tuple[str, ...] = (
-    ".github/workflows/access-audit.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
-    "scripts/ci_release.sh: pip install build",
+    ".github/workflows/example.yml: pip install 'pyyaml>=6.0'",
+    "scripts/ci_example.sh: pip install 'tool==$TOOL_VERSION'",
 )
 ```
 
@@ -234,22 +238,24 @@ leave the map.
 
 ## Pin an install
 
-1. Find a lock in `.github/ci-tools/` that pins the tool, and use its version:
+1. Find a lock in `.github/ci-tools/` that pins the tool, and use the version
+   it pins:
 
-   | Lock | Pins, with their dependencies |
+   | Lock | Tools, with their dependencies |
    |---|---|
-   | `parser.lock` | `pyyaml==6.0.3` |
-   | `audit.lock` | `pip-audit==2.10.1`, excluding `platformdirs` 4.14.8 |
-   | `semgrep.lock` | `semgrep==1.177.0`, `pyyaml==6.0.2` |
-   | `build.lock` | `build==1.6.1`, `setuptools==84.2.1`, `setuptools-scm==10.3.4`, `wheel==0.48.0` |
-   | `browser-crypto.lock` | `playwright==1.63.0`, `orjson==3.13.0`, `cryptography==50.0.2` |
-   | `lint-tools.lock` | `vulture==2.14`, `jsonschema==4.25.1`, `orjson==3.13.0`, `ruff==0.15.12` |
+   | `parser.lock` | `pyyaml` |
+   | `audit.lock` | `pip-audit` |
+   | `semgrep.lock` | `semgrep` and the `pyyaml` it runs with |
+   | `build.lock` | `build`, `setuptools`, `setuptools-scm`, `wheel` |
+   | `browser-crypto.lock` | `playwright`, `orjson`, `cryptography` |
+   | `lint-tools.lock` | `vulture`, `jsonschema`, `orjson`, `ruff` |
 
    Test tools such as `pytest`, `mutmut` and `coverage` are pinned in
    `.github/test-requirements.lock`.
 
-2. Rewrite the install with the exact version and the constraint. A floating
-   step:
+2. Rewrite the install with the exact version and the constraint. The
+   examples below use the versions the locks pinned when this page was
+   written. A floating step:
 
    ```yaml
    - name: Install the parser
@@ -362,8 +368,7 @@ today:
 It also does not read `uv run --with`, `Dockerfile` installs, `.bash` files or
 `Makefile` recipes.
 
-No base graded gate refuses growth of `FLOATING_INSTALLS`; review holds it to
-shrinking.
+No CI check blocks adding a key to `FLOATING_INSTALLS`; review does.
 
 ## Delivery evidence
 
@@ -377,5 +382,5 @@ install. The
 [green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44969293786)
 passed with the list filled from that output. After three review rounds, the
 [review fix run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44987882535)
-passed all 65 test cases in the module; the final head changed only the
-feature map wording.
+passed all 65 test cases the module held at that run; the final head changed
+only the feature map wording.
