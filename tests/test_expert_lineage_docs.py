@@ -1,5 +1,5 @@
 """The expert lineage reference page: every command it names is one the command line takes, the Stop gate is named by
-a mode it has, and what the page describes before it is built is marked."""
+the mode names the command line prints, and what the page describes before it is built is marked."""
 
 import re
 import shlex
@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.gates import modes
 from scripts.gates.expert_stop import ExpertStop
-from scripts.gates.modes import MODES
 from tests.profiles.test_expert_role import PARSERS
 
 pytestmark = pytest.mark.unit
@@ -39,13 +39,13 @@ def test_every_command_the_lineage_page_names_is_one_the_command_line_takes() ->
         assert PARSERS[tool](argv), command
 
 
-def test_the_lineage_page_names_the_stop_gate_by_a_mode_it_has() -> None:
+def test_the_lineage_page_names_the_stop_gate_by_the_mode_names_the_command_line_prints() -> None:
     text = PAGE.read_text()
-    assert ExpertStop.default_mode in MODES
-    assert f"Its default mode is `{ExpertStop.default_mode}`" in text
-    assert f"keeps the Stop gate at `{ExpertStop.default_mode}`" in text
-    assert [mode for mode in re.findall(r"expert-stop-gate=(\w+)", text) if mode not in MODES] == []
-    assert "`deny`" not in text
+    default = modes.label(ExpertStop.default_mode)
+    *first, last = (f"`{modes.label(mode)}`" for mode in modes.MODES)
+    assert f"Its default mode is `{default}`" in text
+    assert f"keeps the Stop gate at `{default}`" in text
+    assert f"where the mode is {', '.join(first)} or {last}" in text
 
 
 def test_the_lineage_page_marks_what_it_describes_before_it_is_built() -> None:
