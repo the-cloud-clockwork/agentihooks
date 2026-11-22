@@ -13036,8 +13036,8 @@
       "id": "master-hive-drain-item",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-hive-items",
-      "behaviour": "When a hive starts draining through the tick hive sweep, hive remove, the hive stop settle or hive set draining, the master seat of each swarm with a live agent on it gets one fyi inbox item naming the hive, the drain reason and that swarm's agents; a repeat drain of a draining hive sends none and an undrain then drain sends a new one; a member stop while another member serves sends none, and a process talking Redis as a hive member sends none because the inbox relay would refuse it. When the hub hive loss pass ends the executions of a lost hive, the master of each swarm it ran gets one item naming the hive, the reason, the executions and the agents, and later polls send none. Agent hand off orders and the hub loss log line are unchanged.",
-      "seam": "scripts.hive.master_notice.drained called by scripts.hive.sweep.sweep, scripts.hive.remove.drain, scripts.hive.remove.settle and the hive set command; scripts.hive.master_notice.lost called by scripts.hub.hive_loss.HiveLoss.poll; items read through scripts.inbox.store.InboxStore.inbox at master@<slug>",
+      "behaviour": "When a hive starts draining through the tick hive sweep, hive remove, the hive stop settle or hive set draining, the master seat of each swarm with a live agent on it gets one fyi inbox item naming the hive, the drain reason and that swarm's agents; a repeat drain of a draining hive sends none and an undrain then drain sends a new one; a member stop while another member serves sends none, and a process talking Redis as a hive member sends none because the inbox relay would refuse it. When the hub hive loss pass ends the executions of a lost hive, the master of each swarm it ran gets one item naming the hive, the reason, the executions and the agents, and later polls send none. Agent hand off orders and the hub loss log line are unchanged, and every loss line is logged before any master item is sent.",
+      "seam": "scripts.hive.master_notice.drained called by scripts.hive.sweep.sweep, scripts.hive.remove.drain, scripts.hive.remove.settle and the hive set command; scripts.hive.master_notice.lost called by scripts.hub.hive_loss.HiveLoss.poll through HiveLoss._report after every loss line is logged; items read through scripts.inbox.store.InboxStore.inbox at master@<slug>",
       "tests": [
         "tests/hive/test_master_hive_items.py::test_a_sweep_drain_leaves_one_item_at_the_master_of_each_swarm_with_a_live_agent_on_the_hive",
         "tests/hive/test_master_hive_items.py::test_a_second_sweep_of_the_draining_hive_sends_no_second_item",
@@ -13046,7 +13046,8 @@
         "tests/hive/test_master_hive_items.py::test_a_hive_stop_settle_tells_each_master_once_and_keeps_the_roll_orders",
         "tests/hive/test_master_hive_items.py::test_a_member_stop_while_another_member_serves_the_hive_sends_no_master_item",
         "tests/hive/test_master_hive_items.py::test_a_drain_run_as_the_hive_member_writes_no_master_item_the_relay_would_refuse",
-        "tests/hive/test_master_hive_items.py::test_a_lost_hive_tells_the_master_of_each_swarm_it_ran_once_and_keeps_the_hub_log"
+        "tests/hive/test_master_hive_items.py::test_a_lost_hive_tells_the_master_of_each_swarm_it_ran_once_and_keeps_the_hub_log",
+        "tests/hive/test_master_hive_items.py::test_a_failed_master_send_still_logs_every_lost_hive_first"
       ]
     }
   ],

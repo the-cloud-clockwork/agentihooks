@@ -283,3 +283,23 @@ def test_a_lost_hive_tells_the_master_of_each_swarm_it_ran_once_and_keeps_the_hu
         f"hub: hive {LOST_HIVE} of swarm sw lost; exited {ended_sw}",
         f"hub: hive {LOST_HIVE} of swarm other lost; exited {ended_other}",
     ]
+
+
+@pytest.mark.feature("master-hive-drain-item")
+def test_a_failed_master_send_still_logs_every_lost_hive_first(
+    hub: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.hive import master_notice, presence
+
+    monkeypatch.setattr(master_notice, "lost", Mock(side_effect=ConnectionError("redis is down")))
+    _start(hub, "sw", "engineer@1", "execution-a")
+    _start(hub, "other", "engineer@3", "execution-c")
+    presence.beat(hub.bus, LOST_HIVE, T0)
+
+    with pytest.raises(ConnectionError):
+        _poll_until(hub, T0 + presence.TTL_MS)
+
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: hive {LOST_HIVE} of swarm sw lost; exited execution execution-a of task task-execution-a",
+        f"hub: hive {LOST_HIVE} of swarm other lost; exited execution execution-c of task task-execution-c",
+    ]

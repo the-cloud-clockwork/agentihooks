@@ -81,8 +81,7 @@ class HiveLoss:
                 return bool(found)
 
             self._edit(drop)
-            for swarm, hive, exits in losses:
-                self._report(swarm, hive, exits)
+            self._report(losses)
 
     def _observe(self, now: int, watching: bool) -> None:
         """Record since when each swarm has been on the events engine, keeping the last record when the store fails."""
@@ -126,11 +125,13 @@ class HiveLoss:
             done.append(key)
         return done, exits
 
-    def _report(self, swarm: str, hive: str, exits: list[Envelope]) -> None:
-        """Log the lost hive with the executions it ended and tell the master of its swarm once."""
-        print(f"hub: hive {hive} of swarm {swarm} lost; exited {master_notice.ended(exits)}", file=sys.stderr)
+    def _report(self, losses: list[tuple[str, str, list[Envelope]]]) -> None:
+        """Log every lost hive with the executions it ended, then tell the master of each swarm once."""
+        for swarm, hive, exits in losses:
+            print(f"hub: hive {hive} of swarm {swarm} lost; exited {master_notice.ended(exits)}", file=sys.stderr)
         if self._store is not None:
-            master_notice.lost(self._store.redis, swarm, hive, exits)
+            for swarm, hive, exits in losses:
+                master_notice.lost(self._store.redis, swarm, hive, exits)
 
     def _edit(self, change: Callable[[dict[str, Any]], bool]) -> None:
         for _ in range(8):
