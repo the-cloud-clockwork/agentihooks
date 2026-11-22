@@ -12634,7 +12634,9 @@
         "tests/swarm/test_order_check.py::test_each_task_under_an_order_reads_the_reason_the_claim_gate_holds_it",
         "tests/swarm/test_order_check.py::test_ledger_get_orders_prints_every_open_order_through_the_ledger_api",
         "tests/swarm_ledger/test_api_v1.py::test_the_orders_read_serves_every_open_order",
-        "tests/swarm/test_order_check.py::test_an_orders_read_past_the_reply_limit_names_the_read_that_fits"
+        "tests/swarm/test_order_check.py::test_an_orders_read_past_the_reply_limit_names_the_read_that_fits",
+        "tests/swarm/test_order_check.py::test_the_orders_route_reads_with_the_fix_phase_of_its_own_swarm_and_revises_its_reply",
+        "tests/swarm/test_order_check.py::test_an_order_mark_that_names_no_author_and_no_proof_reads_with_an_empty_author"
       ]
     },
     {
