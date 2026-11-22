@@ -49,7 +49,7 @@ def scaffold(slug: str, task: dict, doc: dict | None = None) -> Path:
     return path
 
 
-def steering(task: dict, doc: dict | None = None) -> str:
+def steering(task: dict[str, Any], doc: dict[str, Any] | None = None) -> str:
     lines = [f"# {task['id']}: {task.get('title', '')}", ""]
     if task.get("description"):
         lines += [task["description"], ""]
@@ -61,11 +61,29 @@ def steering(task: dict, doc: dict | None = None) -> str:
     rows = [f"- {label}: {contract[key]}" for key, label in CONTRACT_LABELS if contract.get(key)]
     if rows:
         lines += ["Proof contract", *rows, ""]
+    if task.get("enhances") and doc is not None:
+        lines += target_lines(task, doc["tasks"])
     if task.get("kind") == "plan" and doc is not None:
         from scripts.swarm_ledger.plan_evidence import evidence
 
         lines.append(evidence(task, doc))
     return "\n".join(lines)
+
+
+def target_lines(task: dict[str, Any], tasks: list[dict[str, Any]]) -> list[str]:
+    """Return the steering block of an enhancement plan task: its target's id, title, phase, territory, description."""
+    rows = {row.get("id"): row for row in tasks}
+    if task["enhances"] not in rows:
+        return ["Enhancement target", f"- Task: {task['enhances']} is not in the ledger: block this task.", ""]
+    row = rows[task["enhances"]]
+    return [
+        "Enhancement target",
+        f"- Task: {task['enhances']}: {row.get('title', '')}",
+        f"- Phase: {row.get('phase', '')}",
+        f"- Territory: {', '.join(row.get('territory') or []) or 'none'}",
+        f"- Description: {row.get('description', '')}",
+        "",
+    ]
 
 
 def rewrite(task: dict) -> None:

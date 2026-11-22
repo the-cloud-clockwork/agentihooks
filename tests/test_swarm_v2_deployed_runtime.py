@@ -267,6 +267,7 @@ def proof_controller(tmp_path, monkeypatch):
         ("proof-123abc-t1-1", "ci", "hive"),
         ("proof-123abc-t1-1", "plan", "hive"),
         ("proof-123abc-t1-1", "dispatch", "hive"),
+        ("proof-123abc-t1-1", "expert", "hive"),
     ],
 )
 def test_proof_engineer_placement_preserves_other_swarms_and_lanes(
