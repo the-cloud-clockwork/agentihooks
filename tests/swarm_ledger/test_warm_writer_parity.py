@@ -36,11 +36,17 @@ from scripts.tick.adapters import database_ledger
 URL = os.environ.get("LEDGER_TEST_POSTGRES_URL", "")
 STORES = ["sqlite", "postgres"] if URL else ["sqlite"]
 SHARED = ["postgres"] if URL else []
-CONTENT = {"title": "Parity", "overview": "o", "sources": [], "phases": [{"title": "One", "description": "d"}]}
+CONTENT = {
+    "title": "Parity",
+    "overview": "o",
+    "size": "swarm",
+    "sources": [],
+    "phases": [{"title": "One", "description": "d"}],
+}
 THREAD = "phases/p1/comments"
 STALE = "0" * 64
 WORKER = "engineer@323133-0440"
-CLOCKS = frozenset({"at", "created_at", "updated_at", "time"})
+CLOCKS = frozenset({"at", "time"})
 TASK = {
     "op": "task_add",
     "id": "parity-task",
@@ -88,10 +94,15 @@ class Refusal:
     arm: Callable[[pytest.MonkeyPatch], None] | None = None
 
 
+def clocked(key: str) -> bool:
+    """Whether ``key`` names a clock reading: a time, an at or any moment ending in _at."""
+    return key in CLOCKS or key.endswith("_at")
+
+
 def unclocked(value: Any) -> Any:
     """``value`` with every clock reading blanked, since twin ledgers are written moments apart."""
     if isinstance(value, dict):
-        return {key: None if key in CLOCKS else unclocked(item) for key, item in value.items()}
+        return {key: None if clocked(key) else unclocked(item) for key, item in value.items()}
     if isinstance(value, list):
         return [unclocked(item) for item in value]
     return value
