@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import prompt
-from tests.profiles.test_expert_role import PARSERS, _argv
+from tests import command_lines
 
 pytestmark = pytest.mark.unit
 
@@ -110,8 +110,7 @@ def test_every_command_an_expert_prompt_names_is_one_the_command_line_takes() ->
     built = prompt.build("sw", "/repo", "expert", NAME, FIRST)
     for command in COMMANDS:
         assert command in built, command
-        tool, argv = _argv(command)
-        assert PARSERS[tool](argv), command
+        assert command_lines.taken(command), command
     assert built.count("agentihooks ") == len(COMMANDS)
 
 

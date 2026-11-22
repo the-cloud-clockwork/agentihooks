@@ -2,7 +2,6 @@
 
 import json
 import re
-import shlex
 from pathlib import Path
 from typing import Any
 
@@ -10,8 +9,7 @@ import pytest
 import yaml
 
 import hooks.context.context_recycle as recycle
-from scripts.inbox.cli import build_parser as msg_parser
-from scripts.swarm.cli import build_parser as swarm_parser
+from tests import command_lines
 from tests.test_package_internal_names import LEAKS
 from tests.test_profile_render import world as world
 
@@ -86,23 +84,10 @@ HANDOFF_HEADINGS = (
     "Next",
     "Read first",
 )
-PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
 
 
 def _skill(name: str) -> Path:
     return ROLE / ".claude" / "skills" / name / "SKILL.md"
-
-
-def _commands(text: str) -> list[str]:
-    return [span for span in re.findall(r"`([^`\n]+)`", text) if span.startswith("agentihooks ")]
-
-
-def _argv(command: str) -> tuple[str, list[str]]:
-    tokens = [token.split("|")[0] for token in shlex.split(command)[1:]]
-    tokens = ["x" if re.fullmatch(r"<[^>]+>", token) else token for token in tokens]
-    if tokens[0] == "swarm" and tokens[1] == "x":
-        tokens[1] = "s"
-    return tokens[0], tokens[1:]
 
 
 def _template(name: str) -> list[str]:
@@ -178,11 +163,10 @@ def test_each_expert_skill_covers_its_loop_with_commands_that_parse(name: str) -
     text = _skill(name).read_text()
 
     assert [step for step in LOOP[name] if step not in text] == []
-    commands = _commands(text)
+    commands = command_lines.named(text)
     assert commands
     for command in commands:
-        tool, argv = _argv(command)
-        assert PARSERS[tool](argv), command
+        assert command_lines.taken(command), command
 
 
 @pytest.mark.feature("expert-role-profile")
@@ -207,5 +191,4 @@ def test_the_expert_rule_names_agentihooks_commands_that_parse() -> None:
 
     assert spans and all(span.startswith("agentihooks ") for span in spans), spans
     for command in spans:
-        tool, argv = _argv(command.replace("<minutes>", "30"))
-        assert PARSERS[tool](argv), command
+        assert command_lines.taken(command.replace("<minutes>", "30")), command
