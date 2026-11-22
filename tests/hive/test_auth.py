@@ -109,6 +109,7 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:codex-endpoints",
                     f"~{ROOT}:swarm:*:codex-openings",
                     f"~{ROOT}:swarm:*:codex-viewers",
+                    f"~{ROOT}:swarm:*:launch-endings",
                     f"~{ROOT}:swarm:*:identity-conflicts",
                     f"~{ROOT}:swarm:*:desired-routes",
                     f"~{ROOT}:swarm:*:state-since",
@@ -199,6 +200,7 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("swarm:proof:codex-endpoints", True),
         ("swarm:proof:codex-openings", True),
         ("swarm:proof:codex-viewers", True),
+        ("swarm:proof:launch-endings", True),
         ("seat:eng-1@proof:recaps", True),
         ("seat:eng-1@proof:learned", True),
         ("seat-of:engineer@0001-0001:exit", True),
@@ -213,7 +215,9 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("names:engineer@0001-0001", False),
     ],
 )
-def test_a_member_writes_the_keys_a_worker_uses_for_done_ready_park_wait_and_status(suffix, writable):
+def test_a_member_writes_the_keys_a_worker_uses_for_done_ready_park_wait_and_status(
+    suffix: str, writable: bool
+) -> None:
     from fnmatch import fnmatchcase
 
     key = f"{ROOT}:{suffix}"

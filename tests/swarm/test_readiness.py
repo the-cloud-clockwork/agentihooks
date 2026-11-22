@@ -6,7 +6,9 @@ import pytest
 from scripts.events import memory
 from scripts.events.bus import Bus, WorkQueue
 from scripts.events.config import BusConfig, QueuePolicy
-from scripts.swarm import readiness
+from scripts.inbox.store import InboxStore
+from scripts.swarm import preempt, readiness
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.repository import hierarchy
 
 pytestmark = pytest.mark.unit
@@ -199,6 +201,81 @@ def test_an_unfrozen_task_is_offered_again_once_the_dedupe_window_from_its_first
     clock.now += 1
     assert readiness.publish(bus, snapshot(found), clock.now) == ["ready:sw:a:0"]
     assert queued(bus, "eng", snapshot(found)) == ["a"]
+
+
+@pytest.mark.feature("ready-urgent-offer-precedes-older-normal-offers")
+def test_a_later_urgent_offer_is_taken_before_older_normal_offers_queued_past_the_dedupe_window(
+    bus: Bus, clock: Clock
+) -> None:
+    readiness.publish(bus, snapshot(doc([task("n1"), task("n2")])), NOW)
+    clock.now += BusConfig().dedupe_window_ms
+    view = snapshot(doc([task("n1"), task("n2"), task("u", rank="urgent")]))
+    readiness.publish(bus, view, clock.now)
+    assert queued(bus, "eng", view) == ["u", "n1", "n2"]
+
+
+@pytest.mark.feature("ready-urgent-offer-precedes-older-normal-offers")
+def test_a_queued_task_that_turned_urgent_is_taken_before_the_older_normal_offer_ahead_of_it(
+    bus: Bus, clock: Clock
+) -> None:
+    readiness.publish(bus, snapshot(doc([task("n1"), task("u")])), NOW)
+    clock.now += BusConfig().dedupe_window_ms
+    view = snapshot(doc([task("n1"), task("u", rank="urgent")]))
+    assert readiness.publish(bus, view, clock.now) == ["ready:sw:n1:0"]
+    assert queued(bus, "eng", view) == ["u", "n1"]
+
+
+@pytest.mark.feature("ready-urgent-offer-precedes-older-normal-offers")
+def test_a_normal_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_of_a_later_urgent_offer(
+    bus: Bus, clock: Clock
+) -> None:
+    readiness.publish(bus, snapshot(doc([task("n1")])), NOW)
+    clock.now += BusConfig().dedupe_window_ms - 1
+    view = snapshot(doc([task("n1"), task("u", rank="urgent")]))
+    assert readiness.publish(bus, view, clock.now) == ["ready:sw:u:0"]
+    assert queued(bus, "eng", view) == ["n1", "u"]
+
+
+@pytest.mark.feature("ready-urgent-offer-precedes-older-normal-offers")
+def test_a_hive_that_cannot_place_the_urgent_offer_still_takes_the_older_normal_offer(bus: Bus, clock: Clock) -> None:
+    readiness.publish(bus, snapshot(doc([task("n1")])), NOW)
+    clock.now += BusConfig().dedupe_window_ms
+    view = snapshot(doc([task("n1"), task("u", rank="urgent", hive="other")]))
+    readiness.publish(bus, view, clock.now)
+    queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
+    delivery = readiness.take(queue, view, 0, lambda event: readiness.placeable(event.data, "mine", lambda: []))
+    assert delivery is not None and delivery.event.key == "n1"
+
+
+@pytest.mark.feature("ready-urgent-offer-precedes-older-normal-offers")
+def test_an_urgent_offer_in_another_lane_leaves_the_older_normal_offers_in_place(bus: Bus, clock: Clock) -> None:
+    readiness.publish(bus, snapshot(doc([task("n1")])), NOW)
+    clock.now += BusConfig().dedupe_window_ms
+    view = snapshot(doc([task("n1"), task("u", lane="ci", rank="urgent")]))
+    assert readiness.publish(bus, view, clock.now) == ["ready:sw:u:0"]
+    assert queued(bus, "eng", view) == ["n1"]
+
+
+@pytest.mark.feature("ready-urgent-offer-precedes-older-normal-offers")
+def test_the_seat_a_preempted_normal_worker_frees_goes_to_the_urgent_offer_not_the_older_normal_one(
+    bus: Bus, clock: Clock
+) -> None:
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=1))
+    readiness.publish(bus, snapshot(doc([task("n1")])), NOW)
+    clock.now += BusConfig().dedupe_window_ms
+    held, urgent = task("n0", state="claimed"), task("u", rank="urgent")
+    found = doc([held, urgent])
+    full = {"eng": ([urgent], [AgentRecord("e1", "eng", "n0")])}
+    preempt.step(SLUG, store, {"n0": held, "u": urgent}, found, full, 1)
+    preempt.step(SLUG, store, {"n0": held, "u": urgent}, found, full, 2)
+    assert [item.task for item in InboxStore(store.redis).open_items("e1")] == ["n0"]
+    view = snapshot(doc([task("n1"), urgent]))
+    readiness.publish(bus, view, clock.now)
+    delivery = readiness.take(bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy()), view, 0)
+    assert delivery is not None and delivery.event.key == "u"
 
 
 def test_publish_uses_the_given_queue_policy(bus):

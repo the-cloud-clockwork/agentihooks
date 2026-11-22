@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/timeouts.py:scripts.ci_mutation.timeouts.x_retry_timeouts:cef0a123662fcd95ff6f27848724f531b7550048ec5d2f1266f2ea597df4787f": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: this run_unit call executes only when chosen is nonempty. run_unit uses tests solely in its tests-and-not-chosen guard, which is necessarily false here. Replacing tests with None leaves test execution, memory preparation and error handling unchanged."
+  }
+}

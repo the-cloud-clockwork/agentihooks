@@ -5,7 +5,7 @@ import json
 import sys
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, cast
@@ -22,6 +22,7 @@ from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
+from scripts.swarm_ledger.ledger_workspace import WORK_FOLDER
 
 ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
@@ -29,7 +30,6 @@ ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
 TURN_MS, TURN_TRIES, TURN_WAIT_S = 30_000, 40, 0.05  # pragma: no mutate
 BUSY = "another admission for the hive is in progress"
-WORK_FOLDER = "work-folder"
 
 
 def release_key(text: str) -> Version | None:
@@ -70,6 +70,11 @@ def turn_key(hive: str) -> str:
     from scripts.hive import registry
 
     return f"{registry.key(hive)}:admitting"
+
+
+def claiming_key(offer: str) -> str:
+    """The Redis key naming the hive whose admission of the offer is still claiming."""
+    return f"{offer}:claiming"
 
 
 class Admission:
@@ -147,7 +152,8 @@ class Admission:
                 held: dict[str, str] = {hive_admission.HELD: full}
                 return held
             timer.mark("full")
-            admitted = self._claim(slug, request, view.rows, view.doc, timer)
+            with self._claiming(offer, request["hive"]):
+                admitted = self._claim(slug, request, view.rows, view.doc, timer)
         if admitted is None:
             refused(slug, request, "another holder took the claim")
             return None
@@ -173,7 +179,11 @@ class Admission:
         )
 
     def _kept(self, slug: str, request: dict[str, Any], offer: str) -> dict[str, Any] | None:
-        """The asking hive's kept admission while its agent is listed or its unlaunched execution still holds the claim."""
+        """The asking hive's kept admission while its agent is listed or its unlaunched execution still holds the claim,
+        and a held answer while that hive's own admission of the offer is still claiming."""
+        claiming: object = self.store.redis.get(claiming_key(offer))  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        if claiming == request["hive"]:
+            return {hive_admission.HELD: hive_admission.ADMITTING}
         admitted = self._held(offer)
         if admitted and admitted["hive"] == request["hive"] and self._active(slug, admitted):
             return admitted
@@ -207,10 +217,13 @@ class Admission:
         return admitted
 
     def _outdated(self, hive: str) -> str:
-        """The member release below the hub release it is refused for; empty when either release is unreported."""
+        """The member release below the hub release it is refused for; empty when either release is unreported or the
+        hive's own chart pinned it to its release."""
         from scripts.hive import registry
 
         record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
+        if record.get("pinned") == "yes":
+            return ""
         member, hub = str(record.get("version")), updater.installed_version()
         reported, floor = release_key(member), release_key(hub)
         return f"release {member} below hub release {hub}" if reported and floor and reported < floor else ""
@@ -255,6 +268,21 @@ class Admission:
         finally:
             if self.store.redis.get(key) == token:
                 self.store.redis.delete(key)
+
+    @contextmanager
+    def _claiming(self, offer: str, hive: str) -> Generator[None]:
+        """Names the hive whose admission of the offer is claiming for as long as the claim runs, within the task
+        claim lease, so that hive's repeat ask stays held after its turn key lapses; cleared once the claim returns
+        or raises while the mark still names that hive."""
+        from scripts.swarm import tick
+
+        key = claiming_key(offer)
+        self.store.redis.set(key, hive, px=tick.LEASE_MS)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            yield
+        finally:
+            if self.store.redis.get(key) == hive:  # pyright: ignore[reportUnknownMemberType]
+                self.store.redis.delete(key)  # pyright: ignore[reportUnknownMemberType]
 
     def _admitting(self, hive: str, offer: str) -> bool:
         """True while the hive's admission key is held by an admission of this same offer."""

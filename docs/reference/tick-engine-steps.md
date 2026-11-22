@@ -368,7 +368,7 @@ These steps declare the slow lane:
 | `scripts.tick.steps.observe` | `observe` | pane evidence, lab capacity |
 | `scripts.tick.steps.agents` | `agents` | strays, failed panes |
 | `scripts.tick.steps.masters` | `masters` | retire idle master, master stall, prompt stall |
-| `scripts.tick.steps.tasks` | `reopen passes` | promotion refresh, release alert, [fleet red notice](fleet-red-notice.md#the-slow-lane) |
+| `scripts.tick.steps.tasks` | `reopen passes` | promotion refresh, release alert, [fleet red notice](fleet-red-notice.md#the-slow-lane), autoscaler alert |
 | `scripts.tick.steps.place` | `placement notices` | lost runner, time left |
 | `scripts.tick.steps.masters` | `master watch` | night watch, master alarm |
 | `scripts.tick.steps.agents` | `close` | conversations, session models |
@@ -1209,7 +1209,7 @@ and placement steps are in bold; the others hold steps from other changes.
 | 5 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
 | 6 | `drained resume` | After the masters | sleeping, drained resume |
 | 7 | `tasks` | After `drained resume` | orphans |
-| 8 | `reopen passes` | After `tasks` | dev red reopen, prerequisite reopen, promotion refresh, release alert, [fleet red notice](fleet-red-notice.md) (slow lane) |
+| 8 | `reopen passes` | After `tasks` | dev red reopen, prerequisite reopen, promotion refresh, release alert, [fleet red notice](fleet-red-notice.md) (slow lane), autoscaler alert (slow lane) |
 | 9 | **`task passes`** | After `reopen passes` | run window, verification notices, size pass, grouping release, dispatcher group |
 | 10 | `place` | First line inside the placing lock | |
 | 11 | `placement notices` | After `place`, inside the placing lock | quota notice, lost runner (slow lane), time left (slow lane) |
