@@ -91,10 +91,11 @@ def test_the_order_time_travels_through_every_link_of_the_work_it_reaches() -> N
         task("dep", merged_into="lead"),
         task("thin", lane="plan", enhances="dep"),
         task("lead", parked_on=["parked"]),
+        task("polish", lane="plan", enhances="lead"),
         task("parked"),
         task("plain"),
     ]
-    assert orders.stamps(doc(tasks)) == {"o": 6, "dep": 6, "thin": 6, "lead": 6, "parked": 6}
+    assert orders.stamps(doc(tasks)) == {"o": 6, "dep": 6, "thin": 6, "lead": 6, "polish": 6, "parked": 6}
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
@@ -124,6 +125,15 @@ def test_done_and_out_of_scope_work_carries_no_order_time_and_passes_none_on() -
         task("wip", state="pr"),
     ]
     assert orders.stamps(doc(tasks)) == {"o": 2, "busy": 3, "wip": 3}
+
+
+@pytest.mark.feature("ready-ordered-offer-first")
+def test_a_done_or_out_of_scope_phase_passes_its_order_time_to_no_task() -> None:
+    phases = [{"id": "p1", "ordered": order(4), "done": True}, {"id": "p2", "ordered": order(5), "out_of_scope": True}]
+    tasks = [task("a"), task("b", phase="p2"), task("c", ordered=order(7), done=True), task("d", ordered=order(8))]
+    assert orders.stamps(doc(tasks, phases)) == {"d": 8}
+    assert [orders.closed(row) for row in (*phases, tasks[2], tasks[0])] == [True, True, True, False]
+    assert orders.closed({"state": "done"}) and not orders.closed({"state": "pr", "done": False})
 
 
 @pytest.mark.feature("ready-ordered-offer-first")

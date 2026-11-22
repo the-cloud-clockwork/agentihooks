@@ -1,5 +1,6 @@
 import json
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -54,7 +55,7 @@ def test_an_ordered_phase_lists_every_task_under_it_with_its_verdict_and_counts(
             {"id": "t3", "lane": "eng", "state": "claimed", "verdict": "it is claimed by engineer@one"},
             {"id": "t4", "lane": "eng", "state": "pr", "verdict": "it is in a pull request"},
         ],
-        "line": "phases/p1 Build: 4 open, 1 claimable, 2 claimed or in a pull request, 1 done",
+        "line": "phases/p1 Build: 4 unfinished, 1 claimable, 2 claimed or in a pull request, 1 done",
     }
 
 
@@ -73,7 +74,7 @@ def test_an_ordered_task_lists_itself_and_an_order_with_no_task_lists_none() -> 
             "busy": 0,
             "done": [],
             "tasks": [],
-            "line": "phases/p2 Ship: 0 open, 0 claimable, 0 claimed or in a pull request, 0 done",
+            "line": "phases/p2 Ship: 0 unfinished, 0 claimable, 0 claimed or in a pull request, 0 done",
         },
         {
             "item": "tasks/t1",
@@ -84,7 +85,7 @@ def test_an_ordered_task_lists_itself_and_an_order_with_no_task_lists_none() -> 
             "busy": 0,
             "done": [],
             "tasks": [{"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"}],
-            "line": "tasks/t1 Fix the writer: 1 open, 1 claimable, 0 claimed or in a pull request, 0 done",
+            "line": "tasks/t1 Fix the writer: 1 unfinished, 1 claimable, 0 claimed or in a pull request, 0 done",
         },
     ]
 
@@ -95,7 +96,7 @@ def test_orders_read_oldest_first_and_an_entry_he_wrote_reads_as_the_request() -
     found = order_check.read(ledger_doc([task("t1", ordered=asked), task("t2", ordered=ORDER)], p1=ORDER, p2=asked), "")
     assert [row["item"] for row in found] == ["phases/p2", "tasks/t1", "phases/p1", "tasks/t2"]
     assert (found[0]["request"], "quote" in found[0]) == ("c1", False)
-    assert found[1]["line"] == "tasks/t1: 1 open, 1 claimable, 0 claimed or in a pull request, 0 done"
+    assert found[1]["line"] == "tasks/t1: 1 unfinished, 1 claimable, 0 claimed or in a pull request, 0 done"
 
 
 @pytest.mark.feature("swarm-orders-read")
@@ -107,21 +108,51 @@ def test_a_done_or_out_of_scope_order_and_a_malformed_mark_are_left_out() -> Non
         task("t4", ordered="yes"),
         task("t5", ordered={"by": MASTER}),
     ]
-    found = ledger_doc(tasks)
-    found["phases"] = [
+    ledger_state = ledger_doc(tasks)
+    ledger_state["phases"] = [
         {"id": "p1", "title": "Build", "plan": "plans/a", "ordered": ORDER, "done": True},
         {"id": "p2", "title": "Ship", "plan": "plans/b", "ordered": ORDER, "out_of_scope": True},
     ]
-    assert order_check.read(found, "") == []
+    assert order_check.read(ledger_state, "") == []
     assert order_check.read({"plans": PLANS}, "") == []
+
+
+@pytest.mark.feature("swarm-orders-read")
+def test_an_out_of_scope_task_under_an_order_is_not_counted_as_unfinished_work() -> None:
+    tasks = [
+        task("t1"),
+        task("t2", out_of_scope=True),
+        task("t3", state="claimed", out_of_scope=True),
+        task("t4", done=True),
+    ]
+    [row] = order_check.read(ledger_doc(tasks, p1=ORDER), "")
+    assert row["tasks"] == [{"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"}]
+    assert (row["claimable"], row["busy"], row["done"]) == (1, 0, [])
+    assert row["line"] == "phases/p1 Build: 1 unfinished, 1 claimable, 0 claimed or in a pull request, 0 done"
+    [alone] = order_check.read(ledger_doc([task("t2", out_of_scope=True)], p1=ORDER), "")
+    assert (alone["tasks"], alone["line"]) == (
+        [],
+        "phases/p1 Build: 0 unfinished, 0 claimable, 0 claimed or in a pull request, 0 done",
+    )
+
+
+@pytest.mark.feature("swarm-orders-read")
+def test_a_task_whose_phase_waits_for_its_planner_reads_that_reason() -> None:
+    ledger_state = ledger_doc([task("t1")], p1=ORDER)
+    ledger_state["phases"][0]["planning"] = "auto"
+    [row] = order_check.read(ledger_state, "")
+    assert row["tasks"] == [
+        {"id": "t1", "lane": "eng", "state": "open", "verdict": "its phase Build is waiting for its planner"}
+    ]
+    assert row["claimable"] == 0
 
 
 @pytest.mark.feature("swarm-orders-read")
 def test_each_task_under_an_order_reads_the_reason_the_claim_gate_holds_it() -> None:
     tasks = [task("t1"), task("t2"), task("t3", depends_on=["t1"]), task("t9", phase="p2")]
-    found = ledger_doc(tasks, record("tasks/t9", "focus"), record("tasks/t2"), p1=ORDER)
-    [row] = order_check.read(found, "")
-    seen = focus_check.view(found, "")
+    ledger_state = ledger_doc(tasks, record("tasks/t9", "focus"), record("tasks/t2"), p1=ORDER)
+    [row] = order_check.read(ledger_state, "")
+    seen = focus_check.view(ledger_state, "")
     verdicts = {entry["id"]: entry["verdict"] for entry in row["tasks"]}
     assert verdicts == {
         "t1": "a focus elsewhere holds it",
@@ -130,7 +161,7 @@ def test_each_task_under_an_order_reads_the_reason_the_claim_gate_holds_it() -> 
     }
     assert verdicts == {entry["id"]: focus_check.verdict(entry, seen) for entry in tasks[:3]}
     assert (row["claimable"], row["busy"]) == (0, 0)
-    [fixed] = order_check.read(found, "p1")
+    [fixed] = order_check.read(ledger_state, "p1")
     assert {entry["id"]: entry["verdict"] for entry in fixed["tasks"]} == {
         "t1": "claimable",
         "t2": "the freeze on task t2 holds it",
@@ -140,13 +171,13 @@ def test_each_task_under_an_order_reads_the_reason_the_claim_gate_holds_it() -> 
 
 
 @pytest.fixture
-def reads(tmp_path, monkeypatch):
+def reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, bool]]:
     repo = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
     repo.import_document(SLUG, {**ledger_doc([task("t1")], p1=ORDER), "_meta": {"rev": 1}})
     services = as_services(SimpleNamespace(repository=repo))
-    seen = []
+    seen: list[tuple[str, str, bool]] = []
 
-    def resource(slug, path, collection=False):
+    def resource(slug: str, path: str, collection: bool = False) -> Any:
         seen.append((slug, path, collection))
         return routes.ledger_read(services, slug, path, {})["data"]
 
@@ -156,11 +187,13 @@ def reads(tmp_path, monkeypatch):
 
 
 @pytest.mark.feature("swarm-orders-read")
-def test_ledger_get_orders_prints_every_open_order_through_the_ledger_api(reads, capsys, monkeypatch) -> None:
+def test_ledger_get_orders_prints_every_open_order_through_the_ledger_api(
+    reads: list[tuple[str, str, bool]], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     assert ledger._ledger_item("orders") == "orders"
     monkeypatch.setattr(sys, "argv", ["ledger", "--slug", SLUG, "get", "orders"])
     ledger.main()
     [row] = json.loads(capsys.readouterr().out)
-    assert row["line"] == "phases/p1 Build: 1 open, 1 claimable, 0 claimed or in a pull request, 0 done"
+    assert row["line"] == "phases/p1 Build: 1 unfinished, 1 claimable, 0 claimed or in a pull request, 0 done"
     assert row["tasks"] == [{"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"}]
     assert reads == [(SLUG, "orders", True)]
