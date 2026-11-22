@@ -120,7 +120,7 @@ def orders_read(services: Services, slug: str) -> dict[str, Any]:
     state = services.repository.current(slug).state
     found: list[dict[str, Any]] = ports.swarm().order_check.read(state, fix_phase(services, slug))
     reply = {"data": found, "revision": resources.revision(found), "next_cursor": None}
-    return resources.bounded(reply, ORDERS_TOO_LARGE)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return resources.bounded(reply, ORDERS_TOO_LARGE)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def fix_phase(services: Services, slug: str) -> str:
