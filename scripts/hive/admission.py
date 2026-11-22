@@ -21,7 +21,7 @@ HIVE_ADMISSION = "hive admission"
 REASONS = (CPU, RAM, DISK, QUOTA, PLACEMENT, NODE_CAP, MAX_AGENTS, MISSING)
 HOST_PERCENT = 80
 SWARM_PERCENT = 40
-AGENT_CPU = 0.5
+AGENT_CENTI = 50
 AGENT_CPU_ENV = "AGENTIHOOKS_HIVE_AGENT_CPU"
 CPU_STEP = 5
 AGENT_MB = 850
@@ -84,18 +84,17 @@ class Unanswered(TimeoutError):
 
 def agent_cpu(measured: dict[str, Any]) -> AgentCpu:
     """CPU per agent in hundredths of a CPU and where it comes from: AGENTIHOOKS_HIVE_AGENT_CPU when set, else the
-    reading's pod load over the agents it counts, rounded up to the next 0.05 and never below AGENT_CPU, else
-    AGENT_CPU."""
+    reading's pod load over the agents it counts, rounded up to the next 0.05 and never below AGENT_CENTI, else
+    AGENT_CENTI."""
     setting = _setting()
     if setting:
         return AgentCpu(setting, f"set by {AGENT_CPU_ENV}")
     agents = sum(measured.get("agents", {}).values())
     load = measured.get("pod_load")
-    floor = round(100 * AGENT_CPU)
     if load is None or not agents:
-        return AgentCpu(floor, "by default")
+        return AgentCpu(AGENT_CENTI, "by default")
     centi = CPU_STEP * math.ceil(round(100 * load) / (CPU_STEP * agents))
-    return AgentCpu(max(floor, centi), f"measured from pod load {load:.2f} over {agents} agents")
+    return AgentCpu(max(AGENT_CENTI, centi), f"measured from pod load {load:.2f} over {agents} agents")
 
 
 def _setting() -> int:
