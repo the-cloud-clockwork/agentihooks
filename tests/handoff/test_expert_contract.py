@@ -209,6 +209,18 @@ def test_a_read_first_address_that_does_not_resolve_is_refused() -> None:
     assert found == ["Read first entry 2: recap:expert-1@sw does not resolve"]
 
 
+def test_a_read_first_entry_that_cites_the_mission_by_its_line_is_asked_for_by_the_mission_address() -> None:
+    asked: list[str] = []
+
+    def resolves(address: str) -> bool:
+        asked.append(address)
+        return True
+
+    cited = _swap(f"- {ADDRESS} the mission and its deliverables\n", f"- {LINE}\n")
+    assert expert.problems(cited, resolves, "sw", GOOD) == []
+    assert asked == [ADDRESS, "recap:expert-1@sw"]
+
+
 @pytest.mark.feature("expert-handoff-contract")
 def test_a_mission_title_that_names_a_file_is_the_runtimes_wording_and_passes_the_wording_rules() -> None:
     mission = GOOD.replace("Keep an ordered batch built", "Split scripts/swarm/cli.py under line 3000")

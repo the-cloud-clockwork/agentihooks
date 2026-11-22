@@ -11,6 +11,7 @@ import hooks.context.context_recycle as recycle
 from scripts.handoff import expert
 from scripts.swarm import expert_lineage
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm_ledger import ledger_workspace
 from tests.handoff.test_expert_contract import OPENS, VALID
 from tests.swarm.test_expert_handoff_command import V2
 from tests.swarm.test_expert_mission import GOOD
@@ -185,6 +186,19 @@ def test_over_the_limit_an_experts_handoff_is_checked_against_the_expert_contrac
     )
     assert f"\n- {OPENS}\n" in refused
     assert recycle.gate("Bash", _handoff(tmp_path, VALID), "s1", EXPERT) is None
+
+
+def test_over_the_limit_an_experts_read_first_addresses_are_resolved_in_its_own_swarm(
+    store: RedisStore, tmp_path: Path
+) -> None:
+    marker = "<!-- handoff complete -->"
+    cited = VALID.replace(marker, f"- workspace:t1/progress what the worker left\n{marker}")
+    refused = recycle.gate("Bash", _handoff(tmp_path, cited), "s1", EXPERT)
+    assert refused is not None and "- Read first entry 3: workspace:t1/progress does not resolve" in refused
+    notes = ledger_workspace.folder("sw", "t1")
+    notes.mkdir(parents=True)
+    (notes / "progress.md").write_text("Seam one landed.\n", encoding="utf-8")
+    assert recycle.gate("Bash", _handoff(tmp_path, cited), "s1", EXPERT) is None
 
 
 def test_over_the_limit_a_workers_handoff_is_still_checked_against_handoff_v2(
