@@ -4355,9 +4355,10 @@ history, crew and ledger lines, handoff and block lines. A plan task without `en
 exactly as they were: slice only its phase and close with `done --slice <ids>`, naming the tasks it cut.
 
 The prompt does not work out why the target is thin. Its first enhancement line points at the enhancement task's own
-description, which lists the rules the thin check failed. The thin check writes one line per failed rule:
+description, which is expected to list the rules the thin check failed. The thin check,
+`scripts.swarm.thin_task.thin`, returns one line per failed rule:
 
-| Rule | Line the thin check writes |
+| Rule | Line the thin check returns |
 |---|---|
 | Description under 40 words | `Task <id> has a description under 40 words.` |
 | No done when sentence | `Task <id> has no done when sentence.` |
@@ -4365,7 +4366,9 @@ description, which lists the rules the thin check failed. The thin check writes 
 | A `code` or `ci` task that names no seam | `Task <id> is <kind> work that names no seam.` |
 
 A description names a seam with the word seam or seams, a backticked name, a call shape such as `refresh(`, a dotted
-or snake case name, an endpoint path, or an `agentihooks` or `python -m` command.
+or snake case name, an endpoint path, or an `agentihooks` or `python -m` command. A task is never thin when it has a
+`plan_slice`, is itself a `plan` task, or has its `enhancement` field set to `planned` or `skipped`. The check only
+returns these lines: no code on `dev` copies them into a description or creates the enhancement task.
 
 For swarm `demo`, planner `planner@abcdef-0001` and target `t-login` in phase `p1`, the enhancement steps read:
 
@@ -4396,9 +4399,16 @@ Each step leaves this behind:
 | 6 | A ledger follow up for work outside the target. |
 | 7 | The enhancement task done, its proof slice naming the target. |
 
-A plan section that carries every part step 3 asks for:
+`publish-plan` asks for a slice marker above every heading at the plan's task level. That level is the shallowest
+heading level, or the one below it when the shallowest level holds a single heading such as the plan title. Give
+`plan.md` one title above the section, so the section heading is the task level and its parts sit below it without
+markers of their own. The target's `plan_lines` then run from the marker to the end of the section. A `plan.md` that
+holds only the section, with its parts one level below its heading, is refused with
+`plan task sections need a slice marker above each heading`. A `plan.md` that carries every part step 3 asks for:
 
 ```markdown
+# Login enhancement plan
+
 <!-- slice: login-session -->
 ## Login page keeps the session
 
@@ -4435,14 +4445,13 @@ The CI run with both tests green.
 Done when a reload of the login page keeps the session and the session tests pass in CI.
 ```
 
-The six recon headings mean the same as in a task's `recon.md`.
-
 #### The Enhancement target block in steering.md
 
-When the ledger starts a plan task, it writes `steering.md` from the ledger document and replaces any copy left by
-an earlier life, so the block shows the target as it reads at that spawn. Hub admission writes the file the same way.
-The block follows the task heading, its description and any proof contract rows, and comes before Plan evidence,
-which holds the project and mission intent:
+Hub admission writes `steering.md` into the work folder before each launch, from the current ledger document, and
+replaces any copy an earlier life left, so the block shows the target as it stands at that launch.
+`task add --scaffold` also writes the file when the task is added. The block follows the task heading, its
+description, the plan pointer line when the task has a plan, and any proof contract rows. It comes before Plan
+evidence, which holds the project and mission intent:
 
 ```text
 # enhance-t-login: Plan the login task
@@ -4459,13 +4468,15 @@ Plan evidence
 ```
 
 A title, phase or description the target does not set prints empty after its label, and a target with no territory
-prints `- Territory: none`. When `enhances` names a task that is not on the ledger, the block is one line and the
-planner blocks the task instead of planning:
+prints `- Territory: none`. When `enhances` names a task that is not on the ledger, the block holds one task line
+that tells the planner to block:
 
 ```text
 Enhancement target
 - Task: t-login is not in the ledger: block this task.
 ```
+
+The prompt still lists all seven steps in that case; only `steering.md` says to block. Block before step 2:
 
 ```bash
 agentihooks swarm <slug> block "<plain words naming the missing target>"
@@ -4475,21 +4486,26 @@ A phase plan task's `steering.md` carries no Enhancement target block.
 
 #### Limits and troubleshooting
 
-- No ledger command writes `enhances` today: `task add` does not store it and `task set` does not accept it. The
-  prompt and steering above render for a task record that already carries the field.
+- No ledger command writes `enhances`: `task add` does not store it and `task set` does not accept it. The prompt
+  and steering above render for a task record that already carries the field.
+- Nothing grades the plan section's content. `done --slice <target>` checks only that the target is on the ledger in
+  the enhancement task's phase, is not a plan task, and carries a `plan_url` and `plan_lines` that match its anchor.
 - A kind change (`task set <task> kind=<kind>`) rewrites `steering.md` without the ledger document, which drops the
-  Enhancement target and Plan evidence blocks until a later spawn of the task as a plan task writes them again. Read
-  the target with `agentihooks api --slug <slug> --as <planner> get tasks/<target>` meanwhile.
-- `tests/swarm/test_enhance_prompt.py`, feature map entry `planner-enhancement-prompt`, pins both prompts byte for
-  byte against `tests/swarm/phase_plan_prompt.golden` and `tests/swarm/enhancement_prompt.golden`, along with the
-  steering block. A deliberate change to either set of steps rewrites its golden file in the same pull request.
+  Enhancement target and Plan evidence blocks until the next launch writes the file again. Read the target with
+  `agentihooks api --slug <slug> --as <planner> get tasks/<target>` meanwhile.
+- `tests/swarm/test_enhance_prompt.py`, feature map entry `planner-enhancement-prompt`, compares both prompts byte
+  for byte with `tests/swarm/phase_plan_prompt.golden` and `tests/swarm/enhancement_prompt.golden`, and checks the
+  steering block lines. The golden test stays red until a deliberate change to either set of steps regenerates its
+  golden file in the same pull request.
 
 | Symptom | Cause and action |
 |---|---|
 | `done --slice <target>` refused with `tasks/<task> has invalid slice task ids: <target>` | The target is not on the ledger, sits in a phase other than the enhancement task's, or is itself a plan task. Block the task with that evidence; the master moves or recreates the target. |
-| `done --slice <target>` refused with `tasks/<task> slice tasks carry no plan link: <target>` | Step 5 did not set the target's `plan_url`. Run steps 4 and 5, then `done` again. |
+| `done --slice <target>` refused with `tasks/<task> slice tasks carry no plan link: <target>. publish the plan with agentihooks ledger publish-plan <file> --phase <phase id>, then link each task with task set <id> plan_url=<link>` | Step 5 did not set the target's `plan_url`. Run steps 4 and 5, then `done` again. |
 | `done --slice <target>` refused with `tasks/<task> slice tasks lack valid plan ranges or anchors: <target>` | The target's `plan_lines` no longer match its anchor in the phase's plan, for example after another plan was published into the phase. Run step 5 again against the plan the phase now links. |
+| Step 4 refused with `plan task sections need a slice marker above each heading` | The section's parts sit at the plan's task level. Add one title above the section, as in the example, and publish again. |
 | Step 5 refused with `slice anchor <anchor> is missing or repeated in its phase` | The anchor is not in the published plan, or appears twice. Fix the anchor line in `plan.md`, publish again, then repeat step 5. |
+| Step 5 refused with `plan slice <anchor> already belongs to open task <task>` | Another open task already holds that anchor. Give the target its own anchor in `plan.md`, publish again, then repeat step 5. |
 
 ### Split tasks across pull requests
 
