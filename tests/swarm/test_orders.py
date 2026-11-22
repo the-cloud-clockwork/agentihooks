@@ -91,10 +91,11 @@ def test_the_order_time_travels_through_every_link_of_the_work_it_reaches() -> N
         task("dep", merged_into="lead"),
         task("thin", lane="plan", enhances="dep"),
         task("lead", parked_on=["parked"]),
+        task("polish", lane="plan", enhances="lead"),
         task("parked"),
         task("plain"),
     ]
-    assert orders.stamps(doc(tasks)) == {"o": 6, "dep": 6, "thin": 6, "lead": 6, "parked": 6}
+    assert orders.stamps(doc(tasks)) == {"o": 6, "dep": 6, "thin": 6, "lead": 6, "polish": 6, "parked": 6}
 
 
 @pytest.mark.feature("ready-ordered-offer-first")
