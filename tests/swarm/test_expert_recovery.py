@@ -88,13 +88,52 @@ def test_an_expert_whose_lineage_record_is_gone_is_not_resumed_and_its_mail_is_c
     assert inbox.get(asked.id).state == "cancelled"
 
 
-def test_an_expert_that_never_confirmed_the_handoff_on_its_seat_is_not_resumed(
+@pytest.mark.parametrize(
+    "author,reason",
+    [
+        ("expert@a1b2c3-0009", "the handoff on its seat was never confirmed"),
+        ("", "a handoff was submitted"),
+    ],
+)
+def test_an_expert_with_a_handoff_on_its_seat_is_not_resumed_and_the_notice_names_whose_it_is(
+    store: RedisStore, ledger: Any, runtime: Any, author: str, reason: str
+) -> None:
+    started(store)
+    expert = seated(store, runtime)
+    envelope = {"agent": author or expert.name, "reason": "recycle"}
+    store.put_handoff("sw", "expert-1", "the handoff on the seat", seat=expert.seat, envelope=envelope)
+    assert dead_resume.resumable(store, "sw", expert, ledger) is False
+    assert dead_resume.reopen("sw", store, ledger, runtime, expert, NOW + MINUTE) is False
+    assert ledger.notes[-1] == f"Starting a fresh agent after {expert.name} ended because {reason}."
+
+
+def test_the_seat_mail_a_dropped_expert_had_taken_goes_back_to_its_seat_while_its_lineage_runs(
     store: RedisStore, ledger: Any, runtime: Any
 ) -> None:
     started(store)
     expert = seated(store, runtime)
-    store.put_handoff("sw", "expert-1", "the handoff it was given", seat=expert.seat)
-    assert dead_resume.resumable(store, "sw", expert, ledger) is False
+    inbox = InboxStore(store.redis)
+    taken = inbox.send(MASTER, expert.seat, "Read the new evidence")
+    inbox.deliver(taken.id, expert.name)
+    assert inbox.get(taken.id).state != "pending"
+    assert tick_module._drop("sw", store, ledger, {}, expert) == ""
+    back = inbox.get(taken.id)
+    assert (back.state, back.address) == ("pending", expert.seat)
+
+
+def test_mail_that_already_left_the_seat_of_an_ended_lineage_is_not_moved_again(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lineage = started(store)
+    inbox = InboxStore(store.redis)
+    waiting = inbox.send(ENGINEER, lineage.seat, "Read the new evidence")
+    listed = inbox.get(waiting.id)
+    expert_seat.returned(store, "sw", lineage.seat, "expert-1", "stopped")
+    moved = inbox.get(waiting.id)
+    assert (moved.state, moved.address) == ("pending", "master@sw")
+    monkeypatch.setattr(InboxStore, "open_items", lambda self, address: [listed])
+    expert_seat.returned(store, "sw", lineage.seat, "expert-1", "complete")
+    assert inbox.get(waiting.id) == moved
 
 
 @pytest.mark.feature("expert-seat-recovery")
