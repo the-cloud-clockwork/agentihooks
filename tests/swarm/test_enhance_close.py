@@ -282,15 +282,30 @@ def test_a_review_names_exactly_one_of_a_phase_or_a_task(
     assert (code, err) == (1, "swarm: name exactly one of a phase or --task <enhancement task id>")
 
 
+@pytest.mark.feature("swarm-enhance-close")
+@pytest.mark.parametrize(
+    "author", ["planner@a1b2c3-0002", "engineer@a1b2c3-0003", "ci@a1b2c3-0004", "dispatcher@a1b2c3-0005", "swarm"]
+)
 def test_only_the_master_or_the_operator_may_skip_an_enhancement(thin: Seats, author: str) -> None:
     assert "cannot skip the enhancement of task t1" in refused(author, "skipped")
     assert hold(TARGET) == HELD
 
 
 @pytest.mark.feature("swarm-enhance-close")
-@pytest.mark.parametrize("author", ["engineer@a1b2c3-0003", "ci@a1b2c3-0004"])
-def test_an_eng_or_ci_worker_cannot_release_its_own_hold(thin: Seats, author: str) -> None:
-    assert "cannot set the enhancement of task t1" in refused(author, "planned")
+@pytest.mark.parametrize(
+    ("author", "text"),
+    [
+        ("engineer@a1b2c3-0003", "cannot set the enhancement of task t1"),
+        ("ci@a1b2c3-0004", "cannot set the enhancement of task t1"),
+        (PLANNER, "cannot mark the enhancement of task t1 planned"),
+        ("dispatcher@a1b2c3-0005", "cannot mark the enhancement of task t1 planned"),
+        ("swarm", "cannot mark the enhancement of task t1 planned"),
+    ],
+)
+def test_no_seat_but_a_closed_enhancement_the_master_or_the_operator_marks_it_planned(
+    thin: Seats, author: str, text: str
+) -> None:
+    assert text in refused(author, "planned")
     assert hold(TARGET) == HELD
 
 

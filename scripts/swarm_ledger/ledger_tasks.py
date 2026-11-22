@@ -608,12 +608,12 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
-    return park_refusal(op, task) or urgent_update_refusal(op, task, doc) or skip_refusal(op)
+    return park_refusal(op, task) or urgent_update_refusal(op, task, doc) or enhancement_refusal(doc, op)
 
 
-def skip_refusal(op: dict[str, Any]) -> str:
-    """Only the master or the operator skips a task's enhancement, and an eng or ci worker never sets one, so a held
-    worker cannot release its own claim hold."""
+def enhancement_refusal(doc: dict[str, Any], op: dict[str, Any]) -> str:
+    """Only the master or the operator skips a task's enhancement, an eng or ci worker never sets one, and planned
+    comes only from the master, the operator or the planner whose enhancement plan task for it is done."""
     value, by = op["fields"].get("enhancement"), op["by"]
     task = op["item"].split("/")[1]
     if value == "skipped" and not _block_author(by):
@@ -621,7 +621,18 @@ def skip_refusal(op: dict[str, Any]) -> str:
     lane = ports.swarm().naming.lane_of(by)
     if value is not None and lane in WORKER_LANES:
         return f"{by} works in the {lane} lane and cannot set the enhancement of task {task}: {PROPOSE}"
+    if value == "planned" and not (_block_author(by) or _closed_by(doc, task, by)):
+        return (
+            f"{by} cannot mark the enhancement of task {task} planned: its closed enhancement plan task, the master "
+            "or the operator does"
+        )
     return ""
+
+
+def _closed_by(doc: dict[str, Any], task: str, by: str) -> bool:
+    return any(
+        (t.get("enhances"), t.get("claimed_by"), t.get("state")) == (task, by, "done") for t in doc.get("tasks", [])
+    )
 
 
 def urgent_update_refusal(op: dict, task: dict, doc: dict) -> str:
