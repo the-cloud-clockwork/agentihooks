@@ -9179,6 +9179,21 @@
       ]
     },
     {
+      "id": "master-release-item",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-release-items",
+      "behaviour": "A green dev push run of Tests whose promote job succeeded sends the master seat one inbox item naming the release that promotion published, the run and the hub, controller and hive rollout to check. The item is keyed once per release tag, or once per run when the release tag lookup fails, so within the thirty day window of the ledger events mail markers a repeat pass or a later green run with no newer release sends nothing. A repository not on GitHub, or one with no stable tag, sends nothing, and red promotion fixer items keep their own key.",
+      "seam": "promotion_watch.refresh on a green promoted run; release_wait.announce with the ledger events Mail",
+      "tests": [
+        "tests/swarm/test_promotion_watch.py::test_a_green_promotion_tells_the_master_once_to_check_the_release_rollout",
+        "tests/swarm/test_promotion_watch.py::test_a_green_promotion_with_no_red_before_it_still_tells_the_master_of_its_release",
+        "tests/swarm/test_release_wait.py::test_a_published_release_tells_the_master_once_to_check_its_rollout",
+        "tests/swarm/test_release_wait.py::test_a_failed_tag_lookup_tells_the_master_once_per_promotion_run",
+        "tests/swarm/test_release_wait.py::test_a_repository_not_on_github_has_no_release_to_announce",
+        "tests/swarm/test_release_wait.py::test_a_repository_with_no_stable_tag_tells_the_master_nothing"
+      ]
+    },
+    {
       "id": "promotion-red-graded-job-fails-at-once",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2598",
