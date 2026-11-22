@@ -286,6 +286,8 @@ def test_only_the_read_only_roles_carry_the_shell_guard() -> None:
         ("echo x > \\~/scratchpad/f", "./~/scratchpad/f"),
         ("cd '~/scratchpad' && touch f", "f"),
         ('echo x > ~"/scratchpad/f"', "./~/scratchpad/f"),
+        ("true ;<; touch app.py", "app.py"),
+        ("gzip -X app.py", "app.py"),
     ],
 )
 def test_a_reviewer_refuses_each_shell_file_write(home: Path, command: str, target: str) -> None:
@@ -463,6 +465,10 @@ def test_a_reviewer_refuses_git_writes_and_hidden_writes(home: Path, command: st
         "Xvfb :1",
         "bash -x 'touch app.py'",
         'echo x > ~/"scratchpad/f"',
+        "cd ~/scratchpad >||| touch notes.md",
+        "cd ~/scratchpad <&&& x; touch notes.md",
+        "cd ~/scratchpad &>&> ~/scratchpad/x; touch notes.md",
+        "sed -iX -e s/a/b/ ~/scratchpad/n.md",
         "git --work-tree . status && git --git-dir .git log && git --namespace n show-ref",
     ],
 )
@@ -506,6 +512,11 @@ def test_a_nested_script_judges_relative_paths_from_the_shell_folder(home: Path)
     assert _found(home, "echo $(touch notes.md)", scratch) == ""
     assert _found(home, "cat <<EOF\n$(touch notes.md)\nEOF", scratch) == ""
     assert _found(home, "bash -c 'touch notes.md'") == "writes notes.md"
+
+
+@pytest.mark.feature("read-only-roles-refuse-shell-writes")
+def test_an_unmatched_close_parenthesis_keeps_the_top_level_folder(home: Path) -> None:
+    assert _found(home, "x ; cd /tmp ; ) ; touch q", home / "scratchpad") == "writes q"
 
 
 @pytest.mark.feature("read-only-roles-refuse-shell-writes")
