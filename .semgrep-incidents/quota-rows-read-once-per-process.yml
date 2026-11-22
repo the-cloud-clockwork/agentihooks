@@ -1,0 +1,10 @@
+rules:
+  - id: quota-rows-read-once-per-process
+    languages: [python]
+    severity: ERROR
+    message: Quota rows read only while the runtime has none freeze in a long running hive run process, which then refuses every spawn once its reservations fill them; read them through HerdrRuntime._quota_read so the next spawn reads them again.
+    patterns:
+      - pattern: self._quota_accounts = $READ(...)
+      - pattern-inside: |
+          if <... hasattr(self, "_quota_accounts") ...>:
+              ...

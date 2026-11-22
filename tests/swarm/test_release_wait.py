@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from scripts.inbox.store import InboxStore
 from scripts.swarm import release_wait
+from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable
 from scripts.tick.adapters import github
@@ -265,3 +267,64 @@ def test_the_tick_hands_the_release_alert_pass_its_slug_config_ledger_and_state(
     [(slug, swarm, got_ledger, doc)] = seen
     assert (slug, swarm.slug, got_ledger, [t["id"] for t in doc["tasks"]]) == ("sw", "sw", ledger, ["a"])
     assert "alerted" in actions
+
+
+RUN_URL = "https://github.com/owner/project/actions/runs/901"
+
+
+def released_item(tag: str, run_id: int) -> str:
+    return (
+        f"Release {tag} is out from dev push run {run_id} of Tests: {RUN_URL}. "
+        f"Check that the hub, controller and hive images rolled out to {tag}."
+    )
+
+
+def master_items(store: RedisStore) -> list[str]:
+    inbox = InboxStore(store.redis)
+    return [item.text for item in inbox.inbox(Mail(inbox, store, "sw").master)]
+
+
+@pytest.mark.feature("master-release-item")
+def test_a_published_release_tells_the_master_once_to_check_its_rollout(
+    store: RedisStore, api: Callable[..., Api]
+) -> None:
+    api(["v1.2.3", "v1.2.10", "v1.3.0-rc1", "nightly"])
+    mail = Mail(InboxStore(store.redis), store, "sw")
+    assert release_wait.announce(mail, config(), 901, RUN_URL) == ["told the master to check the rollout of v1.2.10"]
+    assert release_wait.announce(mail, config(), 902, RUN_URL) == []
+    api(["v1.2.10", "v1.2.11"])
+    assert release_wait.announce(mail, config(), 903, RUN_URL) == ["told the master to check the rollout of v1.2.11"]
+    assert master_items(store) == [released_item("v1.2.10", 901), released_item("v1.2.11", 903)]
+
+
+@pytest.mark.feature("master-release-item")
+def test_a_failed_tag_lookup_tells_the_master_once_per_promotion_run(
+    store: RedisStore, api: Callable[..., Api]
+) -> None:
+    api(OSError("down"))
+    mail = Mail(InboxStore(store.redis), store, "sw")
+    told = ["told the master to check the rollout of dev push run 901"]
+    assert release_wait.announce(mail, config(), 901, RUN_URL) == told
+    assert release_wait.announce(mail, config(), 901, RUN_URL) == []
+    assert master_items(store) == [
+        f"Dev push run 901 of Tests promoted dev, but the release tag lookup failed: {RUN_URL}. "
+        "Check the newest release and that the hub, controller and hive images rolled out to it."
+    ]
+
+
+@pytest.mark.feature("master-release-item")
+def test_a_repository_not_on_github_has_no_release_to_announce(
+    store: RedisStore, api: Callable[..., Api], tmp_path: Path
+) -> None:
+    fake = api(["v1.0.0"])
+    mail = Mail(InboxStore(store.redis), store, "sw")
+    assert release_wait.announce(mail, config(str(tmp_path), ""), 901, RUN_URL) == []
+    assert fake.calls == [] and master_items(store) == []
+
+
+@pytest.mark.feature("master-release-item")
+def test_a_repository_with_no_stable_tag_tells_the_master_nothing(store: RedisStore, api: Callable[..., Api]) -> None:
+    api(["nightly", "v2.0.0-rc1"])
+    mail = Mail(InboxStore(store.redis), store, "sw")
+    assert release_wait.announce(mail, config(), 901, RUN_URL) == []
+    assert master_items(store) == []

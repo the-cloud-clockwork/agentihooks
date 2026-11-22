@@ -353,6 +353,9 @@ ENV_REFERENCE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
 SHELL_RUN = re.compile(r"(?:\$\{?\w+\}?/)?((?:[\w.-]+/)*[\w.-]+\.sh)\b")
 MODULE_RUN = re.compile(r"\bpython3?\b[^\n;&|]*?\s-m\s+([A-Za-z_]\w*(?:\.\w+)*)")
 FILE_RUN = re.compile(r"\bpython(?:\d+(?:\.\d+)*)?\s+(?:-\w+\s+)*((?:[\w.-]+/)*[\w.-]+\.py)\b")
+NESTED_CONSTRAINT = re.compile(r"(?:-c\s*|--constraints?(?:=|\s+))(\S+)")
+NESTED_REQUIREMENT = re.compile(r"(?:-r\s*|--requirements?(?:=|\s+))(\S+)")
+NESTED_EDITABLE = re.compile(r"(?:-e\s*|--editable(?:=|\s+))(\S+)")
 LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 INTENTIONAL_SMOKES = {
     ".github/workflows/publish-pypi.yml: pip install --no-cache-dir 'agentihooks==$VERSION'": (
@@ -386,8 +389,6 @@ FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/test.yml: pip install 'playwright>=1.44.0' 'orjson>=3.10'",
     ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
     ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
     ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4' PyYAML==6.0.3",
@@ -403,9 +404,7 @@ FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
     ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
     "scripts/ci_dependency_audit.py: uvx --with 'platformdirs!=4.14.8' pip-audit==2.10.1 -r requirements --no-deps --disable-pip --format json",
-    "scripts/ci_duration_provenance.yml: pip install 'pyyaml>=6.0'",
     "scripts/ci_release.sh: pip install build",
-    "scripts/ci_reuse_job.yml: pip install 'pyyaml>=6.0'",
 )
 
 
@@ -526,15 +525,11 @@ def _python_names(tree: ast.Module, root: Path) -> dict[str, str | list[str]]:
     for statement in tree.body:
         if isinstance(statement, ast.ImportFrom):
             imported |= _imported_strings(statement, root)
-    pairs = [pair for node in ast.walk(tree) if (pair := _assigned(node)) is not None]
-    rebound = [
-        node.target.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name)
-    ]
-    bound = Counter([*imported, *(name for name, _ in pairs), *rebound])
+    nodes = list(ast.walk(tree))
+    stored = [node.id for node in nodes if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)]
+    bound = Counter([*imported, *stored, *(node.arg for node in nodes if isinstance(node, ast.arg))])
     names: dict[str, str | list[str]] = {name: value for name, value in imported.items() if bound[name] == 1}
-    for name, value in pairs:
+    for name, value in (pair for node in nodes if (pair := _assigned(node)) is not None):
         if bound[name] != 1:
             continue
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
@@ -652,11 +647,12 @@ def _pin(text: str) -> tuple[str, str] | None:
 def _pins(path: Path, follow: bool = True) -> set[tuple[str, str]]:
     pins: set[tuple[str, str]] = set()
     for line in path.read_text().splitlines():
-        words = line.split()
-        chained = path.parent / words[-1] if words[:1] in (["-c"], ["--constraint"]) else None
+        text = line.split("#", 1)[0].strip().removesuffix("\\").strip()
+        nested = NESTED_CONSTRAINT.fullmatch(text) or NESTED_REQUIREMENT.fullmatch(text)
+        chained = path.parent / nested.group(1) if nested else None
         if chained is not None and follow and chained.is_file():
             pins |= _pins(chained, follow=False)
-        elif (pin := _pin(line.split("#", 1)[0].strip().removesuffix("\\").strip())) is not None:
+        elif (pin := _pin(text)) is not None:
             pins.add(pin)
     return pins
 
@@ -665,11 +661,11 @@ def _floating_lines(path: Path, seen: frozenset[Path] = frozenset()) -> list[str
     floating: list[str] = []
     for line in path.read_text().splitlines():
         text = line.split("#", 1)[0].strip().removesuffix("\\").strip()
-        flag, _, value = text.partition(" ")
-        nested = path.parent / value.strip()
-        if flag in REQUIREMENT_FLAGS and nested.is_file():
-            floating += [] if nested in seen | {path} else _floating_lines(nested, seen | {path})
-        elif flag in REQUIREMENT_FLAGS | EDITABLE_OPTIONS or (text[:1] not in {"", "-"} and _pin(text) is None):
+        nested = NESTED_REQUIREMENT.fullmatch(text)
+        included = path.parent / nested.group(1) if nested else None
+        if included is not None and included.is_file():
+            floating += [] if included in seen | {path} else _floating_lines(included, seen | {path})
+        elif nested or NESTED_EDITABLE.fullmatch(text) or (text[:1] not in {"", "-"} and _pin(text) is None):
             floating.append(text)
     return floating
 
@@ -722,11 +718,11 @@ def _requirement_problems(options: list[tuple[str, str]], root: Path) -> list[st
 
 
 def _lock_problems(files: list[Path], root: Path) -> list[str]:
+    locks = [root / LOCK if file == root / CONSTRAINTS else file for file in files]
     return [
-        f"{file.relative_to(root).as_posix()} holds {text}"
-        for file in dict.fromkeys(files)
-        if file != root / CONSTRAINTS
-        for text in _floating_lines(file)
+        f"{lock.relative_to(root).as_posix()} holds {text}"
+        for lock in dict.fromkeys(locks)
+        for text in _floating_lines(lock)
     ]
 
 
