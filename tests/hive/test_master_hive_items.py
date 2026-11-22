@@ -286,20 +286,30 @@ def test_a_lost_hive_tells_the_master_of_each_swarm_it_ran_once_and_keeps_the_hu
 
 
 @pytest.mark.feature("master-hive-drain-item")
-def test_a_failed_master_send_still_logs_every_lost_hive_first(
-    hub: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_a_failed_master_send_logs_every_loss_and_still_sends_the_other_masters_items(
+    store: RedisStore, hub: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    import redis
+
     from scripts.hive import master_notice, presence
 
-    monkeypatch.setattr(master_notice, "lost", Mock(side_effect=ConnectionError("redis is down")))
+    real = master_notice.lost
+
+    def lost(client: Any, swarm: str, hive: str, exits: list[Any]) -> None:
+        if swarm == "sw":
+            raise redis.ConnectionError("redis is down")
+        real(client, swarm, hive, exits)
+
+    monkeypatch.setattr(master_notice, "lost", lost)
     _start(hub, "sw", "engineer@1", "execution-a")
     _start(hub, "other", "engineer@3", "execution-c")
     presence.beat(hub.bus, LOST_HIVE, T0)
 
-    with pytest.raises(ConnectionError):
-        _poll_until(hub, T0 + presence.TTL_MS)
+    _poll_until(hub, T0 + presence.TTL_MS)
 
+    assert (_master(store, "sw"), len(_master(store, "other"))) == ([], 1)
     assert capsys.readouterr().err.splitlines() == [
         f"hub: hive {LOST_HIVE} of swarm sw lost; exited execution execution-a of task task-execution-a",
         f"hub: hive {LOST_HIVE} of swarm other lost; exited execution execution-c of task task-execution-c",
+        f"hub: hive {LOST_HIVE} of swarm sw lost; its master item failed (redis is down)",
     ]

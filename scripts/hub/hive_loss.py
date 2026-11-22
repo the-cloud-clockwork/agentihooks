@@ -126,12 +126,16 @@ class HiveLoss:
         return done, exits
 
     def _report(self, losses: list[tuple[str, str, list[Envelope]]]) -> None:
-        """Log every lost hive with the executions it ended, then tell the master of each swarm once."""
+        """Log every lost hive with the executions it ended, then tell the master of each swarm once, logging a send
+        the store refused and going on to the next swarm."""
         for swarm, hive, exits in losses:
             print(f"hub: hive {hive} of swarm {swarm} lost; exited {master_notice.ended(exits)}", file=sys.stderr)
         if self._store is not None:
             for swarm, hive, exits in losses:
-                master_notice.lost(self._store.redis, swarm, hive, exits)
+                try:
+                    master_notice.lost(self._store.redis, swarm, hive, exits)
+                except swarm_store.store_errors() as exc:
+                    print(f"hub: hive {hive} of swarm {swarm} lost; its master item failed ({exc})", file=sys.stderr)
 
     def _edit(self, change: Callable[[dict[str, Any]], bool]) -> None:
         for _ in range(8):
