@@ -34,7 +34,7 @@ SHEET = "11,41 * * * *"
 EMAIL = "13,43 * * * *"
 NUDGE = "17 * * * *"
 CREW = "9,39 * * * *"
-ALWAYS = sorted([LOOP, DRIFT, NUDGE])
+ALWAYS = [NUDGE]
 HOOKS = {name: getattr(seat_crons, name) for name in ("on_start", "on_stop", "on_join")}
 env, run = test_cli.env, test_cli.run
 
@@ -75,11 +75,9 @@ def payload(expression: str) -> str:
     return next(view["payload"] for view in aimed() if view["expression"] == expression)
 
 
-def by_hand(expression: str, seat: str = SEAT) -> str:
+def by_hand(expression: str, seat: str = SEAT, owner: str = "master@323133-0991") -> str:
     """A cron a master added by hand with agentihooks cron add, owned by the master and aimed at the seat."""
-    made = commands.add_cron(
-        seat_crons.scheduler(), "master@323133-0991", InboxSlot(seat), "by hand", expression=expression
-    )
+    made = commands.add_cron(seat_crons.scheduler(), owner, InboxSlot(seat), "by hand", expression=expression)
     return made["id"]
 
 
@@ -115,8 +113,6 @@ def test_start_puts_the_standing_seat_crons_on_the_scheduler(env: Env) -> None:
     assert sorted(view["expression"] for view in views) == ALWAYS
     assert {view["owner"] for view in views} == {"agentihooks master seat crons"}
     assert {view["timezone"] for view in views} == {"UTC"}
-    assert payload(LOOP).startswith("Master loop (seat cron): read agentihooks swarm sw status")
-    assert payload(DRIFT).startswith("Drift check (seat cron): read agentihooks swarm sw status")
     assert payload(NUDGE).startswith(f"{safety_nudge.TEXT}, read agentihooks swarm sw status")
     assert all(view["payload"].endswith("Write nothing to the operator.") for view in views)
 
@@ -127,7 +123,7 @@ def test_a_second_start_keeps_the_same_seat_crons(env: Env) -> None:
     run(SLUG, "start")
     first = ids()
     assert run(SLUG, "start") == 0
-    assert ids() == first and len(first) == 3
+    assert ids() == first and len(first) == 1
 
 
 @pytest.mark.feature("master-seat-durable-crons")
@@ -160,19 +156,50 @@ def test_only_the_front_door_master_join_puts_seat_crons(
 @pytest.mark.feature("master-seat-durable-crons")
 def test_hand_made_seat_crons_are_adopted_and_their_duplicates_cancelled(env: Env) -> None:
     created()
-    nudge, loop, extra, crew = by_hand(NUDGE), by_hand(LOOP), by_hand(LOOP), by_hand(CREW)
+    nudge, extra, crew = by_hand(NUDGE), by_hand(NUDGE), by_hand(CREW)
     other = by_hand(NUDGE, "master@other")
     run(SLUG, "start")
     run(SLUG, "start")
     found: dict[str, list[str]] = {}
     for view in aimed():
         found.setdefault(view["expression"], []).append(view["id"])
-    assert found[NUDGE] == [nudge] and found[CREW] == [crew]
-    assert len(found[LOOP]) == 1 and found[LOOP][0] in (loop, extra)
-    assert len(found[DRIFT]) == 1 and sorted(found) == sorted([*ALWAYS, CREW])
-    dropped = extra if found[LOOP] == [loop] else loop
+    assert found[CREW] == [crew] and sorted(found) == sorted([*ALWAYS, CREW])
+    assert len(found[NUDGE]) == 1 and found[NUDGE][0] in (nudge, extra)
+    dropped = extra if found[NUDGE] == [nudge] else nudge
     assert seat_crons.scheduler().get(dropped).state == "cancelled"
     assert ids("master@other") == [other]
+
+
+@pytest.mark.feature("master-seat-durable-crons")
+@pytest.mark.parametrize("via", ["start", "join"])
+def test_a_start_or_join_on_a_swarm_holding_the_old_loop_and_drift_crons_leaves_only_the_wall_clock_crons(
+    env: Env, monkeypatch: pytest.MonkeyPatch, via: str
+) -> None:
+    created()
+    old = [by_hand(LOOP, owner=seat_crons.OWNER), by_hand(DRIFT, owner=seat_crons.OWNER), by_hand(LOOP)]
+    crew = by_hand(CREW)
+    other = by_hand(LOOP, "master@other", seat_crons.OWNER)
+    if via == "start":
+        assert run(SLUG, "start") == 0
+    else:
+        SeatRegistry(env[0].redis).occupy(SEAT, FRONT, 1)
+        join(env, monkeypatch, FRONT)
+    assert schedules() == sorted([*ALWAYS, CREW]) and crew in ids()
+    assert [seat_crons.scheduler().get(cron).state for cron in old] == ["cancelled"] * 3
+    assert ids("master@other") == [other]
+
+
+@pytest.mark.feature("master-seat-durable-crons")
+def test_a_fresh_swarm_gets_only_the_wall_clock_crons(env: Env) -> None:
+    created()
+    script = Path.home() / "scratchpad" / "repo" / "sw-master" / "progress-sheet" / "progress_sheet.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("")
+    state = Path.home() / ".swarm-progress-notification-email" / "repo" / "state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({"enabled": True, "cadence_hours": 1}))
+    assert run(SLUG, "start") == 0
+    assert schedules() == sorted([NUDGE, SHEET, EMAIL])
 
 
 @pytest.mark.feature("master-seat-durable-crons")
