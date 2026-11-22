@@ -8600,7 +8600,7 @@
         "tests/tick/test_placement_worker.py::test_a_lock_taking_step_on_the_slow_lane_runs_on_the_placement_worker",
         "tests/tick/test_placement_worker.py::test_a_call_step_that_declares_the_placement_lock_runs_its_call_holding_it",
         "tests/tick/test_placement_worker.py::test_a_write_step_that_declares_the_placement_lock_runs_its_call_holding_it",
-        "tests/tick/test_placement_worker.py::test_the_eight_steps_that_place_agents_declare_the_placement_lock"
+        "tests/tick/test_placement_worker.py::test_the_nine_steps_that_place_agents_declare_the_placement_lock"
       ]
     },
     {
