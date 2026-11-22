@@ -1,7 +1,7 @@
 """Order times: when the operator's order reached each open task of a ledger."""
 
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 from scripts.swarm import freeze
 
@@ -10,11 +10,11 @@ MARK = "ordered"
 
 def marked(row: dict[str, Any]) -> int | None:
     """The time of the row's order mark, None when it carries no well formed one."""
-    mark: object = row.get(MARK)
-    if not isinstance(mark, dict):
-        return None
-    at = cast("dict[str, object]", mark).get("at")
-    return at if type(at) is int else None
+    match row.get(MARK):
+        case {"at": int() as at} if type(at) is int:
+            return at
+        case _:
+            return None
 
 
 def stamps(doc: dict[str, Any]) -> dict[str, int]:

@@ -309,6 +309,7 @@ def test_behind_names_the_old_waiting_offers_ahead_of_an_offer_of_a_higher_class
     assert readiness.behind([n, o], [], view, LATER) == {n.id}
     assert readiness.behind([n, o, u], [], view, LATER) == {n.id, o.id}
     assert readiness.behind([o, n], [waiting(view, "u", 0)], view, LATER) == {o.id, n.id}
+    assert readiness.behind([o], [waiting(view, "n", 0), waiting(view, "u", 0)], view, LATER) == {o.id}
     assert readiness.behind([o2, n], [waiting(view, "o", 0)], view, LATER) == {n.id}
     assert readiness.behind([o2], [waiting(view, "o", 0)], view, LATER) == set()
     assert readiness.behind([waiting(view, "n", WINDOW - 1), o], [], view, LATER) == set()
