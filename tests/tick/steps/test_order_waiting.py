@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from scripts.tick import registry
+from scripts.tick.steps import hook_domains
 from tests.swarm.test_freeze import record, task
 from tests.swarm.test_order_check import ORDER, ledger_doc
 
@@ -48,6 +49,7 @@ def test_order_waiting() -> None:
         "swarm-order-waiting-finding",
         frozenset({"coordination"}),
     )
+    assert (found.reads, found.interval_s) == (hook_domains("doc"), 600)
 
 
 @pytest.mark.feature("swarm-order-waiting-finding")
@@ -116,6 +118,8 @@ def test_each_pass_stores_its_time_and_keeps_the_time_an_order_was_first_seen_wa
     from scripts.swarm.health import order_waiting
 
     ledger = ledger_doc([task("t1"), task("t2", depends_on=["t9"]), task("t9", phase="p2")], p1=ORDER)
+    assert order_waiting.read(store, SLUG) == {}
+    assert order_waiting.findings(store, SLUG) == []
     order_waiting.observe(store, SLUG, ledger, START)
     noted = order_waiting.observe(store, SLUG, ledger, START + MINUTE)
     waiting = {"since": START, "title": "Build", "unfinished": 2, "claimable": 1, "held": ["it waits on task t9"]}
@@ -145,10 +149,15 @@ def test_the_step_notes_the_orders_of_the_pass_state(store: Any) -> None:
     from scripts.swarm.health import order_waiting
     from scripts.tick.steps import orders
 
-    state = {"store": store, "slug": SLUG, "doc": ledger_doc([task("t1")], p1=ORDER)}
+    state = {"store": store, "slug": SLUG, "doc": ledger_doc([task("t1")], p1=ORDER), "box": {}}
     assert orders._order_waiting(SimpleNamespace(now_ms=lambda: START), state.__getitem__) == []
     assert order_waiting.read(store, SLUG)["at"] == START
     assert list(order_waiting.read(store, SLUG)["orders"]) == ["phases/p1"]
+    registered: Any = {step.name: step for step in registry.steps()}["order waiting"]
+    assert registered.call(None, state.__getitem__) == []
+    assert state["box"] == {}
+    assert order_waiting.read(store, SLUG)["at"] != START
+    assert order_waiting.read(store, SLUG)["orders"]["phases/p1"]["since"] == START
 
 
 @pytest.mark.feature("swarm-order-waiting-finding")

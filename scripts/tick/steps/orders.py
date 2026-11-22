@@ -1,15 +1,19 @@
-"""The orders steps of the tick."""
+"""The orders steps of the tick: note each operator order nobody works on."""
 
-from collections.abc import Callable
 from typing import Any
 
+from scripts.swarm import timing
 from scripts.tick import registry
 from scripts.tick.step import Lane
-from scripts.tick.steps import CallStep
+from scripts.tick.steps import CallStep, hook_domains
+from scripts.tick.steps.host import Get, held
 
 
-def _order_waiting(tick: Any, get: Callable[[str], Any]) -> list[str]:
-    """Return the actions of the order waiting step, given the tick module and a reader of the pass state."""
+def _order_waiting(cli: Any, get: Get) -> list[str]:
+    """Note each open operator order whose unfinished tasks have nothing claimed or in a pull request."""
+    from scripts.swarm.health import order_waiting
+
+    timing.call(order_waiting.observe, get("store"), get("slug"), get("doc"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
     return []
 
 
@@ -17,9 +21,9 @@ registry.register(
     CallStep(
         "order waiting",
         "wrapper phases",
-        _order_waiting,
+        held(_order_waiting),
         needs=frozenset(),
-        reads=frozenset(),
+        reads=hook_domains("doc"),
         writes=frozenset(),
         lane=Lane("slow"),
         effects=frozenset({"coordination"}),
