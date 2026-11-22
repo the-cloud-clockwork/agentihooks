@@ -25,6 +25,10 @@ def _state() -> dict[str, Any]:
     }
 
 
+def _step() -> Any:
+    return {step.name: step for step in registry.steps()}["expert seats"]
+
+
 def _tick(panic: list[object], calls: list[tuple[Any, ...]]) -> SimpleNamespace:
     return SimpleNamespace(
         panic=SimpleNamespace(state=lambda store, slug: panic[0] if slug == "sw" else None),
@@ -37,7 +41,7 @@ def test_expert_seats() -> None:
     """The expert seats step registers in group dispatch seat on the tick lane with its feature and ports, after the
     drained resume, reading the config and placing."""
     import_module("scripts.tick.steps.experts")
-    found = {step.name: step for step in registry.steps()}["expert seats"]
+    found = _step()
     assert (found.group, found.lane, found.feature, found.effects) == (
         "dispatch seat",
         "tick",
@@ -54,7 +58,7 @@ def test_the_step_runs_the_expert_seats_pass_and_nothing_while_panic_holds() -> 
     calls: list[tuple[Any, ...]] = []
     panic: list[object] = ["halted"]
     state = _state()
-    step = {step.name: step for step in registry.steps()}["expert seats"]
+    step = _step()
     assert step.call(_tick(panic, calls), state.get) == []
     assert calls == [] and RAISED not in state["box"]
     panic[0] = None
@@ -74,6 +78,6 @@ def test_the_step_holds_the_exception_its_pass_raises(monkeypatch: pytest.Monkey
         panic=SimpleNamespace(state=lambda store, slug: None),
         skip_refused=lambda function, *args: function(*args),
     )
-    step = {step.name: step for step in registry.steps()}["expert seats"]
+    step = _step()
     assert step.call(tick, state.get) == []
     assert state["box"][RAISED] is failure
