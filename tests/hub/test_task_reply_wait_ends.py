@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 from typing import cast
 
-import fakeredis
 import pytest
 
 from scripts.events import memory
@@ -37,6 +36,8 @@ def _wake(item_id: str) -> Envelope:
 
 @pytest.fixture
 def rig() -> SimpleNamespace:
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
     store.put_agent("sw", AgentRecord(name=PEER, lane="eng", task="t2", seat="eng-2@sw"))
