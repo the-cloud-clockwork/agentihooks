@@ -158,9 +158,11 @@ curl -fsS http://lab:9108/metrics \
   | grep --line-buffered -E '^ci_lab_(slots_total|slots_busy|queue_wait_seconds|budget_fraction|class_shed)'
 ```
 
-`/capacity` returns the [capacity document](#capacity-document). Each capacity request and
-metrics scrape builds a fresh load from queue, lease, live grade, recent worker offer and
-daily budget state; separate requests can observe different instants. Without recent worker
+`/capacity` returns the [capacity document](#capacity-document). Each capacity request on 8800
+builds a fresh load from queue, lease, live grade, recent worker offer and daily budget state;
+separate requests can observe different instants. Port 9108 answers `/metrics` and `/capacity`
+from the last load its own serve loop built, and `ci_lab_load_age_seconds` gives that load's age.
+Without recent worker
 offers and leased jobs, a running scheduler can report zero total slots. Offers expire after
 60 seconds, and unit estimates remain fixed at 60 seconds per slot.
 
@@ -273,9 +275,9 @@ the token from `CI_LAB_CONTROL_TOKEN` on its host.
 | `ci_lab_verdict_mismatch_total` | `gate` | `VERDICT_MISMATCH_TOTAL` |
 | `ci_lab_load_age_seconds` | | `LOAD_AGE_SECONDS` |
 
-The scheduler sets every metric its queue, lease and worker state answers, the node mirror's age
-and the GitHub calls left, on one `scripts.ci_lab.metrics.Registry` the `Scheduler` builds and
-`listen` serves on 9108:
+The scheduler sets every metric its queue, lease and worker state answers, the node mirror's age,
+the served load's age and the GitHub calls left, on one `scripts.ci_lab.metrics.Registry` the
+`Scheduler` builds and `listen` serves on 9108:
 
 | Metric | Set from |
 |---|---|
@@ -288,6 +290,7 @@ and the GitHub calls left, on one `scripts.ci_lab.metrics.Registry` the `Schedul
 | `ci_lab_heads_graded_total` | Each grade a pass closes, by class and conclusion |
 | `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | Each expired lease a pass requeues or marks lost |
 | `ci_lab_mirror_age_seconds` | `metrics.observe_mirror` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the epoch second in the `fetched-at` stamp under `CI_LAB_GIT_MIRROR`, never below zero; no sample while the stamp is missing or holds no whole number. The node cache writes that stamp; the scheduler's own fetch writes none |
+| `ci_lab_load_age_seconds` | `metrics.observe_age` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the build of the load snapshot the port serves started, never below zero; see [Capacity document](#capacity-document) |
 | `ci_lab_github_rate_remaining` | `metrics.observe_rate` on every check runs answer the scheduler's and the relay's `Checks` posters get, retries and refusals included: its `x-ratelimit-remaining` header when that holds a whole number; an answer without one keeps the last value |
 
 A worker unit's report carries `caches` from `scripts.ci_lab.caches.report`: per revision it
@@ -315,9 +318,20 @@ snapshot sets the queue, slot and `ci_lab_queue_wait_seconds` gauges through
 `scripts.ci_lab.metrics.observe_load`. The swarm tick reads the document to decide the
 [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold).
 
-The scheduler service builds the snapshot on every request with
-`scripts.ci_lab.scheduler.Scheduler.load` and serves `/capacity` on port 8800 and `/metrics` on
-9108 from it, through `scripts.ci_lab.scheduler.listen`:
+The scheduler service builds the snapshot with `scripts.ci_lab.scheduler.Scheduler.load` and
+serves it through `scripts.ci_lab.scheduler.listen`. Port 8800 builds one on every `/capacity`
+request. Port 9108 serves `/metrics` and `/capacity` from the last snapshot a
+`scripts.ci_lab.metrics.Latest` holds. Its first read builds the snapshot once, however many reads
+meet that build, and a failed first build fails its read so the next read builds again. Every
+later read answers at once with the last finished build and sets `ci_lab_load_age_seconds` to the
+seconds since that build started. Between requests the port's serve loop runs `Latest.refresh`,
+which starts one background build, a daemon thread named `ci-lab-load-refresh`, once the last
+build started `REFRESH_MS` (15 seconds) ago and no build runs. Builds run one at a time, back to
+back while one takes longer than 15 seconds, so the served snapshot is at most one build plus the
+longer of 15 seconds and one build old; a failed build keeps the last snapshot, and the next waits
+until 15 seconds have passed since the failed one started.
+
+`Scheduler.load` builds each field from:
 
 | Field | Built from |
 |---|---|
@@ -618,8 +632,10 @@ Only the scheduler sets lab series. The worker serves `/metrics` on 9108 through
 `metrics.serve_registry` from a registry of its own that observes nothing, so its exposition holds
 the `HELP` and `TYPE` lines and no sample: a worker scrape target reads up without doubling the
 scheduler's series, which already count every unit from its report. `scripts.ci_lab.scheduler.listen`
-binds the metrics port with a fresh `metrics.Registry`, and every `GET /metrics` sets these from
-the scheduler's load snapshot through `metrics.observe_load`:
+binds the metrics port with a fresh `metrics.Registry`, and every `GET /metrics` sets these
+through `metrics.observe_load` from the last load snapshot the port holds, which its serve loop
+rebuilds on its own cadence (see [Capacity document](#capacity-document)), and sets
+`ci_lab_load_age_seconds` to that snapshot's age:
 
 - `ci_lab_units_queued`, `ci_lab_units_running`, `ci_lab_class_shed` and
   `ci_lab_queue_wait_seconds`, once for each of the five classes
@@ -631,7 +647,7 @@ them:
 
 | Series | Read by | Until a service sets it |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` on every scrape |
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `CILabSchedulerBlind` fires 10 minutes after a `ci-lab-scheduler` Deployment with a replica appears, and the `wanted` lines stay empty. The scheduler sets it from `scripts.ci_lab.budget.slots_wanted` of the served load snapshot on every scrape, so it lags the queue by that snapshot's age, `ci_lab_load_age_seconds`; a stale series never fires `CILabSchedulerBlind`, and the age shows a refresh that stopped |
 | `ci_lab_units_overdue` | `CILabUnitsOverdue` | The alert cannot fire |
 | `ci_lab_workers_ready` | Workers ready against desired | The `heartbeat` line stays empty |
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
