@@ -76,9 +76,9 @@ from scripts.swarm import (
     enhance_review,
     expert_commands,
     expert_launch,
-    expert_seat,
     failed_panes,
     git_https,
+    handoff_commands,
     hive_release,
     idle,
     launch_check,
@@ -2496,6 +2496,7 @@ def _hand_off(
     waits.settle_notices(InboxStore(store.redis), agent, "a handoff")
     rows = _own_rows(ledger, slug, agent.task)
     envelope = handoff_envelope.build(store, slug, agent, reason, rows, now_ms())
+    envelope = handoff_envelope.with_orders(envelope, store, ledger, agent)
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
     if hive_release.release(ledger, slug, (rows or [{}])[0], agent.name):
@@ -2565,12 +2566,7 @@ def cmd_restack(store, args):
 
 
 def cmd_confirm_handoff(store: RedisStore, args: argparse.Namespace) -> None:
-    agent = _me(store, args)
-    if agent.name not in HerdrRuntime().live_names():
-        raise SwarmError("Only a live successor can confirm its handoff")
-    result = transfers.confirm(store, args.slug, args.transfer, agent, args.next, now_ms())
-    expert_seat.drop_confirmed(store, args.slug, agent)
-    print(json.dumps(result))
+    handoff_commands.confirm(store, args, _me(store, args), HerdrRuntime().live_names())
 
 
 def cmd_restore_decision(store, args):

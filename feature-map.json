@@ -12659,6 +12659,7 @@
         "tests/swarm/test_expert_seat.py::test_an_expert_lost_without_a_handoff_leaves_its_successor_a_recovery_handoff",
         "tests/swarm/test_expert_seat.py::test_an_expert_lost_before_it_confirmed_its_handoff_has_that_handoff_offered_again",
         "tests/swarm/test_expert_seat.py::test_an_expert_that_confirms_its_handoff_takes_it_off_the_seat_so_a_later_loss_is_a_recovery",
+        "tests/swarm/test_handoff_commands.py::test_an_experts_confirmation_prints_the_transfer_and_takes_the_handoff_off_its_lineage_seat",
         "tests/swarm/test_expert_seat.py::test_a_lineage_started_from_a_handoff_gives_its_first_expert_that_handoff_to_confirm",
         "tests/test_expert_handoffs_check.py::test_the_handoff_a_lineage_was_started_from_is_held_to_handoff_v2",
         "tests/test_expert_seats_check.py::test_each_running_lineage_is_listed_with_the_one_expert_on_its_seat_or_none",
@@ -13153,6 +13154,34 @@
       ]
     },
     {
+      "id": "master-handoff-carries-orders",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "A master seat change carries the operator's open orders by code. The handoff envelope of a master holds one plain line per open order, an empty list when none is open and unknown when the ledger could not be read, whether the master hands off through the swarm command or the stall pass recycles it; a ledger error never stops the handoff, and no other lane's envelope carries or reads orders. The recovery handoff a draining hive writes for a master still running at its deadline reads no ledger and names the orders unknown. The successor's opening prompt lists those lines before the handoff document. The master refocus block lists the open phases an order stands on first, oldest order first, by id and title, and they are the phases the orders read holds open: a done or out of scope phase is no order. Reading a mark there loads no claim gate code, because the refocus hook runs on every tool call. The master loop seat cron tells the master to read the orders every loop and that only the operator's words clear one; a seat cron the code owns whose text is no longer the code's is replaced once, and a cron a master added by hand stays adopted, wherever the scheduler lists it beside one the code owns.",
+      "seam": "scripts.handoff.envelope.with_orders, agentihooks swarm handoff for a master, the master stall recycle, the hive drain recovery handoff, scripts.swarm.prompt.handoff_lines, hooks.context.swarm_refocus.build_block for the master task and the crons agentihooks swarm start keeps aimed at master@<slug>",
+      "tests": [
+        "tests/swarm/test_order_continuity.py::test_a_master_envelope_carries_one_line_for_each_open_order",
+        "tests/swarm/test_order_continuity.py::test_an_engineer_envelope_carries_no_orders_and_reads_none",
+        "tests/swarm/test_order_continuity.py::test_a_master_envelope_reads_the_orders_with_the_fix_phase_of_its_swarm",
+        "tests/swarm/test_order_continuity.py::test_a_master_handoff_through_the_swarm_command_stores_the_open_orders",
+        "tests/swarm/test_order_continuity.py::test_a_ledger_that_cannot_be_read_never_stops_a_master_handoff",
+        "tests/swarm/test_order_continuity.py::test_an_engineer_handoff_through_the_swarm_command_reads_no_orders",
+        "tests/swarm/test_order_continuity.py::test_a_master_the_stall_pass_recycles_leaves_the_open_orders",
+        "tests/swarm/test_order_continuity.py::test_the_opening_prompt_lists_the_orders_of_the_envelope_before_the_document",
+        "tests/swarm/test_order_continuity.py::test_an_envelope_without_orders_primes_as_before",
+        "tests/context/test_swarm_refocus.py::test_the_master_block_lists_phases_under_an_operator_order_first_by_id_and_title",
+        "tests/context/test_swarm_refocus.py::test_the_ordered_phases_lead_the_phases_share_when_it_is_clipped",
+        "tests/context/test_swarm_refocus.py::test_an_ordered_phase_with_no_id_or_title_keeps_its_place",
+        "tests/context/test_swarm_refocus.py::test_listing_the_ordered_phases_loads_no_claim_gate_code",
+        "tests/swarm/test_seat_crons.py::test_the_master_loop_cron_reads_the_operator_orders_every_loop",
+        "tests/swarm/test_seat_crons.py::test_a_seat_cron_the_code_owns_with_an_older_text_is_replaced_once",
+        "tests/swarm/test_seat_crons.py::test_a_hand_made_cron_is_adopted_in_place_of_an_older_code_owned_one",
+        "tests/swarm/test_seat_crons.py::test_a_hand_made_cron_is_adopted_in_place_of_the_code_owned_one_wherever_it_is_listed",
+        "tests/hive/test_remove.py::test_a_master_still_running_at_the_deadline_gets_a_recovery_envelope_naming_its_orders_unknown"
+      ]
+    },
+    {
       "id": "swarm-focus-verdict",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
@@ -13212,6 +13241,27 @@
         "tests/tick/steps/test_focus_unclaimed.py::test_a_task_below_three_ticks_does_not_stop_the_finding_of_the_next_one",
         "tests/tick/steps/test_focus_unclaimed.py::test_no_stored_count_is_no_finding",
         "tests/tick/steps/test_focus_unclaimed.py::test_the_doctor_fix_phase_comes_from_the_swarm_config"
+      ]
+    },
+    {
+      "id": "swarm-order-waiting-finding",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
+      "behaviour": "The slow lane tick step order waiting notes, every ten minutes, each open operator order whose unfinished tasks have nothing claimed or in a pull request and when it first saw that; an order with work in flight, with no unfinished task or done drops out. Past thirty minutes between its first sighting and the last one the order is an order waiting health finding naming the order, its unfinished and claimable counts and each distinct reason the claim gate holds its tasks, and the findings pass mails it to the master. Every figure is the last sighting's: at the step's cadence the finding comes with the sighting forty minutes after the first, a claim taken and released between two sightings is not seen, and a step that stops running is the step starvation finding's to report. A ledger with no order raises none.",
+      "seam": "scripts.tick.steps.orders._order_waiting registered as tick step order waiting, scripts.swarm.health.order_waiting.observe and findings on a swarm store, and scripts.swarm.status.findings",
+      "tests": [
+        "tests/tick/steps/test_order_waiting.py::test_order_waiting",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_with_open_tasks_and_nothing_in_flight_past_thirty_minutes_is_a_finding",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_whose_open_tasks_are_all_claimable_says_nobody_claimed_one",
+        "tests/tick/steps/test_order_waiting.py::test_work_in_flight_under_an_order_drops_it_and_the_wait_starts_again",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_with_no_open_task_a_done_order_and_a_ledger_without_orders_raise_none",
+        "tests/tick/steps/test_order_waiting.py::test_each_pass_stores_its_time_and_keeps_the_time_an_order_was_first_seen_waiting",
+        "tests/tick/steps/test_order_waiting.py::test_an_ordered_task_and_an_ordered_phase_are_each_one_finding",
+        "tests/tick/steps/test_order_waiting.py::test_an_order_with_work_in_flight_or_a_shorter_wait_never_hides_one_that_waited_longer",
+        "tests/tick/steps/test_order_waiting.py::test_the_order_is_read_with_the_doctor_fix_phase_of_its_swarm",
+        "tests/tick/steps/test_order_waiting.py::test_the_step_notes_the_orders_of_the_pass_state",
+        "tests/tick/steps/test_order_waiting.py::test_the_finding_is_in_the_swarm_status_findings_and_goes_to_the_master_inbox"
       ]
     },
     {
