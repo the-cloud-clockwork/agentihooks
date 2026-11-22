@@ -55,6 +55,12 @@ def test_each_start_takes_the_next_lineage_and_the_same_text_keeps_one_address(s
     assert [row.id for row in expert_lineage.running(store, "other")] == ["expert-1"]
 
 
+def test_a_lineage_takes_its_number_from_the_expert_sequence_of_its_swarm(store: RedisStore) -> None:
+    store.redis.set(store.key("sw", "expert-seq"), 41)
+    assert started(store).id == "expert-42"
+    assert store.redis.get(store.key("sw", "expert-seq")) == "42"
+
+
 def test_the_running_lineages_list_in_the_order_started_whatever_their_ids(store: RedisStore) -> None:
     late, early = started(store, at=9), started(store, at=3)
     assert [row.id for row in expert_lineage.running(store, "sw")] == [early.id, late.id] == ["expert-2", "expert-1"]
