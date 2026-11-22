@@ -12659,6 +12659,7 @@
         "tests/swarm/test_expert_seat.py::test_an_expert_lost_without_a_handoff_leaves_its_successor_a_recovery_handoff",
         "tests/swarm/test_expert_seat.py::test_an_expert_lost_before_it_confirmed_its_handoff_has_that_handoff_offered_again",
         "tests/swarm/test_expert_seat.py::test_an_expert_that_confirms_its_handoff_takes_it_off_the_seat_so_a_later_loss_is_a_recovery",
+        "tests/swarm/test_handoff_commands.py::test_an_experts_confirmation_prints_the_transfer_and_takes_the_handoff_off_its_lineage_seat",
         "tests/swarm/test_expert_seat.py::test_a_lineage_started_from_a_handoff_gives_its_first_expert_that_handoff_to_confirm",
         "tests/test_expert_handoffs_check.py::test_the_handoff_a_lineage_was_started_from_is_held_to_handoff_v2",
         "tests/test_expert_seats_check.py::test_each_running_lineage_is_listed_with_the_one_expert_on_its_seat_or_none",
