@@ -5,7 +5,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from hooks.context import context_recycle
-from scripts.swarm import outage
+from scripts.swarm import expert_launch, expert_lineage, outage
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 if TYPE_CHECKING:
@@ -35,6 +35,8 @@ def _owns(store: RedisStore, slug: str, agent: AgentRecord, ledger: Any) -> bool
         return False
     if agent.lane == MASTER:
         return True
+    if agent.lane == expert_launch.LANE:
+        return expert_lineage.runs(store, slug, agent.task)
     task = ledger.task(slug, agent.task) or {}
     return (
         task.get("state") in {"claimed", "pr"}
@@ -97,6 +99,10 @@ def note_resume(store: RedisStore, slug: str, agent: AgentRecord, at: int) -> No
 
 
 def _hand_off_capped(store: RedisStore, slug: str, agent: AgentRecord, at: int) -> None:
+    """Leave the task a handoff that says its agent kept ending. An expert gets none here: the expert seats pass
+    writes the recovery handoff of its seat, in the expert handoff form."""
+    if agent.lane == expert_launch.LANE:
+        return
     from scripts.handoff import envelope, transfers
     from scripts.swarm_ledger.ledger_workspace import folder
 

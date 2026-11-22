@@ -127,6 +127,7 @@ running lineage and keeps its seat:
 | A running lineage with an empty seat | Launches one expert on it. The expert's opening names its number in the lineage. |
 | A seat that holds an expert, working or not yet retired | Nothing: one seat never holds two experts. |
 | An accepted handoff waiting on the seat | Launches the next expert with that handoff and the transfer it confirms. |
+| An expert whose session was lost while its lineage runs | Resumes it in its own conversation and seat, up to three times in a row, unless the handoff on its seat is one it never confirmed. Its mail stays with the seat. |
 | An empty seat whose last expert was lost | Leaves the next expert a handoff first. If the lost expert never confirmed the handoff it was given, that handoff is offered again. Otherwise the swarm writes a recovery handoff: every deliverable pending and marked unknown, the mission and the seat recap to read first. |
 | An expert whose lineage was stopped | Closes its open mail with the reason and finishes it. |
 | An expert whose lineage completed | Runs the closing steps of the completion again from the kept proof, so the master is told once and the recap is kept even when the expert's session died first. |
@@ -134,7 +135,8 @@ running lineage and keeps its seat:
 A launch waits, and says why, while the swarm has no session slot, the host is
 full or the lineage is placed elsewhere. Nothing launches while the swarm is
 paused, stopping, stopped or in panic. The handoff an expert was given stays on
-the seat until that expert confirms it.
+the seat until that expert confirms it. When a lineage is stopped or completes,
+mail still open on its seat goes to the master's seat with the reason.
 
 ## Starting from a handoff
 

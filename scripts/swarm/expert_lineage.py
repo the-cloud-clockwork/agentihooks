@@ -85,6 +85,11 @@ def get(store: Any, slug: str, name: str) -> Lineage:
     return Lineage(**json.loads(raw))
 
 
+def runs(store: Any, slug: str, name: str) -> bool:
+    """Whether the lineage of that id is running; an unknown id is refused."""
+    return get(store, slug, name).state == RUNNING
+
+
 def running(store: Any, slug: str) -> list[Lineage]:
     """The lineages of the swarm that have not ended, in the order started. The set of their ids bounds the read, so
     code that runs every pass never reads the lineages that ended."""

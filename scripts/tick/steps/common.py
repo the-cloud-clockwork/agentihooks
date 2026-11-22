@@ -9,7 +9,7 @@ from dataclasses import replace
 from importlib import import_module
 from typing import Any
 
-from scripts.swarm import claim_lost
+from scripts.swarm import claim_lost, expert_launch, expert_lineage
 
 DROP_REFUSED = ", the store refused its drop, retrying next pass"
 
@@ -70,8 +70,14 @@ def _drop(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, 
     reopen = held and tick._reopen(slug, ledger, rows, agent.task, expected)
     if reopen and agent.seat:
         store.keep_seat(slug, agent.task, agent.seat)
-    _settle_exit(store, agent.name, agent.seat if reopen else "")
+    _settle_exit(store, agent.name, agent.seat if reopen or _lineage_goes_on(slug, store, agent) else "")
     return handed or (f", task {agent.task} reopened" if reopen else "")
+
+
+def _lineage_goes_on(slug: str, store: Any, agent: Any) -> bool:
+    """True for a dropped expert whose lineage still runs: its seat gets a successor, so its mail goes on with the
+    seat."""
+    return agent.lane == expert_launch.LANE and expert_lineage.runs(store, slug, agent.task)
 
 
 def _merge_wait(store: Any, slug: str, row: dict[str, Any], name: str) -> dict[str, Any] | None:

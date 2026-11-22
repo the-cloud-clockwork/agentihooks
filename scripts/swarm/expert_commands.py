@@ -24,6 +24,8 @@ from scripts.swarm import clearance, expert_launch, expert_lineage, expert_missi
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 
 VACANT = "no expert yet"
+SWARM = "swarm"
+RETURNED = "expert lineage {id} is {state} and no expert holds its seat any more"
 ORPHAN = "--from names the session a handoff document comes from; give the document with --handoff"
 ONLY = "only the expert that works a running lineage completes it, from its own session"
 REFUSED = "mission proof refused; fix what it names and run the command again:"
@@ -149,7 +151,16 @@ def cmd_stop(store: Any, args: argparse.Namespace) -> None:
     """End a running lineage with a note, for the master or the operator."""
     store.config(args.slug)
     ended = expert_lineage.stop(store, args.slug, args.lineage, _starter(store, args.slug), args.note, now_ms())
+    returned(store, args.slug, ended)
     print(json.dumps(asdict(ended)))
+
+
+def returned(store: Any, slug: str, ended: expert_lineage.Lineage) -> None:
+    """Send the mail still open on the seat of a lineage that ended to the master's seat with the reason, so no
+    message waits on a seat nobody will hold again."""
+    inbox = InboxStore(store.redis)
+    for item in inbox.open_items(ended.seat):
+        inbox.redirect(item.id, SWARM, seat_address(slug, MASTER), RETURNED.format(id=ended.id, state=ended.state))
 
 
 def cmd_mission(store: Any, args: argparse.Namespace) -> None:
@@ -193,6 +204,7 @@ def close(store: Any, slug: str, agent: Any, ended: expert_lineage.Lineage, text
     if not kept or kept[0]["text"] != recap:
         store.memory.add_recap(agent.seat, agent.name, agent.task, recap, ended.ended_at)
     exits.settle(inbox, agent.name, "", "completed its mission and left")  # pyright: ignore[reportUnknownMemberType]
+    returned(store, slug, ended)
     store.put_agent(slug, replace(agent, state="finished"))
 
 

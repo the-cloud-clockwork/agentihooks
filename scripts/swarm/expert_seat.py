@@ -84,6 +84,7 @@ def _end(slug: str, store: Any, agent: AgentRecord) -> str:
         expert_commands.close(store, slug, agent, lineage, expert_lineage.proof(store, slug, lineage.id))
     else:
         SEAT.exits.settle(InboxStore(store.redis), agent.name, "", STOPPED.format(lineage=lineage.id))
+        expert_commands.returned(store, slug, lineage)
         store.put_agent(slug, replace(agent, state="finished"))
     return ENDED.format(name=agent.name, lineage=lineage.id, state=lineage.state)
 
