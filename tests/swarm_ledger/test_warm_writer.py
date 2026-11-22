@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import quote
@@ -20,6 +21,7 @@ from urllib.parse import quote
 import pytest
 
 from hooks import config
+from scripts import gates
 from scripts.swarm_ledger import api_service, ledger_server, run, storage, warm_writer
 from scripts.swarm_ledger.api import resources
 from scripts.tick.adapters import database_ledger
@@ -251,17 +253,23 @@ def test_the_writer_answers_as_the_caller_and_with_the_headers_the_request_names
         return 201, b'{"seen": 1}'
 
     monkeypatch.setattr(database_ledger, "answer", answer)
-    asked = {
-        "slug": "sw",
-        "path": "operations",
-        "payload": {"ops": []},
-        "principal": "eng@ab-1",
-        "headers": {"X-Ledger-Worktree": "%2Fcaller%2Ftree"},
-    }
-    with database_ledger.acting("eng@ab-2"):
-        reply = raw(writer, json.dumps(asked).encode())
-    assert reply == b'201\n{"seen": 1}'
-    assert seen == [("eng@ab-1", "%2Fcaller%2Ftree", "sw", "operations", "POST", '{"ops": []}')]
+    monkeypatch.setattr(gates.Who, "from_env", classmethod(lambda cls: SimpleNamespace(name="eng@ab-2", pinned=True)))
+    replies = []
+    for caller in ("eng@ab-1", ""):
+        asked = {
+            "slug": "sw",
+            "path": "operations",
+            "payload": {"ops": []},
+            "principal": caller,
+            "headers": {"X-Ledger-Worktree": "%2Fcaller%2Ftree"},
+        }
+        replies.append(raw(writer, json.dumps(asked).encode()))
+    assert database_ledger.principal() == "eng@ab-2"
+    assert replies == [b'201\n{"seen": 1}'] * 2
+    assert seen == [
+        ("eng@ab-1", "%2Fcaller%2Ftree", "sw", "operations", "POST", '{"ops": []}'),
+        ("", "%2Fcaller%2Ftree", "sw", "operations", "POST", '{"ops": []}'),
+    ]
 
 
 @pytest.mark.feature("ledger-warm-writer")
@@ -365,6 +373,40 @@ def test_a_stale_socket_file_is_replaced_by_a_new_writer(memory_path: Path, monk
         stopped.set()
     served.join(10.0)
     assert not served.is_alive()
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_a_writer_that_cannot_open_its_store_closes_and_removes_its_socket(
+    memory_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unavailable() -> Any:
+        raise OSError("store down")
+
+    monkeypatch.setattr(warm_writer, "revision", same_revision)
+    monkeypatch.setattr(database_ledger, "services", unavailable)
+    where = memory_path / "w.sock"
+    with pytest.raises(OSError, match="store down"):
+        warm_writer.serve(where, threading.Event(), 0.05)
+    assert not where.exists()
+
+
+@pytest.mark.feature("ledger-warm-writer")
+def test_a_writer_whose_socket_file_was_removed_still_returns_cleanly(
+    memory_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(warm_writer, "revision", same_revision)
+    where = memory_path / "w.sock"
+    stopped = threading.Event()
+    codes: list[int] = []
+    served = threading.Thread(target=lambda: codes.append(warm_writer.serve(where, stopped, 0.05)), daemon=True)
+    served.start()
+    deadline = time.monotonic() + 10.0
+    while not answering(where) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    where.unlink()
+    stopped.set()
+    served.join(10.0)
+    assert codes == [0]
 
 
 @pytest.mark.feature("ledger-warm-writer")

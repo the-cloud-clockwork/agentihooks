@@ -41,14 +41,14 @@ def connected(timeout: float, where: Path | None = None) -> socket.socket:
 
 def ask(sock: socket.socket, slug: str, path: str, payload: dict[str, Any] | None) -> tuple[int, bytes]:
     """The writer's status and body for one ledger API request sent on ``sock`` as this process's caller."""
-    asked = {
-        "slug": slug,
-        "path": path,
-        "payload": payload,
-        "principal": database_ledger.principal(),
-        "headers": database_ledger.written(path),
-    }
     with sock:
+        asked = {
+            "slug": slug,
+            "path": path,
+            "payload": payload,
+            "principal": database_ledger.principal(),
+            "headers": database_ledger.written(path),
+        }
         sock.sendall(json.dumps(asked).encode())
         sock.shutdown(socket.SHUT_WR)
         with sock.makefile("rb") as reply:
@@ -101,18 +101,20 @@ def serve(where: Path, stopped: threading.Event, check_s: float = CHECK_S) -> in
     if server is None:
         print(f"a ledger writer already answers on {where}", file=sys.stderr)
         return 1
-    loaded = revision(ROOT)
-    database_ledger.services()
-    listening = threading.Thread(target=server.serve_forever, args=(POLL_S,))
-    listening.start()
     try:
-        while not stopped.is_set() and not moved(loaded):
-            ledger_server.scheduled_wait(check_s, timeout=check_s)
+        loaded = revision(ROOT)
+        database_ledger.services()
+        listening = threading.Thread(target=server.serve_forever, args=(POLL_S,))
+        listening.start()
+        try:
+            while not stopped.is_set() and not moved(loaded):
+                ledger_server.scheduled_wait(check_s, timeout=check_s)
+        finally:
+            server.shutdown()
+            listening.join()
     finally:
-        server.shutdown()
-        listening.join()
         server.server_close()
-        where.unlink()
+        where.unlink(missing_ok=True)
     return 0
 
 
