@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -535,7 +536,7 @@ def test_github_open_changes_lists_at_most_two_pages_of_one_hundred_numbers(
     assert "pullRequests(states: OPEN, first: 100, after: $after)" in github._NUMBERS
 
 
-def test_github_open_changes_reads_rollups_in_batches_of_twenty_five_in_listing_order(
+def test_github_open_changes_reads_rollups_in_batches_of_twenty_five_and_keeps_the_listing_order(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     numbers = list(range(60, 0, -1))
@@ -547,6 +548,31 @@ def test_github_open_changes_reads_rollups_in_batches_of_twenty_five_in_listing_
 
     assert [change.url for change in listed] == [_url(number) for number in numbers]
     assert sorted(batches) == sorted([numbers[:25], numbers[25:50], numbers[50:]])
+
+
+def test_github_open_changes_drops_the_batches_not_started_once_a_batch_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    numbers = list(range(1, 201))
+    read: list[int] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        if "statusCheckRollup" not in args[3]:
+            return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(_number_page(numbers, None)), "")
+        asked = [int(number) for number in re.findall(r"pullRequest\(number: (\d+)\)", args[3])]
+        read.append(asked[0])
+        if asked[0] == 1:
+            raise subprocess.CalledProcessError(1, ["gh", *args], "", "gh: HTTP 502")
+        threading.Event().wait(0.5)
+        return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(_batch(dict.fromkeys(asked))), "")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        provider.open_changes(deadline=_deadline())
+    assert 1 in read
+    assert len(read) <= 5
 
 
 def test_github_open_changes_reads_a_pull_request_whose_rollup_the_app_cannot_read_as_unchecked(

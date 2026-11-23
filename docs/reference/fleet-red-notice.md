@@ -74,18 +74,13 @@ then reads each head commit's check rollup by number:
 The listing holds the same pull requests, in the same order, with the same
 checks as a paged listing. A batch whose only errors hide check rollups from
 the App lists those pull requests with no checks; any other failed batch
-fails the whole listing.
+fails the whole listing and drops the batches not yet started.
 
 Pages of one hundred pull requests with their check rollups made GitHub answer
 with a gateway timeout after about eleven seconds, so every tick pass spent
-about thirteen seconds in the notice step and held nothing. Pages of twenty
-five returned within that timeout, but each rollup must resolve before the
-next page starts: on 23 November eight sequential pages for 179 agentihooks
-pull requests took 41 seconds, past the step's 30 second budget, so the slow
-lane abandoned the step every pass. No cheaper field bounds a pull request's
-newest check time, so the window cannot be applied before the rollups are
-read. Batches of twenty five on four threads read the same 178 pull requests
-in about 20 seconds.
+about thirteen seconds in the notice step and held nothing. Sequential pages
+of twenty five took 41 seconds for 179 pull requests, past the step's 30
+second budget; batches of twenty five on four threads read them in about 20.
 
 ## The listing cache
 

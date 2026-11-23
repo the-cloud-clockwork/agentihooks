@@ -367,13 +367,17 @@ class GitHubSourceControl:
         """List the repository's open pull requests with their check rollups, at most two pages of one hundred.
 
         The open numbers are listed first, then the rollups are read by number in batches of twenty five on four
-        threads under the deadline. A pull request whose check rollup the App may not read is listed with no checks.
+        threads under the deadline. A pull request whose check rollup the App may not read is listed with no checks;
+        any other failed batch fails the listing and the batches not yet started are dropped.
         """
         deadline.live()
         batches = _batches(self._open_numbers(deadline))
-        with ThreadPoolExecutor(_READERS) as readers:
+        readers = ThreadPoolExecutor(_READERS)
+        try:
             reads = [readers.submit(copy_context().run, self._open_batch, batch, deadline) for batch in batches]
             return tuple(change for read in reads for change in read.result())
+        finally:
+            readers.shutdown(cancel_futures=True)
 
     def _open_numbers(self, deadline: Deadline) -> list[int]:
         """List the numbers of the repository's open pull requests, at most two pages of one hundred."""
