@@ -8119,6 +8119,17 @@
       ]
     },
     {
+      "id": "ledger-slim-write-client",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-write-slim-client",
+      "behaviour": "A command line ledger write through the ledger command client goes to this host's warm writer socket as the caller, with the worktree header, and is never run in process when the writer answers; a fresh interpreter that sends such a write loads neither the ledger API service, the ledger server nor the database ledger adapter.",
+      "seam": "scripts.swarm_ledger.ledger.client, the client every command line ledger write builds, over the host writer socket, and the modules a fresh interpreter holds after one write",
+      "tests": [
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_goes_to_the_host_writer_socket",
+        "tests/swarm_ledger/test_writer_client.py::test_a_fresh_interpreter_write_through_a_live_writer_leaves_the_api_service_and_ledger_server_unloaded"
+      ]
+    },
+    {
       "id": "ledger-record-read-scoped",
       "origin": "inventory",
       "behaviour": "A ledger API read of one record of a record collection, such as tasks/t1 or phases/p1, with no query reads only that record's stored rows and their ancestors and answers exactly as a read of the whole ledger would, so a fresh process, as every agentihooks ledger get is, never streams and parses every row of the ledger to answer it.",
