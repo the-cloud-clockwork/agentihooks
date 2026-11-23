@@ -18,7 +18,7 @@ from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import readiness
 from scripts.swarm_v2.runtime.base import SpawnRequest
 
-LANES = ("eng", "ci", "plan")
+LANES = ("eng", "ci", "review", "plan")
 EXCLUDED_ENV = "HIVE_EXCLUDED"
 TAKE_MS = workstation.TAKE_MS
 IDLE_S = workstation.IDLE_S

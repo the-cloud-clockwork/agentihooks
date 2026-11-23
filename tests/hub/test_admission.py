@@ -1073,6 +1073,77 @@ def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_wi
     assert asks == ["admit", "admit", "launched"]
 
 
+@pytest.mark.feature("hub-late-admission-retry-launches")
+def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_a_reap_judged_a_row_read_before_its_claim(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import copy
+
+    from scripts import serena_router_daemon
+    from scripts.events.config import QueuePolicy
+    from scripts.hive import lanes
+    from scripts.hive.spoke import Spoke, SpokeConfig
+    from scripts.swarm import readiness, tick
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+    from scripts.tick.steps import agents
+
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
+    monkeypatch.setenv("SWARM_HIVE_ID", "workstation")
+    bus: Any = open_bus(BusConfig())
+    slots.serve(bus, admitter=rig.admitter)
+    request = type(bus).request
+    asks: list[str] = []
+
+    def late_first(self: Any, subject: str, data: bytes, timeout_ms: int) -> bytes:
+        answer: bytes = request(self, subject, data, timeout_ms)
+        asks.append(json.loads(data)["op"])
+        if asks == ["admit"]:
+            raise TimeoutError(f"no responders for {subject!r}")
+        return answer
+
+    monkeypatch.setattr(type(bus), "request", late_first)
+    rig.admitter.clock = late_clock(0)
+    runtime = Mock()
+    placed = SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a", launched_at=1_500)
+    runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    reading = {"cpus": 32, "load5": 0, "available_mb": 60_000, "total_mb": 64_000}
+    tasks = lanes.LaneTasks(bus, "hive-a", rig.store.config)
+    config = SpokeConfig(rig.store.config(SLUG), "eng", "hive-a")
+    spoke = Spoke(config, bus, runtime, tasks, lambda: reading, view=Mock(return_value=None))
+    queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
+    pass_rows = copy.deepcopy(rig.rows)
+    gone = SimpleNamespace(
+        live_names=set,
+        observe=lambda agent: PaneObservation("unknown"),
+        retire=lambda agent, homes=(): True,
+        refusal=lambda agent: {},
+        reported=lambda agent: False,
+    )
+
+    def unsettled(event: Any) -> bool:
+        return False
+
+    try:
+        readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 1)
+        assert spoke.poll() == "asked"
+        name = rig.store.claimant(SLUG, "t1")
+        [admitted] = [agent for agent in rig.store.agents(SLUG) if agent.name == name]
+        agents._reap_agent(tick._Reaping(SLUG, rig.store, SimpleNamespace(), gone, pass_rows, set(), 7_000), admitted)
+        queue.withdraw(unsettled)
+        readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 2)
+        queue.withdraw(unsettled)
+        assert spoke.poll() == "started"
+    finally:
+        bus.close()
+
+    assert "late: finished after" in capsys.readouterr().err
+    [launched] = [call.args[0] for call in runtime.spawn.call_args_list]
+    assert launched.name == name
+    assert rig.store.claimant(SLUG, "t1") == name
+    assert asks == ["admit", "admit", "launched"]
+
+
 @pytest.mark.feature("events-admission-saved-fleet-red-listing")
 def test_an_admission_of_a_task_with_a_pull_request_answers_inside_the_wait_while_a_live_listing_is_slow(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
@@ -1591,6 +1662,117 @@ def test_the_hub_admits_a_launch_for_a_hive_below_its_max_agents(
     assert admitted["hive"] == "hive-a"
     assert rig.store.claimant(SLUG, "t1") == admitted["name"]
     assert capsys.readouterr().err == ""
+
+
+def _lineage_running(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, slug: str, expert: str) -> str:
+    """Hive A one below its cap of two beside a running expert lineage of the swarm whose expert, seated on another
+    hive, is in the given state; no expert record at all when the state is empty. Returns the lineage id."""
+    from dataclasses import replace
+
+    from scripts.swarm import expert_lineage
+    from scripts.swarm.store import AgentRecord
+    from tests.swarm.test_expert_mission import GOOD
+
+    _hive_holding(rig, monkeypatch, "2", 1)
+    lineage = expert_lineage.start(rig.store, slug, GOOD, "/missions/batch.md", "xhigh", "master@a1b2c3-0001", 1_000)
+    if expert:
+        name = rig.store.next_name(slug, "expert")
+        record = AgentRecord(name, "expert", lineage.id, seat=lineage.seat, started_at=1, hive="hive-b")
+        agent = rig.store.start_execution(slug, record)
+        rig.store.put_agent(slug, replace(agent, state=expert))
+    return lineage.id
+
+
+WAITING = "1 of 2 agents on the hive with 1 kept for expert lineages waiting for an expert"
+
+
+@pytest.mark.feature("hub-admission-expert-room-reserve")
+@pytest.mark.parametrize("expert", ["ended", "finished", ""])
+def test_the_hub_holds_a_launch_on_a_hive_one_below_max_agents_while_a_running_expert_lineage_waits(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], expert: str
+) -> None:
+    _lineage_running(rig, monkeypatch, SLUG, expert)
+    before = {slug: len(rig.store.agents(slug)) for slug in (SLUG, "other")}
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted == {"held": WAITING}
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert {slug: len(rig.store.agents(slug)) for slug in (SLUG, "other")} == before
+    assert rig.ledger.writes == []
+    assert rig.rows["t1"]["state"] == "open"
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: {WAITING}"
+    ]
+
+
+@pytest.mark.feature("hub-admission-expert-room-reserve")
+def test_a_lineage_of_another_swarm_waiting_for_an_expert_also_holds_the_hive(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _lineage_running(rig, monkeypatch, "other", "")
+
+    assert rig.admitter.admit(SLUG, ask()) == {"held": WAITING}
+    assert rig.store.claimant(SLUG, "t1") is None
+
+
+@pytest.mark.feature("hub-admission-expert-room-reserve")
+@pytest.mark.parametrize("expert, stopped", [("working", False), ("starting", False), ("", True)])
+def test_the_hub_admits_a_launch_below_max_agents_while_no_running_expert_lineage_waits(
+    rig: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    expert: str,
+    stopped: bool,
+) -> None:
+    from scripts.swarm import expert_lineage
+
+    lineage = _lineage_running(rig, monkeypatch, SLUG, expert)
+    if stopped:
+        expert_lineage.stop(rig.store, SLUG, lineage, "master@a1b2c3-0001", "mission dropped", 2_000)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert rig.store.claimant(SLUG, "t1") == admitted["name"]
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hub-admission-expert-room-reserve")
+def test_the_slot_kept_for_a_waiting_lineage_goes_to_its_successor_and_then_the_hive_is_full(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    lineage = _lineage_running(rig, monkeypatch, SLUG, "")
+
+    assert rig.admitter.admit(SLUG, ask()) == {"held": WAITING}
+
+    seat = f"{lineage}@{SLUG}"
+    successor = AgentRecord(
+        rig.store.next_name(SLUG, "expert"), "expert", lineage, seat=seat, started_at=2, hive="hive-a"
+    )
+    rig.store.start_execution(SLUG, successor)
+
+    assert rig.admitter.admit(SLUG, ask()) == {"held": "2 of 2 agents on the hive"}
+    assert rig.store.claimant(SLUG, "t1") is None
+
+
+@pytest.mark.feature("hub-admission-expert-room-reserve")
+def test_a_hive_that_takes_no_expert_keeps_no_slot_for_a_waiting_lineage(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import registry
+
+    _lineage_running(rig, monkeypatch, SLUG, "")
+    registry.update(rig.store.redis, "hive-a", ["excluded=master,expert"])
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert rig.store.claimant(SLUG, "t1") == admitted["name"]
 
 
 def _released(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, member: str, hub: str) -> None:
