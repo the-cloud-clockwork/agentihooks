@@ -69,22 +69,22 @@ When the plan task names a single thin or vague task, its phase holds that one
 change: enhance it into a whole plan. The plan states what will be built, code
 areas touched, what might break, regression tests and feature map entries,
 resources needed, protection plan and done condition, and goes through steps 1
-and 2 like a phase plan. Add no task in step 3: point the target at its section
-with the plan link and the section's anchor, so the target carries its slice:
+and 2 like a phase plan. Add no task in step 3: point that task, the target, at
+its section with the plan link and the section's anchor, so it carries its slice:
 `agentihooks api --slug <slug> --as <name> task set <target> plan_url=<link> plan_slice=<anchor> description="<clarified scope, seams and done when>"`.
 Then `agentihooks api --slug <slug> --as <name> leave` and close with
 `agentihooks swarm <slug> done --slice <target>`, the target's id alone. `done`
 refuses a target with no plan slice or an incomplete section and names what is
-missing; fix it and run `done` again. The target stays held from claims until
-the review that follows your close:
+missing; fix it and run `done` again. A target whose enhancement reads needed
+stays held from claims until it turns planned or skipped:
 
-- Full autonomy: a clean slice check releases the target at your close.
+- Full autonomy: a clean slice check marks it planned at your close.
 - Delegate, or full when the slice check found a problem: the master runs
   `agentihooks swarm <slug> plan approve --task <plan-task>` or
   `agentihooks swarm <slug> plan send-back --task <plan-task> --note "<what to change>"`,
   where `<plan-task>` is your plan task's id, never the target's.
-- Manual and assist: the operator approves by setting the target's enhancement
-  to planned.
+- Manual and assist: the master relays it to the operator, who approves by
+  setting the target's enhancement to planned.
 - A send back reopens your plan task with the note; start the loop again from
   that note. Only the master or the operator skips an enhancement.
 
@@ -129,7 +129,8 @@ the review that follows your close:
 
 `agentihooks api --slug <slug> --as <name> leave`, then
 `agentihooks swarm <slug> done --slice <ids>` with the comma separated ids of
-the tasks you added. The ledger refuses unknown ids and tasks without the plan
+the tasks you added; an enhancement names the target's id alone, as the Slice
+section says. The ledger refuses unknown ids and tasks without the plan
 reference, computed range and unique anchor. A review approves the slice or
 sends the plan task back with a note; a send back starts the loop again from
 that note. Stop after `done`.
@@ -148,4 +149,5 @@ stop. As the successor, confirm with
 
 Completion criterion: the phase holds the published plan and every sliced task
 with its computed plan range, dependencies and territory, and the plan task
-shows done with its slice.
+shows done with its slice. For an enhancement, the target carries the plan link,
+its slice and a complete section in place of sliced tasks.
