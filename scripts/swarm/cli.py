@@ -255,7 +255,11 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
 PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
 PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) for site in PASS_SITES[1:]}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
-WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"judged"}), "wrapper view": frozenset({"agents"})}
+WRAPPER_HOOK_READS = {
+    "wrapper phases": frozenset({"doc"}),
+    "wrapper relay": frozenset({"judged"}),
+    "wrapper view": frozenset({"agents"}),
+}
 ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
 LEDGER_HOOKS = frozenset({"wrapper commands", "wrapper phases", "wrapper intent", "wrapper view"})
 CONFIG_KEYS = {
