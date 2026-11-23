@@ -822,12 +822,11 @@ class Scheduler:
         self.client.transaction(partial(stage_grade, document=asdict(state)), GRADES + state.run)
 
     def _keep(self, state: State) -> None:
-        """Store a grade the pass changed, as save does, and keep a live grade's summary at the revision it stored."""
+        """Store a grade the pass changed, as save does, and keep a live grade's summary at the revision it stored; a
+        closed grade's summary goes with the next survey, which keeps live grades only."""
         stage = partial(stage_grade, document=asdict(state))
         revision = self.client.transaction(stage, GRADES + state.run, value_from_callable=True)
-        if revision is None:
-            self._quiets.pop(state.run, None)
-        else:
+        if revision is not None:
             self._quiets[state.run] = _quiet(state, revision)
 
     def _drop(self, run: str) -> None:
