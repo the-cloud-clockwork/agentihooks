@@ -4013,6 +4013,20 @@
       ]
     },
     {
+      "id": "swarm-tick-slow-lane-live-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-slow-lane-deadline",
+      "behaviour": "The slow tick lane covers the accumulated live budgets of its scheduled steps, including budgets resolved after the pass starts, so later slow work finishes beyond the former shared deadline while critical timing and the pass join window stay fixed.",
+      "seam": "scripts.tick.engine.run_group and scripts.tick.pool.running",
+      "rules": ["tick-slow-lane-fixed-deadline"],
+      "tests": [
+        "tests/tick/test_slow_lane_deadline.py::test_slow_deadline_uses_live_budgets_resolved_after_the_pass_starts",
+        "tests/tick/test_slow_lane_deadline.py::test_a_later_slow_step_finishes_after_the_former_lane_deadline",
+        "tests/tick/test_slow_lane_deadline.py::test_live_slow_budgets_keep_the_pass_join_inside_its_original_window",
+        "tests/tick/test_slow_lane_deadline.py::test_slow_dependents_and_finished_records_survive_the_pass_exit"
+      ]
+    },
+    {
       "id": "swarm-tick-left-pass-value",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2329",
