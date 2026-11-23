@@ -44,6 +44,17 @@ FROZEN = "tests/registry/FROZEN_GATES.json"
 LAB_VERDICT_JOB = "lab-verdict"
 LAB_CLAUSE_PREFIX = f"fromJSON(needs.{LAB_VERDICT_JOB}.outputs.authoritative || '{{}}')"
 LAB_UPSTREAM = frozenset({"reuse", LAB_VERDICT_JOB})
+LAB_INSTALL = {
+    "name": "Install the lab verdict dependencies",
+    "run": "python -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1",
+}
+LAB_PINNED_INSTALL = {
+    **LAB_INSTALL,
+    "run": (
+        "python -m pip install --quiet --constraint grader/.github/ci-tools/parser.lock "
+        "--constraint grader/.github/ci-tools/lint-tools.lock PyYAML==6.0.3 jsonschema==4.25.1"
+    ),
+}
 DOWNLOAD_ARTIFACT = "actions/download-artifact@"
 SUMMARY_DOWNLOADS = ("actions/download-artifact@v4", "actions/download-artifact@v8.0.2")
 SUMMARY_REPORTS = ("Download this run's test reports", "{durations,flakes}-3.*")
@@ -109,7 +120,7 @@ def _pinned_tool_form(value: Any) -> Any:
 
 
 def _floating_tool_form(value: Any) -> Any:
-    """Write each pinned parser install back as the floating install a head branched before the pin still holds."""
+    """Write the pinned parser install back in the single quoted form the provenance template held before its pin."""
     if isinstance(value, dict):
         return {key: _floating_tool_form(item) for key, item in cast(dict[Any, Any], value).items()}
     if isinstance(value, list):
@@ -252,15 +263,24 @@ def _reads_needs_freely(condition: str) -> bool:
     return re.search(r"(?<![\w.-])needs\b(?!\s*(?:\.\s*\w|\[\s*''\s*\]))", bare, flags=re.IGNORECASE) is not None
 
 
+def _pinned_lab_job(job: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return the reviewed lab verdict job with its exact dependency install under the grader checkout's locks."""
+    if job is None or LAB_INSTALL not in job.get("steps", ()):
+        return job
+    steps: list[Any] = job["steps"]
+    return {**job, "steps": [LAB_PINNED_INSTALL if step == LAB_INSTALL else step for step in steps]}
+
+
 def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any]) -> list[str]:
     """Refuse a lab verdict job or a gate condition off its reviewed form.
 
     A gate whose base condition reads the lab verdict keeps that condition exactly. Any other gate reads the lab
     verdict, or the needs context by a computed key or as a whole, only through its base condition plus its exact lab
-    clause.
+    clause. The lab verdict job may gain the grader checkout's parser and lint tool locks on its exact dependency
+    install, and never loses them.
     """
     problems: list[str] = []
-    if head.get(LAB_VERDICT_JOB) != base.get(LAB_VERDICT_JOB):
+    if head.get(LAB_VERDICT_JOB) not in (base.get(LAB_VERDICT_JOB), _pinned_lab_job(base.get(LAB_VERDICT_JOB))):
         problems.append(
             "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
         )
