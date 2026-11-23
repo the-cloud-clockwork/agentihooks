@@ -13131,6 +13131,18 @@
       ]
     },
     {
+      "id": "lab-static-step-tools",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "A CI lab static gate step finds the tools the worker image installs beside the system ones and never writes a ruff cache into a leased tree: its PATH is the venv bin folder, then /usr/local/bin, then the system default path, and its RUFF_CACHE_DIR lies in the step's run folder unless the step's own env names another, so ruff passes on a head tree that refuses writes.",
+      "seam": "scripts.ci_lab.run_static.run over a head, base and grader tree with a stand in bubblewrap, reading the PATH and RUFF_CACHE_DIR a step sees and running ruff on a read only head tree",
+      "tests": [
+        "tests/ci_lab/test_run_static.py::test_the_step_reads_each_tree_where_the_workflow_puts_it",
+        "tests/ci_lab/test_run_static.py::test_a_step_keeps_the_ruff_cache_in_its_run_folder_outside_every_tree",
+        "tests/ci_lab/test_run_static.py::test_ruff_passes_on_a_head_tree_that_refuses_writes"
+      ]
+    },
+    {
       "id": "lab-static-step-env",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-step-env",
