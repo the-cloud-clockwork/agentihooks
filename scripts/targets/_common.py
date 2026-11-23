@@ -466,12 +466,28 @@ def clear_managed_mcp(target: str) -> None:
         _i._save_state(state)
 
 
-def shared_directive(bundle_dir: Path | None) -> str:
+def _persona_source(root: Path, native: tuple[str, str] | None) -> Path | None:
+    """A layer's persona file: the target-native one first, then ``CLAUDE.md``.
+
+    ``native`` is ``(subdir, filename)`` for a target that keeps its persona
+    outside the Claude shape, e.g. ``(".codex", "AGENTS.md")`` for a
+    Codex-only layer with no ``CLAUDE.md`` at all.
+    """
+    if native:
+        candidate = root / native[0] / native[1]
+        if candidate.exists():
+            return candidate
+    legacy = root / "CLAUDE.md"
+    return legacy if legacy.exists() else None
+
+
+def shared_directive(bundle_dir: Path | None, native: tuple[str, str] | None = None) -> str:
     from hooks.context.profile_chain import doctrine
 
     if not bundle_dir:
         return ""
-    bundle_md = doctrine(bundle_dir)
+    bundle_md = _persona_source(bundle_dir, native) if native else None
+    bundle_md = bundle_md or doctrine(bundle_dir)
     return bundle_md.read_text().strip() if bundle_md.exists() else ""
 
 
@@ -483,11 +499,16 @@ def build_persona(
     managed_header: str,
     managed_footer: str,
     user_dir: Path | None | Mapping[str, Path | None] = None,
+    native: tuple[str, str] | None = None,
 ) -> str:
     """Assemble the managed region of a compiled instruction file.
 
     ``user_dir`` is the user bundle, or a mapping of label to directory for every bundle after the
     root, in precedence order (``shared bundle`` then ``user bundle``).
+
+    ``native`` names a target-specific persona source (see ``_persona_source``);
+    a layer with no ``CLAUDE.md`` at all, such as a Codex-only profile with
+    ``.codex/AGENTS.md`` instead, still contributes its persona through it.
     """
     from hooks.context.profile_chain import inherited
 
@@ -496,12 +517,12 @@ def build_persona(
     parts: list[str] = [managed_header, identity_preamble([name for name in profile_chain if name not in parents])]
 
     for label, directory in (("bundle", bundle_dir), *later.items()):
-        if content := shared_directive(directory):
+        if content := shared_directive(directory, native):
             parts.append(f"<!-- {label} shared directives -->\n{content}")
 
     for pname, pdir in profile_dirs:
-        src = pdir / "CLAUDE.md"
-        if src.exists():
+        src = _persona_source(pdir, native)
+        if src is not None:
             content = src.read_text().strip()
             if content:
                 parts.append(f"<!-- profile: {pname} -->\n{content}")

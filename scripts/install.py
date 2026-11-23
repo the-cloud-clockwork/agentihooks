@@ -7,7 +7,6 @@ exit
 
 import argparse
 import contextlib
-import fcntl
 import json
 import os
 import re
@@ -23,6 +22,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
 
 import yaml
 
@@ -747,7 +751,12 @@ def _sync_lock(*, blocking: bool = True):
     """Advisory file lock for install operations.
 
     Default ``blocking=True`` waits for any concurrent install to finish.
+    No-op where ``fcntl`` is unavailable (Windows) — installs there are not
+    yet run concurrently, so skipping the lock loses nothing this wraps.
     """
+    if fcntl is None:
+        yield
+        return
     _SYNC_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     fd = open(_SYNC_LOCK_FILE, "w")  # noqa: SIM115
     try:
@@ -817,11 +826,11 @@ def _bundle_roots(layer: bool = False) -> list[tuple[str, Path]]:
     return bundle_roots({key: {"path": str(path)} for key, path in found if path}, layer)
 
 
-def _bundle_feature_layers(subdir: str, label: str) -> list[tuple[str, Path]]:
+def _bundle_feature_layers(subdir: str, label: str, subdir_root: str = _CLAUDE_SUBDIR) -> list[tuple[str, Path]]:
     return [
-        (f"{_BUNDLE_LABELS[kind]} {label}", root / _CLAUDE_SUBDIR / subdir)
+        (f"{_BUNDLE_LABELS[kind]} {label}", root / subdir_root / subdir)
         for kind, root in _bundle_roots(True)
-        if (root / _CLAUDE_SUBDIR / subdir).is_dir()
+        if (root / subdir_root / subdir).is_dir()
     ]
 
 
@@ -2848,11 +2857,18 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         layers.append((label, PACKAGE_FEATURES_DIR / subdir))
         # Layer 2: bundle top-level .claude/ (inherits to all profiles)
         layers.extend(_bundle_feature_layers(subdir, label))
+        # Layer 2b: a codex-only bundle keeps skills Codex-native under .codex/
+        # rather than translated into .claude/ — read that layer too.
+        if subdir == "skills" and install_target == "codex":
+            layers.extend(_bundle_feature_layers(subdir, label, _TARGET_SUBDIR["codex"]))
         # Layer 3+: each profile in chain (later profiles override earlier for same-name files)
         for pname, pdir in content_dirs:
             if (pdir / _CLAUDE_SUBDIR / subdir).is_dir():
                 chain_label = f"profile({pname}) {label}" if len(profile_chain) > 1 else f"profile {label}"
                 layers.append((chain_label, pdir / _CLAUDE_SUBDIR / subdir))
+            if subdir == "skills" and install_target == "codex" and (pdir / _TARGET_SUBDIR["codex"] / subdir).is_dir():
+                chain_label = f"profile({pname}) codex {label}" if len(profile_chain) > 1 else f"profile codex {label}"
+                layers.append((chain_label, pdir / _TARGET_SUBDIR["codex"] / subdir))
         adapter.install_features(subdir, layers, filter_fn)
 
     # --- 5 + 5a + 5b. Persona install (target-specific writer) ---
@@ -3885,7 +3901,7 @@ def _link_cli_tool() -> None:
         return
     link.parent.mkdir(parents=True, exist_ok=True)
     link.unlink(missing_ok=True)
-    link.symlink_to(target)
+    _make_link(target, link)
     _cprint(f"  [OK] CLI linked: {link} -> {target}")
 
 
@@ -4014,6 +4030,18 @@ def _cleanup_stale_links(dst_dir: Path, src_dir: Path, filter_fn: Callable[[Path
     _state_forget_links(removed)
 
 
+def _make_link(item: Path, link: Path) -> None:
+    """Symlink *link* to *item*, falling back to a copy where the platform
+    refuses the link (Windows without Developer Mode or admin rights)."""
+    try:
+        link.symlink_to(item)
+    except OSError:
+        if item.is_dir():
+            shutil.copytree(item, link)
+        else:
+            shutil.copy2(item, link)
+
+
 def _link_item(item: Path, link: Path, label: str) -> tuple[Path, Path, str] | None:
     """Create or update a single symlink *link* → *item*.
 
@@ -4026,13 +4054,13 @@ def _link_item(item: Path, link: Path, label: str) -> tuple[Path, Path, str] | N
             _cprint(f"  [--] {label} '{item.name}' already linked → {item}")
         else:
             link.unlink()
-            link.symlink_to(item)
+            _make_link(item, link)
             _cprint(f"  [OK] Re-linked {label} '{item.name}' → {item}")
         return (link, item, kind)
     if link.exists():
         _cprint(f"  [!!] {label} '{item.name}' exists at {link} and is not a symlink – skipping (remove manually)")
         return None
-    link.symlink_to(item)
+    _make_link(item, link)
     _cprint(f"  [OK] Linked {label} '{item.name}' → {item}")
     return (link, item, kind)
 

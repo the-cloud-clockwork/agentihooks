@@ -93,15 +93,45 @@ _REFERENCE_NAME = re.compile(r"\$\{?(\w+)")
 
 
 def _forward_env_references(entry: dict) -> None:
-    """Codex passes env values literally: resolve ${VAR} in a bash wrapper fed by env_vars."""
+    """Codex passes env values literally: resolve ``${VAR}`` references.
+
+    A reference that names the same variable as its key (``{"X": "${X}"}``)
+    forwards natively through Codex's own ``env_vars`` — no subprocess
+    shell needed on any platform. A reference that renames or composes a
+    value still needs a shell to build it: ``bash -c`` where bash is on
+    ``PATH``, a ``cmd.exe /c`` equivalent otherwise (native Windows has no
+    bash on that path).
+    """
     env = entry.get("env") or {}
     refs = {k: str(v) for k, v in env.items() if has_env_reference(str(v))}
     if not refs:
         return
-    assigns = " ".join(f'{k}="{v.replace(chr(34), chr(92) + chr(34))}"' for k, v in refs.items())
-    entry["args"] = ["-c", f'{assigns} exec "$0" "$@"', entry["command"], *entry.get("args", [])]
-    entry["command"] = "bash"
-    entry["env_vars"] = sorted({n for v in refs.values() for n in _REFERENCE_NAME.findall(v)})
+    native_names: set[str] = set()
+    renamed: dict[str, str] = {}
+    for key, value in refs.items():
+        whole = _WHOLE_REFERENCE.fullmatch(value)
+        if whole and (whole.group(1) or whole.group(2)) == key:
+            native_names.add(key)
+        else:
+            renamed[key] = value
+    env_vars = set(entry.get("env_vars") or [])
+    if native_names:
+        env_vars |= native_names
+    if renamed:
+        referenced = {n for v in renamed.values() for n in _REFERENCE_NAME.findall(v)}
+        env_vars |= referenced
+        if shutil.which("bash"):
+            assigns = " ".join(f'{k}="{v.replace(chr(34), chr(92) + chr(34))}"' for k, v in renamed.items())
+            entry["args"] = ["-c", f'{assigns} exec "$0" "$@"', entry["command"], *entry.get("args", [])]
+            entry["command"] = "bash"
+        else:
+            assigns = " && ".join(f'set "{k}={v}"' for k, v in renamed.items())
+            quoted_args = " ".join(f'"{a}"' for a in entry.get("args", []))
+            tail = f'"{entry["command"]}"' + (f" {quoted_args}" if quoted_args else "")
+            entry["args"] = ["/d", "/s", "/c", f"{assigns} && {tail}"]
+            entry["command"] = "cmd.exe"
+    if env_vars:
+        entry["env_vars"] = sorted(env_vars)
     literal = {k: v for k, v in env.items() if k not in refs}
     if literal:
         entry["env"] = literal
@@ -335,6 +365,16 @@ def _carry_native_keys(name: str, entry: dict[str, Any], spec: dict[str, Any]) -
         entry.setdefault(key, value)
 
 
+def _carry_oauth(entry: dict[str, Any], spec: dict[str, Any]) -> None:
+    """Carry a spec's ``oauth.client_id`` (Claude shape: ``oauth.clientId``) into the codex entry."""
+    oauth = spec.get("oauth")
+    if not isinstance(oauth, dict):
+        return
+    client_id = oauth.get("client_id") or oauth.get("clientId")
+    if client_id:
+        entry["oauth"] = {"client_id": client_id}
+
+
 def codex_mcp_entry(name: str, spec: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     """A declared (Claude-shaped) MCP server as its codex entry, or None and why it cannot mount."""
     if drop_if_credentialed(name, spec, "config.toml"):
@@ -356,6 +396,7 @@ def codex_mcp_entry(name: str, spec: dict[str, Any]) -> tuple[dict[str, Any] | N
     if spec.get("default_tools_approval_mode"):
         entry["default_tools_approval_mode"] = spec["default_tools_approval_mode"]
     _carry_native_keys(name, entry, spec)
+    _carry_oauth(entry, spec)
     return entry, ""
 
 
@@ -690,6 +731,7 @@ class CodexAdapter:
             _MANAGED_HEADER,
             _MANAGED_FOOTER,
             {"shared bundle": shared_dir, "user bundle": user_dir},
+            native=(".codex", "AGENTS.md"),
         )
         dst = self.home() / "AGENTS.md"
         text = write_persona(dst, managed_text, _MANAGED_HEADER, _MANAGED_FOOTER)

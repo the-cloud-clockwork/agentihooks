@@ -2766,6 +2766,34 @@ class TestInstallGlobalHonoursTarget:
         wrapper = (Path.home() / ".codex" / "agentihooks-hook.sh").read_text()
         assert 'export SET_FLAG="${SET_FLAG:=on}"\n' in wrapper
 
+    def test_codex_only_profile_skills_install_from_dot_codex_skills(self, tmp_path, monkeypatch):
+        profiles = self._tiny_profile(tmp_path)
+        donna = profiles / "tiny" / ".codex" / "skills" / "my-skill"
+        donna.mkdir(parents=True)
+        (donna / "SKILL.md").write_text("---\nname: my-skill\n---\nbody")
+        monkeypatch.setattr(install, "PROFILES_DIR", profiles, raising=False)
+        monkeypatch.setattr(install, "_get_bundle_path", lambda: None)
+        monkeypatch.setattr(install, "_install_cli_tool", lambda *a, **k: None, raising=False)
+        monkeypatch.setattr(install, "_ensure_mcp_daemon", lambda *a, **k: None, raising=False)
+        monkeypatch.setattr(install, "_resolve_hooks_python", lambda *a, **k: Path(sys.executable), raising=False)
+        install.install_global(argparse.Namespace(profile="tiny", settings_profile="", install_target="codex"))
+        from scripts.targets._common import agents_skills_home
+
+        assert (agents_skills_home() / "my-skill").exists(), ".codex/skills layer was not installed"
+
+    def test_claude_target_ignores_dot_codex_skills(self, tmp_path, monkeypatch):
+        profiles = self._tiny_profile(tmp_path)
+        donna = profiles / "tiny" / ".codex" / "skills" / "my-skill"
+        donna.mkdir(parents=True)
+        (donna / "SKILL.md").write_text("---\nname: my-skill\n---\nbody")
+        monkeypatch.setattr(install, "PROFILES_DIR", profiles, raising=False)
+        monkeypatch.setattr(install, "_get_bundle_path", lambda: None)
+        monkeypatch.setattr(install, "_install_cli_tool", lambda *a, **k: None, raising=False)
+        monkeypatch.setattr(install, "_ensure_mcp_daemon", lambda *a, **k: None, raising=False)
+        monkeypatch.setattr(install, "_resolve_hooks_python", lambda *a, **k: Path(sys.executable), raising=False)
+        install.install_global(argparse.Namespace(profile="tiny", settings_profile="", install_target="claude"))
+        assert not (Path.home() / ".claude" / "skills" / "my-skill").exists()
+
 
 class TestSkillFolderWithoutSkillFile:
     def _skills(self, tmp_path):
@@ -2990,3 +3018,12 @@ def test_global_install_refuses_before_taking_the_lock(operator_install, monkeyp
     with patch.object(installer, "_sync_lock") as lock, pytest.raises(SystemExit):
         _call_operator_install(installer, external, "global")
     lock.assert_not_called()
+
+
+def test_sync_lock_is_a_noop_where_fcntl_is_unavailable(monkeypatch):
+    """Windows has no fcntl module; the lock degrades to no serialisation."""
+    monkeypatch.setattr(install, "fcntl", None)
+    entered = []
+    with install._sync_lock():
+        entered.append(True)
+    assert entered == [True]
