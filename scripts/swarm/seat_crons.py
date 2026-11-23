@@ -62,10 +62,11 @@ RETIRED = ("7,37 * * * *",)
 CRONS = (
     SeatCron(
         "3,23,53 * * * *",
-        "Master loop (seat cron): read agentihooks swarm {slug} status, clear every focus whose tasks are claimed, in a "
-        "pull request or done, list the urgent tasks and each open pull request of a focused task with what blocks it "
-        "and what can run in parallel, queue priority for green unblockers, reopen pull request tasks whose owner is "
-        "gone and decide every follow up. Act on each. " + QUIET,
+        "Master loop (seat cron): read agentihooks swarm {slug} status, read agentihooks api --slug {slug} get orders "
+        "and act on each order with nothing claimed or in a pull request, clear every focus whose tasks are claimed, "
+        "in a pull request or done, list the urgent tasks and each open pull request of a focused task with what "
+        "blocks it and what can run in parallel, queue priority for green unblockers, reopen pull request tasks whose "
+        "owner is gone and decide every follow up. Act on each. Only the operator's words clear an order. " + QUIET,
         _always,
     ),
     SeatCron(
@@ -121,10 +122,11 @@ def _drop(on: Scheduler, views: list[dict[str, Any]]) -> None:
 
 
 def ensure(on: Scheduler, config: SwarmConfig, home: Path) -> None:
-    """Keep each seat cron the swarm wants on the scheduler: the first live cron aimed at the front door seat on its
-    schedule is adopted, the rest are cancelled, a missing one is added and an unwanted one is cancelled. A stopping or
-    stopped swarm wants none. A retired drift check cron aimed at the seat is cancelled, because release, green
-    promotion and hive drain seat items carry its rollout checks."""
+    """Keep each seat cron the swarm wants on the scheduler: on its schedule the first live cron a master made by
+    hand is adopted, else the first the code owns whose text is still the code's; the rest are cancelled, a missing
+    one is added and an unwanted one is cancelled. A stopping or stopped swarm wants none. A retired drift check cron
+    aimed at the seat is cancelled, because release, green promotion and hive drain seat items carry its rollout
+    checks."""
     where = place(config, home)
     seat = front_door.seat(config.slug)
     with held(on.state, on.name(LOCK), WAIT_S):
@@ -135,11 +137,14 @@ def ensure(on: Scheduler, config: SwarmConfig, home: Path) -> None:
             if config.state in ENDED or not cron.wanted(where):
                 _drop(on, found)
                 continue
-            _drop(on, found[1:])
             text = cron.prompt.format(
                 slug=where.slug, folder=where.sheet.parent, sheet=where.sheet, email=where.email.parent
             )
-            if not found:
+            by_hand = [view for view in found if view["owner"] != OWNER]
+            current = [view for view in found if view["owner"] == OWNER and view["payload"] == text]
+            adopted = next(iter(by_hand + current), None)
+            _drop(on, [view for view in found if view is not adopted])
+            if adopted is None:
                 slot = InboxSlot(seat)
                 commands.add_cron(on, OWNER, slot, text, expression=cron.expression)  # pyright: ignore[reportUnknownMemberType]
 
