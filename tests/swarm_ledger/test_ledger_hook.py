@@ -57,6 +57,13 @@ def test_dispatch_does_not_run_the_handler_for_a_session_outside_the_ledger_memb
     assert seen == []
 
 
+@pytest.mark.feature("ledger-hook-bounded-read")
+def test_dispatch_does_not_run_the_handler_for_a_ledger_with_no_member_record(
+    folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert gate_decisions(folder, monkeypatch, {"_meta": {"events": [operator(2, "tasks/t1")]}}, "Stop") == []
+
+
 @pytest.mark.parametrize("event", ["PostToolUse", "Stop"])
 @pytest.mark.parametrize("phase", [{"done": True}, {"out_of_scope": True}])
 def test_dispatch_does_not_run_the_handler_for_a_closed_ledger(folder, monkeypatch, event, phase):

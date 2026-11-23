@@ -28,3 +28,4 @@ def test_task_targets_name_only_unhandled_operator_task_targets_once_each() -> N
     assert ledger_gate.task_targets(meta, "stranger@a1-9") == ()
     fresh = {"members": {"engineer@a1-1": {}}, "events": [events[7], {**events[7], "rev": 1, "target": "tasks/t9"}]}
     assert ledger_gate.task_targets(fresh, "engineer@a1-1") == ("tasks/t9",)
+    assert ledger_gate.task_targets({"events": events}, "engineer@a1-1") == ()

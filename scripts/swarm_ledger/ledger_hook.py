@@ -342,7 +342,7 @@ def serve_ledgers():
         )
 
 
-def dispatch(payload):
+def dispatch(payload: dict[str, Any]) -> None:
     global LEDGER_DIR, SESSIONS
     LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
     SESSIONS = LEDGER_DIR / ".sessions"
