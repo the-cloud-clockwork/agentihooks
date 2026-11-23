@@ -76,9 +76,9 @@ def test_hook_event_is_exported_before_the_hook_process_exits(collector, tmp_pat
     assert "/v1/logs" in paths
 
 
-@pytest.mark.feature("tokens-gauges-hive-daemon")
+@pytest.mark.feature("tokens-gauges-hook-fallback")
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_native_token_measurements_stay_in_the_seen_record_and_leave_the_hook_process_unsent(
+def test_native_token_measurements_reach_the_seen_record_and_leave_a_process_only_through_the_hook_fallback(
     collector, tmp_path, target
 ):
     endpoint, paths = collector
@@ -145,9 +145,10 @@ def test_native_token_measurements_stay_in_the_seen_record_and_leave_the_hook_pr
     )
     assert result.returncode == 0, result.stderr
     names = {metric.name for metric in paths if not isinstance(metric, str)}
-    assert not names & {"agentihooks.tokens.fill_pct", "agentihooks.tokens.burn_rate"}
     if target == "codex":
-        assert "agentihooks.presence.agent" in names
+        assert {"agentihooks.presence.agent", "agentihooks.tokens.fill_pct"} <= names
+    else:
+        assert not names & {"agentihooks.tokens.fill_pct", "agentihooks.tokens.burn_rate"}
     record = json.loads((tmp_path / "home" / "telemetry" / "presence" / f"native-{target}.json").read_text())
     assert record["tokens"]["session_id"] == "native-" + target
     assert record["tokens"]["fill_pct"] == 25.0

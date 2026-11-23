@@ -14502,12 +14502,22 @@
         "tests/observability/test_token_monitor.py::test_a_codex_lifecycle_record_never_starts_the_otel_worker_or_sdk",
         "tests/observability/test_token_monitor.py::test_the_presence_and_token_writers_keep_each_others_values_in_the_seen_record",
         "tests/observability/test_token_monitor.py::test_a_token_write_names_only_a_present_agent_and_a_validated_string_profile",
-        "tests/observability/test_hook_event_export.py::test_native_token_measurements_stay_in_the_seen_record_and_leave_the_hook_process_unsent",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_the_last_token_fill_and_burn_rate_under_the_session_id",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_only_the_fill_for_a_record_without_a_burn_rate",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_window",
         "tests/hive/test_daemon_presence.py::test_the_daemon_token_gauges_carry_the_session_agent_and_profile_from_the_seen_record",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_skips_token_values_it_cannot_read_and_sends_the_rest"
+      ]
+    },
+    {
+      "id": "tokens-gauges-hook-fallback",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2884",
+      "behaviour": "On a host with no live hive daemon beat, the hook presence fallback that sends a session's agent gauge at most once per interval also sends that session's tokens fill gauge, and the burn rate gauge when known, from its seen record when the tokens were written within the fresh window, under the session id with the recorded agent name and profile. Token values written between two sends wait for the next send, so neither gauge leaves a hook process more often than once per interval. A status line process never sends them.",
+      "seam": "hooks.observability.presence.agent and hooks.observability.token_monitor.send_tokens",
+      "tests": [
+        "tests/observability/test_presence.py::test_with_no_hive_daemon_a_session_sends_its_token_fill_and_burn_rate_once_a_minute_and_none_more_often",
+        "tests/observability/test_hook_event_export.py::test_native_token_measurements_reach_the_seen_record_and_leave_a_process_only_through_the_hook_fallback"
       ]
     }
   ],
