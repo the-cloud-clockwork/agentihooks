@@ -13,7 +13,7 @@ from scripts import ci_frozen, ci_runner_trust, ci_wiring, gate_protected
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
-CANDIDATE = "bdc22bf5e70728f9e9fb93f94067e2a109bf567e"
+CANDIDATE = "e285593508ecbac8c01119645580a1d65e48b5e6"
 FLOATING = "python -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1"
 PINNED = (
     "python -m pip install --quiet --constraint grader/.github/ci-tools/parser.lock "
@@ -119,6 +119,12 @@ def test_the_candidate_refuses_changes_to_the_reviewed_lab_job(grader: Grade, fo
         PINNED.replace("jsonschema==4.25.1", "jsonschema>=4.25.1"),
         PINNED + " requests==2.32.5",
         PINNED + "\ntrue",
+        PINNED + " && true",
+        PINNED + "; true",
+        (
+            "python -m pip install --quiet --constraint grader/.github/ci-tools/lint-tools.lock "
+            "--constraint grader/.github/ci-tools/parser.lock PyYAML==6.0.3 jsonschema==4.25.1"
+        ),
     ],
     ids=[
         "exact",
@@ -132,6 +138,9 @@ def test_the_candidate_refuses_changes_to_the_reviewed_lab_job(grader: Grade, fo
         "range",
         "package",
         "command",
+        "and-command",
+        "then-command",
+        "swapped-locks",
     ],
 )
 def test_the_candidate_admits_only_the_exact_paired_grader_locks(grader: Grade, forms: Forms, install: str) -> None:
@@ -148,3 +157,37 @@ def test_a_pinned_base_refuses_a_head_that_removes_the_lab_constraints(grader: G
     head = copy.deepcopy(base)
     _install(base, PINNED)
     assert _grade(grader, base, head, config, actors) == [REFUSED]
+
+
+@pytest.mark.feature("protected-grader-admits-lab-tool-pins")
+@pytest.mark.parametrize("forms", ["full"], indirect=True)
+@pytest.mark.parametrize("install", [FLOATING, PINNED], ids=["floating", "pinned"])
+@pytest.mark.parametrize("edit", ["env", "if", "continue-on-error", "twice", "other-step", "other-step-dropped"])
+def test_the_candidate_refuses_any_step_change_beside_the_install(
+    grader: Grade, forms: Forms, install: str, edit: str
+) -> None:
+    base, config, actors = forms
+    head = copy.deepcopy(base)
+    _install(head, install)
+    steps = head["test.yml"]["jobs"]["lab-verdict"]["steps"]
+    [step] = [step for step in steps if step.get("name") == "Install the lab verdict dependencies"]
+    other = next(candidate for candidate in steps if candidate is not step)
+    if edit == "twice":
+        steps.append(copy.deepcopy(step))
+    elif edit == "other-step":
+        other["continue-on-error"] = True
+    elif edit == "other-step-dropped":
+        steps.remove(other)
+    else:
+        step[edit] = "unreviewed"
+    assert _grade(grader, base, head, config, actors) == [REFUSED]
+
+
+@pytest.mark.feature("protected-grader-admits-lab-tool-pins")
+@pytest.mark.parametrize("install", [FLOATING, PINNED], ids=["floating", "pinned"])
+def test_a_base_without_a_lab_job_refuses_a_head_that_adds_one(grader: Grade, forms: Forms, install: str) -> None:
+    base, config, actors = forms
+    head = copy.deepcopy(base)
+    _install(head, install)
+    base["test.yml"]["jobs"].pop("lab-verdict")
+    assert REFUSED in _grade(grader, base, head, config, actors)
