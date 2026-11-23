@@ -312,7 +312,7 @@ def _claim_unwritten(judging: _Reaping, agent: AgentRecord) -> bool:
         return False
     if tick._ended(agent, {agent.task: {**row, "claimed_by": agent.name}}):
         return False
-    return judging.store.claimant(judging.slug, agent.task) == agent.name
+    return cast(Any, judging.store).claimant(judging.slug, agent.task) == agent.name
 
 
 def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
