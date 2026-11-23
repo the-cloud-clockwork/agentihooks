@@ -21,6 +21,7 @@ See [Cancelled watcher after the gate change](delivery-tiers.md#cancelled-watche
 | [Expert lineage](expert-lineage.md) | Experts as Fable agents that carry one saved mission: the mission template, starting and steering a lineage, what an expert may do, the expert handoff, ending on a mission proof, the Stop gate, the live checks and troubleshooting |
 | [Swarm elapsed thresholds](swarm-thresholds.md) | Idle and input timing, retirement, dispatch and autoscale windows, cadence examples, legacy settings, holds and ledger probe limits |
 | [Review lane](swarm-review-lane.md) | Reviewer names and numbered seats, template configuration, stored review caps, capacity and tick behavior, paired lane and kind task examples, integration limits and troubleshooting |
+| [Reviewer bundle overlay](reviewer-bundle-overlay.md) | Fleet reviewer inheritance and doctrine, CI and lab evidence, MCP and swarm brain configuration, Claude and Codex render and launch examples, limits and troubleshooting |
 | [Semgrep feature tests](semgrep-features.md) | One dated rule per operator ordered feature, regression and passing fixtures, and required CI proofs |
 | [Feature map](feature-map.md) | Feature map origins and keys, the test marker, live check targets and the pull request validation |
 | [Completed worker archive acknowledgement](../swarm-v2/retention.md#completed-worker-cleanup) | Final checkpoint validation, heartbeat archive progress, configuration examples, retry limits and the outcome and archive guards for completed worker cleanup |
