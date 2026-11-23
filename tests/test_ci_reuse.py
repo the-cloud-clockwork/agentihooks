@@ -329,6 +329,20 @@ def test_the_reuse_template_installs_pyyaml_at_the_parser_pin() -> None:
     assert reuse["run"] == "python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3"
 
 
+@pytest.mark.feature("ci-reuse-templates-install-pinned-tools")
+def test_the_provenance_template_installs_pyyaml_at_the_parser_pin() -> None:
+    from scripts import ci_reuse
+
+    [install] = [
+        step for step in ci_reuse.duration_provenance_steps() if step.get("name") == "Install provenance dependencies"
+    ]
+    assert install["run"] == (
+        'python -m venv "$RUNNER_TEMP/provenance-python"\n'
+        '"$RUNNER_TEMP/provenance-python/bin/python" -I -m pip install '
+        "--constraint .github/ci-tools/parser.lock PyYAML==6.0.3\n"
+    )
+
+
 @pytest.mark.parametrize("reuse_repo", ["dynamic"], indirect=True)
 def test_a_full_pass_with_dynamic_mutation_shards_reuses(full_source, tmp_path):
     root, base, _, queue, env, _, _ = full_source
