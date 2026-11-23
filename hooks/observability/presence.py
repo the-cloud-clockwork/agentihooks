@@ -49,7 +49,8 @@ def daemon_live(now_s: float) -> bool:
 
 def agent(session_id: str, environ: Mapping[str, str], now_s: float) -> None:
     """Marks one agent session seen now with its agent, swarm, lane, task, hive, account and harness in its seen
-    record, and sends the seen gauge itself only while no hive daemon exports this home, at most once per interval."""
+    record, and sends the seen gauge and its fresh token gauges itself only while no hive daemon exports this home, at
+    most once per interval."""
     if not session_id:
         return
     from hooks.observability.agent_trace import identity_from_env

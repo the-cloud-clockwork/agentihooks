@@ -78,7 +78,7 @@ def test_hook_event_is_exported_before_the_hook_process_exits(collector, tmp_pat
 
 @pytest.mark.feature("tokens-gauges-hook-fallback")
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_native_token_measurements_reach_the_seen_record_and_leave_a_process_only_through_the_hook_fallback(
+def test_native_token_measurements_reach_the_seen_record_and_only_the_codex_hook_process_sends_them_with_no_daemon(
     collector, tmp_path, target
 ):
     endpoint, paths = collector
