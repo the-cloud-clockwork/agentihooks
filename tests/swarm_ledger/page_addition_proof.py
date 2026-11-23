@@ -76,13 +76,47 @@ def run(tmp_path: Path, requests: int, extra: str = "") -> subprocess.CompletedP
     return result
 
 
+def first_difference(folder: Path) -> str:
+    base = json.loads((folder / "base-page.json").read_text())
+    head = json.loads((folder / "head-page.json").read_text())
+    counts: dict[str, int] = {}
+    first = ""
+    for left, right in zip(base, head, strict=True):
+        parts = {key: (left[key], right[key]) for key in ("requests", "dialogs", "errors")}
+        parts.update({f"page.{key}": (value, right["page"][key]) for key, value in left["page"].items()})
+        for part, (value, other) in parts.items():
+            if value == other:
+                continue
+            counts[part] = counts.get(part, 0) + 1
+            if first:
+                continue
+            if isinstance(value, str):
+                at = next((i for i, (a, b) in enumerate(zip(value, other)) if a != b), min(len(value), len(other)))
+                low = max(0, at - 400)
+                first = f"{left['step']} {part} at {at}: base {value[low : at + 400]!r} head {other[low : at + 400]!r}"
+            elif isinstance(value, list):
+                only_base = [item for item in value if item not in other]
+                only_head = [item for item in other if item not in value]
+                first = f"{left['step']} {part}: only base {only_base} only head {only_head}"
+            elif isinstance(value, dict):
+                keys = sorted(set(value) | set(other))
+                first = f"{left['step']} {part}: " + "; ".join(
+                    f"{key}: base {value.get(key)!r} head {other.get(key)!r}"
+                    for key in keys
+                    if value.get(key) != other.get(key)
+                )
+            else:
+                first = f"{left['step']} {part}: base {value!r} head {other!r}"
+    return f"steps differing per part: {counts}\nfirst difference: {first}"
+
+
 def steps_with(path: Path, needle: str) -> list[str]:
     return [record["step"] for record in json.loads(path.read_text()) if needle in json.dumps(record)]
 
 
 def test_a_named_addition_passes_and_the_planted_chat_fault_is_still_rejected(tmp_path: Path) -> None:
     result = run(tmp_path, 2)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 0, first_difference(tmp_path) + "\n" + result.stdout + result.stderr
     assert "PASS: identical base and head pages; planted chat fault rejected" in result.stdout
     for name in ("head-page.json", "fault-page.json"):
         assert steps_with(tmp_path / name, "proof-box") == []

@@ -8947,7 +8947,7 @@
       "id": "page-equivalence-reviewed-additions",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-page-addition-contract",
-      "behaviour": "The ledger page equivalence check accepts a page change that adds elements or API requests only when the reviewed expected page change contract names each one in its added list with the operator order and exact count. When the head changes the contract, the base replay hides the removed list and the head and fault replays hide the added elements, drop stored entries keyed by the ids of hidden elements and drop the named requests before the byte compare, while an unnamed addition, a wrong count and the planted chat fault still fail and replays without a contract keep identical records.",
+      "behaviour": "The ledger page equivalence check accepts a page change that adds elements or API requests only when the reviewed expected page change contract names each one in its added list with the operator order and exact count. When the head changes the contract, the base replay hides the removed list and the head and fault replays hide each added element with its subtree, drop stored entries keyed by the ids of hidden elements and drop the named requests before the byte compare, while an unnamed addition, a named element or request the base also shows, a wrong count and the planted chat fault still fail and replays without a contract keep identical records.",
       "seam": "page_replay load_contract, CAPTURE, unnamed and main over a contract with an added list, and the equivalence.sh page step that passes the added list to the head and fault replays",
       "tests": [
         "tests/swarm_ledger/test_page_change.py::test_the_page_step_gives_the_base_the_removed_list_and_the_head_and_fault_the_added_list",
@@ -8956,6 +8956,7 @@
         "tests/swarm_ledger/test_page_change.py::test_the_fake_api_records_each_request_and_hands_each_step_its_requests_sorted",
         "tests/swarm_ledger/test_page_change.py::test_a_contract_naming_each_added_element_makes_head_and_base_identical",
         "tests/swarm_ledger/test_page_change.py::test_an_added_element_the_contract_does_not_name_still_fails",
+        "tests/swarm_ledger/test_page_change.py::test_naming_an_element_the_base_also_shows_cannot_hide_a_change_to_it",
         "tests/swarm_ledger/test_page_change.py::test_added_counts_the_head_page_does_not_match_fail_naming_the_head",
         "tests/swarm_ledger/test_page_change.py::test_named_requests_are_dropped_and_counted_while_the_planted_chat_fault_still_differs",
         "tests/swarm_ledger/test_page_change.py::test_load_contract_returns_the_selectors_and_requests_of_each_list",

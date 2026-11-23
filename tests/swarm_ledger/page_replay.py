@@ -214,7 +214,7 @@ def unclocked(results: list) -> list:
     return results
 
 
-def well_formed(entry: object) -> bool:
+def valid_entry(entry: object) -> bool:
     if not isinstance(entry, dict):
         return False
     kinds = [kind for kind in ("selector", "request") if kind in entry]
@@ -226,7 +226,7 @@ def well_formed(entry: object) -> bool:
     return type(matches) is int and matches > 0 and (kinds[0] == "selector" or bool(REQUEST.fullmatch(name)))
 
 
-def texts(value: object) -> bool:
+def non_empty_texts(value: object) -> bool:
     return isinstance(value, list) and bool(value) and all(isinstance(text, str) and text.strip() for text in value)
 
 
@@ -237,8 +237,8 @@ def load_contract(path: Path, side: str = "removed") -> tuple[dict[str, int], di
     if (
         not set(contract) <= {"reviewed_by", *SIDES}
         or not lists
-        or not all(isinstance(entries, list) and entries and all(map(well_formed, entries)) for entries in lists)
-        or not texts(contract.get("reviewed_by"))
+        or not all(isinstance(entries, list) and entries and all(map(valid_entry, entries)) for entries in lists)
+        or not non_empty_texts(contract.get("reviewed_by"))
     ):
         raise SystemExit(
             f"{path}: an expected page change contract holds reviewed_by, a list of reviewers, and removed or added, "
