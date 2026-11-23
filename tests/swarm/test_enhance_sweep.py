@@ -2,6 +2,7 @@
 pacing its writes, and its dry run prints the thin task count and ids per lane and writes nothing."""
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from importlib import import_module
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import cli, enhance_sweep
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.tick import registry
 from scripts.tick.adapters.fakes import FakeLedger, fake_tools
@@ -62,6 +63,25 @@ class Inbox:
 
     def send(self, sender: str, address: str, text: str, fyi: bool = False) -> None:
         self.sent.append((sender, address, text, fyi))
+
+
+THREE = [_task("a"), _task("b"), _task("c")]
+
+
+@dataclass
+class SecondWriteFails(FakeLedger):
+    error: Exception = field(
+        default_factory=lambda: TimeoutError("the ledger writer took tasks on sw and sent no answer")
+    )
+    writes: int = 0
+    log: list[str] = field(default_factory=list[str])
+
+    def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> object:
+        self.writes += 1
+        self.log.append(f"write {self.writes}")
+        if self.writes == 2:
+            raise self.error
+        return super().mutate(operations, deadline=deadline)
 
 
 def _calls(ledger: FakeLedger) -> list[tuple[str, tuple[object, ...]]]:
@@ -164,3 +184,11 @@ def test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_wri
     assert built == [("sw", "clients of sw")]
     assert swarm == [3.0, 3.0, 3.0, 3.0]
     assert _calls(ledger) == _tick_calls(TASKS)
+
+
+@pytest.mark.feature("swarm-enhance-sweep")
+def test_a_refused_enhancement_write_leaves_the_sweep_writing_the_next_thin_task() -> None:
+    ledger = SecondWriteFails(dict(ANSWERS), error=LedgerRefused("the task changed"))
+    enhance_sweep.sweep(THREE, ledger, pause=lambda _: None)
+    assert ledger.log == ["write 1", "write 2", "write 3"]
+    assert [call.operation for call in ledger.calls] == ["mutate", "mutate"]
