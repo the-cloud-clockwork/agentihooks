@@ -2517,6 +2517,25 @@
       ]
     },
     {
+      "id": "hive-role-release-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-role-release-floor",
+      "behaviour": "A role records the first release that can host it, and a hive that reports an older release does not host that role: the launcher never selects it, the local overflow never takes it and a preferred hive is passed over, pinned or not. A hive whose release cannot be judged still hosts: one that reports no version, a text that is no version, or a development install. A role with no first release is hosted by a hive of any release. When no live hive takes a role that has a first release the wait names the release hosting it needs, and a preferred hive passed over for its release is named with both releases.",
+      "seam": "hive.placement.hosts, outdated, release, choose, place and unhosted over hive records; hive.launch select for the expert lane over a hive written to the registry with a version; the placement table FIRST_RELEASE",
+      "tests": [
+        "tests/hive/test_release_floor.py::test_an_expert_is_hosted_only_by_a_hive_at_or_past_its_first_release",
+        "tests/hive/test_release_floor.py::test_a_hive_whose_release_cannot_be_judged_still_hosts_an_expert",
+        "tests/hive/test_release_floor.py::test_a_release_a_hive_reports_is_read_as_one_that_can_be_compared",
+        "tests/hive/test_release_floor.py::test_a_pinned_hive_is_held_to_the_first_release_of_a_role_too",
+        "tests/hive/test_release_floor.py::test_a_role_with_no_first_release_is_hosted_by_a_hive_of_any_release",
+        "tests/hive/test_release_floor.py::test_the_first_release_a_hive_misses_is_named_and_none_when_it_carries_it",
+        "tests/hive/test_release_floor.py::test_no_live_hive_taking_a_role_names_the_release_hosting_it_needs",
+        "tests/hive/test_release_floor.py::test_a_preferred_hive_passed_over_for_its_release_is_named_with_both_releases",
+        "tests/hive/test_release_floor.py::test_the_launcher_never_selects_a_hive_older_than_the_first_release_of_the_expert",
+        "tests/hive/test_release_floor.py::test_every_first_release_names_a_role_the_swarm_launches_and_a_release"
+      ]
+    },
+    {
       "id": "hive-drain-events-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1896",

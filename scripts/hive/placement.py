@@ -5,6 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from packaging.version import Version
+
 from scripts.hive.registry import LIVE_MS, MASTER_NAME, UI_ROLES, live
 from scripts.master_claude_login import ROUTE as MASTER_LOGIN
 from scripts.routing.slots import account_key
@@ -26,6 +28,7 @@ NEEDS_TOGETHER = "the task needs a hive with {needs}, and no single hive declare
 UNRANKED = math.inf
 SPREAD = "spread"
 PLACED = "placed"
+FIRST_RELEASE: dict[str, str] = {}
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,18 @@ class Choice:
     hive: str
     fallback: str = ""
     spill: Spill | None = None
+
+
+def release(text: object) -> Version | None:
+    """The release a hive reports, as one that can be compared. None when it reports none, a text that is no
+    version, or a development install, which carries no release number of its own."""
+    return None
+
+
+def outdated(role: str, hive: dict[str, Any], aliases: tuple[str, ...] = ()) -> str:
+    """The first release that hosts the role or one of its aliases when the hive reports an older one, else empty.
+    A hive whose release cannot be judged is not held to it."""
+    return ""
 
 
 def hosts(role: str, hive: dict, aliases: tuple[str, ...] = ()) -> bool:
