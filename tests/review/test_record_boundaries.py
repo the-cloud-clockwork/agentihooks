@@ -29,14 +29,26 @@ def test_findings_are_isolated_by_swarm_and_change_request() -> None:
 @pytest.mark.feature("review-record-post")
 def test_a_saved_record_reads_back_from_its_hash_field() -> None:
     found = store()
-    saved = record.Record(URL, HEAD, (record.Finding("f1", "First", f"{URL}#c1", REVIEWER, "r1"),))
+    finding = record.Finding("f1", "First", f"{URL}#c1", REVIEWER, "r1", "answered", "Fixed", ("engineer@x",))
+    saved = record.Record(URL, HEAD, (finding,))
     key = found.key(SLUG, "review", sha256(URL.encode()).hexdigest()[:16])
     found.redis.hset(key, HEAD, json.dumps(record.document(saved)))
     assert record.read(found, SLUG, URL, HEAD) == saved
     assert record.document(saved) == {
         "url": URL,
         "head": HEAD,
-        "findings": [{"id": "f1", "body": "First", "comment": f"{URL}#c1", "by": REVIEWER, "task": "r1"}],
+        "findings": [
+            {
+                "id": "f1",
+                "body": "First",
+                "comment": f"{URL}#c1",
+                "by": REVIEWER,
+                "task": "r1",
+                "state": "answered",
+                "answer": "Fixed",
+                "read_by": ("engineer@x",),
+            }
+        ],
     }
 
 
