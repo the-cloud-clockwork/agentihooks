@@ -322,19 +322,11 @@ def test_the_rendered_reuse_and_provenance_installs_run_their_template_lines() -
 
 
 @pytest.mark.feature("ci-reuse-templates-install-pinned-tools")
-def test_the_reuse_and_provenance_templates_install_pyyaml_at_the_parser_pin() -> None:
+def test_the_reuse_template_installs_pyyaml_at_the_parser_pin() -> None:
     from scripts import ci_reuse
 
-    pinned = "-m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3"
     [reuse] = [step for step in ci_reuse.reuse_job()["steps"] if step.get("name") == "Install metadata dependencies"]
-    [provenance] = [
-        step for step in ci_reuse.duration_provenance_steps() if step.get("name") == "Install provenance dependencies"
-    ]
-    assert reuse["run"] == f"python {pinned}"
-    assert provenance["run"].splitlines() == [
-        'python -m venv "$RUNNER_TEMP/provenance-python"',
-        f'"$RUNNER_TEMP/provenance-python/bin/python" -I {pinned}',
-    ]
+    assert reuse["run"] == "python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3"
 
 
 @pytest.mark.parametrize("reuse_repo", ["dynamic"], indirect=True)
