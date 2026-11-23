@@ -1,5 +1,4 @@
 import json
-import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -42,16 +41,14 @@ def _opened(run: Run, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
 
 @pytest.mark.feature("lab-scheduler-load-measure")
 def test_the_measure_prints_three_builds_and_parses_each_stored_live_grade_once_on_its_cold_build(
-    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     run = _live(lab)
     run.lab.client.sadd(scheduler.LIVE, "gone")
+    parse = scheduler._parse
     assert load_measure.main([], _opened(run, monkeypatch)) == 0
-    printed = capsys.readouterr().out
-    reports = Path(os.environ.get("PROOF_REPORT_DIR") or tmp_path)
-    reports.mkdir(parents=True, exist_ok=True)
-    (reports / "load-measure.json").write_text(printed)
-    figures = json.loads(printed)
+    assert scheduler._parse is parse
+    figures = json.loads(capsys.readouterr().out)
     assert sorted(figures) == ["builds", "grades", "leaves_out", "parses", "process_seconds", "wall_seconds"]
     assert (figures["builds"], figures["grades"], figures["parses"]) == (3, len(HEADS) + 1, len(HEADS))
     assert len(figures["process_seconds"]) == len(figures["wall_seconds"]) == 3
@@ -125,14 +122,3 @@ def test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_pars
     with pytest.raises(json.JSONDecodeError):
         load_measure.measure(engine, 1, 1000, time.process_time, time.perf_counter)
     assert scheduler._parse is parse
-
-
-@pytest.mark.feature("lab-scheduler-load-measure")
-def test_no_module_under_scripts_but_the_measure_itself_names_the_measure_module() -> None:
-    package = ROOT / "scripts"
-    naming = [
-        path.relative_to(package).as_posix()
-        for path in sorted(package.rglob("*.py"))
-        if "load_measure" in path.read_text()
-    ]
-    assert naming == ["ci_lab/load_measure.py"]

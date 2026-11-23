@@ -390,9 +390,11 @@ one JSON object:
 The command reads only. A load prunes stale worker offers through the queue's prune script, its one write, so the
 measured scheduler's queue keeps every offer; the offers read keeps only offers made inside the ready window, so
 each build returns the load the scheduler builds, and the figures leave out that one prune round trip per build.
-Every build reads the whole pending and leased queues and parses every live grade. To measure the live scheduler,
-run it in the scheduler pod, which carries `CI_LAB_REDIS_URL`, with few builds, since it shares the pod's memory
-limit:
+Every build reads the whole pending and leased queues and every live grade document. The first build runs on a
+cold demand cache and parses each live grade with a stored document; builds after the first run on the warm demand
+cache, so the first `process_seconds` and `wall_seconds` entries are the cold cost and later entries the warm cost.
+To measure the live scheduler, run it in the scheduler pod, which carries `CI_LAB_REDIS_URL`, with few builds,
+since it shares the pod's memory limit:
 
 ```bash
 kubectl -n ci-lab exec deploy/ci-lab-scheduler -- python -m scripts.ci_lab.load_measure --builds 3
