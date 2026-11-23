@@ -1473,7 +1473,8 @@
         "tests/swarm/test_admission_view.py::test_every_read_the_view_makes_names_its_own_swarm",
         "tests/swarm/test_admission_view.py::test_the_snapshot_holds_the_rows_the_view_read_under_its_swarm_and_fix_phase",
         "tests/hub/test_admission_gates.py::test_an_admission_hands_the_continuation_the_rows_on_its_task_branch",
-        "tests/hub/test_admission_gates.py::test_an_admission_reads_a_plan_task_steering_through_its_readiness_source"
+        "tests/hub/test_admission_gates.py::test_an_admission_reads_a_plan_task_steering_through_its_readiness_source",
+        "tests/swarm/test_admission_view.py::test_the_admits_gate_needs_a_running_swarm_and_every_wait_clear"
       ]
     },
     {

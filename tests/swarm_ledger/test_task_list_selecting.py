@@ -75,8 +75,9 @@ def test_the_client_query_names_only_the_filters_given() -> None:
         ("tasks", {"ids": ""}, False),
         ("tasks", {"ids": "a", "cursor": "c"}, False),
         ("phases", {"ids": "a"}, False),
+        ("tasks", {"ids": "a", "states": "open", "pinned": "1", "branches": "x", "fields": "branch"}, True),
     ],
-    ids=["ids", "branches-fields", "fields-only", "empty-ids", "with-cursor", "not-tasks"],
+    ids=["ids", "branches-fields", "fields-only", "empty-ids", "with-cursor", "not-tasks", "every-key"],
 )
 def test_only_a_plain_tasks_read_naming_a_filter_is_a_selection(
     path: str, query: dict[str, str], selected: bool
@@ -139,5 +140,7 @@ def test_the_client_reads_a_selection_through_the_tasks_resource(monkeypatch: py
 
     found = ledger_client.LedgerClient().tasks_where("sw", ids=["a", "b"], states=["open"])
 
+    ledger_client.LedgerClient().tasks_where("sw", pinned=True, branches=["x"], fields=["branch"])
+
     assert found == [{"id": "a"}]
-    assert asked == [("sw", "tasks?ids=a%2Cb&states=open")]
+    assert asked == [("sw", "tasks?ids=a%2Cb&states=open"), ("sw", "tasks?pinned=1&branches=x&fields=branch")]

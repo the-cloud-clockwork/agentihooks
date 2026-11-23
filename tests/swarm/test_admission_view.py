@@ -2,6 +2,7 @@
 verdict it trusts and the root slots it keeps."""
 
 from collections.abc import Iterator
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -263,3 +264,57 @@ def test_a_ledger_without_an_overview_gives_the_view_an_empty_one(
     monkeypatch.setattr(narrow.ledger, "metadata", lambda slug: {"_meta": {"rev": 1}})
 
     assert narrow.view.task(SLUG, "t1", marks()[1]).doc["overview"] == ""
+
+
+def test_a_finished_agent_leaves_its_task_unclaimed(narrow: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    agents = [SimpleNamespace(task="t5", state="finished"), SimpleNamespace(task="t6", state="working")]
+    monkeypatch.setattr(narrow.store, "agents", lambda slug: agents)
+
+    claimed = admission_view.claimed(narrow.store, SLUG)
+
+    assert [claimed(task_id) for task_id in ("t5", "t6")] == [False, True]
+
+
+@pytest.mark.feature("hub-admission-narrow-read")
+@pytest.mark.parametrize("denied", ["", "state", "released", "applied", "unshared", "lab"])
+def test_the_admits_gate_needs_a_running_swarm_and_every_wait_clear(
+    narrow: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, denied: str
+) -> None:
+    seen: list[tuple[str, Any]] = []
+
+    def gate(name: str) -> Any:
+        def check(task: dict[str, Any]) -> bool:
+            seen.append((name, task["id"]))
+            return denied != name
+
+        return check
+
+    def released(config: SwarmConfig) -> Any:
+        seen.append(("release config", config.slug))
+        return gate("released")
+
+    def applied(config: SwarmConfig, rows: dict[str, Any]) -> Any:
+        seen.append(("apply rows", sorted(rows)))
+        return gate("applied")
+
+    def lab(store: RedisStore, slug: str, fix: str) -> Any:
+        seen.append(("lab fix", fix))
+
+        def reason(task: dict[str, Any]) -> str:
+            seen.append(("lab", task["id"]))
+            return "held by the lab" if denied == "lab" else ""
+
+        return reason
+
+    monkeypatch.setattr(admission_view.release_wait, "checker", released)
+    monkeypatch.setattr(admission_view.apply_wait, "checker", applied)
+    monkeypatch.setattr(admission_view.fleet_red, "checker", lambda reader: gate("unshared"))
+    monkeypatch.setattr(admission_view.claim_hold, "lab_reason", lab)
+    config = replace(narrow.store.config(SLUG), state="paused" if denied == "state" else "running")
+
+    admits = admission_view.admits(narrow.store, SLUG, config, {"t1": {"id": "t1"}})
+
+    assert admits({"id": "t1"}) is (denied == "")
+    assert ("release config", SLUG) in seen
+    assert ("apply rows", ["t1"]) in seen
+    assert ("lab fix", "") in seen
