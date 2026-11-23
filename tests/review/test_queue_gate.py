@@ -96,6 +96,8 @@ def test_another_agents_read_does_not_satisfy_the_author(monkeypatch: pytest.Mon
     assert "unread" in rows[0].reason
     record.mark(found, SLUG, forge, URL, AUTHOR, ["f1"], "")
     assert _queue(monkeypatch, found) == (0, [URL], [])
+    record.mark(found, SLUG, forge, URL, "engineer@a1b2c3-0003", ["f1"], "")
+    assert _queue(monkeypatch, found) == (0, [URL], [])
 
 
 @pytest.mark.feature("review-findings-queue-gate")

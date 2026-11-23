@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 import sys
-from dataclasses import asdict
 
 from scripts.forge import remote
 from scripts.forge.model import Forge, ForgeError
@@ -56,5 +55,5 @@ def main(argv: list[str]) -> int:
     except (SwarmError, ForgeError) as error:
         print(f"review: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(asdict(result)))
+    print(json.dumps(record.document(result)))
     return 0

@@ -11,4 +11,4 @@ rules:
         - merge-queue-admit-skips-review.py
     patterns:
       - pattern: $QUEUE.operate(..., admit=$ADMIT, ...)
-      - pattern-not: $QUEUE.operate(..., admit=<... review_gate.admit(...) ...>, ...)
+      - pattern-not: $QUEUE.operate(..., admit=<... review_gate.queue_admit(...) ...>, ...)

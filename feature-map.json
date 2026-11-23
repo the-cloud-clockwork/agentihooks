@@ -23,7 +23,7 @@
       "origin": "operator",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-findings-gate",
       "behaviour": "A reviewer posts its findings on a change request head through the forge seam and the review record stores each one with its comment; a review task is refused at swarm done while it posted no finding; the author marks findings read or answered; swarm merge queue logs, or when the review gate is enforced refuses, a head without a review from another agent whose findings the author read.",
-      "seam": "scripts.review.record post, mark and done_refusal through scripts.review.cli and scripts.swarm.cli.cmd_done; scripts.review.gate.admit in the scripts.swarm.cli.cmd_merge queue admission with the review enforcement gate",
+      "seam": "scripts.review.record post, mark and done_refusal through scripts.review.cli and scripts.swarm.cli.cmd_done; scripts.review.gate.queue_admit composes intent, review and freshness checks for scripts.swarm.cli.cmd_merge",
       "tests": [
         "tests/review/test_record.py::test_a_post_stores_each_finding_with_its_forge_comment_on_the_reported_head",
         "tests/review/test_record.py::test_a_post_without_a_finding_is_refused_and_posts_nothing",

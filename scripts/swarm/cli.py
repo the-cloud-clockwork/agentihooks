@@ -58,6 +58,8 @@ from scripts.inbox import relay as relay
 from scripts.inbox import wake as wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.store import InboxError, InboxStore
+from scripts.review import gate as review_gate
+from scripts.review import record as review_record
 from scripts.swarm import (
     affinity,
     agent_up,
@@ -102,7 +104,6 @@ from scripts.swarm import (
     priming_trace,
     prompt,
     pull_head,
-    queue_exit,
     queue_priority,
     queue_record,
     ready,
@@ -2191,10 +2192,7 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: (
-                    (agent is not None and _queue_intent(store, args, agent, head))
-                    or queue_exit.require_fresh(args.url, head)
-                ),
+                admit=lambda head: review_gate.queue_admit(store, args, agent, head, _queue_intent),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
                 priority=lambda: queue_priority.automatic(store, args.slug, args.url, LedgerClient()),
@@ -2217,6 +2215,7 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
             return
         proof.update(found)
     proven = {**row, "proof": {**(row.get("proof") or {}), **proof}}
+    review_record.require_done(store, args.slug, ledger_kinds.kind(row), agent.task)
     missing = ledger_kinds.unmet(proven)
     if missing:
         raise SwarmError(_unproven(ledger_kinds.kind(row), missing))
