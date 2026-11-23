@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 import urllib.parse
+from collections import Counter
 from contextlib import ExitStack
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -201,7 +202,7 @@ def unclocked(results: list) -> list:
     return results
 
 
-def load_contract(path: Path) -> dict[str, int]:
+def load_contract(path: Path, side: str = "removed") -> tuple[dict[str, int], dict[str, int]]:
     contract = json.loads(path.read_text())
     removed = contract.get("removed") if isinstance(contract, dict) else None
     reviewers = contract.get("reviewed_by") if isinstance(contract, dict) else None
@@ -233,7 +234,7 @@ def load_contract(path: Path) -> dict[str, int]:
     selectors = {entry["selector"]: entry["matches"] for entry in removed}
     if len(selectors) != len(removed):
         raise SystemExit(f"{path}: each removed selector is named once")
-    return selectors
+    return selectors, {}
 
 
 def removal(selectors) -> str:
@@ -254,12 +255,20 @@ def seen(page, selectors) -> dict[str, int]:
     return dict(zip(selectors, counts, strict=True))
 
 
-def mismatched(contract: dict[str, int], shown: dict[str, int]) -> list[str]:
+def mismatched(contract: dict[str, int], shown: dict[str, int], side: str = "base") -> list[str]:
     return [
         f"{selector} names {matches} elements but the most the base page shows at once is {shown.get(selector, 0)}"
         for selector, matches in contract.items()
         if shown.get(selector, 0) != matches
     ]
+
+
+def miscounted(named: dict[str, int], made: Counter[str], side: str) -> list[str]:
+    return []
+
+
+def unnamed(requests: list[dict], named: dict[str, int], made: Counter[str]) -> list[dict]:
+    return requests
 
 
 def steps():
@@ -432,7 +441,7 @@ def main() -> None:
     parser.add_argument("output", type=Path)
     parser.add_argument("--remove", type=Path)
     args = parser.parse_args()
-    removed = load_contract(args.remove) if args.remove else {}
+    removed = load_contract(args.remove)[0] if args.remove else {}
     results = unclocked(record(args.root.resolve(), args.folder, removed))
     args.output.write_text(json.dumps(results, indent=1, ensure_ascii=False) + "\n")
 
