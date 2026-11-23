@@ -1,24 +1,31 @@
 import json
 import threading
 import uuid
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from scripts.swarm_ledger import api_service
+from scripts.swarm_ledger import api_service, request_metrics
 from scripts.swarm_ledger.api import mutations, resources
+from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.events.publishing import Publishing
-from scripts.swarm_ledger.repository import task_write
+from scripts.swarm_ledger.repository import legacy, task_write
 from scripts.swarm_ledger.repository.entry import Entry
-from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+from scripts.swarm_ledger.repository.rows import encode
+from scripts.swarm_ledger.repository.sqlite import Missing, SQLiteLedgerRepository
 from tests.swarm_ledger import test_api_v1
 from tests.swarm_ledger.narrow_write_cases import (
     CLAIMANT,
     FALLBACKS,
+    FREED,
     SCENARIOS,
+    SETTLE,
+    TABLES,
     WORKSPACE,
     assert_falls_back,
+    assert_same,
     assert_same_write,
     claim_op,
     rows_of,
@@ -149,16 +156,16 @@ def test_a_hub_claim_reply_carries_the_projected_row_and_the_new_revision(live: 
     assert reply["_meta"]["rev"] == request(live, "GET", "metadata")[1]["data"]["_meta"]["rev"]
 
 
-def services(repository: Any, calls: list) -> Any:
+def services(repository: Any, calls: list, slug: str = LARGE, refusal: Any = None) -> Any:
     def hook(name: str) -> Any:
         return lambda slug, state: calls.append((name, slug, state))
 
     gate = SimpleNamespace(apply=lambda doc, op, ctx, apply_op: apply_op(doc, op, ctx), publish=lambda rejected: None)
-    authority = SimpleNamespace(refusal=lambda principal, op: None, fence=lambda slug, epoch: None)
+    authority = SimpleNamespace(refusal=refusal or (lambda principal, op: None), fence=lambda slug, epoch: None)
     ledger = SimpleNamespace(
         core=repository.domain,
         authority=authority,
-        write_gate=lambda slug: gate,
+        write_gate=lambda name: gate if name == slug else None,
         relay_to_inbox=hook("relay"),
         deliver_alerts=hook("alerts"),
     )
@@ -271,6 +278,12 @@ def test_only_a_single_guarded_hub_claim_takes_the_narrow_path() -> None:
     hub = {"operation_id": "o", "ops": [claim_op()], "guards": {}}
     assert mutations.claim(hub) == claim_op()
     assert mutations.claim({**hub, "ops": [claim_op(controller_epoch=3)]}) is not None
+    one_guard = [
+        {key: value for key, value in claim_op().items() if key != "if_match"},
+        {key: value for key, value in claim_op().items() if key != "if_state"},
+        {**claim_op(), "fields": {"claimed_by": CLAIMANT}},
+    ]
+    assert [mutations.claim({**hub, "ops": [op]}) for op in one_guard] == one_guard
     refused = [
         {**hub, "ops": [claim_op(), claim_op(id="second")]},
         {**hub, "changes": [{"path": "tasks/t1/done", "value": True}]},
@@ -279,6 +292,9 @@ def test_only_a_single_guarded_hub_claim_takes_the_narrow_path() -> None:
         {**hub, "ops": [{key: value for key, value in claim_op().items() if key not in ("if_state", "if_match")}]},
         {**hub, "ops": [{**claim_op(), "fields": {"state": "claimed", "claimed_by": CLAIMANT, "kind": "code"}}]},
         {**hub, "ops": [{**claim_op(), "fields": {"state": "done"}}]},
+        {**hub, "ops": [{**claim_op(), "fields": {}}]},
+        {**hub, "ops": [{**claim_op(), "fields": ["state"]}]},
+        {**hub, "ops": [["op", "id"]]},
         {**hub, "ops": [{"op": "task_add", "id": "a", "by": "swarm", "task": "t9", "title": "x", "lane": "eng"}]},
     ]
     assert [mutations.claim(payload) for payload in refused] == [None] * len(refused)
@@ -287,14 +303,303 @@ def test_only_a_single_guarded_hub_claim_takes_the_narrow_path() -> None:
 @pytest.mark.feature("ledger-task-update-narrow-write")
 @pytest.mark.parametrize(("published", "written", "reads"), [(True, "row", 1), (False, "row", 0), (True, None, 0)])
 def test_publishing_refreshes_only_a_published_ledger_after_a_narrow_write(published, written, reads) -> None:
-    seen = []
+    seen, gates = [], []
     inner = SimpleNamespace(
-        apply_task_update=lambda slug, op, gate: written,
-        current=lambda slug: seen.append(threading.current_thread().name) or SimpleNamespace(generation=-1),
+        apply_task_update=lambda slug, op, gate: gates.append((slug, gate)) or written,
+        current=lambda slug: seen.append((threading.current_thread().name, slug)) or SimpleNamespace(generation=-1),
     )
     wrapper = Publishing(inner)
     if published:
         wrapper.published["demo"] = 0
-    assert wrapper.apply_task_update("demo", claim_op()) == written
+    assert wrapper.apply_task_update("demo", claim_op(), "gate") == written
     wrapper.drain(5)
-    assert seen == ["ledger-publish"] * reads
+    assert gates == [("demo", "gate")]
+    assert seen == [("ledger-publish", "demo")] * reads
+
+
+def made(tmp_path: Any, name: str) -> Callable[[str], SQLiteLedgerRepository]:
+    return lambda twin: SQLiteLedgerRepository(tmp_path / name / twin / "ledger.sqlite3")
+
+
+def done_dependency(document: dict) -> None:
+    document["tasks"][0].update(state="done", done=True)
+    document["tasks"][1]["depends_on"] = ["t1"]
+
+
+def parked_on_done(document: dict) -> None:
+    document["tasks"][0].update(state="done", done=True)
+    document["tasks"][1]["parked_on"] = ["t1"]
+
+
+def wordy(document: dict) -> None:
+    document["overview"] = "word " * 250
+
+
+CASES = {
+    "done dependency": (claim_op("t2"), done_dependency, []),
+    "parked on a done task": (claim_op("t2"), parked_on_done, []),
+    "stored size warning": (claim_op(), wordy, []),
+}
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+@pytest.mark.parametrize("case", sorted(CASES))
+def test_a_narrow_claim_reads_its_dependencies_and_keeps_stored_size_warnings(tmp_path, monkeypatch, case) -> None:
+    assert_same(made(tmp_path, "same"), CASES[case], monkeypatch)
+
+
+def refusing(doc: dict, op: dict, ctx: Any, apply_op: Any) -> bool:
+    return False
+
+
+def dirtying(doc: dict, op: dict, ctx: Any, apply_op: Any) -> bool:
+    ctx.dirty = True
+    return False
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+@pytest.mark.parametrize("refuse", [refusing, dirtying])
+def test_a_claim_its_gate_refuses_is_rejected_and_trims_events_as_the_whole_write_does(
+    tmp_path, monkeypatch, refuse
+) -> None:
+    whole, narrow, left, right, clock = twins(made(tmp_path, "gated"), None, monkeypatch)
+    for ops in ([claim_op(id="first")], [FREED]):
+        whole.apply_ops(left, ops=ops)
+        narrow.apply_ops(right, ops=ops)
+    clock.tick()
+    monkeypatch.setattr(whole.domain, "EVENTS_KEPT", 1)
+    monkeypatch.setattr(whole.domain, "EVENTS_WINDOW_MS", 0)
+    _, rejected = whole.apply_ops(left, ops=[claim_op()], gate=SimpleNamespace(apply=refuse))
+    written = narrow.apply_task_update(right, claim_op(), SimpleNamespace(apply=refuse))
+    assert written is not None and written.rejected == rejected == ["claim"]
+    assert written.task["claimed_by"] == ""
+    assert rows_of(narrow, right) == rows_of(whole, left)
+
+
+def without_task_revision(repository: SQLiteLedgerRepository, slug: str) -> None:
+    document = repository.export_document(slug)
+    del document["_meta"]["task_revision"]
+    repository.import_document(slug, document, replace=True)
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_a_claim_on_a_ledger_without_a_task_revision_stores_the_previous_revision(tmp_path, monkeypatch) -> None:
+    whole, narrow, left, right, clock = twins(made(tmp_path, "unrevised"), None, monkeypatch)
+    for repository, slug in ((whole, left), (narrow, right)):
+        repository.apply_ops(slug, ops=[claim_op(id="first")])
+        without_task_revision(repository, slug)
+    clock.tick()
+    previous = whole.read(left, "_meta.rev")["_meta"]["rev"]
+    whole.apply_ops(left, ops=[claim_op()])
+    assert narrow.apply_task_update(right, claim_op()) is not None
+    assert rows_of(narrow, right) == rows_of(whole, left)
+    assert narrow.read(right, "_meta.task_revision")["_meta"]["task_revision"] == previous
+
+
+def checked(document: dict) -> None:
+    document["tasks"][0]["done"] = True
+
+
+def settled_task(document: dict) -> None:
+    document["tasks"][0]["state"] = "done"
+
+
+def awaiting(document: dict) -> None:
+    document["tasks"][0]["awaiting"] = "approval"
+
+
+def unchanged(document: dict) -> None:
+    return None
+
+
+SETTLED = {
+    "checked done": (checked, claim_op()),
+    "done state": (settled_task, claim_op()),
+    "approval line": (awaiting, {**claim_op(), "fields": {"state": "pr", "claimed_by": CLAIMANT}}),
+    "missing task": (unchanged, claim_op("t9")),
+}
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+@pytest.mark.parametrize("case", sorted(SETTLED))
+def test_a_claim_on_a_settled_task_or_one_that_changes_a_priority_line_falls_back(tmp_path, monkeypatch, case) -> None:
+    prepare, op = SETTLED[case]
+    assert_falls_back(made(tmp_path, "settled"), prepare, monkeypatch, op)
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_a_ledger_missing_a_part_the_whole_write_creates_falls_back(tmp_path) -> None:
+    repository = large(tmp_path, tasks=3)
+    with repository.connect() as connection, connection:
+        for table in TABLES:
+            connection.execute(f"DELETE FROM {table} WHERE slug=? AND path=?", (LARGE, encode(["notifications"])))
+    before = rows_of(repository, LARGE)
+    assert repository.apply_task_update(LARGE, claim_op()) is None
+    assert rows_of(repository, LARGE) == before
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_a_narrow_claim_on_a_missing_ledger_names_it(tmp_path) -> None:
+    repository = large(tmp_path, tasks=3)
+    with pytest.raises(Missing, match="absent"):
+        repository.apply_task_update("absent", claim_op())
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_a_narrow_claim_adopts_only_its_own_legacy_ledger(tmp_path) -> None:
+    repository = large(tmp_path, tasks=3)
+    other = repository.directory / "other.json"
+    old = {"title": "Old", "overview": "o", "phases": [], "questions": [], "followups": []}
+    other.write_text(json.dumps({**old, "_meta": {"rev": 3, "stamps": {}, "events": [], "seeds": {}}}))
+    assert repository.apply_task_update(LARGE, claim_op()) is not None
+    assert other.exists() and not legacy.stored(repository, "other")
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_a_narrow_claim_locks_and_begins_its_own_ledger_and_times_its_write_steps(tmp_path, monkeypatch) -> None:
+    repository = large(tmp_path, tasks=3)
+    locked, begin = request_metrics.locked, request_metrics.begin_ledger
+    held, begun, admitted = [], [], []
+    monkeypatch.setattr(request_metrics, "locked", lambda lock: held.append(lock.slug) or locked(lock))
+    monkeypatch.setattr(
+        request_metrics,
+        "begin_ledger",
+        lambda connection, slug, statement: begun.append(slug) or begin(connection, slug, statement),
+    )
+    monkeypatch.setattr(
+        SQLiteLedgerRepository, "admit", lambda self, connection, state: admitted.append((connection, state))
+    )
+    timing = request_metrics.Timing()
+    token = request_metrics.CURRENT.set(timing)
+    try:
+        written = repository.apply_task_update(LARGE, claim_op())
+    finally:
+        request_metrics.CURRENT.reset(token)
+    assert written is not None
+    assert held == begun == [LARGE]
+    assert {"apply_locked", "event_append", "outbox_write", "refresh_record"} <= set(timing.steps)
+    assert [(connection is not None, state is written.state) for connection, state in admitted] == [(True, True)]
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_a_row_written_outside_the_read_keeps_its_stored_key_and_position(tmp_path) -> None:
+    repository = large(tmp_path, tasks=3)
+    path = encode(task_write.task_parts("t2"))
+    with repository.connect() as connection:
+        stored = task_write.stored_at(connection, LARGE, [path])[path]
+        table, parent, _, _, kind, value = stored
+        after = {path: (table, parent, "moved", 99, kind, value)}
+        assert task_write.placed(connection, LARGE, {}, after, {parent}) == {path: stored}
+    with pytest.raises(RuntimeError, match=task_write.REPLACED):
+        task_write.placed(None, LARGE, {}, after, {path})
+
+
+def hooked(state: dict, held: dict) -> tuple[dict, list]:
+    reads: list = []
+
+    def read(slug: str, *paths: str) -> dict:
+        reads.append((slug, *paths))
+        return {"tasks": [{"id": path.split("/")[1]} for path in paths], "phases": []}
+
+    hooks: Any = SimpleNamespace(repository=SimpleNamespace(held_revisions=lambda: held, read=read))
+    return mutations.hook_state(hooks, "demo", state), reads
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_hook_state_reads_the_rows_operator_events_and_open_alerts_name_since_the_oldest_held_revision() -> None:
+    events = [
+        {"rev": 8, "by": "operator", "target": "tasks/t5/comments"},
+        {"rev": 7, "by": "operator", "target": "tasks/t6/comments"},
+        {"rev": 9, "by": "swarm", "target": "tasks/t7"},
+        {"rev": 9, "by": "operator", "target": "phases/p1"},
+        {"rev": 9, "by": "operator", "target": "tasks/t1"},
+    ]
+    alerts = [
+        {"rev": 8, "state": "open", "item": "tasks/t8"},
+        {"rev": 7, "state": "open", "item": "tasks/t9"},
+        {"rev": 9, "state": "done", "item": "tasks/t10"},
+        {"rev": 9, "state": "open", "item": "chat"},
+        {"rev": 9, "state": "open"},
+        {"state": "open", "item": "tasks/t11"},
+    ]
+    state = {"_meta": {"rev": 10, "events": events}, "alerts": alerts, "tasks": [{"id": "t1"}]}
+    held = {"inbox": {"demo": [12, 8], "other": [1]}, "alerts": {"other": [2]}}
+    found, reads = hooked(state, held)
+    assert reads == [("demo", "tasks/t5", "tasks/t8")]
+    assert found == {**state, "tasks": [{"id": "t1"}, {"id": "t5"}, {"id": "t8"}]}
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_hook_state_leaves_the_written_state_alone_when_nothing_it_names_is_missing() -> None:
+    state = {"_meta": {"rev": 3, "events": []}, "alerts": [{"state": "open", "item": "tasks/t11"}], "tasks": []}
+    found, reads = hooked(state, {"inbox": {"demo": [0]}})
+    assert reads == [] and found is state
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_stored_warnings_reads_only_the_stored_warning_list() -> None:
+    for stored, expected in (({}, []), ({"_meta": {}}, []), ({"_meta": {"warnings": ["w"]}}, ["w"])):
+        reads: list = []
+        reader = SimpleNamespace(read=lambda slug, *keys, stored=stored: reads.append((slug, *keys)) or stored)
+        hooks: Any = SimpleNamespace(repository=reader)
+        assert mutations.stored_warnings(hooks, "demo") == expected
+        assert reads == [("demo", "_meta.warnings")]
+
+
+def warned(tmp_path: Any) -> SQLiteLedgerRepository:
+    repository = large(tmp_path, tasks=5)
+    document = repository.export_document(LARGE)
+    wordy(document)
+    repository.import_document(LARGE, document, replace=True)
+    repository.apply_ops(LARGE, ops=[SETTLE])
+    return repository
+
+
+def claim_payload(repository: SQLiteLedgerRepository, task: str, guarded_by: str | None = None) -> dict:
+    item = f"tasks/{guarded_by or task}"
+    revision = resources.resource_revision(repository.read(LARGE, item), item)
+    return {"operation_id": uuid.uuid4().hex, "ops": [claim_op(task)], "guards": {f"tasks/{task}": revision}}
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_a_refused_hub_claim_answers_with_the_stored_warnings_and_the_refusal(tmp_path) -> None:
+    repository = warned(tmp_path)
+
+    def refusal(principal: str, op: dict) -> str | None:
+        return f"{principal} may not claim" if principal else None
+
+    payload = claim_payload(repository, "t2")
+    with pytest.raises(APIError) as refused:
+        mutations.apply(services(repository, [], refusal=refusal), LARGE, "engineer@abc123-0009", payload)
+    assert refused.value.status == 403
+    warnings = ["overview has 250 words, limit 200", "engineer@abc123-0009 may not claim"]
+    assert refused.value.details == {"rejected": ["claim"], "_meta": {"warnings": warnings}}
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_a_hub_claim_with_a_stale_guard_is_refused_by_its_write_gate(tmp_path) -> None:
+    repository = large(tmp_path, tasks=5)
+    payload = claim_payload(repository, "t2", guarded_by="t3")
+    with pytest.raises(APIError) as stale:
+        mutations.apply(services(repository, []), LARGE, "", payload)
+    assert (stale.value.status, stale.value.code) == (409, "revision_conflict")
+    assert row_claimant(repository, "t2") == ""
+
+
+def row_claimant(repository: SQLiteLedgerRepository, task: str) -> str:
+    return repository.read(LARGE, f"tasks/{task}")["tasks"][0]["claimed_by"]
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_a_hub_claim_hands_its_hooks_the_task_an_operator_wrote_since_a_held_revision(tmp_path) -> None:
+    repository = large(tmp_path, tasks=5)
+    repository.hold_revision("inbox", LARGE, repository.read(LARGE, "_meta.rev")["_meta"]["rev"])
+    repository.apply_ops(
+        LARGE, ops=[{"op": "add", "id": "c1", "thread": "tasks/t3/comments", "text": "operator words"}]
+    )
+    calls: list = []
+    reply = mutations.apply(services(repository, calls), LARGE, "", claim_payload(repository, "t4"))
+    assert reply["applied"] == ["claim"]
+    assert [(name, slug, [task["id"] for task in state["tasks"]]) for name, slug, state in calls] == [
+        (name, LARGE, ["t4", "t3"]) for name in ("relay", "doctor", "alerts")
+    ]

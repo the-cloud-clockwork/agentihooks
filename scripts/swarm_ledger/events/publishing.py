@@ -1,7 +1,7 @@
 import sys
 import threading
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from scripts.swarm_ledger.repository.entry import Entry
@@ -82,7 +82,7 @@ class Publishing:
         return state, rejected
 
     def apply_task_update(self, slug: str, op: dict[str, Any], gate: object = None) -> "Written | None":
-        written = cast("Written | None", self.inner.apply_task_update(slug, op, gate))  # pyright: ignore[reportUnknownMemberType]
+        written: Written | None = self.inner.apply_task_update(slug, op, gate)  # pyright: ignore[reportUnknownMemberType]
         if written is not None and slug in self.published:  # pyright: ignore[reportUnknownMemberType]
             self.queue(slug, Newest())
         return written

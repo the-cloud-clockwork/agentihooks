@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/mutation.py:scripts.swarm_ledger.repository.mutation.x_narrow:91baf14e1c5fc8236b0fe9c01f685a635c4eeec2ab7a65b7c9ce6084ed1698ce": {
+    "reader": "standards_reader",
+    "reason": "Same unreachability as the sibling mutant: omitting the third positional argument defaults ctx.slug to \"\", but ctx.slug is never read anywhere on narrow()'s exclusive task_update claim path, so the value makes no difference."
+  }
+}

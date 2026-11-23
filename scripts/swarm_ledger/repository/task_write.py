@@ -1,9 +1,8 @@
 """A claim shaped task update written on its task's own stored rows."""
 
 import json
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import ledger_priorities  # pyright: ignore[reportMissingImports]
 
@@ -103,13 +102,12 @@ def row_of(state: Doc, task_id: str) -> Doc | None:
 
 
 def lines(task: Doc) -> Doc:
-    wanted = cast(Callable[[Doc], Doc], ledger_priorities.wanted)  # pyright: ignore[reportUnknownMemberType]
-    return wanted({"tasks": [task], "phases": []})
+    return ledger_priorities.wanted({"tasks": [task], "phases": []})  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def admitted(connection: Any, slug: str, state: Doc, task: Doc, op: Doc) -> bool:
     meta: Doc = state["_meta"]
-    if task.get("done") is True or task.get("state", "open") in UNSETTLED or not meta.get("created_at"):
+    if task.get("done") is True or task.get("state") in UNSETTLED or not meta.get("created_at"):
         return False
     if "stamps" not in meta or lines(task) != lines({**task, **op["fields"]}):
         return False
@@ -157,7 +155,7 @@ def update(repository: Any, connection: Any, slug: str, op: Doc, gate: Any) -> W
     rows = read(connection, slug, parts)
     if ROOT not in rows:
         raise Missing(slug)
-    state = cast(Doc, assemble(rows))
+    state: Doc = assemble(rows)  # pyright: ignore[reportAssignmentType]
     task = row_of(state, task_id)
     if task is None or not admitted(connection, slug, state, task, op):
         return None
@@ -166,9 +164,9 @@ def update(repository: Any, connection: Any, slug: str, op: Doc, gate: Any) -> W
     if named:
         parts = (*parts, *named)
         rows.update(read(connection, slug, named))
-        state = cast(Doc, assemble(rows))
+        state = assemble(rows)  # pyright: ignore[reportAssignmentType]
     state["_meta"]["events"] = read_events(connection, slug)
-    before = cast(Doc, thawed(state))
+    before: Doc = thawed(state)  # pyright: ignore[reportAssignmentType]
     rejected, ctx = mutation.narrow(slug, state, repository.domain, op, gate)
     persist(repository, connection, slug, (rows, partial_containers(parts)), (before, state), ctx)
     written = row_of(state, task_id)
@@ -187,10 +185,9 @@ def persist(
     )
     repository.admit(connection, state)
     unlogged: tuple[Doc, Doc] = (without_events(before), without_events(state))  # pyright: ignore[reportUnknownVariableType]
-    old, new = cast(tuple[Rows, Rows], diff(*unlogged))
-    after = placed(connection, slug, rows, new, partial)
-    stored = {**stored_at(connection, slug, [path for path in old if path not in rows]), **rows}
-    paths = cast(list[str], write_rows(connection, slug, {path: stored[path] for path in old if path in stored}, after))
+    old, new = diff(*unlogged)  # pyright: ignore[reportUnknownVariableType]
+    after = placed(connection, slug, rows, new, partial)  # pyright: ignore[reportUnknownArgumentType]
+    paths: list[str] = write_rows(connection, slug, {path: rows[path] for path in old if path in rows}, after)  # pyright: ignore[reportUnknownVariableType]
     events: list[Doc] = ctx.events if ctx.changed else []
     kept = len(meta["events"])
     with request_metrics.step("event_append"):

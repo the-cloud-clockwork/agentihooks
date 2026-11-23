@@ -123,7 +123,7 @@ def apply(services: Services, slug: str, principal: str, payload: Doc, worktree:
     with request_metrics.step("publish"):
         published(services, slug, (fence, rejected), state)
     tasks = {op["item"].split("/")[1] for op in operations if op["op"] == "task_update"}
-    rows = [cast(Doc, resources.project(row)) for row in state.get("tasks", []) if row["id"] in tasks]
+    rows: list[Any] = [resources.project(row) for row in state.get("tasks", []) if row["id"] in tasks]
     return answer(rows if tasks else None, operations, rejected, state["_meta"], screen)
 
 
@@ -157,7 +157,7 @@ def apply_claim(services: Services, slug: str, principal: str, payload: Doc, wor
         return None
     with request_metrics.step("publish"):
         published(services, slug, (fence, written.rejected), hook_state(services, slug, written.state))
-    rows = [cast(Doc, resources.project(written.task))]
+    rows: list[Any] = [resources.project(written.task)]
     return answer(rows, operations, written.rejected, written.state["_meta"], screen)
 
 
@@ -214,16 +214,16 @@ def hook_state(services: Services, slug: str, state: Doc) -> Doc:
     meta: Doc = state["_meta"]
     held: dict[str, dict[str, list[int]]] = services.repository.held_revisions()
     since = min([meta["rev"], *(rev for slugs in held.values() for rev in slugs.get(slug, []))])
-    events: list[Doc] = meta.get("events", [])
-    alerts: list[Doc] = state.get("alerts", [])
+    events: list[Doc] = meta["events"]
+    alerts: list[Doc] = state["alerts"]
     named = {
         "/".join(event["target"].split("/")[:2])
         for event in events
-        if since <= event.get("rev", -1) and event.get("by") == "operator" and event["target"].startswith("tasks/")
+        if since <= event["rev"] and event.get("by") == "operator" and event["target"].startswith("tasks/")
     } | {
         alert["item"]
         for alert in alerts
-        if since <= alert.get("rev", -1) and alert.get("state") == "open" and ITEM.match(alert.get("item") or "")
+        if since <= alert.get("rev", -1) and alert.get("state") == "open" and ITEM.match(str(alert.get("item")))
     }
     held_rows = {f"{name}/{row['id']}" for name in ITEMS for row in state.get(name, [])}
     missing = sorted(named - held_rows)

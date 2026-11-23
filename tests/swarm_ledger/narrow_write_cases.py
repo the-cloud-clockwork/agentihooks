@@ -51,9 +51,9 @@ def rows_of(repository: Any, slug: str) -> dict:
             paths for (paths,) in connection.execute("SELECT paths FROM row_changes WHERE slug=?", (slug,)).fetchall()
         )
         found["ledgers"] = [
-            (revision, summary)
-            for revision, summary in connection.execute(
-                "SELECT revision, summary FROM ledgers WHERE slug=?", (slug,)
+            (revision, generation, summary)
+            for revision, generation, summary in connection.execute(
+                "SELECT revision, generation, summary FROM ledgers WHERE slug=?", (slug,)
             ).fetchall()
         ]
     return json.loads(
@@ -190,7 +190,11 @@ def twins(make: Callable[[str], Any], prepare: Callable[[dict], None] | None, mo
 
 
 def assert_same_write(make: Callable[[str], Any], scenario: str, monkeypatch: Any) -> None:
-    op, prepare, before = SCENARIOS[scenario]
+    assert_same(make, SCENARIOS[scenario], monkeypatch)
+
+
+def assert_same(make: Callable[[str], Any], case: tuple, monkeypatch: Any) -> None:
+    op, prepare, before = case
     whole, narrow, left, right, clock = twins(make, prepare, monkeypatch)
     for ops in before:
         whole.apply_ops(left, ops=ops)
@@ -204,7 +208,9 @@ def assert_same_write(make: Callable[[str], Any], scenario: str, monkeypatch: An
     assert narrow.get_document(right) == make("narrow").get_document(right) == whole.get_document(left)
 
 
-def assert_falls_back(make: Callable[[str], Any], prepare: Callable[[dict], None], monkeypatch: Any) -> None:
+def assert_falls_back(
+    make: Callable[[str], Any], prepare: Callable[[dict], None], monkeypatch: Any, op: dict | None = None
+) -> None:
     repository = make("fallback")
     clock = Clock()
     monkeypatch.setattr(repository.domain, "now_ms", clock)
@@ -215,5 +221,5 @@ def assert_falls_back(make: Callable[[str], Any], prepare: Callable[[dict], None
     prepare(document)
     repository.import_document(slug, document, replace=True)
     before = rows_of(repository, slug)
-    assert repository.apply_task_update(slug, claim_op()) is None
+    assert repository.apply_task_update(slug, op or claim_op()) is None
     assert rows_of(repository, slug) == before
