@@ -636,7 +636,7 @@ def test_api_and_git_read_their_commands(monkeypatch):
     ]
 
 
-def test_the_workflow_grades_every_branch_push_that_changes_a_workflow_with_the_dev_grader():
+def test_the_workflow_grades_every_branch_push_that_changes_a_workflow_with_the_dev_grader() -> None:
     workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "branch-lanes.yml").read_text())
     assert workflow[True] in (
         {
@@ -654,7 +654,7 @@ def test_the_workflow_grades_every_branch_push_that_changes_a_workflow_with_the_
         "ref": "dev",
         "fetch-depth": 1,
         "sparse-checkout": (
-            "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
+            "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n/.github/ci-tools/\n"
         ),
         "sparse-checkout-cone-mode": False,
         "persist-credentials": False,
