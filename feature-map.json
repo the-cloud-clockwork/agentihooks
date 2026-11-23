@@ -6632,6 +6632,17 @@
       ]
     },
     {
+      "id": "ledger-relay-marks-one-helper",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "An entry the orchestrator relays for the operator carries who relayed it, from where and the proof it rests on, his quoted words or the entry he wrote, in that order in the stored entry and in its event. A recorded run of a relayed note, comment and answer, a rank set by his words, an order set by his words and by an entry he wrote and an order cleared keeps the stored text of each. One helper builds the marks, and no other module writes who relayed an entry and from where side by side.",
+      "seam": "ledger_core.sync over the relay, task_update, order_set and order_clear ops, and every module under scripts and hooks against scripts.swarm_ledger.ledger_relay.marks_of",
+      "semgrep_rule": "feature-ledger-relay-marks-one-helper",
+      "tests": [
+        "tests/swarm_ledger/test_relay_marks_recorded.py::test_a_recorded_run_of_the_relaying_ops_keeps_the_text_of_every_entry_and_event"
+      ]
+    },
+    {
       "id": "ledger-followup-duplicates",
       "origin": "inventory",
       "behaviour": "A follow up repeating an open follow up or task is refused naming it, unless a plain words not duplicate reason is given and stored.",
