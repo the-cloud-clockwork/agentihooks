@@ -885,9 +885,13 @@ class RedisStore:
         from scripts.swarm_ledger import ledger_workspace
 
         fencing.write(self, slug, lambda doc: doc.update({**fencing.EMPTY, "epoch": doc["epoch"]}))
-        for pattern in (self.key(slug, "*"), ledger_workspace.task_files_key("*", slug, "*")):
-            for keys in batched(self.redis.scan_iter(match=pattern, count=SCAN_PAGE), SCAN_PAGE):
-                self.redis.delete(*keys)
+        keys = [
+            key
+            for pattern in (self.key(slug, "*"), ledger_workspace.task_files_key("*", slug, "*"))
+            for key in self.redis.scan_iter(match=pattern, count=SCAN_PAGE)
+        ]
+        for page in batched(keys, SCAN_PAGE):
+            self.redis.delete(*page)
         self.redis.srem(f"{PREFIX}:index", slug)
         self.names.release(slug)
 

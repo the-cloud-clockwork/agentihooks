@@ -1768,7 +1768,7 @@
       "id": "swarm-remove-deletes-hive-task-copies",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-remove-task-copies",
-      "behaviour": "Removing a swarm deletes every hive's task copy of that swarm and its work folder pointers, scanning its own keys and the task copy keys of every hive one page of the scan size at a time and deleting each page, never listing keys, while another swarm's copies stay, including a swarm whose name starts with the removed one, and each hive's own files key stays.",
+      "behaviour": "Removing a swarm deletes every hive's task copy of that swarm and its work folder pointers, scanning its own keys and the task copy keys of every hive with the scan page size and deleting them in chunks of that size, never listing keys, while another swarm's copies stay, including a swarm whose name starts with the removed one, and each hive's own files key stays.",
       "seam": "agentihooks swarm remove through RedisStore.remove, and ledger_workspace.task_files_key with a wildcard hive and task",
       "tests": [
         "tests/swarm/test_swarm_remove.py::test_remove_deletes_the_swarm_task_copies_on_every_hive_by_scanning_pages_and_keeps_other_swarms"

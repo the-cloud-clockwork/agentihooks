@@ -6,7 +6,6 @@ from typing import Any
 
 import pytest
 
-from scripts.inbox.seats import SCAN_PAGE
 from scripts.swarm import cli
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_workspace
@@ -35,22 +34,30 @@ def test_remove_deletes_the_swarm_task_copies_on_every_hive_by_scanning_pages_an
         redis.set(key, json.dumps({"progress.md": "step\n"}))
     redis.set(ledger_workspace.files_key("h1"), json.dumps({"sw": {}}))
     ledger_workspace.launched_on(store, "sw", "t1", "h1")
+    page = 2
+    monkeypatch.setattr("scripts.swarm.store.SCAN_PAGE", page)
     scans: list[tuple[str | None, int | None]] = []
-    scan = redis.scan_iter
+    deleted: list[int] = []
+    scan, delete = redis.scan_iter, redis.delete
 
     def paged(match: str | None = None, count: int | None = None, **kwargs: Any) -> Any:
         scans.append((match, count))
         return scan(match=match, count=count, **kwargs)
 
+    def chunked(*names: str) -> int:
+        deleted.append(len(names))
+        return delete(*names)
+
     def listed(*args: Any, **kwargs: Any) -> list[str]:
         raise AssertionError("removing a swarm scans in pages and never lists keys")
 
     monkeypatch.setattr(redis, "scan_iter", paged)
+    monkeypatch.setattr(redis, "delete", chunked)
     monkeypatch.setattr(redis, "keys", listed)
     assert cli.main(["sw", "remove"]) == 0
     assert [key for key in copies.values() if redis.exists(key)] == [copies["h1", "swx"], copies["h2", "swx"]]
     assert redis.get(store.key("sw", ledger_workspace.WORK_FOLDER, "t1")) is None
     assert redis.exists(ledger_workspace.files_key("h1"))
-    paged_scans = {(store.key("sw", "*"), SCAN_PAGE), (ledger_workspace.task_files_key("*", "sw", "*"), SCAN_PAGE)}
-    assert paged_scans <= set(scans)
+    assert {(store.key("sw", "*"), page), (ledger_workspace.task_files_key("*", "sw", "*"), page)} <= set(scans)
+    assert max(deleted) == page
     assert store.slugs() == ["swx"]
