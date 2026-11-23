@@ -1062,9 +1062,10 @@ def test_the_load_counts_each_job_once_in_the_most_urgent_class_of_the_live_grad
     run.tick(1000)
     run.lab.expander.plans[HEAD_A] = plan({"lint": (shared, joined)})
     run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
-    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
     run.tick(1100)
     assert [grant.unit for grant in run.lease(slots=2)] == [shared, joined]
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1100)
     run.lab.client.hset(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, solo)}", "slots", 2)
     run.lab.client.delete(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_B, lost)}")
     run.lab.client.sadd(scheduler.LIVE, "grade-v1-gone")
