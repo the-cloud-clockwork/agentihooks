@@ -925,7 +925,7 @@
         "tests/doctor/test_lab.py::test_each_class_with_a_hit_ratio_under_the_floor_is_a_finding",
         "tests/doctor/test_lab.py::test_the_wait_limit_and_hit_floor_come_from_the_environment",
         "tests/doctor/test_lab.py::test_an_authoritative_gate_with_a_mismatch_is_a_finding",
-        "tests/doctor/test_lab.py::test_mismatches_count_each_authoritative_gate_through_the_acceptance_rule_report",
+        "tests/doctor/test_lab.py::test_mismatches_count_a_listed_gate_over_the_newest_heads_reading_each_head_once",
         "tests/doctor/test_lab.py::test_the_gate_reader_asks_github_only_for_authoritative_gates",
         "tests/doctor/test_lab.py::test_a_pass_reads_the_newest_ten_heads_once_for_every_listed_gate",
         "tests/doctor/test_lab.py::test_a_listed_gate_is_compared_under_the_name_the_lab_posts",

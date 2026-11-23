@@ -177,7 +177,7 @@ def answers(gate: str) -> dict[str, dict[str, Any]]:
 
 
 @pytest.mark.feature("doctor-lab-health")
-def test_mismatches_count_each_authoritative_gate_through_the_acceptance_rule_report() -> None:
+def test_mismatches_count_a_listed_gate_over_the_newest_heads_reading_each_head_once() -> None:
     asked: list[str] = []
     found = answers("lint")
 

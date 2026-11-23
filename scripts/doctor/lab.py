@@ -136,8 +136,8 @@ def mismatches(
     if not gates:
         return {}
     newest = islice(shadow_report.heads_of(fetch, repository, shadow_report.PULL_REQUEST), heads)
-    read = [(sha, shadow_report.check_runs(fetch, repository, sha)) for sha in newest]
-    return {gate: sum(_differs(sha, runs, gate, sources) for sha, runs in read) for gate in gates}
+    checked = [(sha, shadow_report.check_runs(fetch, repository, sha)) for sha in newest]
+    return {gate: sum(_differs(sha, runs, gate, sources) for sha, runs in checked) for gate in gates}
 
 
 def read(store: Any, slug: str, now_ms: int, environ: Mapping[str, str]) -> list[Finding]:
