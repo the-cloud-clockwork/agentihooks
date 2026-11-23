@@ -10,7 +10,6 @@ from unittest.mock import Mock
 
 import pytest
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 pytestmark = pytest.mark.unit
@@ -20,7 +19,6 @@ pytestmark = pytest.mark.unit
 def sdk(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[InMemorySpanExporter, list[TracerProvider], Mock]]:
     from opentelemetry import metrics, trace
     from opentelemetry.sdk import _logs
-    from opentelemetry.sdk import trace as trace_sdk
     from opentelemetry.sdk._logs import export as log_export
     from opentelemetry.sdk.metrics import export as metric_export
     from opentelemetry.util._once import Once
@@ -46,21 +44,19 @@ def sdk(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[InMemorySpanExporter,
     monkeypatch.setattr(otel, "_providers", [])
     monkeypatch.setattr(otel, "_counts", {})
 
-    def provider(*args: Any, **kwargs: Any) -> TracerProvider:
-        result = TracerProvider(*args, **kwargs)
-        providers.append(result)
-        return result
+    provider_init = TracerProvider.__init__
 
-    def batch(span_exporter: SpanExporter) -> BatchSpanProcessor:
-        return BatchSpanProcessor(span_exporter, schedule_delay_millis=600_000)
+    def initialize(provider: TracerProvider, *args: Any, **kwargs: Any) -> None:
+        provider_init(provider, *args, **kwargs)
+        providers.append(provider)
 
     def worker() -> None:
         monkeypatch.setattr(otel, "_q", Mock(put_nowait=Mock(side_effect=otel._dispatch_op)))
         otel._init_sdk()
         otel._init_done.set()
 
-    monkeypatch.setattr(trace_sdk, "TracerProvider", provider)
-    monkeypatch.setattr("opentelemetry.sdk.trace.export.BatchSpanProcessor", batch)
+    monkeypatch.setattr(TracerProvider, "__init__", initialize)
+    monkeypatch.setenv("OTEL_BSP_SCHEDULE_DELAY", "600000")
     monkeypatch.setattr(
         "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter", Mock(return_value=exporter)
     )
@@ -129,7 +125,7 @@ def test_emit_span_preserves_name_attributes_and_times(
         "ratio": 0.5,
         "ready": True,
         "items": "[1]",
-        "long": "x" * 500,
+        "long": "x" * 600,
     }
     assert span.start_time == 987_500_000
     assert span.end_time == 2_000_000_000
