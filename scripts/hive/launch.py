@@ -15,15 +15,16 @@ from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Ord
 from scripts.quota_state import CLOSED
 from scripts.routing.reservation import LaunchSlots, master_five_floor, primary_reserve_pct
 from scripts.routing.slots import account_key
-from scripts.swarm import capacity, lease, profile_choice
+from scripts.swarm import capacity, launch_endings, lease, profile_choice
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import ACK_LATER, Placed
+from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.kubernetes import approved
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
 
 HIVE = "hive"
-ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "planner": "plan", "dispatcher": "dispatch"}
+ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "reviewer": "review", "planner": "plan", "dispatcher": "dispatch"}
 TTL_MS = 300000
 LAUNCH_MS = 75000
 ORDERS = "controller-launch-orders"
@@ -878,7 +879,7 @@ class HiveLaunch:
         previous = self.store.execution_occupants(self.slug).get(agent.seat)
         ended = previous and (
             previous.state in ("ended", "finished")
-            or self.store.redis.hexists(self.store.key(self.slug, ENDINGS), previous.execution_id)
+            or launch_endings.terminal(self.store, self.slug, previous.execution_id)
         )
         with lease.fencing(self.held.epoch):
             return self.store.start_execution(self.slug, agent, previous.execution_id if ended else "")
@@ -930,6 +931,7 @@ class HiveLaunch:
             self.end(agent, LATE)
             self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             return Outcome("spawn", Status.REFUSED, HIVE, detail=LATE)
+        ledger_workspace.launched_on(self.store, self.slug, order.task, order.hive)
         placed = Placed(
             agent.pane_id,
             agent.harness,

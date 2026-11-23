@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event
 from types import ModuleType, SimpleNamespace
@@ -14,6 +15,7 @@ from unittest.mock import Mock
 import pytest
 
 if TYPE_CHECKING:
+    from scripts.events.bus import StateStore
     from scripts.scheduler.core import Scheduler
 
 pytestmark = pytest.mark.unit
@@ -162,7 +164,9 @@ async def test_runner_keeps_dispatching_after_a_pass_without_the_dispatch_lock(
     assert capsys.readouterr().err == "scheduler pass ended: the lock moved\n"
 
 
-def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch, tmp_path):
+def test_supervisor_restarts_an_exited_runner_without_machine_timers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
@@ -176,7 +180,7 @@ def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch
     stop.is_set.return_value = False
     monkeypatch.setattr(service, "Event", Mock(side_effect=AssertionError("supplied stop was ignored")))
     stop.wait.side_effect = [False, True]
-    service.supervise(stop)
+    assert service.supervise(stop) == 0
     assert spawn.call_count == 2
     assert [call.args[0] for call in spawn.call_args_list] == [
         [sys.executable, "-m", "scripts.scheduler.service", "run"],
@@ -187,7 +191,7 @@ def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch
     assert all(not child.terminate.called for child in children)
 
 
-def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_path):
+def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
@@ -199,10 +203,24 @@ def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_pat
     stop.is_set.return_value = False
     monkeypatch.setattr(service, "Event", Mock(side_effect=AssertionError("supplied stop was ignored")))
     stop.wait.return_value = True
-    service.supervise(stop)
+    assert service.supervise(stop) == 0
     child.terminate.assert_called_once_with()
     child.wait.assert_called_once_with()
     stop.wait.assert_called_once_with(1)
+
+
+def test_a_supervisor_stopped_before_starting_returns_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    spawn = Mock()
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn))
+    stop = Event()
+    stop.set()
+
+    assert service.supervise(stop) == 0
+    spawn.assert_not_called()
 
 
 @pytest.mark.feature("scheduler-runner-reload-on-revision")
@@ -339,7 +357,9 @@ def test_service_entrypoint_names_its_command(monkeypatch, capsys, args):
         service.main(args)
     output = capsys.readouterr()
     assert result.value.code == (0 if args == ["--help"] else 2)
-    assert (output.out or output.err).splitlines()[0] == ("usage: agentihooks scheduler service [-h] {run,supervise}")
+    assert (output.out or output.err).splitlines()[0] == (
+        "usage: agentihooks scheduler service [-h] {run,supervise,probe}"
+    )
 
 
 def test_supervisor_entrypoint_stops_on_signals_and_restores_handlers(monkeypatch):
@@ -366,6 +386,7 @@ def test_supervisor_entrypoint_stops_on_signals_and_restores_handlers(monkeypatc
         handlers[2](2, None)
         assert stop.is_set() is True
         calls.append("supervised")
+        return 0
 
     monkeypatch.setattr(service, "supervise", supervise)
     assert service.main(["supervise"]) == 0
@@ -926,6 +947,7 @@ def test_a_signalled_supervisor_names_the_signal_and_its_unit(monkeypatch, capsy
         os.kill(os.getpid(), signal.SIGTERM)
         os.kill(os.getpid(), signal.SIGINT)
         assert stop.is_set() is True
+        return 0
 
     monkeypatch.setattr(service, "supervise", supervise)
     assert service.main(["supervise"]) == 0
@@ -1106,12 +1128,266 @@ def test_a_supervisor_ends_without_a_new_runner_once_its_runner_stopped_on_silen
     stop = Mock(spec=Event)
     stop.is_set.return_value = False
     stop.wait.return_value = False
-    service.supervise(stop)
+    assert service.supervise(stop) == 3
     spawn.assert_called_once()
     assert capsys.readouterr().err.splitlines() == [
         "the scheduler runner 101 exited with code 3",
         f"the scheduler supervisor {os.getpid()} stops: its state store did not answer",
     ]
+
+
+REFUSALS = [
+    ("AuthenticationError", "invalid username-password pair or user is disabled."),
+    ("AuthenticationWrongNumberOfArgsError", "wrong number of arguments for 'auth' command"),
+    ("NoPermissionError", "this user has no permissions to run the 'hello' command"),
+]
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+@pytest.mark.parametrize(("refusal", "text"), REFUSALS)
+@pytest.mark.parametrize("swarm", ["rig-grade-swarm", "proof-323133-t1749-2"])
+async def test_a_refused_credential_stops_the_runner_on_its_first_pass(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    refusal: str,
+    text: str,
+    swarm: str,
+) -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
+    stop, passes = asyncio.Event(), []
+
+    def drain() -> None:
+        passes.append(1)
+        if len(passes) == 2:
+            stop.set()
+        raise getattr(exceptions, refusal)(text)
+
+    with pytest.raises(service.Refused, match=f"^{refusal}: "):
+        await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop)
+    assert passes == [1]
+    assert capsys.readouterr().err == f"scheduler stops: the state store refused its credential ({refusal}: {text})\n"
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+@pytest.mark.parametrize(
+    ("failure", "text"),
+    [
+        ("ConnectionError", "Connection refused"),
+        ("TimeoutError", "Timeout reading from socket"),
+        ("ResponseError", "held"),
+    ],
+)
+async def test_a_store_that_times_out_drops_or_answers_an_error_still_gets_a_new_pass(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], failure: str, text: str
+) -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig-grade-swarm")
+    stop, passes = asyncio.Event(), []
+
+    def drain() -> None:
+        passes.append(1)
+        if len(passes) == 2:
+            stop.set()
+            return
+        raise getattr(exceptions, failure)(text)
+
+    assert await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop) is False
+    assert passes == [1, 1]
+    assert capsys.readouterr().err == "scheduler pass skipped: the state store did not answer\n"
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+def test_only_a_refused_login_or_acl_counts_as_a_refused_credential() -> None:
+    from nats import errors
+    from redis import exceptions
+
+    from scripts.events import state
+
+    assert state.refused({}) == (
+        exceptions.AuthenticationError,
+        exceptions.AuthenticationWrongNumberOfArgsError,
+        exceptions.NoPermissionError,
+    )
+    assert state.refused({"AGENTIHOOKS_STATE_BACKEND": "bus"}) == (errors.AuthorizationError,)
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+def test_the_runner_entrypoint_exits_with_the_refused_code_when_its_credential_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.scheduler import service
+
+    async def run(scheduler: object) -> bool:
+        raise service.Refused("AuthenticationError: invalid username-password pair or user is disabled.")
+
+    monkeypatch.setattr(service, "Scheduler", Mock())
+    monkeypatch.setattr(service, "run", run)
+    assert service.main(["run"]) == 4
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+def test_a_supervisor_ends_without_a_new_runner_once_its_runner_was_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    child = Mock(pid=101, returncode=4)
+    child.poll.return_value = 4
+    spawn = Mock(side_effect=[child, AssertionError("a refused credential got a new runner")])
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn))
+    stop = Mock(spec=Event)
+    stop.is_set.return_value = False
+    stop.wait.return_value = False
+    assert service.supervise(stop) == 4
+    spawn.assert_called_once()
+    assert capsys.readouterr().err.splitlines() == [
+        "the scheduler runner 101 exited with code 4",
+        f"the scheduler supervisor {os.getpid()} stops: its state store refused its credential",
+    ]
+
+
+@pytest.mark.feature("scheduler-credential-refusal-stop")
+@pytest.mark.parametrize("code", [4, 0])
+def test_the_supervisor_entrypoint_exits_with_the_code_its_supervisor_stopped_on(
+    monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "supervise", lambda stop: code)
+    assert service.main(["supervise"]) == code
+
+
+def _stopped_supervisor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, code: int, run: Callable[..., object]) -> Mock:
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    monkeypatch.setattr(service, "installed", lambda: True)
+    runner = Mock(pid=101, returncode=code)
+    runner.poll.return_value = code
+    spawn = Mock(side_effect=[runner, None, None, None])
+    monkeypatch.setattr(
+        service,
+        "subprocess",
+        SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL, run=run, SubprocessError=subprocess.SubprocessError),
+    )
+    stop = Mock(spec=Event)
+    stop.is_set.return_value = False
+    stop.wait.return_value = code == 0
+    assert service.supervise(stop) == code
+    return spawn
+
+
+@pytest.mark.feature("scheduler-refused-restart-skip")
+@pytest.mark.parametrize("code", [3, 0])
+def test_a_supervisor_that_stopped_on_silence_or_cleanly_is_started_again_on_the_next_pass(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, code: int
+) -> None:
+    from scripts.scheduler import service
+
+    (tmp_path / service.REFUSAL).touch()
+    probe = Mock(side_effect=AssertionError("a scheduler that was not refused got a probe"))
+    spawn = _stopped_supervisor(monkeypatch, tmp_path, code, probe)
+    assert not (tmp_path / service.REFUSAL).exists()
+    assert service.ensure_running({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}) is True
+    assert spawn.call_count == 2
+    assert spawn.call_args.args == (service._command("supervise"),)
+
+
+@pytest.mark.feature("scheduler-refused-restart-skip")
+def test_the_wait_pass_starts_no_scheduler_after_a_refused_exit_while_its_ping_answers_and_its_reads_are_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+    from scripts.swarm import store
+
+    acl = {"refused": True}
+    commands: list[str] = []
+
+    def command(name: str, answer: object) -> Callable[..., object]:
+        def call(*_args: object) -> object:
+            commands.append(name)
+            if acl["refused"] and name != "ping":
+                raise exceptions.NoPermissionError(f"this user has no permissions to run the '{name}' command")
+            return answer
+
+        return call
+
+    client = SimpleNamespace(ping=command("ping", True), hget=command("hget", None))
+    monkeypatch.setattr(store, "_pooled_client", lambda factory, url, pid: client)
+    probes: list[tuple[list[str], dict[str, object]]] = []
+
+    def probe(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        probes.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, service.main(argv[-1:]))
+
+    spawn = _stopped_supervisor(monkeypatch, tmp_path, 4, probe)
+    environ = {"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}
+    assert [service.ensure_running(environ) for _ in range(3)] == [False, False, False]
+    assert spawn.call_count == 1
+    assert commands == ["ping", "hget"] * 3
+    assert (tmp_path / service.REFUSAL).is_file()
+    acl["refused"] = False
+    assert service.ensure_running(environ) is True
+    assert spawn.call_count == 2
+    assert spawn.call_args.args == (service._command("supervise"),)
+    assert not (tmp_path / service.REFUSAL).exists()
+    assert service.ensure_running(environ) is True
+    called = {"cwd": service.ROOT, "env": environ, "stdin": subprocess.DEVNULL, "capture_output": True, "timeout": 30}
+    assert probes == [(service._command("probe"), called)] * 4
+
+
+@pytest.mark.feature("scheduler-refused-restart-skip")
+@pytest.mark.parametrize(
+    "outcome",
+    [subprocess.TimeoutExpired(["probe"], 30), OSError("no interpreter"), subprocess.CompletedProcess(["probe"], 1)],
+    ids=["timeout", "unstarted", "crashed"],
+)
+def test_a_probe_that_fails_times_out_or_cannot_start_keeps_a_refused_scheduler_stopped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, outcome: object
+) -> None:
+    from scripts.scheduler import service
+
+    spawn = _stopped_supervisor(monkeypatch, tmp_path, 4, Mock(side_effect=[outcome]))
+    monkeypatch.setattr(service, "runtime_dir", lambda environ=None: tmp_path if environ else tmp_path / "unread")
+    assert service.ensure_running({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.invalid:6379/3"}) is False
+    assert spawn.call_count == 1
+    assert (tmp_path / service.REFUSAL).is_file()
+
+
+@pytest.mark.feature("scheduler-refused-restart-skip")
+def test_the_probe_returns_the_refused_code_when_the_bus_refuses_its_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nats import errors
+
+    from scripts.scheduler import service
+    from scripts.scheduler.core import Scheduler
+
+    keys: list[str] = []
+
+    def get(key: str) -> None:
+        keys.append(key)
+        raise errors.AuthorizationError()
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "bus")
+    scheduler = Scheduler(cast("StateStore", SimpleNamespace(get=get)))
+    assert service.probe(scheduler) == service.REFUSED
+    assert keys == [scheduler.name("entries")]
 
 
 def test_a_takeover_whose_old_supervisor_will_not_drain_says_so(monkeypatch, tmp_path, capsys):

@@ -1,0 +1,35 @@
+rules:
+  - id: nats-consumer-unguarded-decode
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Consumer decoding must catch ValueError and RecursionError and retain a dead letter before terminating an undecodable delivery.
+    paths:
+      include:
+        - /scripts/events/nats.py
+        - nats-consumer-unguarded-decode.py
+    patterns:
+      - pattern-inside: |
+          class $CONSUMER:
+              ...
+      - pattern-inside: |
+          def $METHOD(...):
+              ...
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(fetch|_fetch)$
+      - pattern-either:
+          - pattern: Envelope.decode(...)
+          - pattern: NatsDelivery(...)
+      - pattern-not-inside: |
+          try:
+              ...
+          except (ValueError, RecursionError):
+              ...
+      - pattern-not-inside: |
+          try:
+              ...
+          except (ValueError, RecursionError):
+              ...
+          else:
+              ...

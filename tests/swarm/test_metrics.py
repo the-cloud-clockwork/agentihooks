@@ -366,7 +366,7 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
     )
     swarm = metrics.metrics_swarm.TickInput(store, doc, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["fleet metrics failed: registry down"]
-    assert seen == [(tasks, [True, False, False], {"eng": 0, "ci": 0, "plan": 1})]
+    assert seen == [(tasks, [True, False, False], {"eng": 0, "ci": 0, "plan": 1, "review": 0})]
 
 
 @pytest.mark.parametrize("failure", ["RuntimeError", "StateConflict"])

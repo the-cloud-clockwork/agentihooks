@@ -131,7 +131,21 @@ def _admit(doc: dict[str, Any], graph: dict[str, Any]) -> frozenset[str] | None:
     seen: set[str] = set()
     for task_id in queue:
         _reach(task_id, rows, cold, waits_on, seen)
+    phases = {rows[task_id].get("phase") for task_id in queue} - {None}
+    seen |= _planning(tasks, phases, seen, lambda task_id: _stuck(task_id, rows, cold, waits_on))
     return frozenset(seen) if seen else None
+
+
+def _planning(tasks: list[dict[str, Any]], phases: set[Any], seen: set[str], stuck: Callable[[str], bool]) -> set[str]:
+    """The plan lane tasks focused work waits on, short of work stuck behind frozen work: a phase's planning while
+    it holds open focused work, and the enhancement of an admitted task."""
+    return {
+        task["id"]
+        for task in tasks
+        if task.get("lane") == "plan"
+        and (task.get("phase") in phases or task.get("enhances") in seen)
+        and not stuck(task["id"])
+    }
 
 
 def _reach(
@@ -171,6 +185,24 @@ def _waits(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> Callable[[dict[s
         return named + [member for phase in after.get(row.get("phase"), []) for member in members.get(phase, [])]
 
     return waits_on
+
+
+def waits(doc: dict[str, Any]) -> Callable[[dict[str, Any]], list[str]]:
+    """What a task of the ledger waits on, as the focus queue reads it."""
+    return _waits(doc, doc.get("tasks") or [])
+
+
+def reached(
+    seeds: Iterable[str],
+    rows: dict[str, dict[str, Any]],
+    cold: set[str],
+    next_of: Callable[[dict[str, Any]], list[str]],
+) -> set[str]:
+    """Every id a walk from the seeds meets along next_of, the seeds included, short of the cold ones."""
+    seen: set[str] = set()
+    for seed in seeds:
+        _reach(seed, rows, cold, next_of, seen)
+    return seen
 
 
 def _stuck(

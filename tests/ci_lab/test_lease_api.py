@@ -233,12 +233,10 @@ def test_upload_url_serves_the_report(lab: leases.Leases, signer: Signer, jobs: 
 
 
 @pytest.mark.parametrize("length", ["abc", "-1", "²", str(lease_api.MAX_BODY_BYTES + 1)])
-def test_server_refuses_a_bad_content_length(
-    lab: leases.Leases, signer: Signer, routes: lease_api.ControlRoutes, length: str
-) -> None:
+def test_server_refuses_a_bad_content_length(lab: leases.Leases, signer: Signer, length: str) -> None:
     import http.client
 
-    server = lease_api.serve("127.0.0.1", 0, lab, signer, routes)
+    server = lease_api.serve("127.0.0.1", 0, lab, signer)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -256,12 +254,12 @@ def test_server_refuses_a_bad_content_length(
         thread.join(10)
 
 
-def test_server_reads_a_body_at_the_cap(lab: leases.Leases, signer: Signer, routes: lease_api.ControlRoutes) -> None:
+def test_server_reads_a_body_at_the_cap(lab: leases.Leases, signer: Signer) -> None:
     import http.client
 
     body = json.dumps({"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
     body += b" " * (lease_api.MAX_BODY_BYTES - len(body))
-    server = lease_api.serve("127.0.0.1", 0, lab, signer, routes)
+    server = lease_api.serve("127.0.0.1", 0, lab, signer)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -277,11 +275,9 @@ def test_server_reads_a_body_at_the_cap(lab: leases.Leases, signer: Signer, rout
         thread.join(10)
 
 
-def test_server_round_trip(
-    lab: leases.Leases, signer: Signer, jobs: queue.Queue, routes: lease_api.ControlRoutes
-) -> None:
+def test_server_round_trip(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> None:
     jobs.enqueue([Unit(kind="test", key="a", members=())], "h1", {})
-    server = lease_api.serve("127.0.0.1", 0, lab, signer, routes)
+    server = lease_api.serve("127.0.0.1", 0, lab, signer)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
@@ -412,10 +408,19 @@ def test_a_worker_route_or_a_read_is_no_control_request(routes: lease_api.Contro
 
 
 @pytest.mark.feature("lab-control-routes")
-def test_server_answers_a_control_route_only_with_the_bearer_token(
+def test_the_control_port_answers_only_the_control_routes(
     lab: leases.Leases, signer: Signer, routes: lease_api.ControlRoutes
 ) -> None:
-    server = lease_api.serve("127.0.0.1", 0, lab, signer, routes)
+    assert lease_api.answer_control(routes, "POST", "/lease", b"{}", BEARER) == (404, {"error": "not found"})
+    assert lease_api.answer_control(routes, "GET", "/resume", b"", BEARER) == (404, {"error": "not found"})
+    assert lease_api.answer_control(routes, "POST", "/resume", b"", None) == (401, {"error": "control token refused"})
+    assert lease_api.answer_control(routes, "POST", "/resume", b"", BEARER) == (200, {"resumed": []})
+    assert lease_api.answer(lab, signer, "POST", "/resume", b"", BEARER) == (404, {"error": "not found"})
+
+
+@pytest.mark.feature("lab-control-routes")
+def test_server_answers_a_control_route_only_with_the_bearer_token(routes: lease_api.ControlRoutes) -> None:
+    server = lease_api.serve_control("127.0.0.1", 0, routes)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://127.0.0.1:{server.server_address[1]}"

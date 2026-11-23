@@ -1,6 +1,7 @@
 import hashlib
 import signal
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from scripts.events.bus import StateEntry
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.hub import lease, registry, runner
+from scripts.swarm import redis_grace
 
 pytestmark = pytest.mark.unit
 
@@ -501,6 +503,45 @@ class Stop(BaseException):
     pass
 
 
+@pytest.mark.feature("hub-and-webhook-stop-cleanly-on-interrupt")
+def test_sigint_during_a_pass_ends_the_hub_with_0_and_releases_its_leases(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def interrupt(event: Envelope) -> None:
+        signal.raise_signal(signal.SIGINT)
+        raise Stop
+
+    declared = registry.Registry([registry.Reactor("timers", "swarm.*.task.>", interrupt, singleton=True)])
+    opened = memory.open_bus(BusConfig())
+    opened.events.publish(SUBJECT, event("e1", 1))
+
+    def configured(bus: Any, source: Any = None) -> registry.Registry:
+        assert bus is opened
+        return declared
+
+    monkeypatch.setattr(registry, "configured", configured)
+    monkeypatch.setattr(runner, "open_bus", lambda config: opened)
+    monkeypatch.setenv("HOSTNAME", "hub-1")
+    leases = opened.state(lease.BUCKET)
+    terminate = signal.getsignal(signal.SIGTERM)
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        try:
+            code: object = runner.main(["run"])
+        except SystemExit as exited:
+            code = exited.code
+        except KeyboardInterrupt:
+            code = "KeyboardInterrupt escaped the hub command"
+        interrupted = signal.getsignal(signal.SIGINT)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    assert code == 0
+    assert lease.read(leases, "reactor.timers") == lease.LeaseState("hub-1", 0)
+    assert "Traceback" not in capsys.readouterr().err
+    assert interrupted is signal.default_int_handler
+    assert signal.getsignal(signal.SIGTERM) is terminate
+
+
 def test_the_hub_loop_idles_only_after_a_pass_with_every_reactor_on_standby(monkeypatch):
     passes = iter([{"page": ["handled"]}, {"page": ["standby"]}, {"page": []}])
 
@@ -517,6 +558,134 @@ def test_the_hub_loop_idles_only_after_a_pass_with_every_reactor_on_standby(monk
     with pytest.raises(Stop):
         runner.main(["run"])
     assert slept == [runner.IDLE_S]
+
+
+def _busy() -> Exception:
+    import redis
+
+    return redis.ResponseError("BUSY Redis is busy running a script. You can only call SCRIPT KILL")
+
+
+def _refused() -> Exception:
+    import redis
+
+    return redis.ConnectionError("Error 111 connecting to redis:6379. Connection refused.")
+
+
+@pytest.mark.feature("hub-idle-wait-rides-out-redis-outage")
+@pytest.mark.parametrize("refusal", [_busy, _refused], ids=["busy", "connection"])
+def test_the_hub_waits_out_a_redis_refusal_of_its_idle_wait_on_the_local_clock(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], refusal: Callable[[], Exception]
+) -> None:
+    passes = iter([{"page": ["standby"]}, {"page": ["standby"]}])
+    ran: list[dict[str, list[str]]] = []
+
+    def run_once(self: runner.HubRunner) -> dict[str, list[str]]:
+        try:
+            outcome = next(passes)
+        except StopIteration:
+            raise Stop from None
+        ran.append(outcome)
+        return outcome
+
+    def refused_wait(seconds: float) -> None:
+        raise refusal()
+
+    slept: list[float] = []
+    monkeypatch.delenv(redis_grace.GRACE_ENV, raising=False)
+    monkeypatch.setattr(runner.HubRunner, "run_once", run_once)
+    monkeypatch.setattr(runner, "scheduled_wait", refused_wait)
+    monkeypatch.setattr(runner, "sleep", slept.append, raising=False)
+    monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
+    with pytest.raises(Stop):
+        runner.main(["run"])
+    assert len(ran) == 2
+    assert slept == [runner.IDLE_S, runner.IDLE_S]
+    assert "Redis grace window" in capsys.readouterr().err
+
+
+@pytest.mark.feature("hub-idle-wait-rides-out-redis-outage")
+def test_a_redis_refusal_of_the_idle_wait_past_the_grace_window_still_ends_the_hub(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import redis
+
+    def run_once(self: runner.HubRunner) -> dict[str, list[str]]:
+        return {"page": ["standby"]}
+
+    def busy_wait(seconds: float) -> None:
+        raise _busy()
+
+    slept: list[float] = []
+    monkeypatch.setenv(redis_grace.GRACE_ENV, "0")
+    monkeypatch.setattr(runner.HubRunner, "run_once", run_once)
+    monkeypatch.setattr(runner, "scheduled_wait", busy_wait)
+    monkeypatch.setattr(runner, "sleep", slept.append, raising=False)
+    monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
+    with pytest.raises(redis.ResponseError):
+        runner.main(["run"])
+    assert slept == []
+
+
+@pytest.mark.feature("hub-idle-wait-rides-out-redis-outage")
+def test_an_answered_idle_wait_ends_the_redis_outage_so_a_later_refusal_opens_a_new_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [0.0]
+    moments = iter([0.0, 8.0, 16.0])
+    answers = iter([_busy(), None, _busy()])
+    passes = iter([{"page": ["standby"]}] * 3)
+
+    def run_once(self: runner.HubRunner) -> dict[str, list[str]]:
+        try:
+            return next(passes)
+        except StopIteration:
+            raise Stop from None
+
+    def wait(seconds: float) -> None:
+        now[0] = next(moments)
+        answer = next(answers)
+        if answer is not None:
+            raise answer
+
+    slept: list[float] = []
+    monkeypatch.setattr(redis_grace.Outage, "from_environ", lambda: redis_grace.Outage(10.0, clock=lambda: now[0]))
+    monkeypatch.setattr(runner.HubRunner, "run_once", run_once)
+    monkeypatch.setattr(runner, "scheduled_wait", wait)
+    monkeypatch.setattr(runner, "sleep", slept.append, raising=False)
+    monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
+    with pytest.raises(Stop):
+        runner.main(["run"])
+    assert slept == [runner.IDLE_S, runner.IDLE_S]
+
+
+@pytest.mark.feature("hub-idle-wait-rides-out-redis-outage")
+def test_a_pass_that_handles_work_ends_the_redis_outage_so_a_later_refusal_opens_a_new_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [0.0]
+    moments = iter([0.0, 16.0])
+    passes = iter([{"page": ["standby"]}, {"page": ["handled"]}, {"page": ["standby"]}])
+
+    def run_once(self: runner.HubRunner) -> dict[str, list[str]]:
+        try:
+            return next(passes)
+        except StopIteration:
+            raise Stop from None
+
+    def busy_wait(seconds: float) -> None:
+        now[0] = next(moments)
+        raise _busy()
+
+    slept: list[float] = []
+    monkeypatch.setattr(redis_grace.Outage, "from_environ", lambda: redis_grace.Outage(10.0, clock=lambda: now[0]))
+    monkeypatch.setattr(runner.HubRunner, "run_once", run_once)
+    monkeypatch.setattr(runner, "scheduled_wait", busy_wait)
+    monkeypatch.setattr(runner, "sleep", slept.append, raising=False)
+    monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
+    with pytest.raises(Stop):
+        runner.main(["run"])
+    assert slept == [runner.IDLE_S, runner.IDLE_S]
 
 
 @pytest.fixture

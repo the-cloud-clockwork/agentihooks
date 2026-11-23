@@ -1,4 +1,5 @@
 import sqlite3
+from typing import Any
 
 from scripts import ci_budget
 from scripts.doctor import ci_read
@@ -80,7 +81,7 @@ def _pickups(jobs):
     return pickups, runners
 
 
-def rows(slug: str, item: dict, jobs: list[dict], logs: dict) -> dict:
+def rows(slug: str, item: dict, jobs: list[dict[str, Any]], logs: dict) -> dict:
     gate = next((j for j in jobs if j["name"] == ci_budget.GATE and j.get("completed_at")), None)
     end = gate["completed_at"] if gate else item["updated_at"]
     ts_ms = round(ci_budget.seconds(end) * 1000)
@@ -106,7 +107,7 @@ def rows(slug: str, item: dict, jobs: list[dict], logs: dict) -> dict:
             "attempt": attempt,
             "stage": stage,
             "seconds": spent,
-            "budget": ci_budget.BUDGETS.get(stage, 0),
+            "budget": ci_budget.budget(stage, jobs) or 0,
             "pickup_s": pickups.get(stage, 0.0),
             "runner": runners.get(stage, ""),
         }

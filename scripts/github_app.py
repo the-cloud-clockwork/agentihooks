@@ -41,10 +41,12 @@ class GitHubAppAuth:
             timeout=10,
         )
         if response.status_code != 201:
-            raise GitAuthRefused(REFUSED, status_code=response.status_code)
+            raise GitAuthRefused(
+                self.refusal(f"GitHub answered {response.status_code}"), status_code=response.status_code
+            )
         data = response.json()
         if not self.granted(data):
-            raise GitAuthRefused(REFUSED)
+            raise GitAuthRefused(self.refusal("GitHub answered 201 with a token outside that scope"))
         expiry = datetime.fromisoformat(data["expires_at"]).timestamp()
         self.cached = (data["token"], expiry)
         return self.cached[0]
@@ -66,3 +68,9 @@ class GitHubAppAuth:
                 return False
         permissions = self.permissions or {}
         return all(data["permissions"].get(key) == value for key, value in permissions.items())
+
+    def refusal(self, answer: str) -> str:
+        """Return the refusal text: the permissions the token asked for, or installation when none, and the answer."""
+        asked = " and ".join(f"{name} {level}" for name, level in (self.permissions or {}).items())
+        scope = f"scoped {asked}" if asked else "installation"
+        return f"GitHub App cannot supply {scope} credentials: {answer}"

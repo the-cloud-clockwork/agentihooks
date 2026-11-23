@@ -15,6 +15,7 @@ CHANGES = (
 )
 ROOT = "[]"
 PATHS_KEPT = 5000
+CHUNK = 5000
 
 
 def record(connection: Connection, slug: str, generation: int, paths: list, kept: int) -> None:
@@ -88,10 +89,9 @@ def patched(
     if path in paths:
         return None
     depth, dirty, item = len(json.loads(path)), touched(paths), dict(old)
-    reached: list[tuple[str, Any]] = [
-        (child, stored_row(connection, slug, child))
-        for child in {encode(json.loads(changed)[: depth + 1]) for changed in paths}
-    ]
+    wanted = {encode(json.loads(changed)[: depth + 1]) for changed in paths}
+    stored = stored_rows(connection, slug, wanted)
+    reached: list[tuple[str, Any]] = [(child, stored.get(child)) for child in wanted]
     if any(row is None for _, row in reached):
         return None
     order = {key: index for index, key in enumerate(old)}
@@ -126,13 +126,19 @@ def refreshed(connection: Connection, slug: str, state: dict, paths: set) -> dic
         return None
 
 
-def stored_row(connection: Connection, slug: str, path: str) -> tuple | None:
-    for table in TABLES:
-        row = connection.execute(f"SELECT position, kind, value FROM {table} WHERE slug=? AND path=?", (slug, path))
-        found = row.fetchone()
-        if found is not None:
-            return found
-    return None
+def stored_rows(connection: Connection, slug: str, paths: set[str]) -> dict[str, tuple]:
+    """The position, kind and value stored at each of paths that is stored, read in one query per CHUNK paths."""
+    listed = list(paths)
+    found: dict[str, tuple] = {}
+    for start in range(0, len(listed), CHUNK):
+        chunk = listed[start : start + CHUNK]
+        marks = ",".join("?" * len(chunk))
+        query = " UNION ALL ".join(
+            f"SELECT path, position, kind, value FROM {table} WHERE slug=? AND path IN ({marks})" for table in TABLES
+        )
+        rows = connection.execute(query, [value for _ in TABLES for value in (slug, *chunk)])
+        found.update((path, (position, kind, value)) for path, position, kind, value in rows)
+    return found
 
 
 def rebuilt(connection: Connection, slug: str, path: str, old: list, paths: set) -> list | None:
@@ -141,8 +147,10 @@ def rebuilt(connection: Connection, slug: str, path: str, old: list, paths: set)
     if path in paths:
         return None
     parts, dirty, items = json.loads(path), touched(paths), list(old)
-    for child in {encode(json.loads(changed)[: len(parts) + 1]) for changed in paths}:
-        row = stored_row(connection, slug, child)
+    wanted = {encode(json.loads(changed)[: len(parts) + 1]) for changed in paths}
+    stored = stored_rows(connection, slug, wanted)
+    for child in wanted:
+        row = stored.get(child)
         if row is None or row[1] != "object" or not same_child(old, row[0], json.loads(child)[-1]):
             return None
         items[row[0]] = dict(build(connection, slug, child, old[row[0]], dirty))

@@ -44,6 +44,17 @@ FROZEN = "tests/registry/FROZEN_GATES.json"
 LAB_VERDICT_JOB = "lab-verdict"
 LAB_CLAUSE_PREFIX = f"fromJSON(needs.{LAB_VERDICT_JOB}.outputs.authoritative || '{{}}')"
 LAB_UPSTREAM = frozenset({"reuse", LAB_VERDICT_JOB})
+LAB_INSTALL = {
+    "name": "Install the lab verdict dependencies",
+    "run": "python -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1",
+}
+LAB_PINNED_INSTALL = {
+    **LAB_INSTALL,
+    "run": (
+        "python -m pip install --quiet --constraint grader/.github/ci-tools/parser.lock "
+        "--constraint grader/.github/ci-tools/lint-tools.lock PyYAML==6.0.3 jsonschema==4.25.1"
+    ),
+}
 DOWNLOAD_ARTIFACT = "actions/download-artifact@"
 SUMMARY_DOWNLOADS = ("actions/download-artifact@v4", "actions/download-artifact@v8.0.2")
 SUMMARY_REPORTS = ("Download this run's test reports", "{durations,flakes}-3.*")
@@ -92,6 +103,23 @@ def runners(policy: object = None) -> list[str]:
     return ["ubuntu-latest", *anton]
 
 
+def _pinned_tool_form(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _pinned_tool_form(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_pinned_tool_form(item) for item in value]
+    if not isinstance(value, str):
+        return value
+    for requirement in ('"pyyaml>=6.0"', "'pyyaml>=6.0'"):
+        value = value.replace(
+            f"pip install {requirement}",
+            "pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3",
+        )
+    if value == SHALLOW_PREFLIGHT_CHECKOUT["sparse-checkout"]:
+        return value + "/.github/ci-tools/\n"
+    return value
+
+
 def reuse_jobs(policy: object = None) -> list[dict]:
     jobs = []
     for factory in (ci_reuse.reuse_job, ci_reuse.paged_reuse_job, ci_reuse.retried_reuse_job):
@@ -103,7 +131,7 @@ def reuse_jobs(policy: object = None) -> list[dict]:
                 install["env"] = {"PYTHONNOUSERSITE": "1"}
             jobs.append(job)
             jobs.append({**job, "if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"})
-    return jobs
+    return [*jobs, *(_pinned_tool_form(job) for job in jobs)]
 
 
 @lru_cache(maxsize=None)
@@ -223,15 +251,24 @@ def _reads_needs_freely(condition: str) -> bool:
     return re.search(r"(?<![\w.-])needs\b(?!\s*(?:\.\s*\w|\[\s*''\s*\]))", bare, flags=re.IGNORECASE) is not None
 
 
+def _pinned_lab_job(job: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return the reviewed lab verdict job with its exact dependency install under the grader checkout's locks."""
+    if job is None or LAB_INSTALL not in job.get("steps", ()):
+        return job
+    steps: list[Any] = job["steps"]
+    return {**job, "steps": [LAB_PINNED_INSTALL if step == LAB_INSTALL else step for step in steps]}
+
+
 def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any]) -> list[str]:
     """Refuse a lab verdict job or a gate condition off its reviewed form.
 
     A gate whose base condition reads the lab verdict keeps that condition exactly. Any other gate reads the lab
     verdict, or the needs context by a computed key or as a whole, only through its base condition plus its exact lab
-    clause.
+    clause. The lab verdict job may gain the grader checkout's parser and lint tool locks on its exact dependency
+    install, and never loses them.
     """
     problems: list[str] = []
-    if head.get(LAB_VERDICT_JOB) != base.get(LAB_VERDICT_JOB):
+    if head.get(LAB_VERDICT_JOB) not in (base.get(LAB_VERDICT_JOB), _pinned_lab_job(base.get(LAB_VERDICT_JOB))):
         problems.append(
             "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
         )
@@ -273,6 +310,7 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
         }
     bounds = {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}}
     admitted = [variant for steps in (prefix, retried) for variant in (steps, [steps[0] | bounds, *steps[1:]])]
+    admitted += [_pinned_tool_form(steps) for steps in admitted]
     if producer.get("steps", [])[: len(prefix)] not in admitted:
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
@@ -470,7 +508,8 @@ def _preflight_problems(
     if "diffcheck/**" in ignored:
         ignored.remove("diffcheck/**")
     forms = [*_path_forms(baseline, "push", PREFLIGHT_PATHS), *_path_forms(expanded, "push", PREFLIGHT_PATHS)]
-    if head_workflows.get("branch-lanes.yml") in [*forms, *(form for kept in forms for form in _checkout_forms(kept))]:
+    admitted = [*forms, *(form for kept in forms for form in _checkout_forms(kept))]
+    if head_workflows.get("branch-lanes.yml") in [*admitted, *(_pinned_tool_form(form) for form in admitted)]:
         return []
     return ["The head changes or removes the trusted branch lane preflight."]
 
