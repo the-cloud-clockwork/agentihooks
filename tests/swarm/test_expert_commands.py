@@ -66,6 +66,7 @@ def test_the_operator_and_the_master_start_a_lineage_from_a_mission_file(
         "ended_by": "",
         "ended_at": 0,
         "note": "",
+        "launch_failure": {},
     }
     assert expert_lineage.mission(store, "sw", expert_lineage.get(store, "sw", "expert-1")) == GOOD
     assert store.handoff("sw", "expert-1") == "" and store.redis.hgetall(store.key("sw", "transfers")) == {}
