@@ -11,7 +11,7 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 PLANTS = ROOT / "tests" / "ci_lab" / "plants"
 EXCLUSIONS = ROOT / "tests" / "ci_lab" / "static_gate_exclusions.json"
-NEEDS = {"step env", "secret", "checkout", "earlier step", "docker", "network"}
+NEEDS = {"step env", "secret", "checkout", "earlier step", "docker", "network", "plant"}
 UNSUPPLIED = {"step env"}
 
 

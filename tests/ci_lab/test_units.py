@@ -54,3 +54,14 @@ def test_unknown_event_is_rejected() -> None:
     with pytest.raises(ValueError) as error:
         units.priority_of({"event_name": "unknown"})
     assert str(error.value) == "Unknown lab event: unknown"
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_each_grade_class_names_the_event_actions_runs_it_under() -> None:
+    assert {units.Priority(tier).name: name for tier, name in units.EVENT_NAMES.items()} == {
+        "HOTFIX": "pull_request",
+        "PULL_REQUEST": "pull_request",
+        "QUEUE": "merge_group",
+        "PROMOTION": "push",
+        "BACKFILL": "push",
+    }

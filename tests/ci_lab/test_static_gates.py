@@ -1,3 +1,4 @@
+import dataclasses
 import hashlib
 import json
 import re
@@ -536,12 +537,13 @@ def test_a_gate_misses_every_name_outside_the_lease_fields_its_secrets_and_its_e
         "github.event.pull_request.head.sha",
         "github.event.pull_request.base.sha",
         "github.event_name",
+        "github.head_ref",
+        "github.ref_name",
         "github.run_id",
         "github.run_attempt",
         "github.run_number",
     }
     assert gate.missing == (
-        "github.head_ref",
         "matrix.python-version",
         "needs.reuse.outputs.grader",
         "secretsX.Y",
@@ -556,10 +558,6 @@ def test_the_real_workflow_marks_each_gate_reading_an_event_field_the_lease_lack
     workflow = (ROOT / static_gates.WORKFLOW).read_text()
     gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
     assert {gate.name: gate.missing for gate in gates if gate.missing} == {
-        "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": (
-            "github.head_ref",
-            "github.ref_name",
-        ),
         "lint/artifact-sanity-checks": (
             "github.base_ref",
             "github.event.before",
@@ -734,6 +732,74 @@ def test_every_lab_gradable_gate_that_reads_the_event_name_is_one_whose_verdict_
         "test-count/fetch-the-base-suite-count-recorded-on-dev",
         "test-count/record-the-head-count-for-the-next-queue-group",
     ]
+
+
+TOLERATED = r"""
+on: pull_request
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record a count
+        continue-on-error: true
+        run: python -m scripts.record_count
+      - name: Hold a count
+        continue-on-error: false
+        run: python -m scripts.hold_count
+      - name: Check a count
+        run: python -m scripts.check_count
+"""
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_a_continue_on_error_gate_step_is_tolerated_and_the_real_workflow_tolerates_only_the_queue_record() -> None:
+    assert [gate.tolerated for gate in static_gates.discover(TOLERATED)] == [True, False, False]
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+    assert [gate.name for gate in gates if gate.tolerated] == [
+        "test-count/record-the-head-count-for-the-next-queue-group"
+    ]
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_a_gate_reads_the_event_names_it_names_with_the_values_of_its_lease_and_plans_a_branch_only_with_one() -> None:
+    plain = StaticGate("lint/a", "lint", "a", (), (), "true", (), ())
+    evented = dataclasses.replace(plain, reads=("github.event_name", "github.sha"))
+    branched = dataclasses.replace(plain, reads=("github.head_ref", "github.ref_name"))
+    assert static_gates.event_fields("merge_group", "fix-x") == {
+        "github.event_name": "merge_group",
+        "github.head_ref": "fix-x",
+        "github.ref_name": "",
+    }
+    assert static_gates.read_events(plain, "merge_group", "fix-x") == {}
+    assert static_gates.read_events(evented, "merge_group", "fix-x") == {"github.event_name": "merge_group"}
+    assert static_gates.read_events(branched, "pull_request", "fix-x") == {
+        "github.head_ref": "fix-x",
+        "github.ref_name": "",
+    }
+    assert [static_gates.plannable(gate, "") for gate in (plain, evented, branched)] == [True, True, False]
+    assert static_gates.plannable(branched, "fix-x")
+    assert static_gates.plannable(dataclasses.replace(plain, reads=("github.ref_name",)), "") is False
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_the_only_lab_gate_whose_step_reads_the_event_name_variable_keys_on_the_branch_it_reads() -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+
+    def reads_variable(gate: StaticGate) -> bool:
+        modules = (ROOT / f"{module.replace('.', '/')}.py" for module in gate.modules)
+        texts = [gate.run, *(producer.run for producer in gate.producers)]
+        texts += [path.read_text() for path in modules if path.is_file()]
+        return any("GITHUB_EVENT_NAME" in text for text in texts)
+
+    readers = [gate for gate in gates if not gate.missing and reads_variable(gate)]
+    assert [gate.name for gate in readers] == [
+        "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading"
+    ]
+    assert all(not static_gates.plannable(gate, "") for gate in readers)
 
 
 def test_the_command_adds_each_gate_closure_digest_at_the_grader_tree(

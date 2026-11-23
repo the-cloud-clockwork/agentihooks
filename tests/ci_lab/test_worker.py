@@ -710,12 +710,12 @@ def test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slo
 def test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none(
     scheduler: str, jobs: queue.Queue, clock: Clock, sink: Sink
 ) -> None:
-    jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1")
+    jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1", trigger=queue.Trigger("pull_request", "fix-x"))
     client = worker.Client(scheduler)
 
     [lease] = client.lease("pod-1", 1, CAPABILITIES, 0)
 
-    assert lease == worker.Lease("h1:test:a", lease.token, "h1", UNIT_A, 1, 1500, "b1", "g1")
+    assert lease == worker.Lease("h1:test:a", lease.token, "h1", UNIT_A, 1, 1500, "b1", "g1", "pull_request", "fix-x")
     assert client.heartbeat(lease.job, "wrong") is None
     assert client.upload_url(lease.job, "wrong", "report") is None
     assert client.complete(lease.job, "wrong", "passed") is False
@@ -727,6 +727,26 @@ def test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none(
     assert error.value.code == 400
     assert client.complete(lease.job, lease.token, "passed") is True
     assert found(jobs, lease.job).outcome == "passed"
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_a_grant_from_a_scheduler_older_than_the_event_and_head_branch_reads_with_neither() -> None:
+    grant = {
+        "job": "h1:test:a",
+        "token": "t",
+        "head": "h1",
+        "base": "b1",
+        "grader": "g1",
+        "kind": "test",
+        "key": "a",
+        "members": ["tests/a.py::t"],
+        "slots": 1,
+        "expires_ms": 1500,
+    }
+    older = worker._lease(grant)
+    newer = worker._lease({**grant, "event": "merge_group", "head_branch": "fix-x"})
+    assert (older.event, older.head_branch) == ("", "")
+    assert (newer.event, newer.head_branch) == ("merge_group", "fix-x")
 
 
 @pytest.mark.feature("lab-worker-pod-loop")

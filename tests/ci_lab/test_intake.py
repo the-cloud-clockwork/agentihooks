@@ -39,7 +39,7 @@ def pull_request(
         "action": action,
         "repository": {"html_url": REPO},
         "sender": {"login": sender},
-        "pull_request": {"head": {"sha": HEAD}, "base": {"sha": BASE}, "user": {"login": author}},
+        "pull_request": {"head": {"sha": HEAD, "ref": "fix-x"}, "base": {"sha": BASE}, "user": {"login": author}},
     }
 
 
@@ -60,13 +60,13 @@ def check_run(action: str = "rerequested", name: str = "lab / unit", pulls: bool
         "check_run": {
             "name": name,
             "head_sha": HEAD,
-            "pull_requests": [{"number": 7, "base": {"sha": BASE}}] if pulls else [],
+            "pull_requests": [{"number": 7, "head": {"ref": "fix-x"}, "base": {"sha": BASE}}] if pulls else [],
         },
     }
 
 
-def head(event: str, actor: str, action: str, base: str = BASE) -> HeadEvent:
-    return HeadEvent(event=event, repo=REPO, head=HEAD, base=base, actor=actor, action=action)
+def head(event: str, actor: str, action: str, base: str = BASE, head_branch: str = "") -> HeadEvent:
+    return HeadEvent(event=event, repo=REPO, head=HEAD, base=base, actor=actor, action=action, head_branch=head_branch)
 
 
 def test_a_push_to_a_branch_is_a_head_event() -> None:
@@ -117,7 +117,7 @@ def test_a_branch_delete_or_a_tag_push_names_no_head(payload: dict[str, Any]) ->
 @pytest.mark.parametrize("action", ["opened", "synchronize", "reopened"])
 def test_a_pull_request_that_moves_its_head_is_a_head_event(action: str) -> None:
     assert webhooks.head_events("pull_request", pull_request(action)) == [
-        head("pull_request", "agenticore-app[bot]", action)
+        head("pull_request", "agenticore-app[bot]", action, head_branch="fix-x")
     ]
 
 
@@ -134,7 +134,9 @@ def test_a_merge_group_asking_for_checks_is_a_head_event() -> None:
 
 
 def test_a_rerequested_lab_check_is_a_head_event() -> None:
-    assert webhooks.head_events("check_run", check_run()) == [head("check_run", "nestorcolt", "rerequested")]
+    assert webhooks.head_events("check_run", check_run()) == [
+        head("check_run", "nestorcolt", "rerequested", head_branch="fix-x")
+    ]
     assert webhooks.head_events("check_run", check_run(pulls=False)) == [
         head("check_run", "nestorcolt", "rerequested", base="")
     ]
@@ -180,6 +182,7 @@ def test_a_head_envelope_carries_the_event_on_its_own_subject() -> None:
         "base": BASE,
         "actor": "github-merge-queue[bot]",
         "action": "checks_requested",
+        "head_branch": "",
     }
     assert envelope.id == hashlib.sha256(json.dumps(envelope.data).encode()).hexdigest()
 
@@ -226,6 +229,40 @@ def test_the_lab_intake_refuses_to_run_without_a_notice_secret() -> None:
 def test_a_head_notice_names_its_repository_head_base_and_actor() -> None:
     notice = {"repo": REPO, "head": HEAD, "base": BASE, "actor": "agenticore-app[bot]"}
     assert webhooks.notice_event(notice) == head("notice", "agenticore-app[bot]", "pushed")
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_a_head_notice_naming_its_branch_records_it_as_the_head_branch() -> None:
+    notice = {"repo": REPO, "head": HEAD, "base": BASE, "actor": "agenticore-app[bot]", "branch": "fix-x"}
+    assert webhooks.notice_event(notice) == head("notice", "agenticore-app[bot]", "pushed", head_branch="fix-x")
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_a_grade_request_keeps_the_head_branch_its_head_event_recorded() -> None:
+    request = intake.request_from(head("pull_request", "nestorcolt", "opened", head_branch="fix-x"))
+    assert request.head_branch == "fix-x"
+    assert intake.request_from(head("push", "nestorcolt", "pushed")).head_branch == ""
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_only_a_pull_request_class_head_records_a_head_branch() -> None:
+    branched = [
+        *webhooks.head_events("pull_request", pull_request("opened")),
+        *webhooks.head_events("check_run", check_run()),
+    ]
+    unbranched = [
+        *webhooks.head_events("push", push()),
+        *webhooks.head_events("push", push(ref=PLANT_REF)),
+        *webhooks.head_events("merge_group", merge_group()),
+        *webhooks.head_events("check_run", check_run(pulls=False)),
+    ]
+    assert [event.head_branch for event in branched] == ["fix-x", "fix-x"]
+    assert [(event.event, event.head_branch) for event in unbranched] == [
+        ("push", ""),
+        ("plant", ""),
+        ("merge_group", ""),
+        ("check_run", ""),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -320,7 +357,11 @@ def test_a_cached_negative_answers_a_request_unless_it_is_a_rerequested_check() 
 
 
 def open_pull(sha: str, author: str = "agenticore-app[bot]") -> dict[str, Any]:
-    return {"head": {"sha": sha}, "base": {"sha": BASE, "repo": {"html_url": REPO}}, "user": {"login": author}}
+    return {
+        "head": {"sha": sha, "ref": f"fix-{sha[0]}"},
+        "base": {"sha": BASE, "repo": {"html_url": REPO}},
+        "user": {"login": author},
+    }
 
 
 def test_reconcile_lists_the_open_heads_without_a_grade() -> None:
@@ -333,8 +374,8 @@ def test_reconcile_lists_the_open_heads_without_a_grade() -> None:
 
     pulls = [open_pull(HEAD), open_pull("c" * 40), open_pull("d" * 40, "nestorcolt")]
     assert intake.reconcile(pulls, has_grade) == [
-        HeadEvent("pull_request", REPO, HEAD, BASE, "agenticore-app[bot]", "reconcile"),
-        HeadEvent("pull_request", REPO, "d" * 40, BASE, "nestorcolt", "reconcile"),
+        HeadEvent("pull_request", REPO, HEAD, BASE, "agenticore-app[bot]", "reconcile", "fix-a"),
+        HeadEvent("pull_request", REPO, "d" * 40, BASE, "nestorcolt", "reconcile", "fix-d"),
     ]
     assert seen == [(REPO, HEAD), (REPO, "c" * 40), (REPO, "d" * 40)]
     assert intake.reconcile([], has_grade) == []

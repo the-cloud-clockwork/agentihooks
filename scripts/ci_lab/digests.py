@@ -1,14 +1,15 @@
 """Canonical digests and the per kind unit keys of the CI lab.
 
 A key names every input that can change a verdict and starts with its kind and schema version,
-so a schema bump is a cold cache. The day, the run id, the branch and the author never enter a key.
+so a schema bump is a cold cache. The day, the run id and the author never enter a key, and the
+branch enters only the key of a static gate that reads it.
 docs/reference/ci-lab.md holds the digest specification.
 """
 
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from scripts.ci_mutation import stats_cache
 from scripts.profiles.sources import blob as blob_id
@@ -49,13 +50,15 @@ class Toolchain:
 
 @dataclass(frozen=True)
 class StaticInputs:
-    """The inputs of one static gate: the files it grades at head and base and the grader tree."""
+    """The inputs of one static gate: the files it grades at head and base, the grader tree, and the event names it
+    reads with their values."""
 
     gate: str
     head: Mapping[str, str]
     base: Mapping[str, str]
     grader: str
     toolchain: Toolchain
+    event: Mapping[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True)
@@ -130,7 +133,8 @@ def _toolchain(toolchain: Toolchain) -> dict[str, object]:
 
 
 def static_key(inputs: StaticInputs) -> str:
-    """Return the key of one static gate's verdict."""
+    """Return the key of one static gate's verdict; the event names enter it only for a gate that reads one, so every
+    other gate keeps its content key."""
     return _key(
         "static",
         {
@@ -139,6 +143,7 @@ def static_key(inputs: StaticInputs) -> str:
             "base": dict(inputs.base),
             "grader": inputs.grader,
             "toolchain": _toolchain(inputs.toolchain),
+            **({"event": dict(inputs.event)} if inputs.event else {}),
         },
     )
 

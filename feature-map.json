@@ -1,6 +1,36 @@
 {
   "features": [
     {
+      "id": "lab-lease-event-branch",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2753",
+      "behaviour": "The CI lab records the head branch of a pull request class head at intake (a pull request delivery, a rerequested check run, reconcile, a signed notice that names its branch and a lab remote push) and none for a push, merge group or plant head; the grade keeps it and every queue job, lease grant, lease reply and worker lease carries it with the event name of the grade's class, each reader taking an older record with neither; the static context reads both from the lease, falls back to pull_request for a lease with no event and gives each step GITHUB_EVENT_NAME; a static key carries the event names its gate reads only when it reads one; a gate reading a branch name is planned only for a grade with a head branch; and a continue-on-error gate step that exits non zero keeps its unit green while a timeout stays red.",
+      "seam": "scripts.ci_lab.webhooks head_events and notice_event, scripts.ci_lab.intake request_from, scripts.ci_lab.head_notice send, scripts.ci_lab.scheduler BusInbox.heads, _request, Scheduler._start, Scheduler._admit and MirrorExpander.expand, scripts.ci_lab.queue Queue.enqueue and job, scripts.ci_lab.worker _lease, scripts.ci_lab.executors _context, scripts.ci_lab.static_gates event_fields, read_events, plannable and discover, scripts.ci_lab.run_static run and Result.green, scripts.ci_lab.units EVENT_NAMES and scripts.ci_lab.digests static_key",
+      "tests": [
+        "tests/ci_lab/test_digests.py::test_a_static_gate_that_reads_no_event_name_keeps_its_content_key",
+        "tests/ci_lab/test_executors.py::test_the_changelog_fragment_gate_grades_on_the_lab_with_the_head_branch_its_lease_carries",
+        "tests/ci_lab/test_executors.py::test_the_queue_record_step_runs_only_on_a_merge_group_lease_and_its_failure_keeps_the_unit_green",
+        "tests/ci_lab/test_executors.py::test_the_static_context_reads_the_event_and_head_branch_of_its_lease_and_an_older_lease_as_a_pull_request",
+        "tests/ci_lab/test_intake.py::test_a_head_notice_naming_its_branch_records_it_as_the_head_branch",
+        "tests/ci_lab/test_intake.py::test_a_grade_request_keeps_the_head_branch_its_head_event_recorded",
+        "tests/ci_lab/test_intake.py::test_only_a_pull_request_class_head_records_a_head_branch",
+        "tests/ci_lab/test_leases.py::test_a_grant_carries_the_event_and_head_branch_of_its_job",
+        "tests/ci_lab/test_queue.py::test_enqueue_stores_the_event_and_head_branch_each_job_grades_under",
+        "tests/ci_lab/test_run_static.py::test_a_tolerated_step_that_fails_stays_green_as_continue_on_error_keeps_its_job_but_a_timeout_stays_red",
+        "tests/ci_lab/test_run_static.py::test_a_step_reads_the_event_name_of_its_context_as_github_event_name",
+        "tests/ci_lab/test_scheduler_event_branch.py::test_a_grant_carries_the_event_of_its_grade_class_and_the_pull_request_head_branch",
+        "tests/ci_lab/test_scheduler_event_branch.py::test_a_request_held_before_the_head_branch_field_grades_with_no_head_branch",
+        "tests/ci_lab/test_scheduler_event_branch.py::test_the_bus_inbox_reads_the_head_branch_and_a_head_published_before_it_with_none",
+        "tests/ci_lab/test_scheduler_event_branch.py::test_the_mirror_expander_keys_only_the_gates_that_read_an_event_name_with_its_value",
+        "tests/ci_lab/test_scheduler_event_branch.py::test_the_mirror_expander_plans_the_changelog_fragment_gate_for_a_pull_request_head_with_its_branch",
+        "tests/ci_lab/test_static_gates.py::test_a_continue_on_error_gate_step_is_tolerated_and_the_real_workflow_tolerates_only_the_queue_record",
+        "tests/ci_lab/test_static_gates.py::test_a_gate_reads_the_event_names_it_names_with_the_values_of_its_lease_and_plans_a_branch_only_with_one",
+        "tests/ci_lab/test_static_gates.py::test_the_only_lab_gate_whose_step_reads_the_event_name_variable_keys_on_the_branch_it_reads",
+        "tests/ci_lab/test_units.py::test_each_grade_class_names_the_event_actions_runs_it_under",
+        "tests/ci_lab/test_worker.py::test_a_grant_from_a_scheduler_older_than_the_event_and_head_branch_reads_with_neither"
+      ]
+    },
+    {
       "id": "lab-shadow-reusable-caller-pairing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2804",
@@ -13439,7 +13469,7 @@
       "id": "lab-static-test-count-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-units-missing",
-      "behaviour": "The CI lab grades the Tests workflow's test-count job with static units: the static executor supplies runner.temp as the unit's run folder, github.event_name as pull_request and each matrix value the gate's job holds at one value, so the four test-count gate steps discover with nothing missing; static gate discovery names the docs and writer-lock jobs CI only with the reason the lab sandbox cannot run them, names CI only each job of a static job's reusable workflow that calls another reusable workflow instead of raising on it, and the discovery command prints those jobs with their reasons under --ci-only.",
+      "behaviour": "The CI lab grades the Tests workflow's test-count job with static units: the static executor supplies runner.temp as the unit's run folder, github.event_name from the lease and each matrix value the gate's job holds at one value, so the four test-count gate steps discover with nothing missing; static gate discovery names the docs and writer-lock jobs CI only with the reason the lab sandbox cannot run them, names CI only each job of a static job's reusable workflow that calls another reusable workflow instead of raising on it, and the discovery command prints those jobs with their reasons under --ci-only.",
       "seam": "scripts.ci_lab.static_gates discover, ci_only and main with the StaticGate matrix and missing, scripts.ci_lab.run_static run with its run folder and the gate's matrix in the context, and scripts.ci_lab.executors static with the event name in the lease context",
       "tests": [
         "tests/ci_lab/test_static_gates.py::test_a_gate_misses_no_run_folder_event_name_or_matrix_value_its_job_holds_at_one_value",

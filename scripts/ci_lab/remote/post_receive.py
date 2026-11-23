@@ -75,8 +75,9 @@ def run(
         if not base:
             out.write(f"lab remote: {ref} is not graded, only a pushed refs/grade/* head with a base is\n")
             continue
-        event = HeadEvent(NOTICE, environ[REPOSITORY], new, base, environ[ACTOR], PUSHED)
-        head = grade(event, ref, options.get(BRANCH, ""))
+        branch = options.get(BRANCH, "")
+        event = HeadEvent(NOTICE, environ[REPOSITORY], new, base, environ[ACTOR], PUSHED, branch)
+        head = grade(event, ref, branch)
         events.publish(head.type, head)
         out.write(f"lab grade: {lab}/grades/{new}\n")
     return 0

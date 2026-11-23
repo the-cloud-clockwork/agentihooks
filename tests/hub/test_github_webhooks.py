@@ -443,6 +443,7 @@ def lab_pull_request(action="opened", head="a1"):
     payload["repository"] = {"html_url": REPO}
     payload["sender"] = {"login": "nestorcolt"}
     payload["pull_request"]["base"] = {"sha": "b0"}
+    payload["pull_request"]["head"]["ref"] = "fix-x"
     payload["pull_request"]["user"] = {"login": "agenticore-app[bot]"}
     return payload
 

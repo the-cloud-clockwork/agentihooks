@@ -9,7 +9,7 @@ from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import LOST
 from scripts.ci_lab.units import Unit
 
-__all__ = ["BAND", "PAGE", "PREFIX", "RANKS", "UNRANKED", "Job", "Queue", "Requirement"]
+__all__ = ["BAND", "PAGE", "PREFIX", "RANKS", "UNRANKED", "UNTRIGGERED", "Job", "Queue", "Requirement", "Trigger"]
 
 PREFIX = "agentihooks-ci:queue:"
 RANKS = len(CLASSES)
@@ -28,6 +28,17 @@ DEFAULT = Requirement()
 
 
 @dataclass(frozen=True)
+class Trigger:
+    """The Actions event name a job's grade runs under and the head branch of a pull request head."""
+
+    event: str = ""
+    head_branch: str = ""
+
+
+UNTRIGGERED = Trigger()
+
+
+@dataclass(frozen=True)
 class Job:
     id: str
     head: str
@@ -41,6 +52,8 @@ class Job:
     grader: str = ""
     leased_ms: int = 0
     rank: int = UNRANKED
+    event: str = ""
+    head_branch: str = ""
 
 
 SCORE = f"""
@@ -186,11 +199,13 @@ class Queue:
         base: str = "",
         grader: str = "",
         rank: int = UNRANKED,
+        trigger: Trigger = UNTRIGGERED,
     ) -> list[str]:
-        """Add each unit of the head as a pending job, with the base and grader revision its grade reads, unless that
-        job is already known. The pending order is the rank first, the most urgent class lowest, then the order of
-        enqueue; a job with no rank sorts after every ranked one, as every job enqueued before ranks existed does. A
-        known job still pending under a less urgent rank moves to this one and keeps its place by enqueue order."""
+        """Add each unit of the head as a pending job, with the base and grader revision its grade reads and the event
+        name and head branch its grade runs under, unless that job is already known. The pending order is the rank
+        first, the most urgent class lowest, then the order of enqueue; a job with no rank sorts after every ranked one,
+        as every job enqueued before ranks existed does. A known job still pending under a less urgent rank moves to
+        this one and keeps its place by enqueue order."""
         added: list[str] = []
         for unit in units:
             job = f"{head}:{unit.kind}:{unit.key}"
@@ -208,6 +223,8 @@ class Queue:
                 "worker": "",
                 "outcome": "",
                 "rank": rank,
+                "event": trigger.event,
+                "head_branch": trigger.head_branch,
             }
             fields = [item for pair in record.items() for item in pair]
             keys = [_job(job), _key("pending"), _key("seq"), _head(head, "pending")]
@@ -250,6 +267,8 @@ class Queue:
         return set(self.client.smembers(_head(head, state)))
 
     def job(self, job: str) -> Job | None:
+        """Return the job's record, None once it is gone; a job enqueued before ranks, the event or the head branch
+        existed reads with no rank, event or head branch."""
         record = self.client.hgetall(_job(job))
         if not record:
             return None
@@ -268,6 +287,8 @@ class Queue:
             grader=record["grader"],
             leased_ms=int(record.get("leased_ms", 0)),
             rank=int(record.get("rank", UNRANKED)),
+            event=record.get("event", ""),
+            head_branch=record.get("head_branch", ""),
         )
 
     def slots(self, jobs: Sequence[str]) -> dict[str, tuple[int, int]]:

@@ -1972,7 +1972,7 @@ def test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_w
     expected: dict[str, list[str]] = {"unit": []}
     ungraded: list[str] = []
     for gate in static_gates.discover(text, json.loads(registry.read_text()), ci_wiring.load(ROOT)):
-        if gate.missing:
+        if gate.missing or {"github.head_ref", "github.ref_name"} & set(gate.reads):
             ungraded.append(gate.name)
         else:
             expected.setdefault(gate.job, []).append(gate.name)

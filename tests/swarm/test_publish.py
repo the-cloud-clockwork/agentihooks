@@ -2554,6 +2554,7 @@ def test_a_published_push_sends_one_signed_notice_the_receiver_accepts(
         "base": git(publication.root, "merge-base", head, "origin/dev"),
         "actor": NOTICE_ACTOR,
         "action": "pushed",
+        "head_branch": "engineer-test",
     }
     deliveries = lab_receiver.heads.fetch(100, 0)
     assert [(delivery.event.type, delivery.event.data) for delivery in deliveries] == [("ci.lab.head.notice", notice)]

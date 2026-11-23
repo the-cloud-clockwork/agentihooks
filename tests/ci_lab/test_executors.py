@@ -61,16 +61,15 @@ LEASE_CONTEXT = {
     "github.event.pull_request.head.sha": "h1",
     "github.event.pull_request.base.sha": "b1",
     "github.event_name": "pull_request",
+    "github.head_ref": "fix-x",
+    "github.ref_name": "",
     "github.run_id": "job",
     "github.run_attempt": "1",
     "github.run_number": "1",
 }
-REFUSED = {
-    "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": (
-        "no value for 'github.head_ref' in the context"
-    ),
-    "lint/artifact-sanity-checks": "no value for 'github.base_ref' in the context",
-}
+REFUSED = {"lint/artifact-sanity-checks": "no value for 'github.base_ref' in the context"}
+CHANGELOG = "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading"
+RECORD = "test-count/record-the-head-count-for-the-next-queue-group"
 SECRET_WORKFLOW = r"""
 jobs:
   lint:
@@ -160,7 +159,9 @@ def pod_of(root: Path, trees: FakeWorktrees) -> executors.Pod:
 
 
 def lease(kind: str, key: str, members: tuple[str, ...], slots: int = 1) -> Lease:
-    return Lease("job", "tok", "h1", Unit(kind, key, members), slots, 1500, "b1", "g1")
+    return Lease(
+        "job", "tok", "h1", Unit(kind, key, members), slots, 1500, "b1", "g1", event="pull_request", head_branch="fix-x"
+    )
 
 
 def folder(root: Path, name: str, files: dict[str, str]) -> Path:
@@ -396,6 +397,80 @@ def test_static_grades_every_test_count_gate_of_the_real_workflow_on_a_clean_tre
         "test-count/fetch-the-base-suite-count-recorded-on-dev",
         "test-count/record-the-head-count-for-the-next-queue-group",
     }
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+@pytest.mark.parametrize(
+    ("added", "branch", "outcome"),
+    [
+        ({"changelog.d/fix-x.md": "### Fixed\n\n- A fix.\n"}, "fix-x", PASSED),
+        ({"changelog.d/fix-x.md": "### Fixed\n\n- A fix.\n"}, "fix-y", FAILED),
+        ({}, "fix-x", FAILED),
+    ],
+)
+def test_the_changelog_fragment_gate_grades_on_the_lab_with_the_head_branch_its_lease_carries(
+    tmp_path: Path, venv: Recorder, bwrap: None, added: dict[str, str], branch: str, outcome: str
+) -> None:
+    venv.answer = (Path(sys.executable).parent.parent, False)
+    fragments = {"changelog.d/README.md": "fragments\n"}
+    head = folder(tmp_path, "head", {LOCK: "lock\n", **fragments, **added})
+    base = folder(tmp_path, "base", fragments)
+    pod = live_pod(tmp_path, FakeWorktrees({"h1": head, "b1": base, "g1": ROOT}), {})
+
+    finished = executors.static(pod, dataclasses.replace(lease("static", "k", (CHANGELOG,)), head_branch=branch))
+
+    assert finished.outcome == outcome
+    assert report(finished, pod)["skipped"] is False
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+@pytest.mark.parametrize(("event", "code", "skipped"), [("merge_group", 1, False), ("pull_request", None, True)])
+def test_the_queue_record_step_runs_only_on_a_merge_group_lease_and_its_failure_keeps_the_unit_green(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    venv: Recorder,
+    bwrap: None,
+    event: str,
+    code: int | None,
+    skipped: bool,
+) -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    (record,) = (
+        gate for gate in static_gates.discover(workflow, registry, ci_wiring.load(ROOT)) if gate.name == RECORD
+    )
+    failing = dataclasses.replace(record, run="exit 1")
+
+    def found(grader: Path, name: str) -> StaticGate:
+        return failing
+
+    monkeypatch.setattr(executors, "gate", found)
+    head = folder(tmp_path, "head", {LOCK: "lock\n"})
+    base = folder(tmp_path, "base", {LOCK: "lock\n"})
+    pod = live_pod(tmp_path, FakeWorktrees({"h1": head, "b1": base, "g1": ROOT}), {})
+
+    finished = executors.static(pod, dataclasses.replace(lease("static", "k", (RECORD,)), event=event, head_branch=""))
+
+    assert finished.outcome == PASSED
+    assert (report(finished, pod)["code"], report(finished, pod)["skipped"]) == (code, skipped)
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+@pytest.mark.parametrize(
+    ("event", "branch", "expected"),
+    [
+        ("merge_group", "", ("merge_group", "", "")),
+        ("pull_request", "fix-x", ("pull_request", "fix-x", "")),
+        ("", "", ("pull_request", "", "")),
+    ],
+)
+def test_the_static_context_reads_the_event_and_head_branch_of_its_lease_and_an_older_lease_as_a_pull_request(
+    event: str, branch: str, expected: tuple[str, str, str]
+) -> None:
+    found = StaticGate("lint/a", "lint", "a", (), (), "true", (), ())
+    leased = dataclasses.replace(lease("static", "k", ("lint/a",)), event=event, head_branch=branch)
+    context = executors._context(leased, found, {})
+    assert (context["github.event_name"], context["github.head_ref"], context["github.ref_name"]) == expected
 
 
 @pytest.mark.feature("lab-static-step-env")

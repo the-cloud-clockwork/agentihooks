@@ -33,7 +33,8 @@ from scripts import ci_cpu_quota, ci_wiring
 from scripts.ci_lab import caches, contract, metrics, run_mutation, run_static, run_tests, venvs, worker, worktrees
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
-from scripts.ci_lab.static_gates import REGISTRY, SECRETS, WORKFLOW, StaticGate, discover
+from scripts.ci_lab.static_gates import REGISTRY, SECRETS, WORKFLOW, StaticGate, discover, event_fields
+from scripts.ci_lab.units import EVENT_NAMES, Priority
 from scripts.ci_lab.venvs import Build
 from scripts.ci_lab.worker import Executor, Finished, Lease
 from scripts.ci_lab.worktrees import Mirror, Worktrees
@@ -189,8 +190,9 @@ def gate(grader_tree: Path, name: str) -> StaticGate:
 
 
 def _context(lease: Lease, found: StaticGate, secrets: Mapping[str, str]) -> dict[str, str]:
-    """The context a static unit's steps read: the head, base and job of the lease as their GitHub fields, the pull
-    request event name, attempt and run number 1, and each secret the gate reads by its name, empty when the pod holds
+    """The context a static unit's steps read: the head, base and job of the lease as their GitHub fields, the event
+    name and head branch of the lease, the pull request event for a lease that names none as every older lease
+    graded under it, attempt and run number 1, and each secret the gate reads by its name, empty when the pod holds
     no secret of that name."""
     named = {name: secrets.get(name.removeprefix(SECRETS), "") for name in found.reads if name.startswith(SECRETS)}
     return {
@@ -198,7 +200,7 @@ def _context(lease: Lease, found: StaticGate, secrets: Mapping[str, str]) -> dic
         "github.sha": lease.head,
         "github.event.pull_request.head.sha": lease.head,
         "github.event.pull_request.base.sha": lease.base,
-        "github.event_name": "pull_request",
+        **event_fields(lease.event or EVENT_NAMES[Priority.PULL_REQUEST], lease.head_branch),
         "github.run_id": lease.job,
         "github.run_attempt": "1",
         "github.run_number": "1",

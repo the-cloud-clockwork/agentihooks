@@ -1757,6 +1757,11 @@ both of these hold:
 | `check_run` delivery on `/github` | The action is `rerequested` and the check's name starts with `lab` | `ci.lab.head.check_run` | The run's `head_sha`, and the base of its first pull request, empty when it has none | The delivery's sender |
 | Signed notice on `/lab/head` | Every valid notice | `ci.lab.head.notice` | As the notice names them | As the notice names it |
 
+A pull request delivery records the pull request's head ref as the head's `head_branch`, a
+rerequested check run the head ref of its first pull request, and a notice the optional `branch` it
+names, which the agents' push path sends. Every other head, a plant included, records an empty head
+branch, so only a pull request class grade ever reads one.
+
 The receiver records each head the table names whoever its actor is, and every other GitHub
 event records no head. `scripts.ci_lab.intake.admit` keeps only heads whose actor is on the
 runner trust list (`.github/workflows/trusted-actors.json`) as grade requests, but no service
@@ -1780,7 +1785,7 @@ Each head is one envelope:
 | `version` | `0` |
 | `time` | Milliseconds since the epoch when the receiver built it |
 | `author` | The actor |
-| `data` | `event`, `repo`, `head`, `base`, `actor` and `action` (`pushed` for a push or a notice, else the delivery's action) |
+| `data` | `event`, `repo`, `head`, `base`, `actor`, `action` (`pushed` for a push or a notice, else the delivery's action) and `head_branch`; the scheduler reads an envelope without `head_branch` as one with none |
 
 The bus sends each envelope with its id as `Nats-Msg-Id`, and the stream drops a repeated id inside
 its duplicate window, the bus dedupe window of two minutes. A GitHub redelivery of the same push,
@@ -2356,7 +2361,8 @@ key; the builders are pure and read no file, clock or network.
   inputs, so a schema bump in `SCHEMAS` is a cold cache for that kind, never a reinterpretation.
 - Mappings and sets are order free: the same entries in any order give one key. Sequences keep
   their order where order changes the run, such as a pytest invocation.
-- The day, the run id, the branch name and the author are never inputs.
+- The day, the run id and the author are never inputs. The branch name and the event name are
+  inputs only of a static gate that reads them.
 
 | Kind | Builder | Schema | Unit |
 |---|---|---|---|
@@ -2381,6 +2387,7 @@ key; the builders are pure and read no file, clock or network.
 | `static` | `base` | Path to blob id of every base file the gate compares against |
 | `static` | `grader` | Digest of the grader script tree the gate runs: the gate script's import closure at the protected grader revision |
 | `static` | `toolchain` | The toolchain above |
+| `static` | `event` | Each of `github.event_name`, `github.head_ref` and `github.ref_name` the gate reads, with the value its grade supplies; left out of the key when the gate reads none, so that gate keeps its content key |
 | `test` | `tests` | Test id to its fingerprint from `scripts/dep_manifest.py` |
 | `test` | `opened` | Path to blob id of each file a test opened outside the manifest |
 | `test` | `invocation` | The pytest argument list, plugins included, in order |
@@ -2585,10 +2592,10 @@ every other repository. A live grade with no
 origin, one that started before this step existed, gets one from its document on the next pass,
 and the origin of a run that is no longer live is removed.
 
-Known limits: a lab head event carries no branch yet, so a head's lane is its own sha and a newer
-head supersedes nothing until intake records the branch; expansion keys static gates, test units
-and mutation units only, so the other jobs the lab does not run yet pass by their frame; a
-rerequested grade reuses the finished jobs of its own head.
+Known limits: a GitHub head's lane is its own sha, since the head branch a pull request head
+records serves only the static context, so a newer GitHub head supersedes nothing; expansion keys
+static gates, test units and mutation units only, so the other jobs the lab does not run yet pass
+by their frame; a rerequested grade reuses the finished jobs of its own head.
 
 ### Static units
 
@@ -2667,7 +2674,9 @@ The static executor supplies these names:
 |---|---|
 | `inputs.base`, `github.event.pull_request.base.sha` | The lease's base revision |
 | `github.sha`, `github.event.pull_request.head.sha` | The lease's head |
-| `github.event_name` | `pull_request`, at every class, since a static unit's key holds no class |
+| `github.event_name` | The lease's event: `pull_request` for a hotfix or pull request grade, `merge_group` for a merge group grade, `push` for a promotion or backfill grade, and `pull_request` for a lease that names none, as every lease from an older scheduler graded under it. Each step also reads it as `$GITHUB_EVENT_NAME` |
+| `github.head_ref` | The lease's head branch, which only a pull request class grade has |
+| `github.ref_name` | Empty, since the lab never knows a pull request's merge ref |
 | `github.run_id` | The lease's job id |
 | `github.run_attempt`, `github.run_number` | `1` |
 | `runner.temp` | The unit's run folder, the `$RUNNER_TEMP` its steps see |
@@ -2675,18 +2684,24 @@ The static executor supplies these names:
 | `secrets.<NAME>` | The worker's `CI_LAB_SECRET_<NAME>`, or empty when the worker has no such variable. Only the secrets the gate reads join the context |
 | `steps.<id>.outcome`, `steps.<id>.conclusion`, `steps.<id>.outputs.<name>` | Set as each producer runs |
 
-Since the event is `pull_request` in every class, a lab unit runs or skips each step as a pull
-request run of Actions does. A merge group, promotion or backfill grade can therefore differ from
-that class's Actions run: a step whose `if` needs another event is skipped, and a step whose `if`
-needs `pull_request` runs. Three lab gradable gates read the event name on dev, and
-`tests/ci_lab/test_static_gates.py` pins that list, so a new one fails the test until someone
-checks the pull request event keeps its verdict:
+A lab unit runs or skips each step as the Actions run of its grade's class does. A gate that reads
+`github.event_name`, `github.head_ref` or `github.ref_name` carries each name it reads, with its
+value, in its static key, so its verdict is shared only with grades that supply the same values;
+every other gate keeps its content key and shares its verdict across classes. A gate that reads a
+branch name is planned only for a grade with a head branch, as Actions runs it only for a pull
+request. Among the 44 discovered gates only the changelog fragment gate's module reads
+`$GITHUB_EVENT_NAME`, and `tests/ci_lab/test_static_gates.py` pins that it keys on the branch it
+reads. Three lab gradable gates read the event name on dev, and the same test module pins that
+list:
 
 | Gate | In a lab unit |
 |---|---|
-| `lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one` | Its `self-plant` producer runs, since it needs `pull_request` |
+| `lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one` | Its `self-plant` producer runs for a hotfix or pull request grade, since it needs `pull_request` |
 | `test-count/fetch-the-base-suite-count-recorded-on-dev` | Skipped: it also needs the `app-token` producer, a `uses` step. Every failure path of the step exits 0, so it never changes the job's verdict, and the count floor collects the base suite itself |
-| `test-count/record-the-head-count-for-the-next-queue-group` | Skipped: it runs only on `merge_group`, with `continue-on-error`, so it never changes the job's verdict |
+| `test-count/record-the-head-count-for-the-next-queue-group` | Runs only for a merge group grade. It sets `continue-on-error`, so its failure never turns the unit red |
+
+A gate step with `continue-on-error: true` passes its unit when it exits non zero, as Actions keeps
+the job green. A step past its time limit stays red, since that limit stands for the job's own.
 
 `scripts.ci_lab.run_static.run` runs the producers before the gate, in job order, in the gate's
 sandbox and run folder, and gives each its own `GITHUB_OUTPUT` file. A `uses` producer, or one
@@ -2703,13 +2718,22 @@ summary the report carries.
 
 A gate with any missing name is not lab gradable. The expander leases no unit for it, so its
 verdict stays with Actions. `python -m scripts.ci_lab.static_gates --root .` prints each gate's
-producers by id, its `reads`, its `matrix` and its `missing`. On dev two `lint` gates are not lab
+producers by id, its `reads`, its `matrix` and its `missing`. On dev one `lint` gate is not lab
 gradable:
 
 | Gate | Missing |
 |---|---|
-| `lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading` | `github.head_ref`, `github.ref_name` |
 | `lint/artifact-sanity-checks` | `github.base_ref`, `github.event.before`, `github.event.merge_group.base_sha` |
+
+`lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading` reads
+only names the lease supplies, but the exclusion catalog keeps it with Actions under the need
+`plant`: it grades the fragment a pull request adds, which no plant edit can add, and every plant
+twin adds none, so no plant pair can prove it.
+
+Before pull request
+[#12827](https://github.com/the-cloud-clockwork/agentihooks/pull/12827), the lease carried no event
+name or head branch: `github.event_name` read `pull_request` at every class and the changelog
+fragment gate missed `github.head_ref` and `github.ref_name`.
 
 Before pull request
 [#12486](https://github.com/the-cloud-clockwork/agentihooks/pull/12486), the executor supplied

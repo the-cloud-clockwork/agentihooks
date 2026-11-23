@@ -109,6 +109,8 @@ def _grant(grant: Grant) -> dict[str, Any]:
         "head": grant.head,
         "base": grant.base,
         "grader": grant.grader,
+        "event": grant.event,
+        "head_branch": grant.head_branch,
         "kind": grant.unit.kind,
         "key": grant.unit.key,
         "members": list(grant.unit.members),

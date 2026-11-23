@@ -61,8 +61,8 @@ REDIS = "REDIS"
 
 @dataclass(frozen=True)
 class Lease:
-    """One leased unit: its job, the lease token, the head it grades, the unit, its slots, the lease expiry and the base
-    and grader revision its grade reads."""
+    """One leased unit: its job, the lease token, the head it grades, the unit, its slots, the lease expiry, the base
+    and grader revision its grade reads, and the event name and head branch its grade runs under."""
 
     job: str
     token: str
@@ -72,6 +72,8 @@ class Lease:
     expires_ms: int
     base: str = ""
     grader: str = ""
+    event: str = ""
+    head_branch: str = ""
 
 
 @dataclass(frozen=True)
@@ -100,7 +102,8 @@ class Lost(RuntimeError):
 
 
 def _lease(grant: Mapping[str, Any]) -> Lease:
-    """Read one grant of the lease API's POST /lease reply."""
+    """Read one grant of the lease API's POST /lease reply; a reply from a scheduler older than the event and head
+    branch fields reads with neither."""
     unit = Unit(
         kind=grant["kind"], key=grant["key"], members=tuple(grant["members"]), manifest=grant.get("manifest", "")
     )
@@ -113,6 +116,8 @@ def _lease(grant: Mapping[str, Any]) -> Lease:
         grant["expires_ms"],
         grant["base"],
         grant["grader"],
+        grant.get("event", ""),
+        grant.get("head_branch", ""),
     )
 
 
