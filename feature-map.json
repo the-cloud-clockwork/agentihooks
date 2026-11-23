@@ -1596,6 +1596,21 @@
       ]
     },
     {
+      "id": "hub-admission-expert-room-reserve",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-expert-room-reserve",
+      "behaviour": "While an expert lineage of any swarm runs with no expert in a state that has not ended, never seated, finished on a handoff or ended and waiting on the reap, the hub keeps one slot per such lineage on an asking hive that takes experts and answers a lane offer that would take it with a held answer naming the slots kept for expert lineages, before any claim, execution, seat or ledger write; once the successor is seated the slot is its own and the reserve ends. A lineage whose expert is live, a lineage that was stopped or completed, and a hive that excludes the expert lane keep nothing. The tick's expert seats step places the successor through its own launch path, never this admission. The hold lasts as long as the lineage waits, so a successor that cannot launch for another reason keeps its slot held on every hive that takes experts until it is seated or its lineage ends.",
+      "seam": "expert_lineage.waiting through Admission.admit and Admission._full for a hive spoke request",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_holds_a_launch_on_a_hive_one_below_max_agents_while_a_running_expert_lineage_waits",
+        "tests/hub/test_admission.py::test_a_lineage_of_another_swarm_waiting_for_an_expert_also_holds_the_hive",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_below_max_agents_while_no_running_expert_lineage_waits",
+        "tests/hub/test_admission.py::test_the_slot_kept_for_a_waiting_lineage_goes_to_its_successor_and_then_the_hive_is_full",
+        "tests/hub/test_admission.py::test_a_hive_that_takes_no_expert_keeps_no_slot_for_a_waiting_lineage"
+      ],
+      "rules": []
+    },
+    {
       "id": "controller-done-clears-awaiting",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2488",
@@ -6274,6 +6289,17 @@
       ]
     },
     {
+      "id": "ledger-write-doctrine-order-verb",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "The ledger write doctrine gate counts prose that teaches an order through the ledger command, agentihooks ledger order, as a ledger write line, as it does for every other write verb. The same order through agentihooks api is no write line, and reading the orders is none either.",
+      "seam": "scripts.no_ledger_write_doctrine.hits over one line, and its main grading a head tree against a base tree",
+      "tests": [
+        "tests/test_no_ledger_write_doctrine.py::test_an_order_through_the_ledger_command_is_a_write_line_and_through_the_api_is_not",
+        "tests/test_no_ledger_write_doctrine.py::test_a_new_line_teaching_an_order_through_the_ledger_command_is_red_and_the_api_form_is_green"
+      ]
+    },
+    {
       "id": "ledger-followup-duplicates",
       "origin": "inventory",
       "behaviour": "A follow up repeating an open follow up or task is refused naming it, unless a plain words not duplicate reason is given and stored.",
@@ -9878,6 +9904,26 @@
         "tests/swarm_ledger/test_covers_job_field.py::test_the_task_add_operation_schema_accepts_covers_job",
         "tests/swarm_ledger/test_covers_job_field.py::test_task_add_and_set_mark_the_job_a_task_covers",
         "tests/swarm_ledger/test_covers_job_field.py::test_task_help_says_the_covers_job_value_must_match_the_alert"
+      ]
+    },
+    {
+      "id": "promotion-current-job-not-completed",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promote-wait-poll-log",
+      "behaviour": "Promotion counts its exact triggering run promotion job whenever it is not completed, including a queued listing after execution starts, while retaining unique current job identity and all other grading checks.",
+      "seam": "snapshotGradeComplete in .github/scripts/promote.cjs through the promotion API contract harness",
+      "tests": [
+        "tests/contracts/promotion/test_promote.py::test_noncompleted_triggering_promotion_job_merges"
+      ]
+    },
+    {
+      "id": "promotion-changing-grade-poll-diagnostics",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promote-wait-poll-log",
+      "behaviour": "Each changed promotion grade poll logs the current promotion job count and every unsettled job name and status from the existing paginated response, suppressing identical results and job ordering changes without extra requests.",
+      "seam": "promotion grade polling in .github/scripts/promote.cjs through the promotion API contract harness",
+      "tests": [
+        "tests/contracts/promotion/test_promote.py::test_changed_promotion_grade_polls_are_logged"
       ]
     },
     {
