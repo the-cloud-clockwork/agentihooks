@@ -92,6 +92,23 @@ def test_the_first_release_a_hive_misses_is_named_and_none_when_it_carries_it() 
 
 
 @pytest.mark.feature("hive-role-release-floor")
+def test_the_first_release_applies_under_any_name_placement_asks_for_and_the_newest_one_wins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert not placement.hosts("eng", headless(version=OLD), ("expert",))
+    assert placement.hosts("eng", headless(version=FLOOR), ("expert",))
+    preferred = headless("preferred", heartbeat_at=NOW, version=OLD, prefer={"eng": 1})
+    assert placement.unhosted("eng", [preferred], NOW, ("expert",)) == placement.Spill(
+        "preferred", f"it runs release {OLD}, older than {FLOOR}, the first release that hosts eng"
+    )
+    assert placement.unhosted("eng", [preferred], NOW) is None
+    monkeypatch.setitem(placement.FIRST_RELEASE, "engineer", "2.17.999")
+    assert placement.outdated("expert", headless(version="2.17.1000"), ("engineer",)) == FLOOR
+    assert placement.outdated("engineer", headless(version="2.17.1000")) == ""
+    assert placement.outdated("engineer", headless(version="2.17.998")) == "2.17.999"
+
+
+@pytest.mark.feature("hive-role-release-floor")
 def test_a_role_no_live_hive_is_new_enough_for_waits_as_a_role_no_live_hive_takes() -> None:
     assert chosen([headless(heartbeat_at=NOW, version=OLD)]) == placement.Wait("no live hive takes expert")
     assert chosen([headless(heartbeat_at=NOW, excluded=["ci"])], "ci") == placement.Wait("no live hive takes ci")

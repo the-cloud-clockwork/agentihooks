@@ -2579,6 +2579,7 @@
         "tests/hive/test_release_floor.py::test_a_pinned_hive_is_held_to_the_first_release_of_a_role_too",
         "tests/hive/test_release_floor.py::test_a_role_with_no_first_release_is_hosted_by_a_hive_of_any_release",
         "tests/hive/test_release_floor.py::test_the_first_release_a_hive_misses_is_named_and_none_when_it_carries_it",
+        "tests/hive/test_release_floor.py::test_the_first_release_applies_under_any_name_placement_asks_for_and_the_newest_one_wins",
         "tests/hive/test_release_floor.py::test_a_role_no_live_hive_is_new_enough_for_waits_as_a_role_no_live_hive_takes",
         "tests/hive/test_release_floor.py::test_a_preferred_hive_passed_over_for_its_release_is_named_with_both_releases",
         "tests/hive/test_release_floor.py::test_the_launcher_never_selects_a_hive_older_than_the_first_release_of_the_expert",
