@@ -59,7 +59,7 @@ from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchai
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
-from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, unit_path, upload_path
+from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
 from scripts.ci_lab.queue import DEFAULT, Job, Queue
@@ -992,9 +992,9 @@ class Scheduler:
         return decide(result, self.settings.retries) == "retry" and self.queue.retry(job)
 
     def _remember(self, job: Job, uploaded: tuple[dict[str, Any], bytes] | None, state: State) -> None:
-        """Store the verdict of a graded job from the report and log its worker uploaded, and note the files its batch
-        opened outside the repository's manifest under the manifest commit the grade keyed on; a lost or unrun job is
-        no verdict."""
+        """Store the verdict of a graded job from the report and log its worker uploaded, write a flaky verdict's flake
+        rows once as JSON lines in its flakes object, and note the files its batch opened outside the repository's
+        manifest under the manifest commit the grade keyed on; a lost or unrun job is no verdict."""
         if job.outcome in UNGRADED or uploaded is None:
             return
         report, log = uploaded
@@ -1003,6 +1003,10 @@ class Scheduler:
             job.unit.kind, job.unit.key, passed, passed and bool(report.get("flaky")), float(report.get("seconds", 0.0))
         )
         self.store.put(verdict, report, log)
+        flakes = report.get("flakes")
+        if verdict.flaky and flakes:
+            rows = "".join(json.dumps(row) + "\n" for row in flakes)
+            self.objects.write_once(flakes_path(verdict.kind, verdict.key), rows.encode())
         if report.get("outside") and state.manifest:
             note_outside(self.objects, state.repo, state.manifest, job.unit.members, report["outside"])
 
