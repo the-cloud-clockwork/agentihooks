@@ -1,0 +1,15 @@
+rules:
+  - id: open-listing-with-rollups
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A paged open pull request listing that reads every check rollup context resolves each rollup on GitHub before
+      the next page can start. On 23 November the fleet red notice listing read 179 agentihooks pull requests in
+      eight sequential pages of twenty five in 41 seconds, past the step's 30 second budget, so the slow lane
+      abandoned the step every pass and dropped its listing saves. List the open pull request numbers alone, then
+      read the rollups by number in aliased batches on several threads, as GitHubSourceControl.open_changes does.
+    paths:
+      include:
+        - /scripts/
+        - open-listing-with-rollups.py
+    pattern-regex: (?s)"""(?:(?!""").)*?pullRequests\(states:(?:(?!""").)*?statusCheckRollup\s*\{\s*contexts

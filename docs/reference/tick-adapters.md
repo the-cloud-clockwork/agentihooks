@@ -392,7 +392,7 @@ releases = [tag.name for tag in port.tags(deadline=deadline) if tag.name.startsw
 | `latest_runs()` | REST `repos/<repository>/actions/runs?per_page=100`, one page | `tuple[RepositoryRun, ...]`, newest first |
 | `cancel_run(run_id)` | REST `POST repos/<repository>/actions/runs/<run_id>/cancel` | `None` |
 | `merged_at(commit)` | REST `repos/<repository>/commits/<commit>/pulls` | The `merged_at` stamp of the first listed pull request that merged, or `None` |
-| `open_changes()` | GraphQL `pullRequests(states: OPEN, first: 25)` with the newest commit's `statusCheckRollup`, up to eight pages | `tuple[OpenChange, ...]`, at most 200 |
+| `open_changes()` | GraphQL `pullRequests(states: OPEN, first: 100)` numbers, up to two pages, then the newest commit's `statusCheckRollup` by number in aliased batches of 25 on four threads | `tuple[OpenChange, ...]`, at most 200 |
 | `workflow_runs(workflow, event, conclusion, since)` | REST `repos/<repository>/actions/workflows/<workflow>/runs?event=<event>&status=<conclusion>&exclude_pull_requests=true&created=>=<since>`, every page up to ten | `tuple[WorkflowRun, ...]` |
 | `download(path)` | REST `<path>`, the body kept as bytes | `bytes` |
 | `graph(document, variables)` | GraphQL `document` with each variable passed as a string | The whole decoded answer, `errors` included |
