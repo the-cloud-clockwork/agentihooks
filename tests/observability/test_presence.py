@@ -78,6 +78,18 @@ def test_an_unreadable_or_non_numeric_daemon_beat_leaves_the_session_sending_its
 
 
 @pytest.mark.feature("presence-agent-hive-daemon")
+def test_a_seen_record_is_written_beside_itself_even_when_the_system_temp_folder_is_gone(monkeypatch, tmp_path):
+    import tempfile
+
+    from hooks import config
+
+    recorded(monkeypatch)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "missing"))
+    presence.agent("sess-8", ENV, 1_000.0)
+    assert (config.AGENTIHOOKS_HOME / "telemetry" / "presence" / "sess-8.json").exists()
+
+
+@pytest.mark.feature("presence-agent-hive-daemon")
 def test_a_hook_payload_marks_its_session_under_the_process_environment(monkeypatch):
     calls = []
     monkeypatch.setattr(presence, "time", SimpleNamespace(time=lambda: 9.5))

@@ -10,7 +10,7 @@ import tempfile
 import time
 from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from hooks.observability import otel
 
@@ -99,12 +99,11 @@ def export_agents(now_s: float) -> None:
     for path in sorted(folder.glob("*.json")):
         record = read_record(path)
         seen_s = record.get("seen_s")
-        seen = seen_s if isinstance(seen_s, int | float) else 0.0
         attributes = record.get("attributes")
-        if now_s - seen > PRUNE_S:
+        if not isinstance(seen_s, int | float) or now_s - seen_s > PRUNE_S:
             path.unlink(missing_ok=True)
-        elif now_s - seen <= FRESH_S and isinstance(attributes, dict):
-            otel.record_gauge(AGENT, seen, cast(dict[str, str], attributes))
+        elif now_s - seen_s <= FRESH_S and _mapping(attributes):
+            otel.record_gauge(AGENT, seen_s, {key: str(value) for key, value in attributes.items()})
     write_record(folder / BEAT, {"beat_s": now_s})
 
 
@@ -114,7 +113,11 @@ def read_record(path: Path) -> dict[str, object]:
         loaded: object = json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
-    return cast(dict[str, object], loaded) if isinstance(loaded, dict) else {}
+    return loaded if _mapping(loaded) else {}
+
+
+def _mapping(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 def write_record(path: Path, record: Mapping[str, object]) -> None:
