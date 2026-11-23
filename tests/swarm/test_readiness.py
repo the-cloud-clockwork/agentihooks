@@ -316,8 +316,8 @@ def test_behind_names_the_old_waiting_offers_ahead_of_an_offer_of_a_higher_class
     assert readiness.behind([n, o, u], [], view, LATER) == {n.id, o.id}
     assert readiness.behind([o, n], [offer_aged(view, "u", 0)], view, LATER) == {o.id, n.id}
     assert readiness.behind([o], [offer_aged(view, "n", 0), offer_aged(view, "u", 0)], view, LATER) == {o.id}
-    assert readiness.behind([o2, n], [offer_aged(view, "o", 0)], view, LATER) == {n.id}
-    assert readiness.behind([o2], [offer_aged(view, "o", 0)], view, LATER) == set()
+    assert readiness.behind([o2, n], [offer_aged(view, "o", 0)], view, LATER) == {o2.id, n.id}
+    assert readiness.behind([o2], [offer_aged(view, "o", 0)], view, LATER) == {o2.id}
     assert readiness.behind([offer_aged(view, "n", WINDOW - 1), o], [], view, LATER) == set()
     assert readiness.behind([u, o, n], [], view, LATER) == set()
 
@@ -630,7 +630,8 @@ def recorded_run() -> dict[str, dict[str, list[str]]]:
 
 @pytest.mark.feature("ready-offer-class-one-decider")
 def test_a_recorded_run_of_generated_ledgers_keeps_its_offers_and_its_moves() -> None:
-    assert recorded_run() == json.loads(RECORDED.read_text())
+    found = recorded_run()
+    assert found == json.loads(RECORDED.read_text()), f"the run now leaves: {json.dumps(found)}"
 
 
 def test_publish_uses_the_given_queue_policy(bus):
