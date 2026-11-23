@@ -42,6 +42,7 @@ from urllib.parse import urlsplit
 import scripts.tick.steps.report  # noqa: F401
 from hooks.classifier import settings as classifier_settings
 from hooks.context import injection_trace, quarantine
+from scripts import review
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, quiet
 from scripts.gates import feature as feature_gate
@@ -2220,6 +2221,7 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
             return
         proof.update(found)
     proven = {**row, "proof": {**(row.get("proof") or {}), **proof}}
+    review.require_done(store, args.slug, ledger_kinds.kind(row), agent.lane, agent.task)
     missing = ledger_kinds.unmet(proven)
     if missing:
         raise SwarmError(_unproven(ledger_kinds.kind(row), missing))
