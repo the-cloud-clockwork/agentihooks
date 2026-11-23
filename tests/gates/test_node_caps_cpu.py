@@ -75,3 +75,30 @@ def test_node_caps_cpu_split(tmp_path: Path, module: str) -> None:
     warnings.warn(json.dumps(report), stacklevel=1)
     assert report["import"] == module
     assert len(report["files"]) == 9
+
+
+@pytest.mark.feature("node-caps-named-import")
+def test_node_caps_dispatch_imports_only_its_gate(tmp_path: Path) -> None:
+    program = '''
+import importlib.abc
+import io
+import sys
+
+class NamedGateOnly(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname: str, path: object = None, target: object = None) -> None:
+        if fullname.startswith("scripts.gates.") and fullname.rsplit(".", 1)[-1] not in {
+            "entry", "base", "lift", "log", "modes", "node_caps"
+        }:
+            raise AssertionError("unrelated gate imported: " + fullname)
+
+sys.meta_path.insert(0, NamedGateOnly())
+from pathlib import Path
+from scripts.gates import entry
+from scripts.gates.node_caps import NodeCaps
+assert isinstance(entry.HOST_GATES["node-caps"], NodeCaps)
+assert entry.main(["node-caps"], io.StringIO('{"tool_name":"Bash","tool_input":{"command":"printf ok"}}'), {}, Path(sys.argv[1])) == 0
+'''
+    completed = subprocess.run(
+        [sys.executable, "-c", program, str(tmp_path)], capture_output=True, text=True, timeout=30
+    )
+    assert completed.returncode == 0, completed.stderr
