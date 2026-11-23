@@ -345,3 +345,18 @@ def test_the_presence_and_token_writers_keep_each_others_values_in_the_seen_reco
     assert record["seen_s"] == 1_001.0
     assert record["attributes"]["session.id"] == "sess-merge"
     assert record["sent_s"] == 1_001.0
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_token_write_names_only_a_present_agent_and_a_validated_string_profile(tmp_path: Path) -> None:
+    from hooks.observability.token_monitor import record_tokens
+
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"state": "validated", "validation": {"profile": 7}}))
+    blank = {"AGENTIHOOKS_AGENT_NAME": "", "AGENTIHOOKS_PROFILE_REPORT": str(report)}
+    record_tokens("sess-blank", 1.0, None, 1_000.0, blank)
+    assert _tokens("sess-blank")["correlation"] == {}
+    report.write_text(json.dumps({"state": "failed", "validation": {"profile": "engineer"}}))
+    named = {"AGENTIHOOKS_AGENT_NAME": "engineer@1-2", "AGENTIHOOKS_PROFILE_REPORT": str(report)}
+    record_tokens("sess-blank", 1.0, None, 1_001.0, named)
+    assert _tokens("sess-blank")["correlation"] == {"agentihooks.correlation.agent.name": "engineer@1-2"}

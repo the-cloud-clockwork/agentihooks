@@ -14314,6 +14314,7 @@
         "tests/observability/test_token_monitor.py::test_a_status_line_run_never_starts_the_otel_worker_or_sdk",
         "tests/observability/test_token_monitor.py::test_a_codex_lifecycle_record_never_starts_the_otel_worker_or_sdk",
         "tests/observability/test_token_monitor.py::test_the_presence_and_token_writers_keep_each_others_values_in_the_seen_record",
+        "tests/observability/test_token_monitor.py::test_a_token_write_names_only_a_present_agent_and_a_validated_string_profile",
         "tests/observability/test_hook_event_export.py::test_native_token_measurements_stay_in_the_seen_record_and_leave_the_hook_process_unsent",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_the_last_token_fill_and_burn_rate_under_the_session_id",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_only_the_fill_for_a_record_without_a_burn_rate",
