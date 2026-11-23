@@ -1890,9 +1890,9 @@ hive. Hives pull offers from the hub over NATS JetStream instead, through one sp
 A master spoke rechecks its offer against the ledger itself. An eng, ci or plan spoke asks the hub to admit it,
 because a member's Redis user cannot claim a task, name an agent or take a seat, and a remote hive makes no service
 ledger reads. The hub answers `admit` on the same `slots.<swarm>.<hive>` request subject as account slots, which a
-member's credential may publish only for its own hive; a request naming another hive than its subject is refused. It rechecks the offer against narrow ledger reads of that task (see
-[What an admission reads](#what-an-admission-reads)), claims the task,
-starts the execution on that hive, occupies a seat, marks the task claimed (or back in `pr`) and returns the primed
+member's credential may publish only for its own hive; a request naming another hive than its subject is refused.
+It rechecks the offer against narrow ledger reads of that task (see
+[What an admission reads](#what-an-admission-reads)), claims the task, starts the execution on that hive, occupies a seat, marks the task claimed (or back in `pr`) and returns the primed
 spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
 hive gets none. After a failed admit ask or launch, the spoke sends `reopen`, which returns an admitted task to
 `open` (see [When a launch fails](#when-a-launch-fails)). The hub answers these requests on a pool of eight threads
@@ -2098,7 +2098,7 @@ slot count never call the readiness snapshot.
 
 Before pull request [#13245](https://github.com/the-cloud-clockwork/agentihooks/pull/13245) every `admit` took that
 readiness snapshot, and `readiness.Source` fetched the whole export again whenever the ledger revision had moved
-since its last read. The hub's admission timings on 23 November, the investigation behind #13245, showed the
+since its last read. The hub timings read on 23 November for the investigation behind #13245 showed the
 revision of a large ledger moving about nine times a minute, so nearly every admission missed the kept copy: a hit
 took 66 ms and a miss 1.4 to 17 seconds. After a hub roll every admission answered in 8.1 to 22.2 seconds against
 its 8,000 millisecond answer budget, and the hives stopped waiting for them.
@@ -2113,7 +2113,7 @@ offered task right after the claims stopped check:
 | The task | `GET tasks/<task id>` | The task row, or none when the task is gone | `row` |
 | The rows it names | `GET tasks?ids=<ids>` | Every task the row names in `depends_on`, `parked_on` or `group_members`, and its `enhances` and `merged_into` targets. Skipped when it names none. | `rows` |
 | The running rows | `GET tasks?states=claimed,pr` | Every task claimed or in a pull request, which the claim reads for the task's overlaps | `rows` |
-| Its parts | `GET phases/<phase>` and `GET metadata` | The task's phase and the ledger overview, which the claim seeds read. A `plan` task reads the whole document instead; see below. | `parts` |
+| Its parts | `GET phases/<phase>` and `GET metadata` | The task's phase and the ledger overview, which the claim's profile choice reads. A `plan` task reads the whole document instead; see below. | `parts` |
 | The claim gate verdict | `GET focus/tasks/<task id>` | The verdict the ledger judges for the task over its whole stored state | inside `withdrawal` |
 
 From these rows the view builds a readiness snapshot with no phases and no freezes, and judges the offer in two
@@ -2167,8 +2167,9 @@ database, so the read reaches no separate server. The same read is open to any l
 | `fields` | Field names, comma separated, at most 500 characters | Not a filter: each kept row carries only its `id` and the named fields it has |
 
 A row must pass every filter the query names. Without `fields` each row comes back whole with its `revision`,
-except its comments, which come back as `comments_count`. The reply is one page, `{"data": [...], "revision": "<revision>", "next_cursor": null}`, and a
-reply over 262,144 bytes answers `413 resource_too_large` like other ledger reads.
+except its comments and answers, which come back as `comments_count` and `answers_count`. The reply is one page,
+`{"data": [...], "revision": "<revision>", "next_cursor": null}`, and a reply over 262,144 bytes answers
+`413 resource_too_large` like other ledger reads.
 
 ```text
 GET /api/v1/ledgers/<slug>/tasks?ids=t2,t3
@@ -2179,8 +2180,10 @@ GET /api/v1/ledgers/<slug>/tasks?branches=engineer-1&fields=branch,branch_repo,p
 
 The ledger refuses a selection anywhere else with `400 schema_invalid`,
 `Only a plain tasks read takes a selection, and it names ids, states, pinned or branches`: on any path other than
-`tasks`, with `cursor`, `limit`, `offset`, `q`, `state` or `targets` beside it, or with no non empty `ids`, `states`, `pinned`
-or `branches`, so `fields` alone is refused.
+`tasks`, with `cursor`, `limit`, `offset`, `q`, `state` or `targets` beside it, or with no non empty `ids`,
+`states`, `pinned` or `branches`, so `fields` alone is refused. A `state`, `offset` or `q` on a path that is not a
+ledger collection answers the done rows refusal first,
+`State and offset read the done rows of a collection`.
 
 From a checkout, the same read through the ledger client:
 
