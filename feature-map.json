@@ -1,6 +1,26 @@
 {
   "features": [
     {
+      "id": "placement-role-census",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-placement-role-census",
+      "behaviour": "Hive placement excludes reported master executions by role regardless of login markers, leaving one expert place on a root hive with three masters and eleven workers under a twelve worker limit. Marker overlap never subtracts twice; unregistered processes, pending workers, account separation and CPU refusals retain their limits.",
+      "seam": "loaded_hives through HiveLaunch.select",
+      "tests": [
+        "tests/hive/test_placement_role_census.py::test_three_masters_and_eleven_workers_leave_the_kept_expert_room_usable",
+        "tests/hive/test_placement_role_census.py::test_a_master_execution_does_not_prevent_unclaimed_processes_from_absorbing_pending_workers",
+        "tests/hive/test_placement_role_census.py::test_unreported_masters_never_erase_an_unregistered_worker_process",
+        "tests/hive/test_placement_role_census.py::test_interactive_markers_still_exempt_a_master_whose_execution_is_unreported",
+        "tests/hive/test_placement_role_census.py::test_master_exclusion_does_not_absorb_workers_from_another_account_slot",
+        "tests/hive/test_placement_role_census.py::test_excluding_masters_keeps_a_saturated_cpu_refusal",
+        "tests/hive/test_placement_role_census.py::test_reported_masters_alone_leave_zero_workers_on_the_hive",
+        "tests/hive/test_placement_role_census.py::test_an_identified_worker_process_is_not_reused_for_unreported_workers"
+      ],
+      "rules": [
+        "placement-marker-only-worker-census"
+      ]
+    },
+    {
       "id": "lab-shadow-reusable-caller-pairing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2804",
@@ -2626,6 +2646,45 @@
       ]
     },
     {
+      "id": "review-record-post",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-record-post",
+      "behaviour": "A swarm agent posts review findings on a change request head through the forge: each finding is numbered and keeps the comment id the forge returned, one Redis hash per change request URL holds one record per head and expires thirty days after its last write, a post with no finding text is refused before any forge call, a forge reporting another URL for the request number writes nothing, the same transaction counts each posted finding for the posting task, records stay isolated by swarm and change request, and a session that is not an agent of the swarm is refused.",
+      "seam": "scripts.review.record post and read, and the agentihooks review post command through the review entry in scripts.cli_delegates and scripts.review.cli main",
+      "tests": [
+        "tests/review/test_record.py::test_a_post_stores_each_finding_with_its_forge_comment_on_the_reported_head",
+        "tests/review/test_record.py::test_a_post_without_a_finding_is_refused_and_posts_nothing",
+        "tests/review/test_record.py::test_a_second_post_on_the_same_head_appends_numbered_findings",
+        "tests/review/test_record.py::test_a_new_head_starts_its_own_findings",
+        "tests/review/test_record.py::test_a_record_expires_thirty_days_after_its_last_write",
+        "tests/review/test_record.py::test_a_change_request_url_without_a_number_is_refused",
+        "tests/review/test_record.py::test_each_posted_finding_counts_once_for_its_task",
+        "tests/review/test_record.py::test_a_post_without_a_task_counts_nothing",
+        "tests/review/test_identity.py::test_a_forge_for_another_request_cannot_write_the_record",
+        "tests/review/test_record_boundaries.py::test_findings_are_isolated_by_swarm_and_change_request",
+        "tests/review/test_record_boundaries.py::test_a_saved_record_reads_back_from_its_hash_field",
+        "tests/review/test_record_boundaries.py::test_trailing_slashes_do_not_change_the_forge_target",
+        "tests/review/test_record_boundaries.py::test_both_spellings_of_a_change_request_url_share_one_record",
+        "tests/review/test_record_boundaries.py::test_a_forge_url_with_a_suffix_is_a_different_request",
+        "tests/review/test_record_boundaries.py::test_a_forge_url_missing_the_last_character_of_the_request_is_a_different_request",
+        "tests/review/test_record_boundaries.py::test_urls_that_differ_only_in_a_last_character_keep_separate_records",
+        "tests/review/test_record_boundaries.py::test_the_change_request_number_is_the_last_path_part",
+        "tests/review/test_cli.py::test_the_command_line_delegates_review_to_this_module",
+        "tests/review/test_cli.py::test_post_records_the_calling_agent_and_prints_the_record",
+        "tests/review/test_cli.py::test_a_refusal_prints_its_reason_and_returns_one",
+        "tests/review/test_cli.py::test_a_forge_failure_prints_its_reason_and_returns_one",
+        "tests/review/test_cli.py::test_a_forge_without_a_usable_remote_or_token_prints_its_reason_and_returns_one",
+        "tests/review/test_cli.py::test_a_redis_refusal_prints_its_reason_and_returns_one",
+        "tests/review/test_cli.py::test_a_session_outside_the_swarm_is_refused",
+        "tests/review/test_cli.py::test_an_unnamed_session_receives_the_membership_error",
+        "tests/review/test_cli.py::test_agent_lookup_resolves_the_name_in_the_requested_swarm",
+        "tests/review/test_cli.py::test_forge_selection_uses_the_current_remote_and_environment",
+        "tests/review/test_cli.py::test_review_post_requires_a_url_and_swarm",
+        "tests/review/test_cli.py::test_post_help_runs_and_names_the_post_arguments",
+        "tests/hive/test_auth.py::test_a_member_reviewer_posts_findings_only_with_the_review_keys"
+      ]
+    },
+    {
       "id": "hive-agent-token-cache",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2262",
@@ -4175,7 +4234,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-slow-lane-deadline",
       "behaviour": "The slow tick lane covers the accumulated live budgets of its scheduled steps, including budgets resolved after the pass starts, so later slow work finishes beyond the former shared deadline while critical timing and the pass join window stay fixed.",
       "seam": "scripts.tick.engine.run_group and scripts.tick.pool.running",
-      "rules": ["tick-slow-lane-fixed-deadline"],
+      "rules": [
+        "tick-slow-lane-fixed-deadline"
+      ],
       "tests": [
         "tests/tick/test_slow_lane_deadline.py::test_slow_deadline_uses_live_budgets_resolved_after_the_pass_starts",
         "tests/tick/test_slow_lane_deadline.py::test_a_later_slow_step_finishes_after_the_former_lane_deadline",
@@ -7202,6 +7263,50 @@
         "tests/test_ci_queue_supersede.py::test_a_run_whose_group_merged_is_kept_though_its_queue_branch_is_gone",
         "tests/test_ci_queue_supersede.py::test_older_runs_of_the_same_pull_request_and_older_runs_of_gone_branches_are_cancelled",
         "tests/test_ci_queue_supersede.py::test_the_sweep_reads_the_full_base_history_checked_out_before_it"
+      ]
+    },
+    {
+      "id": "dev-push-copies-reused-unit-results-in-one-job",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dev-push-reuse-one-job",
+      "behaviour": "A dev push that reuses the passed queue run of its commit runs one unit job, unit (3.12, copy), that restores every queue leg once and uploads the twenty legs of durations, coverage, flakes and executed lines in the unit job's order, while every other run still runs all twenty unit legs and every reader of a dev push's unit jobs accepts the copy job as a complete unit result.",
+      "seam": "The Tests workflow unit job matrix and steps, the copy job's per leg coverage check and summary step, the shard check wait, the dispatch and coverage ratchet base lookups, the pull request test plan's dev record search and the scripts.ci_unit_copy layout and upload commands",
+      "tests": [
+        "tests/test_ci_dev_reuse.py::test_workflow_preserves_downstream_artifacts",
+        "tests/test_ci_dev_reuse.py::test_the_copy_job_sets_up_the_python_its_layout_runs_and_skips_every_leg_upload",
+        "tests/test_ci_dev_reuse.py::test_the_copy_job_checks_and_summarizes_each_push_leg_as_its_unit_leg_does",
+        "tests/test_ci_dev_reuse.py::test_an_unusable_push_leg_coverage_database_fails_the_copy_job",
+        "tests/test_ci_dev_reuse.py::test_a_reusing_dev_push_runs_one_copy_job_and_every_other_run_runs_every_leg",
+        "tests/test_ci_dev_reuse.py::test_shard_check_takes_the_one_copy_job_for_every_leg_of_a_reusing_push",
+        "tests/test_ci_baseline_lookup.py::test_lookup_accepts_a_dev_push_run_that_copied_its_queue_units_in_one_job",
+        "tests/test_ci_test_plan.py::test_a_dev_run_that_copied_its_queue_units_in_one_job_is_a_record_only_when_the_copy_passed",
+        "tests/test_ci_workflow.py::test_the_copy_job_restores_every_queue_leg_in_one_download",
+        "tests/test_ci_unit_copy.py::test_every_push_leg_is_laid_out_from_the_queue_leg_it_maps_onto",
+        "tests/test_ci_unit_copy.py::test_a_leg_above_the_queue_count_needs_no_elapsed_time_in_its_queue_leg",
+        "tests/test_ci_unit_copy.py::test_a_missing_queue_leg_stops_the_layout",
+        "tests/test_ci_unit_copy.py::test_an_archive_holds_every_file_under_the_folder_by_its_path_inside_it",
+        "tests/test_ci_unit_copy.py::test_a_folder_without_files_is_never_uploaded",
+        "tests/test_ci_unit_copy.py::test_the_expiry_holds_the_retention_days_inside_the_repository_longest_retention",
+        "tests/test_ci_unit_copy.py::test_the_backend_ids_come_from_the_runtime_token_scope",
+        "tests/test_ci_unit_copy.py::test_the_backend_ids_come_from_a_token_whose_payload_needs_padding",
+        "tests/test_ci_unit_copy.py::test_a_service_call_posts_this_jobs_request_and_reads_the_answer",
+        "tests/test_ci_unit_copy.py::test_a_service_call_hands_its_exact_headers_and_method_to_the_request",
+        "tests/test_ci_unit_copy.py::test_an_artifact_expiry_counts_from_the_clock_in_utc",
+        "tests/test_ci_unit_copy.py::test_a_blob_put_hands_its_exact_headers_and_method_to_the_request",
+        "tests/test_ci_unit_copy.py::test_an_empty_service_answer_reads_as_an_empty_object",
+        "tests/test_ci_unit_copy.py::test_a_created_artifact_answers_its_upload_address",
+        "tests/test_ci_unit_copy.py::test_a_name_an_earlier_attempt_left_unfinalized_is_freed_and_created_again",
+        "tests/test_ci_unit_copy.py::test_a_create_refused_for_another_reason_raises_that_refusal",
+        "tests/test_ci_unit_copy.py::test_a_create_the_service_did_not_confirm_raises",
+        "tests/test_ci_unit_copy.py::test_an_upload_of_a_free_name_deletes_nothing",
+        "tests/test_ci_unit_copy.py::test_an_upload_the_service_did_not_finalize_raises",
+        "tests/test_ci_unit_copy.py::test_an_upload_is_retried_in_place_until_it_lands",
+        "tests/test_ci_unit_copy.py::test_an_upload_that_fails_every_attempt_raises_its_last_failure",
+        "tests/test_ci_unit_copy.py::test_each_command_requires_its_inputs",
+        "tests/test_ci_unit_copy.py::test_an_upload_replaces_the_name_puts_the_zip_and_finalizes_it_with_its_digest",
+        "tests/test_ci_unit_copy.py::test_every_leg_uploads_its_artifacts_in_the_unit_job_order_with_their_retention",
+        "tests/test_ci_unit_copy.py::test_the_layout_command_reads_the_queue_leg_map",
+        "tests/test_ci_unit_copy.py::test_the_upload_command_reaches_the_results_service_with_the_runtime_token"
       ]
     },
     {
@@ -11929,7 +12034,7 @@
       "id": "lab-scheduler-test-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2629",
-      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. A pull request or hotfix head gets none. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A merge group head also runs one unit per test module its entries change that the head holds and the manifest lists no test of, its member the module path, keyed as a broad test over the measured and test trees, whether the rule chose a unit set or the whole suite; the test executor grades such a member, which the manifest records no files for. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it makes the grade red.",
+      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. An ordinary pull request or hotfix head gets none; a plant pull request runs the listed batches and unlisted module units for the test modules it adds or changes. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A merge group head also runs one unit per test module its entries change that the head holds and the manifest lists no test of, its member the module path, keyed as a broad test over the measured and test trees, whether the rule chose a unit set or the whole suite; the test executor grades such a member, which the manifest records no files for. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it makes the grade red.",
       "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.expand_tests.units, scripts.ci_lab.expand_tests.unlisted_units, scripts.ci_lab.run_tests.outside, scripts.ci_lab.queue.Queue.retry and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
       "tests": [
         "tests/ci_lab/test_expand_tests.py::test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_toolchain",
@@ -12560,6 +12665,18 @@
         "tests/ci_lab/test_run_tests.py::test_a_green_first_attempt_returns_no_flake_rows",
         "tests/ci_lab/test_executors.py::test_tests_reports_a_flaky_batchs_rows_with_the_unit_key_as_run_and_its_attempts_as_run_attempt",
         "tests/ci_lab/test_executors.py::test_tests_reports_no_flake_rows_for_a_red_retry"
+      ]
+    },
+    {
+      "id": "lab-fail-once-fixture",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-flake-plant-fixture",
+      "behaviour": "A test that calls the fail once helper fails its first run on a head and passes every later run there: inside the lab its marker sits in the runs folder both attempts of a batch share, the parent of the sandbox folder that holds TMPDIR, keyed by the head tree name and the test node id, so one lab run of the unit.fail-once plant module is green and flaky with one flaky row and the next run on that head is green on its first attempt; outside the lab the marker sits under the pytest temp root it is given.",
+      "seam": "tests.ci_lab.fail_once fail_once and scripts.ci_lab.run_tests run over the module the unit.fail-once plant adds",
+      "tests": [
+        "tests/ci_lab/test_run_tests.py::test_a_fail_once_plant_is_flaky_inside_one_lab_run_and_green_on_the_next",
+        "tests/ci_lab/test_run_tests.py::test_fail_once_keys_its_lab_marker_by_head_tree_and_node_in_the_runs_folder",
+        "tests/ci_lab/test_run_tests.py::test_fail_once_falls_back_to_the_pytest_temp_root_outside_the_lab"
       ]
     },
     {
@@ -14203,17 +14320,20 @@
       "id": "lab-static-plant-proofs",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs",
-      "behaviour": "Deterministic static plant twins preserve the checkout and index, push to the dedicated proof prefix without a lab secret or receiver request, and report only the protected pull request grade when the twin is green and its planted static gate alone is red with the observed named diagnostic.",
+      "behaviour": "Deterministic static plant twins preserve the checkout and index, push to the dedicated proof prefix without a lab secret or receiver request, and report only the protected pull request grade when the twin is green and its planted static gate alone is red with the observed named diagnostic. A plant edit with an empty before on a path absent at the base adds that file with mode 100644, and the unit.fail-once plant adds exactly one new test module.",
       "seam": "scripts.ci_lab.plant_proofs.prepare over git objects and scripts.ci_lab.plant_grade.prove through GitHub pushes and exact grade check runs",
       "tests": [
         "tests/ci_lab/test_static_plants.py::test_every_discovered_static_gate_has_one_plant_or_one_exclusion",
         "tests/ci_lab/test_static_plants.py::test_a_gate_plant_is_named_after_its_gate",
+        "tests/ci_lab/test_static_plants.py::test_a_catalog_plant_outside_the_static_gates_is_a_unit_plant_named_after_its_gate",
         "tests/ci_lab/test_static_plants.py::test_a_gate_plant_edits_this_tree_once_per_edit",
         "tests/ci_lab/test_static_plants.py::test_a_planted_gate_reads_only_the_lab_context",
         "tests/ci_lab/test_static_plants.py::test_an_exclusion_names_what_the_lab_lacks",
         "tests/ci_lab/test_plant_proofs.py::test_a_plant_has_reproducible_commits_and_preserves_the_checkout",
         "tests/ci_lab/test_plant_proofs.py::test_the_lint_fixture_turns_only_import_sorting_red",
         "tests/ci_lab/test_plant_proofs.py::test_the_base_comment_grader_refuses_the_heads_invented_directive",
+        "tests/ci_lab/test_plant_proofs.py::test_an_edit_on_an_absent_path_needs_an_empty_before",
+        "tests/ci_lab/test_plant_proofs.py::test_the_fail_once_plant_adds_exactly_one_new_test_module",
         "tests/ci_lab/test_plant_grade.py::test_two_pushes_grade_against_one_protected_base_and_ignore_other_grades",
         "tests/ci_lab/test_plant_grade.py::test_the_command_accepts_a_discovered_catalog_plant",
         "tests/ci_lab/test_plant_grade.py::test_a_step_plant_uses_its_job_check_and_requires_its_diagnostic",
@@ -15058,6 +15178,24 @@
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_window",
         "tests/hive/test_daemon_presence.py::test_the_daemon_token_gauges_carry_the_session_agent_and_profile_from_the_seen_record",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_skips_token_values_it_cannot_read_and_sends_the_rest"
+      ]
+    },
+    {
+      "id": "lab-plant-test-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-flake-plant-units",
+      "behaviour": "A plant head carries its plant marker through intake and held grade requests. Old requests without the marker default to false. At the pull request tier a plant grades listed test batches whose module changed and unlisted added or changed test modules, omits deleted and unchanged modules, and retains the unit job so its check posts. Ordinary pull request and hotfix grades keep no test units.",
+      "seam": "request_from, held request serialization, MirrorExpander.expand over a git origin fixture, and Scheduler.tick check posting",
+      "tests": [
+        "tests/ci_lab/test_plant_test_units.py::test_only_a_plant_event_marks_its_grade_request",
+        "tests/ci_lab/test_plant_test_units.py::test_a_stored_grade_request_keeps_its_plant_marker",
+        "tests/ci_lab/test_plant_test_units.py::test_a_grade_request_stored_before_plant_markers_loads_as_an_ordinary_request",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_keeps_its_marker_while_held_before_expansion",
+        "tests/ci_lab/test_plant_test_units.py::test_a_pull_request_plant_grades_only_its_added_and_changed_test_modules",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_with_no_added_or_changed_test_module_grades_no_test_unit",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_unit_job_posts_its_check",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_frame_keeps_the_unit_job_only_at_the_pull_request_tier",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_selects_changed_test_modules_whose_tests_are_class_methods"
       ]
     }
   ],
