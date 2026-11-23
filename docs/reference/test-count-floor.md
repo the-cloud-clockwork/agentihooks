@@ -270,6 +270,18 @@ test-retirements/1f0f….json is not approved on the pull request head by a code
 The pull request reviews could not be read, so no retirement is admitted
 ```
 
+The approval can also be graded on its own, without collecting either tree:
+
+```bash
+python -m tests.count_floor --approvals --base "<base checkout>" --head "<head checkout>"
+```
+
+The approvals mode reads the same two settings. It exits 1 when the head holds a new signed retirement that no code owner approved on the reviewed head, and names each one; it exits 0 when every new signed retirement is approved, when the head holds none, and when no reviewed head is set.
+
+```text
+::error::tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary is retired without a code owner's approval of the pull request head.
+```
+
 A review does not start a Tests run. After a code owner approves the head, rerun the failed `test-count` job. GitHub refuses an author's approval of their own pull request, so a pull request authored by the only code owner's account cannot retire a test.
 
 Merge groups and dispatched runs carry no pull request head, so they grade signed retirements by the first three rules. A pull request enters the queue only with its own `test-count` green, which required the approval.

@@ -13054,7 +13054,7 @@
       "ordered_at": "2026-11-19",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2527",
       "behaviour": "On a pull request the test count floor admits a new signed retirement only when a code owner that the base revision's CODEOWNERS names for the retirement file approved the pull request head the run grades. Each reviewer's last approval, request for changes or dismissal decides, and a comment leaves it standing; an approval of an earlier head, an approval from anyone the base does not name, a base CODEOWNERS rule outside the anchored grammar the floor matches, and reviews that cannot be read keep the lost test counted and the job red. The test count job reads the pull request's reviews on its App token and hands the floor the reviews file and the head from the event payload; without a reviewed head, in merge groups and dispatched runs, signed retirements are graded as before.",
-      "seam": "tests.count_floor.retirements with approvers and code_owners, fed by the test-count job's Read the pull request reviews step",
+      "seam": "tests.count_floor.retirements with approvers and code_owners, fed by the test-count job's Read the pull request reviews step, and the approvals mode of tests.count_floor.main (hold_approvals), which grades the same approval without collecting",
       "tests": [
         "tests/test_count_floor.py::test_a_signed_retirement_is_admitted_only_with_a_code_owner_approval_of_the_head",
         "tests/test_count_floor.py::test_a_code_owner_rule_the_floor_cannot_match_admits_no_retirement",
