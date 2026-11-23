@@ -281,14 +281,31 @@ def test_a_more_urgent_rank_sorts_ahead_of_work_enqueued_earlier(jobs: queue.Que
 
 
 @pytest.mark.feature("lab-lease-class-order")
-def test_an_unranked_job_keeps_its_counter_score_and_sorts_after_every_ranked_one(jobs: queue.Queue, client) -> None:
+def test_an_unranked_job_keeps_its_counter_score_and_sorts_after_every_ranked_one(jobs: queue.Queue) -> None:
     jobs.enqueue([unit("old")], "h1", {})
     jobs.enqueue([unit("sweep")], "h2", {}, rank=queue.RANKS - 1)
 
     assert jobs.pending() == ["h2:test:sweep", "h1:test:old"]
-    assert client.zscore("agentihooks-ci:queue:pending", "h1:test:old") == 1
-    assert client.zscore("agentihooks-ci:queue:pending", "h2:test:sweep") == 2 - queue.BAND
+    assert jobs.client.zscore(f"{queue.PREFIX}pending", "h1:test:old") == 1
+    assert jobs.client.zscore(f"{queue.PREFIX}pending", "h2:test:sweep") == 2 - queue.BAND
     assert found(jobs, "h1:test:old").rank == queue.UNRANKED == queue.RANKS
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_job_enqueued_before_ranks_existed_sorts_after_ranked_work_and_moves_under_a_rank(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("old"), unit("kept")], "h1", {})
+    for job in ("h1:test:old", "h1:test:kept"):
+        jobs.client.hdel(f"{queue.PREFIX}job:{job}", "rank")
+    jobs.enqueue([unit("p")], "pull", {}, rank=1)
+
+    assert found(jobs, "h1:test:old").rank == queue.UNRANKED
+    assert list(jobs.ordered()) == ["pull:test:p", "h1:test:old", "h1:test:kept"]
+
+    assert jobs.enqueue([unit("kept")], "h1", {}, rank=0) == []
+
+    assert list(jobs.ordered()) == ["h1:test:kept", "pull:test:p", "h1:test:old"]
+    assert jobs.client.zscore(f"{queue.PREFIX}pending", "h1:test:kept") == 2 - queue.RANKS * queue.BAND
+    assert found(jobs, "h1:test:kept").rank == 0
 
 
 @pytest.mark.feature("lab-lease-class-order")
@@ -331,18 +348,31 @@ def test_a_more_urgent_enqueue_moves_a_pending_job_and_leaves_a_leased_one(jobs:
 
 
 @pytest.mark.feature("lab-lease-class-order")
+def test_a_more_urgent_enqueue_leaves_a_finished_job_alone(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a")], "h1", {}, rank=3)
+    assert take(jobs, "h1:test:a")
+    assert jobs.finish(found(jobs, "h1:test:a"), "tok", "crash")
+
+    assert jobs.enqueue([unit("a")], "h1", {}, rank=1) == []
+
+    finished = found(jobs, "h1:test:a")
+    assert (finished.state, finished.rank) == ("done", 3)
+    assert jobs.pending() == []
+
+
+@pytest.mark.feature("lab-lease-class-order")
 def test_the_lease_order_is_read_in_pages_that_a_claim_between_them_cannot_shift(
-    jobs: queue.Queue, client, monkeypatch: pytest.MonkeyPatch
+    jobs: queue.Queue, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     jobs.enqueue([unit(str(number)) for number in range(5)], "h1", {}, rank=1)
     pages: list[tuple[object, ...]] = []
-    read = client.zrangebyscore
+    read = jobs.client.zrangebyscore
 
     def counted(*arguments: object, **options: object) -> object:
         pages.append(arguments)
         return read(*arguments, **options)
 
-    monkeypatch.setattr(client, "zrangebyscore", counted)
+    monkeypatch.setattr(jobs.client, "zrangebyscore", counted)
     ordered = jobs.ordered(page=2)
 
     assert next(ordered) == "h1:test:0"
