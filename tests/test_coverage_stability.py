@@ -1,4 +1,5 @@
 import re
+import shlex
 from pathlib import Path
 
 import pytest
@@ -178,9 +179,15 @@ def test_the_scheduled_job_compares_the_newest_dev_runs_and_fails_on_any_differe
 
 @pytest.mark.feature("coverage-stability-installs-locked-coverage-first")
 def test_the_compare_job_installs_locked_coverage_before_it_compares() -> None:
-    steps = yaml.safe_load((_ROOT / ".github/workflows/coverage-stability.yml").read_text())["jobs"]["compare"]["steps"]
-    install = re.compile(r"\bpip3? install --constraint \.github/test-requirements\.lock\b.*\bcoverage\b")
-    installs = [index for index, step in enumerate(steps) if install.search(str(step.get("run", "")))]
+    steps = _workflow()["jobs"]["compare"]["steps"]
+    lock = ["pip", "install", "--constraint", ".github/test-requirements.lock"]
+    runs = [shlex.split(str(step.get("run", "")), comments=True) for step in steps]
+    installs = [
+        index
+        for index, words in enumerate(runs)
+        if any(words[at : at + len(lock)] == lock for at in range(len(words)))
+        and any(re.fullmatch(r"coverage(?:[=<>!~].*)?", word) for word in words)
+    ]
     compares = [index for index, step in enumerate(steps) if step.get("id") == "compare"]
     assert installs and compares and installs[0] < compares[0], (
         f"coverage installs at {installs}, compare at {compares}"
