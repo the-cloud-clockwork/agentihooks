@@ -7055,6 +7055,17 @@
       ]
     },
     {
+      "id": "coverage-ratchet-grades-from-the-nearest-measured-ancestor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45173371476-0",
+      "behaviour": "A dev push whose base commit has no measured Tests run with a live coverage-baseline artifact grades its coverage against the nearest first parent ancestor of that base whose dev push run measured and published one, read from one page of the repository's live coverage-baseline artifacts, and checks out and grades against that ancestor, never a newer dev head or a commit outside the base's first parent history, because a newer push replaced the base's run before it published, the cache entry the earlier fallback reads had been evicted, and every later dev push failed the coverage ratchet.",
+      "seam": "The coverage ratchet's Find the run that published the base baseline step, run in a shell over a real git history against a fake gh, and the BASE of its Check out the base grader and Hold every line the base ran steps",
+      "tests": [
+        "tests/test_ci_gate_workflow.py::test_a_base_whose_run_published_no_baseline_grades_from_its_nearest_measured_ancestor",
+        "tests/test_ci_gate_workflow.py::test_the_base_grader_and_the_hold_grade_the_commit_the_lookup_restored"
+      ]
+    },
+    {
       "id": "codex-adopt-refusal-fields",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-adopt-refusal-fields",

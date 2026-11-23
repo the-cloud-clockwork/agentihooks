@@ -802,6 +802,98 @@ def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(tmp_pa
     assert output.read_text() == (found or "")
 
 
+def _dev_push_jobs(publish: str) -> dict[str, object]:
+    jobs: list[dict[str, object]] = [
+        {"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in range(1, 21)
+    ]
+    steps = [
+        {"name": "Compute the coverage baseline", "conclusion": "success"},
+        {"name": "Publish the passed dev coverage baseline", "conclusion": publish},
+    ]
+    jobs.append({"name": "coverage-baseline", "conclusion": publish, "steps": steps})
+    return {"total_count": len(jobs), "jobs": jobs}
+
+
+@pytest.mark.feature("coverage-ratchet-grades-from-the-nearest-measured-ancestor")
+@pytest.mark.parametrize(
+    ("nearest", "listed", "restored"),
+    [
+        ("success", ("newer", "side", "nearest", "older"), "nearest"),
+        ("failure", ("newer", "side", "nearest", "older"), "older"),
+        ("expired", ("newer", "side", "nearest", "older"), "older"),
+        ("success", ("newer", "side"), None),
+        ("failure", ("newer", "side", "nearest"), None),
+    ],
+    ids=["nearest-measured", "nearest-unmeasured", "nearest-expired", "outside-history-only", "no-measured-ancestor"],
+)
+def test_a_base_whose_run_published_no_baseline_grades_from_its_nearest_measured_ancestor(
+    tmp_path: Path, nearest: str, listed: tuple[str, ...], restored: str | None
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    commits = {name: _commit(repo, {"a": name}) for name in ("older", "nearest", "base", "newer")}
+    _git(repo, "checkout", "-q", "-b", "side", commits["older"])
+    commits["side"] = _commit(repo, {"b": "side"})
+    _git(repo, "checkout", "-q", "--detach", commits["newer"])
+    runs = {name: 101 + index for index, name in enumerate(commits)}
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    base_runs = [{"id": 7, "event": "push", "head_branch": "dev", "head_sha": commits["base"]}]
+    (fake / "base-runs.json").write_text(json.dumps({"workflow_runs": base_runs}))
+    artifacts = [
+        {
+            "name": "coverage-baseline",
+            "expired": name == "nearest" and nearest == "expired",
+            "workflow_run": {"id": runs[name], "head_branch": "dev", "head_sha": commits[name]},
+        }
+        for name in listed
+    ]
+    (fake / "artifacts.json").write_text(json.dumps({"total_count": len(artifacts), "artifacts": artifacts}))
+    for name, run in runs.items():
+        publish = "failure" if name == "nearest" and nearest == "failure" else "success"
+        (fake / f"jobs-{run}.json").write_text(json.dumps(_dev_push_jobs(publish)))
+    (fake / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "endpoint=$2\n"
+        'case "$endpoint" in\n'
+        '  */compare/*) body=\'{"status": "ahead"}\' ;;\n'
+        '  */workflows/test.yml/runs\\?*) body=$(cat "$FAKE/base-runs.json") ;;\n'
+        "  */runs/7/artifacts\\?*) body='{\"artifacts\": []}' ;;\n"
+        '  */actions/artifacts\\?*) body=$(cat "$FAKE/artifacts.json") ;;\n'
+        '  */jobs\\?*) run=${endpoint#*/runs/}; body=$(cat "$FAKE/jobs-${run%%/*}.json") ;;\n'
+        '  *) echo "unexpected API endpoint: $endpoint" >&2; exit 1 ;;\n'
+        "esac\n"
+        "while [[ $1 != --jq ]]; do shift; done\n"
+        'jq -r "$2" <<< "$body"\n'
+    )
+    (fake / "gh").chmod(0o755)
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(
+        os.environ,
+        PATH=f"{fake}:{os.environ['PATH']}",
+        FAKE=str(fake),
+        BASE=commits["base"],
+        GITHUB_REPOSITORY="o/r",
+        GITHUB_OUTPUT=str(output),
+    )
+    step = _step("coverage-ratchet", "Find the run that published the base baseline")
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]], cwd=repo, env=env, capture_output=True, text=True
+    )
+    expected = f"id={runs[restored]}\ncommit={commits[restored]}\n" if restored else ""
+    assert (result.returncode, output.read_text()) == (0 if restored else 1, expected), result.stdout + result.stderr
+
+
+@pytest.mark.feature("coverage-ratchet-grades-from-the-nearest-measured-ancestor")
+def test_the_base_grader_and_the_hold_grade_the_commit_the_lookup_restored() -> None:
+    graded = "${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}"
+    for name in ("Check out the base grader", "Hold every line the base ran"):
+        assert _step("coverage-ratchet", name)["env"]["BASE"] == graded
+
+
 def test_coverage_ratchet_grades_a_batched_dev_push_against_the_previous_tip(tmp_path):
     base = next(
         step
