@@ -34,7 +34,7 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
             "claimable": entry["claimable"],
             "reasons": sorted({task["verdict"] for task in entry["tasks"]} - {focus_check.CLAIMABLE}),
         }
-    kept.write(store, slug, KEY, at, orders=waiting)
+    kept.write(store, slug, KEY, at, "orders", waiting)
     return waiting
 
 

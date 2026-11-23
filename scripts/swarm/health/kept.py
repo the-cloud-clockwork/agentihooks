@@ -18,7 +18,7 @@ def read(store: RedisStore, slug: str, key: str) -> dict[str, Any]:
     return json.loads(raw) if raw else {}
 
 
-def write(store: RedisStore, slug: str, key: str, at: int, **rows: Any) -> None:
-    """Keep the check's rows with the time of this pass, the time first."""
+def write(store: RedisStore, slug: str, key: str, at: int, name: str, rows: Any) -> None:
+    """Keep the check's rows under their name with the time of this pass, the time first."""
     client: Any = store
-    client.redis.set(store.key(slug, key), json.dumps({"at": at, **rows}))
+    client.redis.set(store.key(slug, key), json.dumps({"at": at, name: rows}))

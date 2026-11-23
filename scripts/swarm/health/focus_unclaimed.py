@@ -36,7 +36,7 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
                 "title": task.get("title") or task["id"],
                 "focus": record["target"],
             }
-    kept.write(store, slug, KEY, at, tasks=counted)
+    kept.write(store, slug, KEY, at, "tasks", counted)
     return counted
 
 

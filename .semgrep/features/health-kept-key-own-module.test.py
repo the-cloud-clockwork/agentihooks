@@ -7,7 +7,7 @@ def own(store, slug, at, rows):
     # ok: feature-health-kept-key-own-module
     before = kept.read(store, slug, KEY)
     # ok: feature-health-kept-key-own-module
-    kept.write(store, slug, KEY, at, rows=rows)
+    kept.write(store, slug, KEY, at, "rows", rows)
     return before
 
 
@@ -15,7 +15,7 @@ def anothers(store, slug, at):
     # ruleid: feature-health-kept-key-own-module
     seen = kept.read(store, slug, focus_unclaimed.KEY)
     # ruleid: feature-health-kept-key-own-module
-    kept.write(store, slug, "order-waiting", at, orders={})
+    kept.write(store, slug, "order-waiting", at, "orders", {})
     return seen
 
 

@@ -17,7 +17,7 @@ def read(store, slug):
 
 def observe(store, slug, at, rows):
     # ok: feature-health-kept-state-one-helper
-    kept.write(store, slug, KEY, at, rows=rows)
+    kept.write(store, slug, KEY, at, "rows", rows)
 
 
 def cached(store, key):

@@ -84,12 +84,12 @@ def test_each_check_keeps_its_state_apart_from_the_other_and_from_another_swarm(
 @pytest.mark.feature("health-kept-state-one-helper")
 def test_the_helper_reads_empty_then_what_it_wrote_under_the_key_of_that_swarm(store: Any) -> None:
     assert kept.read(store, SLUG, "any-check") == {}
-    kept.write(store, SLUG, "any-check", 9, rows={"a": 1}, more=[2])
-    assert stored(store, "any-check") == '{"at": 9, "rows": {"a": 1}, "more": [2]}'
-    assert kept.read(store, SLUG, "any-check") == {"at": 9, "rows": {"a": 1}, "more": [2]}
+    kept.write(store, SLUG, "any-check", 9, "rows", {"a": [1, 2]})
+    assert stored(store, "any-check") == '{"at": 9, "rows": {"a": [1, 2]}}'
+    assert kept.read(store, SLUG, "any-check") == {"at": 9, "rows": {"a": [1, 2]}}
     assert kept.read(store, SLUG, "other-check") == {}
-    kept.write(store, SLUG, "any-check", 10)
-    assert stored(store, "any-check") == '{"at": 10}'
+    kept.write(store, SLUG, "any-check", 10, "seen", [])
+    assert stored(store, "any-check") == '{"at": 10, "seen": []}'
 
 
 @pytest.mark.feature("health-kept-state-one-helper")
