@@ -14151,7 +14151,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-otel-token-gauges-spool",
       "behaviour": "A status line run and a Codex lifecycle record write the session's last context fill and burn rate into its presence seen record, keeping the presence keys, and never start the OpenTelemetry worker or SDK. The hive daemon presence pass sends the tokens fill and burn rate gauges under the session id with the last written values for every record whose tokens were written within the fresh window, and only the fill when the burn rate is unknown. The Redis token metrics write stays.",
-      "seam": "token_monitor.update_context_metrics, token_monitor.export_tokens and hive.daemon.emit_presence",
+      "seam": "hooks.observability.token_monitor.update_context_metrics, hooks.observability.token_monitor.export_tokens and scripts.hive.daemon.emit_presence",
       "tests": [
         "tests/observability/test_token_monitor.py::test_native_statusline_writes_its_fill_into_the_seen_record_without_otel",
         "tests/observability/test_token_monitor.py::test_codex_context_growth_and_compaction",

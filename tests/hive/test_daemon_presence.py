@@ -159,7 +159,9 @@ def test_a_dispatcher_mark_after_a_daemon_pass_never_starts_the_otel_worker_or_s
 
 
 @pytest.mark.feature("tokens-gauges-hive-daemon")
-def test_a_daemon_pass_sends_the_last_token_fill_and_burn_rate_under_the_session_id(monkeypatch):
+def test_a_daemon_pass_sends_the_last_token_fill_and_burn_rate_under_the_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls = recorded(monkeypatch)
     presence.agent("sess-1", ENV, 1_000.0)
     token_monitor.record_tokens("sess-1", 20.0, 900.0, 1_000.0)
@@ -174,7 +176,7 @@ def test_a_daemon_pass_sends_the_last_token_fill_and_burn_rate_under_the_session
 
 
 @pytest.mark.feature("tokens-gauges-hive-daemon")
-def test_a_daemon_pass_sends_only_the_fill_for_a_record_without_a_burn_rate(monkeypatch):
+def test_a_daemon_pass_sends_only_the_fill_for_a_record_without_a_burn_rate(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = recorded(monkeypatch)
     token_monitor.record_tokens("sess-2", 10.0, None, 1_000.0)
     daemon_pass(monkeypatch, 1_010_000)
@@ -182,7 +184,9 @@ def test_a_daemon_pass_sends_only_the_fill_for_a_record_without_a_burn_rate(monk
 
 
 @pytest.mark.feature("tokens-gauges-hive-daemon")
-def test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_window(monkeypatch):
+def test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls = recorded(monkeypatch)
     token_monitor.record_tokens("sess-3", 10.0, 5.0, 1_000.0)
     daemon_pass(monkeypatch, 1_181_000)

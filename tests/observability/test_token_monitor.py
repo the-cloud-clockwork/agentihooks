@@ -20,14 +20,14 @@ SEAM_ENV = {
 }
 
 
-def _tokens(session_id: str) -> dict:
+def _tokens(session_id: str) -> dict[str, object]:
     from hooks.observability import presence
 
     path = presence.seen_dir() / f"{session_id}.json"
     return json.loads(path.read_text()).get("tokens", {}) if path.exists() else {}
 
 
-def _otel_after(run: str, env: dict[str, str]) -> dict:
+def _otel_after(run: str, env: dict[str, str]) -> dict[str, bool]:
     from hooks import config
 
     probe = (
@@ -162,7 +162,9 @@ class TestTokenMonitor:
 
 
 @pytest.mark.feature("tokens-gauges-hive-daemon")
-def test_native_statusline_writes_its_fill_into_the_seen_record_without_otel(monkeypatch, capsys, tmp_path):
+def test_native_statusline_writes_its_fill_into_the_seen_record_without_otel(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     import io
     import json
 
@@ -283,15 +285,18 @@ def test_lifecycle_reads_the_current_session_rollout(monkeypatch, tmp_path, wind
 
 
 @pytest.mark.feature("tokens-gauges-hive-daemon")
-def test_a_status_line_run_never_starts_the_otel_worker_or_sdk():
+def test_a_status_line_run_never_starts_the_otel_worker_or_sdk() -> None:
     payload = {"session_id": "status-seam", "context_window": {"context_window_size": 200000, "used_percentage": 25}}
-    run = f"import io, sys\nsys.stdin = io.StringIO({json.dumps(payload)!r})\nfrom hooks import statusline\nstatusline.main()"
+    run = (
+        f"import io, sys\nsys.stdin = io.StringIO({json.dumps(payload)!r})\n"
+        "from hooks import statusline\nstatusline.main()"
+    )
     assert _otel_after(run, {}) == {"initialized": False, "worker": False}
     assert _tokens("status-seam")["fill_pct"] == 25.0
 
 
 @pytest.mark.feature("tokens-gauges-hive-daemon")
-def test_a_codex_lifecycle_record_never_starts_the_otel_worker_or_sdk(tmp_path):
+def test_a_codex_lifecycle_record_never_starts_the_otel_worker_or_sdk(tmp_path: Path) -> None:
     day = tmp_path / "sessions" / "2026" / "10" / "07"
     day.mkdir(parents=True)
     usage = {"last_token_usage": {"total_tokens": 50000}, "model_context_window": 200000}
@@ -307,7 +312,9 @@ def test_a_codex_lifecycle_record_never_starts_the_otel_worker_or_sdk(tmp_path):
 
 
 @pytest.mark.feature("tokens-gauges-hive-daemon")
-def test_the_presence_and_token_writers_keep_each_others_values_in_the_seen_record(monkeypatch):
+def test_the_presence_and_token_writers_keep_each_others_values_in_the_seen_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from hooks.observability import otel, presence
     from hooks.observability.token_monitor import record_tokens
 

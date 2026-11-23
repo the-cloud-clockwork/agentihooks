@@ -176,7 +176,8 @@ def update_context_metrics(payload: dict[str, Any]) -> str:
 
 def record_tokens(session_id: str, fill_pct: float, burn_rate: float | None, now_s: float) -> None:
     """Writes the session's last fill and burn rate into its presence seen record for the hive daemon to export,
-    keeping every presence key and giving a record without one a seen time; a failed write never reaches the caller."""
+    keeping every presence key and giving a record without one a seen time; a failed disk write never reaches the
+    caller."""
     from hooks.observability import presence
     from hooks.observability.signals import safe_name
 

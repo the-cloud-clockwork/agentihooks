@@ -79,8 +79,8 @@ def test_hook_event_is_exported_before_the_hook_process_exits(collector, tmp_pat
 @pytest.mark.feature("tokens-gauges-hive-daemon")
 @pytest.mark.parametrize("target", ["claude", "codex"])
 def test_native_token_measurements_stay_in_the_seen_record_and_leave_the_hook_process_unsent(
-    collector, tmp_path, target
-):
+    collector: tuple[str, list[object]], tmp_path: Path, target: str
+) -> None:
     endpoint, paths = collector
     codex_home = tmp_path / "codex"
     sessions = codex_home / "sessions" / "2026" / "10" / "07"
