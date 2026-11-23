@@ -473,6 +473,25 @@
       ]
     },
     {
+      "id": "lab-scheduler-cached-snapshot",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-metrics-cached-snapshot",
+      "behaviour": "The CI lab scheduler's metrics port 9108 answers GET /metrics from the last load snapshot a metrics.Latest holds instead of building a full load per request: the first read builds it once however many reads meet that build, later reads answer at once with the last finished snapshot and set ci_lab_load_age_seconds to the seconds since its build started, never below zero, and the port's own serve loop starts one daemon build at a time once the last build started REFRESH_MS ago, so a failed build keeps the last snapshot and the next waits an interval. The series a scrape serves equal a fresh Scheduler.load of the same state.",
+      "seam": "scripts.ci_lab.scheduler.listen over fakeredis read through GET /metrics with a counting Scheduler.load and a movable clock; scripts.ci_lab.metrics.Latest with a recording build; metrics.observe_age; metrics.serve with actions run from service_actions",
+      "tests": [
+        "tests/ci_lab/test_scheduler_snapshot.py::test_a_scrape_serves_the_series_of_a_fresh_load_build_of_the_same_state",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_two_scrapes_in_a_row_build_the_load_once",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_a_later_scrape_serves_the_cached_load_with_its_age_while_the_lab_moves",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_the_metrics_port_rebuilds_the_load_on_its_own_cadence_and_serves_the_fresh_build",
+        "tests/ci_lab/test_metrics.py::test_concurrent_first_reads_of_the_latest_load_build_it_once",
+        "tests/ci_lab/test_metrics.py::test_refresh_starts_one_daemon_build_at_the_interval_while_reads_keep_the_last_load",
+        "tests/ci_lab/test_metrics.py::test_a_failed_refresh_keeps_the_last_load_and_the_next_waits_an_interval",
+        "tests/ci_lab/test_metrics.py::test_a_failed_first_build_fails_its_read_and_the_next_read_builds_again",
+        "tests/ci_lab/test_metrics.py::test_the_load_age_counts_the_seconds_since_the_served_build_started_never_below_zero",
+        "tests/ci_lab/test_metrics.py::test_the_served_port_runs_its_actions_between_requests_and_a_port_without_actions_runs_none"
+      ]
+    },
+    {
       "id": "lab-scheduler-release-bound",
       "rules": ["lab-release-starts-every-waiting-head"],
       "origin": "regression",
@@ -7588,6 +7607,41 @@
         "tests/tick/test_database_ledger_routes.py::test_a_reply_below_400_is_returned",
         "tests/tick/test_database_ledger_routes.py::test_the_database_client_carries_the_base_timeout_and_in_process_transport",
         "tests/tick/test_database_ledger_routes.py::test_the_port_bounds_each_built_clients_timeout_by_the_deadline_left"
+      ]
+    },
+    {
+      "id": "ledger-warm-writer",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-daemon",
+      "behaviour": "One warm ledger writer per host answers each ledger API request on an owner only unix socket in the agentihooks home with the in process answer, as the caller and with the headers the request names, so a socket write, read or refusal returns the same status, body and rows as the in process call. A second writer refuses a live socket, a stale socket file is replaced, and the writer returns once the checkout moves after finishing requests in flight. A writer that cannot open its store, or whose socket file was removed, still closes and leaves no socket behind.",
+      "seam": "scripts.swarm_ledger.warm_writer.serve and ask over scripts.tick.adapters.database_ledger.replied, the answer the in process transport uses",
+      "tests": [
+        "tests/swarm_ledger/test_warm_writer.py::test_a_socket_write_returns_the_in_process_reply_and_leaves_the_same_rows",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_socket_read_returns_the_in_process_body",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_refused_socket_write_returns_the_in_process_refusal_and_changes_no_row",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_answers_as_the_caller_and_with_the_headers_the_request_names",
+        "tests/swarm_ledger/test_warm_writer.py::test_ask_sends_the_caller_name_and_the_in_process_headers",
+        "tests/swarm_ledger/test_warm_writer.py::test_ask_raises_when_the_writer_closes_without_an_answer",
+        "tests/swarm_ledger/test_warm_writer.py::test_an_error_the_in_process_call_raises_is_raised_again_by_the_socket_caller",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_raised_reply_names_the_error_class_and_its_arguments",
+        "tests/swarm_ledger/test_warm_writer.py::test_an_error_class_nested_in_another_is_rebuilt_by_its_qualified_name",
+        "tests/swarm_ledger/test_warm_writer.py::test_an_error_the_caller_cannot_rebuild_is_raised_as_a_runtime_error_naming_it",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_reply_naming_a_callable_that_is_not_an_error_class_never_calls_it",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_connection_fails_where_no_writer_listens_and_carries_its_timeout",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_socket_is_owner_only_in_the_agentihooks_home",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_second_writer_on_a_live_socket_returns_one_and_leaves_the_first_answering",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_stale_socket_file_is_replaced_by_a_new_writer",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_writer_that_cannot_open_its_store_closes_and_removes_its_socket",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_writer_whose_socket_file_was_removed_still_returns_cleanly",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_writer_too_busy_to_accept_keeps_its_socket",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_client_that_never_finishes_sending_cannot_hold_the_writer_open",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_paces_probes_and_reads_by_its_named_windows",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_connection_that_sends_nothing_gets_no_reply_and_no_error",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_finishes_a_request_in_flight_then_returns_once_the_checkout_moves",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_checkout_moves_only_to_a_new_revision",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_command_serves_the_home_socket_until_sigterm",
+        "tests/swarm_ledger/test_warm_writer.py::test_the_writer_command_names_itself_and_takes_only_serve",
+        "tests/swarm_ledger/test_warm_writer.py::test_a_new_writer_probes_its_own_socket_within_the_probe_window"
       ]
     },
     {
