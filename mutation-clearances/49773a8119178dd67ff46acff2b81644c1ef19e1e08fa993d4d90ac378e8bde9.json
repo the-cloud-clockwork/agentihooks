@@ -1,0 +1,6 @@
+{
+  "scripts/tick/pool.py:scripts.tick.pool.x_running:331570a0c4d2ee716e8602f0bf2ebba73b6f15db21e1bd91e6c69ad032b7bee2": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: changing the cleanup thread name to XXtick-slow-cleanupXX changes only its diagnostic label. No tick consumer reads this name; the target, arguments, daemon state, scheduling, records and executor cleanup remain identical."
+  }
+}
