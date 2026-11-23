@@ -9838,7 +9838,7 @@
       "behaviour": "Promotion counts its exact triggering run promotion job whenever it is not completed, including a queued listing after execution starts, while retaining unique current job identity and all other grading checks.",
       "seam": "snapshotGradeComplete in .github/scripts/promote.cjs through the promotion API contract harness",
       "tests": [
-        "tests/contracts/promotion/test_promote.py::test_promotion_api_contracts"
+        "tests/contracts/promotion/test_promote.py::test_noncompleted_triggering_promotion_job_merges"
       ]
     },
     {
@@ -9848,7 +9848,7 @@
       "behaviour": "Each changed promotion grade poll logs the current promotion job count and every unsettled job name and status from the existing paginated response, suppressing identical results and job ordering changes without extra requests.",
       "seam": "promotion grade polling in .github/scripts/promote.cjs through the promotion API contract harness",
       "tests": [
-        "tests/contracts/promotion/test_promote.py::test_promotion_api_contracts"
+        "tests/contracts/promotion/test_promote.py::test_changed_promotion_grade_polls_are_logged"
       ]
     },
     {
