@@ -15,11 +15,11 @@
       "id": "gate-entry-mode-dispatch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45097094236-0",
-      "behaviour": "The gates entry hands the mode of the swarm to the intent gate, with the call, the caller and the verdict state, and calls every other gate with the three arguments the gate type declares. The call that carries the mode is made on a name typed as the intent gate, so a static analyser counts no argument its callee does not take.",
-      "seam": "scripts.gates.entry._decide with a gate that records what it was called with; the source of the entry module, read for every decide call on a name typed as the gate type",
+      "behaviour": "The gates entry hands the mode of the swarm to the intent gate, with the call, the caller and the verdict state, and calls every other gate with the three arguments the gate type declares. The call that carries the mode is made on a name typed as a gate whose decision takes the mode, so a static analyser counts no argument its callee does not take.",
+      "seam": "scripts.gates.entry._decide with a gate that records what it was called with; the source of the entry module, read for every decide call and the number of arguments the declared type of its gate takes",
       "tests": [
         "tests/gates/test_node_caps_cpu.py::test_the_entry_hands_the_mode_to_the_intent_gate_and_three_arguments_to_any_other",
-        "tests/gates/test_node_caps_cpu.py::test_no_gate_typed_as_the_gate_type_is_called_with_more_than_its_three_arguments"
+        "tests/gates/test_node_caps_cpu.py::test_every_decide_call_of_the_entry_passes_what_the_type_of_its_gate_declares"
       ]
     },
     {

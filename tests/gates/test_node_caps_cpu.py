@@ -160,23 +160,21 @@ def test_the_entry_hands_the_mode_to_the_intent_gate_and_three_arguments_to_any_
 
 
 @pytest.mark.feature("gate-entry-mode-dispatch")
-def test_no_gate_typed_as_the_gate_type_is_called_with_more_than_its_three_arguments() -> None:
+def test_every_decide_call_of_the_entry_passes_what_the_type_of_its_gate_declares() -> None:
     from scripts.gates import entry
 
+    takes = {"Gate": 3, "ModeGate": 4}
     tree = ast.parse(Path(entry.__file__).read_text(encoding="utf-8"))
-    calls: list[tuple[int, int, int]] = []
+    calls: list[tuple[int, str, int, int]] = []
     for function in ast.walk(tree):
         if not isinstance(function, ast.FunctionDef):
             continue
-        typed = {
-            arg.arg
-            for arg in function.args.args
-            if isinstance(arg.annotation, ast.Name) and arg.annotation.id == "Gate"
-        }
+        typed = {arg.arg: arg.annotation.id for arg in function.args.args if isinstance(arg.annotation, ast.Name)}
         for node in ast.walk(function):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
                 continue
             receiver = node.func.value
-            if node.func.attr == "decide" and isinstance(receiver, ast.Name) and receiver.id in typed:
-                calls.append((node.lineno, len(node.args), len(node.keywords)))
-    assert calls and [found for found in calls if found[1:] != (3, 0)] == []
+            if node.func.attr == "decide":
+                declared = typed.get(receiver.id, "") if isinstance(receiver, ast.Name) else ""
+                calls.append((node.lineno, declared, len(node.args), len(node.keywords)))
+    assert calls and [found for found in calls if found[2:] != (takes.get(found[1], -1), 0)] == []

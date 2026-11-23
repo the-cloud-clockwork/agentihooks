@@ -88,6 +88,12 @@ class Stdin(Protocol):
     def read(self) -> str: ...
 
 
+class ModeGate(Protocol):
+    """A gate whose decision also takes the mode of its swarm."""
+
+    def decide(self, call: Call, who: Who, state: Verdicts, mode: str) -> Decision: ...
+
+
 def main(
     argv: list[str] | None = None,
     stdin: Stdin | None = None,
@@ -163,12 +169,6 @@ def _decide(gate: Gate, call: Call, who: Who, home: Path | str | None, mode: str
         detail = "gate evaluation failed" if gate.name == "brain" else f"{type(exc).__name__}: {exc}"
         _record(who, log.Row.of(gate.name, "fail-open", who, call.tool, detail), home)
         return FAILED_OPEN
-
-
-class ModeGate(Protocol):
-    """A gate whose decision also takes the mode of its swarm."""
-
-    def decide(self, call: Call, who: Who, state: object, mode: str) -> Decision: ...
 
 
 def _decide_in_mode(gate: ModeGate, call: Call, who: Who, state: Verdicts, mode: str) -> Decision:
