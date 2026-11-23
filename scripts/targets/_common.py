@@ -496,15 +496,15 @@ def build_persona(
     profile_chain: list[str],
     bundle_dir: Path | None,
     pending_rules: list[tuple[str, str, str]],
-    managed_header: str,
-    managed_footer: str,
+    markers: tuple[str, str],
     user_dir: Path | None | Mapping[str, Path | None] = None,
     native: tuple[str, str] | None = None,
 ) -> str:
     """Assemble the managed region of a compiled instruction file.
 
-    ``user_dir`` is the user bundle, or a mapping of label to directory for every bundle after the
-    root, in precedence order (``shared bundle`` then ``user bundle``).
+    ``markers`` is ``(managed_header, managed_footer)``. ``user_dir`` is the
+    user bundle, or a mapping of label to directory for every bundle after
+    the root, in precedence order (``shared bundle`` then ``user bundle``).
 
     ``native`` names a target-specific persona source (see ``_persona_source``);
     a layer with no ``CLAUDE.md`` at all, such as a Codex-only profile with
@@ -512,6 +512,7 @@ def build_persona(
     """
     from hooks.context.profile_chain import inherited
 
+    managed_header, managed_footer = markers
     later = user_dir if isinstance(user_dir, Mapping) else {"user bundle": user_dir}
     parents = inherited(profile_dirs)
     parts: list[str] = [managed_header, identity_preamble([name for name in profile_chain if name not in parents])]

@@ -92,7 +92,7 @@ def signs_in_by_hand(entry: Mapping[str, Any]) -> bool:
 _REFERENCE_NAME = re.compile(r"\$\{?(\w+)")
 
 
-def _forward_env_references(entry: dict) -> None:
+def _forward_env_references(entry: dict[str, Any]) -> None:
     """Codex passes env values literally: resolve ``${VAR}`` references.
 
     A reference that names the same variable as its key (``{"X": "${X}"}``)
@@ -102,8 +102,8 @@ def _forward_env_references(entry: dict) -> None:
     ``PATH``, a ``cmd.exe /c`` equivalent otherwise (native Windows has no
     bash on that path).
     """
-    env = entry.get("env") or {}
-    refs = {k: str(v) for k, v in env.items() if has_env_reference(str(v))}
+    env: dict[str, Any] = entry.get("env") or {}
+    refs: dict[str, str] = {k: str(v) for k, v in env.items() if has_env_reference(str(v))}
     if not refs:
         return
     native_names: set[str] = set()
@@ -114,25 +114,27 @@ def _forward_env_references(entry: dict) -> None:
             native_names.add(key)
         else:
             renamed[key] = value
-    env_vars = set(entry.get("env_vars") or [])
+    env_vars: set[str] = set(entry.get("env_vars") or [])
     if native_names:
         env_vars |= native_names
     if renamed:
-        referenced = {n for v in renamed.values() for n in _REFERENCE_NAME.findall(v)}
+        referenced: set[str] = {n for v in renamed.values() for n in _REFERENCE_NAME.findall(v)}
         env_vars |= referenced
+        command = str(entry["command"])
+        args: list[str] = [str(a) for a in entry.get("args", [])]
         if shutil.which("bash"):
             assigns = " ".join(f'{k}="{v.replace(chr(34), chr(92) + chr(34))}"' for k, v in renamed.items())
-            entry["args"] = ["-c", f'{assigns} exec "$0" "$@"', entry["command"], *entry.get("args", [])]
+            entry["args"] = ["-c", f'{assigns} exec "$0" "$@"', command, *args]
             entry["command"] = "bash"
         else:
             assigns = " && ".join(f'set "{k}={v}"' for k, v in renamed.items())
-            quoted_args = " ".join(f'"{a}"' for a in entry.get("args", []))
-            tail = f'"{entry["command"]}"' + (f" {quoted_args}" if quoted_args else "")
+            quoted_args = " ".join(f'"{a}"' for a in args)
+            tail = f'"{command}"' + (f" {quoted_args}" if quoted_args else "")
             entry["args"] = ["/d", "/s", "/c", f"{assigns} && {tail}"]
             entry["command"] = "cmd.exe"
     if env_vars:
         entry["env_vars"] = sorted(env_vars)
-    literal = {k: v for k, v in env.items() if k not in refs}
+    literal: dict[str, Any] = {k: v for k, v in env.items() if k not in refs}
     if literal:
         entry["env"] = literal
     else:
@@ -728,8 +730,7 @@ class CodexAdapter:
             profile_chain,
             bundle_dir,
             self._pending_rules,
-            _MANAGED_HEADER,
-            _MANAGED_FOOTER,
+            (_MANAGED_HEADER, _MANAGED_FOOTER),
             {"shared bundle": shared_dir, "user bundle": user_dir},
             native=(".codex", "AGENTS.md"),
         )
