@@ -15,6 +15,24 @@
       ]
     },
     {
+      "id": "reviewer-worker-gates",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-lane-gates",
+      "behaviour": "The review lane receives the existing build, push stop, one push, claim stop, quiet, watch and talk worker checks. Stall watch reports stale reviewer pull request claims and ready unclaimed review work in a full lane, while existing workers keep their checks.",
+      "seam": "The seven worker gate decisions, quiet_pass and stall_watch.stall_pass with worker lane records",
+      "tests": [
+        "tests/gates/test_build.py::test_worker_lanes_cannot_edit_outside_their_plan",
+        "tests/gates/test_claim_stop.py::test_worker_lanes_cannot_stop_with_an_unfinished_claim",
+        "tests/gates/test_one_push.py::test_worker_lanes_cannot_push_while_checks_run",
+        "tests/gates/test_push_stop.py::test_worker_lanes_cannot_stop_with_uncommitted_work",
+        "tests/gates/test_quiet.py::test_worker_lanes_raise_the_quiet_claim_flag",
+        "tests/gates/test_watch.py::test_worker_lanes_cannot_exceed_the_watch_budget",
+        "tests/gates/test_talk_review.py::test_worker_lanes_cannot_talk_past_the_budget",
+        "tests/gates/test_stall_watch_review.py::test_full_worker_lanes_report_unclaimed_work",
+        "tests/gates/test_stall_watch_review.py::test_a_stale_review_claim_with_a_pull_request_is_reported"
+      ]
+    },
+    {
       "id": "node-caps-named-import",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-node-caps-cpu",
@@ -9605,7 +9623,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
