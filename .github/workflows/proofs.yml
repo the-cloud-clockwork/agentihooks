@@ -37,6 +37,11 @@ on:
         required: false
         default: every
         options: [every, plant, none]
+      mutation_only:
+        description: Expand only the mutation gates of each head in the lab mutation plant proof
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ${{ format('focused-proof-{0}', github.run_id) }}
@@ -61,6 +66,7 @@ jobs:
       PROOF_BASE: ${{ inputs.base }}
       PROOF_TIMEOUT: ${{ inputs.unit_timeout }}
       PROOF_SCOPE: ${{ inputs.stats_scope }}
+      PROOF_MUTATION_ONLY: ${{ inputs.mutation_only }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,7 +104,7 @@ jobs:
 
       - name: Expand and grade the twin, the plant and the control in process
         shell: bash
-        working-directory: /
+        working-directory: ${{ runner.temp }}/lab-mutation-plant/driver
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -111,8 +117,23 @@ jobs:
           if [[ "${PROOF_SCOPE:-every}" == none ]]; then
             scope=(--expand-only)
           fi
-          "$proof/venv/bin/python" -I "$proof/driver/lab_mutation_plant.py" --repo "$GITHUB_WORKSPACE" --base "$base" \
-            --work "$proof/work" --out "$proof/out" --timeout "${PROOF_TIMEOUT:-0}" "${scope[@]}"
+          if [[ "${PROOF_MUTATION_ONLY:-false}" == true ]]; then
+            scope+=(--mutation-only)
+          fi
+          nproc
+          while true; do
+            memory="$(free -m | awk '/^Mem:/ {print $3 " MB used, " $7 " MB available"}' || true)"
+            disk="$(df -m "$RUNNER_TEMP" | awk 'NR == 2 {print $4 " MB free"}' || true)"
+            largest="$(ps -eo rss=,comm= --sort=-rss | awk 'NR == 1 {print int($1 / 1024) " MB " $2}' || true)"
+            echo "sample $(date -u +%H:%M:%S): memory $memory; disk $disk; largest process $largest; load $(cut -d' ' -f1 /proc/loadavg)"
+            sleep 30
+          done &
+          sampler=$!
+          status=0
+          "$proof/venv/bin/python" -I lab_mutation_plant.py --repo "$GITHUB_WORKSPACE" --base "$base" \
+            --work "$proof/work" --out "$proof/out" --timeout "${PROOF_TIMEOUT:-0}" "${scope[@]}" || status=$?
+          kill "$sampler"
+          exit "$status"
 
       - name: Publish the proof table
         if: always()

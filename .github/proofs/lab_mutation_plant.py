@@ -63,6 +63,54 @@ IDENTITY = {
 LOG_TAIL = 200
 BUDGET_S = 1800.0
 CAP = 1
+BEGAN = time.monotonic()
+PACE = 100
+SLOW_S = 15.0
+
+
+def say(message: str) -> None:
+    """Print one progress line with the seconds since the driver started."""
+    print(f"[{time.monotonic() - BEGAN:8.1f} s] {message}", flush=True)
+
+
+def timed(owner: Any, name: str, timings: list[dict[str, Any]]) -> None:
+    """Make owner.name report when each call begins and how long it took, and keep that time; the call itself and
+    what it returns or raises stay as they are."""
+    inner = getattr(owner, name)
+
+    def reported(*args: Any, **kwargs: Any) -> Any:
+        began = time.monotonic()
+        say(f"{name} begins")
+        try:
+            return inner(*args, **kwargs)
+        finally:
+            seconds = round(time.monotonic() - began, 1)
+            timings.append({"call": name, "seconds": seconds})
+            say(f"{name} took {seconds} s")
+
+    setattr(owner, name, reported)
+
+
+def paced(owner: Any, name: str) -> None:
+    """Make owner.name report every hundredth call with the seconds spent in it so far, and each call slower than
+    fifteen seconds with its arguments; the call itself stays as it is."""
+    inner = getattr(owner, name)
+    seen = {"calls": 0, "seconds": 0.0}
+
+    def reported(*args: Any, **kwargs: Any) -> Any:
+        began = time.monotonic()
+        try:
+            return inner(*args, **kwargs)
+        finally:
+            spent = time.monotonic() - began
+            seen["calls"] += 1
+            seen["seconds"] += spent
+            if spent > SLOW_S:
+                say(f"{name} took {spent:.1f} s for {args[1:]}")
+            if seen["calls"] % PACE == 0:
+                say(f"{name} called {seen['calls']} times in {seen['seconds']:.1f} s")
+
+    setattr(owner, name, reported)
 
 
 @dataclass
@@ -78,6 +126,7 @@ class Run:
     requests: dict[str, Any] = field(default_factory=dict[str, Any])
     plans: dict[str, dict[str, list[Any]]] = field(default_factory=dict[str, dict[str, list[Any]]])
     graders: dict[str, str] = field(default_factory=dict[str, str])
+    mutation_only: bool = False
 
     def write(self) -> None:
         """Store the artifact as it stands."""
@@ -206,17 +255,26 @@ def inputs_of(expander: Any, request: Any) -> tuple[dict[str, Any], dict[str, by
     return manifest, expander._contents(mirror, expander._files(mirror, request.head))
 
 
-def gates_of(expander: Any, request: Any, record: dict[str, Any]) -> tuple[dict[str, list[Any]], str]:
-    """Return the gates of the request's whole plan with its grader, or only its mutation gates when the whole
-    expansion raises, noting the path taken and the error in the record."""
+def mutation_gates(expander: Any, request: Any, record: dict[str, Any], path: str) -> tuple[dict[str, list[Any]], str]:
+    """Return only the mutation gates of the request with its head as grader, noting the path taken in the record."""
+    record["path"] = path
+    manifest, contents = inputs_of(expander, request)
+    record["manifest_commit"] = manifest["commit"]
+    return expander._mutation(expander._mirror(request.repo), request, manifest, contents), request.head
+
+
+def gates_of(
+    expander: Any, request: Any, record: dict[str, Any], mutation_only: bool
+) -> tuple[dict[str, list[Any]], str]:
+    """Return the gates of the request's whole plan with its grader, or only its mutation gates when asked or when
+    the whole expansion raises, noting the path taken and the error in the record."""
+    if mutation_only:
+        return mutation_gates(expander, request, record, "MirrorExpander._mutation, asked")
     try:
         plan = expander.expand(request)
     except Exception:
         record["error"] = traceback.format_exc()
-        record["path"] = "MirrorExpander._mutation"
-        manifest, contents = inputs_of(expander, request)
-        record["manifest_commit"] = manifest["commit"]
-        return expander._mutation(expander._mirror(request.repo), request, manifest, contents), request.head
+        return mutation_gates(expander, request, record, "MirrorExpander._mutation")
     record["path"] = "MirrorExpander.expand"
     record["manifest_commit"] = plan.manifest
     return {job: list(units) for job, units in plan.gates.items()}, plan.grader
@@ -244,8 +302,10 @@ def expand(run: Run, expander: Any, name: str, request: Any) -> None:
     scheduler = run.lab.scheduler
     record: dict[str, Any] = {"tier": int(request.tier), "error": ""}
     began = time.monotonic()
-    gates, run.graders[name] = gates_of(expander, request, record)
+    say(f"expansion of the {name} begins")
+    gates, run.graders[name] = gates_of(expander, request, record, run.mutation_only)
     record["seconds"] = round(time.monotonic() - began, 1)
+    say(f"expansion of the {name} took {record['seconds']} s by {record['path']}")
     record["jobs"] = {job: len(units) for job, units in gates.items()}
     mutation = {job: gates.get(job, []) for job in (scheduler.STATS_JOB, scheduler.MUTANT_JOB)}
     record["mutation"] = [
@@ -311,7 +371,9 @@ def grade(run: Run, pod: Any, settings: Any, name: str, head: str) -> None:
             lease = run.lab.worker.Lease(
                 scheduler.job_id(head, unit), "offline", head, unit, 1, 0, request.base, run.graders[name]
             )
+            say(f"{job} unit {index} of the {name} begins: {unit.kind}, {len(unit.members)} members")
             row = {"head": name, "job": job, **graded(run, pod, settings, lease, f"{name}-{job}-{index}")}
+            say(f"{job} unit {index} of the {name} ended {row['outcome']} in {row['seconds']} s")
             outcomes.append(row["outcome"])
             run.proof["units"].append(row)
             run.write()
@@ -367,6 +429,7 @@ def parsed(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=0.0)
     parser.add_argument("--stats-scope", choices=("every", "plant"), default="every")
     parser.add_argument("--expand-only", action="store_true")
+    parser.add_argument("--mutation-only", action="store_true")
     parser.add_argument("--manifest", default="")
     return parser.parse_args(argv)
 
@@ -390,11 +453,13 @@ def opened(arguments: argparse.Namespace) -> tuple[Run, str, dict[str, str], flo
         "stats_scope": arguments.stats_scope,
         "expansion": {},
         "units": [],
+        "timings": [],
         "verdicts": {},
         "checks": {},
         "dependencies": {"driver": {name: metadata.version(name) for name in PINNED}},
     }
-    return Run(lab, repo, work, out, arguments.repository, proof), base, heads, timeout
+    run = Run(lab, repo, work, out, arguments.repository, proof, mutation_only=arguments.mutation_only)
+    return run, base, heads, timeout
 
 
 def finish(run: Run, pod: Any, heads: Mapping[str, str], expected: list[str]) -> int:
@@ -426,12 +491,17 @@ def main(argv: Sequence[str]) -> int:
     expected = planted_mutants(run, heads["twin"])
     run.proof["planted_mutants"] = expected
     run.write()
+    say(f"{len(expected)} planted mutants named from {Path.cwd()}")
     if arguments.expand_only:
         print(json.dumps(run.proof["expansion"], indent=1))
         return 0
     if arguments.stats_scope == "plant":
         run.lab.executors._test_files = lambda tree: [TESTS]
     pod, settings = pod_of(run, node, timeout)
+    executors = run.lab.executors
+    for owner, call in ((executors.venvs, "venv_for"), (executors, "_trampolined"), (executors, "_run")):
+        timed(owner, call, run.proof["timings"])
+    paced(run.lab.run_mutation, "trampoline")
     for name in GRADED:
         grade(run, pod, settings, name, heads[name])
     return finish(run, pod, heads, expected)
