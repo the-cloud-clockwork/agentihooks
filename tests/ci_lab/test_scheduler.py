@@ -1063,9 +1063,10 @@ def test_the_load_counts_each_job_once_in_the_most_urgent_class_of_the_live_grad
     run.tick(1000)
     run.lab.expander.plans[HEAD_A] = plan({"lint": (shared, joined)})
     run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
-    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
     run.tick(1100)
     assert [grant.unit for grant in run.lease(slots=2)] == [shared, joined]
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1100)
     run.lab.client.hset(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, solo)}", "slots", 2)
     run.lab.client.delete(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_B, lost)}")
     run.lab.client.sadd(scheduler.LIVE, "grade-v1-gone")
@@ -1345,6 +1346,22 @@ def test_backfill_takes_only_the_slots_left_free_after_the_units_waiting_in_othe
     assert run.lease(slots=3) == []
     assert run.tick(1200) == [f"enqueued 3 units of {run.grade(HEAD_A).run}"]
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item) for item in (second, third, fourth)]
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_pull_request_grade_admitted_after_a_merge_group_grade_is_leased_first(lab: Callable[..., Run]) -> None:
+    grouped, checked = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (grouped,)}), HEAD_B: plan({"lint": (checked,)})})
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.tick(1000)
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(2000)
+
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, checked), scheduler.job_id(HEAD_A, grouped)]
+    assert [grant.job for grant in run.lease(slots=1)] == [scheduler.job_id(HEAD_B, checked)]
+    queued = run.engine.queue.job(scheduler.job_id(HEAD_A, grouped))
+    assert queued is not None
+    assert queued.rank == int(Priority.QUEUE)
 
 
 @pytest.mark.feature("lab-scheduler-budget")

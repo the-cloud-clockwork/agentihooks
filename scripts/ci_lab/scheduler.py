@@ -15,7 +15,6 @@ commit's grades on the scheduler port, metrics on the metrics port, both from on
 """
 
 import argparse
-import hashlib
 import io
 import json
 import logging
@@ -479,16 +478,36 @@ def _parse(raw: str | bytes) -> State:
 
 @dataclass(frozen=True)
 class _Demand:
-    digest: bytes
     tier: int
     hits: int
     jobs: tuple[str, ...]
 
 
-def _grade_demand(raw: str | bytes, fingerprint: bytes) -> _Demand:
+def _grade_demand(raw: str | bytes) -> _Demand:
     state = _parse(raw)
     jobs = tuple(slot.job for slot in state.units.values() if slot.job)
-    return _Demand(fingerprint, state.tier, len(state.units) - len(jobs), jobs)
+    return _Demand(state.tier, len(state.units) - len(jobs), jobs)
+
+
+def _record_demand(record: str | bytes) -> tuple[str, _Demand]:
+    """Read a stored demand record: the revision it was written at, then its grade's tier, the units the verdict store
+    answered and the queue jobs of the rest."""
+    data = json.loads(record)
+    return str(data["revision"]), _Demand(data["tier"], data["hits"], tuple(data["jobs"]))
+
+
+def _records(client: Any, runs: Sequence[str]) -> list[str | None]:
+    """Return each run's stored demand record, or None for a run with none, read with one HMGET per run in a pipeline
+    that opens no transaction."""
+    pipe = client.pipeline(transaction=False)
+    for run in runs:
+        pipe.hmget(RECORDS, run)
+    return [record for (record,) in pipe.execute()]
+
+
+def _document(client: Any, run: str) -> str | None:
+    """Return a grade's stored state document, or None for a run with none."""
+    return client.get(GRADES + run)
 
 
 def stage_grade(pipe: Any, document: dict[str, Any]) -> None:
@@ -629,7 +648,7 @@ class Scheduler:
         self.shed: tuple[str, ...] = ()
         self.registry = metrics.Registry()
         self.held: defaultdict[str, int] = defaultdict(int)
-        self._demand_cache: dict[str, _Demand] = {}
+        self._demand_cache: dict[str, tuple[str, _Demand]] = {}
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
@@ -694,16 +713,7 @@ class Scheduler:
         tiers: dict[str, int] = {}
         hits: Counter[str] = Counter()
         misses: Counter[str] = Counter()
-        cache: dict[str, _Demand] = {}
-        for run in sorted(self.client.smembers(LIVE)):
-            raw = self.client.get(f"{GRADES}{run}")
-            if raw is None:
-                continue
-            fingerprint = hashlib.sha256(raw.encode() if isinstance(raw, str) else raw).digest()
-            contribution = self._demand_cache.get(run)
-            if contribution is None or contribution.digest != fingerprint:
-                contribution = _grade_demand(raw, fingerprint)
-            cache[run] = contribution
+        for contribution in self._contributions(sorted(self.client.smembers(LIVE))):
             name = CLASSES[contribution.tier]
             if contribution.hits:
                 hits[name] += contribution.hits
@@ -711,8 +721,32 @@ class Scheduler:
                 misses[name] += len(contribution.jobs)
             for job in contribution.jobs:
                 tiers[job] = min(tiers.get(job, contribution.tier), contribution.tier)
-        self._demand_cache = cache
         return tiers, hits, misses
+
+    def _contributions(self, live: list[str]) -> list[_Demand]:
+        """Return each live run's demand contribution: the kept one while the stored revision is unchanged, else the
+        one read again; keep those that carry a revision for the next build."""
+        revisions = self.client.hgetall(REVISIONS)
+        kept = {
+            run: entry
+            for run in live
+            if (entry := self._demand_cache.get(run)) is not None and entry[0] == revisions.get(run)
+        }
+        recorded, parsed = self._read_demand([run for run in live if run not in kept])
+        self._demand_cache = kept | recorded
+        return [demand for _, demand in self._demand_cache.values()] + parsed
+
+    def _read_demand(self, runs: list[str]) -> tuple[dict[str, tuple[str, _Demand]], list[_Demand]]:
+        """Return the runs' demand read again: each stored demand record with the revision it carries, and the parsed
+        grade document of each run without a record, which no later build reuses; a run with neither is left out."""
+        recorded: dict[str, tuple[str, _Demand]] = {}
+        parsed: list[_Demand] = []
+        for run, record in zip(runs, _records(self.client, runs)):
+            if record is not None:
+                recorded[run] = _record_demand(record)
+            elif (raw := _document(self.client, run)) is not None:
+                parsed.append(_grade_demand(raw))
+        return recorded, parsed
 
     def grades_of(self, head: str) -> list[dict[str, Any]]:
         """Return every grade of a commit by run: its live grades and the closed ones its evidence markers name."""
@@ -969,8 +1003,9 @@ class Scheduler:
     def _admit(self, now_ms: int) -> list[str]:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
         and backfill only into the slots workers offered free after every unit already waiting in the queue, backfill
-        and those admitted in this pass included, since the queue leases in order. A class the budget newly sheds is
-        named first. Each grade with held units is read again as it is admitted, so the pass holds one at a time."""
+        and those admitted in this pass included, since the queue leases the most urgent class first and in order
+        inside a class, which each unit is enqueued under by its grade's tier. A class the budget newly sheds is named
+        first. Each grade with held units is read again as it is admitted, so the pass holds one at a time."""
         actions = self._shedding()
         held = sorted(
             (state.tier, state.run) for state in self._live() if any(slot.held for slot in state.units.values())
@@ -987,7 +1022,7 @@ class Scheduler:
                     admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
                     waiting += DEFAULT.slots
             if admitted:
-                self.queue.enqueue(admitted, state.head, {}, state.base, state.grader)
+                self.queue.enqueue(admitted, state.head, {}, state.base, state.grader, state.tier)
                 self.save(state)
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions
