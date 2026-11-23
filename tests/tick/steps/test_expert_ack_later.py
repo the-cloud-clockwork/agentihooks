@@ -1,10 +1,12 @@
+import json
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
-from scripts.hive import admission
+from scripts.hive import admission, launch, orders
 from scripts.hive.orders import Ack
 from scripts.swarm import expert_lineage, expert_seat, lease, seat_spawn, tick
 from scripts.swarm.controller import FencedRuntime
@@ -94,7 +96,7 @@ def test_expert_hive_launch_returns_pending_without_waiting_or_releasing_its_res
 def test_next_expert_pass_keeps_the_same_unacknowledged_order_and_generation(context: SimpleNamespace) -> None:
     agent = pending(context)
     order = context.launcher.orders_for(context.lineage.id)
-    run(context)
+    assert run(context) == []
     [kept] = [agent for agent in context.store.agents(context.config.slug) if agent.lane == "expert"]
     assert kept == agent
     assert context.launcher.orders_for(context.lineage.id) == order
@@ -119,7 +121,8 @@ def test_next_expert_pass_records_the_live_acknowledgement_on_the_original_execu
             },
         ),
     )
-    run(context)
+    actions = run(context)
+    assert actions == [f"spawned expert {agent.name} on lineage {context.lineage.id} as its expert number 1"]
     [live] = [agent for agent in context.store.agents(context.config.slug) if agent.lane == "expert"]
     assert (live.name, live.seat, live.execution_id, live.generation) == (
         agent.name,
@@ -151,6 +154,11 @@ def test_next_expert_pass_records_a_refusal_and_keeps_the_lineage_available_for_
     assert context.store.execution_registry.get(context.config.slug, agent.execution_id).state == "ended"
     assert admission.pending(context.store.redis, agent.hive) == 0
     assert expert_lineage.running(context.store, context.config.slug) == [context.lineage]
+    assert expert_lineage.launches(context.store, context.config.slug, context.lineage.id) == 0
+    failure = expert_lineage.launch_failures(context.store, context.config.slug)[context.lineage.id]
+    assert (failure["agent"], failure["reason"]) == (agent.name, "hive launch failed: profile refused")
+    retry = pending(context)
+    assert retry.name != agent.name
 
 
 @pytest.mark.feature("expert-seat-step")
@@ -161,7 +169,13 @@ def test_expired_expert_order_is_retired_without_launching_again_under_the_same_
     order = context.launcher.orders_for(context.lineage.id)
     assert order is not None
     monkeypatch.setattr(lease, "now_ms", lambda store: order.expires_at)
-    run(context)
+    actions = run(context)
+    assert actions == [f"expert spawn failed on lineage {context.lineage.id}: {launch.EXPIRED}"]
+    assert expert_lineage.launch_failures(context.store, context.config.slug)[context.lineage.id] == {
+        "at": order.expires_at,
+        "agent": agent.name,
+        "reason": launch.EXPIRED,
+    }
     assert context.store.execution_registry.get(context.config.slug, agent.execution_id).state == "ended"
     assert len(context.store.execution_registry.records(context.config.slug)) == 1
     assert not [agent for agent in context.store.agents(context.config.slug) if agent.lane == "expert"]
@@ -172,6 +186,8 @@ def test_expired_expert_order_is_retired_without_launching_again_under_the_same_
 def test_reap_keeps_a_pending_expert_until_its_order_is_collected(context: SimpleNamespace) -> None:
     agent = pending(context)
     assert tick._acknowledging(context.config.slug, context.store, agent)
+    assert not tick._acknowledging(context.config.slug, context.store, replace(agent, lane="eng"))
+    assert not tick._acknowledging(context.config.slug, context.store, replace(agent, state="working"))
 
 
 @pytest.mark.feature("expert-seat-step")
@@ -186,3 +202,75 @@ def test_fenced_spawn_preserves_reservations_only_while_acknowledgement_is_pendi
     with pytest.raises(tick.SpawnError, match="hive result"):
         context.runtime.spawn(context.config, "expert", "expert-agent", {"id": context.lineage.id})
     assert released.call_count == (0 if status == "pending" else 1)
+
+
+@pytest.mark.feature("expert-seat-step")
+def test_ambiguous_expert_acknowledgement_keeps_the_original_execution_pending(context: SimpleNamespace) -> None:
+    agent = pending(context)
+    order = context.launcher.orders_for(context.lineage.id)
+    acknowledge(context, Ack("failed", {}, failure="ambiguous"))
+    assert run(context) == [f"lineage {context.lineage.id} waits: hive launch failed: ambiguous"]
+    assert context.store.execution_registry.get(context.config.slug, agent.execution_id).state == "launching"
+    assert context.launcher.orders_for(context.lineage.id) == order
+    assert expert_lineage.launches(context.store, context.config.slug, context.lineage.id) == 1
+
+
+@pytest.mark.feature("expert-seat-step")
+@pytest.mark.parametrize("live", [False, True])
+def test_controller_takeover_retires_the_original_expert_order_without_relaunch(
+    context: SimpleNamespace, live: bool
+) -> None:
+    agent = pending(context)
+    if live:
+        acknowledge(context, Ack("live", {"host_id": "remote"}, execution={"pane_id": "old-pane"}))
+    assert lease.release(context.store, context.config.slug, context.held)
+    held = lease.acquire(context.store, context.config.slug, "next controller")
+    assert held is not None
+    context.launcher.held = held
+    context.runtime.held = held
+    assert run(context) == [f"expert spawn failed on lineage {context.lineage.id}: {orders.STALE_EPOCH}"]
+    assert context.store.execution_registry.get(context.config.slug, agent.execution_id).state == "ended"
+    assert not [agent for agent in context.store.agents(context.config.slug) if agent.lane == "expert"]
+    assert len(context.store.execution_registry.records(context.config.slug)) == 1
+    commands = context.store.redis.xrange(context.launcher.orders.commands("remote"))
+    [command] = [json.loads(fields["order"]) for _, fields in commands]
+    assert command["action"] == ("reap_execution" if live else "reap")
+    if live:
+        assert (command["execution_id"], command["generation"]) == (agent.execution_id, agent.generation)
+
+
+@pytest.mark.feature("expert-seat-step")
+def test_a_launching_record_without_a_hive_runtime_keeps_its_existing_seat(context: SimpleNamespace) -> None:
+    runtime = FakeRuntime()
+    run(context, runtime)
+    [agent] = [agent for agent in context.store.agents(context.config.slug) if agent.lane == "expert"]
+    context.store.put_agent(context.config.slug, replace(agent, state="launching"))
+    assert run(context, runtime) == []
+    assert len(runtime.spawned) == 1
+    assert context.store.seats.occupant(agent.seat).occupant == agent.name
+
+
+@pytest.mark.feature("expert-seat-step")
+def test_collection_with_no_order_never_invents_an_expert_acknowledgement(context: SimpleNamespace) -> None:
+    agent = pending(context)
+    context.store.redis.hdel(context.store.key(context.config.slug, launch.ORDERS), context.lineage.id)
+    assert not tick._acknowledging(context.config.slug, context.store, agent)
+    assert run(context) == []
+    assert context.store.execution_registry.get(context.config.slug, agent.execution_id).state == "launching"
+    assert len(context.store.execution_registry.records(context.config.slug)) == 1
+
+
+@pytest.mark.feature("expert-seat-step")
+def test_another_execution_cannot_be_collected_for_a_pending_expert(context: SimpleNamespace) -> None:
+    agent = pending(context)
+    order = context.launcher.orders_for(context.lineage.id)
+    assert order is not None
+    context.store.redis.hset(
+        context.store.key(context.config.slug, launch.ORDERS),
+        context.lineage.id,
+        json.dumps(asdict(replace(order, execution_id="another execution"))),
+    )
+    assert not tick._acknowledging(context.config.slug, context.store, agent)
+    assert run(context) == []
+    assert context.store.execution_registry.get(context.config.slug, agent.execution_id).state == "launching"
+    assert len(context.store.execution_registry.records(context.config.slug)) == 1

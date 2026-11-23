@@ -368,6 +368,10 @@ def _retire_launch(slug: str, store: Any, runtime: Any, agent: Any, now_ms: int)
 
 
 def _acknowledging(slug: str, store: Any, agent: Any) -> bool:
+    if agent.lane == "expert" and agent.state == "launching":
+        from scripts.swarm import expert_launch
+
+        return expert_launch.acknowledging(slug, store, agent)
     if agent.lane == MASTER:
         return False
     raw = store.redis.hget(store.key(slug, "launches"), agent.name)

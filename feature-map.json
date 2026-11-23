@@ -13594,7 +13594,12 @@
         "tests/tick/steps/test_expert_ack_later.py::test_next_expert_pass_records_a_refusal_and_keeps_the_lineage_available_for_retry",
         "tests/tick/steps/test_expert_ack_later.py::test_expired_expert_order_is_retired_without_launching_again_under_the_same_name",
         "tests/tick/steps/test_expert_ack_later.py::test_reap_keeps_a_pending_expert_until_its_order_is_collected",
-        "tests/tick/steps/test_expert_ack_later.py::test_fenced_spawn_preserves_reservations_only_while_acknowledgement_is_pending"
+        "tests/tick/steps/test_expert_ack_later.py::test_fenced_spawn_preserves_reservations_only_while_acknowledgement_is_pending",
+        "tests/tick/steps/test_expert_ack_later.py::test_ambiguous_expert_acknowledgement_keeps_the_original_execution_pending",
+        "tests/tick/steps/test_expert_ack_later.py::test_controller_takeover_retires_the_original_expert_order_without_relaunch",
+        "tests/tick/steps/test_expert_ack_later.py::test_a_launching_record_without_a_hive_runtime_keeps_its_existing_seat",
+        "tests/tick/steps/test_expert_ack_later.py::test_collection_with_no_order_never_invents_an_expert_acknowledgement",
+        "tests/tick/steps/test_expert_ack_later.py::test_another_execution_cannot_be_collected_for_a_pending_expert"
       ],
       "live_check": [
         "python",

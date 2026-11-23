@@ -91,6 +91,8 @@ def run(slug: str, config: Any, store: Any, runtime: Any, now_ms: int) -> list[s
     for agent in experts:
         if agent.state != "finished" and agent.task not in kept:
             actions += _guarded(agent.task, _end, slug, store, agent)
+        elif agent.state == "launching":
+            actions += _guarded(agent.task, _collect, slug, store, runtime, agent, now_ms)
     if config.state in HELD:
         return actions
     seated = {agent.task for agent in experts}
@@ -232,15 +234,39 @@ def _launch(
         if SEAT.seat_spawn.room_refused(failed.error):
             SEAT.transfers.detach(store, slug, failed.record)
             return [*left, WAITS.format(lineage=lineage.id, error=failed.error)]
-        why = _why(failed.error)
-        expert_lineage.launch_failed(store, slug, lineage.id, failed.record.name, why, now_ms)
-        SEAT.transfers.failed(store, slug, failed.record, why)
-        return [*left, FAILED.format(lineage=lineage.id, error=why)]
+        return [*left, *_failed_launch(slug, store, failed.record, failed.error, now_ms)]
     record = tick.placed_record(record, placed)
     store.put_agent(slug, record)
     expert_lineage.launch_recovered(store, slug, lineage.id)
     SEAT.dispatch_seat.move_mail_home(store, record)
     return [*left, SPAWNED.format(name=record.name, lineage=lineage.id, number=number)]
+
+
+def _collect(slug: str, store: Any, runtime: Any, agent: AgentRecord, now_ms: int) -> list[str]:
+    tick: Any = import_module("scripts.swarm.tick")
+    try:
+        outcome = expert_launch.collect(runtime, agent)
+    except tick.SpawnError as error:
+        expert_lineage.unlaunched(store, slug, agent.task)
+        store.drop_agent(slug, agent.name)
+        return _failed_launch(slug, store, agent, error, now_ms)
+    if outcome is None or outcome.status == "pending":
+        return []
+    if outcome.status == "ambiguous":
+        return [WAITS.format(lineage=agent.task, error=outcome.detail)]
+    record = tick.placed_record(agent, outcome.value)
+    store.put_agent(slug, record)
+    expert_lineage.launch_recovered(store, slug, agent.task)
+    SEAT.dispatch_seat.move_mail_home(store, record)
+    number = expert_lineage.launches(store, slug, agent.task)
+    return [SPAWNED.format(name=agent.name, lineage=agent.task, number=number)]
+
+
+def _failed_launch(slug: str, store: Any, agent: AgentRecord, error: BaseException, now_ms: int) -> list[str]:
+    why = _why(error)
+    expert_lineage.launch_failed(store, slug, agent.task, agent.name, why, now_ms)
+    SEAT.transfers.failed(store, slug, agent, why)
+    return [FAILED.format(lineage=agent.task, error=why)]
 
 
 def _why(error: BaseException) -> str:
