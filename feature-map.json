@@ -9791,7 +9791,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
@@ -14439,6 +14439,21 @@
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_window",
         "tests/hive/test_daemon_presence.py::test_the_daemon_token_gauges_carry_the_session_agent_and_profile_from_the_seen_record",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_skips_token_values_it_cannot_read_and_sends_the_rest"
+      ]
+    },
+    {
+      "id": "build-gate-serena-repository-areas",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2844",
+      "behaviour": "The build gate resolves a Serena edit repository from the parent session activated worktree or the call working directory git root, matches slash and colon repository prefixed plan and territory areas, preserves plain areas and an unknown repository, refuses outside paths and other repositories, and leaves dry runs exempt.",
+      "seam": "BuildGate.touched repository resolution before within checks plan and territory areas",
+      "tests": [
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_call_directory_supplies_serena_repository",
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_serena_repository_territory_widens_the_plan",
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_active_parent_repository_takes_precedence",
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_serena_worktree_uses_the_repository_name",
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_unknown_repository_keeps_the_relative_scope",
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_serena_dry_run_does_not_resolve_a_repository"
       ]
     }
   ],

@@ -461,6 +461,93 @@ class TestRepositoryNamedAreas:
         assert not within("k8s/charts/x", list(pieces[0].areas), "other")
 
 
+class TestSerenaRepositoryAreas:
+    @pytest.fixture(autouse=True)
+    def no_activation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def root_for(_session_id: str, _agent_id: str) -> str:
+            return ""
+
+        monkeypatch.setattr("hooks.context.serena_binding.root_for", root_for)
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    @pytest.mark.parametrize("separator", ["/", ":"])
+    def test_call_directory_supplies_serena_repository(self, antoncore: Any, separator: str) -> None:
+        antoncore.plan(f"- the chart | antoncore{separator}k8s/charts | the runners need it\n", kept=(True,))
+        tool = "mcp__serena__replace_symbol_body"
+        path = "k8s/charts/runners/smoke.py"
+        assert not antoncore.decide(tool=tool, relative_path="k8s/other/smoke.py", cwd=antoncore.antoncore).allowed
+        assert not antoncore.decide(tool=tool, relative_path=path, cwd=antoncore.repo).allowed
+        assert antoncore.decide(tool=tool, relative_path=path, cwd=antoncore.antoncore / "k8s/charts").allowed
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    @pytest.mark.parametrize("separator", ["/", ":"])
+    def test_serena_repository_territory_widens_the_plan(self, antoncore: Any, separator: str) -> None:
+        antoncore.plan()
+        antoncore.territory(f"antoncore{separator}k8s/charts")
+        tool = "mcp__serena__replace_symbol_body"
+        path = "k8s/charts/runners/smoke.py"
+        assert not antoncore.decide(tool=tool, relative_path="k8s/other/smoke.py", cwd=antoncore.antoncore).allowed
+        assert not antoncore.decide(tool=tool, relative_path=path, cwd=antoncore.repo).allowed
+        assert antoncore.decide(tool=tool, relative_path=path, cwd=antoncore.antoncore).allowed
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    def test_active_parent_repository_takes_precedence(
+        self, antoncore: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = []
+
+        def root_for(session_id: str, agent_id: str) -> str:
+            seen.append((session_id, agent_id))
+            return str(antoncore.antoncore)
+
+        monkeypatch.setattr("hooks.context.serena_binding.root_for", root_for)
+        antoncore.plan(CHARTS, kept=(True,))
+        gate = BuildGate(environ={"LEDGER_DIR": str(tmp_path / "ledgers")})
+        who = Who(name=ME, swarm=SLUG, task=TASK)
+        state = Verdicts(SLUG, "build", tmp_path / "gates")
+        for path, allowed in [("k8s/other/smoke.py", False), ("k8s/charts/runners/smoke.py", True)]:
+            call = Call(
+                tool="mcp__serena__replace_symbol_body",
+                tool_input={"relative_path": path},
+                cwd=str(antoncore.repo),
+                session="activated-session",
+            )
+            assert gate.decide(call, who, state).allowed is allowed
+        assert seen == [("activated-session", ""), ("activated-session", "")]
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    def test_serena_worktree_uses_the_repository_name(self, antoncore: Any) -> None:
+        antoncore.plan(CHARTS, kept=(True,))
+        tree = antoncore.antoncore.parent / "serena-worktree"
+        git(antoncore.antoncore, "worktree", "add", "-q", str(tree))
+        assert antoncore.decide(
+            tool="mcp__serena__replace_symbol_body",
+            relative_path="k8s/charts/runners/smoke.py",
+            cwd=tree,
+        ).allowed
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    @pytest.mark.parametrize("directory", ["", "outside"])
+    def test_unknown_repository_keeps_the_relative_scope(self, antoncore: Any, tmp_path: Path, directory: str) -> None:
+        call = Call(
+            tool="mcp__serena__replace_symbol_body",
+            tool_input={"relative_path": "./doghouse/light/lamp.py"},
+            cwd=str(tmp_path / directory) if directory else "",
+        )
+        assert BuildGate().touched(call, antoncore.folder) == [("", "doghouse/light/lamp.py")]
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    def test_serena_dry_run_does_not_resolve_a_repository(
+        self, antoncore: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def root_for(_session_id: str, _agent_id: str) -> str:
+            raise AssertionError("a dry run must not read the activation")
+
+        monkeypatch.setattr("hooks.context.serena_binding.root_for", root_for)
+        call = Call(tool="mcp__serena__replace_in_files", tool_input={"dry_run": True})
+        assert BuildGate().touched(call, antoncore.folder) == []
+
+
 class TestTerritory:
     def test_a_missing_ledger_or_task_reads_as_no_territory(self, tmp_path):
         assert task_territory(tmp_path, SLUG, TASK) == []
