@@ -460,7 +460,7 @@ def test_the_early_gate_accepts_the_split_jobs_only_together(
 @pytest.mark.feature("gate-required-split-jobs")
 def test_the_early_gate_refuses_a_gate_that_names_no_needs() -> None:
     workflows = _reviewed_pair([])
-    del workflows["test.yml"]["jobs"]["gate-required"]["needs"]
+    workflows["test.yml"]["jobs"]["gate-required"] = {"name": ci_gate_queue.SUMMARY_NAME, "runs-on": "runner"}
     with pytest.raises(ValueError, match="reviewed graded inventory"):
         ci_gate_queue.normalize(workflows)
 
