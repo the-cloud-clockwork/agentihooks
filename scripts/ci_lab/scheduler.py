@@ -15,6 +15,7 @@ commit's grades on the scheduler port, metrics on the metrics port, both from on
 """
 
 import argparse
+import hashlib
 import io
 import json
 import logging
@@ -59,7 +60,7 @@ from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchai
 from scripts.ci_lab.intake import GradeRequest, admit
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
-from scripts.ci_lab.objects import Objects, S3Objects, Uploads, manifest_folder, unit_path, upload_path
+from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
 from scripts.ci_lab.queue import DEFAULT, Job, Queue
@@ -84,6 +85,7 @@ __all__ = [
     "Plan",
     "Ports",
     "READY_MS",
+    "REFRESH_MS",
     "Scheduler",
     "Settings",
     "StoredManifests",
@@ -146,6 +148,7 @@ LEASE_TTL_MS = 120_000
 LEASE_POLL_MS = 500
 UNIT_ESTIMATE_S = 60.0
 READY_MS = 2 * lease_api.MAX_WAIT_MS
+REFRESH_MS = 15_000
 MINIO_ENDPOINT = f"{contract.MINIO_PREFIX}ENDPOINT"
 MINIO_BUCKET = f"{contract.MINIO_PREFIX}BUCKET"
 MINIO_ACCESS_KEY = f"{contract.MINIO_PREFIX}ACCESS_KEY"
@@ -458,6 +461,20 @@ def _parse(raw: str | bytes) -> State:
     return State(**data)
 
 
+@dataclass(frozen=True)
+class _Demand:
+    digest: bytes
+    tier: int
+    hits: int
+    jobs: tuple[str, ...]
+
+
+def _grade_demand(raw: str | bytes, fingerprint: bytes) -> _Demand:
+    state = _parse(raw)
+    jobs = tuple(slot.job for slot in state.units.values() if slot.job)
+    return _Demand(fingerprint, state.tier, len(state.units) - len(jobs), jobs)
+
+
 def _evidence(state: State) -> evidence.GradeEvidence:
     """Return a closed grade's evidence: its inputs and each of its units with the grade run that used its verdict."""
     inputs = GradeInputs(state.repo, state.head, state.base, CLASSES[state.tier], state.grader)
@@ -579,6 +596,7 @@ class Scheduler:
         self.shed: tuple[str, ...] = ()
         self.registry = metrics.Registry()
         self.held: defaultdict[str, int] = defaultdict(int)
+        self._demand_cache: dict[str, _Demand] = {}
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
@@ -643,14 +661,24 @@ class Scheduler:
         tiers: dict[str, int] = {}
         hits: Counter[str] = Counter()
         misses: Counter[str] = Counter()
-        for state in self._live():
-            name = CLASSES[state.tier]
-            for slot in state.units.values():
-                if not slot.job:
-                    hits[name] += 1
-                    continue
-                misses[name] += 1
-                tiers[slot.job] = min(tiers.get(slot.job, state.tier), state.tier)
+        cache: dict[str, _Demand] = {}
+        for run in sorted(self.client.smembers(LIVE)):
+            raw = self.client.get(f"{GRADES}{run}")
+            if raw is None:
+                continue
+            fingerprint = hashlib.sha256(raw.encode() if isinstance(raw, str) else raw).digest()
+            contribution = self._demand_cache.get(run)
+            if contribution is None or contribution.digest != fingerprint:
+                contribution = _grade_demand(raw, fingerprint)
+            cache[run] = contribution
+            name = CLASSES[contribution.tier]
+            if contribution.hits:
+                hits[name] += contribution.hits
+            if contribution.jobs:
+                misses[name] += len(contribution.jobs)
+            for job in contribution.jobs:
+                tiers[job] = min(tiers.get(job, contribution.tier), contribution.tier)
+        self._demand_cache = cache
         return tiers, hits, misses
 
     def grades_of(self, head: str) -> list[dict[str, Any]]:
@@ -990,9 +1018,9 @@ class Scheduler:
         return decide(result, self.settings.retries) == "retry" and self.queue.retry(job)
 
     def _remember(self, job: Job, uploaded: tuple[dict[str, Any], bytes] | None, state: State) -> None:
-        """Store the verdict of a graded job from the report and log its worker uploaded, and note the files its batch
-        opened outside the repository's manifest under the manifest commit the grade keyed on; a lost or unrun job is
-        no verdict."""
+        """Store the verdict of a graded job from the report and log its worker uploaded, write a flaky verdict's flake
+        rows once as JSON lines in its flakes object, and note the files its batch opened outside the repository's
+        manifest under the manifest commit the grade keyed on; a lost or unrun job is no verdict."""
         if job.outcome in UNGRADED or uploaded is None:
             return
         report, log = uploaded
@@ -1001,6 +1029,10 @@ class Scheduler:
             job.unit.kind, job.unit.key, passed, passed and bool(report.get("flaky")), float(report.get("seconds", 0.0))
         )
         self.store.put(verdict, report, log)
+        flakes = report.get("flakes")
+        if verdict.flaky and flakes:
+            rows = "".join(json.dumps(row) + "\n" for row in flakes)
+            self.objects.write_once(flakes_path(verdict.kind, verdict.key), rows.encode())
         if report.get("outside") and state.manifest:
             note_outside(self.objects, state.repo, state.manifest, job.unit.members, report["outside"])
 
@@ -1534,26 +1566,31 @@ def listen(
     ports: tuple[int, int, int],
     mirror: Path | None = None,
 ) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, ThreadingHTTPServer]:
-    """Bind the scheduler port's lease API, capacity and grades routes, the control port's control routes and the
-    metrics port, the scheduler and metrics ports over one load whose budget fraction and shed classes come from the
-    day's spending, the metrics port with the counters the scheduler's passes keep and the age of the node mirror at
-    each scrape when one is given; the caller runs each serve_forever."""
+    """Bind the lease, capacity, grades, control and metrics routes.
+    Both capacity ports serve the same cached budgeted load, refreshed by the metrics
+    serve loop after REFRESH_MS. Grade lookups remain per request. Each scrape observes
+    load and mirror ages. The caller runs each serve_forever.
+    """
 
-    def snapshot() -> Load:
-        return budget.observe(scheduler.load(clock()), spending.status())
+    def snapshot(now_ms: int) -> Load:
+        return budget.observe(scheduler.load(now_ms), spending.status())
+
+    latest = metrics.Latest(snapshot, clock, REFRESH_MS)
 
     def scrape() -> Load:
         if mirror is not None:
             metrics.observe_mirror(scheduler.registry, mirror, clock())
-        return snapshot()
+        load, built_ms = latest.read()
+        metrics.observe_age(scheduler.registry, built_ms, clock())
+        return load
 
     api, steering, exposition = ports
     lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
-    port = service.Routes(lease, snapshot, scheduler.grades_of)
+    port = service.Routes(lease, lambda: latest.read()[0], scheduler.grades_of)
     return (
         service.serve("", api, port),
         lease_api.serve_control("", steering, routes),
-        metrics.serve("", exposition, scrape, scheduler.registry),
+        metrics.serve("", exposition, scrape, scheduler.registry, latest.refresh),
     )
 
 

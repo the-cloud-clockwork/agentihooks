@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__paren_end:97c60fa36431773e1d6102256b6a38b0435899f9ccbff9a5836e00efb13b6e43": {
+    "reader": "standards_reader",
+    "reason": "The mutant depth is the negation of the original at each step, and the scan starts on \"(\", so the same \")\" closes."
+  }
+}

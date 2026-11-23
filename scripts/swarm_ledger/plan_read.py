@@ -13,8 +13,9 @@ import re
 import sys
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from importlib import import_module
+from typing import Any
 
 from scripts.swarm_ledger import HERE
 
@@ -38,9 +39,9 @@ def chunk(text: str, lines: str, margin: int = MARGIN) -> str:
     return "".join(f"{row}\n" for row in rows[max(1, start - margin) - 1 : min(len(rows), end + margin)])
 
 
-def exact(doc: dict, task: dict) -> str:
+def exact(doc: dict[str, Any], task: dict[str, Any], load: Callable[[str, str], bytes] | None = None) -> str:
     phase = _phase(doc, task.get("phase")) or {}
-    source = _ledger("plan_packages").text() if _packaged(phase, task) else _stored(doc, phase, task)
+    source = _ledger("plan_packages").text() if _packaged(phase, task) else _stored(doc, phase, task, load)
     text = chunk(source, task["plan_lines"], margin=0)
     if not text.strip():
         raise ValueError(f"plan lines {task['plan_lines']} hold no text")
@@ -226,6 +227,18 @@ def _served(env, slug: str, file_id: str) -> bytes:
         if error.code != 404:
             raise
         raise ValueError(f"no stored artifact {file_id}") from None
+
+
+def fetched(slug: str, env: Mapping[str, str]) -> tuple[dict[str, Any] | None, Callable[[str, str], bytes] | None]:
+    from scripts.swarm_ledger import ledger_link
+    from scripts.swarm_ledger.storage import read_ledger
+
+    hosted = ledger_link.remote(env)
+    keys = ("tasks", "phases", "artifacts")
+    doc: dict[str, Any] | None = (
+        _hosted(slug, keys) if hosted else read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, *keys)
+    )
+    return doc, functools.partial(_served, env) if hosted else None
 
 
 def main(argv=None, environ=None) -> int:

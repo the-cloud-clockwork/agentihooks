@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__operator:2349ff16e8e72aaea93a42e1b8a1d1572e3a9b38c400d8d8823beef5f4848607": {
+    "reader": "standards_reader",
+    "reason": "Operator tails never contain whitespace, so lstrip(None) changes only leading \"&\", which the \">\"/\"<\" test, emptiness and endswith(\"&\") ignore."
+  }
+}

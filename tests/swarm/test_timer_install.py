@@ -545,7 +545,7 @@ def test_the_own_group_is_the_tick_service_cgroup_on_either_hierarchy(tmp_path, 
         assert str(found).startswith(str(tmp_path / "fs" / procs))
 
 
-def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
+def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path: Path) -> None:
     calls = []
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
     (tmp_path / "agentihooks-swarm.service").write_text("[Service]\nType=oneshot\n")
@@ -560,7 +560,7 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     ]
     calls.clear()
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
-    assert [argv[2] for argv, _ in calls] == ["enable"] * 5
+    assert [argv[2] for argv, _ in calls] == ["enable"] * 6
 
 
 def test_ensure_fails_and_keeps_the_tick_timer_when_registration_fails_before_any_delivery(tmp_path, monkeypatch):
@@ -1139,7 +1139,9 @@ def test_hosts_work_reads_the_swarm_store_and_keeps_the_units_when_it_cannot(mon
     assert real_hosts_work() is True
 
 
-def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anton(tmp_path, monkeypatch):
+def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anton(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     cancelled = []
     monkeypatch.setattr(timer, "unschedule", lambda: cancelled.append(True))
     monkeypatch.setattr(timer, "schedule", lambda caller: pytest.fail("the tick was scheduled"))
@@ -1159,6 +1161,7 @@ def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anto
         ["systemctl", "--user", "daemon-reload"],
     ]
     assert sorted(path.name for path in unit_dir.iterdir()) == [
+        "agentihooks-ledger-writer.service",
         "agentihooks-quota-prober.service",
         "agentihooks-scheduler.service",
     ]

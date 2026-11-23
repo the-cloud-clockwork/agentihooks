@@ -1,0 +1,6 @@
+{
+  "scripts/handoff/check.py:scripts.handoff.check.x__sections:39a18d10d3a0eb008dbf068078874e0d31b307240ab8c2740025a21c4beea1cf": {
+    "reader": "standards_reader",
+    "reason": "_sections only reads fenced as a truth value, and not None equals not False, so flips and heading detection are the same."
+  }
+}

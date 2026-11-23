@@ -1,0 +1,21 @@
+rules:
+  - id: hive-queue-priority-permission
+    languages: [python]
+    severity: ERROR
+    message: Catch the Redis permission refusal alongside SwarmError so a successful hive enqueue returns a plain priority error.
+    paths:
+      include:
+        - /scripts/swarm/queue_priority.py
+        - hive-queue-priority-permission.py
+    patterns:
+      - pattern-inside: |
+          def $AUTOMATIC(...):
+              ...
+      - metavariable-regex:
+          metavariable: $AUTOMATIC
+          regex: ^automatic($|_)
+      - pattern: |
+          try:
+              return apply(...)
+          except SwarmError as $EXC:
+              ...

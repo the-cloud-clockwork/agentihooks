@@ -637,6 +637,7 @@ granting each key Redis refused until all five passed gave the list.
 | `agentihooks swarm <slug> wait --on ...` | The prerequisite wait record `swarm:<slug>:prerequisite-waits`, which it clears and writes. A wait without `--on` writes only below the member's own hive key. |
 | `agentihooks swarm <slug> block` | The same claim release, agent records and seat exit mark as `done`, plus `swarm:<slug>:dev-red` and, for a stacked prerequisite, `prerequisite-waits`. |
 | `agentihooks swarm <slug> learned` | The seat's learned notes `seat:<seat>:learned`. |
+| `agentihooks swarm <slug> expert complete` | The expert lineage record `swarm:<slug>:expert-lineages`, the running set `expert-running`, the kept proof `expert-proofs` and the closing set `expert-closing`. The lineage sequence, the saved missions and the launch count stay refused. |
 | A refused execution record write | The identity conflict counter, kept in `swarm:state:counters:*`. |
 
 The rest of the list covers records the same commands write through the execution registry, fencing and gate code:
@@ -881,7 +882,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `max-agents` | whole number, 0 or more, or `auto` | `auto` | A cap on the hive's agent ceiling. With no cap the ceiling is computed each tick from the hive's own heartbeat reading: the agents it runs plus the room the workstation host room rule gives its free memory less swap in use and its one minute load. A cap holds the ceiling lower; `0` scales the hive fully down, so the tick places no new agent there; `auto` clears it. Placement admits no hive past the ceiling, and the headroom admission still applies beside it. With no cap and no fresh reading the ceiling reads `unknown`. Masters do not count against it. A stored value is kept. |
 | `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
-Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role
+Every hive takes every agent type (master, eng, ci, review, plan, dispatch and any profile) unless the agent's lane role
 or profile is in its `excluded` list, and never past its max agents. `prefer` refuses a role the hive excludes. An
 unset `excluded` follows the hive's current `ui`. A hive still on a legacy record with the old `roles` setting drops
 it, with its stored `max-agents`, on its next heartbeat, join or `hive set`, and reads under the defaults until then.
@@ -919,14 +920,14 @@ prints each agent's hive in its Hive column, and the ledger page agents table na
 The operator runs a PC, a VM and a set of pods:
 
 ```bash
-agentihooks hive set pc  ui=yes excluded=qa,frontend,eng,ci,plan,dispatch prefer=master:1
-agentihooks hive set vm  ui=yes excluded=eng,ci,plan,dispatch prefer=master:2,qa:1,frontend:1
+agentihooks hive set pc  ui=yes excluded=qa,frontend,eng,ci,review,plan,dispatch prefer=master:1
+agentihooks hive set vm  ui=yes excluded=eng,ci,review,plan,dispatch prefer=master:2,qa:1,frontend:1
 agentihooks hive set pod-1 ui=no ephemeral=yes max-agents=20
 ```
 
 - The master runs on the PC while it is live, and on the VM when the PC is gone; the pods exclude it by default.
 - QA and frontend work runs on the VM, then on a pod when the VM is gone.
-- Engineer, CI, planner and dispatcher work runs on the pods, and on the PC when every pod is full once the PC no
+- Engineer, CI, reviewer, planner and dispatcher work runs on the pods, and on the PC when every pod is full once the PC no
   longer excludes that role.
 
 ### The dispatcher seat on hives
@@ -934,7 +935,7 @@ agentihooks hive set pod-1 ui=no ephemeral=yes max-agents=20
 The dispatcher is one seat per swarm, `dispatcher@<slug>`, in the `dispatch` lane. The tick's dispatch seat step
 starts it while the swarm runs at `autonomy=full` and has an open dispatcher trigger: a Priorities item, an
 uncovered bottleneck share, a red dev run that holds work, or an inbox item for the seat. It ends the seat when the
-triggers close. It spawns through hive placement like the `eng`, `ci` and `plan` lanes: the
+triggers close. It spawns through hive placement like the `eng`, `ci`, `review` and `plan` lanes: the
 `dispatcher` profile places as the `dispatch` worker role, so it lands on any live hive that does not exclude
 `dispatch` or `dispatcher`, ordered as in [Placement](#placement).
 
@@ -1038,7 +1039,7 @@ unchanged.
 
 #### How round robin picks a hive
 
-For each `eng`, `ci`, `plan` or `dispatch` launch, and any other worker profile, placement:
+For each `eng`, `ci`, `review`, `plan` or `dispatch` launch, and any other worker profile, placement:
 
 1. Keeps the live hives that are not draining, do not exclude the launch's lane, role or profile, and host its
    profile, as under `anton-first`.
@@ -1099,14 +1100,14 @@ when agents placed before the switch still run where `anton-first` put them. Rou
 
 ### Workstation fallback for workers
 
-A headless hive refusing an `eng`, `ci`, `plan` or `dispatch` launch does not prevent an eligible UI hive,
+A headless hive refusing an `eng`, `ci`, `review`, `plan` or `dispatch` launch does not prevent an eligible UI hive,
 such as the workstation, from taking it. This covers a missing account slot, a repo mismatch, a missing login,
 no admission room, or no live headless hive. The workstation must pass the same account, repo, role and room
 checks. A fallback never bypasses a task's hive pin or workstation requirement.
 
 Worker selection now ranks eligible headed and headless hives together using `prefer` and utilization. Set a
 lower `prefer` rank for a worker to favor it; being headless alone does not force that worker to win. The engineer,
-cicd, planner and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; frontend and qa profiles keep
+cicd, reviewer, planner and dispatcher profiles place as `eng`, `ci`, `review`, `plan` and `dispatch`; frontend and qa profiles keep
 their UI role on any lane.
 
 For a workstation reporting five accounts and a headless worker reporting one, a launch can use the worker's
@@ -1168,6 +1169,7 @@ does:
 | `qa`, on any lane | `qa` | UI hive only |
 | `engineer` | `eng` | Any hive that does not exclude it |
 | `cicd` | `ci` | Any hive that does not exclude it |
+| `reviewer` | `review` | Any hive that does not exclude it |
 | `planner` | `plan` | Any hive that does not exclude it |
 | `dispatcher` | `dispatch` | Any hive that does not exclude it |
 
@@ -1182,7 +1184,7 @@ UI roles, `master`, `qa` and `frontend`:
   `no live swarm-master takes qa` (or `frontend`). It never runs on the headless hive.
 - These roles never overflow to the local machine, and round robin placement leaves them under `anton-first`.
 
-Worker roles, `eng`, `ci`, `plan` and `dispatch`, place on every live hive that does not exclude them, UI or
+Worker roles, `eng`, `ci`, `review`, `plan` and `dispatch`, place on every live hive that does not exclude them, UI or
 headless, by the order above. A UI hive's `excluded` default is empty, so the workstation takes worker work on
 equal terms with the pods unless it excludes the worker roles or the pods rank first in `prefer`. With the
 defaults, worker roles are not held to headless hives. Two layouts control when worker roles reach the
@@ -1191,11 +1193,11 @@ workstation:
 ```bash
 # Worker work never runs on the workstation; it waits for a pod with room
 agentihooks hive set anton-1 ui=no ephemeral=yes                 # excluded defaults to master
-agentihooks hive set desk ui=yes excluded=eng,ci,plan,dispatch prefer=master:1
+agentihooks hive set desk ui=yes excluded=eng,ci,review,plan,dispatch prefer=master:1
 
 # Worker work runs on the workstation only when no ranked pod takes it, with the reason logged
-agentihooks hive set anton-1 prefer=eng:1,ci:1,plan:1,dispatch:1
-agentihooks hive set anton-2 prefer=eng:2,ci:2,plan:2,dispatch:2
+agentihooks hive set anton-1 prefer=eng:1,ci:1,review:1,plan:1,dispatch:1
+agentihooks hive set anton-2 prefer=eng:2,ci:2,review:2,plan:2,dispatch:2
 agentihooks hive set desk ui=yes excluded=
 agentihooks hive show desk                                       # "excluded": [], "prefer": {}
 ```
@@ -1266,17 +1268,40 @@ A reading holds:
 | Field | Source |
 |---|---|
 | `cpus`, `load5` | CPU count and the five minute load average from `/proc/loadavg`. |
+| `cpu_ticks`, `used_cpus` | The node's busy and total CPU ticks from `/proc/stat`, and the CPUs used since the previous reading; `used_cpus` needs a previous reading, so the first reading after a start carries only the ticks. |
 | `available_mb`, `total_mb` | Available and total memory from `/proc/meminfo`. |
 | `pod_total_mb`, `pod_available_mb` | The cgroup v2 `memory.max` limit and that limit minus current use less inactive file pages, only when the limit is set. |
 | `pod_cpus`, `pod_cpu_usec`, `pod_load` | The cgroup v2 `cpu.max` quota and usage; `pod_load` needs a previous reading under 30 seconds old, so the pod CPU limit does not apply to the first reading after a start or a gap. |
 | `pending` | Launch orders waiting in the hive's order stream, shown by `hive list`. Room counts the hive's pending launch reservations instead. |
+| `agents` | The agent processes running on the machine, counted per harness, such as `{"claude": 6, "codex": 3}`. |
 | `measured_at` | Milliseconds when the reading was taken. |
 
 The reading expires after 30 seconds, and a reader treats one older than that as absent. With no fresh reading the
 hive's room is 0, the refusal reads `missing telemetry: no fresh headroom reading`, and `hive list` shows
-`headroom=missing`. Otherwise each limit fits whole agents at 0.5 CPU and 850 MB each under 80 percent of the host,
-and of the pod when the cgroup sets a limit; launches reserved on the hive in the last fifteen minutes count against
-each limit, and the smallest limit wins.
+`headroom=missing`. Otherwise each limit fits whole agents at the measured CPU per agent and 850 MB each under 80
+percent of the host, and of the pod when the cgroup sets a limit; launches reserved on the hive in the last fifteen
+minutes count against each limit, and the smallest limit wins.
+
+The CPU per agent comes from the reading itself:
+
+- **Measured:** the pod load over the agents the reading counts, rounded up to the next 0.05 and never below 0.5. A
+  pod load of 6.70 over 9 agents gives 0.75 CPU per agent.
+- **Default:** 0.5 CPU per agent when no agent runs or the reading carries no pod load: the first reading after a
+  start, a reading taken after a stale one, since pod load needs a previous reading under 30 seconds old, and a host
+  without a cgroup CPU limit. A reading that is itself stale never reaches admission; the hive's room is 0 as above.
+- **Setting:** `AGENTIHOOKS_HIVE_AGENT_CPU` overrides both, in CPUs per agent. A value that is not a number above 0
+  after rounding to hundredths is ignored.
+
+Every CPU detail names the figure and where it came from, for example
+`pod load 6.70 on a 16 CPU limit, 0.75 CPU per agent measured from pod load 6.70 over 9 agents, fits 8 more under the 80 percent line`,
+`0.5 CPU per agent by default` or `1 CPU per agent set by AGENTIHOOKS_HIVE_AGENT_CPU`.
+
+The host CPU line reads `used_cpus` when the reading carries it and the five minute load only as a fallback. With
+`used_cpus` in the reading it also carries a guard: while the five minute load is above 80 percent of the CPUs and
+the hive's own CPU, its pod load when the reading carries one and else `used_cpus`, is at or above the 40 percent
+swarm share, the line gives room 0. The swarm share is 40 percent of the machine's CPUs and memory; on the
+workstation its CPU limit counts the local agents at the same CPU per agent, see
+[Workstation admission room and the swarm share](#workstation-admission-room-and-the-swarm-share).
 
 `hive run` publishes headroom on two paths:
 
@@ -1907,8 +1932,12 @@ The offers are sorted by three keys, in this order:
    when its target is a node in the task's ancestry, or a `lane:` or `kind:` selector whose value equals the task's
    lane or kind; see [Focus ranks in offer order](../reference/tick-adapters.md#focus-ranks-in-offer-order) for the
    full rules.
-2. **Ledger rank band.** `urgent`, then `high`, then `normal`, then `low`, read from the rank stored on the task row
-   by `scripts.swarm_ledger.ledger_rank.order`. A task with no rank counts as `normal`, except a documentation follow
+2. **Class, then ledger rank band.** A focused or `urgent` task comes first, by rank band. A task under an operator
+   order comes next, oldest order first and by rank band inside one order time: its order time is the earlier of
+   its own mark and its phase's, and the work it waits on carries the same time (see
+   [Operator orders](swarm.md#operator-orders)). Every other task follows, by rank band. The bands are `urgent`,
+   then `high`, then `normal`, then `low`, read from the rank stored on the task row by
+   `scripts.swarm_ledger.ledger_rank.order`. A task with no rank counts as `normal`, except a documentation follow
    up (profile `documentation` with `follow_up` set), which counts as `low`. `next` is stored as `urgent`.
 3. **Focus record position.** The position of the first focus record that covers the task; a task no record covers
    takes the count of focus records.
@@ -1924,8 +1953,9 @@ whatever their rank:
 - A task that joins the focus only because a focused task depends on it, is parked on it, or sits in a phase the
   focused task's phase waits on. It is offered, but no focus record covers it, so it has no focus position.
 
-With no focus record on the ledger, every offer is unfocused and goes out by rank band, in ledger order inside a
-band.
+With no focus record on the ledger, every offer is unfocused: `urgent` tasks go out first, then the tasks under an
+operator order, oldest order first, then the rest by rank band, in ledger order inside a band. An ordered `normal`
+task goes out ahead of an unordered `high` one.
 
 #### Offer order example
 
@@ -1953,6 +1983,9 @@ agentihooks swarm <slug> focus phases/<phase id> --only
 
 # Raise one task's rank band (master, planner or operator)
 agentihooks api --slug <slug> --as <name> task set <task id> rank=urgent
+
+# Mark a phase as the operator's order (the master, with his recorded words)
+agentihooks api --slug <slug> --as <name> order phases/<phase id> --quote "<his words>"
 
 # Clear a focus or a freeze record
 agentihooks swarm <slug> unfreeze phases/<phase id>
@@ -2053,7 +2086,7 @@ An admission claims the task, starts its execution, occupies a seat and marks th
 hive launches anything. When the launch then fails, the hive gives the admission back with `reopen`, so the task
 returns to `open` and is offered again: on the same poll for most failures, on the next poll for a launch the spoke
 left `launching`, and through the dead letter on the offer's last delivery. An admit ask the hub did not answer and a
-held answer send no `reopen`; the table below lists every case. Every eng, ci and plan spoke does this on every
+held answer send no `reopen`; the table below lists every case. Every eng, ci, review and plan spoke does this on every
 `events` swarm; no setting turns it on or off. A master spoke admits nothing on the hub and is outside this path.
 
 Before pull request [#11051](https://github.com/the-cloud-clockwork/agentihooks/pull/11051) the spoke reset only
@@ -3173,13 +3206,13 @@ The feature map entry `events-outage-hold-hub-agents` lists the regression tests
 ### Running a spoke
 
 With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation,
-and `agentihooks hive run`, the worker hive image's last start step, runs beside its telemetry loop an eng, ci and
-plan spoke for every swarm on the `events` engine, leaving out the lanes in `HIVE_EXCLUDED`. The workstation spoke
+and `agentihooks hive run`, the worker hive image's last start step, runs beside its telemetry loop an eng, ci, review
+and plan spoke for every swarm on the `events` engine, leaving out the lanes in `HIVE_EXCLUDED`. The workstation spoke
 runs the same lane spokes for every lane. Legacy engine swarms get no lane spoke. Each new spoke logs
 `hive spoke for swarm <slug> lane <lane> takes swarm.<slug>.ready.<lane>`, and a stopped set of lane spokes logs
 why and starts again after 30 seconds. Spokes take work from the bus and bind to the hub's streams instead of
 creating them. Outside distributed mode `agentihooks swarm spoke` refuses, because the workstation then runs the
-swarm engine itself, but `agentihooks hive run` still starts the eng, ci and plan spokes: under the `events` engine
+swarm engine itself, but `agentihooks hive run` still starts the eng, ci, review and plan spokes: under the `events` engine
 the tick launches no workstation task and offers each one pinned to the root hive, so the root hive's lane spokes
 are its only taker, and only a spoke poll beats the hive's presence. `hive run` loads the operator env files before
 the spokes read their bus settings, and a draining hive polls no spoke but keeps beating presence on every `events`
@@ -4242,14 +4275,14 @@ pull request #11279, or the daemon cannot read its own epoch because `/proc/sys/
 ## Hive placement for one swarm on a local machine
 
 A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks swarm <id> set hive-placement=on`
-makes that one swarm's tick place like a `hybrid` controller: eng, ci, plan and dispatch work goes to joined hives
+makes that one swarm's tick place like a `hybrid` controller: eng, ci, review, plan and dispatch work goes to joined hives
 with the role and room, and the master goes to a UI hive. Every other swarm on the machine, and every ledger client,
 stays local, because `AGENTIHOOKS_DEPLOYMENT` is unchanged. Before turning it on, run the machine itself as a hive
 (`agentihooks hive install`, then `agentihooks hive set <id> ui=yes max-agents=N`) so local work and the master keep a
 hive to land on. `hive-placement=off` rolls back on the next
 tick. On a machine in any other mode the setting changes nothing.
 
-Hives fill first. When no hive takes an eng, ci, plan or dispatch spawn, the tick runs it in the machine's own herdr
+Hives fill first. When no hive takes an eng, ci, review, plan or dispatch spawn, the tick runs it in the machine's own herdr
 panes while the machine runs fewer worker agents than `agentihooks swarm <id> set local-max-agents=N` (default 15),
 counted across every swarm on the machine, and only while the host room guard finds load and memory room. At the cap
 the spawn waits with the hive's reason and the local count.
@@ -4257,7 +4290,7 @@ Masters, qa and frontend keep the UI host rule, and a task pinned to a hive neve
 
 ### Placement order for a worker spawn
 
-For each eng, ci, plan or dispatch spawn the tick decides in this order:
+For each eng, ci, review, plan or dispatch spawn the tick decides in this order:
 
 1. Hive placement picks a live hive that takes the role, has room and holds the repo, as in
    [Placement](#placement). When one does, the agent launches there. When the chosen hive is the machine itself, the
@@ -4317,10 +4350,10 @@ Otherwise the room is the smallest of these limits:
 
 | Limit | Rule |
 |---|---|
-| Host CPU | Whole agents at 0.5 CPU each under 80 percent of the CPUs, measured from CPU used when the reading carries it, else from the five minute load. With CPU used in the reading, a five minute load above 80 percent of the CPUs and the hive's own CPU at or above 40 percent of them gives room 0; the hive's own CPU is its pod load when the reading carries one, else CPU used. |
+| Host CPU | Whole agents at the CPU per agent from [Headroom](#headroom), 0.5 on a workstation without a cgroup CPU limit, under 80 percent of the CPUs, measured from CPU used when the reading carries it, else from the five minute load. With CPU used in the reading, a five minute load above 80 percent of the CPUs and the hive's own CPU at or above 40 percent of them gives room 0; the hive's own CPU is its pod load when the reading carries one, else CPU used. |
 | Host memory | Whole agents at 850 MB each under 80 percent of total memory. |
 | Pod CPU and memory | The same rules on the cgroup limits, when the machine runs in a pod with limits set. |
-| Swarm share, CPU | 40 percent of the CPUs at 0.5 CPU per agent, less the local agents running: 12 agents on 16 CPUs. |
+| Swarm share, CPU | 40 percent of the CPUs at the same CPU per agent, less the local agents running: 12 agents on 16 CPUs at 0.5. |
 | Swarm share, memory | 40 percent of total memory at 850 MB per agent, less the local agents running. |
 
 The swarm share yields to the machine's agent ceiling. When the machine is a hive, the tick reads its ceiling, the
@@ -4357,7 +4390,8 @@ The spawn is admitted and the local cap reads 20. Before
 no hive for eng has room: ..., and the local machine runs 12 of its 12 agents: cpu: 12 swarm agents at 0.5 CPU each on 16 CPUs, fits 0 more under the 40 percent swarm share
 ```
 
-A spawn whose placement already chose the machine's own hive waits without the hives' reason in front:
+A spawn whose placement had already chosen the machine's own hive waited without the hives' reason in front. Both
+lines are the text of that time; the CPU figure now also names its source, as in `0.5 CPU each by default`:
 
 ```text
 , and the local machine runs 12 of its 12 agents: cpu: 12 swarm agents at 0.5 CPU each on 16 CPUs, fits 0 more under the 40 percent swarm share
@@ -4370,9 +4404,9 @@ yields only that far.
 
 When the ceiling itself equals what the share fits, the share still names the limit; with 10 agents running under a
 ceiling of 12 the room reads
-`cpu: 10 swarm agents at 0.5 CPU each on 16 CPUs, fits 2 more under the 40 percent swarm share`. A busy host binds on
-its own line: at a five minute load of 12.00 on 16 CPUs the room reads
-`cpu: five minute load 12.00 on 16 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line` with 12 agents
+`cpu: 10 swarm agents at 0.5 CPU each by default on 16 CPUs, fits 2 more under the 40 percent swarm share`. A busy
+host binds on its own line: at a five minute load of 12.00 on 16 CPUs the room reads
+`cpu: five minute load 12.00 on 16 CPUs, 0.5 CPU per agent by default, fits 1 more under the 80 percent line` with 12 agents
 running under any ceiling above 12.
 
 To let the workstation run twenty local workers:
@@ -5218,8 +5252,9 @@ node's memory. Size it from the node's budget and the agents' measured use, in t
    cgroup of its own. Past the pod limit the kernel OOM killer ends a process in the pod cgroup; when that is the
    hive's main process, the container restarts and every agent on the hive ends.
 
-4. Check CPU against the pod's CPU limit. Inside the pod, admission refuses a launch unless 0.5 CPU fits under 80
-   percent of the pod's CPU limit, measured on the pod's load ([Headroom](#headroom)). Launches stop once pod load
+4. Check CPU against the pod's CPU limit. Inside the pod, admission refuses a launch unless one more agent's CPU, the
+   pod load over its running agents and never below 0.5, fits under 80 percent of the pod's CPU limit, measured on the
+   pod's load ([Headroom](#headroom)). Launches stop once pod load
    nears that line, so the hive reaches `maxAgents` only while its agents average about 0.8 times the CPU limit
    divided by `maxAgents`. A higher `maxAgents` with too small a CPU limit leaves the hive at a ceiling below its
    cap, with launches refused for `cpu`.
@@ -5523,7 +5558,7 @@ its turn sends each agent one inbox order to hand off, so successors start on th
 
 The antoncore swarm hives are one ArgoCD Application each, `swarm-hive-001` and `swarm-hive-003`, with values in
 `k8s/values-overlays/<hive>/values.yaml`. Each takes the `agentihooks-swarm` chart from
-`ghcr.io/the-cloud-clockwork/charts` at `targetRevision: '*'`, runs the hive worker image at tag `release` with
+`ghcr.io/the-cloud-clockwork/charts`, runs the hive worker image at tag `release` with
 `pullPolicy: Always`, and sets `workers.rollout.enabled: true` (the chart default is false), keeping the other
 rollout defaults:
 
@@ -5536,14 +5571,18 @@ workers:
     enabled: true
 ```
 
-ArgoCD syncs each release's chart. Pod templates carry no chart version label
+The release hive, `swarm-hive-001`, follows `targetRevision: '*'` and rolls at most once per automated sync window
+onto the newest chart. Manual syncs remain allowed. The stable hive, `swarm-hive-003`, pins its chart and keeps its
+daily manual drain then chart bump.
+
+ArgoCD syncs the release hive inside its automated sync window and the stable hive after its manual bump. Pod
+templates carry no chart version label
 ([#10072](https://github.com/the-cloud-clockwork/agentihooks/pull/10072)), but each leased worker hive on the `release`
-tag carries the release chart's `appVersion` as its `release` stamp, so every release changes it once and rolls the hive
+tag carries the synced chart's `appVersion` as its `release` stamp, so each newly synced chart changes it once and rolls the hive
 ([#12360](https://github.com/the-cloud-clockwork/agentihooks/issues/12360)). A rolled pod pulls the current `:release`
 image. Each roll goes through the shared Lease `default/agentihooks-hive-rollout`, one hive at a time. The overlays
 set no `release` stamp and the Applications carry no image updater annotations, so no second writer changes the
-template after the chart moved; antoncore's `test_hive_release_roll` asserts both, and that a chart version bump
-leaves each hive pod template unchanged.
+template after the chart moved; antoncore's `test_hive_release_roll` guards that single writer behavior.
 
 Antoncore [#1474](https://github.com/the-cloud-clockwork/antoncore/pull/1474) first wrote each release's `:release`
 digest into `workers.rollout.release` through the ArgoCD image updater. On release v2.17.472 that rolled every hive
