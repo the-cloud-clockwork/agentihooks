@@ -1667,6 +1667,8 @@ def test_the_hub_admits_a_launch_for_a_hive_below_its_max_agents(
 def _lineage_running(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, slug: str, expert: str) -> str:
     """Hive A one below its cap of two beside a running expert lineage of the swarm whose expert, seated on another
     hive, is in the given state; no expert record at all when the state is empty. Returns the lineage id."""
+    from dataclasses import replace
+
     from scripts.swarm import expert_lineage
     from scripts.swarm.store import AgentRecord
     from tests.swarm.test_expert_mission import GOOD
@@ -1674,9 +1676,10 @@ def _lineage_running(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, slug
     _hive_holding(rig, monkeypatch, "2", 1)
     lineage = expert_lineage.start(rig.store, slug, GOOD, "/missions/batch.md", "xhigh", "master@a1b2c3-0001", 1_000)
     if expert:
-        seat = f"{lineage.id}@{slug}"
-        record = AgentRecord("expert@a1b2c3-0001", "expert", lineage.id, seat=seat, state=expert, hive="hive-b")
-        rig.store.put_agent(slug, record)
+        name = rig.store.next_name(slug, "expert")
+        record = AgentRecord(name, "expert", lineage.id, seat=lineage.seat, started_at=1, hive="hive-b")
+        agent = rig.store.start_execution(slug, record)
+        rig.store.put_agent(slug, replace(agent, state=expert))
     return lineage.id
 
 
