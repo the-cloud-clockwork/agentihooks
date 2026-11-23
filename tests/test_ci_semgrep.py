@@ -354,7 +354,11 @@ def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
     assert 'git show "$BASE:$list"' in step["run"]
     assert "current <= previous" in step["run"]
     lists = sorted(path.name for path in (_ROOT / ".semgrep").glob("*-allowlist.json"))
-    assert lists == ["source-control-allowlist.json", "tick-unbounded-read-allowlist.json"]
+    assert lists == [
+        "source-control-allowlist.json",
+        "test-private-imports-allowlist.json",
+        "tick-unbounded-read-allowlist.json",
+    ]
 
 
 @pytest.mark.feature("tick-unbounded-read-rule")
@@ -698,10 +702,25 @@ def test_exactly_one_step_per_ratchet_grades_against_the_base():
     ]
     assert [(job, step["name"]) for job, step in ratchets] == [
         ("scan", "New test waits keep a bound of ten seconds or more"),
+        ("scan", "Test modules import no new private names from other test modules"),
         ("scan", "Fail on findings new against the base"),
         ("charts", "Guard rules hold on their fixtures and at their computed floors"),
     ]
     assert all(not {"if", "continue-on-error"} & set(step) for _, step in ratchets)
+
+
+@pytest.mark.feature("test-private-imports-ratchet")
+def test_private_test_imports_gate_runs_the_grader_copy_against_the_merge_base() -> None:
+    steps = _jobs()["scan"]["steps"]
+    names = [step.get("name") for step in steps]
+    step = steps[names.index("Test modules import no new private names from other test modules")]
+    assert step["env"] == {"BASE": "${{ inputs.base }}", "SCRIPT": "scripts/private_test_imports.py"}
+    assert step["run"].splitlines() == [
+        'grader="$SCRIPT"',
+        'if [[ -e "$RUNNER_TEMP/grader/$SCRIPT" ]]; then grader="$RUNNER_TEMP/grader/$SCRIPT"; fi',
+        'python "$grader" check --baseline-commit "$(git merge-base "$BASE" HEAD)" --grader "$RUNNER_TEMP/grader"',
+    ]
+    assert names.index("Check out the protected grader") < names.index(step["name"]) < len(steps) - 1
 
 
 def test_wrapper_is_triggered_only_by_workflow_call():
