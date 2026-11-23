@@ -3,10 +3,12 @@ import hmac
 import io
 import json
 import signal
+from typing import cast
 
 import pytest
 
 from scripts.ci_lab.webhooks import LabIntake
+from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
@@ -642,7 +644,7 @@ def test_repository_events_from_recorded_payloads():
 
 
 @pytest.mark.feature("swarm-review-trigger")
-def test_a_merge_group_without_a_head_ref_names_no_pull_request():
+def test_a_merge_group_without_a_head_ref_names_no_pull_request() -> None:
     payload = merge_group()
     del payload["merge_group"]["head_ref"]
     [(_, _, _, data)] = github_webhooks.repository_events("merge_group", payload)
@@ -650,11 +652,10 @@ def test_a_merge_group_without_a_head_ref_names_no_pull_request():
 
 
 @pytest.mark.feature("swarm-review-trigger")
-def test_the_lazy_pull_tracker_announces_a_repository_event_to_the_tracking_swarm():
-    bus = open_bus(BusConfig())
-    Pulls(bus, fetch=lambda url: pytest.fail("unexpected fetch"), clock=lambda: 1000).track("crew", URL)
+def test_the_lazy_pull_tracker_announces_a_repository_event_to_the_tracking_swarm() -> None:
+    bus, _, _ = setup()
     consumer = bus.events.consumer("watch", "swarm.crew.release.published")
-    github_webhooks.LazyPulls(bus).announce(REPO, "release.published", "v1", {"tag": "v1"})
+    github_webhooks.LazyPulls(cast(Bus, bus)).announce(REPO, "release.published", "v1", {"tag": "v1"})
     [event] = drain(consumer)
     assert (event.swarm, event.type, event.key, event.data) == (
         "crew",
