@@ -800,11 +800,16 @@ def test_mutation_drops_its_private_tree_when_the_runner_raises(
 @pytest.mark.parametrize(
     ("members", "manifest", "refusal"),
     [
-        (("scripts.alpha.x_first__mutmut_1",), "", "mutant unit m1 carries no manifest"),
         (
-            ("scripts.alpha.x_first__mutmut_2", "scripts.alpha.x_second__mutmut_1"),
+            ("scripts.alpha.x_first__mutmut_1",),
+            "",
+            "^mutant unit m1 carries no manifest of the test files to trace$",
+        ),
+        (
+            ("scripts.alpha.x_third__mutmut_1", "scripts.alpha.x_first__mutmut_2", "scripts.alpha.x_second__mutmut_1"),
             "[]",
-            "scripts.alpha.x_second__mutmut_1",
+            "^mutant unit m1 names mutants its tree holds behind no trampoline: "
+            r"\['scripts.alpha.x_second__mutmut_1', 'scripts.alpha.x_third__mutmut_1'\]$",
         ),
     ],
 )
@@ -838,7 +843,10 @@ def test_the_worker_trampolines_the_mutants_the_scheduler_names_for_a_change(tmp
         "class Meter:\n    def read(self, amount):\n        return amount * 3\n"
     )
     files = {
-        "pyproject.toml": '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/"]\n',
+        "pyproject.toml": (
+            '[project]\nname = "change"\n\n[project.optional-dependencies]\ndev = ["mutmut==3.6.0"]\n\n'
+            '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/"]\n'
+        ),
         "scripts/sample.py": sample,
         "scripts/plain.py": "LIMIT = 1\n",
         "hooks/other.py": kept,

@@ -73,7 +73,7 @@ def test_every_part_of_a_split_mutant_unit_names_the_test_files_it_traces(
 def test_a_promotion_head_that_changes_no_function_plans_no_stats_unit_for_its_test_modules(tmp_path: Path) -> None:
     suite = _suite(tmp_path, DELIVERY["lab"])
     _git(suite.repo, "switch", "-q", "-c", "other", suite.base)
-    edits = {"scripts/alpha.py": "LIMIT = 1\n\n\n" + ALPHA, GAMMA: PASSING, "tests/test_beta.py": PASSING}
+    edits = {"scripts/alpha.py": ALPHA + "\n\nLIMIT = 1\n", GAMMA: PASSING, "tests/test_beta.py": PASSING}
     head = _commit(suite.repo, edits)
 
     found = Port(SUITE_MANIFEST).expander(tmp_path).expand(suite.request(Priority.PROMOTION, head))

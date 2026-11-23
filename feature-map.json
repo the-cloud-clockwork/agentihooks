@@ -12596,6 +12596,20 @@
       ]
     },
     {
+      "id": "lab-stats-of-a-test-file-with-no-test",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs-mutation",
+      "behaviour": "A CI lab stats collection over test files that collect no test ends as a record with status zero and no test, so a traced test module that holds no test fails neither its stats unit nor the mutant units that trace it beside a file whose record is stored. Only pytest's no tests collected exit code is read that way: a failed, interrupted, internally broken or misused session keeps its code and still fails the collection.",
+      "seam": "scripts.ci_lab.run_mutation.collect for each pytest exit code, and the lab runner run as its own process in a corpus tree for a stats request over a test file that holds no test, alone on an empty cache and beside a test file whose record is stored",
+      "rules": [
+        "lab-stats-record-carries-pytests-exit-code"
+      ],
+      "tests": [
+        "tests/ci_lab/test_run_mutation.py::test_a_stats_collection_that_collects_no_test_is_an_empty_record_and_every_other_code_stays",
+        "tests/ci_lab/test_run_mutation.py::test_the_runner_answers_a_stats_request_over_a_test_file_that_holds_no_test"
+      ]
+    },
+    {
       "id": "test-seat-through-admission",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-seat-helper",

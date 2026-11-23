@@ -39,9 +39,9 @@ def trampolined_with_another_modules_constant_of_every_line(tree: Path, path: st
     return trampoline(tree, path, run_mutation.EVERY_LINE)
 
 
-def trampolined_under_the_mutmut_source_paths(tree: Path, settings: dict[str, Any], tracked: list[str]) -> list[str]:
+def trampolined_under_the_mutmut_source_paths(tree: Path, pyproject: dict[str, Any], tracked: list[str]) -> list[str]:
     # ruleid: lab-trampolines-every-source-file
-    roots: list[str] = settings["tool"]["mutmut"]["source_paths"]
+    roots: list[str] = pyproject["tool"]["mutmut"]["source_paths"]
     return [path for path in tracked if any(Path(path).is_relative_to(root) for root in roots)]
 
 

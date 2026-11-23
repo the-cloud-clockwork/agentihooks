@@ -41,6 +41,7 @@ NO_TESTS = "no tests"
 SUSPICIOUS = "suspicious"
 STATUSES = {0: "survived", 1: "killed"}
 CRASHED = 3
+NOTHING_COLLECTED = int(pytest.ExitCode.NO_TESTS_COLLECTED)
 HITS: set[str] = set()
 
 
@@ -185,6 +186,12 @@ class WarmLoop:
         return run_items(session, [items[test] for test in order if test in items])
 
 
+def collected_status(code: int) -> int:
+    """Return the stats record status of a pytest exit code: zero when the session collected no test, since test
+    files that hold no test have nothing to trace, and the code itself otherwise."""
+    return 0 if code == NOTHING_COLLECTED else code
+
+
 def collect(options: Sequence[str], chosen: list[str]) -> list[dict[str, Any]]:
     """Run chosen once with stats tracing on and return the one stats result the cache splits per test file."""
     recorder = Recorder()
@@ -193,7 +200,7 @@ def collect(options: Sequence[str], chosen: list[str]) -> list[dict[str, Any]]:
     status = pytest.main([*options, *chosen], plugins=[recorder.plugin()])
     tests = {function: sorted(names) for function, names in recorder.tests.items()}
     cpu = process_time() - started
-    return [{"status": int(status), "tests": tests, "durations": recorder.durations, "cpu": cpu}]
+    return [{"status": collected_status(int(status)), "tests": tests, "durations": recorder.durations, "cpu": cpu}]
 
 
 def stats(root: Path, cache: Path, file_batch: Sequence[str], options: Sequence[str]) -> list[dict[str, Any]]:
