@@ -119,6 +119,21 @@ def test_a_retired_merge_group_grade_leaves_no_revision_and_no_demand_record(lab
 
 
 @pytest.mark.feature("lab-retire-gone-merge-groups")
+def test_a_forget_that_ended_before_the_live_set_exit_is_finished_by_the_next_pass(lab: Callable[..., Run]) -> None:
+    run = _queued(lab, unit(1))
+    live = run.grade(HEAD_A).run
+    run.lab.expander.gone.add(HEAD_A)
+    run.engine.queue.drop(HEAD_A)
+    run.lab.client.delete(scheduler.GRADES + live)
+    run.lab.client.hdel(scheduler.ORIGINS, live)
+    assert run.tick(1100) == [f"forgot {live}"]
+    assert run.lab.client.smembers(scheduler.LIVE) == set()
+    assert run.lab.client.hkeys(scheduler.REVISIONS) == []
+    assert run.lab.client.hkeys(scheduler.RECORDS) == []
+    assert _origins(run) == {}
+
+
+@pytest.mark.feature("lab-retire-gone-merge-groups")
 def test_a_merge_group_grade_whose_ref_is_listed_keeps_its_units_and_its_verdict(lab: Callable[..., Run]) -> None:
     lost, kept = unit(1), unit(2)
     run = lab(
