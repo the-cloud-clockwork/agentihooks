@@ -323,10 +323,13 @@ snapshot sets the queue, slot and `ci_lab_queue_wait_seconds` gauges through
 The scheduler service builds the snapshot with `scripts.ci_lab.scheduler.Scheduler.load` and
 serves it through `scripts.ci_lab.scheduler.listen`. Ports 8800 and 9108 serve `/capacity`
 from the same last snapshot a `scripts.ci_lab.metrics.Latest` holds; port 9108 also serves
-`/metrics` from it. The first read of either port after a start builds the snapshot once,
-however many reads meet that build, so the lab series stay without samples until that build
-finishes. A failed first build fails its own read, and each read that waited on it builds again in
-turn. Every later capacity read answers at once with the last finished build. Reads on port 9108 set
+`/metrics` from it. `listen` starts the first build with `Latest.start` right after it binds the
+three ports, in the same daemon thread a refresh uses, and no read waits for it: until that build
+finishes, `/capacity` on either port answers 503 with
+`{"error": "the load snapshot is not built yet"}` and `/metrics` answers 200 with the registry
+alone, so the lab series stay without samples until then. A failed first build leaves both answers
+in place until the serve loop's next refresh builds again. Every capacity read after the first
+build answers at once with the last finished build. Reads on port 9108 set
 `ci_lab_load_age_seconds` to the seconds since that build started. Between requests that port's serve loop runs `Latest.refresh`,
 which starts one background build, a daemon thread named `ci-lab-load-refresh`, once the last
 build started `REFRESH_MS` (15 seconds) ago and no build runs. The serve loop checks after each
@@ -678,7 +681,7 @@ lines of a metric with no sample, so Prometheus stores no series for it until th
 
 | Series | Read by | Set by |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `metrics.observe_load`, from `scripts.ci_lab.budget.slots_wanted` of the served load snapshot on every scrape, so it lags the queue by that snapshot's age and `CILabSchedulerBlind` fires only while Prometheus scrapes no running scheduler; a stale series never fires it, and `ci_lab_load_age_seconds` shows a refresh that stopped |
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `metrics.observe_load`, from `scripts.ci_lab.budget.slots_wanted` of the served load snapshot on every scrape after the scheduler's first build finishes, so it lags the queue by that snapshot's age and `CILabSchedulerBlind` fires only while Prometheus scrapes no running scheduler; a stale series never fires it, and `ci_lab_load_age_seconds` shows a refresh that stopped |
 | `ci_lab_units_overdue` | `CILabUnitsOverdue` | `metrics.observe_load`, on every scrape |
 | `ci_lab_workers_ready` | Workers ready against desired, as its `heartbeat` line | `metrics.observe_load`, on every scrape |
 | `ci_lab_core_seconds_total` | Core minutes per merged pull request | `metrics.observe_unit`, which `Scheduler._finished` calls once for each finished attempt whose worker uploaded a report |
@@ -2542,8 +2545,13 @@ A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<ru
 key of the repository, head, base, class and grader revision. Live grades sit in
 `agentihooks-ci:grades`, held heads in `agentihooks-ci:waiting`, a lane's latest run at
 `agentihooks-ci:lane:<repository>|<lane>|<class>` and a passing merge group grade at
-`agentihooks-ci:tree:<repository>|<tree>`. A rerequested check run grades the head again under
-`<run>-<now_ms>`, bypassing negative verdicts in the store.
+`agentihooks-ci:tree:<repository>|<tree>`. Every save of a live grade, and every compaction of one,
+increments its revision in the `agentihooks-ci:revisions` hash and writes the demand record of that
+revision, a JSON object of its revision, tier, hits and job ids, to the `agentihooks-ci:records`
+hash, both under `<run>` and in one transaction with the document. A grade leaving the live set
+leaves both hashes with it, and a save of a closed grade removes both with its document write. A
+rerequested check run grades the head again under `<run>-<now_ms>`, bypassing negative verdicts in
+the store.
 
 Every pass starts by retiring the merge group grades whose merge group is gone. The hash
 `agentihooks-ci:origins` holds the origin of each live grade: its class, repository, head and grade
