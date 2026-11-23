@@ -309,8 +309,13 @@ def test_server_round_trip(lab: leases.Leases, signer: Signer, jobs: queue.Queue
 
 @pytest.mark.feature("lab-scheduler-access-log-query-redaction")
 @pytest.mark.parametrize(("method", "status"), [("GET", 200), ("GET", 403), ("POST", 200)])
-def test_access_logs_omit_upload_query_strings(method: str, status: int, capsys: pytest.CaptureFixture[str]) -> None:
-    target = "/upload-url?job=example&token=synthetic-lease-value&name=log"
+@pytest.mark.parametrize(
+    ("target", "logged_path"),
+    [("/upload-url?job=example&token=synthetic-lease-value&name=log", "/upload-url"), ("/health", "/health")],
+)
+def test_access_logs_omit_upload_query_strings(
+    method: str, status: int, target: str, logged_path: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     seen: list[tuple[str, str, bytes, str | None]] = []
 
     def reply(method: str, target: str, raw: bytes, authorization: str | None) -> tuple[int, dict[str, Any]]:
@@ -335,7 +340,7 @@ def test_access_logs_omit_upload_query_strings(method: str, status: int, capsys:
     logged = capsys.readouterr().err
     assert "synthetic-lease-value" not in logged
     assert "?job=" not in logged
-    assert f'"{method} /upload-url HTTP/1.1" {status} ' in logged
+    assert f'"{method} {logged_path} HTTP/1.1" {status} -\n' in logged
 
 
 def order(routes: lease_api.ControlRoutes, path: str, body: object, authorization: str = BEARER) -> object:

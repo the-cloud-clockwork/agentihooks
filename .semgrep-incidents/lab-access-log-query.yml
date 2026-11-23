@@ -1,0 +1,35 @@
+rules:
+  - id: lab-access-log-query
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Scheduler access logs exposed worker lease tokens from upload URL query strings.
+      Log only the request method, query-free path and response status, never the raw request target or request line.
+    paths:
+      include:
+        - /scripts/ci_lab/
+        - lab-access-log-query.py
+    patterns:
+      - pattern-either:
+          - pattern: $LOGGER.$LOG(..., $REQUEST.requestline, ...)
+          - pattern: $LOGGER.$LOG(..., $REQUEST.path, ...)
+      - metavariable-regex:
+          metavariable: $LOG
+          regex: ^(log_message|log_error|log_request|debug|info|warning|error|exception|critical)$
+      - metavariable-regex:
+          metavariable: $REQUEST
+          regex: ^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$
+  - id: lab-handler-inherits-raw-access-log
+    languages: [python]
+    severity: ERROR
+    message: >-
+      BaseHTTPRequestHandler logs the raw request line by default, including upload lease tokens in the query.
+      Bind an explicit access logger that omits the query string.
+    paths:
+      include:
+        - /scripts/ci_lab/
+        - lab-access-log-query.py
+    patterns:
+      - pattern: type($NAME, (BaseHTTPRequestHandler,), {...})
+      - pattern-not: |
+          type($NAME, (BaseHTTPRequestHandler,), {..., "log_request": $LOGGER, ...})
