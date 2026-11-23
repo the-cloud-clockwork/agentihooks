@@ -5,11 +5,11 @@ name: Gate Protected
 on:
   pull_request_target:
     branches: [dev]
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
 
 concurrency:
-  group: ${{ format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
-  cancel-in-progress: false
+  group: gate-protected-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   actions: read

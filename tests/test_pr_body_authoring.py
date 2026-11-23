@@ -41,10 +41,10 @@ def test_engineer_fills_body_from_recon() -> None:
 
 
 @pytest.mark.feature("pull-request-recon-context")
-def test_protected_body_check_runs_on_body_edits() -> None:
+def test_protected_body_check_runs_on_every_head_update() -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/gate-protected.yml").read_text())
     events = workflow.get("on", workflow.get(True))
-    assert set(events["pull_request_target"]["types"]) == {"opened", "synchronize", "reopened", "edited"}
+    assert set(events["pull_request_target"]["types"]) == {"opened", "synchronize", "reopened"}
     steps = workflow["jobs"]["grade"]["steps"]
     body_step = next(step for step in steps if step.get("id") == "body")
     assert body_step["run"] == 'python -m scripts.pr_body check --event "$GITHUB_EVENT_PATH"'

@@ -117,12 +117,18 @@
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-pr-body",
       "behaviour": "Pull request bodies supply nine authored recon sections; missing or empty sections are named and the engineer fills them from recon while preserving existing authoring content.",
-      "seam": "scripts.pr_body missing_sections, fill and main; the protected pull request workflow and packaged engineer authoring step",
+      "seam": "scripts.pr_body missing_sections, fill and main; the protected pull request workflow and packaged engineer authoring step; the live check scripts.feature_checks.pr_body over the shipped template, protected workflow and engineer skill",
+      "semgrep_rule": "feature-pr-body-sections",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.pr_body"
+      ],
       "tests": [
         "tests/test_pr_body_authoring.py::test_existing_template_authoring_sections_remain",
         "tests/test_pr_body_authoring.py::test_engineer_preserves_first_push_and_ci_requirements",
         "tests/test_pr_body_authoring.py::test_engineer_fills_body_from_recon",
-        "tests/test_pr_body_authoring.py::test_protected_body_check_runs_on_body_edits",
+        "tests/test_pr_body_authoring.py::test_protected_body_check_runs_on_every_head_update",
         "tests/test_pr_body.py::test_complete_body_passes",
         "tests/test_pr_body.py::test_each_missing_section_is_named",
         "tests/test_pr_body.py::test_empty_sections_are_named",
@@ -144,7 +150,10 @@
         "tests/test_pr_body_boundaries.py::test_wrong_body_type_names_the_contract",
         "tests/test_pr_body_boundaries.py::test_fill_without_an_existing_body_has_only_recon_sections",
         "tests/test_pr_body_boundaries.py::test_multiple_missing_recon_details_are_named_in_order",
-        "tests/test_pr_body_boundaries.py::test_utf8_author_evidence_survives_an_ascii_default"
+        "tests/test_pr_body_boundaries.py::test_utf8_author_evidence_survives_an_ascii_default",
+        "tests/test_pr_body_check.py::test_the_checkout_holds_every_part_and_each_is_listed",
+        "tests/test_pr_body_check.py::test_a_part_whose_mark_is_gone_fails_by_name",
+        "tests/test_pr_body_check.py::test_a_missing_file_fails_every_part_it_carries"
       ]
     },
     {

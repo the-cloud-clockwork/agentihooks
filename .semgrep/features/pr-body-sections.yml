@@ -1,0 +1,26 @@
+rules:
+  - id: feature-pr-body-sections
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-21, every pull request body carries the operator's recon sections: the checker names
+      Assumptions, What could break, What will not break, Features that may disconnect, Dependencies, Resources,
+      Why the fix, Why the feature and Notes for the reviewer, in that order and no other.
+    patterns:
+      - pattern: SECTIONS = $NAMES
+      - pattern-not: |
+          SECTIONS = (
+              "Assumptions",
+              "What could break",
+              "What will not break",
+              "Features that may disconnect",
+              "Dependencies",
+              "Resources",
+              "Why the fix",
+              "Why the feature",
+              "Notes for the reviewer",
+          )
+    paths:
+      include:
+        - /scripts/pr_body.py
+        - '*.test.py'

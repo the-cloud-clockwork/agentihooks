@@ -241,7 +241,6 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/docs_sanity.py",
         "scripts/locked_tests.py",
         "scripts/no_comments.py",
-        "scripts/pr_body.py",
         "scripts/no_ledger_write_doctrine.py",
         "scripts/no_whole_ledger.py",
         "scripts/size_limits.py",

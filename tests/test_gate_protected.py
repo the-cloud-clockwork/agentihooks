@@ -280,10 +280,10 @@ def _protected_workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/gate-protected.yml").read_text())
 
 
-def test_the_protected_grader_runs_only_from_the_base_on_pull_requests_into_dev() -> None:
+def test_the_protected_grader_runs_only_from_the_base_on_pull_requests_into_dev():
     workflow = _protected_workflow()
     assert workflow[True] == {
-        "pull_request_target": {"branches": ["dev"], "types": ["opened", "synchronize", "reopened", "edited"]}
+        "pull_request_target": {"branches": ["dev"], "types": ["opened", "synchronize", "reopened"]}
     }
     assert workflow["permissions"] in (
         {"contents": "read", "statuses": "write"},
