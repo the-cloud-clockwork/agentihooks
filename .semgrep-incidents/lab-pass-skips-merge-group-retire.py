@@ -1,3 +1,11 @@
+from collections.abc import Sequence
+from typing import Protocol
+
+
+class Pass(Protocol):
+    def tick(self, now_ms: int) -> Sequence[str]: ...
+
+
 class Skips:
     def _intake(self, now_ms: int) -> list[str]:
         return [f"received at {now_ms}"]
