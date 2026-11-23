@@ -10,7 +10,7 @@ from unittest.mock import Mock
 import pytest
 
 from scripts.events.bus import Bus
-from scripts.events.config import BusConfig
+from scripts.events.config import BIND_ENV, BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hive import execution_events, execution_stop
@@ -907,3 +907,50 @@ def test_a_stop_the_bus_takes_for_a_dropped_agent_keeps_nothing_pending(
     assert reconciler.stop_dropped(store, SLUG, agent, "idle") == execution_stop.SENT
 
     assert pending_stops(store) == {}
+
+
+@pytest.mark.feature("member-tick-stop-forwarded-by-hub")
+def test_a_member_bind_tick_parks_its_stop_until_the_hub_sends_it(
+    env: tuple[RedisStore, Any, Any],
+    bus: Bus,
+    seat: Callable[..., AgentRecord],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, _, _ = env
+    agent, event = launched(env, bus, seat)
+    spoke_started(bus)
+    finish(env, agent, "finished")
+    original = execution_stop.stop
+
+    def send(controller: Bus, slug: str, stopped: AgentRecord, reason: str) -> str:
+        if controller is not bus:
+            raise PermissionError("member cannot publish execution stops")
+        return original(controller, slug, stopped, reason)
+
+    sender = Mock(side_effect=send)
+    monkeypatch.setattr(execution_stop, "stop", sender)
+    monkeypatch.setenv(BIND_ENV, "1")
+
+    reap_pass(env, NOW + 1)
+    reap_pass(env, NOW + 2)
+
+    sender.assert_not_called()
+    held = json.loads(pending_stops(store)[agent.execution_id])
+    assert (held["agent"]["execution_id"], held["agent"]["name"], held["reason"]) == (
+        agent.execution_id,
+        agent.name,
+        "ended",
+    )
+    assert [seated.name for seated in store.agents(SLUG)] == [agent.name]
+    assert sent_stops(bus, agent) == []
+
+    hub = reconciler.Reconciler(bus, store, clock=lambda: NOW + 3)
+    hub.poll()
+
+    assert sender.call_count == 1
+    assert sender.call_args.args[0] is bus
+    sent = sent_stops(bus, agent)
+    assert [(stop.key, stop.cause, stop.data["reason"]) for stop in sent] == [(agent.execution_id, event.id, "ended")]
+    assert pending_stops(store) == {}
+    hub.poll()
+    assert sender.call_count == 1

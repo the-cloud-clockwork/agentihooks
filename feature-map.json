@@ -15031,6 +15031,16 @@
         "tests/hive/test_daemon_presence.py::test_the_daemon_token_gauges_carry_the_session_agent_and_profile_from_the_seen_record",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_skips_token_values_it_cannot_read_and_sends_the_rest"
       ]
+    },
+    {
+      "id": "member-tick-stop-forwarded-by-hub",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2698",
+      "behaviour": "A member bind tick parks its execution stops with agent identity and reason in swarm pending stops without publishing on the member bus. The hub reconciler delivers parked stops using its injected controller bus, including a stop for an execution still seated in the swarm, and removes delivered stops without duplication.",
+      "seam": "agents._reap to swarm pending stops to Reconciler.poll and the owning hive stop stream",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_a_member_bind_tick_parks_its_stop_until_the_hub_sends_it"
+      ]
     }
   ],
   "unmapped_rules": [
