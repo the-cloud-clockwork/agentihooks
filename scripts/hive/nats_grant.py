@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.events import nkey, subjects
+from scripts.events import nkey, scope, subjects
 from scripts.events.dead import DEAD_STREAM
 from scripts.events.resource_names import legacy_stream_name
 from scripts.hive import auth, buckets, stop_names
@@ -133,7 +133,7 @@ def swarm_publish(swarm: str) -> list[str]:
     resources = (
         "EVENTS",
         "DEAD",
-        *(f"QUEUE_{lane}" for lane in ("eng", "ci", "plan")),
+        *(f"QUEUE_{lane}" for lane in scope.LANES),
         *(f"STATE_{bucket}" for bucket in buckets.NAMES),
     )
     streams = [
