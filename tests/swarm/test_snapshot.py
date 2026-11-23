@@ -15,6 +15,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, commands, model_catalog, name_state, readiness, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
+from tests.helpers import narrow_ledger
 from tests.helpers.seat import seat_agent
 from tests.helpers.seat import view as seat_view
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -523,7 +524,8 @@ def admitted_task(store: RedisStore, ledger: FakeLedger, task_id: str, at: int) 
     row = ledger.rows[task_id]
     request = {"hive": readiness.ROOT, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
     source = SimpleNamespace(slugs=lambda: ["sw"], snapshot=lambda name: seat_view(store, ledger, name))
-    admitted = admission.Admission(store, ledger, source, lambda: at).admit("sw", request)  # pyright: ignore[reportArgumentType]
+    admitter = narrow_ledger.viewed(admission.Admission(store, ledger, source, lambda: at))  # pyright: ignore[reportArgumentType]
+    admitted = admitter.admit("sw", request)
     assert admitted and "task" in admitted, admitted
     return admitted["task"]
 

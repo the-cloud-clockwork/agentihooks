@@ -50,14 +50,14 @@ def _text(content: bytes) -> str:
     return content.decode(errors="replace")
 
 
-def _test_module(path: str) -> bool:
+def is_test_module(path: str) -> bool:
     """Return whether a path is a pytest test module under the test tree."""
     return path.startswith("tests/") and path.endswith(".py") and PurePosixPath(path).name.startswith("test_")
 
 
 def _shared(path: str) -> bool:
     """Return whether a Python file outside the measured trees and the test modules keys every test."""
-    return path.endswith(".py") and not path.startswith(dep_manifest.MEASURED) and not _test_module(path)
+    return path.endswith(".py") and not path.startswith(dep_manifest.MEASURED) and not is_test_module(path)
 
 
 def _reached(tree: Mapping[str, bytes], path: str, reached: set[str]) -> set[str]:
@@ -133,17 +133,21 @@ def fingerprints(
     return keys
 
 
+def unlisted_modules(manifest: Mapping[str, Any], tree: Mapping[str, bytes]) -> list[str]:
+    """List the test modules of the tree that hold no manifest test."""
+    listed = {test.partition("::")[0] for test in manifest["tests"]}
+    return sorted(path for path in tree if is_test_module(path) and path not in listed)
+
+
 def unlisted_test_hashes(manifest: Mapping[str, Any], tree: Mapping[str, bytes]) -> dict[str, str]:
     """Return the sha256 of every test module of the tree that holds no manifest test, of each conftest pytest loads
     for such a module and of each test tree module either imports, and while there is such a module, of every file
     under the measured and test trees, since the manifest records no file a test it never ran reads."""
-    listed = {test.partition("::")[0] for test in manifest["tests"]}
     reached: set[str] = set()
-    for path in tree:
-        if _test_module(path) and path not in listed:
-            for parent in PurePosixPath(path).parents:
-                _reached(tree, (parent / "conftest.py").as_posix(), reached)
-            _reached(tree, path, reached)
+    for path in unlisted_modules(manifest, tree):
+        for parent in PurePosixPath(path).parents:
+            _reached(tree, (parent / "conftest.py").as_posix(), reached)
+        _reached(tree, path, reached)
     if reached:
         reached.update(path for path in tree if path.startswith(BROAD_TREES))
     return {path: hashlib.sha256(tree[path]).hexdigest() for path in reached}
@@ -157,7 +161,7 @@ def unlisted_units(
     the module opened outside it, with the pytest invocation and the toolchain."""
     listed = {test.partition("::")[0] for test in manifest["tests"]}
     noted: Mapping[str, Sequence[str]] = manifest.get(UNLISTED, {})
-    files = sorted({path for path in paths if _test_module(path) and path in tree and path not in listed})
+    files = sorted({path for path in paths if is_test_module(path) and path in tree and path not in listed})
     keys = fingerprints({"units": [], "tests": {path: {"files": list(noted.get(path, ()))} for path in files}}, tree)
     return tuple(
         Unit(

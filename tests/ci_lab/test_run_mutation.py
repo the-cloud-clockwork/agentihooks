@@ -27,6 +27,7 @@ REPO = Path(__file__).resolve().parents[2]
 OPTIONS = ["-q", "-p", "no:cacheprovider", "-o", "addopts="]
 FUNCTION = "scripts.mutation_self_plant_sample.x_fee"
 SAMPLE = "def fee(amount, rate):\n    return amount * rate + 1\n"
+BOTH = SAMPLE + "\n\ndef tax(amount):\n    return amount - 2\n"
 FIXED_COST_RATIO = 0.25
 
 
@@ -87,7 +88,7 @@ def test_trampoline_writes_every_mutant_of_the_file_and_names_them_as_mutmut_doe
     path = "scripts/sample.py"
     (tmp_path / "scripts").mkdir()
     (tmp_path / path).write_text(SAMPLE)
-    names = run_mutation.trampoline(tmp_path, path)
+    names = run_mutation.trampoline(tmp_path, path, {1, 2})
     assert names == [f"scripts.sample.{name}" for name in selected_mutant_names(path, SAMPLE, {1, 2})]
     assert len(names) > 1
     assert (tmp_path / path).read_text() == selected_mutants(path, SAMPLE, {1, 2})[0]
@@ -100,7 +101,66 @@ def test_trampoline_names_the_file_mutmut_refuses_a_pragma_in(tmp_path: Path) ->
         "def fee(amount, rate):\n    # pragma: no mutate start\n    return amount * rate + 1\n"
     )
     with pytest.raises(PragmaParseError, match="scripts/sample.py:2"):
-        run_mutation.trampoline(tmp_path, path)
+        run_mutation.trampoline(tmp_path, path, {1, 2, 3})
+
+
+@pytest.mark.feature("lab-mutants-read-no-mutmut-config")
+def test_trampoline_reads_no_mutmut_config_from_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = "scripts/sample.py"
+    tree, elsewhere = tmp_path / "tree", tmp_path / "elsewhere"
+    (tree / "scripts").mkdir(parents=True)
+    elsewhere.mkdir()
+    (tree / path).write_text(SAMPLE)
+    monkeypatch.chdir(REPO)
+    expected = [f"scripts.sample.{name}" for name in selected_mutant_names(path, SAMPLE, {1, 2})]
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr(configuration, "_config", None)
+    monkeypatch.setattr(configuration.Config, "get", stats_recorder_only)
+    assert run_mutation.trampoline(tree, path, {1, 2}) == expected
+    assert len(expected) > 1
+    assert vars(configuration)["_config"] is None
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_trampoline_rewrites_only_the_functions_the_changed_lines_meet(tmp_path: Path) -> None:
+    path = "scripts/sample.py"
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / path).write_text(BOTH)
+    names = run_mutation.trampoline(tmp_path, path, {6})
+    assert names == [f"scripts.sample.{name}" for name in selected_mutant_names(path, BOTH, {5, 6})]
+    assert len(names) > 1
+    assert {name.rpartition("__mutmut_")[0] for name in names} == {"scripts.sample.x_tax"}
+    written = (tmp_path / path).read_text()
+    assert written == selected_mutants(path, BOTH, {5, 6})[0]
+    assert SAMPLE in written
+    assert "x_fee" not in written
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_trampoline_leaves_a_file_no_function_of_which_meets_the_changed_lines_as_it_was(tmp_path: Path) -> None:
+    path = "scripts/sample.py"
+    source = "LIMIT = 1\n\n\n" + SAMPLE
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / path).write_text(source)
+    assert run_mutation.trampoline(tmp_path, path, {1}) == []
+    assert (tmp_path / path).read_text() == source
+    assert run_mutation.trampoline(tmp_path, path, set()) == []
+    assert (tmp_path / path).read_text() == source
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_trampoline_keeps_the_wrappers_of_a_decorated_function_on_its_trampoline_alone(tmp_path: Path) -> None:
+    path = "scripts/sample.py"
+    source = "import functools\n\n\n" + SAMPLE + "\n\n@functools.cache\ndef tax(amount):\n    return amount - 2\n"
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / path).write_text(source)
+    every = set(range(1, 11))
+    names = run_mutation.trampoline(tmp_path, path, every)
+    assert names == [f"scripts.sample.{name}" for name in selected_mutant_names(path, source, every)]
+    assert {name.rpartition("__mutmut_")[0] for name in names} == {"scripts.sample.x_fee", "scripts.sample.x_tax"}
+    assert (tmp_path / path).read_text() == selected_mutants(path, source, every)[0]
 
 
 @pytest.mark.feature("lab-mutants-read-no-mutmut-config")
@@ -478,7 +538,7 @@ def corpus_run(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPath
         subprocess.run(["git", "init", "-q"], cwd=root, check=True)
         subprocess.run(["git", "add", "-A"], cwd=root, check=True)
         tree = corpus(work / "tree", mode)
-        names = run_mutation.trampoline(tree, plant.SAMPLE)
+        names = run_mutation.trampoline(tree, plant.SAMPLE, {1, 2})
         stats_request = {
             "kind": "stats",
             "key": "lab",

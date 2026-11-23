@@ -18,7 +18,7 @@ import sys
 import time
 import traceback
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from importlib import import_module, metadata
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -309,11 +309,21 @@ def expand(run: Run, expander: Any, name: str, request: Any) -> None:
     record["jobs"] = {job: len(units) for job, units in gates.items()}
     mutation = {job: gates.get(job, []) for job in (scheduler.STATS_JOB, scheduler.MUTANT_JOB)}
     record["mutation"] = [
-        {"job": job, "kind": unit.kind, "key": unit.key, "members": list(unit.members)}
+        {
+            "job": job,
+            "kind": unit.kind,
+            "key": unit.key,
+            "members": list(unit.members),
+            "traced": json.loads(unit.manifest) if unit.manifest else None,
+        }
         for job, units in mutation.items()
         for unit in units
     ]
     record["key_inputs"] = key_inputs(run, expander, request)
+    objects = run.lab.objects.LocalObjects(run.work / "objects")
+    record["manifests_kept"] = scheduler.keep_manifests(
+        objects, [unit for units in mutation.values() for unit in units]
+    )
     run.plans[name] = mutation
     run.proof["expansion"][name] = record
     run.write()
@@ -324,8 +334,10 @@ def planted_mutants(run: Run, head: str) -> list[str]:
     with TemporaryDirectory(dir=run.work) as scratch:
         target = Path(scratch) / SOURCE
         target.parent.mkdir(parents=True)
-        target.write_text(git(run.repo, "show", f"{head}:{SOURCE}"))
-        names: list[str] = run.lab.run_mutation.trampoline(Path(scratch), SOURCE)
+        source = git(run.repo, "show", f"{head}:{SOURCE}")
+        target.write_text(source)
+        every = set(range(1, len(source.splitlines()) + 1))
+        names: list[str] = run.lab.run_mutation.trampoline(Path(scratch), SOURCE, every)
     return sorted(name for name in names if name.startswith(PLANTED))
 
 
@@ -365,11 +377,13 @@ def graded(run: Run, pod: Any, settings: Any, lease: Any, label: str) -> dict[st
 def grade(run: Run, pod: Any, settings: Any, name: str, head: str) -> None:
     """Grade every mutation unit of one head, its stats units first, and keep the head's verdict."""
     scheduler, outcomes = run.lab.scheduler, []
+    objects = run.lab.objects.LocalObjects(run.work / "objects")
     for job in (scheduler.STATS_JOB, scheduler.MUTANT_JOB):
         for index, unit in enumerate(run.plans[name][job]):
             request = run.requests[name]
+            leased = replace(unit, manifest=scheduler.stored_manifest(objects, unit))
             lease = run.lab.worker.Lease(
-                scheduler.job_id(head, unit), "offline", head, unit, 1, 0, request.base, run.graders[name]
+                scheduler.job_id(head, unit), "offline", head, leased, 1, 0, request.base, run.graders[name]
             )
             say(f"{job} unit {index} of the {name} begins: {unit.kind}, {len(unit.members)} members")
             row = {"head": name, "job": job, **graded(run, pod, settings, lease, f"{name}-{job}-{index}")}
@@ -427,7 +441,7 @@ def parsed(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--out", required=True)
     parser.add_argument("--repository", default="https://github.com/the-cloud-clockwork/agentihooks")
     parser.add_argument("--timeout", type=float, default=0.0)
-    parser.add_argument("--stats-scope", choices=("every", "plant"), default="every")
+    parser.add_argument("--stats-scope", choices=("every",), default="every")
     parser.add_argument("--expand-only", action="store_true")
     parser.add_argument("--mutation-only", action="store_true")
     parser.add_argument("--manifest", default="")
@@ -450,7 +464,7 @@ def opened(arguments: argparse.Namespace) -> tuple[Run, str, dict[str, str], flo
         "base": base,
         "heads": heads,
         "unit_timeout_seconds": timeout,
-        "stats_scope": arguments.stats_scope,
+        "stats_scope": "the test files each mutant unit's manifest names",
         "expansion": {},
         "units": [],
         "timings": [],
@@ -495,8 +509,6 @@ def main(argv: Sequence[str]) -> int:
     if arguments.expand_only:
         print(json.dumps(run.proof["expansion"], indent=1))
         return 0
-    if arguments.stats_scope == "plant":
-        run.lab.executors._test_files = lambda tree: [TESTS]
     pod, settings = pod_of(run, node, timeout)
     executors = run.lab.executors
     for owner, call in ((executors.venvs, "venv_for"), (executors, "_trampolined"), (executors, "_run")):

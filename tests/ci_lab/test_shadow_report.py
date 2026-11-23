@@ -339,3 +339,31 @@ def test_a_paged_list_stops_at_a_short_page_or_after_ten_pages() -> None:
 
     assert len(list(shadow_report.pages(short, "list?a=1", "items"))) == 99
     assert asked == ["list?a=1&per_page=100&page=1"]
+
+
+@pytest.mark.feature("lab-shadow-reusable-caller-pairing")
+@pytest.mark.parametrize(
+    ("failed_child", "verdict"),
+    [(None, "pass"), ("scan", "fail"), ("feature-tests", "fail"), ("charts", "fail")],
+)
+def test_bare_semgrep_pairs_with_all_reusable_actions_jobs(failed_child: str | None, verdict: str) -> None:
+    sources = shadow.Sources(shadow.static_jobs(shadow_report.ROOT), APP)
+    runs = [
+        job(f"semgrep / {child}", "failure" if child == failed_child else "success", minute)
+        for child, minute in [("scan", 8), ("feature-tests", 12), ("charts", 10)]
+    ]
+    runs.append(lab("semgrep"))
+    found = shadow_report.head(HEAD, runs, "semgrep", sources)
+    assert found == shadow_report.Head(
+        HEAD, shadow_report.Verdict(verdict, at(12)), shadow_report.Verdict("pass", at(5))
+    )
+
+
+@pytest.mark.feature("lab-shadow-reusable-caller-pairing")
+@pytest.mark.parametrize("child", ["scan", "feature-tests", "charts"])
+@pytest.mark.parametrize(("status", "conclusion"), [("in_progress", "success"), ("completed", "cancelled")])
+def test_an_unfinished_reusable_child_excludes_the_semgrep_head(child: str, status: str, conclusion: str) -> None:
+    sources = shadow.Sources(shadow.static_jobs(shadow_report.ROOT), APP)
+    runs = [job(f"semgrep / {name}") for name in ["scan", "feature-tests", "charts"] if name != child]
+    runs.extend([job(f"semgrep / {child}", conclusion, status=status), lab("semgrep")])
+    assert shadow_report.head(HEAD, runs, "semgrep", sources) is None

@@ -296,6 +296,7 @@ def _scheduled(
     names = {step.name for step in later}
     first = tuple(step for step in ordered if step.name not in names)
     if later:
+        pool.budget_slow(found, {step.name: step.budget_s for step in later})
         awaited = frozenset[str]().union(*(step.needs for step in later)) & {step.name for step in first}
         found.hand(names)
         found.track(awaited)
