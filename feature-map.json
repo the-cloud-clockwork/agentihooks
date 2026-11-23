@@ -4267,6 +4267,7 @@
       "id": "thin-task-enhancement-snapshot",
       "behaviour": "The thin task pass sends the enhancement value from its task snapshot with its needed mark. A refreshed resource revision retains that expectation and cannot overwrite a concurrent planned or skipped decision or emit a success notice.",
       "seam": "scripts.tick.steps.thin.enhance and _marking through ClientLedger and ResourceClient",
+      "rules": ["thin-enhancement-without-expected"],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2885",
       "tests": [

@@ -30,7 +30,14 @@ pytestmark = pytest.mark.unit
 SLUG = "sw"
 EFFECTS = frozenset({"inbox", "ledger"})
 NEEDED = {"enhancement": "needed"}
-MARK = {"op": "task_enhancement", "id": "thin-mark-t1", "by": "swarm", "item": "tasks/t1", "enhancement": "needed"}
+MARK = {
+    "op": "task_enhancement",
+    "id": "thin-mark-t1",
+    "by": "swarm",
+    "item": "tasks/t1",
+    "enhancement": "needed",
+    "expected": None,
+}
 THIN: dict[str, Any] = {
     "id": "t1",
     "title": "Fix the claim",
@@ -339,7 +346,7 @@ def test_a_revision_retry_preserves_the_thin_snapshot_and_refuses_a_concurrent_d
         assert slug == SLUG
         paths.append(path)
         if path == "tasks/t1":
-            return {"revision": f"r{len(posts) + 1}"}
+            return {"revision": f"{len(posts) + 1:064x}"}
         assert path == "operations"
         assert payload is not None
         posts.append(json.loads(json.dumps(payload)))
@@ -358,7 +365,7 @@ def test_a_revision_retry_preserves_the_thin_snapshot_and_refuses_a_concurrent_d
     monkeypatch.setattr(api_client.time, "sleep", Mock())
     found = _run([THIN], cast(FakeLedger, ClientLedger(SLUG, lambda remaining: client)))
     assert paths == ["tasks/t1", "operations", "tasks/t1", "operations"]
-    assert [post["guards"] for post in posts] == [{"tasks/t1": "r1"}, {"tasks/t1": "r2"}]
+    assert [post["guards"] for post in posts] == [{"tasks/t1": f"{1:064x}"}, {"tasks/t1": f"{2:064x}"}]
     assert [[operation for operation in post["ops"] if operation["op"] == "task_enhancement"] for post in posts] == [
         [{**MARK, "expected": None}],
         [{**MARK, "expected": None}],
