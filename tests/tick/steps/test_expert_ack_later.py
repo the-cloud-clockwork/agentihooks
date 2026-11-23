@@ -171,6 +171,10 @@ def test_expired_expert_order_is_retired_without_launching_again_under_the_same_
     agent = pending(context)
     order = context.launcher.orders_for(context.lineage.id)
     assert order is not None
+    order = replace(order, expires_at=lease.now_ms(context.store))
+    context.store.redis.hset(
+        context.store.key(context.config.slug, launch.ORDERS), context.lineage.id, json.dumps(asdict(order))
+    )
     monkeypatch.setattr(lease, "now_ms", lambda store: order.expires_at)
     actions = run(context)
     assert actions == [f"expert spawn failed on lineage {context.lineage.id}: {launch.EXPIRED}"]
