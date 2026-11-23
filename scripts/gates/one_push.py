@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from scripts.gates.verdicts import Verdicts
     from scripts.swarm.ledger_events import PullRequest
 
-WORKERS = frozenset({"eng", "ci"})
+WORKERS = frozenset({"eng", "ci", "review"})
 OPENS = (["pr", "create"], ["pr", "ready"])
 DRAFTS = frozenset({"--draft", "-d", "--undo"})
 NO_PUSH = frozenset({"--dry-run", "-n", "--delete", "-d"})

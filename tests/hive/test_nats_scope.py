@@ -214,6 +214,7 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer: nats_gran
         "DEAD",
         "QUEUE_eng",
         "QUEUE_ci",
+        "QUEUE_review",
         "QUEUE_plan",
         "STATE_spoke-work",
         "STATE_spoke-pending",
