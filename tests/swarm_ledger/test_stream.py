@@ -82,6 +82,21 @@ def comment(n):
     return {"op": "add", "thread": "notes", "id": f"n-{n}", "text": f"note {n}"}
 
 
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_a_cursorless_connect_opens_without_building_the_page_view(live, monkeypatch):
+    def refuse(*args, **kwargs):
+        raise AssertionError("a stream connect built the whole ledger page view")
+
+    monkeypatch.setattr(server, "page_view", refuse)
+    port, token = live
+    conn, response = connect(port, token)
+    assert response.status == 200
+    name, data, cursor = next(iter(frames(response)))
+    assert name == "open" and cursor
+    assert "ledger" not in data and data["swarm"] == {"config": {"state": "running"}}
+    conn.close()
+
+
 def test_a_stream_starts_with_a_snapshot_then_sends_only_patches(live):
     port, token = live
     conn, response = connect(port, token)

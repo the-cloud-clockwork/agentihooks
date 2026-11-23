@@ -30,6 +30,22 @@ def test_a_first_connection_gets_one_snapshot_at_the_current_cursor():
     assert hub.watched() == [SLUG]
 
 
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_a_connect_without_a_cursor_opens_without_a_ledger_snapshot():
+    hub = Hub()
+    seq, first = hub.open(SLUG, lambda: {"swarm": {"agents": []}})
+    channel = hub.channels[SLUG]
+    assert seq == 0
+    assert first == [(0, f"{channel.epoch}.0", "open", {"rev": None, "swarm": {"agents": []}})]
+    assert hub.publish(SLUG, "ledger", ledger(2, tasks=[{"id": "t0"}, {"id": "t1"}])) is False
+    assert hub.publish(SLUG, "ledger", ledger(3, tasks=[{"id": "t1", "state": "pr"}, {"id": "t2"}]))
+    events = hub.wait(SLUG, seq, 0.01)
+    assert [(name, data["from"], data["rev"]) for _, _, name, data in events] == [("ledger", 2, 3)]
+    assert events[0][3]["rows"] == {"tasks": {"u": ["t1", "t2"], "gone": ["t0"]}}
+    _, again = hub.open(SLUG, lambda: {"swarm": None})
+    assert [(name, data) for _, _, name, data in again] == [("open", {"rev": 3, "swarm": {"agents": []}})]
+
+
 def test_every_channel_life_has_its_own_epoch():
     first, second = Hub(), Hub()
     opened(first)

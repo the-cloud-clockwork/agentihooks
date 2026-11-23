@@ -15059,6 +15059,30 @@
         "tests/hive/test_daemon_presence.py::test_the_daemon_token_gauges_carry_the_session_agent_and_profile_from_the_seen_record",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_skips_token_values_it_cannot_read_and_sends_the_rest"
       ]
+    },
+    {
+      "id": "ledger-summary-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-load-api",
+      "behaviour": "The ledger page's first reads answer from narrow database reads: the summary read gives every part of the page but its paged sections, with counts per state of each paged section, phase status, freeze marks and closed row counts equal to what the page view derives, and an open rows read pages the open rows of one section in page order without comment bodies. Neither builds the whole ledger page view.",
+      "seam": "GET /api/v1/ledgers/<slug>/summary, GET /api/v1/ledgers/<slug>/<section>?state=open and scripts.swarm_ledger.api.summary.build",
+      "tests": [
+        "tests/swarm_ledger/test_summary_read.py::test_the_summary_answers_without_building_the_whole_page_view",
+        "tests/swarm_ledger/test_summary_read.py::test_an_open_first_page_answers_without_building_the_whole_page_view",
+        "tests/swarm_ledger/test_summary_read.py::test_the_summary_derives_what_the_page_view_derives"
+      ]
+    },
+    {
+      "id": "ledger-stream-no-snapshot-connect",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-load-api",
+      "behaviour": "A ledger event stream connect without a cursor answers an open frame naming the cursor, the ledger revision the channel holds and its small resources, never a whole ledger snapshot, and never builds the ledger page view on the request path. Ledger change frames carry the revision they apply from and the upserted and removed row ids of each list they change.",
+      "seam": "scripts.swarm_ledger.events.hub.Hub.open, scripts.swarm_ledger.events.stream.serve and GET /api/v1/ledgers/<slug>/events",
+      "tests": [
+        "tests/swarm_ledger/test_hub.py::test_a_connect_without_a_cursor_opens_without_a_ledger_snapshot",
+        "tests/swarm_ledger/test_events_stream.py::test_serve_opens_a_cursorless_connect_without_a_snapshot",
+        "tests/swarm_ledger/test_stream.py::test_a_cursorless_connect_opens_without_building_the_page_view"
+      ]
     }
   ],
   "unmapped_rules": [

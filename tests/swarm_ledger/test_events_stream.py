@@ -104,6 +104,16 @@ def test_serve_sends_the_snapshot_then_heartbeats_until_the_client_goes(monkeypa
     assert hub.watched() == []
 
 
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_serve_opens_a_cursorless_connect_without_a_snapshot(monkeypatch):
+    monkeypatch.setattr(stream, "HEARTBEAT_S", 0.01)
+    hub = Hub()
+    handler = Handler(Sink(2))
+    assert bounded(stream.serve, handler, hub, SLUG, lambda: {"swarm": None})[0] is None
+    sent = [name for name, _, _ in stream.parse(handler.wfile.getvalue().decode().splitlines(keepends=True))]
+    assert sent == ["open", "heartbeat"]
+
+
 def test_serve_replays_from_the_cursor_header_then_streams_only_new_events(monkeypatch):
     monkeypatch.setattr(stream, "HEARTBEAT_S", 0.01)
     hub = Hub()
