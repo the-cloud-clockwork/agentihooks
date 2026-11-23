@@ -19,7 +19,6 @@ from typing import Any
 import redis
 
 from scripts.ci_lab import contract, scheduler
-from scripts.ci_lab.queue import Queue
 
 BUILDS = 3
 LEAVES_OUT = "the offer prune round trip of each build"
@@ -27,8 +26,9 @@ LEAVES_OUT = "the offer prune round trip of each build"
 Clock = Callable[[], float]
 
 
-class KeptOffers(Queue):
-    """The scheduler's queue with its offer prune turned into a no op, so a measured build deletes no offer."""
+def keep(since_ms: int) -> int:
+    """Stand in for the queue's offer prune on a measured scheduler: delete no offer and report none dropped."""
+    return 0
 
 
 class Parses:
@@ -40,28 +40,40 @@ class Parses:
 
     def __call__(self, raw: str | bytes) -> scheduler.State:
         """Count one parse and return the grade it parsed."""
+        self.count += 1
         return self.parse(raw)
 
 
 def reader(client: Any) -> scheduler.Scheduler:
-    """Return a scheduler over client for load builds: its queue keeps every offer, and it holds no object store,
-    ports or settings, which a load never reads."""
+    """Return a scheduler over client for load builds: its queue's offer prune deletes nothing, and it holds no
+    object store, ports or settings, which a load never reads."""
     engine = scheduler.Scheduler(client, None, None, None)  # pyright: ignore[reportArgumentType]
-    engine.queue = KeptOffers(client)
+    setattr(engine.queue, "prune", keep)
     return engine
 
 
 def measure(engine: scheduler.Scheduler, builds: int, now_ms: int, process: Clock, wall: Clock) -> dict[str, Any]:
     """Run builds loads at now_ms and return the build count, the live grade count, each build's seconds on the
     process and wall clocks, the grade parses the builds ran and what the figures leave out."""
-    parses = Parses(getattr(scheduler, "_parse"))
-    for _ in range(builds):
-        engine.load(now_ms)
+    grades = engine.client.scard(scheduler.LIVE)
+    parse = getattr(scheduler, "_parse")
+    parses = Parses(parse)
+    spent: list[float] = []
+    took: list[float] = []
+    setattr(scheduler, "_parse", parses)
+    try:
+        for _ in range(builds):
+            started, clock = process(), wall()
+            engine.load(now_ms)
+            spent.append(process() - started)
+            took.append(wall() - clock)
+    finally:
+        setattr(scheduler, "_parse", parse)
     return {
         "builds": builds,
-        "grades": int(engine.client.scard(scheduler.LIVE)),
-        "process_seconds": [process() * 0],
-        "wall_seconds": [wall() * 0],
+        "grades": grades,
+        "process_seconds": spent,
+        "wall_seconds": took,
         "parses": parses.count,
         "leaves_out": LEAVES_OUT,
     }
