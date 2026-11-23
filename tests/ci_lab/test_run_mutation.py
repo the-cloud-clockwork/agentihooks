@@ -21,7 +21,7 @@ from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.runner import run_gate
 from scripts.ci_mutation.selection import selected_mutant_names, selected_mutants
 from tests.mutation_self_plant import plant
-from tests.test_ci_mutation_stats import place_flake_ledger
+from tests.test_ci_mutation_stats import place_flake_ledger, stats_recorder_only
 
 REPO = Path(__file__).resolve().parents[2]
 OPTIONS = ["-q", "-p", "no:cacheprovider", "-o", "addopts="]
@@ -115,6 +115,7 @@ def test_trampoline_reads_no_mutmut_config_from_the_working_directory(
     expected = [f"scripts.sample.{name}" for name in selected_mutant_names(path, SAMPLE, {1, 2})]
     monkeypatch.chdir(elsewhere)
     monkeypatch.setattr(configuration, "_config", None)
+    monkeypatch.setattr(configuration.Config, "get", stats_recorder_only)
     assert run_mutation.trampoline(tree, path) == expected
     assert len(expected) > 1
     assert vars(configuration)["_config"] is None

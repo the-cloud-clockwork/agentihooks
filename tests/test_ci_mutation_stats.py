@@ -1,6 +1,8 @@
+import inspect
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -174,6 +176,16 @@ def test_measured_dependencies_keep_only_the_test_modules_a_node_runs(
 def place_flake_ledger(tests: Path) -> None:
     (tests / "__init__.py").touch()
     shutil.copy(Path(__file__).with_name("flake_ledger.py"), tests)
+
+
+def stats_recorder_only() -> SimpleNamespace:
+    """Stand in for mutmut's Config.get: answer its stats recorder, which reads the config on every trampolined call
+    while a mutation run collects stats, and fail every other reader."""
+    frame = inspect.currentframe()
+    caller = frame.f_back if frame else None
+    if caller is None or caller.f_code.co_name != "record_trampoline_hit":
+        raise AssertionError("mutmut config read")
+    return SimpleNamespace(source_paths=[], max_stack_depth=-1)
 
 
 @pytest.mark.parametrize("inherited", ["before", None])

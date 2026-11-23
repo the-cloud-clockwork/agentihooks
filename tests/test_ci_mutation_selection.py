@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.ci_mutation.runner import run_gate
-from tests.test_ci_mutation_stats import place_flake_ledger
+from tests.test_ci_mutation_stats import place_flake_ledger, stats_recorder_only
 
 
 def _no_pytest(self, params, **kwargs):
@@ -604,16 +604,13 @@ def test_given_patterns_keep_the_lines_mutmut_config_patterns_keep_from_mutation
 
     from scripts.ci_mutation.selection import selected_mutants
 
-    def refuse() -> SimpleNamespace:
-        raise AssertionError("mutmut config read")
-
     source = "def bumped(count):\n    total = count + 1\n    return total * 2\n"
     patterns = [r"count \+ 1"]
     monkeypatch.setattr(
         Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=patterns, source_paths=[], max_stack_depth=-1)
     )
     configured = selected_mutants("scripts/sample.py", source, {2, 3})
-    monkeypatch.setattr(Config, "get", refuse)
+    monkeypatch.setattr(Config, "get", stats_recorder_only)
     given = selected_mutants("scripts/sample.py", source, {2, 3}, patterns)
     every = selected_mutants("scripts/sample.py", source, {2, 3}, ())
     assert given == configured
@@ -630,6 +627,7 @@ def test_given_patterns_load_no_mutmut_config(tmp_path: Path, monkeypatch: pytes
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(configuration, "_config", None)
+    monkeypatch.setattr(configuration.Config, "get", stats_recorder_only)
     _, names = selected_mutants("scripts/sample.py", "def doubled(value):\n    return value * 2\n", {2}, ())
     assert names
     assert vars(configuration)["_config"] is None

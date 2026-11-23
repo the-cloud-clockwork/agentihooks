@@ -15,6 +15,7 @@ from scripts.ci_mutation.plan import MUTANT_SECONDS
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats_cache import collect_cached_stats
 from scripts.ci_mutation.stats_dependencies import digest  # pyright: ignore[reportUnknownVariableType]
+from tests.test_ci_mutation_stats import stats_recorder_only
 
 SAMPLE = """import functools
 
@@ -182,6 +183,7 @@ def test_mutant_units_read_no_mutmut_config_from_the_working_directory(
     expected = expand_mutation.mutant_units(root, EVERY_LINE, {}, {})
     monkeypatch.chdir(elsewhere)
     monkeypatch.setattr(configuration, "_config", None)
+    monkeypatch.setattr(configuration.Config, "get", stats_recorder_only)
     assert expand_mutation.mutant_units(root, EVERY_LINE, {}, {}) == expected
     assert expected
     assert vars(configuration)["_config"] is None
