@@ -7,7 +7,7 @@ ends; this module is the only writer of the lineage records and of the saved mis
 
 import json
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
@@ -49,6 +49,7 @@ class Lineage:
     ended_by: str = ""
     ended_at: int = 0
     note: str = ""
+    launch_failure: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 def start(store: Any, slug: str, text: str, source: str, effort: str, by: str, at: int) -> Lineage:
@@ -158,6 +159,11 @@ def launched(store: Any, slug: str, name: str) -> int:
 def unlaunched(store: Any, slug: str, name: str) -> int:
     """Take back the count of an expert whose spawn failed after it was counted, and return the count left."""
     return int(store.redis.hincrby(store.key(slug, LAUNCHES), name, -1))
+
+
+def launch_failed(store: Any, slug: str, name: str, agent: str, reason: str, at: int) -> None:
+    """Keep the last failed launch of a running lineage: why it failed, the expert that did not start and when. A
+    lineage that ended, or that the swarm does not hold, is left as it is."""
 
 
 def closing(store: Any, slug: str) -> list[Lineage]:

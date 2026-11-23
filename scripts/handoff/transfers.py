@@ -3,7 +3,9 @@ import shlex
 import time
 from uuid import uuid4
 
-from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+
+LAUNCH_FAILED = "Launch failed"
 
 
 def now_ms() -> int:
@@ -91,14 +93,14 @@ def fresh(store, slug: str, transfer: str, at: int) -> dict:
     return _change(store, slug, transfer, change)
 
 
-def failed(store, slug: str, agent) -> None:
+def failed(store: RedisStore, slug: str, agent: AgentRecord, reason: str = LAUNCH_FAILED) -> None:
     for row in list_transfers(store, slug):
         if row["successor"] != agent.name or row["binding"]["state"] == "live":
             continue
         at = now_ms()
 
         def change(current, at=at):
-            current["binding"] = {"state": "absent", "at": at, "session": agent.name, "reason": "Launch failed"}
+            current["binding"] = {"state": "absent", "at": at, "session": agent.name, "reason": LAUNCH_FAILED}
 
         _change(store, slug, row["id"], change)
         retry = {
