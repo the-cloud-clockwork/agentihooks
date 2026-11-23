@@ -1,5 +1,17 @@
 [
   {
+    "query": "Create the first draft pull request for this task. The task recon is complete.",
+    "expected_behavior": "Prepares the nine named level three review details within the six recon sections, runs agentihooks-pr-body fill with the recon and body files, checks the body, and uses that body file at the first draft pull request creation."
+  },
+  {
+    "query": "The pull request body checker says Resources is missing from the recon details.",
+    "expected_behavior": "Reads the recon resource findings, fills the Resources detail with observed needs or an explicit absence, reruns the filler and checker, and updates the body only after both pass."
+  },
+  {
+    "query": "Update the pull request body after a new recon finding while keeping the summary and CI evidence.",
+    "expected_behavior": "Updates the named recon detail, fills the existing body file so unrelated sections survive, checks all nine sections, and submits the updated body."
+  },
+  {
     "query": "You are an engineer in swarm docs-sweep, your task is d4",
     "expected_behavior": "Joins the ledger, keeps the ledger watch running, reads steering.md, records the issue and pull request with swarm issue and swarm pr, and closes with swarm done --pr after the merge."
   },
