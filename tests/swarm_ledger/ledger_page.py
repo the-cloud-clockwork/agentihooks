@@ -48,6 +48,7 @@ ORDER += (
     "architecture",
     "status_note",
     "controls",
+    "orders",
     "events",
     "main",
 )

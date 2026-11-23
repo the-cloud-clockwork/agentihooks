@@ -4449,7 +4449,9 @@
       "id": "thin-task-enhancement-snapshot",
       "behaviour": "The thin task pass sends the enhancement value from its task snapshot with its needed mark. A refreshed resource revision retains that expectation and cannot overwrite a concurrent planned or skipped decision or emit a success notice.",
       "seam": "scripts.tick.steps.thin.enhance and _marking through ClientLedger and ResourceClient",
-      "rules": ["thin-enhancement-without-expected"],
+      "rules": [
+        "thin-enhancement-without-expected"
+      ],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2885",
       "tests": [
@@ -14998,7 +15000,9 @@
         "tests/swarm_ledger/test_orders_page.py::test_failed_read_preserves_orders_and_recovers_on_the_next_update",
         "tests/swarm_ledger/test_orders_page.py::test_order_panel_fold_choice_survives_reload",
         "tests/swarm_ledger/test_page_events.py::test_tabs_get_ledger_and_swarm_changes_without_polling_the_document",
-        "tests/swarm_ledger/test_page_events.py::test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410"
+        "tests/swarm_ledger/test_page_events.py::test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410",
+        "tests/swarm_ledger/test_page_modules.py::test_the_source_view_for_text_checks_covers_every_module",
+        "tests/swarm_ledger/test_single_page.py::test_approved_columns_overview_tabs_and_stats"
       ]
     }
   ],
