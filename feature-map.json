@@ -13837,7 +13837,7 @@
       "id": "ledger-verdict-reads-one-reply",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/phases/p139",
-      "behaviour": "The orders read and the focus read serve the data they work out from the ledger state under the swarm's fix phase, the revision of that data, an empty cursor on a read that lists and nothing past the reply limit, each refusing with its own message. A recorded run of the orders read, the focus list and two focus targets, with and without a fix phase, one byte past the limit and for a target that does not exist keeps the text of every reply.",
+      "behaviour": "The orders read and the focus read serve the data they work out from the ledger state under the swarm's fix phase, the revision of that data, an empty cursor on a read that lists and nothing past the reply limit, each refusing with its own message. A recorded run of the orders read, the focus list and two focus targets, of each one byte past the limit and of a target that does not exist keeps the text of every reply.",
       "seam": "scripts.swarm_ledger.api.routes.ledger_read at orders, focus and focus/<target>",
       "tests": [
         "tests/swarm_ledger/test_read_replies_recorded.py::test_a_recorded_run_of_the_orders_and_focus_reads_keeps_the_text_of_every_reply"

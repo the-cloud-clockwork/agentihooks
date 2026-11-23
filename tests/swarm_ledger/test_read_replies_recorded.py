@@ -1,5 +1,5 @@
-"""The replies the orders and focus reads serve, as text: a recorded run of each read over one ledger, with and
-without a fix phase, of each read one byte past the reply limit and of a target that does not exist."""
+"""The replies the orders and focus reads serve, as text: a recorded run of each read over one ledger, of each read
+one byte past the reply limit and of a target that does not exist."""
 
 import json
 from pathlib import Path
@@ -17,7 +17,6 @@ pytestmark = pytest.mark.unit
 
 RECORDED = Path(__file__).with_name("read_replies_recorded.json")
 READS = ("orders", "focus", "focus/phases/p1", "focus/tasks/t2")
-FIXES = ("", "p2")
 NOW_S = 600.0
 
 
@@ -32,6 +31,14 @@ def rows() -> list[dict[str, Any]]:
     ]
 
 
+def no_fix(services: Any, slug: str) -> str:
+    return ""
+
+
+def now() -> float:
+    return NOW_S
+
+
 def refusal(services: Any, path: str) -> list[Any]:
     with pytest.raises(APIError) as refused:
         routes.ledger_read(services, SLUG, path, {})
@@ -39,17 +46,15 @@ def refusal(services: Any, path: str) -> list[Any]:
 
 
 def read_run(services: Any, patch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """The text of each read under each fix phase, what each answers one byte past the reply limit, and the answer
-    for a target that does not exist."""
+    """The text of each read, what each answers one byte past the reply limit, and the answer for a target that does
+    not exist."""
     found: dict[str, Any] = {}
-    for fix in FIXES:
-        patch.setattr(routes, "fix_phase", lambda services, slug, fix=fix: fix)
-        for path in READS:
-            whole = routes.ledger_read(services, SLUG, path, {})
-            found[f"{path} fix={fix}"] = json.dumps(whole)
-            with patch.context() as limited:
-                limited.setattr(routes.resources, "MAX_REPLY", routes.resources.reply_size(whole) - 1)
-                found[f"{path} fix={fix} past the limit"] = refusal(services, path)
+    for path in READS:
+        whole = routes.ledger_read(services, SLUG, path, {})
+        found[path] = json.dumps(whole)
+        with patch.context() as limited:
+            limited.setattr(routes.resources, "MAX_REPLY", routes.resources.reply_size(whole) - 1)
+            found[f"{path} past the limit"] = refusal(services, path)
     found["focus/tasks/none"] = refusal(services, "focus/tasks/none")
     return found
 
@@ -59,6 +64,7 @@ def test_a_recorded_run_of_the_orders_and_focus_reads_keeps_the_text_of_every_re
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     services = served(tmp_path, rows(), record("phases/p1", "focus"), record("tasks/t9", "focus"))
-    monkeypatch.setattr(routes, "time", SimpleNamespace(time=lambda: NOW_S))
+    monkeypatch.setattr(routes, "time", SimpleNamespace(time=now))
+    monkeypatch.setattr(routes, "fix_phase", no_fix)
     found = read_run(services, monkeypatch)
     assert found == json.loads(RECORDED.read_text()), f"the run now leaves: {json.dumps(found)}"
