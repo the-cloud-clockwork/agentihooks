@@ -564,6 +564,19 @@
       ]
     },
     {
+      "id": "lab-scheduler-pass-moves-changed-grades",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-grade-state-load",
+      "behaviour": "A lab scheduler pass reads and writes a live grade document only when the grade can change. A quiet pass leaves unread and unwritten every grade waiting on a pending or leased job, the budget, its own post hold, its repository's post hold or a held final post; a finished job moves only the grade holding it; a vanished job still drops its unit; and a scheduler keeping its per grade summaries grades every pass exactly like one rebuilt from Redis.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over the scheduler lab fixture, recording grade document GET and SET commands outside the demand build and comparing a warm scheduler with one rebuilt every pass",
+      "tests": [
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_quiet_pass_reads_and_writes_no_live_grade_whatever_holds_it",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_pass_after_one_job_finishes_reads_and_writes_only_the_grade_holding_it",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_unit_whose_queued_job_vanished_is_dropped_on_the_next_pass",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_warm_scheduler_grades_every_pass_like_one_rebuilt_from_redis"
+      ]
+    },
+    {
       "id": "lab-scheduler-memory",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2755",
