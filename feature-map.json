@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "node-caps-named-import",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-node-caps-cpu",
+      "behaviour": "Invoking the node caps condition imports its gate without loading unrelated gate implementations, while retaining existing cap decisions and mutable gate registries.",
+      "seam": "scripts.gates.entry.main, _decide and HOST_GATES",
+      "tests": [
+        "tests/gates/test_node_caps_cpu.py::test_node_caps_dispatch_imports_only_its_gate",
+        "tests/gates/test_node_caps_cpu.py::test_lazy_dispatch_preserves_the_default_intent_mode"
+      ]
+    },
+    {
       "id": "hive-member-queue-priority",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-queue-priority-noperm",
