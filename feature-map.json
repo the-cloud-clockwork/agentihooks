@@ -13921,7 +13921,19 @@
         "tests/hub/test_pulls.py::test_a_repository_event_for_an_untracked_repository_publishes_nothing",
         "tests/hub/test_github_webhooks.py::test_repository_events_from_recorded_payloads",
         "tests/hub/test_github_webhooks.py::test_a_merge_group_and_a_release_reach_each_swarm_tracking_the_repository",
-        "tests/hub/test_github_webhooks.py::test_a_failed_repository_publish_answers_503_after_the_lab_head_is_published"
+        "tests/hub/test_github_webhooks.py::test_a_failed_repository_publish_answers_503_after_the_lab_head_is_published",
+        "tests/hub/test_github_webhooks.py::test_a_merge_group_without_a_head_ref_names_no_pull_request",
+        "tests/hub/test_github_webhooks.py::test_the_lazy_pull_tracker_announces_a_repository_event_to_the_tracking_swarm",
+        "tests/hub/test_pulls.py::test_the_repository_key_hashes_the_lowercased_repository",
+        "tests/hub/test_pulls.py::test_the_repository_of_a_pull_is_everything_before_its_last_pull_segment",
+        "tests/hub/test_pulls.py::test_a_repository_event_is_published_on_the_swarm_subject_of_its_kind",
+        "tests/tick/steps/test_review_queue.py::test_a_pull_review_task_names_its_change_and_author_exactly",
+        "tests/tick/steps/test_review_queue.py::test_a_release_review_task_names_its_tag_and_no_author",
+        "tests/tick/steps/test_review_queue.py::test_a_merge_group_naming_no_pull_request_has_no_author",
+        "tests/tick/steps/test_review_queue.py::test_an_author_task_without_a_phase_gives_the_review_no_phase",
+        "tests/tick/steps/test_review_queue.py::test_the_durable_consumer_is_named_by_kind_and_swarm",
+        "tests/tick/steps/test_review_queue.py::test_an_event_at_the_edge_of_the_replay_window_still_queues",
+        "tests/tick/steps/test_review_queue.py::test_the_step_opens_the_configured_shared_bus"
       ]
     },
     {
