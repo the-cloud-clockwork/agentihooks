@@ -87,7 +87,7 @@ import sys
 class NamedGateOnly(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname: str, path: object = None, target: object = None) -> None:
         if fullname.startswith("scripts.gates.") and fullname.rsplit(".", 1)[-1] not in {
-            "entry", "base", "lift", "log", "modes", "node_caps"
+            "entry", "base", "lift", "log", "modes", "node_caps", "verdicts"
         }:
             raise AssertionError("unrelated gate imported: " + fullname)
 

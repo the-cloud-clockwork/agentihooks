@@ -19,6 +19,7 @@ from typing import Protocol
 
 from scripts.gates import lift, log, modes
 from scripts.gates.base import Call, Decision, Gate, Who
+from scripts.gates.verdicts import Verdicts
 
 LIFTED = "lifted by the operator: "
 FAILED_OPEN = Decision()
@@ -148,13 +149,16 @@ def native(name, operation, environ=None):
     return evaluate(HOST_GATES[name], Call(operation, session=receiving_session(environ)), environ)
 
 
-def _decide(gate, call, who, home, mode="enforce"):
+def _decide(gate: Gate, call: Call, who: Who, home: Path | str | None, mode: str = "enforce") -> Decision:
     try:
         state = Verdicts(who.swarm, gate.name, home)
-        if isinstance(gate, IntentGate):
-            return gate.decide(call, who, state, mode)
+        if "scripts.gates.intent" in sys.modules:
+            from scripts.gates.intent import IntentGate
+
+            if isinstance(gate, IntentGate):
+                return gate.decide(call, who, state, mode)
         return gate.decide(call, who, state)
-    except Exception as exc:  # a crashed gate lets the call through, counted in the gate log
+    except Exception as exc:
         detail = "gate evaluation failed" if gate.name == "brain" else f"{type(exc).__name__}: {exc}"
         _record(who, log.Row.of(gate.name, "fail-open", who, call.tool, detail), home)
         return FAILED_OPEN
