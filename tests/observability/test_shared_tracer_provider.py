@@ -113,7 +113,7 @@ def test_emit_span_preserves_name_attributes_and_times(
     monkeypatch.setattr(telemetry, "time", SimpleNamespace(time_ns=Mock(side_effect=[1_000_000_000, 2_000_000_000])))
     telemetry.emit_span(
         "brain.ingest",
-        {"text": "value", "count": 2, "ratio": 0.5, "ready": True, "skip": None, "items": [1], "long": "x" * 600},
+        {"text": "value", "count": 2, "ratio": 0.5, "ready": True, "omitted": None, "items": [1], "long": "x" * 600},
         duration_ms=12.5,
     )
     telemetry.flush()
@@ -139,8 +139,8 @@ def test_span_ctx_exports_attributes_and_updated_attributes(
 ) -> None:
     from hooks import telemetry
 
-    with telemetry.span_ctx("brain.tick", {"initial": 1, "skip": None}) as handle:
-        handle.set_attrs({"initial": 2, "items": [3], "skip": None})
+    with telemetry.span_ctx("brain.tick", {"initial": 1, "omitted": None}) as handle:
+        handle.set_attrs({"initial": 2, "items": [3], "omitted": None})
     telemetry.flush()
     (span,) = sdk[0].get_finished_spans()
     assert span.name == "brain.tick"
@@ -200,7 +200,7 @@ def test_sdk_unavailable_keeps_direct_http_span_fallback(
     monkeypatch.setattr(
         telemetry, "time", SimpleNamespace(time_ns=lambda: 1_000_000_000, time=Mock(side_effect=[10.0, 10.25]))
     )
-    telemetry.emit_span("brain.fallback", {"value": "kept", "skip": None}, duration_ms=12.5)
+    telemetry.emit_span("brain.fallback", {"value": "kept", "omitted": None}, duration_ms=12.5)
     with telemetry.span_ctx("brain.context.fallback", {"initial": "kept"}) as handle:
         handle.set_attrs({"extra": [1]})
     assert post.call_count == 2
