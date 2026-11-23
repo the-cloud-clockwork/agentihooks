@@ -649,7 +649,7 @@
       "id": "lab-scheduler-cached-snapshot",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-metrics-cached-snapshot",
-      "behaviour": "The CI lab scheduler's metrics port 9108 answers GET /metrics from the last load snapshot a metrics.Latest holds instead of building a full load per request: the first read builds it once however many reads meet that build, later reads answer at once with the last finished snapshot and set ci_lab_load_age_seconds to the seconds since its build started, never below zero, and the port's own serve loop starts one daemon build at a time once the last build started REFRESH_MS ago, so a failed build keeps the last snapshot and the next waits an interval. The series a scrape serves equal a fresh Scheduler.load of the same state.",
+      "behaviour": "The CI lab scheduler's metrics port 9108 answers GET /metrics from the last load snapshot a metrics.Latest holds instead of building a full load per request: listen starts the first build at bind and a Latest.read before any build builds it once however many reads meet that build, later reads answer at once with the last finished snapshot and set ci_lab_load_age_seconds to the seconds since its build started, never below zero, and the port's own serve loop starts one daemon build at a time once the last build started REFRESH_MS ago, so a failed build keeps the last snapshot and the next waits an interval. The series a scrape serves equal a fresh Scheduler.load of the same state.",
       "seam": "scripts.ci_lab.scheduler.listen over fakeredis read through GET /metrics with a counting Scheduler.load and a movable clock; scripts.ci_lab.metrics.Latest with a recording build; metrics.observe_age; metrics.serve with actions run from service_actions",
       "tests": [
         "tests/ci_lab/test_scheduler_snapshot.py::test_a_scrape_serves_the_series_of_a_fresh_load_build_of_the_same_state",
@@ -676,6 +676,20 @@
         "tests/ci_lab/test_scheduler_snapshot.py::test_the_capacity_document_equals_a_fresh_build_of_the_same_state",
         "tests/ci_lab/test_scheduler_snapshot.py::test_the_capacity_route_serves_the_build_the_metrics_port_refreshed",
         "tests/ci_lab/test_scheduler_snapshot.py::test_the_grades_route_reads_every_request_beside_the_cached_capacity"
+      ]
+    },
+    {
+      "id": "lab-scheduler-first-build-at-bind",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-labload-cold-start",
+      "behaviour": "The CI lab scheduler starts its first load build in a daemon thread when listen binds its ports, with no read, and no read waits for it: until that build finishes GET /capacity on ports 8800 and 9108 answers 503 with {\"error\": \"the load snapshot is not built yet\"} and GET /metrics answers 200 with the registry alone, carrying no load series and no load age; once it finishes both ports serve that build. metrics.Latest.start starts the first build only once, and metrics.Latest.peek answers None at once before the first build finishes and the finished snapshot after.",
+      "seam": "scripts.ci_lab.scheduler.listen over fakeredis with a held Scheduler.load read through GET /capacity and GET /metrics; scripts.ci_lab.metrics.Latest.start and Latest.peek with a held recording build; metrics.respond and service.Routes.respond with a snapshot answering None",
+      "tests": [
+        "tests/ci_lab/test_scheduler_snapshot.py::test_listen_starts_the_first_build_at_bind_and_no_read_waits_for_it",
+        "tests/ci_lab/test_metrics.py::test_start_builds_the_first_load_on_a_daemon_thread_with_no_read_and_starts_it_once",
+        "tests/ci_lab/test_metrics.py::test_peek_answers_at_once_while_the_first_build_runs_and_then_the_finished_load",
+        "tests/ci_lab/test_metrics.py::test_before_the_first_build_capacity_answers_not_built_and_metrics_the_registry_alone",
+        "tests/ci_lab/test_service.py::test_the_scheduler_port_answers_capacity_not_built_before_the_first_build"
       ]
     },
     {
@@ -1594,6 +1608,21 @@
       "rules": [
         "admission-skips-hive-max-agents"
       ]
+    },
+    {
+      "id": "hub-admission-expert-room-reserve",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-expert-room-reserve",
+      "behaviour": "While an expert lineage of any swarm runs with no expert in a state that has not ended, never seated, finished on a handoff or ended and waiting on the reap, the hub keeps one slot per such lineage on an asking hive that takes experts and answers a lane offer that would take it with a held answer naming the slots kept for expert lineages, before any claim, execution, seat or ledger write; once the successor is seated the slot is its own and the reserve ends. A lineage whose expert is live, a lineage that was stopped or completed, and a hive that excludes the expert lane keep nothing. The tick's expert seats step places the successor through its own launch path, never this admission. The hold lasts as long as the lineage waits, so a successor that cannot launch for another reason keeps its slot held on every hive that takes experts until it is seated or its lineage ends.",
+      "seam": "expert_lineage.waiting through Admission.admit and Admission._full for a hive spoke request",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_holds_a_launch_on_a_hive_one_below_max_agents_while_a_running_expert_lineage_waits",
+        "tests/hub/test_admission.py::test_a_lineage_of_another_swarm_waiting_for_an_expert_also_holds_the_hive",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_below_max_agents_while_no_running_expert_lineage_waits",
+        "tests/hub/test_admission.py::test_the_slot_kept_for_a_waiting_lineage_goes_to_its_successor_and_then_the_hive_is_full",
+        "tests/hub/test_admission.py::test_a_hive_that_takes_no_expert_keeps_no_slot_for_a_waiting_lineage"
+      ],
+      "rules": []
     },
     {
       "id": "controller-done-clears-awaiting",
@@ -4235,6 +4264,41 @@
       ]
     },
     {
+      "id": "tick-thin-task-pass",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-tick-step",
+      "behaviour": "Every 120 seconds the thin task pass checks each open engineer or ci task whose enhancement field is empty; a thin one gets one enhancement plan task in its phase, its enhancement set to needed in the same ledger write, and one master notice, and a second pass queues nothing more.",
+      "seam": "scripts.tick.steps.thin._thin_task_pass registered as tick step thin task pass in group wrapper phases",
+      "tests": [
+        "tests/tick/steps/test_thin_task_pass.py::test_thin_task_pass",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_open_task_gets_one_enhancement_task_on_the_first_pass_and_none_on_the_next",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_task_that_is_not_an_unmarked_thin_open_engineer_task_gets_no_write",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_ci_or_engineer_task_is_queued_whatever_its_lane_field",
+        "tests/tick/steps/test_thin_task_pass.py::test_an_existing_enhancement_task_skips_the_add_and_still_marks_the_task",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_task_with_no_description_field_is_checked_as_an_empty_description",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_refused_write_is_reported_and_the_pass_goes_on_to_the_next_task",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_title_the_ledger_would_refuse_falls_back_to_a_plain_title",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_task_with_no_title_gets_the_plain_title",
+        "tests/tick/steps/test_thin_task_pass.py::test_two_thin_tasks_are_both_queued_and_named_in_one_master_notice",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_with_no_phase_or_description_gets_an_enhancement_task_with_neither",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_spent_deadline_takes_no_task",
+        "tests/tick/steps/test_thin_task_pass.py::test_every_write_of_a_pass_is_one_the_ledger_api_accepts"
+      ]
+    },
+    {
+      "id": "swarm-phase-admits-enhancement",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-tick-step",
+      "behaviour": "An enhancement plan task, a plan kind task carrying enhances, is claimable while its phase is planning or building, so a thin task in a building phase gets a planner instead of draining the swarm, and it is never taken for its phase's own plan task: not by the phase lifecycle, not by the slice check and not by a sent back slice review that reopens the plan task.",
+      "seam": "scripts.swarm.phase_state.admits, scripts.swarm.phase_state.lifecycle, scripts.swarm.slice_check.plan_task and scripts.swarm_ledger.ledger_phases.decided",
+      "tests": [
+        "tests/swarm/test_phase_state.py::test_an_enhancement_task_is_admitted_while_its_phase_plans_or_builds",
+        "tests/swarm/test_phase_state.py::test_an_enhancement_task_is_never_taken_for_its_phase_plan_task",
+        "tests/swarm/test_slice_check.py::test_the_phase_plan_task_is_read_past_an_enhancement_task_queued_ahead_of_it",
+        "tests/swarm_ledger/test_phase_review.py::test_a_send_back_never_reopens_a_task_that_enhances_another"
+      ]
+    },
+    {
       "id": "swarm-claim-dependencies",
       "origin": "inventory",
       "behaviour": "A task stacked on a live dependency is claimable while work parked on it waits.",
@@ -6274,6 +6338,17 @@
       ]
     },
     {
+      "id": "ledger-write-doctrine-order-verb",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "The ledger write doctrine gate counts prose that teaches an order through the ledger command, agentihooks ledger order, as a ledger write line, as it does for every other write verb. The same order through agentihooks api is no write line, and reading the orders is none either.",
+      "seam": "scripts.no_ledger_write_doctrine.hits over one line, and its main grading a head tree against a base tree",
+      "tests": [
+        "tests/test_no_ledger_write_doctrine.py::test_an_order_through_the_ledger_command_is_a_write_line_and_through_the_api_is_not",
+        "tests/test_no_ledger_write_doctrine.py::test_a_new_line_teaching_an_order_through_the_ledger_command_is_red_and_the_api_form_is_green"
+      ]
+    },
+    {
       "id": "ledger-followup-duplicates",
       "origin": "inventory",
       "behaviour": "A follow up repeating an open follow up or task is refused naming it, unless a plain words not duplicate reason is given and stored.",
@@ -7992,7 +8067,7 @@
       "id": "ledger-warm-writer",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-daemon",
-      "behaviour": "One warm ledger writer per host answers each ledger API request on an owner only unix socket in the agentihooks home with the in process answer, as the caller and with the headers the request names, so a socket write, read or refusal returns the same status, body and rows as the in process call. A second writer refuses a live socket, a stale socket file is replaced, and the writer returns once the checkout moves after finishing requests in flight. A writer that cannot open its store, or whose socket file was removed, still closes and leaves no socket behind.",
+      "behaviour": "One warm ledger writer per host answers each ledger API request on an owner only unix socket in the agentihooks home with the in process answer, as the caller and with the headers the request names, so a socket write, read or refusal returns the same status, body and rows as the in process call. A second writer refuses a live socket, a stale socket file is replaced, and the writer returns once the checkout moves after finishing requests in flight. A writer that cannot open its store, or whose socket file was removed, still closes and leaves no socket behind. Every refusal, the revision conflict retry and every audit effect answer and leave rows alike over the socket and in process, on the SQLite store and on shared Postgres.",
       "seam": "scripts.swarm_ledger.warm_writer.serve and ask over scripts.tick.adapters.database_ledger.replied, the answer the in process transport uses",
       "tests": [
         "tests/swarm_ledger/test_warm_writer.py::test_a_socket_write_returns_the_in_process_reply_and_leaves_the_same_rows",
@@ -8020,7 +8095,10 @@
         "tests/swarm_ledger/test_warm_writer.py::test_the_checkout_moves_only_to_a_new_revision",
         "tests/swarm_ledger/test_warm_writer.py::test_the_writer_command_serves_the_home_socket_until_sigterm",
         "tests/swarm_ledger/test_warm_writer.py::test_the_writer_command_names_itself_and_takes_only_serve",
-        "tests/swarm_ledger/test_warm_writer.py::test_a_new_writer_probes_its_own_socket_within_the_probe_window"
+        "tests/swarm_ledger/test_warm_writer.py::test_a_new_writer_probes_its_own_socket_within_the_probe_window",
+        "tests/swarm_ledger/test_warm_writer_parity.py::test_each_refusal_answers_alike_over_the_socket_and_in_process",
+        "tests/swarm_ledger/test_warm_writer_parity.py::test_a_conflicting_write_retries_once_and_lands_alike_over_the_socket_and_in_process",
+        "tests/swarm_ledger/test_warm_writer_parity.py::test_each_audit_effect_is_left_alike_over_the_socket_and_in_process"
       ]
     },
     {
@@ -9878,6 +9956,26 @@
         "tests/swarm_ledger/test_covers_job_field.py::test_the_task_add_operation_schema_accepts_covers_job",
         "tests/swarm_ledger/test_covers_job_field.py::test_task_add_and_set_mark_the_job_a_task_covers",
         "tests/swarm_ledger/test_covers_job_field.py::test_task_help_says_the_covers_job_value_must_match_the_alert"
+      ]
+    },
+    {
+      "id": "promotion-current-job-not-completed",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promote-wait-poll-log",
+      "behaviour": "Promotion counts its exact triggering run promotion job whenever it is not completed, including a queued listing after execution starts, while retaining unique current job identity and all other grading checks.",
+      "seam": "snapshotGradeComplete in .github/scripts/promote.cjs through the promotion API contract harness",
+      "tests": [
+        "tests/contracts/promotion/test_promote.py::test_noncompleted_triggering_promotion_job_merges"
+      ]
+    },
+    {
+      "id": "promotion-changing-grade-poll-diagnostics",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promote-wait-poll-log",
+      "behaviour": "Each changed promotion grade poll logs the current promotion job count and every unsettled job name and status from the existing paginated response, suppressing identical results and job ordering changes without extra requests.",
+      "seam": "promotion grade polling in .github/scripts/promote.cjs through the promotion API contract harness",
+      "tests": [
+        "tests/contracts/promotion/test_promote.py::test_changed_promotion_grade_polls_are_logged"
       ]
     },
     {
