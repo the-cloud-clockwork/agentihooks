@@ -1,4 +1,5 @@
 import dataclasses
+import inspect
 import json
 import os
 import shutil
@@ -292,11 +293,10 @@ def test_outside_lists_every_unshared_file_a_test_module_the_manifest_lacks_open
 def test_a_fail_once_plant_is_flaky_inside_one_lab_run_and_green_on_the_next(tmp_path: Path) -> None:
     [edit] = json.loads((ROOT / "tests/ci_lab/plants/unit.fail-once.json").read_text())["edits"]
     test = f"{edit['path']}::test_a_planted_test_fails_its_first_lab_attempt_and_passes_the_retry"
-    copies = {
-        path: (ROOT / path).read_text() for path in ("tests/ci_lab/fail_once.py", "scripts/ci_lab/open_capture.py")
-    }
-    packages = {path: "" for path in ("tests/ci_lab/__init__.py", "scripts/__init__.py", "scripts/ci_lab/__init__.py")}
-    tree = _tree(tmp_path / "tree", {**copies, **packages, edit["path"]: edit["after"]})
+    sources = [Path(inspect.getfile(module)).relative_to(ROOT) for module in (fail_once, open_capture)]
+    packages = {str(folder / "__init__.py"): "" for path in sources for folder in path.parents if folder.name}
+    copies = {str(path): (ROOT / path).read_text() for path in sources}
+    tree = _tree(tmp_path / "tree", {**packages, **copies, edit["path"]: edit["after"]})
     lab = _lab(tmp_path, _manifest({test: []}), {})
 
     first = run_tests.run((test,), tree, VENV, 1, lab)

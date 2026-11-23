@@ -46,20 +46,23 @@ def prepare(root: Path, name: str, base: str) -> Pair:
     fixture = json.loads((root / CATALOG / f"{name}.json").read_text())
     revision = _git(root, "rev-parse", "--verify", f"{base}^{{commit}}").strip()
     sources: dict[str, str] = {}
+    modes: dict[str, str] = {}
     for edit in fixture["edits"]:
         path = edit["path"]
-        source = sources[path] if path in sources else _git(root, "show", f"{revision}:{path}")
-        if source.count(edit["before"]) != 1:
+        if path not in sources:
+            entry = _git(root, "ls-tree", revision, "--", path).split()
+            modes[path] = entry[0] if entry else "100644"
+            sources[path] = _git(root, "show", f"{revision}:{path}") if entry else ""
+        if sources[path].count(edit["before"]) != 1:
             raise ValueError(f"{name}: {path} must match its edit exactly once")
-        sources[path] = source.replace(edit["before"], edit["after"])
+        sources[path] = sources[path].replace(edit["before"], edit["after"])
     directory = (root / _git(root, "rev-parse", "--git-path", "index").strip()).parent
     with TemporaryDirectory(dir=directory) as temporary:
         environ = {**os.environ, **IDENTITY, "GIT_INDEX_FILE": str(Path(temporary) / "index")}
         _git(root, "read-tree", revision, environ=environ)
         for path, source in sources.items():
-            mode = _git(root, "ls-tree", revision, "--", path).split()[0]
             blob = _git(root, "hash-object", "-w", "--stdin", data=source).strip()
-            _git(root, "update-index", "--cacheinfo", f"{mode},{blob},{path}", environ=environ)
+            _git(root, "update-index", "--cacheinfo", f"{modes[path]},{blob},{path}", environ=environ)
         tree = _git(root, "write-tree", environ=environ).strip()
     original = _git(root, "rev-parse", f"{revision}^{{tree}}").strip()
     green = _git(root, "commit-tree", original, "-p", revision, data=f"CI lab {name} twin\n", environ=IDENTITY).strip()
