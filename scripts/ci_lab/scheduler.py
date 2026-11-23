@@ -1234,10 +1234,11 @@ def frame(
     """Return a tier's plan: the lab's gates its `Gate — Required` rules require, and every other job they require as
     a gate without units, which passes, so only what the lab grades can turn the grade red.
 
-    A pull request or hotfix grade runs with no test scope and no mutation, and names each authoritative gate it runs
-    no unit of, which it posts as skipped; a merge group grade runs only the queue suite with no lost unit rerun; both
-    keep the authoritative gates, which post as lab/<gate>; a promotion or backfill grade takes every lab gate, since
-    those rules require no job by name, and lists none.
+    A pull request or hotfix grade runs with no test scope and no mutation, grades under each required job the units
+    of every reusable workflow job it calls, which the expander files under the job, a slash and the called job, and
+    names each authoritative gate it runs no unit of, which it posts as skipped; a merge group grade runs only the
+    queue suite with no lost unit rerun; both keep the authoritative gates, which post as lab/<gate>; a promotion or
+    backfill grade takes every lab gate, since those rules require no job by name, and lists none.
     """
     if tier >= Priority.PROMOTION:
         return Plan(tree, grader, dict(gates))
@@ -1246,7 +1247,10 @@ def frame(
         required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
         queued = {job: gates.get(job, ()) for job in required}
         return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed)
-    framed = {job: gates.get(job, ()) for job in PULL_REQUIRED}
+    framed = {
+        job: tuple(unit for key, units in gates.items() if key == job or key.startswith(f"{job}/") for unit in units)
+        for job in PULL_REQUIRED
+    }
     idle = frozenset(gate for gate in authoritative if not framed.get(gate))
     return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}}, idle=idle, authoritative=listed)
 

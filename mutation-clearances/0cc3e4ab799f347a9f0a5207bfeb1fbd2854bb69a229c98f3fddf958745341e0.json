@@ -1,0 +1,6 @@
+{
+  "scripts/tick/pool.py:scripts.tick.pool.x_running:ccf64e4ed711a96fc37d0b717f99f9063766d11312b9b884b23675081442aee4": {
+    "reader": "standards-reader",
+    "reason": "Equivalent for supported running inputs: the slow lane is created by Deadline.after without a clock override, and that factory and Deadline.__init__ bind the same monotonic callable. The join copy is made immediately before user code can run, so omitting its explicit clock preserves the expiry, remaining wait and pass cadence."
+  }
+}

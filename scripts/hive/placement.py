@@ -5,6 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from packaging.version import InvalidVersion, Version
+
 from scripts.hive.registry import LIVE_MS, MASTER_NAME, UI_ROLES, live
 from scripts.master_claude_login import ROUTE as MASTER_LOGIN
 from scripts.routing.slots import account_key
@@ -26,6 +28,8 @@ NEEDS_TOGETHER = "the task needs a hive with {needs}, and no single hive declare
 UNRANKED = math.inf
 SPREAD = "spread"
 PLACED = "placed"
+FIRST_RELEASE: dict[str, str] = {"expert": "2.17.1181"}
+OUTDATED = "it runs release {release}, older than {floor}, the first release that hosts {role}"
 
 
 @dataclass(frozen=True)
@@ -58,8 +62,36 @@ class Choice:
     spill: Spill | None = None
 
 
-def hosts(role: str, hive: dict, aliases: tuple[str, ...] = ()) -> bool:
-    return hive.get("draining") != YES and not {role, *aliases} & set(hive["excluded"])
+def release(text: object) -> Version | None:
+    """The release a hive reports, as one that can be compared; a pre-release sorts before its release. None when it
+    reports none, a text that is no version, or a development or local build, which carries no release number of
+    its own."""
+    try:
+        found = Version(str(text))
+    except InvalidVersion:
+        return None
+    return None if found.is_devrelease or found.local else found
+
+
+def outdated(role: str, hive: dict[str, Any], aliases: tuple[str, ...] = ()) -> str:
+    """The first release that hosts the role or one of its aliases when the hive reports an older one, else empty.
+    A hive whose release cannot be judged is not held to it."""
+    floors = [FIRST_RELEASE[name] for name in (role, *aliases) if name in FIRST_RELEASE]
+    reported = release(hive.get("version"))
+    if not floors or reported is None:
+        return ""
+    floor = max(floors, key=Version)
+    return floor if reported < Version(floor) else ""
+
+
+def hosts(role: str, hive: dict[str, Any], aliases: tuple[str, ...] = ()) -> bool:
+    """Whether the hive may be given the role: it is not draining, excludes neither the role nor an alias of it,
+    and reports no release older than the first one that hosts the role."""
+    return (
+        hive.get("draining") != YES
+        and not {role, *aliases} & set(hive["excluded"])
+        and not outdated(role, hive, aliases)
+    )
 
 
 def repository(hive: dict[str, Any], repo: str) -> str:
@@ -191,7 +223,7 @@ def _pick(
     return Choice(min(candidates, key=_order(role))["id"], spill=spill)
 
 
-def unhosted(role: str, hives: list[dict], now: int, aliases: tuple[str, ...] = ()) -> Spill | None:
+def unhosted(role: str, hives: list[dict[str, Any]], now: int, aliases: tuple[str, ...] = ()) -> Spill | None:
     ranked = [hive for hive in hives if SPREAD not in hive and role in hive["prefer"]]
     if not ranked:
         return None
@@ -200,8 +232,10 @@ def unhosted(role: str, hives: list[dict], now: int, aliases: tuple[str, ...] = 
         return Spill(preferred["id"], f"its heartbeat is older than {LIVE_MS // 1000} seconds")
     if preferred.get("draining") == YES:
         return Spill(preferred["id"], "it is draining")
-    if not hosts(role, preferred, aliases):
+    if {role, *aliases} & set(preferred["excluded"]):
         return Spill(preferred["id"], f"it excludes {role}")
+    if floor := outdated(role, preferred, aliases):
+        return Spill(preferred["id"], OUTDATED.format(release=preferred.get("version"), floor=floor, role=role))
     return None
 
 
