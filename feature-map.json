@@ -13877,6 +13877,18 @@
       ]
     },
     {
+      "id": "health-kept-state-one-helper",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "A health check that keeps state between tick passes stores it as one JSON text under its own key of the swarm, the time of the pass first and its rows after it. The focus unclaimed and order waiting checks keep the same text they always kept, apart from each other and from another swarm, and an absent value reads as empty.",
+      "seam": "scripts.swarm.health.focus_unclaimed and order_waiting observe and read over a Redis store",
+      "tests": [
+        "tests/tick/steps/test_kept_health_state.py::test_the_focus_check_keeps_its_counts_as_one_text_under_its_key",
+        "tests/tick/steps/test_kept_health_state.py::test_the_order_check_keeps_its_waits_as_one_text_under_its_key",
+        "tests/tick/steps/test_kept_health_state.py::test_each_check_keeps_its_state_apart_from_the_other_and_from_another_swarm"
+      ]
+    },
+    {
       "id": "swarm-master-focus-read",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-sanity-check",
