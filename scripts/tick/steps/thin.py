@@ -1,5 +1,5 @@
 """The thin task pass: queue one planner enhancement task for each open engineer or ci task whose text is too thin
-to build from, mark the task as needing enhancement under a guard and tell the master once."""
+to build from, mark the task as needing enhancement in the same ledger write and tell the master once."""
 
 from collections.abc import Callable
 from itertools import takewhile
@@ -10,6 +10,7 @@ from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm_ledger import ledger_comments
 from scripts.tick import registry
 from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import Ledger
 from scripts.tick.ports.tools import Tools
 from scripts.tick.step import Lane
 from scripts.tick.steps import CallStep, hook_domains
@@ -18,7 +19,6 @@ Get = Callable[[str], Any]
 SENDER = "swarm"
 LANES = ("eng", "ci")
 NEEDED = {"enhancement": "needed"}
-UNCHECKED = {"enhancement": ""}
 TITLE = "Plan a thin task before an engineer claims it"
 DISTINCT = "Each thin task gets its own enhancement plan task, keyed by the task it enhances."
 
@@ -32,9 +32,9 @@ def _thin_task_pass(tick: Any, get: Get) -> list[str]:
     ids = {task["id"] for task in tasks}
     lines: list[str] = []
     queued: list[str] = []
-    for task in takewhile(lambda _: not deadline.expired, filter(_unchecked, tasks)):
-        if problems := thin_task.thin(task):
-            line, marked = _enhance(tools, deadline, task, problems, ids)
+    for task in takewhile(lambda _: not deadline.expired, filter(unchecked, tasks)):
+        if problems := thin_task.thin({"description": "", **task}):
+            line, marked = enhance(tools.ledger, deadline, task, problems, ids)
             lines.append(line)
             queued += [task["id"]] if marked else []
     if queued:
@@ -42,27 +42,29 @@ def _thin_task_pass(tick: Any, get: Get) -> list[str]:
     return lines
 
 
-def _unchecked(task: dict[str, Any]) -> bool:
+def unchecked(task: dict[str, Any]) -> bool:
     """Return whether ``task`` is an open engineer or ci task, a missing lane reading as engineer, that no thin check
     has marked."""
     return task.get("state") == "open" and task.get("lane", "eng") in LANES and not task.get("enhancement")
 
 
-def _enhance(
-    tools: Tools, deadline: Deadline, task: dict[str, Any], problems: list[str], ids: set[str]
+def enhance(
+    ledger: Ledger, deadline: Deadline, task: dict[str, Any], problems: list[str], ids: set[str]
 ) -> tuple[str, bool]:
-    """Add the enhancement task of the thin ``task`` unless ``ids`` holds it, then mark the task as needing
-    enhancement only while its field is empty; return the action line and whether this pass marked it."""
+    """Add the enhancement task of the thin ``task`` unless ``ids`` holds it and mark the task as needing enhancement,
+    both in one ledger write; return the action line and whether the write landed."""
     tid, enhancement = task["id"], thin_task.ENHANCE.format(task["id"])
+    added = [] if enhancement in ids else [_addition(task, problems)]
     try:
-        if enhancement not in ids:
-            tools.ledger.mutate([_addition(task, problems)], deadline=deadline)
-        held = tools.ledger.update_task(tid, NEEDED, if_match=UNCHECKED, deadline=deadline)
+        ledger.mutate([*added, _marking(tid)], deadline=deadline)
     except LedgerRefused as exc:
         return f"refused the enhancement of {tid}: {exc}", False
-    if held.get("enhancement") != NEEDED["enhancement"]:
-        return f"left {tid}: another writer marked its enhancement first", False
     return f"queued {enhancement} for thin task {tid}", True
+
+
+def _marking(tid: str) -> dict[str, object]:
+    """Return the enhancement operation that marks task ``tid`` as needing enhancement."""
+    return {"op": "task_enhancement", "id": f"thin-mark-{tid}", "by": SENDER, "item": f"tasks/{tid}", **NEEDED}
 
 
 def _addition(task: dict[str, Any], problems: list[str]) -> dict[str, object]:
@@ -70,6 +72,7 @@ def _addition(task: dict[str, Any], problems: list[str]) -> dict[str, object]:
     named = f"Plan the thin task {task['title']}"
     operation: dict[str, object] = {
         "op": "task_add",
+        "id": f"thin-add-{task['id']}",
         "by": SENDER,
         "task": thin_task.ENHANCE.format(task["id"]),
         "title": TITLE if ledger_comments.problems(named, "item") else named,

@@ -1,5 +1,5 @@
 """The thin task pass tick step queues one enhancement plan task for each thin open engineer or ci task, marks the
-task as needing enhancement under a guard and tells the master once."""
+task as needing enhancement in the same ledger write and tells the master once."""
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -10,7 +10,7 @@ import pytest
 
 from scripts.swarm import thin_task
 from scripts.swarm.ledger_client import LedgerRefused
-from scripts.swarm_ledger import ledger_core
+from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.api import schemas
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.tick import registry
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.unit
 SLUG = "sw"
 EFFECTS = frozenset({"inbox", "ledger"})
 NEEDED = {"enhancement": "needed"}
-UNCHECKED = {"enhancement": ""}
+MARK = {"op": "task_enhancement", "id": "thin-mark-t1", "by": "swarm", "item": "tasks/t1", "enhancement": "needed"}
 THIN: dict[str, Any] = {
     "id": "t1",
     "title": "Fix the claim",
@@ -69,7 +69,9 @@ class Accepting:
     def mutate(self, slug: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
         self.sent.append(operations)
         try:
-            schemas.check_operations({"operation_id": slug, "ops": operations, "guards": {}}, ledger_core, ("t1",))
+            schemas.check_operations(
+                {"operation_id": slug, "ops": operations, "guards": {}}, ledger_server.core, ("t1",)
+            )
         except APIError as error:
             self.refused.append(str(error))
             return {"rejected": ["refused"]}
@@ -94,7 +96,7 @@ def _step() -> CallStep:
 
 
 def _run(tasks: list[dict[str, Any]], ledger: FakeLedger | None = None, deadline: Deadline | None = None) -> Pass:
-    held = ledger or FakeLedger({"update_task": {"id": "t1", **NEEDED}})
+    held = ledger or FakeLedger({})
     inbox = Inbox()
     values: dict[str, Any] = {
         "doc": {"tasks": tasks},
@@ -107,7 +109,7 @@ def _run(tasks: list[dict[str, Any]], ledger: FakeLedger | None = None, deadline
     return Pass(call(None, values.__getitem__), held, inbox)
 
 
-def _added(found: Pass) -> list[dict[str, Any]]:
+def _operations(found: Pass) -> list[dict[str, Any]]:
     operations: list[dict[str, Any]] = []
     for name, args in found.calls():
         if name == "mutate":
@@ -115,8 +117,8 @@ def _added(found: Pass) -> list[dict[str, Any]]:
     return operations
 
 
-def _guards(found: Pass) -> list[tuple[object, ...]]:
-    return [args for name, args in found.calls() if name == "update_task"]
+def _added(found: Pass) -> list[dict[str, Any]]:
+    return [operation for operation in _operations(found) if operation["op"] == "task_add"]
 
 
 def _notice(names: str) -> str:
@@ -143,12 +145,13 @@ def test_thin_task_pass() -> None:
 
 @pytest.mark.feature("tick-thin-task-pass")
 def test_a_thin_open_task_gets_one_enhancement_task_on_the_first_pass_and_none_on_the_next() -> None:
-    """The first pass adds enhance-t1 in the target's phase, marks t1 as needing enhancement only while it is unmarked
-    and tells the master once; the next pass over the ledger that write produced changes nothing."""
+    """The first pass adds enhance-t1 in the target's phase and marks t1 as needing enhancement in one ledger write and
+    tells the master once; the next pass over the ledger that write produced changes nothing."""
     first = _run([THIN])
-    [added] = _added(first)
-    assert {key: added[key] for key in ("op", "by", "task", "title", "lane", "kind", "phase", "enhances")} == {
+    [added, marked] = _operations(first)
+    assert {key: added[key] for key in ("op", "id", "by", "task", "title", "lane", "kind", "phase", "enhances")} == {
         "op": "task_add",
+        "id": "thin-add-t1",
         "by": "swarm",
         "task": "enhance-t1",
         "title": "Plan the thin task Fix the claim",
@@ -162,8 +165,8 @@ def test_a_thin_open_task_gets_one_enhancement_task_on_the_first_pass_and_none_o
         f"{' '.join(thin_task.thin(THIN))} Its current description: Fix the claim."
     )
     assert added["not_duplicate"] == "Each thin task gets its own enhancement plan task, keyed by the task it enhances."
-    assert _guards(first) == [("t1", NEEDED, (), UNCHECKED)]
-    assert [name for name, _ in first.calls()] == ["mutate", "update_task"]
+    assert marked == MARK
+    assert [name for name, _ in first.calls()] == ["mutate"]
     assert first.lines == ["queued enhance-t1 for thin task t1"]
     assert first.inbox.sent == [("swarm", f"master@{SLUG}", _notice("enhance-t1"), True)]
     enhancement = {"id": "enhance-t1", "state": "open", "lane": "plan", "kind": "plan", "enhances": "t1"}
@@ -202,28 +205,33 @@ def test_a_thin_ci_or_engineer_task_is_queued_whatever_its_lane_field(lane: dict
 
 
 @pytest.mark.feature("tick-thin-task-pass")
-def test_an_existing_enhancement_task_skips_the_add_and_still_guards_the_field() -> None:
-    """When the ledger already holds enhance-t1 the pass adds nothing and still marks t1 under the guard."""
+def test_an_existing_enhancement_task_skips_the_add_and_still_marks_the_task() -> None:
+    """When the ledger already holds enhance-t1 the pass adds nothing and its one write only marks t1."""
     found = _run([THIN, {"id": "enhance-t1", "state": "open", "lane": "plan", "kind": "plan", "enhances": "t1"}])
-    assert found.calls() == [("update_task", ("t1", NEEDED, (), UNCHECKED))]
+    assert [name for name, _ in found.calls()] == ["mutate"]
+    assert _operations(found) == [MARK]
     assert found.lines == ["queued enhance-t1 for thin task t1"]
 
 
 @pytest.mark.feature("tick-thin-task-pass")
-def test_a_task_marked_elsewhere_first_is_left_and_the_master_is_not_told() -> None:
-    """When the guard finds t1 already marked by another writer the pass reports it left and sends no item."""
-    found = _run([THIN], FakeLedger({"update_task": {"id": "t1", "enhancement": "planned"}}))
-    assert found.lines == ["left t1: another writer marked its enhancement first"]
-    assert found.inbox.sent == []
+def test_a_task_with_no_description_field_is_checked_as_an_empty_description(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ledger row without a description field reaches the thin check with an empty description, as the ledger
+    stores a task added without one, so the pass never fails on such a row."""
+    checked: list[dict[str, Any]] = []
+    monkeypatch.setattr(thin_task, "thin", lambda task: checked.append(task) or [])
+    task = {key: value for key, value in THIN.items() if key != "description"}
+    found = _run([task])
+    assert checked == [{"description": "", **task}]
+    assert (found.lines, found.calls()) == ([], [])
 
 
 @pytest.mark.feature("tick-thin-task-pass")
 def test_a_refused_write_is_reported_and_the_pass_goes_on_to_the_next_task() -> None:
     """A ledger refusal on t1 leaves t1 unmarked, and the pass still queues t2 and tells the master only about t2."""
-    ledger = RefusingLedger({"update_task": {"id": "t2", **NEEDED}}, refused="t1")
+    ledger = RefusingLedger({}, refused="t1")
     found = _run([THIN, {**THIN, "id": "t2"}], ledger)
     assert found.lines == ["refused the enhancement of t1: task_add refused", "queued enhance-t2 for thin task t2"]
-    assert _guards(found) == [("t2", NEEDED, (), UNCHECKED)]
+    assert [operation["id"] for operation in _operations(found)] == ["thin-add-t2", "thin-mark-t2"]
     assert found.inbox.sent == [("swarm", f"master@{SLUG}", _notice("enhance-t2"), True)]
 
 
