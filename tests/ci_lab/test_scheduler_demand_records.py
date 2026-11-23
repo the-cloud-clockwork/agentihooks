@@ -41,6 +41,7 @@ def test_a_save_stores_the_document_with_its_next_revision_and_the_demand_record
     assert revision == str(int(before) + 1)
     assert record == {"revision": int(before) + 1, "tier": 1, "hits": 1, "jobs": [scheduler.job_id(HEAD_A, unit(1))]}
     assert document is not None
+    assert record is not None
     demand = scheduler._grade_demand(document, b"")
     assert (record["tier"], record["hits"], tuple(record["jobs"])) == (demand.tier, demand.hits, demand.jobs)
 
