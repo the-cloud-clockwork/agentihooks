@@ -352,6 +352,7 @@
       "ready:sw:t8:0"
     ],
     "placed after a plain pass": [
+      "ready:sw:t2:0",
       "ready:sw:t6:0"
     ],
     "queued in eng": [
@@ -359,8 +360,8 @@
       "t8"
     ],
     "queued in ci": [
-      "t2",
       "t10",
+      "t2",
       "t6"
     ]
   }
