@@ -1,20 +1,6 @@
 {
   "features": [
     {
-      "id": "swarm-parser-extraction",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-cli-split-parser",
-      "behaviour": "The swarm parser preserves every recorded command namespace, help page, refusal and current CLI handler binding while its builder lives separately and the CLI stays below 2850 lines.",
-      "seam": "scripts.swarm.cli.build_parser and scripts.swarm.cli_parser.build_parser",
-      "tests": [
-        "tests/swarm/test_parser_equivalence.py::test_recorded_arguments_cover_every_parser_leaf",
-        "tests/swarm/test_parser_equivalence.py::test_namespaces_help_and_refusals_equal_recorded_base",
-        "tests/swarm/test_parser_equivalence.py::test_recorded_invalid_arguments_are_refused",
-        "tests/swarm/test_parser_equivalence.py::test_builder_resolves_current_cli_handlers",
-        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom"
-      ]
-    },
-    {
       "id": "reviewer-worker-gates",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-lane-gates",
@@ -41,6 +27,20 @@
       "tests": [
         "tests/gates/test_node_caps_cpu.py::test_node_caps_dispatch_imports_only_its_gate",
         "tests/gates/test_node_caps_cpu.py::test_lazy_dispatch_preserves_the_default_intent_mode"
+      ]
+    },
+    {
+      "id": "swarm-parser-extraction",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-cli-split-parser",
+      "behaviour": "The swarm parser preserves every recorded command namespace, help page, refusal and current CLI handler binding while its builder lives separately and the CLI stays below 2850 lines.",
+      "seam": "scripts.swarm.cli.build_parser and scripts.swarm.cli_parser.build_parser",
+      "tests": [
+        "tests/swarm/test_parser_equivalence.py::test_recorded_arguments_cover_every_parser_leaf",
+        "tests/swarm/test_parser_equivalence.py::test_namespaces_help_and_refusals_equal_recorded_base",
+        "tests/swarm/test_parser_equivalence.py::test_recorded_invalid_arguments_are_refused",
+        "tests/swarm/test_parser_equivalence.py::test_builder_resolves_current_cli_handlers",
+        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom"
       ]
     },
     {

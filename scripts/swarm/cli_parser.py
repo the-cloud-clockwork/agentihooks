@@ -2,6 +2,7 @@ import argparse
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from scripts.swarm import cli as cli_module
     from scripts.swarm import launch_starts, master_drill, night_watch_drill, tasks_read, tick_report
     from scripts.swarm.cli import (
         DEFAULT_MATURITY,
@@ -16,8 +17,9 @@ def build_parser() -> argparse.ArgumentParser:
         master_launch,
         plan_review,
         prerequisite_wait,
-        probe_command,
     )
+
+    probe_command = getattr(cli_module, "probe_command")
 
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
