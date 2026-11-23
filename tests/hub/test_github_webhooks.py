@@ -654,7 +654,7 @@ def test_a_merge_group_without_a_head_ref_names_no_pull_request() -> None:
 @pytest.mark.feature("swarm-review-trigger")
 def test_the_lazy_pull_tracker_announces_a_repository_event_to_the_tracking_swarm() -> None:
     bus, _, _ = setup()
-    consumer = bus.events.consumer("watch", "swarm.crew.release.published")
+    consumer = bus.events.consumer("release", "swarm.crew.release.published")
     github_webhooks.LazyPulls(cast(Bus, bus)).announce(REPO, "release.published", "v1", {"tag": "v1"})
     [event] = drain(consumer)
     assert (event.swarm, event.type, event.key, event.data) == (
