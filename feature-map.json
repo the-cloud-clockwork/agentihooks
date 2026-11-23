@@ -4883,7 +4883,8 @@
         "tests/swarm/test_lane_kinds.py::test_a_reviewer_seat_moves_its_mail_and_is_capped_like_an_engineer_seat",
         "tests/inbox/test_exits.py::test_review_seat_mail_above_the_review_lane_cap_is_settled_and_within_it_waits",
         "tests/inbox/test_member_mail.py::test_the_sweep_moves_open_review_seat_mail_to_the_new_occupants_host",
-        "tests/doctor/test_empty_seats.py::test_a_review_seat_above_the_review_lane_cap_has_no_seat_wait"
+        "tests/doctor/test_empty_seats.py::test_a_review_seat_above_the_review_lane_cap_has_no_seat_wait",
+        "tests/doctor/test_empty_seats.py::test_a_review_seat_on_a_config_stored_without_a_review_cap_has_no_seat_wait"
       ]
     },
     {
