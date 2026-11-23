@@ -9,7 +9,7 @@ export function liveAgents(sw) {
 
 function laneRoles(sw) {
   const live = liveAgents(sw), role = (a) => a.profile || LANE_PROFILES[a.lane];
-  return LANE_ROLES.map(([lane, lanes, known]) => {
+  return LANE_ROLES.filter(([lane]) => lane !== "review" || Object.hasOwn(sw.config || {}, "max_review") || live.some((a) => a.lane === "review")).map(([lane, lanes, known]) => {
     const agents = live.filter((a) => lanes.includes(a.lane)), names = [...new Set([...known, ...agents.map(role).filter(Boolean)])];
     return [lane, names.map((name) => [name, agents.filter((a) => role(a) === name).length])];
   });
