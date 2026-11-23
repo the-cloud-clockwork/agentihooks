@@ -4,13 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import capacity, naming, quota_view, readiness, templates
+from scripts.swarm import capacity, cli, naming, quota_view, readiness, templates
 from scripts.swarm import tick as swarm_tick
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_ledger import ledger_tasks, new_ledger
+from scripts.swarm_ledger import ledger_creator, ledger_tasks, new_ledger
 from scripts.tick.steps import tasks as task_steps
 from tests.swarm.test_capacity import _readings, account
+from tests.swarm.test_create_refusal import _args as create_args
 from tests.swarm.test_readiness import doc as readiness_doc
 from tests.swarm.test_readiness import snapshot as readiness_snapshot
 from tests.swarm.test_readiness import task as readiness_task
@@ -73,6 +74,7 @@ def test_reviewer_names_round_trip_to_the_review_lane() -> None:
 def test_review_seats_are_numbered_like_worker_seats() -> None:
     assert naming.seat_label("eng", 2) == "eng-2"
     assert naming.seat_label("review", 2) == "review-2"
+    assert swarm_tick.seat_address("sw", naming.seat_label("review", 2)) == "review-2@sw"
 
 
 @pytest.mark.feature("swarm-review-lane")
@@ -101,6 +103,15 @@ def test_a_template_from_a_swarm_config_carries_the_review_cap() -> None:
         "review": 3,
         "master": 1,
     }
+
+
+@pytest.mark.feature("swarm-review-lane")
+def test_a_new_swarm_takes_the_review_cap_from_its_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    template = templates.parse({"name": "wide", "lanes": {"review": {"cap": 3}}})
+    monkeypatch.setattr(cli.templates, "load", lambda name, environ: template)
+    monkeypatch.setattr("scripts.hive.daemon.origin", lambda path: f"origin of {path}")
+    monkeypatch.setattr(ledger_creator, "shared", lambda environ: True)
+    assert cli.create_config(create_args()).max_review == 3
 
 
 @pytest.mark.feature("swarm-review-lane")
@@ -156,6 +167,19 @@ def test_autoscale_reads_no_demand_as_zero_demand_on_every_scaled_lane() -> None
     assert idle is not None and unset is not None and wanted is not None
     assert unset["ceilings"] == idle["ceilings"]
     assert wanted["ceilings"] != idle["ceilings"]
+
+
+@pytest.mark.feature("swarm-review-lane")
+def test_autoscale_reads_a_scaled_lane_missing_from_ready_work_as_zero_demand() -> None:
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto", max_review=2)
+    inputs = capacity.fixture_inputs({**_readings(), "previous": {}})
+    zero = capacity.ScaleInputs(inputs.observations, inputs.agents, {"eng": 0, "ci": 0, "plan": 0}, lambda: None, {})
+    review_only = capacity.ScaleInputs(inputs.observations, inputs.agents, {"review": 2}, lambda: None, {})
+    _, idle = capacity.autoscaled(config, zero)
+    _, missing = capacity.autoscaled(config, review_only)
+    assert idle is not None and missing is not None
+    assert missing["ceilings"] == idle["ceilings"]
+    assert missing["reason"] == idle["reason"]
 
 
 @pytest.mark.feature("swarm-review-lane")

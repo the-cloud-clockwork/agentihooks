@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__operator:8a899eb98e8dbf617f406e317fd85ebbb2a6c186ff010b5a2ccc5ebd7975649d": {
+    "reader": "standards_reader",
+    "reason": "Identical _operator output on all 299,592 operator runs up to length 6; the replacement keeps \">\" and adds no separator or \"&\"."
+  }
+}
