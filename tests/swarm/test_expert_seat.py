@@ -259,8 +259,11 @@ def test_the_kept_reason_and_the_line_of_the_pass_hold_no_secret_and_no_login_of
 def test_the_login_dropped_from_a_word_runs_from_its_first_address_mark_to_the_last_at_sign_after_it(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, word: str, kept: str
 ) -> None:
+    def unredacted(text: str, *, mode: str) -> str:
+        return text
+
     started(store)
-    monkeypatch.setattr(expert_seat, "redact", lambda text, *, mode: text)
+    monkeypatch.setattr(expert_seat, "redact", unredacted)
     assert go(store, failing(f"clone of {word} failed")) == [
         f"expert spawn failed on lineage expert-1: clone of {kept} failed"
     ]
