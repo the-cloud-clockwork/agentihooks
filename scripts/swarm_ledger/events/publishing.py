@@ -1,5 +1,6 @@
 import sys
 import threading
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -11,13 +12,13 @@ class Publishing:
     """A LedgerRepository that hands each stored generation it reads or writes to every publisher(slug, state) once,
     on its own thread, newest generation per ledger, so no reader or writer waits for a publication."""
 
-    def __init__(self, inner, *publishers):
+    def __init__(self, inner: Any, *publishers: Callable[[str, dict[str, Any]], None]) -> None:
         self.inner = inner
         self.publishers = list(publishers)
-        self.published = {}
+        self.published: dict[str, int] = {}
         self.queued = threading.Condition()
-        self.pending = {}
-        self.worker = None
+        self.pending: dict[str, Entry | Newest] = {}
+        self.worker: threading.Thread | None = None
 
     def __getattr__(self, name):
         return getattr(self.inner, name)
@@ -90,7 +91,7 @@ class Publishing:
 class Newest:
     """A queued publication of whatever generation is stored when the publish thread reaches it."""
 
-    generation = -1
+    generation: int = -1
 
 
 SHARED = {}
