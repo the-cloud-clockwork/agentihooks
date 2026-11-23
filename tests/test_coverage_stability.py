@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -173,6 +174,17 @@ def test_the_scheduled_job_compares_the_newest_dev_runs_and_fails_on_any_differe
     assert 'python -m tests.coverage_stability --work "$RUNNER_TEMP/coverage-stability" latest' in compare["run"]
     assert "set -o pipefail" in compare["run"]
     assert all("continue-on-error" not in step and "if" not in step for step in job["steps"])
+
+
+@pytest.mark.feature("coverage-stability-installs-locked-coverage-first")
+def test_the_compare_job_installs_locked_coverage_before_it_compares() -> None:
+    steps = yaml.safe_load((_ROOT / ".github/workflows/coverage-stability.yml").read_text())["jobs"]["compare"]["steps"]
+    install = re.compile(r"\bpip3? install --constraint \.github/test-requirements\.lock\b.*\bcoverage\b")
+    installs = [index for index, step in enumerate(steps) if install.search(str(step.get("run", "")))]
+    compares = [index for index, step in enumerate(steps) if step.get("id") == "compare"]
+    assert installs and compares and installs[0] < compares[0], (
+        f"coverage installs at {installs}, compare at {compares}"
+    )
 
 
 def test_stability_reads_every_coverage_shard_the_unit_job_splits():
