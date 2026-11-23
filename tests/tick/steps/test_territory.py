@@ -288,7 +288,7 @@ def test_a_running_swarm_with_nothing_claimable_drains_and_counts_blocked_tasks(
     rows["d"] = {"state": "done"}
     store, ledger = _SettleStore([_agent("master@1-1", "master")]), _Ledger()
     assert _settled(SimpleNamespace(state="running"), store, ledger, rows, {}) == ["drained"]
-    assert calls == [("claimable", "eng"), ("claimable", "ci"), ("claimable", "plan")]
+    assert calls == [("claimable", "eng"), ("claimable", "ci"), ("claimable", "plan"), ("claimable", "review")]
     assert store.updates == [("sw", {"state": "drained"})]
     assert ledger.notices == [("sw", f"drained fix {len(rows)}{tail}")]
 
@@ -322,7 +322,7 @@ def test_settle_hands_its_own_slug_store_ledger_rows_doc_and_config_to_each_seam
     running, stopping = SimpleNamespace(state="running"), SimpleNamespace(state="stopping")
     assert _settled(running, store, ledger, rows, doc) == ["drained"]
     assert seen == [
-        *(("claimable", "sw", store, rows, doc, lane) for lane in ("eng", "ci", "plan")),
+        *(("claimable", "sw", store, rows, doc, lane) for lane in ("eng", "ci", "plan", "review")),
         ("fix", running),
         ("notice", doc, "fix"),
     ]

@@ -1116,7 +1116,7 @@ def build_parser() -> argparse.ArgumentParser:
     task.add_argument("action", choices=["add", "set", "group", "split"])
     task.add_argument("id", help="task id; task add - mints the next free t<n>")
     task.add_argument("values", nargs="+")
-    task.add_argument("--lane", choices=["eng", "ci", "plan"], default="eng")
+    task.add_argument("--lane", choices=ledger_tasks.LANES, default="eng")
     task.add_argument("--phase", default="")
     task.add_argument("--description", default="")
     task.add_argument("--depends-on", default="", help="comma separated task ids that must be done first")

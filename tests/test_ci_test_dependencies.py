@@ -380,7 +380,6 @@ FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
-    ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
     ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
     ".github/workflows/test.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4' PyYAML==6.0.3",
@@ -396,7 +395,6 @@ FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
     ".github/workflows/test.yml: uv pip install --system --constraint '$RUNNER_TEMP/workflow/.github/test-requirements.lock' mutmut==3.6.0 'pytest>=8.0,<9.2' 'pyyaml>=6.0' 'tomlkit>=0.12'",
     "scripts/ci_duration_provenance.yml: pip install 'pyyaml>=6.0'",
-    "scripts/ci_reuse_job.yml: pip install 'pyyaml>=6.0'",
 )
 
 
