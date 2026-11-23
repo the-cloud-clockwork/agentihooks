@@ -78,6 +78,8 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 | `wait-ends-closed` | `swarm.*.pull.closed` | The same re-check for a pull request closed unmerged. |
 | `wait-ends-dequeued` | `swarm.*.merge.dequeued` | The same re-check for a pull request that left the merge queue. |
 | `wait-ends-checks` | `swarm.*.checks.completed` | The same re-check when a check suite on the pull request completes. |
+| `task-wait-ends` | `swarm.*.task.*` | On a task changed event to done or blocked, re-reads that task and ends every task wait naming it through the same single wait end. When the task is done, it also sends the live holder of every claimed open task whose `depends_on` names it one inbox item naming the closed dependency, once per dependency and dependent. |
+| `reply-wait-ends` | `swarm.*.inbox-wake.requested` | When the woken inbox item is a reply, ends every reply wait on the item it answers through the same single wait end. A send that answers nothing ends no wait. |
 
 ### Hub readiness and rollouts
 
