@@ -13,6 +13,17 @@
       ]
     },
     {
+      "id": "filter-web-single-token-literals",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-filter-identifier-literals",
+      "behaviour": "The string literal finder skips a quoted literal in a web file that holds no whitespace, such as a tag name, class, id, data attribute key or path segment, while literals with whitespace, template text included, and text nodes stay findings, so the ledger page filter lets the saved orders panel file through when the judge scores its identifiers above the threshold.",
+      "seam": "hooks.filters.finders.string_literals.find for web paths, and conditions.pre_effect running the shipped ledger page filter",
+      "tests": [
+        "tests/filters/test_literals.py::test_web_literals_without_whitespace_are_skipped_while_sentences_and_text_nodes_stay",
+        "tests/filters/test_ui_slop.py::test_saved_orders_panel_passes_the_ledger_filter_when_its_identifiers_score_above_the_threshold"
+      ]
+    },
+    {
       "id": "sonar-gate-verdict",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-sonar-new-bug-13212",
@@ -486,6 +497,16 @@
         "tests/ci_lab/test_skipped_gates.py::test_a_grade_ref_head_leaves_each_skipped_authoritative_gate_to_the_relay",
         "tests/ci_lab/test_skipped_gates.py::test_a_pull_request_or_hotfix_head_takes_its_authoritative_gates_from_its_base",
         "tests/ci_lab/test_relay.py::test_a_relayed_grade_posts_each_authoritative_gate_it_ran_no_unit_of_as_skipped"
+      ]
+    },
+    {
+      "id": "lab-pull-request-reusable-job-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2722",
+      "behaviour": "A hotfix or pull request grade frames each job its Gate Required rules require with the job's own units and the units of every reusable workflow job it calls, which the mirror expander files under the calling job, a slash and the called job, so the Tests workflow's semgrep job grades its scan, feature tests and charts units under semgrep instead of framing semgrep as a gate with no units, which passes, or posting it as skipped when it is authoritative. Promotion and backfill grades keep the labelled keys.",
+      "seam": "scripts.ci_lab.scheduler.frame over a gates mapping that holds units under labelled reusable workflow job keys",
+      "tests": [
+        "tests/ci_lab/test_skipped_gates.py::test_a_pull_request_frame_grades_each_reusable_workflow_job_under_the_job_that_calls_it"
       ]
     },
     {
@@ -4025,6 +4046,20 @@
       ]
     },
     {
+      "id": "swarm-tick-slow-lane-live-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-slow-lane-deadline",
+      "behaviour": "The slow tick lane covers the accumulated live budgets of its scheduled steps, including budgets resolved after the pass starts, so later slow work finishes beyond the former shared deadline while critical timing and the pass join window stay fixed.",
+      "seam": "scripts.tick.engine.run_group and scripts.tick.pool.running",
+      "rules": ["tick-slow-lane-fixed-deadline"],
+      "tests": [
+        "tests/tick/test_slow_lane_deadline.py::test_slow_deadline_uses_live_budgets_resolved_after_the_pass_starts",
+        "tests/tick/test_slow_lane_deadline.py::test_a_later_slow_step_finishes_after_the_former_lane_deadline",
+        "tests/tick/test_slow_lane_deadline.py::test_live_slow_budgets_keep_the_pass_join_inside_its_original_window",
+        "tests/tick/test_slow_lane_deadline.py::test_slow_dependents_and_finished_records_survive_the_pass_exit"
+      ]
+    },
+    {
       "id": "swarm-tick-left-pass-value",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2329",
@@ -5035,6 +5070,30 @@
         "tests/swarm/test_plan_cap_floor.py::test_start_restores_a_stored_zero_plan_cap_to_its_default",
         "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_restores_a_stored_zero_plan_cap",
         "tests/swarm/test_plan_cap_floor.py::test_a_scale_up_keeps_a_stored_plan_cap_above_zero"
+      ]
+    },
+    {
+      "id": "swarm-review-seat-mail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2881",
+      "behaviour": "A reviewer seat is a worker seat for its inbox: its open seat mail follows a live occupant into the world of the host it runs on, and mail left on an empty reviewer seat numbered above the review lane cap is withdrawn with the sender told the review lane cap, while mail on a reviewer seat within the cap waits for the next occupant; the Doctor inbox read treats a reviewer seat above the cap as having no seat wait.",
+      "seam": "scripts.inbox.exits seat patterns and no_successor through the inbox exit sweep, and scripts.doctor.read inbox receivers",
+      "tests": [
+        "tests/swarm/test_lane_kinds.py::test_a_reviewer_seat_moves_its_mail_and_is_capped_like_an_engineer_seat",
+        "tests/inbox/test_exits.py::test_review_seat_mail_above_the_review_lane_cap_is_settled_and_within_it_waits",
+        "tests/inbox/test_member_mail.py::test_the_sweep_moves_open_review_seat_mail_to_the_new_occupants_host",
+        "tests/doctor/test_empty_seats.py::test_a_review_seat_above_the_review_lane_cap_has_no_seat_wait",
+        "tests/doctor/test_empty_seats.py::test_a_review_seat_on_a_config_stored_without_a_review_cap_has_no_seat_wait"
+      ]
+    },
+    {
+      "id": "swarm-review-dispatcher-lane-cap",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2881",
+      "behaviour": "The dispatcher lane caps carry the review lane cap from the swarm config, so focused review tasks yield their focus position once the review lane holds its focus weight share of claimed and pull request tasks, as engineering, CI and plan tasks do.",
+      "seam": "scripts.swarm.dispatcher.lane_caps and the claim key focus order",
+      "tests": [
+        "tests/swarm/test_dispatcher.py::test_the_claim_key_yields_review_focus_when_the_review_lane_share_is_full"
       ]
     },
     {
@@ -6199,6 +6258,95 @@
         "tests/ci_lab/test_flakes.py::test_ci_lab_flakes_refuses_a_missing_output_folder_and_a_window_outside_the_budget_history",
         "tests/ci_lab/test_flakes.py::test_ci_lab_flakes_resolves_through_the_ci_delegate_and_prints_the_written_file",
         "tests/ci_lab/test_flakes.py::test_ci_lab_flakes_reads_the_object_store_named_by_the_environment_and_exits_one_on_its_error"
+      ]
+    },
+    {
+      "id": "flake-ledger-retry-pass-recorded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "A test that fails its first attempt and passes on its rerun leaves the run green and writes one flake ledger line with outcome flaky, the run and run attempt, two attempts and its failure lines, serially and across workers. The line carries the first attempt traceback, and the flake budget publishes the ledger lines unchanged as that test's retry evidence.",
+      "seam": "tests.flake_ledger.FlakeLedger loaded into pytest with reruns and CI_FLAKES, its ledger read by tests.flake_budget.main",
+      "tests": [
+        "tests/test_flake_ledger.py::test_a_test_that_passes_on_retry_passes_and_is_recorded_as_a_flake",
+        "tests/test_flake_ledger.py::test_retry_pass_publishes_the_first_attempt_traceback"
+      ]
+    },
+    {
+      "id": "flake-budget-once-per-run",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "The flake budget keeps one history line per test and run: parameter ids fold into the test function, a flaky report already counted for that test and run adds no line on a later gather, and each distinct report with a traceback is kept once on its line as retry evidence until the line expires.",
+      "seam": "tests.flake_budget.gather and tests.flake_budget.budget",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_flaky_report_joins_the_history_once_per_run",
+        "tests/test_flake_budget.py::test_retry_evidence_survives_history_deduplication_and_expiry"
+      ]
+    },
+    {
+      "id": "flake-budget-seven-day-expiry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "A flake history line exactly seven days old drops out of the budget while one a second younger stays, and a new flaky report for an expired test and run joins again at the current time.",
+      "seam": "tests.flake_budget.gather with tests.flake_budget.WINDOW_S",
+      "tests": [
+        "tests/test_flake_budget.py::test_lines_older_than_seven_days_drop_out"
+      ]
+    },
+    {
+      "id": "flake-budget-over-at-two-runs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "A test flaky in two or more separate runs within the history is over the flake budget with its runs sorted, a test flaky in one run is not, every flaky test is listed under retried with its run count and runs, and an empty history budgets nothing.",
+      "seam": "tests.flake_budget.budget with tests.flake_budget.BUDGET_RUNS",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_test_flaky_in_two_runs_is_over_budget",
+        "tests/test_flake_budget.py::test_every_retry_pass_is_listed_with_its_count_and_runs"
+      ]
+    },
+    {
+      "id": "flake-budget-no-reports-red",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "With no jsonl report at any depth under the reports folder, the flake budget prints the error No flake reports under the folder, exits 1 and writes no budget, so the flake-budget job is red.",
+      "seam": "tests.flake_budget.main as the Count flaky tests over seven days step of the flake-budget job runs it",
+      "tests": [
+        "tests/test_flake_budget.py::test_no_flake_reports_is_red"
+      ]
+    },
+    {
+      "id": "flake-budget-lab-source",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "Flake rows read from the lab folder under the reports folder join the history marked source lab, while rows from anywhere else and history lines without a source count as Actions. A budget entry holding a lab run carries a sources map naming each of its runs lab or actions, an Actions only entry keeps its earlier shape, the summary prints the source beside every run, and a lab export alone, even an empty one, is a report that grades green.",
+      "seam": "tests.flake_budget.gather with its source argument, tests.flake_budget.budget and tests.flake_budget.main over the lab folder of the reports folder",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_lab_history_line_names_its_run_lab_and_a_line_without_a_source_counts_as_actions",
+        "tests/test_flake_budget.py::test_a_lab_export_alone_grades_green_and_names_its_run_lab",
+        "tests/test_flake_budget.py::test_the_budget_names_each_runs_source_in_its_json_and_summary"
+      ]
+    },
+    {
+      "id": "flake-budget-job-wiring",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "On a dev push the flake-budget job restores the newest flake history, downloads this run's flake reports with one retry, exports the lab flake records into the lab folder of the reports folder with the lab store settings from Actions secrets, counts every report, publishes flake-budget.json when a history was restored and saves the history or a seed. A missing setting or a failed install or export prints one Lab flakes warning and leaves the step green, so the Actions reports still grade.",
+      "seam": "the flake-budget job of the Tests workflow and the run script of its Export the lab flake records step",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget",
+        "tests/test_flake_budget.py::test_a_restore_that_matched_nothing_saves_a_seed_the_history_prefix_never_restores",
+        "tests/test_flake_budget.py::test_the_job_exports_the_lab_flake_records_before_the_count_with_the_settings_by_secret_reference",
+        "tests/test_flake_budget.py::test_a_lab_export_that_cannot_run_warns_once_and_leaves_the_step_green"
+      ]
+    },
+    {
+      "id": "flake-budget-lab-runs-current",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "The tick's flake budget refresh counts a run the budget names lab as current without asking GitHub for its run, because a lab run is a unit key and no Actions run, and looks up only the Actions runs of an over budget test against its newest merged test change, so the ledger follow up of a test flaky in lab and Actions runs is still filed.",
+      "seam": "scripts.ci_budget.flakes.refresh and scripts.ci_budget.flakes._since_fix reading the sources map of a flake-budget.json over_budget entry",
+      "tests": [
+        "tests/test_ci_budget_flakes.py::test_a_lab_run_counts_as_current_without_a_github_run_lookup",
+        "tests/test_ci_budget_flakes.py::test_a_lab_run_is_returned_among_the_current_runs_by_its_unit_key"
       ]
     },
     {
@@ -10887,6 +11035,18 @@
         "tests/swarm/test_readiness.py::test_an_ordered_offer_younger_than_the_dedupe_window_keeps_its_place_ahead_of_an_urgent_one_until_it_ages",
         "tests/swarm/test_readiness.py::test_a_focus_of_any_form_puts_its_tasks_in_the_first_class_of_offers",
         "tests/swarm/test_readiness.py::test_an_ordered_offer_a_focus_lets_through_moves_behind_a_later_offer_of_the_focus"
+      ]
+    },
+    {
+      "id": "ready-offer-class-one-decider",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "One decider gives a task's offer its class for both the order the hub readiness pass offers tasks in and the waiting offers it moves behind a higher class: urgent or under a focus, then under an operator order, then the rest. Every focus selector has a case through both, so a selector added without one is red, and a recorded run of generated ledgers keeps its offers and its moves.",
+      "seam": "scripts.swarm.readiness.offers and behind over a snapshot, for every key of scripts.swarm.freeze.SELECTORS",
+      "tests": [
+        "tests/swarm/test_readiness.py::test_the_selector_cases_name_exactly_the_focus_selectors_that_exist",
+        "tests/swarm/test_readiness.py::test_offers_and_behind_class_a_task_under_a_focus_selector_alike",
+        "tests/swarm/test_readiness.py::test_a_recorded_run_of_generated_ledgers_keeps_its_offers_and_its_moves"
       ]
     },
     {

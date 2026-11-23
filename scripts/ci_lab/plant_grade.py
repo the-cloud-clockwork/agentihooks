@@ -66,7 +66,7 @@ def _verdict(rows: list[Mapping[str, Any]], pair: plant_proofs.Pair, planted: bo
     if len(checks) != len(rows):
         raise ValueError(f"{pair.name} grade has ambiguous gate checks")
     required = checks.pop("required")
-    gate = pair.gate.rpartition("/")[0] or pair.gate
+    gate = pair.gate.partition("/")[0]
     expected = "failure" if planted else "success"
     failed = {gate for gate, check in checks.items() if check["conclusion"] != "success"}
     if (
