@@ -19,6 +19,7 @@ worker's PriorityClass is a cluster object outside that module;
 
 | Command | Module form | What it does today |
 |---|---|---|
+| `agentihooks ci lab flakes --out FOLDER [--hours N] [--objects ROOT]` | none | Copies the flake rows the lab stored in the window into `FOLDER/lab-flakes.jsonl` for the flake budget (see [Export the lab flake rows](#export-the-lab-flake-rows)) |
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
@@ -159,10 +160,10 @@ curl -fsS http://lab:9108/metrics \
   | grep --line-buffered -E '^ci_lab_(slots_total|slots_busy|queue_wait_seconds|budget_fraction|class_shed)'
 ```
 
-`/capacity` returns the [capacity document](#capacity-document). Each capacity request on 8800
-builds a fresh load from queue, lease, live grade, recent worker offer and daily budget state;
-separate requests can observe different instants. Port 9108 answers `/metrics` and `/capacity`
-from the last load its own serve loop built, and `ci_lab_load_age_seconds` gives that load's age.
+`/capacity` returns the [capacity document](#capacity-document). Ports 8800 and 9108 share the
+last load built from queue, lease, live grade, recent worker offer and daily budget state.
+Port 9108 answers `/metrics` and `/capacity` from that same snapshot, refreshed by its serve
+loop, and `ci_lab_load_age_seconds` gives that load's age at each metrics port read.
 Without recent worker
 offers and leased jobs, a running scheduler can report zero total slots. Offers expire after
 60 seconds, and unit estimates remain fixed at 60 seconds per slot.
@@ -320,13 +321,13 @@ snapshot sets the queue, slot and `ci_lab_queue_wait_seconds` gauges through
 [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold).
 
 The scheduler service builds the snapshot with `scripts.ci_lab.scheduler.Scheduler.load` and
-serves it through `scripts.ci_lab.scheduler.listen`. Port 8800 builds one on every `/capacity`
-request. Port 9108 serves `/metrics` and `/capacity` from the last snapshot a
-`scripts.ci_lab.metrics.Latest` holds. The port's first read after a start builds the snapshot once,
+serves it through `scripts.ci_lab.scheduler.listen`. Ports 8800 and 9108 serve `/capacity`
+from the same last snapshot a `scripts.ci_lab.metrics.Latest` holds; port 9108 also serves
+`/metrics` from it. The first read of either port after a start builds the snapshot once,
 however many reads meet that build, so the lab series stay without samples until that build
 finishes. A failed first build fails its own read, and each read that waited on it builds again in
-turn. Every later read of the port answers at once with the last finished build and sets
-`ci_lab_load_age_seconds` to the seconds since that build started. Between requests the port's serve loop runs `Latest.refresh`,
+turn. Every later capacity read answers at once with the last finished build. Reads on port 9108 set
+`ci_lab_load_age_seconds` to the seconds since that build started. Between requests that port's serve loop runs `Latest.refresh`,
 which starts one background build, a daemon thread named `ci-lab-load-refresh`, once the last
 build started `REFRESH_MS` (15 seconds) ago and no build runs. The serve loop checks after each
 request and at least every half second, and builds run one at a time, back to back while one takes
@@ -4211,6 +4212,34 @@ unit run:
 `lab.retry.failed` does not control that rerun. `run_tests.Verdict.attempts` counts attempts inside
 the run, `1` or `2`, while `UnitResult.attempts` counts reruns of the unit; with the default
 `failed: 0` every failure is final whichever number is passed.
+
+### Export the lab flake rows
+
+The scheduler stores the flake rows of a passed flaky unit once, in `lab/flakes/<kind>/<digest>.jsonl`.
+Each row is a flake ledger line whose `run` is the unit key. `agentihooks ci lab flakes` copies the
+rows of every such object written within a window into one file that `tests.flake_budget` reads:
+
+```bash
+agentihooks ci lab flakes \
+  --out reports/lab \
+  --hours 168
+```
+
+| Setting | Default | What it sets |
+|---|---|---|
+| `--out FOLDER` | required | The folder that receives `lab-flakes.jsonl`, created when missing |
+| `--hours N` | `168` | The window: objects written in the last N hours, 1 to 168, at most the seven days the flake budget keeps |
+| `--objects ROOT` | the lab object store | A local objects folder to read instead of the object store |
+| `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | none | The object store it lists and reads without `--objects`; a read only key is enough |
+
+The rows land in path order, unchanged. On success the command prints the file path and exits 0;
+an empty store writes an empty file, which the budget still reads. A missing setting, an object
+store error, a listing longer than the store backend's page cap or an `--objects` path that is not a
+folder prints one `ci lab flakes: <reason>` line on standard error, writes no file and exits 1.
+
+The budget counts a test once per run, and a lab row's run is its unit key, so a cached flaky unit
+that every dev push rereads counts once however many exports carry it. The command refuses `--hours`
+outside 1 to 168 and exits 2, so a row leaves the export before its history line expires.
 
 ### What reaches the policy
 
