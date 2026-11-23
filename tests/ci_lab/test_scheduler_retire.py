@@ -87,6 +87,18 @@ def test_a_retired_merge_group_grade_posts_nothing_and_records_no_verdict(lab: C
 
 
 @pytest.mark.feature("lab-retire-gone-merge-groups")
+def test_a_retired_merge_group_grade_leaves_no_revision_and_no_demand_record(lab: Callable[..., Run]) -> None:
+    run = _queued(lab, unit(1))
+    live = run.grade(HEAD_A).run
+    assert run.lab.client.hkeys(scheduler.REVISIONS) == [live]
+    assert run.lab.client.hkeys(scheduler.RECORDS) == [live]
+    run.lab.expander.gone.add(HEAD_A)
+    run.tick(1100)
+    assert run.lab.client.hkeys(scheduler.REVISIONS) == []
+    assert run.lab.client.hkeys(scheduler.RECORDS) == []
+
+
+@pytest.mark.feature("lab-retire-gone-merge-groups")
 def test_a_merge_group_grade_whose_ref_is_listed_keeps_its_units_and_its_verdict(lab: Callable[..., Run]) -> None:
     lost, kept = unit(1), unit(2)
     run = lab(

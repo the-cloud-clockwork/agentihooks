@@ -2557,8 +2557,8 @@ Every pass starts by retiring the merge group grades whose merge group is gone. 
 `agentihooks-ci:origins` holds the origin of each live grade: its class, repository, head and grade
 ref, written when the grade starts. `Scheduler._retire_groups` lists the `refs/heads/gh-readonly-queue/*`
 refs of each repository that has a live merge group grade, once per pass, and closes each such
-grade whose head no ref carries: the run leaves `agentihooks-ci:grades`, its document and origin
-are deleted and the pending jobs of its head are dropped, unless another live grade of any
+grade whose head no ref carries: the run leaves `agentihooks-ci:grades`, its document, revision,
+demand record and origin are deleted in one transaction and the pending jobs of its head are dropped, unless another live grade of any
 repository grades that head, since a job names its head alone. Its leased jobs keep their leases:
 each runs to completion, or, once its lease expires, is requeued and lost as the lost retries
 allow. Nothing is posted, no evidence is recorded and no graded head is counted. A grade pushed to
