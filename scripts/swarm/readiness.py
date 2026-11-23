@@ -6,7 +6,8 @@ An offer's id carries the task's claim generation, so the bus drops a repeat onl
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from functools import cached_property
+from typing import Any, NamedTuple
 
 from scripts.events import subjects
 from scripts.events.bus import Bus, Delivery, WorkQueue
@@ -24,6 +25,15 @@ UNFIT_NAK_MS = 5_000
 PREFERRED, ORDERED, REST = range(3)
 
 
+class Classes(NamedTuple):
+    """The focus rank of each task of a snapshot, the rank of a task no focus covers, and the one function that gives
+    a task's offer its class with the keys that order offers inside it."""
+
+    focus: dict[str, int]
+    unfocused: int
+    band: Callable[[dict[str, Any]], tuple[int, ...]]
+
+
 @dataclass(frozen=True)
 class Snapshot:
     slug: str
@@ -33,6 +43,29 @@ class Snapshot:
     fix: str
     claimed: Callable[[str], bool]
     admits: Callable[[dict], bool]
+
+    @cached_property
+    def classes(self) -> Classes:
+        """The classes of the snapshot's offers, worked out once for every read of the snapshot."""
+        return _classes(self.doc)
+
+
+def _classes(doc: dict[str, Any]) -> Classes:
+    """Class each task of the document: urgent or under a focus first, then under an operator order, oldest order
+    first, then the rest, each by ledger rank band."""
+    from scripts.swarm import focus_budget, orders, preempt
+    from scripts.swarm_ledger import ledger_rank
+
+    focus, unfocused, stamped = focus_budget.ranks(doc), focus_budget.outside(doc), orders.stamps(doc)
+
+    def band(task: dict[str, Any]) -> tuple[int, ...]:
+        rank = ledger_rank.order(task)
+        if focus[task["id"]] != unfocused or task.get("rank") == preempt.URGENT:
+            return PREFERRED, rank
+        at = stamped.get(task["id"])
+        return (REST, rank) if at is None else (ORDERED, at, rank)
+
+    return Classes(focus, unfocused, band)
 
 
 def _on_events(store: RedisStore, slug: str) -> bool:
@@ -202,8 +235,7 @@ def anywhere(event: Envelope) -> bool:
 def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
     """Each claimable task's offer: focused and urgent tasks first, then the tasks under an operator order, oldest
     order first, then the rest, each by ledger rank band and focused tasks by focus record order."""
-    from scripts.swarm import focus_budget, orders, preempt
-    from scripts.swarm_ledger import ledger_rank
+    from scripts.swarm import focus_budget
 
     rows: Any = view.rows
     ready = [
@@ -213,15 +245,7 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
         and (not task.get("workstation") or task.get("hive") in (None, "", ROOT))
         and claimable(task, task["lane"], view)
     ]
-    focus, unfocused, stamped = focus_budget.ranks(view.doc), focus_budget.outside(view.doc), orders.stamps(view.doc)
-
-    def band(task: dict[str, Any]) -> tuple[int, ...]:
-        rank = ledger_rank.order(task)
-        if focus[task["id"]] != unfocused or task.get("rank") == preempt.URGENT:
-            return PREFERRED, rank
-        at = stamped.get(task["id"])
-        return (REST, rank) if at is None else (ORDERED, at, rank)
-
+    focus, unfocused, band = view.classes
     return [offer(task, view, now_ms) for _, task in focus_budget.ordered(ready, focus, band, unfocused)]
 
 
@@ -266,16 +290,12 @@ def _sweep(queue: WorkQueue, view: Snapshot) -> list[Envelope]:
 def behind(kept: list[Envelope], fresh: list[Envelope], view: Snapshot, now_ms: int) -> set[str]:
     """The ids of one lane's waiting offers that sit ahead of an offer of a higher class, waiting or about to be
     offered, and are at least one dedupe window old, so offering one again behind it is never dropped by the bus
-    dedupe and moves it at most once per window. The classes are the urgent or focused tasks, the set preemption
-    serves first, then the tasks under an operator order, then the rest."""
-    from scripts.swarm import orders, preempt
-
-    stamped = orders.stamps(view.doc)
+    dedupe and moves it at most once per window. The classes are the ones the snapshot gives its offers: the urgent
+    or focused tasks, then the tasks under an operator order, then the rest."""
+    band = view.classes.band
 
     def grade(event: Envelope) -> int:
-        if preempt.preferred(view.rows[event.key], view.doc, view.graph):
-            return PREFERRED
-        return ORDERED if event.key in stamped else REST
+        return band(view.rows[event.key])[0]
 
     window = BusConfig().dedupe_window_ms
     best = min(map(grade, fresh), default=REST)

@@ -24,7 +24,7 @@ worker's PriorityClass is a cluster object outside that module;
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
 | `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain; serves `/metrics` on 9108 from its own registry until the drain ends, and exits at start when it cannot bind 9108 |
-| none | `python -m scripts.ci_lab.load_measure [--builds N]` | Reads only: runs `Scheduler.load` N times, 3 by default, against the Redis that `CI_LAB_REDIS_URL` names and prints each build's processor and wall seconds, the live grade count and the grade parses as JSON (see [Load snapshot](#load-snapshot)) |
+| none | `python -m scripts.ci_lab.load_measure [--builds N]` | Reads only: runs `Scheduler.load` N times, 3 by default, against the Redis that `CI_LAB_REDIS_URL` names and prints each build's processor and wall seconds, grade documents fetched and demand record bytes read, the live grade count and the grade parses as JSON (see [Load snapshot](#load-snapshot)) |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
@@ -388,15 +388,23 @@ one JSON object:
 | `builds` | Load builds run |
 | `grades` | Live grades, the size of the live grade set; a live run whose grade document is gone counts here and is never parsed |
 | `process_seconds`, `wall_seconds` | Each build's `time.process_time` and `time.perf_counter` seconds, one entry per build |
-| `parses` | Calls of the scheduler's grade parser during the builds; one scheduler serves every build, so the first build parses each live grade with a stored document once and later builds parse only grades whose stored document changed |
+| `parses` | Calls of the scheduler's grade parser during the builds; a build parses only live grades that have a stored document and no demand record, so it is 0 once every live grade has a record |
+| `documents_fetched` | Grade documents each build read, one entry per build; only a live grade with no demand record is read from its document, on every build until a save records it, and a read that finds no document counts nothing |
+| `record_bytes_read` | Demand record bytes each build read, one entry per build; the first build reads every live grade's record and later builds read only records whose revision moved |
 | `leaves_out` | What the figures leave out: the offer prune round trip of each build |
 
 The command reads only. A load prunes stale worker offers through the queue's prune script, its one write, so the
 measured scheduler's queue keeps every offer; the offers read keeps only offers made inside the ready window, so
 each build returns the load the scheduler builds, and the figures leave out that one prune round trip per build.
-Every build reads the whole pending and leased queues and every live grade document. The first build runs on a
-cold demand cache and parses each live grade with a stored document; builds after the first run on the warm demand
-cache, so the first `process_seconds` and `wall_seconds` entries are the cold cost and later entries the warm cost.
+Every build reads the whole pending and leased queues, the live grade set and the whole grade revisions hash. A
+build keeps each live grade's demand contribution while its stored revision equals the revision kept with it; for
+every other live grade it reads the demand record with one `HMGET` per grade in one pipeline that opens no
+transaction, and keeps the contribution under the revision the record carries. A live grade with no demand record,
+saved by a release before demand records, is read from its grade document and parsed on every build until a save
+records it; a live grade with neither counts nowhere. No build reads or hashes a grade document that has a record.
+The first build runs on a cold demand cache and reads every live grade's record; builds after the first run on the
+warm demand cache, so the first `process_seconds` and `wall_seconds` entries are the cold cost and later entries
+the warm cost.
 To measure the live scheduler, run it in the scheduler pod, which carries `CI_LAB_REDIS_URL`, with few builds,
 since it shares the pod's memory limit:
 
@@ -2462,7 +2470,15 @@ key; the builders are pure and read no file, clock or network.
    Every unit of a class the day's core budget does not shed is enqueued; a shed class enqueues nothing
    until the budget resets the next UTC day, though its units already in the queue still run. Backfill
    takes only the slots workers offered free on a lease poll within the ready window after the units
-   already waiting in the queue. A newer head of the lane drops the older head's held units.
+   already waiting in the queue. A newer head of the lane drops the older head's held units. Each
+   unit is enqueued under the class of its grade, and workers lease the most urgent class first, in
+   the order of `delivery.CLASSES` (hotfix, pull request, queue, promotion, backfill), and first in
+   first out inside a class. A unit that a more urgent grade enqueues again while it is still pending
+   moves to that class and keeps its place there by its sequence number; a leased or finished job is
+   left alone. A job enqueued with no class, as every job enqueued before the classes ordered the
+   queue was, leases after every job that has one. A lease poll reads the pending order
+   `queue.PAGE` (64) jobs at a time, so a poll that fills its free slots from the first page reads
+   one page.
 6. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
    default); the next loss is `lost`.
 7. Finished jobs are collected. A job whose outcome `retry.decide` allows another run under
@@ -2712,7 +2728,7 @@ before its step ran, so its unit was requeued once and then lost.
 
 | Class | Static gates with units |
 |---|---|
-| Pull request, hotfix | `lint`, `type-gate` and `test-count`. `semgrep` is framed as a gate without units, which passes. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), while its units sit under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels |
+| Pull request, hotfix | `lint`, `type-gate`, `test-count` and `semgrep`. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), and its frame takes the units filed under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels, in that mapping's order: each required job grades its own units and those of every label that starts with the job and a slash |
 | Merge group | `test-count`, the one static job the queue rules require (`scheduler.QUEUE_REQUIRED`) |
 | Promotion, backfill | All six |
 
@@ -2818,7 +2834,6 @@ or an empty log, and the required check show only unit keys.
   workflow gets no units, and its Actions job keeps the verdict; `--ci-only` names it.
 - Every expansion parses each workflow file directly in the folder, so one file that does not
   parse drops every head the lab grades at that grader revision.
-- Pull request and hotfix grades run no `semgrep` units, as the frame table above shows.
 
 #### Verify
 
@@ -2860,7 +2875,7 @@ and both passed in
 | The same text names a workflow you just added to a static job | The called file is in a folder below `.github/workflows`, or not on the grader revision yet. A pull request, hotfix or merge group grade reads the base, so a new workflow counts only once the base holds it | `git ls-tree --name-only <grader> .github/workflows/` lists the file |
 | Every head graded at one grader revision is dropped with a YAML error | A workflow file directly in `.github/workflows` at that revision does not parse | In a checkout of that revision, `python -c 'import pathlib,yaml; [print(p) or yaml.safe_load(p.read_text()) for p in sorted(pathlib.Path(".github/workflows").glob("*.y*ml"))]'` prints each file before parsing it, so the last name printed before the traceback is the file |
 | The worker's standard error reads `ci-lab worker: unit <job> crashed: ValueError('semgrep uses ./.github/workflows/semgrep.yml, which was not given')` | The worker runs a release older than the fix while the scheduler expands with it | The `ci-lab-worker` image, as for the scheduler; the unit's lease expires and follows step 6 of the [Scheduler loop](#scheduler-loop) |
-| A pull request grade passes `semgrep` with no units | The pull request frame names the job `semgrep` while its units sit under the `semgrep/` labels | Expected today; see [Which grades run static units](#which-grades-run-static-units) |
+| A pull request grade passes `semgrep` with no units | The scheduler runs a release from before pull request frames graded reusable workflow job units under their calling job; that frame looked the job `semgrep` up by its bare name while its units sit under the `semgrep/` labels | The `ci-lab-scheduler` image, read as in the first row, names a release older than the first one whose release notes list this change to pull request frames; see [Which grades run static units](#which-grades-run-static-units) |
 
 ### Test units
 
@@ -4281,7 +4296,8 @@ table, and the `lab-scheduler-test-units` feature tests cover the scheduler's re
 
 `queue.Queue.retry` moves only a job whose state is `done`: it adds one to `attempts`, clears the
 job's worker and outcome and adds it back to the pending set under the same job id with a new
-sequence number; a job in any other state is left as it is and the call returns `False`. A job
+sequence number in the class it was enqueued under, as `queue.Queue.reap` does for an expired
+lease; a job in any other state is left as it is and the call returns `False`. A job
 reaping marked `lost` never reaches it, since reaping marks a job `lost` only once its `attempts`
 reached `lab.retry.lost`, where `decide` is `final`.
 
@@ -4464,10 +4480,12 @@ verdict.
 - `RUNNER_TEMP` is a fresh folder under `settings.root`. Its `grader` and `base` entries are
   symlinks to the real tree paths, and it holds the empty `GITHUB_STEP_SUMMARY` file.
 - `GITHUB_WORKSPACE` and the working folder are the head tree.
-- `PATH` is `settings.venv/bin` followed by `/bin:/usr/bin`. `settings.whitelist` and the step's
-  own `env` values, with their `${{ }}` expressions read from `settings.context`, come after it
-  and can replace it. Neither can replace `RUNNER_TEMP`, `GITHUB_WORKSPACE` or
-  `GITHUB_STEP_SUMMARY`.
+- `PATH` is `settings.venv/bin`, then `/usr/local/bin`, where the worker image installs semgrep
+  and helm, then `/bin:/usr/bin`. `RUFF_CACHE_DIR` is the `ruff` folder inside `RUNNER_TEMP`,
+  since the worker seals the leased head tree and ruff would otherwise write `.ruff_cache` into
+  it. `settings.whitelist` and the step's own `env` values, with their `${{ }}` expressions read
+  from `settings.context`, come after both and can replace them. Neither can replace
+  `RUNNER_TEMP`, `GITHUB_WORKSPACE` or `GITHUB_STEP_SUMMARY`.
 
 The bind applies to the real tree paths, so a write through `$RUNNER_TEMP/grader/...` or
 `$RUNNER_TEMP/base/...` is refused as well. A gate step can therefore read the grader's scripts
@@ -4950,8 +4968,11 @@ an import sorting fault. Use `--plant gate-script` to prove that a head cannot t
 own comment grader to accept a new directive. Test and mutation plants are separate proofs.
 
 The command also accepts every JSON plant name in the catalog, including dotted names such as
-`lint.lint-check`. A plant keeps its full discovered step in `gate`; grading reads that step's job
-check and requires its named diagnostic. The JSON result and summary row include `green_run` and
+`lint.lint-check`. A plant keeps its full discovered step in `gate`; grading reads the check of the
+job the pull request rules require, the first path segment of the gate, and requires its named
+diagnostic. A step of a reusable workflow job, such as `semgrep/scan/rule-exceptions-only-shrink`,
+is therefore read from the `semgrep` check, where a pull request grade posts the units of every
+job that workflow holds. The JSON result and summary row include `green_run` and
 `red_run`, the exact grade identifiers for the two check links. `lint.threshold-pins` is the shorter
 alias for the threshold pin plant; its full gate identity is unchanged.
 
