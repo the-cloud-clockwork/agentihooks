@@ -74,6 +74,10 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 | `preemption` | A one minute poll; it also subscribes to `swarm.*.preemption.requested`, which nothing publishes yet | Asks the lowest ranked holder of a full lane to hand off when an urgent or focused task of a running `events` swarm still waits one poll later. |
 | `pulls` | `swarm.*.task.*` and a poll | Publishes pull request, merge queue and check events, also fed by `agentihooks github-webhook`. |
 | `launch-checks` | A ten second poll; it also subscribes to `swarm.*.launch-checks.requested`, which nothing publishes yet | Judges the launch check of each worker the hub admitted, from the launch time its execution started write records. A worker whose hive reports no launch fails 300 seconds after admission. A failed worker is stopped on its hive, and its task relaunches once. |
+| `wait-ends-merged` | `swarm.*.pull.merged` | Re-checks every checks or merge wait on the merged pull request through the waits pass's own resolution and ends a resolved one at once, with the same ended item, woke key and wait history the polled pass writes. With no such wait it reads nothing from GitHub; the minute tick pass still ends what no event names. |
+| `wait-ends-closed` | `swarm.*.pull.closed` | The same re-check for a pull request closed unmerged. |
+| `wait-ends-dequeued` | `swarm.*.merge.dequeued` | The same re-check for a pull request that left the merge queue. |
+| `wait-ends-checks` | `swarm.*.checks.completed` | The same re-check when a check suite on the pull request completes. |
 
 ### Hub readiness and rollouts
 
