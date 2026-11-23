@@ -323,10 +323,13 @@ snapshot sets the queue, slot and `ci_lab_queue_wait_seconds` gauges through
 The scheduler service builds the snapshot with `scripts.ci_lab.scheduler.Scheduler.load` and
 serves it through `scripts.ci_lab.scheduler.listen`. Ports 8800 and 9108 serve `/capacity`
 from the same last snapshot a `scripts.ci_lab.metrics.Latest` holds; port 9108 also serves
-`/metrics` from it. The first read of either port after a start builds the snapshot once,
-however many reads meet that build, so the lab series stay without samples until that build
-finishes. A failed first build fails its own read, and each read that waited on it builds again in
-turn. Every later capacity read answers at once with the last finished build. Reads on port 9108 set
+`/metrics` from it. `listen` starts the first build with `Latest.start` right after it binds the
+three ports, in the same daemon thread a refresh uses, and no read waits for it: until that build
+finishes, `/capacity` on either port answers 503 with
+`{"error": "the load snapshot is not built yet"}` and `/metrics` answers 200 with the registry
+alone, so the lab series stay without samples until then. A failed first build leaves both answers
+in place until the serve loop's next refresh builds again. Every capacity read after the first
+build answers at once with the last finished build. Reads on port 9108 set
 `ci_lab_load_age_seconds` to the seconds since that build started. Between requests that port's serve loop runs `Latest.refresh`,
 which starts one background build, a daemon thread named `ci-lab-load-refresh`, once the last
 build started `REFRESH_MS` (15 seconds) ago and no build runs. The serve loop checks after each
@@ -678,7 +681,7 @@ lines of a metric with no sample, so Prometheus stores no series for it until th
 
 | Series | Read by | Set by |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `metrics.observe_load`, from `scripts.ci_lab.budget.slots_wanted` of the served load snapshot on every scrape, so it lags the queue by that snapshot's age and `CILabSchedulerBlind` fires only while Prometheus scrapes no running scheduler; a stale series never fires it, and `ci_lab_load_age_seconds` shows a refresh that stopped |
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `metrics.observe_load`, from `scripts.ci_lab.budget.slots_wanted` of the served load snapshot on every scrape after the scheduler's first build finishes, so it lags the queue by that snapshot's age and `CILabSchedulerBlind` fires only while Prometheus scrapes no running scheduler; a stale series never fires it, and `ci_lab_load_age_seconds` shows a refresh that stopped |
 | `ci_lab_units_overdue` | `CILabUnitsOverdue` | `metrics.observe_load`, on every scrape |
 | `ci_lab_workers_ready` | Workers ready against desired, as its `heartbeat` line | `metrics.observe_load`, on every scrape |
 | `ci_lab_core_seconds_total` | Core minutes per merged pull request | `metrics.observe_unit`, which `Scheduler._finished` calls once for each finished attempt whose worker uploaded a report |
@@ -2542,8 +2545,13 @@ A grade's state is one JSON document at `agentihooks-ci:grade:<run>`, where `<ru
 key of the repository, head, base, class and grader revision. Live grades sit in
 `agentihooks-ci:grades`, held heads in `agentihooks-ci:waiting`, a lane's latest run at
 `agentihooks-ci:lane:<repository>|<lane>|<class>` and a passing merge group grade at
-`agentihooks-ci:tree:<repository>|<tree>`. A rerequested check run grades the head again under
-`<run>-<now_ms>`, bypassing negative verdicts in the store.
+`agentihooks-ci:tree:<repository>|<tree>`. Every save of a live grade, and every compaction of one,
+increments its revision in the `agentihooks-ci:revisions` hash and writes the demand record of that
+revision, a JSON object of its revision, tier, hits and job ids, to the `agentihooks-ci:records`
+hash, both under `<run>` and in one transaction with the document. A grade leaving the live set
+leaves both hashes with it, and a save of a closed grade removes both with its document write. A
+rerequested check run grades the head again under `<run>-<now_ms>`, bypassing negative verdicts in
+the store.
 
 Known limits: a lab head event carries no branch yet, so a head's lane is its own sha and a newer
 head supersedes nothing until intake records the branch; expansion keys static gates, test units
@@ -2688,7 +2696,7 @@ before its step ran, so its unit was requeued once and then lost.
 
 | Class | Static gates with units |
 |---|---|
-| Pull request, hotfix | `lint`, `type-gate` and `test-count`. `semgrep` is framed as a gate without units, which passes. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), while its units sit under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels |
+| Pull request, hotfix | `lint`, `type-gate`, `test-count` and `semgrep`. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), and its frame takes the units filed under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels, in that mapping's order: each required job grades its own units and those of every label that starts with the job and a slash |
 | Merge group | `test-count`, the one static job the queue rules require (`scheduler.QUEUE_REQUIRED`) |
 | Promotion, backfill | All six |
 
@@ -2794,7 +2802,6 @@ or an empty log, and the required check show only unit keys.
   workflow gets no units, and its Actions job keeps the verdict; `--ci-only` names it.
 - Every expansion parses each workflow file directly in the folder, so one file that does not
   parse drops every head the lab grades at that grader revision.
-- Pull request and hotfix grades run no `semgrep` units, as the frame table above shows.
 
 #### Verify
 
@@ -2836,7 +2843,7 @@ and both passed in
 | The same text names a workflow you just added to a static job | The called file is in a folder below `.github/workflows`, or not on the grader revision yet. A pull request, hotfix or merge group grade reads the base, so a new workflow counts only once the base holds it | `git ls-tree --name-only <grader> .github/workflows/` lists the file |
 | Every head graded at one grader revision is dropped with a YAML error | A workflow file directly in `.github/workflows` at that revision does not parse | In a checkout of that revision, `python -c 'import pathlib,yaml; [print(p) or yaml.safe_load(p.read_text()) for p in sorted(pathlib.Path(".github/workflows").glob("*.y*ml"))]'` prints each file before parsing it, so the last name printed before the traceback is the file |
 | The worker's standard error reads `ci-lab worker: unit <job> crashed: ValueError('semgrep uses ./.github/workflows/semgrep.yml, which was not given')` | The worker runs a release older than the fix while the scheduler expands with it | The `ci-lab-worker` image, as for the scheduler; the unit's lease expires and follows step 6 of the [Scheduler loop](#scheduler-loop) |
-| A pull request grade passes `semgrep` with no units | The pull request frame names the job `semgrep` while its units sit under the `semgrep/` labels | Expected today; see [Which grades run static units](#which-grades-run-static-units) |
+| A pull request grade passes `semgrep` with no units | The scheduler runs a release from before pull request frames graded reusable workflow job units under their calling job; that frame looked the job `semgrep` up by its bare name while its units sit under the `semgrep/` labels | The `ci-lab-scheduler` image, read as in the first row, names a release older than the first one whose release notes list this change to pull request frames; see [Which grades run static units](#which-grades-run-static-units) |
 
 ### Test units
 
@@ -4926,8 +4933,11 @@ an import sorting fault. Use `--plant gate-script` to prove that a head cannot t
 own comment grader to accept a new directive. Test and mutation plants are separate proofs.
 
 The command also accepts every JSON plant name in the catalog, including dotted names such as
-`lint.lint-check`. A plant keeps its full discovered step in `gate`; grading reads that step's job
-check and requires its named diagnostic. The JSON result and summary row include `green_run` and
+`lint.lint-check`. A plant keeps its full discovered step in `gate`; grading reads the check of the
+job the pull request rules require, the first path segment of the gate, and requires its named
+diagnostic. A step of a reusable workflow job, such as `semgrep/scan/rule-exceptions-only-shrink`,
+is therefore read from the `semgrep` check, where a pull request grade posts the units of every
+job that workflow holds. The JSON result and summary row include `green_run` and
 `red_run`, the exact grade identifiers for the two check links. `lint.threshold-pins` is the shorter
 alias for the threshold pin plant; its full gate identity is unchanged.
 
