@@ -1,16 +1,14 @@
 import json
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from scripts.ci_lab import scheduler
 from tests.ci_lab.test_scheduler import HEAD_A, Run, plan, unit
-from tests.ci_lab.test_scheduler import lab as _lab
-
-lab = _lab
+from tests.ci_lab.test_scheduler import lab as lab
 
 
 @pytest.fixture
@@ -42,8 +40,9 @@ def test_a_save_stores_the_document_with_its_next_revision_and_the_demand_record
     assert record == {"revision": int(before) + 1, "tier": 1, "hits": 1, "jobs": [scheduler.job_id(HEAD_A, unit(1))]}
     assert document is not None
     assert record is not None
-    demand = scheduler._grade_demand(document, b"")
-    assert (record["tier"], record["hits"], tuple(record["jobs"])) == (demand.tier, demand.hits, demand.jobs)
+    parsed = scheduler._parse(document)
+    jobs = tuple(slot.job for slot in parsed.units.values() if slot.job)
+    assert (record["tier"], record["hits"], tuple(record["jobs"])) == (parsed.tier, len(parsed.units) - len(jobs), jobs)
 
 
 @pytest.mark.feature("lab-scheduler-grade-demand-records")
@@ -66,7 +65,7 @@ def test_a_failed_save_transaction_leaves_the_document_revision_and_record_as_th
     client = grading.lab.client
     pipeline = client.pipeline
 
-    def refused() -> list[Any]:
+    def refused() -> NoReturn:
         raise RedisConnectionError("Connection reset by peer")
 
     def failing(*args: Any, **options: Any) -> Any:
@@ -136,6 +135,17 @@ def test_a_completed_grade_leaves_the_live_set_with_neither_revision_nor_record_
     assert stored(run, name)[1:] == (None, None)
     run.engine.save(closed)
     document, revision, record = stored(run, name)
+    assert (revision, record) == (None, None)
+    assert document is not None
+    assert json.loads(document)["conclusion"] == "success"
+
+
+@pytest.mark.feature("lab-scheduler-grade-demand-records")
+def test_a_closed_save_removes_a_revision_and_record_left_beside_its_grade(grading: Run) -> None:
+    state = grading.grade(HEAD_A)
+    assert stored(grading, state.run)[1] is not None
+    grading.engine.save(replace(state, conclusion="success"))
+    document, revision, record = stored(grading, state.run)
     assert (revision, record) == (None, None)
     assert document is not None
     assert json.loads(document)["conclusion"] == "success"

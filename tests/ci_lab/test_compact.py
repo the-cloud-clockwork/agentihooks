@@ -317,12 +317,13 @@ def test_compaction_bumps_the_revision_and_rewrites_the_record_of_each_grade_it_
     plain_record = client.hget(scheduler.RECORDS, plain)
     assert compact.compact(client, run.lab.objects)["grades stripped"] == 1
     revisions = client.hgetall(scheduler.REVISIONS)
-    demand = scheduler._grade_demand(client.get(name), b"")
+    graded = scheduler._parse(client.get(name))
+    jobs = [slot.job for slot in graded.units.values() if slot.job]
     assert revisions == {**before, carrying: str(int(before[carrying]) + 1)}
     assert json.loads(client.hget(scheduler.RECORDS, carrying)) == {
         "revision": int(before[carrying]) + 1,
-        "tier": demand.tier,
-        "hits": demand.hits,
-        "jobs": list(demand.jobs),
+        "tier": graded.tier,
+        "hits": len(graded.units) - len(jobs),
+        "jobs": jobs,
     }
     assert client.hget(scheduler.RECORDS, plain) == plain_record
