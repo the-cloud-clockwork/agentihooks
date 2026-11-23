@@ -56,8 +56,8 @@ def _change(short: str, data: dict[str, Any]) -> tuple[str, str, str]:
 def _label(short: str, data: dict[str, Any], pull: str) -> str:
     """Return the plain words naming the change of a review event of kind ``short``: its pull request number, the
     pull request its merge queue group tests, or its release tag, with the repository name."""
-    repository = (pull or data.get("repository") or data["url"]).split("/")[4]
-    number = pull.rsplit("/", 1)[-1]
+    repository = (pull or data["repository"]).split("/")[4]
+    number = pull.split("/")[-1]
     if short == "pr":
         return f"pull request {number} of {repository}"
     if short == "mq":
@@ -70,7 +70,7 @@ def review_task(short: str, data: dict[str, Any], doc: dict[str, Any]) -> dict[s
     """Return the review lane task for the change a review event of kind ``short`` names, with the phase of the
     author task whose pull request it carries."""
     ident, link, pull = _change(short, data)
-    author = next((t for t in doc["tasks"] if pull and str(t.get("pr_url", "")).lower() == pull.lower()), None)
+    author = next((t for t in doc["tasks"] if pull and str(t.get("pr_url")).lower() == pull.lower()), None)
     noun = NOUNS[short]
     named = f"Review {_label(short, data, pull)}"
     by = f" Author task {author['id']}." if author else " No swarm task carries this change."

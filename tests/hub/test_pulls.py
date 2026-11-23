@@ -675,3 +675,36 @@ def test_a_repository_event_for_an_untracked_repository_publishes_nothing():
     _, hub, consumer = setup()
     hub.announce(REPO, "release.published", "v1", {"tag": "v1"})
     assert drain(consumer) == []
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_the_repository_key_hashes_the_lowercased_repository():
+    assert pulls.repository_key(REPO.upper()) == "repo." + hashlib.sha256(REPO.lower().encode()).hexdigest()
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_the_repository_of_a_pull_is_everything_before_its_last_pull_segment():
+    bus, hub, _ = setup()
+    hub.track("crew", "https://github.com/pull/pull/pull/3")
+    entry = bus.state(pulls.BUCKET).get(pulls.repository_key("https://github.com/pull/pull"))
+    assert entry is not None
+    assert json.loads(entry.value) == ["crew"]
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_repository_event_is_published_on_the_swarm_subject_of_its_kind():
+    bus, hub, _ = setup()
+    exact = bus.events.consumer("exact", "swarm.crew.merge_group.requested")
+    hub.track("crew", URL)
+    hub.announce(REPO, "merge_group.requested", "a1", {"head": "a1"})
+    [event] = drain(exact)
+    digest = hashlib.sha256(json.dumps(["crew", "merge_group.requested", REPO.lower(), "a1"]).encode()).hexdigest()
+    assert (event.id, event.entity, event.key, event.version, event.time, event.author) == (
+        digest,
+        "merge_group",
+        "a1",
+        1,
+        1000,
+        pulls.AUTHOR,
+    )
+    assert event.data == {"repository": REPO, "head": "a1"}

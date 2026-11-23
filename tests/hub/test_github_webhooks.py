@@ -642,6 +642,29 @@ def test_repository_events_from_recorded_payloads():
 
 
 @pytest.mark.feature("swarm-review-trigger")
+def test_a_merge_group_without_a_head_ref_names_no_pull_request():
+    payload = merge_group()
+    del payload["merge_group"]["head_ref"]
+    [(_, _, _, data)] = github_webhooks.repository_events("merge_group", payload)
+    assert (data["head_ref"], data["number"]) == ("", None)
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_the_lazy_pull_tracker_announces_a_repository_event_to_the_tracking_swarm():
+    bus = open_bus(BusConfig())
+    Pulls(bus, fetch=lambda url: pytest.fail("unexpected fetch"), clock=lambda: 1000).track("crew", URL)
+    consumer = bus.events.consumer("watch", "swarm.crew.release.published")
+    github_webhooks.LazyPulls(bus).announce(REPO, "release.published", "v1", {"tag": "v1"})
+    [event] = drain(consumer)
+    assert (event.swarm, event.type, event.key, event.data) == (
+        "crew",
+        "release.published",
+        "v1",
+        {"repository": REPO, "tag": "v1"},
+    )
+
+
+@pytest.mark.feature("swarm-review-trigger")
 def test_a_merge_group_and_a_release_reach_each_swarm_tracking_the_repository():
     _, ingress, swarm = setup()
     assert deliver(ingress, "merge_group", merge_group()) == 200

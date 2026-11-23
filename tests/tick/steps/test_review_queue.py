@@ -1,5 +1,6 @@
 """The review pass queues one review task per pull request, merge queue group and release a swarm sees."""
 
+import hashlib
 from importlib import import_module
 from types import SimpleNamespace
 from typing import Any
@@ -18,6 +19,7 @@ SLUG = "crew"
 REPO = "https://github.com/acme/widgets"
 PULL = f"{REPO}/pull/7"
 NOW = 1_700_000_000_000
+UNLINKED = {"id": "t2", "pr_url": "", "phase": "p2"}
 
 
 class Ledger:
@@ -87,6 +89,38 @@ def test_a_merge_group_and_a_release_each_queue_one_review_task() -> None:
 
 
 @pytest.mark.feature("swarm-review-trigger")
+def test_a_pull_review_task_names_its_change_and_author_exactly() -> None:
+    task = review().review_task("pr", {"url": PULL}, doc())
+    assert task["task"] == "review-pr-" + hashlib.sha256(PULL.lower().encode()).hexdigest()[:12]
+    assert task["description"] == f"Review the pull request {PULL}. Author task t1."
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_release_review_task_names_its_tag_and_no_author() -> None:
+    url = f"{REPO}/releases/tag/v1.2.3"
+    task = review().review_task("rel", {"repository": REPO, "tag": "v1.2.3", "url": url}, doc(UNLINKED))
+    assert (task["title"], task["phase"]) == ("Review release v1.2.3 of widgets", "")
+    assert task["description"] == f"Review the release {url}. No swarm task carries this change."
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_merge_group_naming_no_pull_request_has_no_author() -> None:
+    task = review().review_task("mq", {"repository": REPO, "head": "a1", "number": None}, doc(UNLINKED))
+    assert (task["title"], task["phase"]) == ("Review the merge queue group of widgets", "")
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_an_author_task_without_a_phase_gives_the_review_no_phase() -> None:
+    task = review().review_task("pr", {"url": PULL}, {"tasks": [{"id": "t1", "pr_url": PULL}]})
+    assert task["phase"] == ""
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_the_durable_consumer_is_named_by_kind_and_swarm() -> None:
+    assert review()._durable(SLUG, "pr") == "review-pr-" + hashlib.sha256(SLUG.encode()).hexdigest()[:16]
+
+
+@pytest.mark.feature("swarm-review-trigger")
 def test_review_task_ids_are_keyed_by_the_change_alone() -> None:
     first, second = Ledger(), Ledger()
     for ledger in (first, second):
@@ -102,6 +136,13 @@ def test_events_from_before_the_replay_window_queue_nothing() -> None:
     publish(bus, "pull.opened", {"url": PULL}, PULL, NOW - review().REPLAY_MS - 1)
     assert run(bus, ledger) == []
     assert ledger.added == []
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_an_event_at_the_edge_of_the_replay_window_still_queues() -> None:
+    bus, ledger = open_bus(BusConfig()), Ledger()
+    publish(bus, "pull.opened", {"url": PULL}, PULL, NOW - review().REPLAY_MS)
+    assert len(run(bus, ledger)) == 1
 
 
 @pytest.mark.feature("swarm-review-trigger")
@@ -146,4 +187,15 @@ def test_the_step_opens_no_bus_on_the_memory_backend(monkeypatch: pytest.MonkeyP
     module._bus.cache_clear()
     monkeypatch.delenv("AGENTIHOOKS_BUS", raising=False)
     assert module._bus() is None
+    module._bus.cache_clear()
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_the_step_opens_the_configured_shared_bus(monkeypatch: pytest.MonkeyPatch) -> None:
+    module, opened = review(), []
+    module._bus.cache_clear()
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    monkeypatch.setattr(module, "open_bus", lambda config: opened.append(config) or "bus")
+    assert module._bus() == "bus"
+    assert [config.backend for config in opened] == ["nats"]
     module._bus.cache_clear()
