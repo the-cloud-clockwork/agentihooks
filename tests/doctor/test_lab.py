@@ -135,7 +135,8 @@ def test_an_authoritative_gate_with_a_mismatch_is_a_finding() -> None:
             "the authoritative gate lint disagrees with GitHub Actions on 2 of the newest 10 pull request heads",
             (
                 "gate lint is authoritative in delivery.yaml",
-                "lab check lab/lint against the github-actions job on the newest 10 pull request heads",
+                "lab check lab/lint or lab-shadow/lint, the newer, against the github-actions job on the newest 10 "
+                "pull request heads",
             ),
             "any mismatch on an authoritative gate",
             2,

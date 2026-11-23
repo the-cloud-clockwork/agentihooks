@@ -110,8 +110,8 @@ def gate_findings(counted: Mapping[str, int], heads: int) -> list[Finding]:
             "pull request heads",
             (
                 f"gate {gate} is authoritative in delivery.yaml",
-                f"lab check {shadow_report.LISTED_NAME}{gate} against the github-actions job on the newest {heads} "
-                "pull request heads",
+                f"lab check {shadow_report.LISTED_NAME}{gate} or {shadow.LAB_NAME}{gate}, the newer, against the "
+                f"github-actions job on the newest {heads} pull request heads",
             ),
             "any mismatch on an authoritative gate",
             count,

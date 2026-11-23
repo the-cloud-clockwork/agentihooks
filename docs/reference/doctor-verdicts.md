@@ -211,7 +211,7 @@ every Doctor pass:
 | `lab-unreachable/<swarm>` | The last capacity read failed. No other lab finding is raised from that block. | Minutes since the last good read, or since the failure when no read ever succeeded |
 | `lab-behind/<swarm>` | A reading under ten minutes old predicts pull request grading more than `AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES` (20) minutes behind, the same limit that holds eng claims | Minutes behind |
 | `lab-cache-hit-ratio/<class>` | A reading under ten minutes old gives the class a verdict cache hit ratio below `AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR` (0.6). A class with no lookups has no ratio and is skipped | Hit ratio in percent |
-| `lab-gate-mismatch/<gate>` | An authoritative gate disagrees with GitHub Actions on any of the newest ten pull request heads that hold both verdicts | Mismatches |
+| `lab-gate-mismatch/<gate>` | An authoritative gate disagrees with GitHub Actions on any of the newest ten pull request heads. The window is those ten heads whatever they hold; a head counts only when it holds both verdicts | Mismatches |
 
 The floor must be a fraction from 0 to 1; any other value falls back to 0.6.
 The `lab gate` detector takes lab verdicts only from the GitHub App that
