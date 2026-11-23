@@ -41,6 +41,7 @@ PLACED = {
         "capacity lane",
         "tick task lane",
         "ledger task lane",
+        "stall watched lane",
     },
     "dispatch": {"default profile", "hive placed lane"},
     "expert": {"default profile", "hive placed lane", "moving numbered seat"},
