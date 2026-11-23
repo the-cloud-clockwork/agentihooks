@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -83,12 +84,42 @@ def test_the_coverage_wait_outlasts_its_own_deadline_inside_the_sonar_budget() -
     spec.loader.exec_module(module)
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     steps, names = _sonar_steps()
-    minutes = steps[names.index("Take each shard's coverage as it lands")]["timeout-minutes"]
-    assert module.WAIT < minutes * 60
-    pull, push = minutes + 15, minutes + 30
-    assert jobs["sonar"]["timeout-minutes"] == (
-        f"${{{{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && {push} || {pull} }}}}"
+    expr = steps[names.index("Take each shard's coverage as it lands")]["timeout-minutes"]
+    matched = re.fullmatch(
+        r"\$\{\{ github\.event_name == 'push' && github\.ref == 'refs/heads/dev' && (\d+) \|\| (\d+) \}\}", expr
     )
+    assert matched is not None
+    push_minutes, pull_minutes = (int(value) for value in matched.groups())
+    assert module.WAIT < pull_minutes * 60
+    assert module.WAIT < push_minutes * 60
+    sonar_matched = re.fullmatch(
+        r"\$\{\{ github\.event_name == 'push' && github\.ref == 'refs/heads/dev' && (\d+) \|\| (\d+) \}\}",
+        jobs["sonar"]["timeout-minutes"],
+    )
+    assert sonar_matched is not None
+    sonar_push, sonar_pull = (int(value) for value in sonar_matched.groups())
+    assert sonar_push - push_minutes >= 10
+    assert sonar_pull - pull_minutes >= 10
+
+
+@pytest.mark.feature("sonar-queue-watch-dev-push-bound-token")
+def test_the_queue_watch_token_stays_under_its_one_hour_lifetime() -> None:
+    spec = importlib.util.spec_from_file_location("queue_watch", ROOT / ".github/coverage/queue_watch.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert "actions" not in (jobs["sonar"].get("permissions") or {})
+    steps, names = _sonar_steps()
+    watch = steps[names.index("Watch whether this run's shard jobs have started")]
+    assert watch["if"] == (
+        "github.event_name == 'push' && github.ref == 'refs/heads/dev' "
+        "&& needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'"
+    )
+    mint = steps[names.index("Mint the token that reads this run's job states")]
+    assert mint["if"] == watch["if"]
+    assert watch["env"]["GH_APP_TOKEN"] == "${{ steps.jobs-token.outputs.token }}"
+    assert module.BOUND < 60 * 60
 
 
 def test_sonar_waits_for_the_shards_on_a_standard_runner_so_its_scan_keeps_its_cpu() -> None:

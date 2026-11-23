@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__head_reason:0989a1dfa861f3c6944178347c233c32121bc42c63ffb195c9fc31c1de8e6ad1": {
+    "reader": "standards_reader",
+    "reason": "join over at most one element never uses its separator."
+  }
+}

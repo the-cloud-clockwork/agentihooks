@@ -115,7 +115,7 @@ def _gone(pid, wait=5.0):
     while True:
         try:
             state = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[0]
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return True
         if state in {"Z", "X"}:
             return True

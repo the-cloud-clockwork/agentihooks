@@ -8,16 +8,26 @@ import json
 import re
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
+from typing import Any
 
 from scripts import agent_choice
 from scripts.inbox import links
-from scripts.swarm.store import AUTONOMY, SwarmError
+from scripts.swarm.store import AUTONOMY, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
-LANES = ("eng", "ci", "plan", "master")
-DEFAULT_CAPS = {"eng": 2, "ci": 1, "plan": 1, "master": 1}
-DEFAULT_PROFILES = {"eng": "engineer", "ci": "cicd", "plan": "planner", "master": "master", "dispatch": "dispatcher"}
+LANES = ("eng", "ci", "plan", "review", "master")
+DEFAULT_CAPS = {"eng": 2, "ci": 1, "plan": 1, "review": 1, "master": 1}
+DEFAULT_PROFILES = {
+    "eng": "engineer",
+    "ci": "cicd",
+    "plan": "planner",
+    "review": "reviewer",
+    "master": "master",
+    "dispatch": "dispatcher",
+    "expert": "expert",
+}
 AUTO = "auto"
+DEFAULT_KINDS = {"review": "review"}
 LANE_FIELDS = ("role", "agent", "model", "effort", "kind", "profile")
 LINK_FIELDS = {"from", "to", "kind"}
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
@@ -48,11 +58,12 @@ def user_dir(environ):
     return Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "swarm-templates"
 
 
-def lane(name, data):
+def lane(name: str, data: dict[str, Any]) -> Lane:
     unknown = set(data) - {f.name for f in fields(Lane)}
     if unknown:
         raise SwarmError(f"lane {name} has unknown fields {sorted(unknown)}")
-    found = Lane(**{"cap": DEFAULT_CAPS[name], "profile": DEFAULT_PROFILES[name], **data})
+    defaults = {"cap": DEFAULT_CAPS[name], "profile": DEFAULT_PROFILES[name], "kind": DEFAULT_KINDS.get(name, AUTO)}
+    found = Lane(**{**defaults, **data})
     if not isinstance(found.cap, int) or isinstance(found.cap, bool) or found.cap < 0:
         raise SwarmError(f"lane {name} cap must be a whole number")
     if found.agent not in (AUTO, *agent_choice.AGENTS):
@@ -82,13 +93,13 @@ def _checked(name):
     return name
 
 
-def parse(data):
+def parse(data: dict[str, Any]) -> Template:
     name = _checked(data.get("name", ""))
     lanes = data.get("lanes") or {}
     custom = set(lanes) - set(LANES)
     if custom:
         raise SwarmError(
-            f"template {name} names lanes {sorted(custom)}; a swarm has only the eng, ci, plan and master lanes"
+            f"template {name} names lanes {sorted(custom)}; a swarm has only the eng, ci, plan, review and master lanes"
         )
     if data.get("autonomy", "") not in ("", *AUTONOMY):
         raise SwarmError(f"template {name} autonomy must be one of {AUTONOMY}")
@@ -134,8 +145,14 @@ def lane_map(template):
     return {key: {f: getattr(value, f) for f in LANE_FIELDS} for key, value in template.lanes.items()}
 
 
-def from_config(name, config):
-    caps = {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan, "master": 1}
+def from_config(name: str, config: SwarmConfig) -> Template:
+    caps = {
+        "eng": config.max_eng,
+        "ci": config.max_ci,
+        "plan": config.max_plan,
+        "review": config.max_review,
+        "master": 1,
+    }
     return parse(
         {
             "name": name,

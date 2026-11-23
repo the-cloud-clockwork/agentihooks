@@ -60,6 +60,10 @@ def test_an_imported_postgres_ledger_exports_reads_and_snapshots_as_stored(impor
     assert shared.exists(slug)
     assert shared.export_document(slug) == local.export_document(slug)
     assert shared.read(slug, "tasks/t2") == local.read(slug, "tasks/t2")
+    names, flags = ("phases", "followups"), ("done", "out_of_scope")
+    expected = {"phases": [{}, {"done": True}, {}, {}], "followups": []}
+    assert sqlite.read_flags(postgres.Database(URL), slug, names, flags) == expected
+    assert sqlite.read_flags(local.path.parent, slug, names, flags) == expected
     assert shared.token(slug)
     assert slug in [summary["slug"] for summary in shared.list_summaries()]
     with shared.snapshot() as snapshot, local.snapshot() as stored:

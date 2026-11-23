@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import Any, cast
 
-from scripts.swarm import waits
+from scripts.swarm import seat_heads, waits
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.tick import registry
 from scripts.tick.adapters.calls import LedgerCalls, RuntimeCalls
@@ -281,7 +281,7 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
             store.refresh(slug, agent.task, agent.name, tick.LEASE_MS)
             return []
         return [tick.timing.timed(tick._drop_remote, slug, store, ledger, rows, agent, reason)]
-    ended = tick._ended(agent, rows)
+    ended = tick._ended(agent, rows) and not _claim_unwritten(judging, agent)
     if agent.state == "retiring" and not ended:
         return []
     if ended:
@@ -302,6 +302,17 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
     if now_ms - max(agent.started_at, agent.launched_at) > tick.STARTUP_GRACE_MS:
         return tick.timing.timed(tick._lost, slug, store, ledger, runtime, rows, agent, now_ms)
     return []
+
+
+def _claim_unwritten(judging: _Reaping, agent: AgentRecord) -> bool:
+    """True when only the empty claimant of its pass row would end a starting, never launched agent that still holds
+    its Redis claim: the hub admitted it after the pass read that row and before its ledger claim write landed."""
+    row = judging.rows.get(agent.task)
+    if agent.state != "starting" or agent.launched_at or not row or row.get("claimed_by"):
+        return False
+    if tick._ended(agent, {agent.task: {**row, "claimed_by": agent.name}}):
+        return False
+    return cast(Any, judging.store).claimant(judging.slug, agent.task) == agent.name
 
 
 def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
@@ -604,9 +615,10 @@ def _conversations(slug: str, store: Any, runtime: Any) -> None:
 
 
 def _session_models(slug: Any, store: Any) -> Any:
-    for agent in store.agents(slug):
+    listed = store.agents(slug)
+    for agent in listed:
         reported = tick.session_model.apply(agent, tick.session_model.get(store.redis, slug, agent.name))
-        if reported != agent:
+        if reported != agent and not seat_heads.superseded(agent, listed):
             store.put_agent(slug, reported)
 
 

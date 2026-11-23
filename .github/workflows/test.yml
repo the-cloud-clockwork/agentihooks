@@ -93,7 +93,7 @@ jobs:
         if: hashFiles('scripts/ci_reuse.py') != ''
         env:
           PYTHONNOUSERSITE: "1"
-        run: python -m pip install "pyyaml>=6.0"
+        run: python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
 
       - name: Mint the tcc main ci App token
         id: app-token
@@ -502,7 +502,7 @@ jobs:
 
       - name: Install unit reuse metadata dependencies
         if: github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != ''
-        run: python -m pip install "pyyaml>=6.0"
+        run: python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
 
       - name: Look up the base revision's dev durations
         id: stored
@@ -796,7 +796,7 @@ jobs:
           if [[ "$(python -I -m ruff --version 2>/dev/null)" == "ruff 0.15.12" ]]; then
             echo "ruff 0.15.12 comes from the runner image"
           else
-            python -m pip install ruff==0.15.12
+            python -m pip install --constraint .github/ci-tools/lint-tools.lock ruff==0.15.12
           fi
           test "$(python -I -m ruff --version)" = "ruff 0.15.12"
 
@@ -1316,13 +1316,15 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           COLLECTION_JOB: test-count (${{ matrix.python-version }})
+          COLLECTION_STEP: Upload the early collection
         run: |
           while :; do
             state="$(python -m scripts.ci_budget.rate_limit --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
-              --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion)\"")" || state=""
+              --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion) \([.steps[]? | select(.name == \"$COLLECTION_STEP\") | .conclusion][0])\"")" || state=""
             case "$state" in
-              "completed success") exit 0 ;;
+              "completed success"*) exit 0 ;;
               completed*) echo '::error::The early collection did not succeed.'; exit 1 ;;
+              *" success") exit 0 ;;
             esac
             sleep 15
           done
@@ -1640,9 +1642,7 @@ jobs:
         run: |
           git worktree add --detach "$RUNNER_TEMP/grader" "$GRADER"
           cd "$RUNNER_TEMP/grader"
-          package=scripts
-          if [[ ! -f scripts/reused_coverage.py ]]; then package=tests; fi
-          python -m "$package.reused_coverage" --repo "$GITHUB_WORKSPACE" --head HEAD \
+          python -m scripts.reused_coverage --repo "$GITHUB_WORKSPACE" --head HEAD \
             --coverage "$RUNNER_TEMP/dev-coverage/.coverage" --commit "$COMMIT" \
             --reused "$GITHUB_WORKSPACE/reused.json" --out "$GITHUB_WORKSPACE/reused-coverage/.coverage" \
             --captures "$RUNNER_TEMP/dev-coverage/js-coverage" --captures-out "$GITHUB_WORKSPACE/js-coverage"
@@ -2324,6 +2324,9 @@ jobs:
 
       - *python
 
+      - name: Install PyYAML
+        run: python -m pip install --constraint .github/test-requirements.lock PyYAML==6.0.3
+
       - name: Download collected tests
         uses: ./.github/actions/retry-download
         with:
@@ -2453,7 +2456,7 @@ jobs:
     if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && needs.select.outputs.sonar != 'skip' && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['sonar'] != true }}
     needs: [select, reuse, admission, lab-verdict]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 75 || 60 }}
+    timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 90 || 60 }}
     outputs:
       analysis: ${{ steps.gate.outputs.analysis }}
     env:
@@ -2500,7 +2503,7 @@ jobs:
 
       - name: Install coverage
         if: steps.source.outputs.test_only != 'true'
-        run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4" PyYAML==6.0.3
+        run: python -m pip install --constraint .github/test-requirements.lock coverage==7.17.0 PyYAML==6.0.3
 
       - name: Mint the token that reads the pull request runs' coverage
         id: app-token
@@ -2511,6 +2514,26 @@ jobs:
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
+
+      - name: Mint the token that reads this run's job states
+        id: jobs-token
+        if: &jobs-token github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Watch whether this run's shard jobs have started
+        id: queue-watch
+        if: *jobs-token
+        env:
+          GH_APP_TOKEN: ${{ steps.jobs-token.outputs.token }}
+          PREFIX: ${{ needs.select.outputs.scope == 'selected' && 'unit-selected (' || 'unit (' }}
+        run: |
+          python .github/coverage/queue_watch.py "$PREFIX" > queue-watch.log 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
 
       - name: Download the pull request runs' test plan
         id: download-the-pull-request-runs-test-plan
@@ -2554,7 +2577,7 @@ jobs:
       - name: Take each shard's coverage as it lands
         if: needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
         continue-on-error: true
-        timeout-minutes: 45
+        timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 75 || 45 }}
         uses: actions/github-script@v7
         env:
           SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}
@@ -2564,6 +2587,12 @@ jobs:
           github-token: none
           script: |
             require('child_process').execFileSync('python', [process.env.ARRIVALS], {stdio: 'inherit'})
+
+      - name: Stop the queue watch
+        if: always() && steps.queue-watch.outputs.pid != ''
+        env:
+          PID: ${{ steps.queue-watch.outputs.pid }}
+        run: kill "$PID" 2> /dev/null || true
 
       - name: Take each selected leg's latest branch coverage
         if: needs.select.outputs.scope == 'selected'
@@ -2754,6 +2783,7 @@ jobs:
           dashboard=$(sed -n 's/^dashboardUrl=//p' .scannerwork/report-task.txt)
           if [[ "$gate" != OK ]]; then
             echo "::error::Quality Gate has FAILED ($gate). Detailed information can be found at: $dashboard"
+            { GITHUB_STEP_SUMMARY= SONAR_RETRY_SECONDS=30 api "issues/search?componentKeys=${dashboard#*\?id=}&types=BUG,VULNERABILITY&inNewCodePeriod=true&resolved=false&ps=100" | jq -r '(.issues[] | "\(.component):\(.line // 0) \(.rule) \(.message)"), (select(.total > (.issues | length)) | "\(.total - (.issues | length)) more not shown")'; } 2> /dev/null || true
             exit 1
           fi
           echo "Quality Gate has PASSED. $dashboard"
@@ -2822,7 +2852,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install coverage
-        run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4" PyYAML==6.0.3
+        run: python -m pip install --constraint .github/test-requirements.lock coverage==7.17.0 PyYAML==6.0.3
 
       - name: Download shard coverage
         id: download-shard-coverage
@@ -2991,20 +3021,20 @@ jobs:
         run: |
           set -euo pipefail
           # The checker's own environment carries antoncore's job pins without changing the lint interpreter.
-          (python -m venv "$RUNNER_TEMP/columns" && "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0; echo $? > "$RUNNER_TEMP/columns-venv.status") > "$RUNNER_TEMP/columns-venv.log" 2>&1 < /dev/null &
+          (python -m venv "$RUNNER_TEMP/columns" && "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet --constraint .github/ci-tools/parser.lock --constraint .github/ci-tools/lint-tools.lock PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0 packaging==26.3; echo $? > "$RUNNER_TEMP/columns-venv.status") > "$RUNNER_TEMP/columns-venv.log" 2>&1 < /dev/null &
           (docker run -d --rm --name "$CLICKHOUSE" clickhouse/clickhouse-server:24.1-alpine; echo $? > "$RUNNER_TEMP/clickhouse.status") > "$RUNNER_TEMP/clickhouse.log" 2>&1 < /dev/null &
 
       - name: Install ruff
-        run: python -m pip install ruff==0.15.12
+        run: python -m pip install --constraint .github/ci-tools/lint-tools.lock ruff==0.15.12
 
       - name: Install PyYAML
-        run: python -m pip install "pyyaml>=6.0"
+        run: python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
 
       - name: Install vulture
-        run: python -m pip install vulture==2.14
+        run: python -m pip install --constraint .github/ci-tools/lint-tools.lock vulture==2.14
 
       - name: Install the comment gate grammars
-        run: python -m pip install --constraint .github/test-requirements.lock tree-sitter tree-sitter-bash tree-sitter-javascript tree-sitter-css
+        run: python -m pip install --constraint .github/test-requirements.lock tree-sitter==0.26.0 tree-sitter-bash==0.25.1 tree-sitter-javascript==0.25.0 tree-sitter-css==0.25.0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
@@ -3246,8 +3276,6 @@ jobs:
           python -m scripts.threshold_pins --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
-      # The constraint protects this head's own run against a broken pip-audit dependency release;
-      # a fixed base's script carries the same pin and needs no constraint file.
       - name: Fail on known vulnerabilities new against the base
         if: ${{ !cancelled() }}
         run: |
@@ -3255,8 +3283,6 @@ jobs:
             echo "::error::The base carries no scripts/ci_dependency_audit.py, so nothing trusted can grade."
             exit 1
           fi
-          echo "platformdirs!=4.14.8" > "$RUNNER_TEMP/pip-audit-constraints.txt"
-          export UV_CONSTRAINT="$RUNNER_TEMP/pip-audit-constraints.txt"
           cd "$RUNNER_TEMP/base"
           python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
@@ -3341,7 +3367,7 @@ jobs:
             echo "::error::The protected grader carries no scripts/ci_hive_nats_grants.py, so nothing trusted can grade the hive member grants."
             exit 1
           fi
-          python -m pip install --quiet "cryptography>=42"
+          python -m pip install --quiet --constraint .github/ci-tools/browser-crypto.lock cryptography==50.0.2
           cd "$RUNNER_TEMP/grader"
           python -m scripts.ci_hive_nats_grants --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
 
@@ -3364,7 +3390,7 @@ jobs:
 
       - name: Install Playwright for artifact checks
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
-        run: python -m pip install "playwright>=1.44.0" "orjson>=3.10"
+        run: python -m pip install --constraint .github/ci-tools/browser-crypto.lock playwright==1.63.0 orjson==3.13.0
 
       - name: Install the artifact viewer browser
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
@@ -3388,7 +3414,7 @@ jobs:
           changed=false
           base="$(git -C "$RUNNER_TEMP/base" rev-parse HEAD)"
           for path in scripts/ci_mutation tests/mutation_self_plant hooks/context/conditions.py scripts/ci_cpu_quota.py \
-            pyproject.toml pytest.ini setup.cfg tox.ini uv.lock .coveragerc; do
+            pyproject.toml pytest.ini setup.cfg tox.ini .github/test-requirements.lock .coveragerc; do
             if ! git diff --quiet "$base" HEAD -- "$path"; then
               echo "Changed: $path"
               changed=true
@@ -3505,7 +3531,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install coverage
-        run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4"
+        run: python -m pip install --constraint .github/test-requirements.lock coverage==7.17.0
 
       - name: Resolve the measured base tree
         id: base
@@ -3559,15 +3585,8 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BASE: ${{ steps.base.outputs.commit }}
         run: |
-          ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...dev" --jq .status)
-          [[ "$ancestry" == ahead || "$ancestry" == identical ]] || { echo "::error::Base $BASE is outside dev history."; exit 1; }
-          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE&per_page=20" --jq '.workflow_runs[] | select((.event == "push" and .head_branch == "dev") or (.event == "merge_group" and (.head_branch | startswith("gh-readonly-queue/dev/")))) | "\(.id) \(.event)"')
-          while read -r run event; do
-            [[ -n "$run" ]] || continue
-            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
-            [[ "$kept" -gt 0 ]] || continue
-            jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
-            if ! jq -s -e --arg event "$event" '
+          measured() {
+            jq -s -e --arg event "$1" '
               [.[] | select(.name | startswith("unit ("))] as $units |
               (($units | length > 0 and all(.[]; .conclusion == "success") and
                 (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
@@ -3584,13 +3603,32 @@ jobs:
                 .name == "queue-baseline" and
                 any(.steps[]?; .name == "Record this run\u0027s coverage baseline" and .conclusion == "success") and
                 any(.steps[]?; .name == "Publish this run\u0027s coverage baseline" and .conclusion == "success")
-              end)' <<< "$jobs" > /dev/null; then
-              continue
-            fi
+              end)' > /dev/null
+          }
+          ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...dev" --jq .status)
+          [[ "$ancestry" == ahead || "$ancestry" == identical ]] || { echo "::error::Base $BASE is outside dev history."; exit 1; }
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE&per_page=20" --jq '.workflow_runs[] | select((.event == "push" and .head_branch == "dev") or (.event == "merge_group" and (.head_branch | startswith("gh-readonly-queue/dev/")))) | "\(.id) \(.event)"')
+          while read -r run event; do
+            [[ -n "$run" ]] || continue
+            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
+            [[ "$kept" -gt 0 ]] || continue
+            jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
+            measured "$event" <<< "$jobs" || continue
             echo "Restoring the coverage baseline of base $BASE from measured run $run"
             echo "id=$run" >> "$GITHUB_OUTPUT"
             exit 0
           done <<< "$runs"
+          published=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=coverage-baseline&per_page=100" --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "dev") | [.workflow_run.head_sha, .workflow_run.id]]')
+          candidates=$(git rev-list --first-parent --skip=1 --max-count=1000 "$BASE" -- | jq -R -r --argjson published "$published" '. as $commit | $published[] | select(.[0] == $commit) | "\(.[0]) \(.[1])"')
+          while read -r commit run; do
+            [[ -n "$run" ]] || continue
+            jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
+            measured push <<< "$jobs" || continue
+            echo "Restoring the coverage baseline of base $BASE from measured run $run of its nearest measured first parent ancestor $commit, because no run of the base kept one"
+            echo "id=$run" >> "$GITHUB_OUTPUT"
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
+            exit 0
+          done <<< "$candidates"
           echo "::error::No measured Tests run on base $BASE kept a live coverage-baseline artifact with successful measuring and publishing jobs."
           exit 1
 
@@ -3642,7 +3680,7 @@ jobs:
       - name: Check out the base grader
         id: grader
         env:
-          BASE: ${{ steps.restored.outputs.commit || steps.base.outputs.commit }}
+          BASE: ${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}
         run: |
           git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
           if [[ ! -f "$RUNNER_TEMP/base/tests/coverage_ratchet.py" ]]; then
@@ -3699,7 +3737,7 @@ jobs:
 
       - name: Hold every line the base ran
         env:
-          BASE: ${{ steps.restored.outputs.commit || steps.base.outputs.commit }}
+          BASE: ${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}
           HEAD_INPUT: ${{ steps.grader.outputs.input }}
         run: |
           base="$BASE"
@@ -4035,7 +4073,7 @@ jobs:
     needs: [unit]
     if: ${{ !cancelled() && github.event_name == 'push' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
-    timeout-minutes: 5
+    timeout-minutes: 8
     permissions:
       contents: read
     steps:
@@ -4093,6 +4131,32 @@ jobs:
         uses: actions/download-artifact@v8.0.2
         with: *flake-budget-download-this-runs-flake-reports
 
+      - name: Export the lab flake records
+        shell: bash
+        env:
+          CI_LAB_MINIO_ENDPOINT: ${{ secrets.CI_LAB_FLAKES_ENDPOINT }}
+          CI_LAB_MINIO_BUCKET: ${{ secrets.CI_LAB_FLAKES_BUCKET }}
+          CI_LAB_MINIO_ACCESS_KEY: ${{ secrets.CI_LAB_FLAKES_ACCESS_KEY }}
+          CI_LAB_MINIO_SECRET_KEY: ${{ secrets.CI_LAB_FLAKES_SECRET_KEY }}
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
+        run: |
+          warn() {
+            echo "::warning title=Lab flakes::$1; the flake budget counts the Actions reports only."
+            exit 0
+          }
+          [[ -n "$CI_LAB_MINIO_ENDPOINT" && -n "$CI_LAB_MINIO_BUCKET" && -n "$CI_LAB_MINIO_ACCESS_KEY" && -n "$CI_LAB_MINIO_SECRET_KEY" ]] || warn "The lab store settings are not set"
+          python -m venv "$RUNNER_TEMP/lab-flakes" || warn "Creating the lab export environment failed"
+          export PATH="$RUNNER_TEMP/lab-flakes/bin:$PATH"
+          timeout 120 env -u CI_LAB_MINIO_ENDPOINT -u CI_LAB_MINIO_BUCKET -u CI_LAB_MINIO_ACCESS_KEY -u CI_LAB_MINIO_SECRET_KEY python -m pip install --quiet --constraint .github/test-requirements.lock -e . || warn "Installing the lab export failed"
+          status=0
+          timeout 45 agentihooks ci lab flakes --out ~/flake-reports/lab 2> "$RUNNER_TEMP/lab-flakes.err" || status=$?
+          if [[ $status != 0 ]]; then
+            cat "$RUNNER_TEMP/lab-flakes.err" >&2
+            warn "The lab export exited $status: $(tail -n 1 "$RUNNER_TEMP/lab-flakes.err")"
+          fi
+          [[ -f ~/flake-reports/lab/lab-flakes.jsonl ]] || warn "The lab export wrote no lab-flakes.jsonl"
+          echo "Lab flake rows: $(wc -l < ~/flake-reports/lab/lab-flakes.jsonl)"
+
       - name: Count flaky tests over seven days
         shell: bash
         run: python -m tests.flake_budget --history ~/flake-history/history.jsonl --reports ~/flake-reports --out flake-budget.json | tee -a "$GITHUB_STEP_SUMMARY"
@@ -4128,7 +4192,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install coverage
-        run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4"
+        run: python -m pip install --constraint .github/test-requirements.lock coverage==7.17.0
 
       - name: Resolve baseline trees
         id: tree
@@ -4263,7 +4327,7 @@ jobs:
 
       - &mutation-planning-install
         name: Install dependencies
-        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest>=8.0,<9.2" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest==9.1.1" "pyyaml==6.0.3" "tomlkit==0.15.2"
 
       - name: Restore latest dev durations
         id: durations
@@ -4443,12 +4507,16 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Prepare stats evidence
+        if: failure() && steps.stats.outcome == 'failure'
+        run: python -m scripts.ci_mutation.evidence . .mutation-gate-stats .mutation-stats-evidence
+
       - name: Upload stats evidence
         if: failure() && steps.stats.outcome == 'failure'
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-evidence-stats-0
-          path: .mutation-gate-stats/
+          path: .mutation-stats-evidence/
           include-hidden-files: true
           retention-days: 7
 
@@ -4694,12 +4762,16 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Prepare stats evidence
+        if: failure()
+        run: python -m scripts.ci_mutation.evidence . .mutation-gate .mutation-stats-evidence
+
       - name: Upload stats evidence
         if: failure()
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-evidence-stats-${{ matrix.part }}
-          path: .mutation-gate/
+          path: .mutation-stats-evidence/
           include-hidden-files: true
           retention-days: 7
 
@@ -4778,10 +4850,21 @@ jobs:
       probe: ${{ steps.refine.outputs.probe }}
       probe_shards: ${{ steps.refine.outputs.probe_shards }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - name: Check out the head history without file contents
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        env: *low-speed
+        with: &refine-checkout
+          fetch-depth: 2147483647
+          filter: blob:none
           ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Check out the head history without file contents, attempt 2
+        if: steps.checkout.outcome == 'failure'
+        uses: actions/checkout@v4
+        env: *low-speed
+        with: *refine-checkout
 
       - uses: actions/setup-python@v5
         with:
@@ -4795,7 +4878,7 @@ jobs:
 
       - name: Take the helper scripts from the workflow revision
         run: |
-          git fetch --no-tags origin "$GITHUB_SHA"
+          git fetch --no-tags --negotiation-tip=HEAD origin "$GITHUB_SHA"
           mkdir -p "$RUNNER_TEMP/workflow"
           git archive "$GITHUB_SHA" .github/scripts .github/test-requirements.lock | tar -x -C "$RUNNER_TEMP/workflow"
 

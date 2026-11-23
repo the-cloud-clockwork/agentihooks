@@ -1,7 +1,7 @@
 import { $, h } from "./dom.js";
 
-const LANE_ROLES = [["eng", ["eng"], ["engineer", "frontend", "qa", "documentation"]], ["ci", ["ci"], ["cicd"]], ["plan", ["plan"], ["planner"]], ["seats", ["dispatch", "master"], ["dispatcher", "master"]]];
-const LANE_PROFILES = { eng: "engineer", ci: "cicd", plan: "planner", dispatch: "dispatcher", master: "master" };
+const LANE_ROLES = [["eng", ["eng"], ["engineer", "frontend", "qa", "documentation"]], ["ci", ["ci"], ["cicd"]], ["plan", ["plan"], ["planner"]], ["review", ["review"], ["reviewer"]], ["seats", ["dispatch", "master"], ["dispatcher", "master"]]];
+const LANE_PROFILES = { eng: "engineer", ci: "cicd", plan: "planner", review: "reviewer", dispatch: "dispatcher", master: "master" };
 
 export function liveAgents(sw) {
   return (sw.agents || []).filter((a) => a.state !== "finished");
@@ -9,7 +9,7 @@ export function liveAgents(sw) {
 
 function laneRoles(sw) {
   const live = liveAgents(sw), role = (a) => a.profile || LANE_PROFILES[a.lane];
-  return LANE_ROLES.map(([lane, lanes, known]) => {
+  return LANE_ROLES.filter(([lane]) => lane !== "review" || Object.hasOwn(sw.config || {}, "max_review") || live.some((a) => a.lane === "review")).map(([lane, lanes, known]) => {
     const agents = live.filter((a) => lanes.includes(a.lane)), names = [...new Set([...known, ...agents.map(role).filter(Boolean)])];
     return [lane, names.map((name) => [name, agents.filter((a) => role(a) === name).length])];
   });

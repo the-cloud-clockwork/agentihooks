@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__piped:22704edd4286abfefd2ab6a6ea2cc3ae0a0397d2faa19fa2e3a7bca17eafb0d8": {
+    "reader": "standards_reader",
+    "reason": "The replacement is the last step before the \"|\" membership test, and \"XXXX\" contains no \"|\"."
+  }
+}

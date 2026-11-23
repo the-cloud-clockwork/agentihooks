@@ -51,7 +51,9 @@ def test_status_uses_new_names_in_modes_and_decisions(env, monkeypatch, capsys, 
         lines = output.splitlines()
         assert lines[1] == (
             "gate modes  identity=deny  watch=log only  subagents=deny  reruns=deny  intent=log only  "
-            "build=log only  claim-stop=deny  push-stop=deny  quiet=deny  one-push=deny  brain=log only  claims=deny  "
+            "recon=log only  "
+            "build=log only  claim-stop=deny  expert-stop=deny  push-stop=deny  quiet=deny  one-push=deny  brain=log only  "
+            "claims=deny  "
             "trace-plan=log only  "
             "window=log only  stall=log only  nightwatch=deny  reset=log only  "
             "feature=log only  talk=log only"

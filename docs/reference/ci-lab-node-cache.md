@@ -15,9 +15,9 @@ its own cache; this is neither a shared volume nor a backup.
 This delivery prepares the caches and records the last successful fetch. The
 [worker Deployment](ci-lab.md#worker-deployment) mounts `git` and `uv` read only, and its pod
 store borrows the node mirror's objects, so a worker reports a git hit for a head the node mirror
-holds without fetching it. No code sets the scheduler's `ci_lab_mirror_age_seconds` yet. The
-[metric contract](ci-lab.md#metrics) names that series; the DaemonSet itself exposes no metrics
-endpoint.
+holds without fetching it. The scheduler sets `ci_lab_mirror_age_seconds` from the `fetched-at`
+stamp this DaemonSet writes when the scheduler's `CI_LAB_GIT_MIRROR` is this mirror, as the
+[metric contract](ci-lab.md#metrics) lists; the DaemonSet itself exposes no metrics endpoint.
 
 ## Placement and security
 
@@ -220,4 +220,4 @@ the deployment repository's CI; a green fake-tool run does not establish live ca
 | Pod is Ready while warming keeps failing | Ready tracks the container, not cache success. Compare the fetch stamp and warmed lock with the checks above |
 | Warmer reports current after an excludes-only change | It keys on the lock blob only; an unchanged requirements lock skips installation |
 | Errors after changing the UID or cache path | Existing nested files keep their old ownership, and another host path starts another cache; plan the deployment change accordingly |
-| Worker still misses git or no mirror age sample appears | This DaemonSet neither mounts worker volumes nor exports the scheduler series. Check the worker's read only mounts and git hit counter in [Worker Deployment](ci-lab.md#worker-deployment); no code sets the mirror age series yet |
+| Worker still misses git or no mirror age sample appears | This DaemonSet neither mounts worker volumes nor exports the scheduler series. Check the worker's read only mounts and git hit counter in [Worker Deployment](ci-lab.md#worker-deployment); the scheduler sets the mirror age series only from a whole number `fetched-at` stamp under its own `CI_LAB_GIT_MIRROR` |

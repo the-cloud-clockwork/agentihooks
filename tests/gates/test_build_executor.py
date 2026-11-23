@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.gates.recon import HEADINGS, refusal
 from scripts.swarm import trace_plan
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +54,7 @@ def hook(tmp_path):
         "AGENTIHOOKS_SWARM_LANE": "eng",
         "AGENTIHOOKS_SWARM_TASK": TASK,
         "AGENTIHOOKS_GATE_BUILD": "enforce",
+        "AGENTIHOOKS_GATE_RECON": "off",
     }
 
     def run(rel, extra=None):
@@ -112,3 +114,22 @@ def test_observe_mode_lets_the_edit_through_and_logs_it(hook):
     hook.traced()
     assert hook("power/generator/diesel.py", extra={"AGENTIHOOKS_GATE_BUILD": "observe"}).returncode == 0
     assert [r["kind"] for r in hook.rows()] == ["observe"]
+
+
+@pytest.mark.feature("recon-gate")
+def test_the_build_condition_judges_the_recon_plan_first_through_the_real_hook(hook, tmp_path):
+    hook.traced()
+    recon = {"AGENTIHOOKS_GATE_RECON": "enforce"}
+    denied = hook("doghouse/light/lamp.py", extra=recon)
+    assert denied.returncode == 2, denied.stdout + denied.stderr
+    folder = tmp_path / ".agentihooks" / "swarm" / SLUG / "tasks" / TASK
+    assert f"] {refusal(folder / 'recon.md', 'no recon plan yet')}" in denied.stderr
+    assert [(r["gate"], r["kind"], r["reason"]) for r in hook.rows()] == [
+        ("recon", "deny", refusal(folder / "recon.md", "no recon plan yet"))
+    ]
+    (folder / "recon.md").write_text("".join(f"{heading}\nx\n" for heading in HEADINGS))
+    assert hook("doghouse/light/lamp.py", extra=recon).returncode == 0
+    denied = hook("power/generator/diesel.py", extra=recon)
+    assert denied.returncode == 2, denied.stdout + denied.stderr
+    assert "build gate: outside your traced plan: power/generator/diesel.py." in denied.stderr
+    assert [(r["gate"], r["kind"]) for r in hook.rows()] == [("recon", "deny"), ("recon", "count"), ("build", "deny")]

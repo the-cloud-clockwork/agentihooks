@@ -1,8 +1,11 @@
 import json
 import subprocess
+import sys
+from importlib import metadata
 from pathlib import Path
 
 import pytest
+from mutmut import configuration
 from mutmut.mutation.pragma_handling import PragmaParseError
 
 from scripts.ci_lab import digests, expand_mutation, store
@@ -12,6 +15,7 @@ from scripts.ci_mutation.plan import MUTANT_SECONDS
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats_cache import collect_cached_stats
 from scripts.ci_mutation.stats_dependencies import digest  # pyright: ignore[reportUnknownVariableType]
+from tests.test_ci_mutation_stats import stats_recorder_only
 
 SAMPLE = """import functools
 
@@ -89,6 +93,8 @@ STATS_FILES = {
     "tests/test_a.py": TEST_A,
     "tests/test_b.py": "def test_alone():\n    assert True\n",
 }
+LOCKFILE = ".github/test-requirements.lock"
+EXCLUDES = ".github/test-excludes.txt"
 
 
 def repository(root: Path, files: dict[str, str]) -> Path:
@@ -166,6 +172,22 @@ def test_mutant_names_and_keys_are_stable_across_runs_and_checkouts(tmp_path: Pa
     assert first == again == other
     assert first
     assert len({unit.key for unit in first}) == len(first)
+
+
+@pytest.mark.feature("lab-mutants-read-no-mutmut-config")
+def test_mutant_units_read_no_mutmut_config_from_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, elsewhere = repository(tmp_path / "tree", MUTANT_FILES), tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(Path(__file__).resolve().parents[2])
+    expected = expand_mutation.mutant_units(root, EVERY_LINE, {}, {})
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr(configuration, "_config", None)
+    monkeypatch.setattr(configuration.Config, "get", stats_recorder_only)
+    assert expand_mutation.mutant_units(root, EVERY_LINE, {}, {}) == expected
+    assert expected
+    assert vars(configuration)["_config"] is None
 
 
 @pytest.mark.feature("lab-mutant-unit-split")
@@ -272,6 +294,18 @@ def test_only_the_mutmut_pin_and_runner_tree_enter_the_key(
     assert [after[function] != before[function] for function in before] == [changed] * len(before)
 
 
+@pytest.mark.feature("tracked-test-lock-cache-keys")
+def test_a_test_requirements_lock_change_rekeys_every_stats_unit(tmp_path: Path) -> None:
+    lock = ".github/test-requirements.lock"
+    root = repository(tmp_path, {**STATS_FILES, lock: "pytest==8.4.2\n"})
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    before = expand_mutation.stats_units(root, files)
+    edit(root, lock, "pytest==8.4.2", "pytest==8.4.3")
+    after = expand_mutation.stats_units(root, files)
+    assert [unit.members for unit in after] == [unit.members for unit in before]
+    assert {unit.key for unit in after}.isdisjoint(unit.key for unit in before)
+
+
 @pytest.mark.parametrize("line", ['dev = ["mutmut==3.6.0"]', "dev = ['mutmut == 3.6.0']"])
 def test_the_mutmut_pin_is_read_from_pyproject(tmp_path: Path, line: str) -> None:
     (tmp_path / "pyproject.toml").write_text(f"[project.optional-dependencies]\n{line}\n")
@@ -354,6 +388,45 @@ def test_stats_units_carry_the_stats_cache_identity(tmp_path: Path) -> None:
     assert [(unit.kind, unit.members) for unit in units] == [("stats", (path,)) for path in files]
     assert {unit.key for unit in units} == {f"stats-v{digests.SCHEMAS['stats']}-{key}" for key in stored}
     assert len(stored) == len(files)
+
+
+@pytest.mark.feature("lab-stats-unit-key-head-lockfile")
+def test_a_scheduler_on_another_interpreter_and_package_set_keys_the_stats_the_worker_stores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = repository(tmp_path / "repo", {**STATS_FILES, LOCKFILE: "pytest==8.3.4\n"})
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    cache = tmp_path / "cache"
+
+    def collect(chosen: list[str]) -> list[dict]:
+        return [{"status": 0, "tests": {}, "durations": {f"{path}::test": 1.0 for path in chosen}, "cpu": 1.0}]
+
+    collect_cached_stats(root, cache, {}, files, ["-q"], collect)
+    stored = {json.loads(record.read_text())["key"] for record in cache.glob("*.json")}
+    monkeypatch.setattr(sys, "version", "3.13.0 (scheduler image)")
+    monkeypatch.setattr(metadata, "distributions", lambda: iter(()))
+    units = expand_mutation.stats_units(root, files, ["-q"])
+    assert len(stored) == len(files)
+    assert {unit.key for unit in units} == {f"stats-v{digests.SCHEMAS['stats']}-{key}" for key in stored}
+
+
+@pytest.mark.feature("lab-stats-unit-key-head-lockfile")
+@pytest.mark.parametrize(
+    ("path", "edit"),
+    [(LOCKFILE, "pytest==8.3.5\n"), (EXCLUDES, "opentelemetry-exporter-otlp-proto-http\n")],
+    ids=["lockfile", "excludes"],
+)
+def test_a_change_to_the_head_lockfile_or_install_excludes_rekeys_every_stats_unit(
+    tmp_path: Path, path: str, edit: str
+) -> None:
+    head = {LOCKFILE: "pytest==8.3.4\n", EXCLUDES: "opentelemetry-exporter-otlp-proto-grpc\n"}
+    root = repository(tmp_path / "repo", {**STATS_FILES, **head})
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    before = {unit.members: unit.key for unit in expand_mutation.stats_units(root, files)}
+    (root / path).write_text(edit)
+    after = {unit.members: unit.key for unit in expand_mutation.stats_units(root, files)}
+    assert before.keys() == after.keys()
+    assert all(before[members] != after[members] for members in before)
 
 
 @pytest.mark.feature("lab-mutation-verdict-key-prefix")

@@ -1,0 +1,6 @@
+{
+  "scripts/tick/pool.py:scripts.tick.pool.x_running:a20ef95d73db7e7464fc3bb6ca402142e1ee6654e90e8dfd7fb63cc1be8f1cd7": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: name=None changes only the cleanup thread diagnostic label. No tick consumer reads this name; the target, arguments, daemon state, scheduling, records and executor cleanup remain identical."
+  }
+}
