@@ -7599,6 +7599,21 @@
       ]
     },
     {
+      "id": "hooks-brain-shared-tracer-provider",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-otel-one-tracer-provider",
+      "behaviour": "Hook and brain spans share one tracer provider in either call order, preserving exported brain scope, names, attributes and times; telemetry flush drains the shared provider, no span telemetry stays lazy, and missing SDK keeps direct HTTP fallback.",
+      "seam": "hooks.telemetry.emit_span, span_ctx and flush through hooks.observability.otel.get_tracer",
+      "tests": [
+        "tests/observability/test_shared_tracer_provider.py::test_hook_and_brain_spans_share_one_tracer_provider",
+        "tests/observability/test_shared_tracer_provider.py::test_emit_span_preserves_name_attributes_and_times",
+        "tests/observability/test_shared_tracer_provider.py::test_span_ctx_exports_attributes_and_updated_attributes",
+        "tests/observability/test_shared_tracer_provider.py::test_telemetry_without_spans_never_starts_the_sdk",
+        "tests/observability/test_shared_tracer_provider.py::test_telemetry_flush_drains_the_shared_otel_providers",
+        "tests/observability/test_shared_tracer_provider.py::test_sdk_unavailable_keeps_direct_http_span_fallback"
+      ]
+    },
+    {
       "id": "brain-task-recall",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/dk3",
