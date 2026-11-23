@@ -336,3 +336,30 @@ def test_local_uploads_name_the_file_the_worker_writes(tmp_path: Path) -> None:
     url = objects.Uploads(objects.LocalObjects(tmp_path)).upload_url("h1:test:k", "report")
 
     assert url == (tmp_path.resolve() / "lab" / "uploads" / "h1:test:k" / "report.json").as_uri()
+
+
+@pytest.mark.feature("lab-flakes-object-once")
+def test_flakes_path_names_the_unit_flakes_object_and_refuses_a_key_of_another_kind() -> None:
+    unit = key("test", "a")
+    path = objects.flakes_path("test", unit)
+
+    assert path == f"lab/flakes/test/{hexdigest(unit)}.jsonl"
+    assert not objects.is_report(path)
+    for bad in (key("mutant", "f"), "test-v1-abc", unit + "x", "test-v-" + hexdigest(unit)):
+        with pytest.raises(ValueError, match=f"^not a test unit key: {bad}$"):
+            objects.flakes_path("test", bad)
+
+
+@pytest.mark.feature("lab-flakes-object-once")
+def test_reindex_counts_only_reports_beside_a_flakes_object(verdicts: store.Store, client: fakeredis.FakeRedis) -> None:
+    flaky = store.Verdict(kind="test", key=key("test", "a"), passed=True, flaky=True, seconds=3.0)
+    flakes = f"lab/flakes/test/{hexdigest(flaky.key)}.jsonl"
+    verdicts.put(flaky, {"flaky": True}, b"ok\n")
+    verdicts.objects.write_once(flakes, b'{"test": "t", "outcome": "flaky"}\n')
+    client.flushall()
+
+    assert verdicts.reindex() == 1
+
+    assert client.keys("*") == [f"agentihooks-ci:verdict:test:{flaky.key}"]
+    assert verdicts.get("test", flaky.key) == flaky
+    assert verdicts.objects.read(flakes) == b'{"test": "t", "outcome": "flaky"}\n'
