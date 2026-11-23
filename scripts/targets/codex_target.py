@@ -43,6 +43,7 @@ from scripts.targets._common import (
     clear_managed_mcp,
     drop_if_credentialed,
     has_env_reference,
+    managed_mcp_names,
     migrate_legacy_mcp,
     reap_translated_commands,
     record_managed_mcp,
@@ -359,6 +360,7 @@ class CodexAdapter:
         loop runs first.
         """
         self._pending_rules: list[tuple[str, str, str]] = []
+        self._written_mcp: set[str] = set()
 
     def home(self) -> Path:
         return codex_home()
@@ -649,6 +651,7 @@ class CodexAdapter:
             added.append(name)
         self._dump_toml(config_path, doc)
         if added:
+            self._written_mcp.update(added)
             record_managed_mcp(self.name, added)
             _i._cprint(f"  [OK] Codex MCP servers: {', '.join(added)}")
 
@@ -761,7 +764,26 @@ class CodexAdapter:
         self._reap_prompts()
 
     def post_install_reconcile(self, profile_chain: list[str], persisted_profile: str) -> None:
-        return None
+        """
+        Prune only when this run wrote MCP servers and the full intended chain resolved — a transiently missing profile
+        would otherwise shrink the written set and delete that profile's servers.
+        """
+        say: Callable[[str], None] = getattr(_install_module(), "_cprint")
+        missing = [p.strip() for p in persisted_profile.split(",") if p.strip() and p.strip() not in profile_chain]
+        if missing or not self._written_mcp:
+            if missing:
+                say(f"  [--] Skipping codex MCP reconcile — profile(s) {', '.join(missing)} did not resolve")
+            return
+        stale = [n for n in managed_mcp_names(self.name) if n not in self._written_mcp]
+        config_path = self.home() / "config.toml"
+        doc: Any = self._load_toml(config_path)
+        table: Any = doc.get("mcp_servers")
+        removed = [n for n in stale if table is not None and table.pop(n, None) is not None]
+        if removed:
+            self._dump_toml(config_path, doc)
+            say(f"  [OK] Removed {len(removed)} codex MCP server(s) no longer shipped: {', '.join(removed)}")
+        clear_managed_mcp(self.name)
+        record_managed_mcp(self.name, sorted(self._written_mcp))
 
     def doctor(self) -> int:
         """Print codex-install health; return count of failed checks."""
