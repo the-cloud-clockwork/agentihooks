@@ -23,6 +23,7 @@ worker's PriorityClass is a cluster object outside that module;
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
 | `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain; serves `/metrics` on 9108 from its own registry until the drain ends, and exits at start when it cannot bind 9108 |
+| none | `python -m scripts.ci_lab.load_measure [--builds N]` | Reads only: runs `Scheduler.load` N times, 3 by default, against the Redis that `CI_LAB_REDIS_URL` names and prints each build's processor and wall seconds, the live grade count and the grade parses as JSON (see [Load snapshot](#load-snapshot)) |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
@@ -373,6 +374,31 @@ Until the lab records measured unit durations, every estimate is the fixed `UNIT
 | `running_slots`, `pending_slots` | `{}` | Slots running and pending units take, keyed by class; `scripts.ci_lab.budget.slots_wanted` reads them for `ci_lab_slots_wanted` |
 | `workers_ready` | `0` | Workers that offered slots within the ready window |
 | `overdue` | `0` | Leased units past their estimate |
+
+`python -m scripts.ci_lab.load_measure [--builds N]` measures what one load build costs. It runs
+`Scheduler.load` N times, 3 by default, on a scheduler over the Redis that `CI_LAB_REDIS_URL` names and prints
+one JSON object:
+
+| Field | Meaning |
+|---|---|
+| `builds` | Load builds run |
+| `grades` | Live grades, the size of the live grade set; a live run whose grade document is gone counts here and is never parsed |
+| `process_seconds`, `wall_seconds` | Each build's `time.process_time` and `time.perf_counter` seconds, one entry per build |
+| `parses` | Calls of the scheduler's grade parser during the builds; one scheduler serves every build, so the first build parses each live grade with a stored document once and later builds parse only grades whose stored document changed |
+| `leaves_out` | What the figures leave out: the offer prune round trip of each build |
+
+The command reads only. A load prunes stale worker offers through the queue's prune script, its one write, so the
+measured scheduler's queue keeps every offer; the offers read keeps only offers made inside the ready window, so
+each build returns the load the scheduler builds, and the figures leave out that one prune round trip per build.
+Every build reads the whole pending and leased queues and every live grade document. The first build runs on a
+cold demand cache and parses each live grade with a stored document; builds after the first run on the warm demand
+cache, so the first `process_seconds` and `wall_seconds` entries are the cold cost and later entries the warm cost.
+To measure the live scheduler, run it in the scheduler pod, which carries `CI_LAB_REDIS_URL`, with few builds,
+since it shares the pod's memory limit:
+
+```bash
+kubectl -n ci-lab exec deploy/ci-lab-scheduler -- python -m scripts.ci_lab.load_measure --builds 3
+```
 
 ### Document fields
 
