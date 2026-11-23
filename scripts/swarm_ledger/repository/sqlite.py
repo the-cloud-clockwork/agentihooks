@@ -210,6 +210,11 @@ def read_ids(directory, slug: str, collection: str) -> tuple:
     return tuple(part[1] for part in found if part[0] == "id")
 
 
+def read_flags(directory: object, slug: str, collections: tuple[str, ...], names: tuple[str, ...]) -> dict[str, list]:
+    """Each item of the named collections with only its `names` fields, read from those rows alone."""
+    return {}
+
+
 def read_slugs(directory) -> list:
     with read_only(directory) as connection:
         if connection is None:

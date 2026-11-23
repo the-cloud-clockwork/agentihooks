@@ -4,6 +4,7 @@ Pure functions over a ledger's `_meta` and document; the CLI, the server and the
 """
 
 import re
+from typing import Any
 
 from scripts.swarm_ledger import ports
 
@@ -77,6 +78,11 @@ def operator_events(meta):
         for index, event in enumerate(meta.get("events", []))
         if event.get("by") == "operator" and event.get("kind") not in IGNORED_KINDS
     ]
+
+
+def task_targets(meta: dict[str, Any], name: str) -> tuple[str, ...]:
+    """The `tasks/<id>` targets of the operator events `name` has not handled, the only tasks owner() reads for it."""
+    return ()
 
 
 def pending_for(meta, name, events, tasks, owners):

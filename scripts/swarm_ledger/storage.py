@@ -37,6 +37,10 @@ def read_ids(directory, slug: str, collection: str) -> tuple:
     return sqlite.read_ids(store(directory), slug, collection)
 
 
+def read_flags(directory: object, slug: str, collections: tuple[str, ...], names: tuple[str, ...]) -> dict[str, list]:
+    return sqlite.read_flags(store(directory), slug, collections, names)
+
+
 def read_ledger(directory, slug: str, *keys: str) -> dict | None:
     return sqlite.read_ledger(store(directory), slug, *keys)
 
