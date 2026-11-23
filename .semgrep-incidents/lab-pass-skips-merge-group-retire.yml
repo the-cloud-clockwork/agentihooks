@@ -1,0 +1,20 @@
+rules:
+  - id: lab-pass-skips-merge-group-retire
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A lab scheduler pass that does not start with self._retire_groups() keeps every grade of a vanished merge group
+      live. Put *self._retire_groups() first in the actions the pass builds.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-pass-skips-merge-group-retire.py
+    patterns:
+      - pattern: |
+          def tick(self, now_ms: int) -> list[str]:
+              ...
+      - pattern-not: |
+          def tick(self, now_ms: int) -> list[str]:
+              ...
+              $ACTIONS = [*self._retire_groups(), ...]
+              ...

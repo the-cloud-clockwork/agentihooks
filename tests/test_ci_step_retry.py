@@ -471,7 +471,7 @@ def test_an_attempt_that_ends_in_time_releases_its_watchdog_quietly(tmp_path):
 def _alive(pid):
     try:
         state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return False
     return state not in ("Z", "X")
 

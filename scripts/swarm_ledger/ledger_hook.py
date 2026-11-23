@@ -23,7 +23,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parents[1]))
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SESSIONS = LEDGER_DIR / ".sessions"
-GATE_READS = ("_meta.members", "_meta.events", "tasks", "phases", "followups", "policy")
+GATE_READS = ("_meta.members", "_meta.events", "policy")
 SHOWN = 5
 CLI = "agentihooks api"
 VARIABLE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
@@ -342,7 +342,7 @@ def serve_ledgers():
         )
 
 
-def dispatch(payload):
+def dispatch(payload: dict[str, Any]) -> None:
     global LEDGER_DIR, SESSIONS
     LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
     SESSIONS = LEDGER_DIR / ".sessions"
@@ -363,16 +363,35 @@ def dispatch(payload):
     handler = HANDLERS.get(payload.get("hook_event_name"))
     if session is None or handler is None:
         return
-    import ledger_gate
+    state = gate_state(session["slug"], session["name"])
+    if state is not None:
+        handler(payload, session, state, sfile)
 
-    from scripts.swarm_ledger.storage import read_ledger
 
-    state = read_ledger(LEDGER_DIR, session["slug"], *GATE_READS)
-    if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or ledger_gate.closed(state):
-        return
-    if session["name"] not in state["_meta"].get("members", {}):
-        return
-    handler(payload, session, state, sfile)
+def gate_state(slug: str, name: str) -> dict[str, Any] | None:
+    """The ledger parts the gates read for member `name`; None when the ledger is unreadable, not its crew's or closed.
+
+    Members, events and policy, the done and out of scope flags of phases and follow ups, and only the tasks the
+    member's unhandled operator events target: never a whole tasks, phases or followups collection.
+    """
+    from scripts.swarm_ledger import ledger_gate
+    from scripts.swarm_ledger.storage import read_flags, read_ledger
+
+    state: dict[str, Any] | None = read_ledger(LEDGER_DIR, slug, *GATE_READS)
+    if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict):
+        return None
+    if name not in state["_meta"].get("members", {}):
+        return None
+    flags = read_flags(LEDGER_DIR, slug, ledger_gate.CLOSING, ledger_gate.CLOSED_FLAGS)
+    if not flags or ledger_gate.closed(flags):
+        return None
+    targets = ledger_gate.task_targets(state["_meta"], name)
+    if targets:
+        found: dict[str, Any] | None = read_ledger(LEDGER_DIR, slug, *targets)
+        if found is None:
+            return None
+        state["tasks"] = found.get("tasks", [])
+    return state
 
 
 def main():

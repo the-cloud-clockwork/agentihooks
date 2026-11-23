@@ -311,6 +311,42 @@ def test_recorded_reads_the_named_agents_current_transport(monkeypatch):
         assert str(refused.value) == f"{name} runs no app-server a native terminal can attach to"
 
 
+@pytest.mark.feature("codex-viewer-waits-for-an-admitted-launch")
+def test_an_admitted_execution_waits_for_its_harness_and_then_attaches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord
+
+    admitted = AgentRecord("ci-1", "ci", "t1", state="starting", execution_id="exe-1")
+    classified = replace(admitted, harness="codex", transport=APP_SERVER_TRANSPORT)
+    snapshots = [[admitted], [admitted], [classified]]
+    store = SimpleNamespace(agents=lambda slug: snapshots.pop(0) if len(snapshots) > 1 else snapshots[0])
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    monkeypatch.setattr(
+        "scripts.swarm.live_binding.transport",
+        lambda found, agent: RECORD if agent == classified else None,
+    )
+    clock = Clock()
+    assert attach.wait_attachable(attach.recorded("sw", "ci-1"), 10, clock, clock.sleep) == RECORD
+    assert clock.slept == [0.5, 0.5]
+
+
+@pytest.mark.feature("codex-viewer-waits-for-an-admitted-launch")
+@pytest.mark.parametrize(("state", "harness"), [("working", ""), ("starting", "codex")])
+def test_a_classified_or_running_execution_without_an_app_server_still_refuses(
+    monkeypatch: pytest.MonkeyPatch, state: str, harness: str
+) -> None:
+    from types import SimpleNamespace
+
+    from scripts.swarm.store import AgentRecord
+
+    agent = AgentRecord("ci-1", "ci", "t1", state=state, harness=harness, execution_id="exe-1")
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: SimpleNamespace(agents=lambda slug: [agent]))
+    with pytest.raises(attach.AttachError) as refused:
+        attach.recorded("sw", "ci-1")()
+    assert str(refused.value) == "ci-1 runs no app-server a native terminal can attach to"
+
+
 def test_the_app_server_pane_runs_the_server_in_its_own_session_and_the_viewer_in_front(tmp_path):
     spec = init_agent.AgentSpec(agent="codex", profile="engineer", transport=init_agent.APP_SERVER, seat="master@sw")
     launcher, opening = init_agent._write_launcher(

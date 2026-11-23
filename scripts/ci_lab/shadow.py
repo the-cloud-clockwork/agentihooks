@@ -118,7 +118,7 @@ def grader_revision(summary: str | None) -> str:
 def static_jobs(root: Path) -> frozenset[str]:
     """Return the gate id of every static job of the workflow tree at root whose steps gate."""
     found = static_gates.discover((root / static_gates.WORKFLOW).read_text(), reusable=ci_wiring.load(root))
-    return frozenset(item.job for item in found)
+    return frozenset(item.job.partition("/")[0] for item in found)
 
 
 def _fold(stored: Mapping[str, str], side: str) -> str | None:

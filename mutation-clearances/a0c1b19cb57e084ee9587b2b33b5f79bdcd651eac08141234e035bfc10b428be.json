@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__operator:d09cc5cbb0e765f1bafecba9bdd5695119691c7af6d4274f69f16a124c74ddb4": {
+    "reader": "standards_reader",
+    "reason": "Operator tails hold only \"&\", \"<\", \">\", so lstrip(\"XX&XX\") equals lstrip(\"&\")."
+  }
+}

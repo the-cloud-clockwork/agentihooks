@@ -11,7 +11,6 @@ import hashlib
 import math
 import re
 import subprocess
-import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -34,7 +33,7 @@ from scripts.ci_mutation.stats_cache import (
     TRACKED,
     UNKEYED,
     StatsInputs,
-    distribution_versions,
+    runtime_digest,
 )
 from scripts.ci_mutation.stats_dependencies import StoredStats, digest  # pyright: ignore[reportUnknownVariableType]
 
@@ -75,7 +74,7 @@ def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -
     paths = tracked(root)
     present = [path for path in paths if (root / path).is_file()]
     sources = {path: file_digest(root / path) for path in present if path in CONFIGURATION or path.startswith(RUNNER)}
-    runtime = [sys.version, sys.platform, distribution_versions(root)]
+    runtime = runtime_digest(root)
     stored = StoredStats(root, root, dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, runtime))), {})
     modules = {module_name(Path(path)): path for path in paths if Path(path).suffix == ".py"}
     inputs = StatsInputs(root, modules, resources_of([path for path in present if path not in UNKEYED]), {})
@@ -130,9 +129,10 @@ def function_units(
     timeout: float,
 ) -> list[Unit]:
     """Return the mutant units of each function mutmut trampolines in path whose lines meet changed: one, or the parts
-    of split_members keyed by the function key with their own members when its mutants price over timeout."""
+    of split_members keyed by the function key with their own members when its mutants price over timeout. It applies
+    no ignore pattern and reads no mutmut config, as the worker's trampolining does."""
     source = (root / path).read_text()
-    wrapper, graded, _ = created_mutations(path, source)
+    wrapper, graded, _ = created_mutations(path, source, patterns=())
     starts = wrapper.resolve(WhitespaceInclusivePositionProvider)
     ends = wrapper.resolve(PositionProvider)
     parents = wrapper.resolve(ParentNodeProvider)

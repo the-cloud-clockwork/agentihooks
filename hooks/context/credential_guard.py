@@ -100,6 +100,10 @@ PROC_DIR = re.compile(r"/proc\b")
 SHELL_WORD_BREAK = re.compile(r"[\s;|&()<>]+")
 CD_OPERAND = re.compile(r"\b(?:cd|pushd)(?:\s+-\S*)*\s+(\S+)")
 BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
+PID_NAMES = frozenset({"self", "thread-self"})
+DEPTH_SHIFTING_SEGMENTS = frozenset({".", "..", "**"})
+LINK_SEGMENTS = ("cwd", "root", "fd")
+EXPANDING_SEGMENT = re.compile(r"[$`{]")
 
 
 READER_VERBS = {
@@ -215,8 +219,14 @@ LAUNCHERS = {
 }
 SEGMENT_DELIM = re.compile(r"&&|\|\||;|\n")
 STAGE_DELIM = re.compile(r"(?<!\|)\|(?!\|)")
-SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`|<\(([^()]*)\)")
-BODY_SUBSTITUTION = re.compile(r"\\.|(\$\([^()]*\)|`[^`]*`)", re.S)
+SUBSTITUTION_OPEN = re.compile(r"\$\(|<\(|`")
+BODY_SUBSTITUTION_OPEN = re.compile(r"\\.|\$\(|`", re.S)
+BACKTICK = re.compile("`")
+FIRST_CLOSE = re.compile(r"[^()]*\)")
+PAREN_OPENERS = ("$(", "<(")
+NESTED_OPENS = ("(", "'", '"', "`")
+CLOSERS = {"(": ")", "'": "'", '"': '"', "`": "`"}
+MAX_SUBSTITUTION_DEPTH = 8
 VERB_PREFIX = re.compile(
     r"^(\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:sudo\s+(?:-\S+\s+)*|command\s+)?(?:\S*/)?(grep|egrep|fgrep|rg))(?=\s)"
 )
@@ -246,6 +256,61 @@ def split_outside_quotes(delim, text):
         i += 1
     parts.append(text[start:])
     return parts
+
+
+def scan_step(stack: list[str], text: str, i: int) -> int:
+    """Apply text[i] to the stack of open parentheses and quotes; the number of characters it consumes."""
+    ch, top = text[i], stack[-1]
+    if ch == "\\" and top != "'":
+        return 2
+    if ch == CLOSERS[top]:
+        stack.pop()
+    elif top == "(" and ch in NESTED_OPENS:
+        stack.append(ch)
+    elif top == '"' and text.startswith("$(", i):
+        stack.append("(")
+        return 2
+    return 1
+
+
+def paren_close(text: str, start: int) -> int | None:
+    """Index of the parenthesis balancing the one opened just before start, quoted and escaped text skipped, or None."""
+    stack = ["("]
+    positions = iter(range(start, len(text)))
+    for i in positions:
+        for _ in range(scan_step(stack, text, i) - 1):
+            next(positions, None)
+        if not stack:
+            return i
+    return None
+
+
+def substitution_close(text: str, opened: re.Match[str]) -> int | None:
+    """Index closing the substitution an opener starts: its balanced parenthesis, else its first one, or next backtick."""
+    if opened.group() == "`":
+        close = BACKTICK.search(text, opened.end())
+        return close.start() if close else None
+    if opened.group() not in PAREN_OPENERS:
+        return None
+    balanced = paren_close(text, opened.end())
+    if balanced is not None:
+        return balanced
+    first = FIRST_CLOSE.match(text, opened.end())
+    return first.end() - 1 if first else None
+
+
+def substitutions(text: str, opener: re.Pattern[str] = SUBSTITUTION_OPEN) -> list[str]:
+    """The body of each outermost command or process substitution in the text, read to its close."""
+    bodies: list[str] = []
+    end = 0
+    for opened in opener.finditer(text):
+        if opened.start() < end:
+            continue
+        close = substitution_close(text, opened)
+        if close is not None:
+            bodies.append(text[opened.end() : close])
+            end = close + 1
+    return bodies
 
 
 def strip_heredocs(cmd: str) -> str:
@@ -546,15 +611,38 @@ def proc_environ_verdict(command, cwd):
     return None
 
 
-def path_reads_environ(word):
-    *dirs, leaf = word.split("/")
-    if any(fnmatch.fnmatchcase("proc", d) for d in dirs[:-1]):
-        return leaf_names_environ(leaf)
-    return any("$" in d for d in dirs) and fnmatch.fnmatchcase("environ", leaf)
+def path_reads_environ(word: str) -> bool:
+    segments = word.split("/")
+    *dirs, leaf = segments
+    if any("$" in d for d in dirs) and fnmatch.fnmatchcase("environ", leaf):
+        return True
+    parts = [p for p in segments if p]
+    return any(fnmatch.fnmatchcase("proc", p) and proc_tail_reads_environ(parts[i + 1 :]) for i, p in enumerate(parts))
 
 
-def leaf_names_environ(leaf):
-    return "$" in leaf or "`" in leaf or fnmatch.fnmatchcase("environ", leaf)
+def proc_tail_reads_environ(tail: list[str]) -> bool:
+    if not tail or not leaf_names_environ(tail[-1]):
+        return False
+    middle = tail[:-1]
+    if middle and any(s in DEPTH_SHIFTING_SEGMENTS or EXPANDING_SEGMENT.search(s) for s in tail):
+        return True
+    if middle and names_pid(middle[0]) and any(names_link(s) for s in middle[1:]):
+        return True
+    if len(middle) == 3:
+        return names_pid(middle[0]) and fnmatch.fnmatchcase("task", middle[1]) and names_pid(middle[2])
+    return len(middle) == 1 and names_pid(middle[0])
+
+
+def names_link(segment: str) -> bool:
+    return any(fnmatch.fnmatchcase(link, segment) for link in LINK_SEGMENTS)
+
+
+def names_pid(segment: str) -> bool:
+    return segment.isdigit() or segment in PID_NAMES or bool(GLOB_CHARS.search(segment))
+
+
+def leaf_names_environ(leaf: str) -> bool:
+    return "$" in leaf or "`" in leaf or "}" in leaf or fnmatch.fnmatchcase("environ", leaf)
 
 
 def echo_secret_verdict(command: str) -> str | None:
@@ -852,8 +940,8 @@ def prints_gh_token(toks):
     return False
 
 
-def gh_token_verdict(command):
-    inner = [next(g for g in m.groups() if g is not None) for m in SUBSTITUTION.finditer(command)]
+def gh_token_verdict(command: str) -> str | None:
+    inner = substitutions(command)
     if any(prints_gh_token(tokens_of(text)) for text in split_stages(command) + inner):
         return (
             block("printing the GitHub token (gh auth status or gh auth token)", KIND_ENVIRONMENT)
@@ -1074,8 +1162,8 @@ def rewrite_stage(stage_text, verb):
 
 
 def stage_verdict(stage_text: str, ctx: Context) -> Verdict:
-    for m in SUBSTITUTION.finditer(stage_text):
-        inner = next(g for g in m.groups() if g is not None).strip()
+    for body in substitutions(stage_text):
+        inner = body.strip()
         if inner.startswith("<"):
             tok, kind = first_sensitive([inner[1:].strip()])
             if kind:
@@ -1181,8 +1269,8 @@ def script_verdict(stage_text: str, ctx: Context) -> Verdict:
 
 def runs_input_script(stage_text: str) -> bool:
     """Whether the stage, its wrapped or launched command or a substitution in it runs a shell, source or eval."""
-    for m in SUBSTITUTION.finditer(stage_text):
-        if runs_input_script(next(g for g in m.groups() if g is not None)):
+    for inner in substitutions(stage_text):
+        if runs_input_script(inner):
             return True
     toks = tokens_of(stage_text)
     if verb_of(toks) in WRAPPERS:
@@ -1212,12 +1300,7 @@ def heredoc_body_verdict(heredoc: re.Match[str], runs_script: bool, ctx: Context
         return decide_bash({"command": heredoc.group(4)}, Context(ctx.cwd, ctx.recursive))
     if heredoc.group(1):
         return ALLOW
-    for m in BODY_SUBSTITUTION.finditer(heredoc.group(4)):
-        if m.group(1):
-            v = stage_verdict(m.group(1), Context(ctx.cwd, ctx.recursive))
-            if v.block:
-                return v
-    return ALLOW
+    return substitutions_verdict(heredoc.group(4), ctx, BODY_SUBSTITUTION_OPEN)
 
 
 def segment_verdict(segment: str, ctx: Context) -> Verdict:
@@ -1236,6 +1319,33 @@ def segment_verdict(segment: str, ctx: Context) -> Verdict:
     return Verdict(rewrite="".join(parts)) if changed else ALLOW
 
 
+def substitutions_verdict(
+    text: str, ctx: Context, opener: re.Pattern[str] = SUBSTITUTION_OPEN, depth: int = 0
+) -> Verdict:
+    """The first refusal among the substitution bodies in the text, each judged as a command; too deep a nest is refused."""
+    bodies = substitutions(text, opener)
+    if bodies and depth >= MAX_SUBSTITUTION_DEPTH:
+        return Verdict(block=block(f"command substitutions nested over {MAX_SUBSTITUTION_DEPTH} deep", KIND_DOTENV))
+    for body in bodies:
+        v = body_verdict(body, ctx, depth + 1)
+        if v.block:
+            return v
+    return ALLOW
+
+
+def body_verdict(body: str, ctx: Context, depth: int) -> Verdict:
+    """A substitution body at a nesting depth judged as a command: its own substitutions first, then each segment."""
+    inner = Context(ctx.cwd, ctx.recursive)
+    v = substitutions_verdict(body, inner, depth=depth)
+    if v.block:
+        return v
+    for segment in split_outside_quotes(SEGMENT_DELIM, body)[::2]:
+        v = segment_verdict(segment, inner)
+        if v.block:
+            return v
+    return ALLOW
+
+
 def decide_bash(tool_input: Mapping[str, object], ctx: Context | None = None) -> Verdict:
     command = tool_input.get("command") or ""
     if not command:
@@ -1245,6 +1355,9 @@ def decide_bash(tool_input: Mapping[str, object], ctx: Context | None = None) ->
     if reason:
         return Verdict(block=reason)
     command, heredocs = mask_heredocs(command)
+    v = substitutions_verdict(command, ctx)
+    if v.block:
+        return v
     parts = split_outside_quotes(SEGMENT_DELIM, command)
     changed = False
     for i in range(0, len(parts), 2):
