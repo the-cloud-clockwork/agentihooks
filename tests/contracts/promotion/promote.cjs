@@ -6,6 +6,7 @@ function fixture(options = {}) {
   const writes = [];
   const refs = [];
   const outputs = {};
+  const infos = [];
   const context = {
     repo: { owner: 'owner', repo: 'repo' }, eventName: 'push', ref: 'refs/heads/dev',
     sha: 'graded', payload: { repository: { full_name: 'owner/repo' } },
@@ -84,11 +85,11 @@ function fixture(options = {}) {
     throw new Error('Unexpected paginated endpoint');
   };
   const summary = { addHeading() { return this; }, addTable() { return this; }, async write() {} };
-  const core = { setOutput: (key, value) => { outputs[key] = value; }, summary, info() {} };
+  const core = { setOutput: (key, value) => { outputs[key] = value; }, summary, info: message => { infos.push(message); } };
   github.graphql = async () => ({ repository: { object: { statusCheckRollup: { contexts: {
     nodes: [], pageInfo: { hasNextPage: false, endCursor: null },
   } } } } });
-  return { github, context, core, writes, refs, outputs, jobs, checks, statuses, pages, grades,
+  return { github, context, core, writes, refs, outputs, jobs, checks, statuses, pages, grades, infos,
     now: () => elapsed, sleep: async ms => { elapsed += ms; } };
 }
 
@@ -101,6 +102,93 @@ test('reports the snapshot grade with the promotion app before merging', async (
   await promote(f);
   assert.ok(f.grades.every(grade => grade.sha === 'snapshot' && grade.context === 'Gate — Required' &&
     grade.target_url === 'https://github.com/owner/repo/actions/runs/42'));
+});
+
+for (const status of ['queued', 'waiting', 'pending', 'in_progress']) {
+  test(`a noncompleted triggering promote job merges on its first poll: ${status}`, async () => {
+    const f = fixture();
+    f.jobs[0].status = status;
+    await promote(f);
+    assert.equal(f.now(), 0);
+    assert.equal(f.outputs.main, 'rebased');
+    assert.equal(f.grades.at(-1).state, 'success');
+    assert.equal(f.writes.find(([kind]) => kind === 'merge')[1].sha, 'snapshot');
+  });
+}
+
+test('logs every changed grade poll once with all unsettled job statuses', async () => {
+  const f = fixture();
+  const current = f.jobs[0];
+  const gate = f.jobs[1];
+  gate.status = 'queued';
+  const lint = { id: 75, run_id: 42, name: 'lint', status: 'queued', conclusion: null };
+  f.jobs.push(lint);
+  const sleep = f.sleep;
+  f.sleep = async ms => {
+    await sleep(ms);
+    f.jobs.reverse();
+    if (f.now() === 10000) {
+      lint.status = 'in_progress';
+      current.status = 'queued';
+    }
+    if (f.now() === 20000) {
+      gate.status = lint.status = 'completed';
+      lint.conclusion = 'success';
+    }
+  };
+  await promote(f);
+  assert.equal(f.now(), 20000);
+  assert.deepEqual(f.infos.filter(message => message.startsWith('Promotion grade poll:')), [
+    'Promotion grade poll: current promote jobs=1; unsettled jobs=Gate — Required queued, lint queued, promote / promote in_progress',
+    'Promotion grade poll: current promote jobs=1; unsettled jobs=Gate — Required queued, lint in_progress, promote / promote queued',
+    'Promotion grade poll: current promote jobs=1; unsettled jobs=promote / promote queued',
+  ]);
+});
+
+for (const count of [0, 2]) {
+  test(`logs a changing current promotion job count from ${count} to one`, async () => {
+    const f = fixture();
+    const current = f.jobs.shift();
+    if (count === 2) f.jobs.push(current, { ...current, id: 73 });
+    const sleep = f.sleep;
+    f.sleep = async ms => {
+      await sleep(ms);
+      if (f.now() === 10000) {
+        f.jobs.splice(0, f.jobs.length, f.jobs.find(job => job.name === 'Gate — Required'), { ...current, status: 'queued' });
+      }
+    };
+    await promote(f);
+    assert.equal(f.now(), 10000);
+    assert.deepEqual(f.infos.filter(message => message.startsWith('Promotion grade poll:')), [
+      `Promotion grade poll: current promote jobs=${count}; unsettled jobs=${count ? 'promote / promote in_progress, promote / promote in_progress' : 'none'}`,
+      'Promotion grade poll: current promote jobs=1; unsettled jobs=promote / promote queued',
+    ]);
+  });
+}
+
+test('logs every unsettled job beyond one hundred without another jobs request', async () => {
+  const f = fixture();
+  f.jobs[1].status = 'queued';
+  f.jobs.push(...Array.from({ length: 110 }, (_, id) => ({
+    id: 100 + id, run_id: 42, name: `extra-${id}`, status: 'queued', conclusion: null,
+  })));
+  const sleep = f.sleep;
+  f.sleep = async ms => {
+    await sleep(ms);
+    for (const job of f.jobs.filter(job => job.name !== 'promote / promote')) {
+      job.status = 'completed';
+      job.conclusion = 'success';
+    }
+  };
+  await promote(f);
+  const polls = f.infos.filter(message => message.startsWith('Promotion grade poll:'));
+  assert.equal(polls.length, 2);
+  assert.match(polls[0], /current promote jobs=1;/);
+  assert.ok(polls[0].includes('Gate — Required queued'));
+  assert.ok(polls[0].includes('promote / promote in_progress'));
+  for (let id = 0; id < 110; id++) assert.ok(polls[0].includes(`extra-${id} queued`));
+  assert.equal(polls[1], 'Promotion grade poll: current promote jobs=1; unsettled jobs=promote / promote in_progress');
+  assert.equal(f.pages.filter(args => args.run_id === 42).length, 3);
 });
 
 test('keeps the snapshot grade pending until the original grade completes', async () => {
