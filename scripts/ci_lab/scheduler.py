@@ -894,7 +894,7 @@ class Scheduler:
     def _forget(self, run: str) -> None:
         """Delete a run's grade document and origin, then take it out of the live set with its revision and demand
         record; a pass that ends in between leaves a live run with no document, which the next pass retires again
-        while its origin is still recorded and forgets once it is not."""
+        while its origin is still recorded and its merge group is still gone, and forgets once its origin is gone."""
         self.client.delete(GRADES + run)
         self.client.hdel(ORIGINS, run)
         self._drop(run)
