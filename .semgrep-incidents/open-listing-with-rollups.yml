@@ -1,6 +1,6 @@
 rules:
   - id: open-listing-with-rollups
-    languages: [python]
+    languages: [generic]
     severity: ERROR
     message: >-
       A paged open pull request listing that reads every check rollup context resolves each rollup on GitHub before
@@ -10,6 +10,6 @@ rules:
       read the rollups by number in aliased batches on several threads, as GitHubSourceControl.open_changes does.
     paths:
       include:
-        - /scripts/
-        - open-listing-with-rollups.py
+        - /scripts/**/*.py
+        - open-listing-with-rollups.txt
     pattern-regex: (?s)"""(?:(?!""").)*?pullRequests\(states:(?:(?!""").)*?statusCheckRollup\s*\{\s*contexts
