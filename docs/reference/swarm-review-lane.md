@@ -179,8 +179,8 @@ takes precedence.
 A hive runs a review spoke unless `HIVE_EXCLUDED` names `review`. The value is
 a comma separated list with no spaces. On a worker hive Pod the chart sets it
 from `workers.excluded`, default `[master]`, and the Pod's start step writes
-the same list to the hive record's `excluded` setting. This values change
-leaves the Pods with `eng`, `ci` and `plan` spokes and no review spoke:
+the same list to the hive record's `excluded` setting. This change leaves the
+Pods with `eng`, `ci` and `plan` spokes and no review spoke:
 
 ```yaml
 workers:
