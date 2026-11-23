@@ -134,6 +134,41 @@ def test_a_forget_that_ended_before_the_live_set_exit_is_finished_by_the_next_pa
 
 
 @pytest.mark.feature("lab-retire-gone-merge-groups")
+def test_a_forget_that_ended_before_the_origin_delete_is_retired_again_by_the_next_pass(
+    lab: Callable[..., Run],
+) -> None:
+    run = _queued(lab, unit(1))
+    live = run.grade(HEAD_A).run
+    run.lab.expander.gone.add(HEAD_A)
+    run.engine.queue.drop(HEAD_A)
+    run.lab.client.delete(scheduler.GRADES + live)
+    assert run.tick(1100) == [_retired(live, 0)]
+    assert run.lab.client.smembers(scheduler.LIVE) == set()
+    assert run.lab.client.hkeys(scheduler.REVISIONS) == []
+    assert run.lab.client.hkeys(scheduler.RECORDS) == []
+    assert _origins(run) == {}
+
+
+@pytest.mark.feature("lab-retire-gone-merge-groups")
+def test_a_merge_group_grade_is_judged_by_the_merge_group_refs_of_its_own_repository(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab(
+        {
+            HEAD_A: scheduler.frame(Priority.QUEUE, TREE, BASE, {"unit": (unit(1),)}),
+            HEAD_B: scheduler.frame(Priority.QUEUE, OTHER_TREE, BASE, {"unit": (unit(2),)}),
+        }
+    )
+    run.push(HEAD_A, lane=HEAD_A, event="merge_group", action="checks_requested")
+    _elsewhere(run, HEAD_B, lane=HEAD_B)
+    run.tick(1000)
+    live = {grade.run for grade in run.grades()}
+    run.lab.expander.gone.update({(REPO, HEAD_B), (OTHER_REPO, HEAD_A)})
+    assert run.tick(1100) == []
+    assert run.lab.client.smembers(scheduler.LIVE) == live
+
+
+@pytest.mark.feature("lab-retire-gone-merge-groups")
 def test_a_merge_group_grade_whose_ref_is_listed_keeps_its_units_and_its_verdict(lab: Callable[..., Run]) -> None:
     lost, kept = unit(1), unit(2)
     run = lab(

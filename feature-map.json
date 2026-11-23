@@ -602,6 +602,8 @@
         "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_posts_nothing_and_records_no_verdict",
         "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_no_revision_and_no_demand_record",
         "tests/ci_lab/test_scheduler_retire.py::test_a_forget_that_ended_before_the_live_set_exit_is_finished_by_the_next_pass",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_forget_that_ended_before_the_origin_delete_is_retired_again_by_the_next_pass",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_is_judged_by_the_merge_group_refs_of_its_own_repository",
         "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_whose_ref_is_listed_keeps_its_units_and_its_verdict",
         "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_listing_git_cannot_produce_retires_nothing",
         "tests/ci_lab/test_scheduler_retire.py::test_a_listing_git_cannot_produce_for_one_repository_still_retires_the_gone_grades_of_another",
