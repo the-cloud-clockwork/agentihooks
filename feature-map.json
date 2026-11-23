@@ -6468,11 +6468,11 @@
       "id": "split-starts-on-the-early-collection-upload",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-queue-first-shard-lead",
-      "behaviour": "The Tests split job passes its early collection guard at the first jobs API poll that shows the test-count job still running with its Upload the early collection step concluded success, so the unit shards no longer wait for the count job's tail steps. A test-count job the guard sees completed keeps the old verdict: it passes only on success, and any other completion fails the guard before any artifact is read, even after its upload step succeeded.",
-      "seam": "the split job's Require successful early collection step and the COLLECTION_STEP it names in test-count",
+      "behaviour": "The Tests split job passes its early collection guard at the first jobs API poll that shows the collect job still running with its Upload the early collection step concluded success, so the unit shards no longer wait for the collect job's tail steps. A collect job the guard sees completed keeps the old verdict: it passes only on success, and any other completion fails the guard before any artifact is read, even after its upload step succeeded.",
+      "seam": "the split job's Require successful early collection step and the COLLECTION_STEP it names in collect",
       "tests": [
-        "tests/test_ci_workflow.py::test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_job_runs",
-        "tests/test_ci_workflow.py::test_split_waits_on_the_count_step_that_uploads_the_collection_it_downloads"
+        "tests/test_ci_workflow.py::test_split_starts_once_the_early_collection_upload_succeeds_while_the_collect_job_runs",
+        "tests/test_ci_workflow.py::test_split_waits_on_the_collect_step_that_uploads_the_collection_it_downloads"
       ]
     },
     {
@@ -7120,7 +7120,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-pr-planner-artifact-page",
       "behaviour": "The test planner lists every artifact page of each candidate dev push run, up to two pages of 100, and counts every page against its request budget, so a passed dev push run whose coverage shards are listed past the first 100 artifacts is still the record, because two passed dev push runs each held 106 artifacts with coverage shards on page two and pull request runs reused tests from a dev run four commits behind.",
-      "seam": "scripts.ci_test_plan.find_record and its per run artifact listing, run by the Plan the tests whose inputs did not change step of the Tests workflow test-count job",
+      "seam": "scripts.ci_test_plan.find_record and its per run artifact listing, run by the Plan the tests whose inputs did not change step of the Tests workflow collect job",
       "rules": [
         "run-artifacts-read-one-page-python"
       ],
@@ -8900,7 +8900,7 @@
       "id": "lint-gates-grade-from-grader",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-gates-from-grader-tree",
-      "behaviour": "The lint job's ruff, wiring and marker vector steps and the Semgrep code scans and chart checks grade the head with the protected grader's module and config, the head only as data, so a head that edits a gate's module or config to pass its own copy stays red.",
+      "behaviour": "The lint job's ruff and wiring steps, the lint-actions job's marker vector step and the Semgrep code scans and chart checks grade the head with the protected grader's module and config, the head only as data, so a head that edits a gate's module or config to pass its own copy stays red.",
       "seam": "The lint and Semgrep workflow step run text, executed over a planted head with the repository as grader",
       "tests": [
         "tests/test_ci_grader_gates.py::test_a_head_config_that_drops_a_rule_stays_red_under_the_grader_config",
@@ -13153,8 +13153,8 @@
       "id": "tracked-test-lock-cache-keys",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-cache-keys-tracked-lock",
-      "behaviour": "The tracked .github/test-requirements.lock, never the untracked uv.lock, is the dependency lock every cache key and trigger reads: the mutation stats cache hashes it among its configuration sources, so a lock change recollects a test file's stats and gives every lab stats unit a new key; the test dependency manifest counts it as a global file, so a lock change or removal rekeys every lab test fingerprint and keeps whole files in planned mutation test selection; and the lint job's self plant runs the mutation gate's plant when it changes.",
-      "seam": "scripts.ci_mutation.stats_cache CONFIGURATION with collect_cached_stats, scripts.ci_lab.expand_mutation stats_units, scripts.dep_manifest GLOBAL_FILES with scripts.ci_lab.expand_tests fingerprints and scripts.ci_mutation.plan record_drift, the self-plant step of the lint job in .github/workflows/test.yml",
+      "behaviour": "The tracked .github/test-requirements.lock, never the untracked uv.lock, is the dependency lock every cache key and trigger reads: the mutation stats cache hashes it among its configuration sources, so a lock change recollects a test file's stats and gives every lab stats unit a new key; the test dependency manifest counts it as a global file, so a lock change or removal rekeys every lab test fingerprint and keeps whole files in planned mutation test selection; and the lint-actions job's self plant runs the mutation gate's plant when it changes.",
+      "seam": "scripts.ci_mutation.stats_cache CONFIGURATION with collect_cached_stats, scripts.ci_lab.expand_mutation stats_units, scripts.dep_manifest GLOBAL_FILES with scripts.ci_lab.expand_tests fingerprints and scripts.ci_mutation.plan record_drift, the self-plant step of the lint-actions job in .github/workflows/test.yml",
       "tests": [
         "tests/test_ci_mutation_stats_cache.py::test_a_test_requirements_lock_change_recollects_stats",
         "tests/ci_lab/test_expand_mutation.py::test_a_test_requirements_lock_change_rekeys_every_stats_unit",
@@ -13862,7 +13862,7 @@
       "id": "deselect-scripts-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2654",
-      "behaviour": "The test count job's Deselect the reused tests step runs the grader checkout's scripts.dep_manifest alone. A grader checkout whose interpreter cannot import the tests package deselects exactly the tests scripts.dep_manifest.deselect picks, and a grader checkout that keeps the manifest only under the tests package never runs that manifest.",
+      "behaviour": "The collect job's Deselect the reused tests step runs the grader checkout's scripts.dep_manifest alone. A grader checkout whose interpreter cannot import the tests package deselects exactly the tests scripts.dep_manifest.deselect picks, and a grader checkout that keeps the manifest only under the tests package never runs that manifest.",
       "seam": "the Deselect the reused tests step run text executed in a fake grader checkout",
       "tests": [
         "tests/test_dep_manifest.py::test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests_package"
@@ -14410,8 +14410,8 @@
       "id": "ci-dependency-audit-platformdirs-pin",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2801",
-      "behaviour": "The dependency audit runs pip-audit through uvx with --constraints on the checked in audit lock, .github/ci-tools/audit.lock, read from the script's own tree, and the lock pins the audited pip-audit version and its whole closure, so a new upstream release such as platformdirs 4.14.8 cannot reach the audit; the lint job's grading step sets no constraint of its own and calls the base's copy of the script.",
-      "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint job's dependency audit step",
+      "behaviour": "The dependency audit runs pip-audit through uvx with --constraints on the checked in audit lock, .github/ci-tools/audit.lock, read from the script's own tree, and the lock pins the audited pip-audit version and its whole closure, so a new upstream release such as platformdirs 4.14.8 cannot reach the audit; the lint-actions job's grading step sets no constraint of its own and calls the base's copy of the script.",
+      "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint-actions job's dependency audit step",
       "tests": [
         "tests/test_ci_dependency_audit.py::test_audit_runs_pip_audit_under_the_checked_in_audit_constraint",
         "tests/test_ci_dependency_audit.py::test_dependency_audit_is_a_lint_step_graded_by_the_base"

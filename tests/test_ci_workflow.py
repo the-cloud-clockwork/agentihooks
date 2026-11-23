@@ -1075,7 +1075,7 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
 @pytest.mark.feature("split-starts-on-the-early-collection-upload")
 @pytest.mark.parametrize("status", ["in_progress", "completed"])
 @pytest.mark.parametrize("upload", ["success", "failure", "skipped", None])
-def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_job_runs(
+def test_split_starts_once_the_early_collection_upload_succeeds_while_the_collect_job_runs(
     tmp_path: Path, status: str, upload: str | None
 ) -> None:
     steps = _workflow()["jobs"]["split"]["steps"]
@@ -1117,7 +1117,7 @@ def test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_
 
 
 @pytest.mark.feature("split-starts-on-the-early-collection-upload")
-def test_split_waits_on_the_count_step_that_uploads_the_collection_it_downloads() -> None:
+def test_split_waits_on_the_collect_step_that_uploads_the_collection_it_downloads() -> None:
     jobs = _workflow()["jobs"]
     steps = jobs["split"]["steps"]
     guard = next(step for step in steps if step.get("name") == "Require successful early collection")
