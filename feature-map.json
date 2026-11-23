@@ -3994,10 +3994,22 @@
         "tests/tick/steps/test_thin_task_pass.py::test_a_task_with_no_description_field_is_checked_as_an_empty_description",
         "tests/tick/steps/test_thin_task_pass.py::test_a_refused_write_is_reported_and_the_pass_goes_on_to_the_next_task",
         "tests/tick/steps/test_thin_task_pass.py::test_a_title_the_ledger_would_refuse_falls_back_to_a_plain_title",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_task_with_no_title_gets_the_plain_title",
         "tests/tick/steps/test_thin_task_pass.py::test_two_thin_tasks_are_both_queued_and_named_in_one_master_notice",
         "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_with_no_phase_or_description_gets_an_enhancement_task_with_neither",
         "tests/tick/steps/test_thin_task_pass.py::test_a_spent_deadline_takes_no_task",
         "tests/tick/steps/test_thin_task_pass.py::test_every_write_of_a_pass_is_one_the_ledger_api_accepts"
+      ]
+    },
+    {
+      "id": "swarm-phase-admits-enhancement",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-tick-step",
+      "behaviour": "An enhancement plan task, a plan kind task carrying enhances, is claimable while its phase is planning or building, so a thin task in a building phase gets a planner instead of draining the swarm, and it is never taken for its phase's own plan task.",
+      "seam": "scripts.swarm.phase_state.admits and scripts.swarm.phase_state.lifecycle",
+      "tests": [
+        "tests/swarm/test_phase_state.py::test_an_enhancement_task_is_admitted_while_its_phase_plans_or_builds",
+        "tests/swarm/test_phase_state.py::test_an_enhancement_task_is_never_taken_for_its_phase_plan_task"
       ]
     },
     {

@@ -43,9 +43,10 @@ def _thin_task_pass(tick: Any, get: Get) -> list[str]:
 
 
 def unchecked(task: dict[str, Any]) -> bool:
-    """Return whether ``task`` is an open engineer or ci task, a missing lane reading as engineer, that no thin check
-    has marked."""
-    return task.get("state") == "open" and task.get("lane", "eng") in LANES and not task.get("enhancement")
+    """Return whether ``task`` is an open, in scope engineer or ci task, a missing lane reading as engineer, that no
+    thin check has marked."""
+    in_lane = task.get("lane", "eng") in LANES and not task.get("out_of_scope")
+    return task.get("state") == "open" and in_lane and not task.get("enhancement")
 
 
 def enhance(
@@ -69,13 +70,12 @@ def _marking(tid: str) -> dict[str, object]:
 
 def _addition(task: dict[str, Any], problems: list[str]) -> dict[str, object]:
     """Return the task add operation of the plan lane task that enhances ``task``, in its phase when it has one."""
-    named = f"Plan the thin task {task['title']}"
     operation: dict[str, object] = {
         "op": "task_add",
         "id": f"thin-add-{task['id']}",
         "by": SENDER,
         "task": thin_task.ENHANCE.format(task["id"]),
-        "title": TITLE if ledger_comments.problems(named, "item") else named,
+        "title": _title(task),
         "lane": "plan",
         "kind": "plan",
         "description": _brief(task, problems),
@@ -83,6 +83,14 @@ def _addition(task: dict[str, Any], problems: list[str]) -> dict[str, object]:
         "not_duplicate": DISTINCT,
     }
     return operation | ({"phase": task["phase"]} if task.get("phase") else {})
+
+
+def _title(task: dict[str, Any]) -> str:
+    """Return the enhancement task title naming the target's title, or the plain title when the target has none or
+    the ledger would refuse the named one."""
+    title = task.get("title")
+    named = f"Plan the thin task {title}"
+    return named if title and not ledger_comments.problems(named, "item") else TITLE
 
 
 def _brief(task: dict[str, Any], problems: list[str]) -> str:

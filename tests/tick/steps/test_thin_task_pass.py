@@ -17,7 +17,7 @@ from scripts.tick import registry
 from scripts.tick.adapters.fakes import FakeLedger, fake_tools
 from scripts.tick.adapters.ledger import ClientLedger
 from scripts.tick.deadline import Deadline
-from scripts.tick.steps import CallStep, hook_domains
+from scripts.tick.steps import CallStep, actions_of, hook_domains
 
 pytestmark = pytest.mark.unit
 
@@ -121,6 +121,19 @@ def _added(found: Pass) -> list[dict[str, Any]]:
     return [operation for operation in _operations(found) if operation["op"] == "task_add"]
 
 
+def _applied(tasks: list[dict[str, Any]], operations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The ledger rows after a pass's writes: each task add as a new open row in its lane and phase, and each
+    enhancement operation set on its target."""
+    rows = {task["id"]: dict(task) for task in tasks}
+    for operation in operations:
+        if operation["op"] == "task_add":
+            added = {"id": operation["task"], "state": "open", "lane": operation["lane"], "phase": operation["phase"]}
+            rows[operation["task"]] = added
+        else:
+            rows[operation["item"].removeprefix("tasks/")]["enhancement"] = operation["enhancement"]
+    return list(rows.values())
+
+
 def _notice(names: str) -> str:
     return (
         f"For your information: the thin task check queued {names} for a planner; "
@@ -133,13 +146,18 @@ def test_thin_task_pass() -> None:
     """The thin task pass step registers in group wrapper phases on the tick lane every 120 seconds, reading the
     ledger doc and writing through the ledger and inbox ports."""
     found = _step()
-    assert (found.group, found.lane, found.interval_s, found.feature, found.effects, found.reads) == (
+    assert (found.group, found.lane, found.interval_s, found.floor_s, found.feature, found.effects) == (
         "wrapper phases",
         "tick",
         120.0,
+        2.0,
         "tick-thin-task-pass",
         EFFECTS,
+    )
+    assert (found.needs, found.reads, found.writes) == (
+        frozenset(),
         hook_domains("doc"),
+        {actions_of("thin task pass")},
     )
 
 
@@ -169,8 +187,9 @@ def test_a_thin_open_task_gets_one_enhancement_task_on_the_first_pass_and_none_o
     assert [name for name, _ in first.calls()] == ["mutate"]
     assert first.lines == ["queued enhance-t1 for thin task t1"]
     assert first.inbox.sent == [("swarm", f"master@{SLUG}", _notice("enhance-t1"), True)]
-    enhancement = {"id": "enhance-t1", "state": "open", "lane": "plan", "kind": "plan", "enhances": "t1"}
-    second = _run([{**THIN, **NEEDED}, enhancement])
+    after = _applied([THIN], _operations(first))
+    assert after == [{**THIN, **NEEDED}, {"id": "enhance-t1", "state": "open", "lane": "plan", "phase": "p1"}]
+    second = _run(after)
     assert (second.lines, second.calls(), second.inbox.sent) == ([], [], [])
 
 
@@ -186,11 +205,13 @@ def test_a_thin_open_task_gets_one_enhancement_task_on_the_first_pass_and_none_o
         {**THIN, "enhancement": "planned"},
         {**THIN, "enhancement": "skipped"},
         {**THIN, "plan_slice": "thin-tick-step"},
+        {**THIN, "out_of_scope": True},
     ],
-    ids=["passing", "claimed", "done", "plan lane", "needed", "planned", "skipped", "sliced"],
+    ids=["passing", "claimed", "done", "plan lane", "needed", "planned", "skipped", "sliced", "out of scope"],
 )
 def test_a_task_that_is_not_an_unmarked_thin_open_engineer_task_gets_no_write(task: dict[str, Any]) -> None:
-    """Passing, claimed, closed, plan lane, already marked and sliced tasks get no ledger write and no master item."""
+    """Passing, claimed, closed, plan lane, already marked, sliced and out of scope tasks get no ledger write and no
+    master item."""
     found = _run([task])
     assert (found.lines, found.calls(), found.inbox.sent) == ([], [], [])
 
@@ -240,6 +261,16 @@ def test_a_title_the_ledger_would_refuse_falls_back_to_a_plain_title() -> None:
     """A target title over the item word limit gives the enhancement task the plain fallback title."""
     found = _run([{**THIN, "title": "word " * 41}])
     [added] = _added(found)
+    assert added["title"] == "Plan a thin task before an engineer claims it"
+
+
+@pytest.mark.feature("tick-thin-task-pass")
+@pytest.mark.parametrize("title", [{}, {"title": ""}], ids=["no title field", "empty title"])
+def test_a_task_with_no_title_gets_the_plain_title(title: dict[str, str]) -> None:
+    """A target row with no title or an empty one gives the enhancement task the plain title, so the pass never
+    fails on such a row."""
+    task = {key: value for key, value in THIN.items() if key != "title"} | title
+    [added] = _added(_run([task]))
     assert added["title"] == "Plan a thin task before an engineer claims it"
 
 
