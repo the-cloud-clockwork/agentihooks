@@ -58,12 +58,17 @@ def _is_feature(decorator: ast.expr) -> bool:
     return isinstance(decorator, ast.Call) and ast.unparse(decorator.func) == "pytest.mark.feature"
 
 
-def _rules(root: Path) -> set[str]:
+def _rule_ids(folder: Path) -> list[str]:
     rules = []
-    for path in (root / ".semgrep/features").rglob("*"):
+    for path in folder.rglob("*"):
         if path.suffix in {".yaml", ".yml"} and not path.name.endswith((".test.yaml", ".test.yml")):
             data = yaml.safe_load(path.read_text())
             rules.extend(rule["id"] for rule in data["rules"])
+    return rules
+
+
+def _rules(root: Path) -> set[str]:
+    rules = _rule_ids(root / ".semgrep/features")
     if len(rules) != len(set(rules)):
         raise ValueError("duplicate feature rule id")
     return set(rules)
@@ -156,7 +161,7 @@ def _live_check(entry: dict, root: Path, name: str) -> None:
         raise ValueError(f"{name}: missing live check {command}")
 
 
-def _entry(entry: dict, root: Path, rules: set[str], tests: dict[str, str | None]) -> list[str]:
+def _entry(entry: dict, root: Path, rules: set[str], declared: set[str], tests: dict[str, str | None]) -> list[str]:
     name = _require(entry, "id")
     _require(entry, "behaviour")
     _require(entry, "seam")
@@ -167,6 +172,9 @@ def _entry(entry: dict, root: Path, rules: set[str], tests: dict[str, str | None
     if origin == "operator" or "semgrep_rule" in entry:
         if _require(entry, "semgrep_rule") not in rules:
             raise ValueError(f"{name}: missing rule {entry['semgrep_rule']}")
+    for rule in entry.get("rules", []):
+        if rule not in declared:
+            raise ValueError(f"{name}: missing rule {rule}")
     if origin == "operator" or "live_check" in entry:
         _live_check(entry, root, name)
     nodes = _nodes(entry, name)
@@ -226,9 +234,10 @@ def validate(root: Path, map_path: Path, base: Path | None = None) -> int:
     if not isinstance(entries, list) or not entries:
         raise ValueError("features must be a nonempty list")
     rules, tests = _rules(root), _tests(root)
+    declared = rules.union(_rule_ids(root / ".semgrep-incidents"))
     ids, owned_tests = set(), set()
     for entry in entries:
-        owned_tests.update(_entry(entry, root, rules, tests))
+        owned_tests.update(_entry(entry, root, rules, declared, tests))
         if entry["id"] in ids:
             raise ValueError(f"duplicate feature {entry['id']}")
         ids.add(entry["id"])
