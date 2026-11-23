@@ -4,6 +4,7 @@ code over the shared database."""
 import sys
 import urllib.error
 import uuid
+from collections.abc import Iterable
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -510,6 +511,17 @@ def pass_state(ledger: Any, slug: str, scope: "live_rows.Scope | None" = None) -
         return doc
     answer = live_rows.answer(doc, scope)
     return {**doc, "tasks": answer.rows, live_rows.FROZEN_IDS: answer.frozen_ids}
+
+
+def where_query(
+    ids: Iterable[str] = (),
+    states: Iterable[str] = (),
+    pinned: bool = False,
+    branched: bool = False,
+    fields: Iterable[str] = (),
+) -> dict[str, str]:
+    """The tasks collection query naming only the filters given."""
+    raise NotImplementedError((ids, states, pinned, branched, fields))
 
 
 def _op(kind, by, **fields):

@@ -78,6 +78,11 @@ def targeting(rows: list[Any], url: str) -> dict[str, Any]:
     return resources.bounded({"data": data, "revision": resources.revision(found), "next_cursor": None})
 
 
+def selecting(rows: list[Any], query: dict[str, Any]) -> dict[str, Any]:
+    """The task rows matching every filter the query names, in one reply."""
+    raise NotImplementedError(query)
+
+
 def pull_links(row: dict[str, Any]) -> set[Any]:
     """Every pull request URL a task row names."""
     return {row.get("pr_url"), *(row.get("split_pulls") or []), *(row.get("pull_scopes") or {})}

@@ -1293,6 +1293,21 @@
       ]
     },
     {
+      "id": "hub-admission-narrow-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-admit-narrow-read",
+      "behaviour": "A hub events admission reads only what its own task needs: the task row, the rows it names, the running rows, the overview and its phase, and the claim gate verdict the ledger judges over its stored state, through a narrow tasks selection of ids, states, pins and branches; it never reads the whole ledger export however often the revision moves, and it refuses a frozen, unfocused, phased, waiting or thin task without claiming it.",
+      "seam": "Admission.admit over a ledger whose revision moves and whose export is counted, the ledger API tasks selection and LedgerClient.where_query",
+      "tests": [
+        "tests/hub/test_admission_gates.py::test_an_admission_never_reads_the_full_export_when_the_revision_moves",
+        "tests/hub/test_admission_gates.py::test_an_admission_refuses_a_task_its_claim_gate_holds_and_claims_nothing",
+        "tests/hub/test_admission_gates.py::test_an_admission_claims_the_task_its_dependency_left_open_once_the_dependency_is_done",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_returns_the_rows_matching_every_filter_it_names",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_projects_rows_without_threads_and_keeps_only_the_named_fields",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_client_query_names_only_the_filters_given"
+      ]
+    },
+    {
       "id": "hub-admission-claim-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-workspace",
