@@ -12,7 +12,7 @@ import json
 import os
 import sys
 from collections import ChainMap
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Callable, Iterator, MutableMapping
 from importlib import import_module
 from pathlib import Path
 from typing import Protocol
@@ -26,14 +26,15 @@ FAILED_OPEN = Decision()
 
 
 class GateRegistry(MutableMapping[str, Gate]):
-    def __init__(self, declarations: dict[str, tuple[str, str]]) -> None:
-        self._entries: dict[str, Gate | tuple[str, str]] = dict(declarations)
+    def __init__(self, declarations: dict[str, Callable[[], Gate]]) -> None:
+        self._entries: dict[str, Gate | tuple[Callable[[], Gate]]] = {
+            key: (factory,) for key, factory in declarations.items()
+        }
 
     def __getitem__(self, key: str) -> Gate:
         value = self._entries[key]
         if isinstance(value, tuple):
-            module, name = value
-            gate: Gate = getattr(import_module(f"scripts.gates.{module}"), name)()
+            gate = value[0]()
             self._entries[key] = gate
             return gate
         return value
@@ -56,28 +57,28 @@ class GateRegistry(MutableMapping[str, Gate]):
 
 GATES = GateRegistry(
     {
-        "identity": ("identity", "PinnedIdentity"),
-        "watch": ("watch", "WatchBudget"),
-        "subagents": ("subagents", "SubagentBudget"),
-        "reruns": ("reruns", "RerunBudget"),
-        "intent": ("intent", "IntentGate"),
-        "recon": ("recon", "ReconGate"),
-        "build": ("build", "BuildGate"),
-        "claim-stop": ("claim_stop", "ClaimStop"),
-        "expert-stop": ("expert_stop", "ExpertStop"),
-        "push-stop": ("push_stop", "PushStop"),
-        "quiet": ("quiet", "QuietClaim"),
-        "one-push": ("one_push", "OnePush"),
-        "brain": ("brain", "BrainGate"),
+        "identity": lambda: import_module("scripts.gates.identity").PinnedIdentity(),
+        "watch": lambda: import_module("scripts.gates.watch").WatchBudget(),
+        "subagents": lambda: import_module("scripts.gates.subagents").SubagentBudget(),
+        "reruns": lambda: import_module("scripts.gates.reruns").RerunBudget(),
+        "intent": lambda: import_module("scripts.gates.intent").IntentGate(),
+        "recon": lambda: import_module("scripts.gates.recon").ReconGate(),
+        "build": lambda: import_module("scripts.gates.build").BuildGate(),
+        "claim-stop": lambda: import_module("scripts.gates.claim_stop").ClaimStop(),
+        "expert-stop": lambda: import_module("scripts.gates.expert_stop").ExpertStop(),
+        "push-stop": lambda: import_module("scripts.gates.push_stop").PushStop(),
+        "quiet": lambda: import_module("scripts.gates.quiet").QuietClaim(),
+        "one-push": lambda: import_module("scripts.gates.one_push").OnePush(),
+        "brain": lambda: import_module("scripts.gates.brain").BrainGate(),
     }
 )
 HOST_GATES = GateRegistry(
     {
-        "placement": ("placement", "PlacementGate"),
-        "prompts": ("prompts", "PromptGuard"),
-        "node-caps": ("node_caps", "NodeCaps"),
-        "terminations": ("terminations", "Terminations"),
-        "sign-ins": ("sign_ins", "SignIns"),
+        "placement": lambda: import_module("scripts.gates.placement").PlacementGate(),
+        "prompts": lambda: import_module("scripts.gates.prompts").PromptGuard(),
+        "node-caps": lambda: import_module("scripts.gates.node_caps").NodeCaps(),
+        "terminations": lambda: import_module("scripts.gates.terminations").Terminations(),
+        "sign-ins": lambda: import_module("scripts.gates.sign_ins").SignIns(),
     }
 )
 BEFORE = {"build": ("recon",)}

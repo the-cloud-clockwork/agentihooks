@@ -106,3 +106,16 @@ assert not attempted, attempted
         [sys.executable, "-c", program, str(tmp_path)], capture_output=True, text=True, timeout=30
     )
     assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.feature("node-caps-named-import")
+def test_lazy_dispatch_preserves_the_default_intent_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.gates import entry, intent
+    from scripts.gates.base import Call, Decision, Who
+
+    def decide(call: Call, who: Who, state: object, mode: str = "enforce") -> Decision:
+        return Decision.deny(mode)
+
+    gate = intent.IntentGate()
+    monkeypatch.setattr(gate, "decide", decide)
+    assert entry._decide(gate, Call("Bash", {}), Who(), tmp_path).reason == "enforce"
