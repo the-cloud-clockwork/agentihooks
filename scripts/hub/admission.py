@@ -291,8 +291,11 @@ class Admission:
 
     def _full(self, hive: str, reserved: int) -> str:
         """The hive's live worker executions across every swarm, with the slots it keeps for waiting tasks only it
-        takes, against its registry max agents; empty below the cap or when none is set."""
+        takes and one for each running expert lineage of every swarm with no live expert, against its registry max
+        agents; empty below the cap or when none is set. The tick places an expert successor, never this admission,
+        so the slot kept for it holds lane offers until the expert seats step seats it."""
         from scripts.hive import registry
+        from scripts.swarm import expert_lineage
 
         record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
         cap = record.get("max_agents")
@@ -300,14 +303,18 @@ class Admission:
             return ""
         slugs = cast(list[str], self.store.slugs())  # pragma: no mutate
         hosts = {hive, ""} if hive == readiness.ROOT else {hive}
-        live = sum(
-            1
-            for slug in slugs
-            for agent in self.store.execution_registry.agents(slug)
-            if agent.hive in hosts and agent.lane != "master" and agent.state not in TERMINAL_STATES
-        )
+        live = waiting = 0
+        for slug in slugs:
+            agents = self.store.execution_registry.agents(slug)
+            live += sum(
+                1
+                for agent in agents
+                if agent.hive in hosts and agent.lane != "master" and agent.state not in TERMINAL_STATES
+            )
+            waiting += expert_lineage.waiting(self.store, slug, agents)
         kept = f" with {reserved} kept for tasks only the root hive takes" if reserved else ""
-        return f"{live} of {cap} agents on the hive{kept}" if live + reserved >= cap else ""
+        kept += f" with {waiting} kept for expert lineages waiting for an expert" if waiting else ""
+        return f"{live} of {cap} agents on the hive{kept}" if live + reserved + waiting >= cap else ""
 
     def _claim(
         self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], timer: _StepTimer
