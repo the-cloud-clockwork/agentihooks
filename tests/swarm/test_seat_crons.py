@@ -34,7 +34,7 @@ SHEET = "11,41 * * * *"
 EMAIL = "13,43 * * * *"
 NUDGE = "17 * * * *"
 CREW = "9,39 * * * *"
-ALWAYS = sorted([LOOP, DRIFT, NUDGE])
+ALWAYS = sorted([LOOP, NUDGE])
 HOOKS = {name: getattr(seat_crons, name) for name in ("on_start", "on_stop", "on_join")}
 env, run = test_cli.env, test_cli.run
 
@@ -75,11 +75,9 @@ def payload(expression: str) -> str:
     return next(view["payload"] for view in aimed() if view["expression"] == expression)
 
 
-def by_hand(expression: str, seat: str = SEAT) -> str:
+def by_hand(expression: str, seat: str = SEAT, owner: str = "master@323133-0991") -> str:
     """A cron a master added by hand with agentihooks cron add, owned by the master and aimed at the seat."""
-    made = commands.add_cron(
-        seat_crons.scheduler(), "master@323133-0991", InboxSlot(seat), "by hand", expression=expression
-    )
+    made = commands.add_cron(seat_crons.scheduler(), owner, InboxSlot(seat), "by hand", expression=expression)
     return made["id"]
 
 
@@ -116,7 +114,6 @@ def test_start_puts_the_standing_seat_crons_on_the_scheduler(env: Env) -> None:
     assert {view["owner"] for view in views} == {"agentihooks master seat crons"}
     assert {view["timezone"] for view in views} == {"UTC"}
     assert payload(LOOP).startswith("Master loop (seat cron): read agentihooks swarm sw status")
-    assert payload(DRIFT).startswith("Drift check (seat cron): read agentihooks swarm sw status")
     assert payload(NUDGE).startswith(f"{safety_nudge.TEXT}, read agentihooks swarm sw status")
     assert all(view["payload"].endswith("Write nothing to the operator.") for view in views)
 
@@ -127,7 +124,7 @@ def test_a_second_start_keeps_the_same_seat_crons(env: Env) -> None:
     run(SLUG, "start")
     first = ids()
     assert run(SLUG, "start") == 0
-    assert ids() == first and len(first) == 3
+    assert ids() == first and len(first) == 2
 
 
 @pytest.mark.feature("master-seat-durable-crons")
@@ -169,7 +166,7 @@ def test_hand_made_seat_crons_are_adopted_and_their_duplicates_cancelled(env: En
         found.setdefault(view["expression"], []).append(view["id"])
     assert found[NUDGE] == [nudge] and found[CREW] == [crew]
     assert len(found[LOOP]) == 1 and found[LOOP][0] in (loop, extra)
-    assert len(found[DRIFT]) == 1 and sorted(found) == sorted([*ALWAYS, CREW])
+    assert sorted(found) == sorted([*ALWAYS, CREW])
     dropped = extra if found[LOOP] == [loop] else loop
     assert seat_crons.scheduler().get(dropped).state == "cancelled"
     assert ids("master@other") == [other]
@@ -198,12 +195,12 @@ def test_the_master_loop_cron_reads_the_operator_orders_every_loop(env: Env) -> 
 @pytest.mark.feature("master-handoff-carries-orders")
 def test_a_seat_cron_the_code_owns_with_an_older_text_is_replaced_once(env: Env) -> None:
     created()
-    old, hand = code_owned(LOOP, "Master loop (seat cron): an older text"), by_hand(DRIFT)
+    old, hand = code_owned(LOOP, "Master loop (seat cron): an older text"), by_hand(NUDGE)
     run(SLUG, "start")
     first = ids()
     assert old not in first and seat_crons.scheduler().get(old).state == "cancelled"
     assert payload(LOOP).startswith("Master loop (seat cron): read agentihooks swarm sw status, read agentihooks api")
-    assert hand in first and payload(DRIFT) == "by hand"
+    assert hand in first and payload(NUDGE) == "by hand"
     assert schedules() == ALWAYS
     run(SLUG, "start")
     assert ids() == first
@@ -236,6 +233,38 @@ def test_a_hand_made_cron_is_adopted_in_place_of_the_code_owned_one_wherever_it_
     run(SLUG, "start")
     assert [view["id"] for view in aimed() if view["expression"] == LOOP] == [hand]
     assert seat_crons.scheduler().get(mine).state == "cancelled"
+
+
+@pytest.mark.feature("master-seat-durable-crons")
+@pytest.mark.parametrize("via", ["start", "join"])
+def test_a_start_or_join_on_a_swarm_holding_old_drift_check_crons_cancels_them(
+    env: Env, monkeypatch: pytest.MonkeyPatch, via: str
+) -> None:
+    created()
+    old = [by_hand(DRIFT, owner=seat_crons.OWNER), by_hand(DRIFT)]
+    loop, crew = by_hand(LOOP), by_hand(CREW)
+    other = by_hand(DRIFT, "master@other", seat_crons.OWNER)
+    if via == "start":
+        assert run(SLUG, "start") == 0
+    else:
+        SeatRegistry(env[0].redis).occupy(SEAT, FRONT, 1)
+        join(env, monkeypatch, FRONT)
+    assert schedules() == sorted([*ALWAYS, CREW]) and {loop, crew} <= set(ids())
+    assert [seat_crons.scheduler().get(cron).state for cron in old] == ["cancelled", "cancelled"]
+    assert ids("master@other") == [other]
+
+
+@pytest.mark.feature("master-seat-durable-crons")
+def test_a_fresh_swarm_gets_no_drift_check_cron(env: Env) -> None:
+    created()
+    script = Path.home() / "scratchpad" / "repo" / "sw-master" / "progress-sheet" / "progress_sheet.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("")
+    state = Path.home() / ".swarm-progress-notification-email" / "repo" / "state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({"enabled": True, "cadence_hours": 1}))
+    assert run(SLUG, "start") == 0
+    assert schedules() == sorted([LOOP, NUDGE, SHEET, EMAIL])
 
 
 @pytest.mark.feature("master-seat-durable-crons")

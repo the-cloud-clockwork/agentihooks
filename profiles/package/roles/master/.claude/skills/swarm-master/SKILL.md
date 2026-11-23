@@ -239,9 +239,12 @@ Review each slice against its phase intent, then
   yourself; when that has not solved it by the two hour mark, launch the crew.
 - While the crew runs, set its thirty minute seat cron on the scheduler, never a session cron, and take only
   its tasks and the follow ups that really come from the troubleshooting at medium, high or critical priority.
-- The standing master reminders (master loop, drift check, safety nudge, progress sheet, progress email due
-  check) are seat crons that `swarm start` and your orchestrator join keep on the scheduler; never recreate
-  them as session crons. The agentihooks cron list shows them.
+- Findings, follow ups, blocked tasks, releases, green promotions and hive drains arrive as seat inbox items;
+  act on each item as it lands. The master loop seat cron carries the rest of the loop duties until they
+  have seat items of their own.
+- The standing seat crons (master loop, safety nudge, progress sheet, progress email due check) are kept on
+  the scheduler by `swarm start` and your orchestrator join, which also cancel the retired drift check cron.
+  Never recreate them as session crons. The agentihooks cron list shows them.
 
 ## Expert lineages
 
