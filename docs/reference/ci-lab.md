@@ -2635,8 +2635,9 @@ imports, repository modules included; a step stays a gate only through its other
 `fetch-the-base-suite-count-recorded-on-dev` steps stay in their jobs but drop out of discovery
 by that rule alone. A step whose verdict the lab must grade runs a module (`python -m`), a script
 file or a script on standard input (`python -`), and
-`test_the_real_static_jobs_pass_inline_python_only_in_their_install_and_record_fetch_steps` names
-the three steps of the static jobs that pass inline code today, so a new one is a decision.
+`test_the_real_static_jobs_leave_only_their_setup_and_record_fetch_steps_without_a_gate` names
+every run step of the static jobs that `discover` yields no gate for today, the three that pass
+inline code among them, so a new one is a decision.
 
 Before pull request
 [#11978](https://github.com/the-cloud-clockwork/agentihooks/pull/11978), the expander passed only

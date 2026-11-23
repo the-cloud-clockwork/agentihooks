@@ -415,19 +415,36 @@ def test_the_real_lint_type_gate_and_test_count_jobs_hold_no_excluded_step() -> 
 
 
 @pytest.mark.feature("lab-static-jobs-hold-lab-steps")
-def test_the_real_static_jobs_pass_inline_python_only_in_their_install_and_record_fetch_steps() -> None:
-    jobs = yaml.safe_load((ROOT / static_gates.WORKFLOW).read_text())["jobs"]
-    inline = {
-        f"{job}/{step['name']}"
+def test_the_real_static_jobs_leave_only_their_setup_and_record_fetch_steps_without_a_gate() -> None:
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    gated = {(gate.job, gate.step) for gate in static_gates.discover(workflow, registry, ci_wiring.load(ROOT))}
+    jobs = yaml.safe_load(workflow)["jobs"]
+    ungated = {
+        job: [step["name"] for step in jobs[job]["steps"] if "run" in step and (job, step["name"]) not in gated]
         for job in ("lint", "type-gate", "test-count")
-        for step in jobs[job]["steps"]
-        for command in static_gates.COMMAND.split(step.get("run", "").replace("\\\n", " "))
-        if (match := static_gates.PYTHON.match(command)) and any("c" in flag for flag in match.group(1).split())
     }
-    assert inline == {
-        "type-gate/Install dependencies",
-        "test-count/Install dependencies",
-        "test-count/Fetch the base suite count recorded on dev",
+    assert ungated == {
+        "lint": [
+            "Install ruff",
+            "Install PyYAML",
+            "Install vulture",
+            "Install the comment gate grammars",
+            "Check out the base revision",
+            "Check out the protected grader",
+        ],
+        "type-gate": [
+            "Install dependencies",
+            "Use the test environment",
+            "Check out the base revision",
+            "Check out the protected grader",
+        ],
+        "test-count": [
+            "Install dependencies",
+            "Use the test environment",
+            "Check out the base revision",
+            "Fetch the base suite count recorded on dev",
+        ],
     }
 
 

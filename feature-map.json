@@ -517,7 +517,7 @@
         "tests/ci_lab/test_delivery.py::test_the_exclusion_catalog_keeps_lab_authority_for_the_split_static_gates",
         "tests/ci_lab/test_static_gates.py::test_a_python_dash_c_probe_adds_no_gate_while_module_script_and_stdin_forms_do",
         "tests/ci_lab/test_static_gates.py::test_the_real_lint_type_gate_and_test_count_jobs_hold_no_excluded_step",
-        "tests/ci_lab/test_static_gates.py::test_the_real_static_jobs_pass_inline_python_only_in_their_install_and_record_fetch_steps",
+        "tests/ci_lab/test_static_gates.py::test_the_real_static_jobs_leave_only_their_setup_and_record_fetch_steps_without_a_gate",
         "tests/ci_lab/test_static_gates.py::test_the_real_count_floor_gate_reads_no_pull_request_head_and_no_reviews_file",
         "tests/test_ci_workflow_collect.py::test_the_collection_step_propagates_its_exit_code"
       ]
