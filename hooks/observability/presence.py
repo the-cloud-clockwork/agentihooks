@@ -43,7 +43,7 @@ def seen_dir() -> Path:
 
 def daemon_live(now_s: float) -> bool:
     """True when a hive daemon on this home exported the seen records within its live window."""
-    beat_s = _read(seen_dir() / BEAT).get("beat_s")
+    beat_s = read_record(seen_dir() / BEAT).get("beat_s")
     return isinstance(beat_s, int | float) and now_s - beat_s <= DAEMON_LIVE_S
 
 
@@ -67,13 +67,13 @@ def agent(session_id: str, environ: Mapping[str, str], now_s: float) -> None:
         "harness": environ.get("AGENTIHOOKS_TARGET", "").strip().lower() or "claude",
     }
     path = seen_dir() / f"{safe_name(session_id)}.json"
-    record = _read(path)
+    record = read_record(path)
     sent_s = record.get("sent_s")
     due = not isinstance(sent_s, int | float) or now_s - sent_s >= INTERVAL_S
     if due and not daemon_live(now_s):
         otel.record_gauge(AGENT, now_s, attributes)
         sent_s = now_s
-    _write(path, {**record, "attributes": attributes, "seen_s": now_s, "sent_s": sent_s})
+    write_record(path, {**record, "attributes": attributes, "seen_s": now_s, "sent_s": sent_s})
 
 
 def mark(payload: Mapping[str, object]) -> None:
@@ -97,18 +97,19 @@ def export_agents(now_s: float) -> None:
     attributes, removes records seen over a day ago or unreadable, then beats so hooks on this home stop sending."""
     folder = seen_dir()
     for path in sorted(folder.glob("*.json")):
-        record = _read(path)
+        record = read_record(path)
         seen_s = record.get("seen_s")
         seen = seen_s if isinstance(seen_s, int | float) else 0.0
         attributes = record.get("attributes")
         if now_s - seen > PRUNE_S:
-            path.unlink()
+            path.unlink(missing_ok=True)
         elif now_s - seen <= FRESH_S and isinstance(attributes, dict):
             otel.record_gauge(AGENT, seen, cast(dict[str, str], attributes))
-    _write(folder / BEAT, {"beat_s": now_s})
+    write_record(folder / BEAT, {"beat_s": now_s})
 
 
-def _read(path: Path) -> dict[str, object]:
+def read_record(path: Path) -> dict[str, object]:
+    """The JSON object a seen record or beat holds, or an empty one when it is missing, unreadable or not an object."""
     try:
         loaded: object = json.loads(path.read_text())
     except (OSError, ValueError):
@@ -116,7 +117,8 @@ def _read(path: Path) -> dict[str, object]:
     return cast(dict[str, object], loaded) if isinstance(loaded, dict) else {}
 
 
-def _write(path: Path, record: Mapping[str, object]) -> None:
+def write_record(path: Path, record: Mapping[str, object]) -> None:
+    """Replaces a seen record or beat with record in one atomic step, creating its folder."""
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=path.parent)
     with os.fdopen(handle, "w") as stream:
