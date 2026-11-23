@@ -340,9 +340,9 @@ def test_a_thin_task_held_by_a_freeze_gets_no_enhancement_write(target: str) -> 
 
 @pytest.mark.feature("tick-thin-task-pass")
 def test_an_unfrozen_thin_task_beside_a_frozen_phase_still_gets_its_enhancement() -> None:
-    """Beside a thin task in the frozen phase p1, a thin task in the open phase p2 still gets its one enhancement
-    write and is the only task the master notice names."""
-    found = _run([THIN, {**THIN, "id": "t2", "phase": "p2"}], doc=_frozen("phases/p1"))
+    """In a ledger whose phase p1 is frozen, a thin task in the open phase p2 still gets its one enhancement write
+    and the master notice naming it."""
+    found = _run([{**THIN, "id": "t2", "phase": "p2"}], doc=_frozen("phases/p1"))
     assert found.lines == ["queued enhance-t2 for thin task t2"]
     assert [operation["id"] for operation in _operations(found)] == ["thin-add-t2", "thin-mark-t2"]
     assert found.inbox.sent == [("swarm", f"master@{SLUG}", _notice("enhance-t2"), True)]
