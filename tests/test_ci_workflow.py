@@ -2731,13 +2731,12 @@ def _planner_third_party() -> set[str]:
     return third
 
 
-def test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pins():
+def test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pins() -> None:
     plan = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation-plan"]
     (install,) = [step for step in plan["steps"] if step.get("name") == "Install dependencies"]
-    project = tomllib.loads((_ROOT / "pyproject.toml").read_text())["project"]
-    declared = {re.split(r"[<>=!\[]", spec)[0].lower(): spec for spec in project["optional-dependencies"]["dev"]}
-    declared |= {re.split(r"[<>=!\[]", spec)[0].lower(): spec for spec in project["dependencies"]}
-    specs = [declared[name] for name in sorted(PLANNER_PACKAGES)]
+    lock = (_ROOT / ".github/test-requirements.lock").read_text().splitlines()
+    pinned = dict(line.split(" ", 1)[0].split("==", 1) for line in lock if "==" in line and not line.startswith("#"))
+    specs = [f"{name}=={pinned[name]}" for name in sorted(PLANNER_PACKAGES)]
     assert (
         install["run"]
         == 'bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" '

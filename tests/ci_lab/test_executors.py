@@ -494,8 +494,77 @@ def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_l
         "attempts": 2,
         "seconds": 2.5,
         "caches": CACHED,
+        "flakes": [],
     }
     assert trees.calls == [("lease", "h1"), ("release", "h1")]
+
+
+def report_of_tests(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, verdict: run_tests.Verdict) -> dict[str, Any]:
+    tree = folder(tmp_path, "head", {LOCK: "lock-h"})
+    suite = executors.Suite(
+        folder(tmp_path, "in", {"manifest.json": "{}"}) / "manifest.json", tmp_path / "flakes.jsonl"
+    )
+    monkeypatch.setattr(executors.run_tests, "run", Recorder(verdict))
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": tree}))
+    unit = Unit("test", "unit-key", ("tests/a.py::t", "tests/a.py::u"), "{}")
+    return report(executors.tests(pod, suite, Lease("job", "tok", "h1", unit, 1, 1500, "b1", "g1")), pod)
+
+
+@pytest.mark.feature("lab-report-flake-rows")
+def test_tests_reports_a_flaky_batchs_rows_with_the_unit_key_as_run_and_its_attempts_as_run_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder
+) -> None:
+    rows = (
+        {
+            "test": "tests/a.py::t",
+            "run": None,
+            "run_attempt": None,
+            "attempts": 2,
+            "outcome": "flaky",
+            "errors": ["first attempt fails"],
+            "tracebacks": ["Traceback"],
+        },
+        {
+            "test": "tests/a.py::u",
+            "errors": ["pytest exited with code 2"],
+            "tracebacks": [],
+            "attempts": 2,
+            "outcome": "flaky",
+        },
+    )
+    verdict = run_tests.Verdict(PASSED, True, (), {}, 2, tmp_path / "log.txt", tmp_path / "cov", rows)
+
+    flakes = report_of_tests(monkeypatch, tmp_path, verdict)["flakes"]
+
+    assert flakes == [
+        {
+            "test": "tests/a.py::t",
+            "run": "unit-key",
+            "run_attempt": 2,
+            "attempts": 2,
+            "outcome": "flaky",
+            "errors": ["first attempt fails"],
+            "tracebacks": ["Traceback"],
+        },
+        {
+            "test": "tests/a.py::u",
+            "errors": ["pytest exited with code 2"],
+            "tracebacks": [],
+            "attempts": 2,
+            "outcome": "flaky",
+            "run": "unit-key",
+            "run_attempt": 2,
+        },
+    ]
+
+
+@pytest.mark.feature("lab-report-flake-rows")
+def test_tests_reports_no_flake_rows_for_a_red_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder
+) -> None:
+    verdict = run_tests.Verdict(FAILED, False, (), {}, 2, tmp_path / "log.txt", tmp_path / "cov")
+
+    assert report_of_tests(monkeypatch, tmp_path, verdict)["flakes"] == []
 
 
 @pytest.fixture

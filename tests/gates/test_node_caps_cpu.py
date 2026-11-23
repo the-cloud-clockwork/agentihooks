@@ -1,8 +1,10 @@
+import ast
 import json
 import subprocess
 import sys
 import warnings
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -119,3 +121,72 @@ def test_lazy_dispatch_preserves_the_default_intent_mode(tmp_path: Path, monkeyp
     gate = intent.IntentGate()
     monkeypatch.setattr(gate, "decide", decide)
     assert entry._decide(gate, Call("Bash", {}), Who(), tmp_path).reason == "enforce"
+
+
+@pytest.mark.feature("gate-entry-mode-dispatch")
+def test_the_entry_hands_the_mode_to_the_intent_gate_and_three_arguments_to_any_other(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.gates import entry, intent
+    from scripts.gates.base import Call, Decision, Who
+    from scripts.gates.verdicts import Verdicts
+
+    seen: list[tuple[object, ...]] = []
+
+    def recording(*given: object) -> Decision:
+        seen.append(given)
+        return Decision.deny("held")
+
+    moded = intent.IntentGate()
+    monkeypatch.setattr(moded, "decide", recording)
+    call, who = Call("Bash", {}), Who()
+    assert entry._decide(moded, call, who, tmp_path, "coach").reason == "held"
+    [(got_call, got_who, state, mode)] = seen
+    assert got_call is call and got_who is who and mode == "coach" and isinstance(state, Verdicts)
+    seen.clear()
+
+    class Plain:
+        name = "plain"
+        default_mode = "enforce"
+
+        def matches(self, call: Call) -> bool:
+            return True
+
+        def decide(self, call: Call, who: Who, state: object) -> Decision:
+            return recording(call, who, state)
+
+    assert entry._decide(Plain(), call, who, tmp_path, "coach").reason == "held"
+    [(got_call, got_who, state)] = seen
+    assert got_call is call and got_who is who and isinstance(state, Verdicts)
+
+
+@pytest.mark.feature("gate-entry-mode-dispatch")
+def test_every_decide_call_of_the_entry_passes_what_the_type_of_its_gate_declares() -> None:
+    from scripts.gates import base, entry
+
+    def arguments(module: ModuleType, name: str) -> int:
+        declared = ast.parse(Path(str(module.__file__)).read_text(encoding="utf-8"))
+        found = [
+            len(item.args.args) - 1
+            for node in ast.walk(declared)
+            if isinstance(node, ast.ClassDef) and node.name == name
+            for item in node.body
+            if isinstance(item, ast.FunctionDef) and item.name == "decide"
+        ]
+        return found[0] if found else -1
+
+    takes = {"Gate": arguments(base, "Gate"), "ModeGate": arguments(entry, "ModeGate")}
+    tree = ast.parse(Path(str(entry.__file__)).read_text(encoding="utf-8"))
+    calls: list[tuple[int, str, int, int]] = []
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef):
+            continue
+        typed = {arg.arg: arg.annotation.id for arg in function.args.args if isinstance(arg.annotation, ast.Name)}
+        for node in ast.walk(function):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            receiver = node.func.value
+            if node.func.attr == "decide":
+                declared = typed.get(receiver.id, "") if isinstance(receiver, ast.Name) else ""
+                calls.append((node.lineno, declared, len(node.args), len(node.keywords)))
+    assert calls and [found for found in calls if found[2:] != (takes.get(found[1], -1), 0)] == []

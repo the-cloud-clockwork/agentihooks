@@ -47,7 +47,7 @@ from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest,
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
 from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused, FetchUnanswered
-from scripts.ci_lab.objects import LocalObjects, manifest_folder, unit_path, upload_path
+from scripts.ci_lab.objects import LocalObjects, flakes_path, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CRASH
 from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.static_gates import StaticGate
@@ -1177,15 +1177,15 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
         threading.Thread(target=server.serve_forever, daemon=True).start()
     api, control, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
     try:
+        body = json.dumps({"worker": "w", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
+        leased = json.loads(_read(f"{api}/lease", body))["leases"]
+        assert [grant["job"] for grant in leased] == [scheduler.job_id(HEAD_A, item)]
         capacity = json.loads(_read(f"{api}/capacity"))
-        assert capacity["classes"]["promotion"]["pending"] == 1
+        assert capacity["classes"]["promotion"]["running"] == 1
         assert capacity["budget_fraction"] == pytest.approx(0.4)
         assert capacity["shed"] == ["backfill"]
         grades = json.loads(_read(f"{api}/grades/{HEAD_A}"))
         assert [grade["run"] for grade in grades["grades"]] == [run.grade(HEAD_A).run]
-        body = json.dumps({"worker": "w", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
-        leased = json.loads(_read(f"{api}/lease", body))["leases"]
-        assert [grant["job"] for grant in leased] == [scheduler.job_id(HEAD_A, item)]
         job, token = leased[0]["job"], leased[0]["token"]
         signed = json.loads(_read(f"{api}/upload-url?job={job}&token={token}&name=report"))
         assert signed == {"url": run.lab.objects.upload_url(upload_path(job, "report"), 0)}
@@ -2910,3 +2910,45 @@ def test_the_cli_runs_the_scheduler_service_and_keeps_the_self_test(
     assert cli.main(["scheduler", "--self-test"], {}) == 0
     assert json.loads(capsys.readouterr().out)["service"] == "scheduler"
     assert len(seen) == 1
+
+
+def flake_rows(item: Unit, *tests: str) -> list[dict[str, Any]]:
+    return [{"test": test, "run": item.key, "run_attempt": 2, "attempts": 2, "outcome": "flaky"} for test in tests]
+
+
+def flakes_at(run: Run, item: Unit) -> bytes:
+    assert run.lab.objects.keys("lab/flakes/") == [flakes_path(item.kind, item.key)]
+    return run.lab.objects.read(flakes_path(item.kind, item.key))
+
+
+@pytest.mark.feature("lab-flakes-object-once")
+def test_only_a_passed_flaky_unit_with_flake_rows_writes_its_flakes_object(lab: Callable[..., Run]) -> None:
+    flaky, steady, failed, rowless, empty = (unit(number) for number in range(1, 6))
+    run = lab({HEAD_A: plan({"lint": (flaky, steady, failed, rowless, empty)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    grants = {grant.unit: grant for grant in run.lease(slots=5)}
+    rows = flake_rows(flaky, "tests/test_a.py::test_one", "tests/test_a.py::test_two")
+    run.finish(grants[flaky], "passed", {"flaky": True, "seconds": 3.5, "flakes": rows})
+    run.finish(grants[steady], "passed", {"flaky": False, "flakes": flake_rows(steady, "t")})
+    run.finish(grants[failed], "failed", {"flaky": True, "flakes": flake_rows(failed, "t")})
+    run.finish(grants[rowless], "passed", {"flaky": True})
+    run.finish(grants[empty], "passed", {"flaky": True, "flakes": []})
+    run.tick(1100)
+    assert flakes_at(run, flaky) == "".join(json.dumps(row) + "\n" for row in rows).encode()
+    assert run.store.get(flaky.kind, flaky.key) == Verdict(flaky.kind, flaky.key, True, True, 3.5)
+
+
+@pytest.mark.feature("lab-flakes-object-once")
+def test_a_second_remember_of_a_flaky_unit_keeps_the_first_flakes_object_and_verdict(lab: Callable[..., Run]) -> None:
+    flaky = unit(1)
+    first, second = (lab({head: plan({"lint": (flaky,)})}) for head in (HEAD_A, HEAD_B))
+    for run, head, seconds, test in ((first, HEAD_A, 3.5, "tests/test_a.py::test_one"), (second, HEAD_B, 9.0, "t")):
+        run.push(head)
+        run.tick(1000)
+        (grant,) = run.lease()
+        run.finish(grant, "passed", {"flaky": True, "seconds": seconds, "flakes": flake_rows(flaky, test)})
+        run.tick(1100)
+        assert run.grade(head).conclusion == "success"
+    assert json.loads(flakes_at(second, flaky)) == flake_rows(flaky, "tests/test_a.py::test_one")[0]
+    assert second.store.get(flaky.kind, flaky.key) == Verdict(flaky.kind, flaky.key, True, True, 3.5)
