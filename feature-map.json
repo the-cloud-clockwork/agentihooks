@@ -643,6 +643,46 @@
       ]
     },
     {
+      "id": "lab-retire-gone-merge-groups",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-retire-gone-merge-groups",
+      "behaviour": "The CI lab scheduler ends a merge group grade whose merge group is gone: at the start of every pass Scheduler.tick lists the merge group refs of each repository that has a live merge group grade once and closes each such grade whose head no ref carries, so its grade document and its origin are deleted, the run leaves the live set with its revision and its demand record and the pending jobs of its head are dropped unless another live grade of any repository grades the same head, while its leased jobs keep their leases, each running to completion or, once its lease expires, requeued and lost as the lost retries allow, with no check run posted, no evidence or passed tree recorded and no graded head counted. A grade whose merge group ref is listed keeps its units and its verdict, a grade pushed to a grade ref and a grade of any other class are never retired, and a ref listing git cannot produce within its timeout retires nothing of that repository while the gone grades of every other repository are retired. The scheduler keeps the origin of each live grade, its class, repository, head and grade ref, written at grade start, filled once from the grade document of a live run that has none and removed for a run that is no longer live, so a steady pass reads no grade document for this step.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with an expander that lists merge group heads, scripts.ci_lab.queue.Queue.drop over fakeredis and scripts.ci_lab.scheduler.MirrorExpander.groups over a git origin fixture",
+      "rules": [
+        "lab-pass-skips-merge-group-retire"
+      ],
+      "tests": [
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_whose_ref_is_gone_leaves_the_live_set_and_loses_its_pending_jobs",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_gone_grades_of_one_pass_are_retired_in_run_order",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_posts_nothing_and_records_no_verdict",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_no_revision_and_no_demand_record",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_forget_that_ended_before_the_live_set_exit_is_finished_by_the_next_pass",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_forget_that_ended_before_the_origin_delete_is_retired_again_by_the_next_pass",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_is_judged_by_the_merge_group_refs_of_its_own_repository",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_whose_ref_is_listed_keeps_its_units_and_its_verdict",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_listing_git_cannot_produce_retires_nothing",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_listing_git_cannot_produce_for_one_repository_still_retires_the_gone_grades_of_another",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_the_jobs_another_live_grade_of_its_head_holds",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_the_jobs_a_live_grade_of_its_head_in_another_repository_holds",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_its_leased_jobs_running",
+        "tests/ci_lab/test_scheduler_retire.py::test_an_expired_lease_of_a_retired_merge_group_grade_is_requeued_once_and_then_lost",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_pushed_to_a_grade_ref_is_never_retired",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_pull_request_grade_is_never_retired_for_a_missing_merge_group_ref",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_grade_records_its_origin_when_it_starts",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_gets_one_from_its_grade_document",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_grade_document_with_no_ref_gives_an_origin_with_an_empty_ref",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_gets_its_grade_ref_from_its_grade_document",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_run_with_no_grade_document_holds_no_other_origin_back",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_pass_reads_a_grade_document_for_the_origins_only_when_a_live_grade_has_no_origin",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_is_retired_in_the_pass_that_records_it",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_origin_of_a_run_that_is_no_longer_live_is_removed",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_mirror_expander_lists_the_head_of_every_merge_group_ref",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_mirror_expander_fails_for_a_repository_git_cannot_list",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_mirror_expander_bounds_the_merge_group_listing_by_its_timeout",
+        "tests/ci_lab/test_queue.py::test_drop_removes_the_pending_jobs_of_a_head_and_keeps_its_leased_ones"
+      ]
+    },
+    {
       "id": "lab-lease-class-order",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
@@ -12533,6 +12573,23 @@
         "tests/ci_lab/test_run_mutation.py::test_the_warm_runner_grades_every_corpus_mutant_as_the_selection_gate_does",
         "tests/ci_lab/test_run_mutation.py::test_a_runner_that_grades_a_killable_mutant_survived_fails_the_equivalence",
         "tests/ci_lab/test_run_mutation.py::test_the_fixed_cost_per_mutant_is_a_fraction_of_the_one_collection"
+      ]
+    },
+    {
+      "id": "lab-mutants-read-no-mutmut-config",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs-mutation",
+      "behaviour": "The CI lab generates mutants without reading mutmut's config: the worker's trampolining and the scheduler's expansion name the same mutants from any working directory, also one that holds no project file, and leave mutmut's process wide config unloaded, so a worker whose working directory mutmut cannot guess a source path from still runs mutation units. The lab applies no do_not_mutate_patterns, and the lines a file's own pragmas mark stay unmutated. The mutant generator takes the patterns as an argument: given patterns keep the same lines from mutation as the same patterns in mutmut's config, and without the argument it reads mutmut's config, as the CI mutation gate does inside mutmut's own run.",
+      "seam": "scripts.ci_lab.run_mutation.trampoline and scripts.ci_lab.expand_mutation.mutant_units called from a working directory with no mutmut config and with mutmut's config unloaded, and scripts.ci_mutation.selection.created_mutations and selected_mutants given patterns",
+      "rules": [
+        "lab-mutants-read-mutmut-config"
+      ],
+      "tests": [
+        "tests/ci_lab/test_run_mutation.py::test_trampoline_reads_no_mutmut_config_from_the_working_directory",
+        "tests/ci_lab/test_expand_mutation.py::test_mutant_units_read_no_mutmut_config_from_the_working_directory",
+        "tests/test_ci_mutation_selection.py::test_given_patterns_keep_the_lines_mutmut_config_patterns_keep_from_mutation",
+        "tests/test_ci_mutation_selection.py::test_a_line_a_given_pattern_matches_gets_no_mutant",
+        "tests/test_ci_mutation_selection.py::test_given_patterns_load_no_mutmut_config"
       ]
     },
     {
