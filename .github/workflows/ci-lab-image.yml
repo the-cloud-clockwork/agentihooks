@@ -49,7 +49,7 @@ jobs:
       IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-ci-lab-worker
       CANDIDATE: agentihooks-ci-lab-worker-candidate:${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: ${{ github.event_name == 'release' && '0' || '1' }}
           persist-credentials: false
@@ -62,7 +62,7 @@ jobs:
           if [[ "$newest" == "$GITHUB_REF_NAME" ]]; then latest=true; else latest=false; fi
           echo "latest=$latest" >> "$GITHUB_OUTPUT"
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
