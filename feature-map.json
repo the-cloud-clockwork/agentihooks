@@ -531,6 +531,11 @@
       "rules": [
         "lab-authoritative-gate-the-lab-cannot-grade"
       ],
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.feature_checks.lab_authority"
+      ],
       "tests": [
         "tests/ci_lab/test_delivery.py::test_the_repository_file_lists_lint_type_gate_and_test_count_as_lab_authoritative",
         "tests/test_lab_authority_check.py::test_the_checkout_holds_every_part_of_the_lab_authority_and_each_is_listed",
