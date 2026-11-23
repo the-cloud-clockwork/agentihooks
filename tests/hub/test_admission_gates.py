@@ -29,7 +29,7 @@ def gates() -> Iterator[SimpleNamespace]:
     def slow() -> None:
         now[0] += EXPORT_MS
 
-    ledger = DocLedger(found, moving=True, export=slow)
+    ledger: Any = DocLedger(found, moving=True, export=slow)
     rows = {row["id"]: row for row in found["tasks"]}
     admitter = admission.Admission(store, ledger, readiness.Source(store, ledger), clock=lambda: now[0])
     yield SimpleNamespace(store=store, ledger=ledger, rows=rows, found=found, admitter=admitter)

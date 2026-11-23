@@ -3,7 +3,7 @@ own task selection and focus verdict code, so a fake never judges a gate its own
 
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm.health import focus_check
 from scripts.swarm_ledger.api import resources
@@ -18,7 +18,7 @@ class NarrowReads:
     def _row(self, slug: str, collection: str, item_id: str) -> dict[str, Any] | None:
         rows: list[dict[str, Any]] = self.document(slug).get(collection) or []
         found = next((row for row in rows if row.get("id") == item_id), None)
-        return None if found is None else dict(resources.project(found))  # pyright: ignore[reportArgumentType]
+        return None if found is None else {**cast(dict[str, Any], resources.project(found))}
 
     def task(self, slug: str, task_id: str) -> dict[str, Any] | None:
         return self._row(slug, "tasks", task_id)
