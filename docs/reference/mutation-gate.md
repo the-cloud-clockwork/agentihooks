@@ -1115,7 +1115,8 @@ files. These are delivery measurements, not a current runner speed guarantee.
 
 The `mutation-plan` job of the Tests run installs only the third party
 packages that the shard planner and the empty change grade import: mutmut,
-pytest, pyyaml and tomlkit, at the specifiers `pyproject.toml` declares. Before
+pytest, pyyaml and tomlkit, at the exact pins `.github/test-requirements.lock`
+holds. Before
 [pull request 5439](https://github.com/the-cloud-clockwork/agentihooks/pull/5439)
 the job installed the whole project with `.[dev,all]`, 95 packages, only to
 size shards. It now resolves and installs 20 packages in about one second. The
@@ -1127,15 +1128,15 @@ still install `.[dev,all]`.
 
 ```yaml
       - name: Install dependencies
-        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest==9.1.1" "pyyaml==6.0.3" "tomlkit==0.15.2"
 ```
 
-| Package | Specifier | Declared in `pyproject.toml` | Planner module that imports it at module level |
+| Package | Pin in `.github/test-requirements.lock` | Declared in `pyproject.toml` | Planner module that imports it at module level |
 |---|---|---|---|
 | `mutmut` | `==3.6.0` | `dev` extra | `scripts.ci_mutation.selection` |
-| `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `scripts.ci_mutation.selection` |
-| `pyyaml` | `>=6.0` | project dependencies | `scripts.dep_manifest` (imported as `yaml`) |
-| `tomlkit` | `>=0.12` | project dependencies | `scripts.ci_mutation.runner` |
+| `pytest` | `==9.1.1` | `dev` extra | `scripts.ci_mutation.killers`, `scripts.ci_mutation.selection` |
+| `pyyaml` | `==6.0.3` | project dependencies | `scripts.dep_manifest` (imported as `yaml`) |
+| `tomlkit` | `==0.15.2` | project dependencies | `scripts.ci_mutation.runner` |
 
 - The packages go into the runner's system Python 3.12. The project itself is
   not installed: **Size mutation shards from stored timings** runs
@@ -1157,8 +1158,8 @@ still install `.[dev,all]`.
 
 `test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pins`
 in `tests/test_ci_workflow.py` keeps the step, the planner and
-`.github/test-requirements.lock` in agreement. `PLANNER_PACKAGES` in the same file maps each installed
-distribution to its import name:
+`.github/test-requirements.lock` in agreement. `PLANNER_PACKAGES` in the same
+file maps each installed distribution to its import name:
 
 ```python
 PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "tomlkit": "tomlkit"}
@@ -1226,9 +1227,9 @@ Stats parts: 1
 | Symptom | Cause and fix |
 |---|---|
 | **Size mutation shards from stored timings** or **Grade the empty change set** fails with `ModuleNotFoundError` | A planner path imports a package the step does not install. A module level import also fails the contract test; an import inside a function does not. Add the package as described in [Adding a planner dependency](#adding-a-planner-dependency). |
-| The contract test fails on the `run` line | The step and `pyproject.toml` disagree on a specifier, the order or the retry wrapper. Copy the specifier from `pyproject.toml` into the step. |
+| The contract test fails on the `run` line | The step and `.github/test-requirements.lock` disagree on a pin, the order, the constraint or the retry wrapper. Copy the exact pin from `.github/test-requirements.lock` into the step. |
 | The contract test fails on the import set | A planner module gained or dropped a third party import. Add or remove the package in `PLANNER_PACKAGES` and in the step. |
-| The test raises `KeyError` with a package name | A `PLANNER_PACKAGES` entry is declared in neither the project dependencies nor the `dev` extra. Declare it there. |
+| The test raises `KeyError` with a package name | A `PLANNER_PACKAGES` distribution has no exact pin in `.github/test-requirements.lock`. Declare it in the project dependencies or the `dev` extra, then regenerate the lock with `bash .github/scripts/lock-test-deps.sh`. |
 | The step fails with `Python package index unavailable` | The package index did not answer within the retry window. This is not a code verdict; rerun the job. |
 
 ### Plan job dependency delivery evidence
