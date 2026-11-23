@@ -7,7 +7,7 @@ from contextlib import contextmanager
 import pytest
 
 from scripts.ci_lab import budget, lease_api, metrics, scheduler
-from scripts.ci_lab.capacity import Load
+from scripts.ci_lab.capacity import Load, document
 from tests.ci_lab.test_scheduler import HEAD_A, Run, _read, plan, unit
 from tests.ci_lab.test_scheduler import lab as _lab
 
@@ -27,6 +27,11 @@ def _fresh(run: Run, load: Callable[[int], Load], now: int) -> set[str]:
     spending = budget.Budget(run.lab.client, lambda: now, POLICY)
     metrics.observe_load(registry, budget.observe(load(now), spending.status()))
     return _samples(registry.render())
+
+
+def _document(run: Run, load: Callable[[int], Load], now: int) -> object:
+    spending = budget.Budget(run.lab.client, lambda: now, POLICY)
+    return json.loads(json.dumps(document(budget.observe(load(now), spending.status()))))
 
 
 def _named(served: set[str], fresh: set[str]) -> set[str]:
@@ -138,3 +143,77 @@ def test_the_metrics_port_rebuilds_the_load_on_its_own_cadence_and_serves_the_fr
     assert f"{RUNNING} 1.0" in _samples(text)
     fresh = _fresh(run, load, later)
     assert _named(_samples(text), fresh) == fresh
+
+
+@pytest.mark.feature("lab-scheduler-capacity-cached")
+def test_two_capacity_reads_in_a_row_build_the_load_once(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _started(lab)
+    builds, _ = _counted(run, monkeypatch)
+    with _serving(run, [1000]) as (api, _):
+        first = json.loads(_read(f"{api}/capacity"))
+        second = json.loads(_read(f"{api}/capacity"))
+    assert builds == [1000]
+    assert first == second
+
+
+@pytest.mark.feature("lab-scheduler-capacity-cached")
+def test_a_capacity_read_and_a_scrape_share_one_load_build(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _started(lab)
+    builds, _ = _counted(run, monkeypatch)
+    with _serving(run, [1000]) as (api, exposition):
+        capacity = json.loads(_read(f"{api}/capacity"))
+        assert len(json.loads(_read(f"{api}/lease", LEASE))["leases"]) == 1
+        served = _samples(_read(exposition).decode())
+    assert builds == [1000]
+    assert capacity["classes"]["promotion"]["running"] == 0
+    assert f"{RUNNING} 0.0" in served
+
+
+@pytest.mark.feature("lab-scheduler-capacity-cached")
+def test_the_capacity_document_equals_a_fresh_build_of_the_same_state(lab: Callable[..., Run]) -> None:
+    run = _started(lab)
+    assert len(run.lease()) == 1
+    with _serving(run, [1000]) as (api, _):
+        capacity = json.loads(_read(f"{api}/capacity"))
+    assert capacity["classes"]["promotion"]["running"] == 1
+    assert capacity == _document(run, run.engine.load, 1000)
+
+
+@pytest.mark.feature("lab-scheduler-capacity-cached")
+def test_the_capacity_route_serves_the_build_the_metrics_port_refreshed(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _started(lab)
+    builds, load = _counted(run, monkeypatch)
+    later = 1000 + scheduler.REFRESH_MS
+    now = [1000]
+    with _serving(run, now) as (api, exposition):
+        assert json.loads(_read(f"{api}/capacity"))["classes"]["promotion"]["running"] == 0
+        assert len(json.loads(_read(f"{api}/lease", LEASE))["leases"]) == 1
+        now[0] = later
+        assert AGE_ZERO in _poll(exposition, AGE_ZERO)
+        capacity = json.loads(_read(f"{api}/capacity"))
+    assert builds == [1000, later]
+    assert capacity["classes"]["promotion"]["running"] == 1
+    assert capacity == _document(run, load, later)
+
+
+@pytest.mark.feature("lab-scheduler-capacity-cached")
+def test_the_grades_route_reads_every_request_beside_the_cached_capacity(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _started(lab)
+    builds, _ = _counted(run, monkeypatch)
+    graded = run.grade(HEAD_A).run
+    with _serving(run, [1000]) as (api, _):
+        assert json.loads(_read(f"{api}/capacity"))["classes"]["promotion"]["pending"] == 2
+        first = json.loads(_read(f"{api}/grades/{HEAD_A}"))["grades"]
+        run.lab.client.delete(scheduler.GRADES + graded)
+        second = json.loads(_read(f"{api}/grades/{HEAD_A}"))["grades"]
+    assert [grade["run"] for grade in first] == [graded]
+    assert second == []
+    assert builds == [1000]
