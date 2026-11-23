@@ -1,0 +1,17 @@
+rules:
+  - id: proc-read-gone-on-missing-file-alone
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A per pid proc file is read inside a try that catches FileNotFoundError alone. The open succeeds while the
+      process lives; once the process is reaped the read fails with ESRCH, which Python raises as ProcessLookupError,
+      so the probe raises where it should answer gone. On 23 November a lab sandbox job failed on exactly that in the
+      gone probe of the sandbox tests, the fourth probe to meet it. Catch ProcessLookupError beside FileNotFoundError,
+      or OSError.
+    patterns:
+      - pattern-inside: |
+          try:
+              ...
+          except FileNotFoundError:
+              ...
+      - pattern-regex: /proc/\{[^}]+\}/\w+
