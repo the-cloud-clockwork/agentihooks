@@ -189,7 +189,7 @@ def run_startup(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         if not completed:
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=5)
+        process.wait(timeout=10)
 
 
 @pytest.mark.feature("ledger-writer-hosts")
