@@ -477,6 +477,19 @@
       ]
     },
     {
+      "id": "gate-required-split-jobs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
+      "behaviour": "The protected grader accepts the Gate Required aggregation that requires the collect and lint-actions jobs only in its exact reviewed rendering and only when the gate needs name both jobs; that rendering requires both to succeed on pull requests, collect to succeed and lint-actions to be skipped on merge groups, and lets both be skipped on a dev push, so a skipped or cancelled run of either on a pull request is red.",
+      "seam": "scripts.ci_reuse.split_required over scripts.ci_reuse.gate_steps, scripts.gate_protected.grade and scripts.ci_gate_queue.normalize",
+      "tests": [
+        "tests/test_gate_protected_split.py::test_split_admission_requires_the_exact_reviewed_aggregation_and_both_jobs",
+        "tests/test_gate_protected_split.py::test_split_aggregation_requires_both_jobs_to_succeed_on_pull_requests",
+        "tests/test_gate_protected_split.py::test_split_aggregation_requires_collection_on_the_queue_and_skips_both_jobs_on_promotion",
+        "tests/test_ci_gate_queue.py::test_the_early_gate_accepts_the_split_jobs_only_together"
+      ]
+    },
+    {
       "id": "swarm-refusal-size-warnings",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-limit-scope",

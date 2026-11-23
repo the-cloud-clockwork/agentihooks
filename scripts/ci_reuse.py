@@ -242,6 +242,11 @@ def ledger_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{**aggregation, "run": aggregation["run"].replace(*LEDGER_REQUIRED)}, *rest]
 
 
+def split_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the aggregation that requires the collect and lint-actions jobs split out of test-count and lint."""
+    return steps
+
+
 def summary_steps() -> list[dict[str, Any]]:
     return yaml.safe_load(Path(__file__).with_name("ci_gate_summary_steps.yml").read_text())
 
