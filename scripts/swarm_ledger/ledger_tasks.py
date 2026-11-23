@@ -790,8 +790,8 @@ def _update(doc, op, ctx):
     return True
 
 
-def _relay_rank(doc, op, ctx):
-    from scripts.swarm_ledger.ledger_relay import RELAYED_FROM, relayed
+def _relay_rank(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+    from scripts.swarm_ledger.ledger_relay import marks_of, relayed
 
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
     rank, words = ledger_rank.canonical(op["fields"]["rank"]), relayed(op, ctx.meta)
@@ -803,7 +803,7 @@ def _relay_rank(doc, op, ctx):
         return False
     task["rank"] = rank
     ctx.stamp(f"{op['item']}/rank", ledger_rank.OPERATOR)
-    marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
+    marks = marks_of(op, {"quote": words})
     ctx.record(ledger_rank.OPERATOR, "rank set", op["item"], text=rank, **marks)
     return True
 
