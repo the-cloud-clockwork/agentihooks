@@ -601,7 +601,16 @@ def test_storage_read_helpers_read_the_shared_database_when_its_url_is_set(monke
         "fenced",
     ]
     assert all(isinstance(entry[1], postgres.Database) for entry in seen[1:])
-    assert [entry[2:] for entry in seen[1:]] == [("s",), ("s", "tasks"), ("s", "a"), ("a", "b"), ("bin",), (), ("s",)]
+    assert [entry[2:] for entry in seen[1:]] == [
+        ("s",),
+        ("s", ("phases",), ("done",)),
+        ("s", "tasks"),
+        ("s", "a"),
+        ("a", "b"),
+        ("bin",),
+        (),
+        ("s",),
+    ]
 
 
 def test_a_shared_database_never_adopts_files_left_in_a_host_folder(tmp_path, monkeypatch):

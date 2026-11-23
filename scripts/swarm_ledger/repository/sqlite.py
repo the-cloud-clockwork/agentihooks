@@ -213,8 +213,41 @@ def read_ids(directory, slug: str, collection: str) -> tuple:
 def read_flags(
     directory: object, slug: str, collections: tuple[str, ...], names: tuple[str, ...]
 ) -> dict[str, list[dict[str, object]]]:
-    """Each item of the named collections with only its `names` fields, read from those rows alone."""
-    return {}
+    """Each item of the named collections with only its `names` fields, read from those rows alone.
+
+    Every named collection maps to its items in stored order; {} when the folder holds no readable database.
+    """
+    with read_only(directory) as connection:
+        if connection is None:
+            return {}
+        try:
+            with connection:
+                connection.execute(BEGIN)
+                return {collection: item_fields(connection, slug, collection, names) for collection in collections}
+        except sqlite3.OperationalError:
+            return {}
+
+
+def item_fields(connection: Any, slug: str, collection: str, names: tuple[str, ...]) -> list[dict[str, object]]:
+    """The `names` leaf values of each item of one stored collection, from the item rows and those leaf rows."""
+    parent = encode([collection])
+    prefix = scope([collection])[1]
+    keys = tuple(encode(name) for name in names)
+    marks = ",".join("?" * len(keys))
+    positions: dict[str, int] = {}
+    fields: dict[str, dict[str, object]] = {}
+    for table in TABLES:
+        for path, position in connection.execute(
+            f"SELECT path, position FROM {table} WHERE slug=? AND parent=?", (slug, parent)
+        ):
+            positions[path] = position
+        for owner, key, value in connection.execute(
+            f"SELECT parent, key, value FROM {table} "
+            f"WHERE slug=? AND path > ? AND path < ? AND kind='value' AND key IN ({marks})",
+            (slug, prefix, prefix + PATH_END, *keys),
+        ):
+            fields.setdefault(owner, {})[json.loads(key)] = json.loads(value)
+    return [fields.get(path, {}) for path in sorted(positions, key=positions.__getitem__)]
 
 
 def read_slugs(directory) -> list:

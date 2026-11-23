@@ -42,8 +42,8 @@ def test_dispatch_hands_only_the_gate_parts_of_the_bound_ledger_to_the_handler(f
     seen = []
     monkeypatch.setitem(ledger_hook.HANDLERS, "PostToolUse", lambda payload, session, state, sfile: seen.append(state))
     ledger_hook.dispatch({"session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Read"})
-    assert [(state["tasks"], state["_meta"]["members"], "overview" in state) for state in seen] == [
-        ([{"id": "t1"}], members, False)
+    assert [("tasks" in state, state["_meta"]["members"], "overview" in state) for state in seen] == [
+        (False, members, False)
     ]
 
 
