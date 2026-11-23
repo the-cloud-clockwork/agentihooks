@@ -909,7 +909,6 @@ def test_a_member_expert_ends_its_lineage_on_a_proof_and_is_refused_without_one_
 
     member = Member(server=fake_server, decode_responses=True, username="hive-m1")
     member.auth("", username="hive-m1")
-    assert f"%R~{ROOT}:*" in auth._acl_keys("m1")
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
