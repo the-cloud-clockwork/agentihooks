@@ -13391,6 +13391,16 @@
       ]
     },
     {
+      "id": "chart-grader-sealed-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "The chart pod template grader grades a head tree whatever its permission bits: the bumped copy of a chart read from a read only tree, as the lab worker seals a leased head, carries the probe version in a Chart.yaml the grader can rewrite, and the source chart stays unchanged.",
+      "seam": "tests/ci_charts/chart_pod_templates.py bumped_copy over a chart whose files and folders carry no write bit",
+      "tests": [
+        "tests/test_ci_charts_grader.py::test_the_bumped_copy_of_a_read_only_chart_carries_the_probe_version"
+      ]
+    },
+    {
       "id": "lab-static-step-env",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-step-env",
