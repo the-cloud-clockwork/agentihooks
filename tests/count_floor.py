@@ -962,6 +962,8 @@ def main(argv: list[str] | None = None) -> int:
         help="with --base, grade only that a code owner approved each new signed retirement, without collecting",
     )
     args = parser.parse_args(argv)
+    if args.approvals and args.base is None:
+        parser.error("--approvals grades a head against a base, so it needs --base")
     if args.retire:
         return write_retirements(args.head, args.retire, args.reader, args.reason)
     if args.record:
