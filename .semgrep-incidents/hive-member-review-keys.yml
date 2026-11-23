@@ -1,0 +1,19 @@
+rules:
+  - id: hive-member-review-keys
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Keep the review record and review post counter keys in WORKER_KEYS: a reviewer on a worker hive posts
+      findings through the member's Redis grant, and without either key Redis refuses the post after the forge
+      comment already exists.
+    paths:
+      include:
+        - /scripts/hive/auth.py
+        - hive-member-review-keys.py
+    pattern-either:
+      - patterns:
+          - pattern: WORKER_KEYS = (...)
+          - pattern-not: WORKER_KEYS = (..., "swarm:*:review:*", ...)
+      - patterns:
+          - pattern: WORKER_KEYS = (...)
+          - pattern-not: WORKER_KEYS = (..., "swarm:*:review-tasks", ...)
