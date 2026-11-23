@@ -25,7 +25,7 @@ def no_host_agents(monkeypatch):
 def capped(held, of, running, cpus=10):
     return (
         f"{HIVE_FULL}, and the local machine runs {held} of its {of} agents: cpu: {running} swarm agents at 0.5 CPU "
-        f"each on {cpus} CPUs, fits {of - running} more under the 40 percent swarm share"
+        f"each by default on {cpus} CPUs, fits {of - running} more under the 40 percent swarm share"
     )
 
 
@@ -455,7 +455,7 @@ def test_pending_local_launches_hold_the_host_line_until_the_load_shows_them(set
         setup.store.put_agent(setup.config.slug, AgentRecord(f"eng {index}", "eng", f"t{index}"))
     assert fenced.placement_refusal("eng", {"id": "t4"}) == (
         f"{HIVE_FULL}, and the local machine runs 4 of its 4 agents: cpu: five minute load 6.00 on 10 CPUs, "
-        "0.5 CPU per agent with 4 pending launches, fits 0 more under the 80 percent line"
+        "0.5 CPU per agent by default with 4 pending launches, fits 0 more under the 80 percent line"
     )
     assert setup.herdr.spawn.call_count == 4
 
@@ -491,7 +491,7 @@ def test_the_host_line_leaves_out_the_task_itself_and_measures_without_pending(s
     setup.store.put_agent(setup.config.slug, AgentRecord("eng-self", "eng", "task"))
     assert fenced.placement_refusal("eng", {"id": "task"}) == (
         f"{HIVE_FULL}, and the local machine runs 4 of its 4 agents: cpu: five minute load 8.00 on 10 CPUs, "
-        "0.5 CPU per agent, fits 0 more under the 80 percent line"
+        "0.5 CPU per agent by default, fits 0 more under the 80 percent line"
     )
     assert [pending for pending, _, _ in measured] == [0] * len(measured)
     assert all(abs(now - lease.now_ms(setup.store)) < 60_000 for _, now, _ in measured)
