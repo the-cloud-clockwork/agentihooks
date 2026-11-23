@@ -20,5 +20,7 @@ def read(store: RedisStore, slug: str, key: str) -> dict[str, Any]:
 
 def write(store: RedisStore, slug: str, key: str, at: int, name: str, rows: Any) -> None:
     """Keep the check's rows under their name with the time of this pass, the time first."""
+    if name == "at":
+        raise ValueError("a check keeps its rows under a name other than at, the time of its pass")
     client: Any = store
     client.redis.set(store.key(slug, key), json.dumps({"at": at, name: rows}))

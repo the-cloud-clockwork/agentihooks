@@ -1,6 +1,7 @@
 """The health checks that keep state between tick passes store it as one JSON text under their own key of the swarm:
 the time of the pass first, their rows after it."""
 
+import importlib
 import re
 from pathlib import Path
 from types import ModuleType
@@ -93,6 +94,13 @@ def test_the_helper_reads_empty_then_what_it_wrote_under_the_key_of_that_swarm(s
 
 
 @pytest.mark.feature("health-kept-state-one-helper")
+def test_the_helper_refuses_rows_kept_under_the_name_of_the_time_of_the_pass(store: Any) -> None:
+    with pytest.raises(ValueError, match="a name other than at"):
+        kept.write(store, SLUG, "any-check", 9, "at", {"a": 1})
+    assert stored(store, "any-check") is None
+
+
+@pytest.mark.feature("health-kept-state-one-helper")
 def test_the_rule_excuses_only_checks_that_still_keep_state_on_their_own_and_did_before_the_helper() -> None:
     rule: dict[str, Any] = yaml.safe_load(RULE.read_text())["rules"][0]
     excused = {Path(path).stem for path in rule["paths"]["exclude"]} - {"kept"}
@@ -101,8 +109,24 @@ def test_the_rule_excuses_only_checks_that_still_keep_state_on_their_own_and_did
     assert [name for name in sorted(excused) if not own.search((HEALTH / f"{name}.py").read_text())] == []
 
 
+def keepers() -> list[ModuleType]:
+    """Every health check that keeps state through the helper, found in the tree."""
+    uses = re.compile(r"\bkept\.(?:read|write)\(|from scripts\.swarm\.health\.kept import")
+    found = sorted(path.stem for path in HEALTH.glob("*.py") if path.stem != "kept" and uses.search(path.read_text()))
+    return [importlib.import_module(f"scripts.swarm.health.{name}") for name in found]
+
+
+def named(check: ModuleType) -> str:
+    return check.__name__.rpartition(".")[2]
+
+
 @pytest.mark.feature("health-kept-key-own-module")
-@pytest.mark.parametrize("check", [focus_unclaimed, order_waiting])
+def test_the_checks_that_keep_state_through_the_helper_are_found_in_the_tree() -> None:
+    assert {"focus_unclaimed", "order_waiting"} <= {named(check) for check in keepers()}
+
+
+@pytest.mark.feature("health-kept-key-own-module")
+@pytest.mark.parametrize("check", keepers(), ids=named)
 def test_only_the_check_names_the_key_of_the_state_it_keeps(check: ModuleType) -> None:
     own = Path(str(check.__file__)).resolve()
     named = [
