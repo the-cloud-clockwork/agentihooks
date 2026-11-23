@@ -48,7 +48,7 @@ def test_offenders_key_each_finding_by_its_file_and_the_name_its_byte_span_cover
 @pytest.mark.feature("test-private-imports-ratchet")
 def test_grade_refuses_a_new_offender_the_list_does_not_name() -> None:
     kept = "tests/test_a.py::_kept"
-    assert gate.grade({kept, "tests/test_b.py::_new"}, {kept}, {kept}) == [
+    assert gate.grade({kept, "tests/test_b.py::_new"}, {kept}, {kept}, {kept}) == [
         "tests/test_b.py imports the private name _new from another test module; "
         "make the helper public in a shared test module instead"
     ]
@@ -57,15 +57,44 @@ def test_grade_refuses_a_new_offender_the_list_does_not_name() -> None:
 @pytest.mark.feature("test-private-imports-ratchet")
 def test_grade_passes_offenders_the_list_names() -> None:
     kept = {"tests/test_a.py::_kept", "tests/test_b.py::_moved"}
-    assert gate.grade({"tests/test_b.py::_moved"}, kept, kept) == []
+    assert gate.grade({"tests/test_b.py::_moved"}, kept, kept, kept) == []
 
 
 @pytest.mark.feature("test-private-imports-ratchet")
 def test_grade_refuses_a_listed_entry_its_file_no_longer_imports() -> None:
-    assert gate.grade(set(), {"tests/test_a.py::_kept"}, {"tests/test_a.py::_kept", "tests/test_a.py::_gone"}) == [
+    listed = {"tests/test_a.py::_kept", "tests/test_a.py::_gone"}
+    assert gate.grade(set(), {"tests/test_a.py::_kept"}, listed, listed) == [
         f"{gate.ALLOWLIST} lists tests/test_a.py::_gone, which its file no longer imports; "
         "run python -m scripts.private_test_imports write"
     ]
+
+
+@pytest.mark.feature("test-private-imports-ratchet")
+def test_grade_passes_a_stale_entry_in_a_file_the_change_did_not_touch() -> None:
+    assert gate.grade(set(), set(), {"tests/test_a.py::_gone"}, set()) == []
+
+
+@pytest.mark.feature("test-private-imports-ratchet")
+def test_changed_lists_the_files_between_the_baseline_and_head_deleted_ones_included(tmp_path: Path) -> None:
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(tmp_path), *args], capture_output=True, text=True, check=True).stdout
+
+    git("init", "-q")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "test")
+    _module(tmp_path, "tests/test_a.py", "a = 1\n")
+    _module(tmp_path, "tests/test_b.py", "b = 1\n")
+    _module(tmp_path, "tests/test_c.py", "c = 1\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "base")
+    baseline = git("rev-parse", "HEAD").strip()
+    _module(tmp_path, "tests/test_a.py", "a = 2\n")
+    (tmp_path / "tests/test_b.py").unlink()
+    git("add", "-A")
+    git("commit", "-q", "-m", "head")
+    assert gate.changed(baseline, tmp_path) == {Path("tests/test_a.py"), Path("tests/test_b.py")}
+    with pytest.raises(SystemExit, match=r"^git diff exited 128: "):
+        gate.changed("0" * 40, tmp_path)
 
 
 @pytest.mark.feature("test-private-imports-ratchet")
@@ -108,14 +137,15 @@ def test_scan_refuses_a_semgrep_run_that_fails(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.feature("test-private-imports-ratchet")
-def test_check_grades_new_findings_and_rescans_only_the_listed_files_that_exist(
+def test_check_grades_new_findings_and_rescans_only_the_listed_files_the_change_touches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     kept = _HEADER + "from tests.b import _kept\n"
     new = "from tests.c import _new\n"
     _module(tmp_path, "tests/test_a.py", kept)
     _module(tmp_path, "tests/test_b.py", new)
-    _listed(tmp_path, ["tests/test_a.py::_kept", "tests/test_gone.py::_lost"])
+    _module(tmp_path, "tests/test_other.py", "from tests.d import _untouched\n")
+    _listed(tmp_path, ["tests/test_a.py::_kept", "tests/test_gone.py::_lost", "tests/test_other.py::_untouched"])
     calls: list[tuple[list[Path], list[Path], str | None]] = []
 
     def scan(rules: list[Path], targets: list[Path], baseline: str | None = None) -> dict[str, Any]:
@@ -124,7 +154,11 @@ def test_check_grades_new_findings_and_rescans_only_the_listed_files_that_exist(
             return {"results": [_finding("tests/test_a.py", kept, "_kept")]}
         return {"results": [_finding("tests/test_b.py", new, "_new"), _finding("tests/test_a.py", kept, "_kept")]}
 
+    touched = {Path("tests/test_a.py"), Path("tests/test_b.py"), Path("tests/test_gone.py")}
     monkeypatch.setattr(gate, "scan", scan)
+    monkeypatch.setattr(
+        gate, "changed", lambda baseline, root: touched if (baseline, root) == ("abc", tmp_path) else set()
+    )
     assert gate.check("abc", tmp_path / "grader", tmp_path) == 1
     assert calls == [([gate.RULE], [gate.TESTS], "abc"), ([gate.RULE], [Path("tests/test_a.py")], None)]
     assert capsys.readouterr().out.splitlines() == [
@@ -132,7 +166,7 @@ def test_check_grades_new_findings_and_rescans_only_the_listed_files_that_exist(
         "make the helper public in a shared test module instead",
         f"::error::{gate.ALLOWLIST} lists tests/test_gone.py::_lost, which its file no longer imports; "
         "run python -m scripts.private_test_imports write",
-        "2 listed private test imports, 1 new, 1 no longer imported",
+        "3 listed private test imports, 1 new, 1 no longer imported",
     ]
 
 
@@ -145,21 +179,26 @@ def test_check_passes_when_the_list_names_every_offender(
     _listed(tmp_path, ["tests/test_a.py::_kept"])
     _module(tmp_path, f"grader/{gate.RULE}", "rules: []\n")
     rules = [gate.RULE, tmp_path / "grader" / gate.RULE]
+    calls: list[str | None] = []
 
     def scan(given: list[Path], targets: list[Path], baseline: str | None = None) -> dict[str, Any]:
         assert given == rules
+        calls.append(baseline)
         return {"results": [_finding("tests/test_a.py", kept, "_kept")]}
 
     monkeypatch.setattr(gate, "scan", scan)
+    monkeypatch.setattr(gate, "changed", lambda baseline, root: {Path("tests/test_a.py")})
     assert gate.check("abc", tmp_path / "grader", tmp_path) == 0
+    assert calls == ["abc", None]
     assert capsys.readouterr().out == "1 listed private test imports, 0 new, 0 no longer imported\n"
 
 
 @pytest.mark.feature("test-private-imports-ratchet")
-def test_check_skips_the_listed_scan_when_no_listed_file_exists(
+def test_check_skips_the_listed_scan_when_the_change_touches_no_listed_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _listed(tmp_path, [])
+    _module(tmp_path, "tests/test_a.py", "from tests.b import _kept\n")
+    _listed(tmp_path, ["tests/test_a.py::_kept"])
     calls: list[str | None] = []
 
     def scan(rules: list[Path], targets: list[Path], baseline: str | None = None) -> dict[str, Any]:
@@ -167,9 +206,10 @@ def test_check_skips_the_listed_scan_when_no_listed_file_exists(
         return {"results": []}
 
     monkeypatch.setattr(gate, "scan", scan)
+    monkeypatch.setattr(gate, "changed", lambda baseline, root: {Path("tests/test_b.py")})
     assert gate.check("abc", None, tmp_path) == 0
     assert calls == ["abc"]
-    assert capsys.readouterr().out == "0 listed private test imports, 0 new, 0 no longer imported\n"
+    assert capsys.readouterr().out == "1 listed private test imports, 0 new, 0 no longer imported\n"
 
 
 @pytest.mark.feature("test-private-imports-ratchet")
