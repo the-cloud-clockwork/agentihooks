@@ -231,7 +231,7 @@ class TestEntry:
         assert code == 1
         assert (
             err
-            == "agentihooks gate: name one gate of: brain, build, claim-stop, identity, intent, node-caps, one-push, placement, prompts, push-stop, quiet, recon, reruns, sign-ins, subagents, terminations, watch\n"
+            == "agentihooks gate: name one gate of: brain, build, claim-stop, expert-stop, identity, intent, node-caps, one-push, placement, prompts, push-stop, quiet, recon, reruns, sign-ins, subagents, terminations, watch\n"
         )
 
     def test_unknown_gate_lists_every_gate(self, monkeypatch):
@@ -251,6 +251,7 @@ class TestEntry:
             "brain",
             "build",
             "claim-stop",
+            "expert-stop",
             "identity",
             "intent",
             "one-push",

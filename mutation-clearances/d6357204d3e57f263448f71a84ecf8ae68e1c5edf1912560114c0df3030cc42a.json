@@ -1,0 +1,6 @@
+{
+  "scripts/feature_checks/expert_claims.py:scripts.feature_checks.expert_claims.x_judged:ade13feec7d3d07bc5d98045c7b877ee22fc5bcc7952478fcc973775fc86832f": {
+    "reader": "standards_reader",
+    "reason": "In judged the fallback only applies when claimed_by is falsy, and lane_of returns '' for both \"\" and \"XXXX\", so the claimed list is unchanged."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/expert_lineage.py:scripts.swarm.expert_lineage.x_mission:816ef326b35b34efd25120a91b458c979abf1c6ec51308353a84ef17bc1b432b": {
+    "reader": "standards_reader",
+    "reason": "A lineage is read only in a swarm whose config exists, and every config writer holds its slug to SLUG_RE or PROOF_RE, neither of which allows a slash, so the address holds one slash and both splits read the same digest."
+  }
+}
