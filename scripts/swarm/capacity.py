@@ -9,7 +9,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, account_key
-from scripts.swarm import autoscale, freeze, host_budget, master_pin
+from scripts.swarm import autoscale, freeze, host_budget, master_pin, plan_cap_floor
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import AUTO_SCALING, AgentRecord, RedisStore, SwarmConfig
@@ -547,15 +547,16 @@ def warned_accounts(observations: list[Account], environ: dict[str, str]) -> dic
 def autoscaled(
     config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None
 ) -> tuple[SwarmConfig, dict[str, Any] | None]:
+    demand: dict[str, int] = inputs.demand or dict.fromkeys(LANES, 0)
     if config.scaling != AUTO_SCALING:
-        return config, None
+        return plan_cap_floor.manual(config, demand), None
     host = host or granted(host_room(config, inputs), inputs.previous, inputs.now_ms)
     stored = inputs.previous.get("autoscale") or {}
     previous = {
         "ceilings": stored.get("ceilings") or _scaled(_configured(config)),
         "pending_raise": stored.get("pending_raise") or {"target": None, "ticks": 0},
     }
-    demand = {lane: (inputs.demand or {}).get(lane, 0) for lane in LANES}
+    demand = {lane: demand.get(lane, 0) for lane in LANES}
     free = _placeable(_open(inputs.observations, inputs.warned))
     decision = autoscale.calculate(
         _busy(inputs.agents),
@@ -566,7 +567,7 @@ def autoscaled(
         now_ms=inputs.now_ms,
         review=autoscale.Review(config.review_share, _harnesses(config, autoscale.REVIEW)),
     )
-    caps = decision["ceilings"]
+    caps = decision["ceilings"] = plan_cap_floor.ceilings(decision["ceilings"], demand)
     reviewers = caps.get(autoscale.REVIEW, config.max_review)
     scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"], max_review=reviewers)
     return scaled, {**decision, "host": host}

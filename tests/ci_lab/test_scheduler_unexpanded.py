@@ -1,5 +1,7 @@
+import ast
 import json
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 import yaml
@@ -8,8 +10,32 @@ from scripts.ci_lab import scheduler
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.manifests import FetchPending, FetchUnanswered
-from tests.ci_lab.test_scheduler import BASE, HEAD_A, HEAD_B, REPO, SLUG, Run, plan, unit
+from scripts.ci_lab.objects import LocalObjects
+from scripts.ci_lab.retry import Policy
+from scripts.ci_lab.webhooks import HeadEvent
+from tests.ci_lab.test_scheduler import (
+    ACTOR,
+    ALPHA,
+    BASE,
+    DELIVERY,
+    HEAD_A,
+    HEAD_B,
+    REPO,
+    SLUG,
+    SUITE_MANIFEST,
+    Expander,
+    Inbox,
+    Lab,
+    Port,
+    Run,
+    _commit,
+    _suite,
+    fake_redis,
+    plan,
+    unit,
+)
 from tests.ci_lab.test_scheduler import lab as _lab
+from tests.ci_lab.test_scheduler import staticless as staticless
 
 lab = _lab
 
@@ -44,6 +70,35 @@ def test_a_grade_ref_head_that_cannot_expand_posts_no_check_run(lab: Callable[..
     assert run.lab.poster.posts == []
     assert run.lab.repos == []
     assert run.grades() == []
+
+
+@pytest.mark.feature("lab-unparsable-head-dropped")
+@pytest.mark.usefixtures("staticless")
+def test_a_promotion_head_whose_changed_python_does_not_parse_is_dropped_and_the_pass_starts_the_next_head(
+    tmp_path: Path,
+) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    source = ALPHA.replace("return 2", "return (2")
+    broken = _commit(suite.repo, {"scripts/alpha.py": source})
+    with pytest.raises(SyntaxError) as unparsable:
+        ast.parse(source.encode())
+    state = Lab(fake_redis(), LocalObjects(tmp_path / "objects"), Inbox(), Expander({}))
+    expander = Port(SUITE_MANIFEST).expander(tmp_path)
+    ports = scheduler.Ports(state.inbox, expander, state.checks, state.hotfixes, state.kube)
+    settings = scheduler.Settings(frozenset({ACTOR}), 0, Policy())
+    run = Run(state, scheduler.Scheduler(state.client, state.objects, ports, settings))
+    for lane, head in (("a", broken), ("b", suite.head)):
+        event = HeadEvent("push", suite.remote, head, suite.base, ACTOR, "pushed")
+        state.inbox.pending.append(scheduler.Head(event, lane, ""))
+    actions = run.tick(1000)
+    assert f"cannot expand {broken}: {unparsable.value}" in actions
+    reason = f"cannot expand {broken} against {suite.base}: {unparsable.value}"
+    commit = f"{suite.remote}/commit/{broken}"
+    output = Output("promotion grade cannot expand", reason, (), "unexpanded-1000", "unknown", commit)
+    refusals = [post for post in state.poster.posts if post[0] == broken]
+    assert refusals == [(broken, scheduler.REQUIRED, "completed", "failure", output, True)]
+    assert state.client.hgetall(scheduler.WAITING) == {}
+    assert [grade.head for grade in run.grades()] == [suite.head]
 
 
 @pytest.mark.feature("lab-manifest-fetch-hold-cap")

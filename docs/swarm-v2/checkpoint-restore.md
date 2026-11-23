@@ -173,6 +173,11 @@ under the same compatibility key as the controller's current worker image tag.
 Worker bootstrap marks Claude Code's first run onboarding as completed before the harness starts, so a Pod worker
 reaches its first turn and writes a native transcript that a later checkpoint can capture.
 
+During a clean drain, a worker with checkpoint storage configured also acknowledges the validated final checkpoint's
+`transcript_end` through its lease heartbeat. The controller must accept that archive watermark before completed
+worker cleanup passes its archive guard. See [completed worker cleanup](retention.md#completed-worker-cleanup) for
+configuration examples, retry limits and the outcome reference that cleanup also requires.
+
 ## Observing recovery
 
 - **Ledger page.** The task row shows `RECOVERY PENDING` while the replacement is pending, and the seat's card in

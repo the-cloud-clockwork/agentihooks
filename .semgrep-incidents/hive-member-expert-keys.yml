@@ -1,0 +1,25 @@
+rules:
+  - id: hive-member-expert-keys
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Keep the four keys expert complete writes in WORKER_KEYS: an expert on a worker hive ends its lineage through
+      the member's Redis grant, and without the lineage records, the running set, the proofs or the closing set
+      Redis refuses the completion.
+    paths:
+      include:
+        - /scripts/hive/auth.py
+        - hive-member-expert-keys.py
+    pattern-either:
+      - patterns:
+          - pattern: WORKER_KEYS = (...)
+          - pattern-not: WORKER_KEYS = (..., "swarm:*:expert-lineages", ...)
+      - patterns:
+          - pattern: WORKER_KEYS = (...)
+          - pattern-not: WORKER_KEYS = (..., "swarm:*:expert-running", ...)
+      - patterns:
+          - pattern: WORKER_KEYS = (...)
+          - pattern-not: WORKER_KEYS = (..., "swarm:*:expert-proofs", ...)
+      - patterns:
+          - pattern: WORKER_KEYS = (...)
+          - pattern-not: WORKER_KEYS = (..., "swarm:*:expert-closing", ...)

@@ -1,6 +1,6 @@
 from urllib.parse import unquote
 
-from scripts.swarm_ledger import ledger_task_duplicates, ports
+from scripts.swarm_ledger import ledger_task_duplicates, ports, request_metrics
 
 from . import receipts, resources, schemas
 from .errors import APIError
@@ -94,7 +94,8 @@ def stamped(payload: dict, worktree: str) -> dict:
 
 
 def apply(services: Services, slug: str, principal: str, payload: dict, worktree: str = "") -> dict:
-    doc = services.repository.current(slug).state
+    with request_metrics.step("guard_read"):
+        doc = services.repository.current(slug).state
     task_ids = tuple(t["id"] for t in doc.get("tasks", []))
     operations = [
         {key: value for key, value in op.items() if key != "worktree"}
@@ -113,18 +114,20 @@ def apply(services: Services, slug: str, principal: str, payload: dict, worktree
     services.media.resolve_media(slug, operations)
     services.media.resolve_artifacts(slug, operations)
     screen = ledger_task_duplicates.screen(doc, operations)
-    fence = services.ledger.write_gate(slug)
-    gate = ledger_task_duplicates.Gate(
-        screen,
-        GuardedOperations(
-            payload, fence, services.ledger.core, lambda epoch: services.ledger.authority.fence(slug, epoch), slug
-        ),
-    )
+    with request_metrics.step("write_gate"):
+        fence = services.ledger.write_gate(slug)
+        gate = ledger_task_duplicates.Gate(
+            screen,
+            GuardedOperations(
+                payload, fence, services.ledger.core, lambda epoch: services.ledger.authority.fence(slug, epoch), slug
+            ),
+        )
     state, rejected = services.repository.apply_ops(slug, ops=operations, gate=gate, copy_state=False)
-    fence.publish(rejected)
-    services.ledger.relay_to_inbox(slug, state)
-    services.swarm.doctor_phrase(slug, state)
-    services.ledger.deliver_alerts(slug, state)
+    with request_metrics.step("publish"):
+        fence.publish(rejected)
+        services.ledger.relay_to_inbox(slug, state)
+        services.swarm.doctor_phrase(slug, state)
+        services.ledger.deliver_alerts(slug, state)
     tasks = {op["item"].split("/")[1] for op in operations if op["op"] == "task_update"}
     rows = [resources.project(row) for row in state.get("tasks", []) if row["id"] in tasks]
     reply = {

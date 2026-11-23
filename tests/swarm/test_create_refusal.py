@@ -47,6 +47,7 @@ def _expected(template: templates.Template, *caps: int, pinned: bool) -> SwarmCo
         eng,
         ci,
         max_plan=plan,
+        max_review=1,
         state="paused",
         compact_limit=7,
         template="wide",

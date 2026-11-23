@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/expert_lineage.py:scripts.swarm.expert_lineage.x_launched:f670b68eb81e38418eb5136d0903ea93ea097229768f92371498f1d8313c3afa": {
+    "reader": "standards-reader-6a-move",
+    "reason": "The Redis client's hincrby defaults its amount to 1, so the call without the amount increments by the same one; the count every launch test reads is unchanged."
+  }
+}

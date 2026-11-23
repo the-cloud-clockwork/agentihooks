@@ -18,9 +18,9 @@ def reply_size(reply: object) -> int:
     return len(json.dumps(reply, ensure_ascii=False).encode())
 
 
-def bounded(reply: dict) -> dict:
+def bounded(reply: dict, message: str = "Use the explicit export operation for this resource") -> dict:
     if reply_size(reply) > MAX_REPLY:
-        raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
+        raise APIError(413, "resource_too_large", message)
     return reply
 
 

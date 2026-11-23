@@ -48,6 +48,7 @@ from scripts.gates import feature as feature_gate
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
+from scripts.handoff import contracts as handoff_contracts
 from scripts.handoff import envelope as handoff_envelope
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
@@ -72,8 +73,12 @@ from scripts.swarm import (
     dispatch_seat,
     doc_report,
     done_gate,
+    enhance_review,
+    expert_commands,
+    expert_launch,
     failed_panes,
     git_https,
+    handoff_commands,
     hive_release,
     idle,
     launch_check,
@@ -91,6 +96,7 @@ from scripts.swarm import (
     phase_planning,
     phase_state,
     phases,
+    plan_cap_floor,
     plan_review,
     prerequisite_wait,
     priming_trace,
@@ -106,6 +112,7 @@ from scripts.swarm import (
     review_rounds,
     run_window,
     seat_crons,
+    seat_heads,
     snapshot,
     stack,
     stages,
@@ -975,6 +982,7 @@ def create_config(args: argparse.Namespace) -> SwarmConfig:
         caps["eng"] if args.max_eng_agents is None else args.max_eng_agents,
         caps["ci"] if args.max_ci_agents is None else args.max_ci_agents,
         max_plan=caps["plan"] if args.max_plan_agents is None else args.max_plan_agents,
+        max_review=caps["review"],
         state="paused",
         compact_limit=template.compact_limit,
         template=args.template,
@@ -1039,6 +1047,7 @@ def cmd_start(store: RedisStore, args: argparse.Namespace) -> None:
     print(shape["summary"], flush=True)
     if shape["warning"]:
         print(f"warning: {shape['warning']}", file=sys.stderr, flush=True)
+    plan_cap_floor.restore(store, args.slug)
     _state(store, args, "running")
     seat_crons.on_start(store, args.slug)
     print(ledger_link.page_line(args.slug))
@@ -1100,13 +1109,14 @@ def _live_master(store, slug, live):
     return next((a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished" and a.name in live), None)
 
 
-def _retire_each(store, slug, runtime, agents):
-    left = []
+def _retire_each(store: RedisStore, slug: str, runtime: Any, agents: list[AgentRecord]) -> list[str]:
+    left: list[str] = []
     for agent in agents:
         store.release(slug, agent.task, agent.name)
         store.drop_agent(slug, agent.name)
         if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
-            store.put_agent(slug, agent)
+            if not seat_heads.superseded(agent, agents):
+                store.put_agent(slug, agent)
             left.append(agent.name)
     return left
 
@@ -1219,6 +1229,7 @@ def cmd_agent_up(store, args):
 def cmd_exit(store: RedisStore, args: argparse.Namespace) -> None:
     name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
+    expert_commands.seated(store, args.slug, agent)
     released = agent is not None and agent.lane != MASTER and agent.state == "finished"
     if agent and agent.lane != MASTER and not released and _claimless(store, args.slug, agent):
         _retire(store, args.slug, agent, "finished its session without a claim")
@@ -1379,7 +1390,7 @@ def _manual_count_step(counts):
     return {"masters_step": 0} if counts else {}
 
 
-def cmd_set(store, args):
+def cmd_set(store: RedisStore, args: argparse.Namespace) -> None:
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     counts, pairs = _split_master_pairs(args.pairs, "masters", masters.count_of)
     changes.update(_manual_count_step(counts))
@@ -1426,7 +1437,8 @@ def cmd_set(store, args):
             )
         changes[SETTABLE[key]] = int(value)
     changes = _engine_origin(store.config(args.slug), changes)
-    config = store.update(args.slug, **{**changes, **_pinned(changes)})
+    restored = plan_cap_floor.restored(store.config(args.slug), changes)
+    config = store.update(args.slug, **{**changes, **_pinned(changes), **restored})
     _store_master_counts(store, args.slug, counts, hives)
     _store_master_rules(store, args.slug, rules)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
@@ -1828,9 +1840,18 @@ def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
 
 def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     """The panic button: on, pressed by the master or the operator, stops agent starts, cancels CI runs and pauses the
-    lab's pull request grading but the checked fixes and the fixer branches every swarm recorded; off clears it once
-    stable and resumes the lab."""
+    lab's pull request grading but the checked fixes and the fixer branches every swarm recorded; drop, by the master or
+    the operator, removes one registered fix and tells the lab the fixes left; off clears it once stable and resumes the
+    lab."""
     now = now_ms()
+    if args.action == "drop":
+        _master_or_operator(store, args, "only the master or the operator drops a panic fix")
+        if len(args.fix) != 1:
+            raise SwarmError("panic drop takes exactly one --fix")
+        found = panic.drop(store, args.slug, args.fix[0])
+        lab = panic.lab_engage(store, args.slug, found.fixes)
+        print(json.dumps({"panic": "on", "fixes": list(found.fixes), "lab": lab}))
+        return
     if args.action == "on":
         _master_or_operator(store, args, "only the master or the operator presses panic on")
         for fix in args.fix:
@@ -1933,10 +1954,12 @@ def _me(store, args):
     return agent
 
 
-def _worker(store, args):
-    agent = _me(store, args)
+def _worker(store: RedisStore, args: argparse.Namespace) -> AgentRecord:
+    agent: AgentRecord = _me(store, args)
     if agent.lane == MASTER:
         raise SwarmError(f"{agent.name} is the swarm master; the master works no task")
+    if agent.lane == expert_launch.LANE:
+        raise SwarmError(f"{agent.name} is an expert; an expert works its mission and claims no task")
     return agent
 
 
@@ -2157,10 +2180,12 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
         result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
         hotfix = args.action == "queue" and _hotfix_master(store, args)
-        master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
+        caller = _me(store, args) if args.action != "state" and not hotfix else None
+        master = args.action == "queue" and caller is not None and caller.lane == MASTER
         stalled = master_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
         hotfix = hotfix or stalled is not None
-        agent = _worker(store, args) if args.action != "state" and not hotfix else None
+        tasked = caller is not None and not hotfix and caller.lane != expert_launch.LANE
+        agent = _worker(store, args) if tasked else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
             _require_target(store, args, agent)
@@ -2169,7 +2194,8 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
                 args.action,
                 args.url,
                 admit=lambda head: (
-                    (not hotfix and _queue_intent(store, args, agent, head)) or queue_exit.require_fresh(args.url, head)
+                    (agent is not None and _queue_intent(store, args, agent, head))
+                    or queue_exit.require_fresh(args.url, head)
                 ),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
@@ -2214,8 +2240,10 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
     if refused:
         raise SwarmError(refused)
     _feature_gate(store, args.slug, agent, proven, pull)
+    closing = enhance_review.close(args.slug, row, store.config(args.slug).autonomy)
     fields = {**done_gate.DONE, **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    enhance_review.settle(ledger, InboxStore(store.redis), args.slug, agent.name, closing)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
@@ -2434,18 +2462,18 @@ def cmd_progress(store, args):
     print(json.dumps({"agent": agent.name, "task": agent.task, "progress": line}))
 
 
-def cmd_plan(store, args):
+def cmd_plan(store: RedisStore, args: argparse.Namespace) -> None:
     agent, autonomy = _me(store, args), store.config(args.slug).autonomy
-    decision = plan_review.Decision(args.action, args.note, args.override)
+    decision = plan_review.Decision(args.action, args.note, args.override, args.task)
     result = plan_review.decide(LedgerClient(), args.slug, agent, autonomy, args.phase, decision)
     print(json.dumps(result))
 
 
-def cmd_handoff(store, args):
-    agent = _me(store, args)
+def cmd_handoff(store: RedisStore, args: argparse.Namespace) -> None:
+    agent: AgentRecord = _me(store, args)
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
-    found = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.item))
+    found = handoff_contracts.problems(text, Resolver(args.slug, store.redis, ledger.item), store, args.slug, agent)
     if found:
         raise SwarmError(handoff_check.refusal(found))
     envelope, transfer = _hand_off(store, args.slug, agent, text, args.reason, ledger)
@@ -2471,6 +2499,7 @@ def _hand_off(
     waits.settle_notices(InboxStore(store.redis), agent, "a handoff")
     rows = _own_rows(ledger, slug, agent.task)
     envelope = handoff_envelope.build(store, slug, agent, reason, rows, now_ms())
+    envelope = handoff_envelope.with_orders(envelope, store, ledger, agent)
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
     if hive_release.release(ledger, slug, (rows or [{}])[0], agent.name):
@@ -2539,12 +2568,10 @@ def cmd_restack(store, args):
     print(json.dumps({"task": agent.task, **fields}))
 
 
-def cmd_confirm_handoff(store, args):
+def cmd_confirm_handoff(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _me(store, args)
-    if agent.name not in HerdrRuntime().live_names():
-        raise SwarmError("Only a live successor can confirm its handoff")
-    result = transfers.confirm(store, args.slug, args.transfer, agent, args.next, now_ms())
-    print(json.dumps(result))
+    live = HerdrRuntime().live_names()
+    handoff_commands.confirm(store, args.slug, args.transfer, agent, args.next, live, now_ms())
 
 
 def cmd_restore_decision(store, args):
@@ -2706,7 +2733,7 @@ def cmd_terminal(store, args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from scripts.swarm import master_drill, night_watch_drill, tasks_read, tick_report
+    from scripts.swarm import launch_starts, master_drill, night_watch_drill, tasks_read, tick_report
 
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -2744,6 +2771,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     sub.add_parser("tasks").set_defaults(handler=tasks_read.command)
+    sub.add_parser("launches").set_defaults(handler=launch_starts.command)
     sub.add_parser("probe").set_defaults(handler=probe_command)
     sub.add_parser("tick").set_defaults(handler=cmd_swarm_tick)
     report = sub.add_parser("tick-report")
@@ -2803,7 +2831,7 @@ def build_parser() -> argparse.ArgumentParser:
     blockers_cmd.add_argument("category", nargs="?", default="")
     blockers_cmd.set_defaults(handler=cmd_blockers)
     panic_cmd = sub.add_parser("panic")
-    panic_cmd.add_argument("action", nargs="?", default="status", choices=("on", "off", "status"))
+    panic_cmd.add_argument("action", nargs="?", default="status", choices=("on", "off", "status", "drop"))
     panic_cmd.add_argument("--fix", action="append", default=[])
     panic_cmd.set_defaults(handler=cmd_panic)
     sub.add_parser("prepare")
@@ -2831,7 +2859,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan = sub.add_parser("plan").add_subparsers(dest="action", required=True)
     for action in plan_review.DECISIONS:
         decision = plan.add_parser(action)
-        decision.add_argument("phase")
+        decision.add_argument("phase", nargs="?")
+        decision.add_argument("--task")
         decision.add_argument("--note", required=action == "send-back")
         if action == "approve":
             decision.add_argument("--override", default="")
@@ -2877,6 +2906,7 @@ def build_parser() -> argparse.ArgumentParser:
     culture = sub.add_parser("culture").add_subparsers(dest="action", required=True)
     culture.add_parser("set").add_argument("file")
     culture.add_parser("show")
+    expert_commands.register(sub)
     say = sub.add_parser("say")
     say.add_argument("text")
     say.add_argument("--to", default="")

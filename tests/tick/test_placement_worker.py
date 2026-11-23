@@ -28,6 +28,7 @@ PLACING_STEPS = frozenset(
         "master scale",
         "seat alarm",
         "dispatch seat",
+        "expert seats",
     }
 )
 
@@ -316,7 +317,7 @@ def test_a_write_step_that_declares_the_placement_lock_runs_its_call_holding_it(
 
 
 @pytest.mark.feature("placement-lock-steps-on-one-placement-worker")
-def test_the_eight_steps_that_place_agents_declare_the_placement_lock() -> None:
+def test_the_nine_steps_that_place_agents_declare_the_placement_lock() -> None:
     steps = {step.name: step for wave in registry.waves() for step in wave}
 
     assert {name for name, step in steps.items() if getattr(step, "placing", False)} == PLACING_STEPS

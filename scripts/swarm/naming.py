@@ -27,6 +27,7 @@ TYPES = {
     "plan": "planner",
     "dispatch": "dispatcher",
     "review": "reviewer",
+    "expert": "expert",
 }
 LANES = {kind: lane for lane, kind in TYPES.items()}
 OPERATOR = "operator"
