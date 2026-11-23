@@ -13,7 +13,8 @@ AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
 MINTED_RE = re.compile(r"t(\d+)")
-LANES = ("eng", "ci", "plan")
+LANES = ("eng", "ci", "plan", "review")
+PAIRED_LANES = ("plan", "review")
 STATES = ("open", "claimed", "blocked", "pr", "done")
 UPDATABLE = (
     "state",
@@ -139,8 +140,11 @@ PUBLISH = (
 
 
 def check_lane(task: dict) -> None:
-    if (ledger_kinds.kind(task) == "plan") != (task.get("lane", "eng") == "plan"):
-        raise ValueError("plan tasks must use the plan lane, and the plan lane accepts only plan tasks")
+    for paired in PAIRED_LANES:
+        if (ledger_kinds.kind(task) == paired) != (task.get("lane", "eng") == paired):
+            raise ValueError(
+                f"{paired} tasks must use the {paired} lane, and the {paired} lane accepts only {paired} tasks"
+            )
 
 
 def check(op: dict[str, Any]) -> None:

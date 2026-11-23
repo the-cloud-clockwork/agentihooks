@@ -6,12 +6,13 @@ ends; this module is the only writer of the lineage records and of the saved mis
 """
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
 from scripts.swarm import expert_launch, expert_mission, naming
+from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.store import SwarmError
 
 LINEAGES = "expert-lineages"
@@ -101,6 +102,14 @@ def running(store: Any, slug: str) -> list[Lineage]:
     """The lineages of the swarm that have not ended, in the order started. The set of their ids bounds the read, so
     code that runs every pass never reads the lineages that ended."""
     return sorted(_indexed(store, slug, ACTIVE), key=lambda row: (row.started_at, len(row.id), row.id))
+
+
+def waiting(store: Any, slug: str, agents: Iterable[Any]) -> int:
+    """How many running lineages of the swarm have no live expert among the agents: none of the expert lane holds the
+    lineage in a state that has not ended. A lineage never seated, or whose expert finished on a handoff or ended and
+    waits on the reap, waits for the successor the expert seats step places."""
+    live = {agent.task for agent in agents if agent.lane == expert_launch.LANE and agent.state not in TERMINAL_STATES}
+    return sum(1 for lineage in running(store, slug) if lineage.id not in live)
 
 
 def _indexed(store: Any, slug: str, index: str) -> list[Lineage]:

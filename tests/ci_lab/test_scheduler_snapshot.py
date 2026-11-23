@@ -1,14 +1,15 @@
 import json
 import threading
 import time
+import urllib.error
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
 import pytest
 
 from scripts.ci_lab import budget, lease_api, metrics, scheduler
-from scripts.ci_lab.capacity import Load
-from tests.ci_lab.test_scheduler import HEAD_A, Run, _read, plan, unit
+from scripts.ci_lab.capacity import Load, document
+from tests.ci_lab.test_scheduler import HEAD_A, Run, _built, _read, plan, unit
 from tests.ci_lab.test_scheduler import lab as _lab
 
 lab = _lab
@@ -27,6 +28,11 @@ def _fresh(run: Run, load: Callable[[int], Load], now: int) -> set[str]:
     spending = budget.Budget(run.lab.client, lambda: now, POLICY)
     metrics.observe_load(registry, budget.observe(load(now), spending.status()))
     return _samples(registry.render())
+
+
+def _document(run: Run, load: Callable[[int], Load], now: int) -> object:
+    spending = budget.Budget(run.lab.client, lambda: now, POLICY)
+    return json.loads(json.dumps(document(budget.observe(load(now), spending.status()))))
 
 
 def _named(served: set[str], fresh: set[str]) -> set[str]:
@@ -48,6 +54,13 @@ def _counted(run: Run, monkeypatch: pytest.MonkeyPatch) -> tuple[list[int], Call
 
 @contextmanager
 def _serving(run: Run, now: list[int]) -> Iterator[tuple[str, str]]:
+    with _listening(run, now) as (api, exposition):
+        _built(api)
+        yield api, exposition
+
+
+@contextmanager
+def _listening(run: Run, now: list[int]) -> Iterator[tuple[str, str]]:
     spending = budget.Budget(run.lab.client, lambda: now[0], POLICY)
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: now[0])
     servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now[0], (0, 0, 0))
@@ -138,3 +151,119 @@ def test_the_metrics_port_rebuilds_the_load_on_its_own_cadence_and_serves_the_fr
     assert f"{RUNNING} 1.0" in _samples(text)
     fresh = _fresh(run, load, later)
     assert _named(_samples(text), fresh) == fresh
+
+
+@pytest.mark.feature("lab-scheduler-capacity-cached")
+def test_two_capacity_reads_in_a_row_build_the_load_once(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _started(lab)
+    builds, _ = _counted(run, monkeypatch)
+    with _serving(run, [1000]) as (api, _):
+        first = json.loads(_read(f"{api}/capacity"))
+        second = json.loads(_read(f"{api}/capacity"))
+    assert builds == [1000]
+    assert first == second
+
+
+@pytest.mark.feature("lab-scheduler-capacity-cached")
+def test_a_capacity_read_and_a_scrape_share_one_load_build(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _started(lab)
+    builds, _ = _counted(run, monkeypatch)
+    with _serving(run, [1000]) as (api, exposition):
+        capacity = json.loads(_read(f"{api}/capacity"))
+        assert len(json.loads(_read(f"{api}/lease", LEASE))["leases"]) == 1
+        served = _samples(_read(exposition).decode())
+    assert builds == [1000]
+    assert capacity["classes"]["promotion"]["running"] == 0
+    assert f"{RUNNING} 0.0" in served
+
+
+@pytest.mark.feature("lab-scheduler-capacity-cached")
+def test_the_capacity_document_equals_a_fresh_build_of_the_same_state(lab: Callable[..., Run]) -> None:
+    run = _started(lab)
+    assert len(run.lease()) == 1
+    with _serving(run, [1000]) as (api, _):
+        capacity = json.loads(_read(f"{api}/capacity"))
+    assert capacity["classes"]["promotion"]["running"] == 1
+    assert capacity == _document(run, run.engine.load, 1000)
+
+
+@pytest.mark.feature("lab-scheduler-capacity-cached")
+def test_the_capacity_route_serves_the_build_the_metrics_port_refreshed(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _started(lab)
+    builds, load = _counted(run, monkeypatch)
+    later = 1000 + scheduler.REFRESH_MS
+    now = [1000]
+    with _serving(run, now) as (api, exposition):
+        assert json.loads(_read(f"{api}/capacity"))["classes"]["promotion"]["running"] == 0
+        assert len(json.loads(_read(f"{api}/lease", LEASE))["leases"]) == 1
+        now[0] = later
+        assert AGE_ZERO in _poll(exposition, AGE_ZERO)
+        capacity = json.loads(_read(f"{api}/capacity"))
+    assert builds == [1000, later]
+    assert capacity["classes"]["promotion"]["running"] == 1
+    assert capacity == _document(run, load, later)
+
+
+@pytest.mark.feature("lab-scheduler-capacity-cached")
+def test_the_grades_route_reads_every_request_beside_the_cached_capacity(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _started(lab)
+    builds, _ = _counted(run, monkeypatch)
+    graded = run.grade(HEAD_A).run
+    with _serving(run, [1000]) as (api, _):
+        assert json.loads(_read(f"{api}/capacity"))["classes"]["promotion"]["pending"] == 2
+        first = json.loads(_read(f"{api}/grades/{HEAD_A}"))["grades"]
+        run.lab.client.delete(scheduler.GRADES + graded)
+        second = json.loads(_read(f"{api}/grades/{HEAD_A}"))["grades"]
+    assert [grade["run"] for grade in first] == [graded]
+    assert second == []
+    assert builds == [1000]
+
+
+def _refused(url: str) -> tuple[int, object]:
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        _read(url)
+    return refused.value.code, json.loads(refused.value.read())
+
+
+@pytest.mark.feature("lab-scheduler-first-build-at-bind")
+def test_listen_starts_the_first_build_at_bind_and_no_read_waits_for_it(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _started(lab)
+    assert len(run.lease()) == 1
+    builds, load = _counted(run, monkeypatch)
+    counted = run.engine.load
+    entered, gate = threading.Event(), threading.Event()
+
+    def held(now_ms: int) -> Load:
+        entered.set()
+        assert gate.wait(10)
+        return counted(now_ms)
+
+    monkeypatch.setattr(run.engine, "load", held)
+    unbuilt = (503, {"error": "the load snapshot is not built yet"})
+    with _listening(run, [1000]) as (api, exposition):
+        try:
+            assert entered.wait(10)
+            assert _refused(f"{api}/capacity") == unbuilt
+            assert _refused(exposition.removesuffix("/metrics") + "/capacity") == unbuilt
+            scraped = _samples(_read(exposition).decode())
+        finally:
+            gate.set()
+        capacity = json.loads(_built(api))
+        served = _samples(_read(exposition).decode())
+    fresh = _fresh(run, load, 1000)
+    assert _named(scraped, fresh) == set()
+    assert not any(line.startswith("ci_lab_load_age_seconds") for line in scraped)
+    assert _named(served, fresh) == fresh
+    assert f"{RUNNING} 1.0" in served
+    assert capacity == _document(run, load, 1000)
+    assert builds == [1000]
