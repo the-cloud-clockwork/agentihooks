@@ -7203,6 +7203,17 @@
       ]
     },
     {
+      "id": "coverage-ratchet-grades-from-the-nearest-measured-ancestor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45173371476-0",
+      "behaviour": "A dev push whose base commit has no measured Tests run with a live coverage-baseline artifact grades its coverage against the nearest first parent ancestor of that base whose dev push run measured and published one, read from one page of the repository's live coverage-baseline artifacts, and checks out and grades against that ancestor, never a newer dev head or a commit outside the base's first parent history, because a newer push replaced the base's run before it published, the cache entry the earlier fallback reads had been evicted, and every later dev push failed the coverage ratchet.",
+      "seam": "The coverage ratchet's Find the run that published the base baseline step, run in a shell over a real git history against a fake gh, and the BASE of its Check out the base grader and Hold every line the base ran steps",
+      "tests": [
+        "tests/test_ci_gate_workflow.py::test_a_base_whose_run_published_no_baseline_grades_from_its_nearest_measured_ancestor",
+        "tests/test_ci_gate_workflow.py::test_the_base_grader_and_the_hold_grade_the_commit_the_lookup_restored"
+      ]
+    },
+    {
       "id": "codex-adopt-refusal-fields",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-adopt-refusal-fields",
@@ -11175,7 +11186,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "Among the tasks a lane may claim, the hub readiness pass offers urgent and focused tasks first as before, then the tasks under an operator order, oldest order first, then the rest, each by ledger rank band. A task's order time is the earlier of its own mark and its phase's; the work an ordered task waits on, the plan task that enhances it and the lead it is merged into carry the earliest such time, through every such link in turn, and a mark that is not well formed counts as none. A waiting offer at least one dedupe window old moves behind a later offer of a higher class. An order never changes which tasks are offered: under a focus an ordered task outside it is not offered, and focused offers keep their order.",
+      "behaviour": "Among the tasks a lane may claim, the hub readiness pass offers urgent and focused tasks first as before, then the tasks under an operator order, oldest order first, then the rest, each by ledger rank band. A task's order time is the earlier of its own mark and its phase's; the work an ordered task waits on, the plan task that enhances it and the lead it is merged into carry the earliest such time, through every such link in turn, and a mark that is not well formed counts as none. A waiting offer at least one dedupe window old moves behind a later offer the hub would offer before it: one of a higher class, an ordered one whose order is older or that has the same order time and a higher rank, and among the rest one of a higher rank, so a task raised to high passes the normal offers queued before it. Inside the urgent or focused class a waiting offer keeps its place, and after a move a second pass moves nothing. An order never changes which tasks are offered: under a focus an ordered task outside it is not offered, and focused offers keep their order.",
       "seam": "scripts.swarm.orders.stamps, the walk it runs on (scripts.swarm.freeze.waits and reached), scripts.swarm.readiness.offers and behind, and readiness.publish on the memory work queue read back through readiness.take",
       "tests": [
         "tests/swarm/test_orders.py::test_a_ledger_with_no_order_mark_has_no_order_time",
@@ -11194,6 +11205,12 @@
         "tests/swarm/test_freeze.py::test_waits_names_what_each_task_of_the_ledger_waits_on",
         "tests/swarm/test_freeze.py::test_reached_walks_from_every_seed_along_the_links_and_stops_at_cold_work",
         "tests/swarm/test_readiness.py::test_behind_names_the_old_waiting_offers_ahead_of_an_offer_of_a_higher_class",
+        "tests/swarm/test_readiness.py::test_behind_moves_a_waiting_offer_of_the_rest_behind_a_later_offer_of_a_higher_rank",
+        "tests/swarm/test_readiness.py::test_behind_moves_a_waiting_ordered_offer_behind_a_later_one_ordered_before_it_or_ranked_above_it",
+        "tests/swarm/test_readiness.py::test_behind_moves_nothing_inside_the_urgent_or_focused_class",
+        "tests/swarm/test_readiness.py::test_a_queued_task_raised_to_high_is_taken_before_the_older_normal_offers_ahead_of_it_and_moves_them_once",
+        "tests/swarm/test_readiness.py::test_a_queued_task_lowered_to_low_is_taken_after_the_normal_offers_behind_it",
+        "tests/swarm/test_readiness.py::test_an_ordered_offer_moves_behind_a_later_offer_whose_order_is_older",
         "tests/swarm/test_readiness.py::test_offers_put_urgent_tasks_first_then_ordered_ones_oldest_order_first_then_the_rest",
         "tests/swarm/test_readiness.py::test_the_tasks_of_an_ordered_phase_and_the_work_they_wait_on_are_offered_before_the_rest",
         "tests/swarm/test_readiness.py::test_order_marks_change_the_order_of_offers_and_never_which_tasks_are_offered",
