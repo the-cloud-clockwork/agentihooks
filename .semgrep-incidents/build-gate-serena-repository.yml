@@ -9,7 +9,7 @@ rules:
         - build-gate-serena-repository.py
     patterns:
       - pattern-inside: |
-          def touched(...):
+          def $FUNCTION(...):
               ...
               if $CALL.tool.startswith(SERENA):
                   ...
