@@ -64,6 +64,20 @@ def _codex_full(harnesses: tuple[str, ...]) -> autoscale.Decision:
     )
 
 
+def _decide(
+    live: dict[str, int], free: dict[str, int], host_room: int | None, demand: dict[str, int], share: int
+) -> autoscale.Decision:
+    return autoscale.calculate(
+        live,
+        free,
+        host_room,
+        demand,
+        _previous({"plan": 0, "ci": 0, "eng": 10}),
+        now_ms=0,
+        review=autoscale.Review(share, CODEX_ONLY),
+    )
+
+
 def _review_placement(codex_sessions: int, lanes: dict[str, dict[str, str]]) -> dict:
     config = SwarmConfig(SLUG, "/repo", max_eng=0, max_ci=0, max_plan=0, max_review=2, lanes=lanes)
     accounts = [account("a", cap=3), account("cx", cap=3, sessions=codex_sessions, harness="codex")]
@@ -249,3 +263,64 @@ def test_swarm_set_takes_the_review_share(env: tuple, capsys: pytest.CaptureFixt
     assert saved.config(SLUG).review_share == 35
     assert run(SLUG, "set", "review-share=101") == 1
     assert saved.config(SLUG).review_share == 35
+
+
+@pytest.mark.feature("swarm-review-affinity-quota")
+def test_readings_without_a_review_entry_count_no_reviewer_and_no_waiting_review_task() -> None:
+    decision = autoscale.calculate(
+        OLD_LIVE, {"claude": 3, "codex": 2}, 10, OLD_DEMAND, OLD_PREVIOUS, now_ms=0, review=autoscale.Review(20, BOTH)
+    )
+    assert decision == OLD_DECISION
+    live = {"plan": 0, "ci": 0, "eng": 8}
+    held = _decide(live, {"claude": 0, "codex": 4}, 2, {"plan": 0, "ci": 0, "eng": 10, "review": 5}, 30)
+    assert held["ceilings"] == {"plan": 0, "ci": 0, "eng": 7, "review": 3}
+
+
+@pytest.mark.feature("swarm-review-affinity-quota")
+def test_live_reviewers_without_a_review_demand_entry_keep_their_seats_and_name_no_share() -> None:
+    live = {"plan": 0, "ci": 0, "eng": 8, "review": 2}
+    decision = _decide(live, {"claude": 0, "codex": 4}, 0, {"plan": 0, "ci": 0, "eng": 10}, 20)
+    assert decision == {
+        "ceilings": {"plan": 0, "ci": 0, "eng": 8, "review": 2},
+        "pending_raise": IDLE,
+        "reason": "Quota seats 4 (claude 0, codex 4); host room 0; ceiling 10 of 10.",
+    }
+
+
+@pytest.mark.feature("swarm-review-affinity-quota")
+def test_a_pinned_harness_missing_from_the_free_seats_has_no_free_seat() -> None:
+    live = {"plan": 0, "ci": 0, "eng": 8, "review": 0}
+    decision = _decide(live, {"claude": 4}, 2, {"plan": 0, "ci": 0, "eng": 10, "review": 5}, 30)
+    assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 10, "review": 0}
+
+
+@pytest.mark.feature("swarm-review-affinity-quota")
+def test_the_review_share_of_the_total_rounds_up_to_whole_seats() -> None:
+    live = {"plan": 0, "ci": 0, "eng": 0, "review": 0}
+    decision = _decide(live, {"claude": 0, "codex": 3}, None, {"plan": 0, "ci": 0, "eng": 3, "review": 3}, 67)
+    assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 0, "review": 3}
+
+
+@pytest.mark.feature("swarm-review-affinity-quota")
+def test_held_review_seats_never_pass_the_total_when_the_host_has_no_room() -> None:
+    live = {"plan": 0, "ci": 0, "eng": 0, "review": 2}
+    decision = _decide(live, {"claude": 0, "codex": 4}, 0, {"plan": 0, "ci": 0, "eng": 0, "review": 3}, 20)
+    assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 0, "review": 2}
+
+
+@pytest.mark.feature("swarm-review-affinity-quota")
+def test_a_zero_share_still_holds_one_seat_when_the_other_lanes_fill_the_room() -> None:
+    live = {"plan": 0, "ci": 0, "eng": 9, "review": 0}
+    decision = _decide(live, {"claude": 0, "codex": 1}, None, {"plan": 0, "ci": 0, "eng": 10, "review": 5}, 0)
+    assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 9, "review": 1}
+
+
+@pytest.mark.feature("swarm-review-affinity-quota")
+def test_autoscaled_holds_review_seats_only_on_the_pinned_harness() -> None:
+    config = SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, max_plan=5, lanes={"review": REVIEWER}, review_share=30)
+    accounts = [account(cap=6).__dict__, account("cx", harness="codex", cap=1).__dict__]
+    readings = {**READINGS, "accounts": accounts, "demand": {"eng": 4, "ci": 1, "plan": 0, "review": 3}}
+    scaled, decision = capacity.autoscaled(config, capacity.fixture_inputs(readings))
+    assert decision is not None
+    assert decision["ceilings"] == {"plan": 0, "ci": 2, "eng": 3, "review": 1}
+    assert scaled.max_review == 1
