@@ -637,6 +637,7 @@ granting each key Redis refused until all five passed gave the list.
 | `agentihooks swarm <slug> wait --on ...` | The prerequisite wait record `swarm:<slug>:prerequisite-waits`, which it clears and writes. A wait without `--on` writes only below the member's own hive key. |
 | `agentihooks swarm <slug> block` | The same claim release, agent records and seat exit mark as `done`, plus `swarm:<slug>:dev-red` and, for a stacked prerequisite, `prerequisite-waits`. |
 | `agentihooks swarm <slug> learned` | The seat's learned notes `seat:<seat>:learned`. |
+| `agentihooks swarm <slug> expert complete` | The expert lineage record `swarm:<slug>:expert-lineages`, the running set `expert-running`, the kept proof `expert-proofs` and the closing set `expert-closing`. The lineage sequence, the saved missions and the launch count stay refused. |
 | A refused execution record write | The identity conflict counter, kept in `swarm:state:counters:*`. |
 
 The rest of the list covers records the same commands write through the execution registry, fencing and gate code:
