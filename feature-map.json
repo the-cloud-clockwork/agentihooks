@@ -14712,6 +14712,21 @@
       ]
     },
     {
+      "id": "swarm-review-cap-setting",
+      "origin": "regression",
+      "ordered_at": "2026-11-23",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-review-cap-setting",
+      "behaviour": "A running swarm opens its review lane with swarm set max-review-agents: set and the bare pair take a whole number and store it as the swarm config review cap, refuse anything else, leave the autoscale caps unpinned and report the cap in the set reply; status shows the review cap after the plan cap; once the cap is above zero on a running swarm the review pass queues the review task it held back at zero.",
+      "seam": "scripts.swarm.cli.cmd_set and the SETTABLE table, scripts.swarm.cli.cmd_status text line, scripts.swarm.store.RedisStore.config and update, and scripts.tick.steps.review._review_pass",
+      "tests": [
+        "tests/swarm/test_review_cap_setting.py::test_set_stores_the_review_cap_on_a_swarm_stored_without_one",
+        "tests/swarm/test_review_cap_setting.py::test_set_refuses_a_review_cap_that_is_not_a_whole_number",
+        "tests/swarm/test_review_cap_setting.py::test_status_shows_the_worker_caps",
+        "tests/swarm/test_review_cap_setting.py::test_status_shows_the_review_cap",
+        "tests/swarm/test_review_cap_setting.py::test_a_review_cap_set_on_a_running_swarm_lets_the_review_pass_queue"
+      ]
+    },
+    {
       "id": "swarm-review-trigger",
       "origin": "inventory",
       "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
