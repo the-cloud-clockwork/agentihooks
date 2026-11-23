@@ -20,6 +20,7 @@ from tests.ci_lab.test_scheduler import (
     HEAD_A,
     HEAD_B,
     LOW_BUDGET,
+    REPO,
     Expander,
     Inbox,
     Lab,
@@ -181,6 +182,69 @@ def test_a_unit_whose_queued_job_vanished_is_dropped_on_the_next_pass(lab: Calla
     grade = run.grade(HEAD_A)
     assert [(slot.key, slot.outcome) for slot in grade.units.values()] == [(first.key, "dropped"), (second.key, "")]
     assert grade.run in run.lab.client.smembers(scheduler.LIVE)
+
+
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
+def test_a_finished_job_its_retry_policy_reruns_goes_back_to_pending_and_leaves_its_grade_unwritten(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1), unit(2))})}, retries=RETRIES)
+    run.push(HEAD_A)
+    run.tick(1000)
+    grant = run.lease()[0]
+    run.finish(grant, "failed", {"seconds": 1.0})
+    documents = _documents(run)
+    sent = _record(run, monkeypatch)
+    assert run.tick(1100) == []
+    writes = [entry for entry in sent if entry[0] == "SET"]
+    assert grant.job in run.engine.queue.pending()
+    assert writes == []
+    assert _documents(run) == documents
+
+
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
+def test_a_live_grade_saved_with_every_slot_final_and_every_check_posted_closes_on_the_next_pass(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    state = run.grade(HEAD_A)
+    for slot in state.units.values():
+        slot.outcome = "passed"
+    state.posted = {check: [status, conclusion] for check, (status, conclusion) in scheduler._checks(state).items()}
+    run.engine.save(state)
+    assert run.tick(1100) == [f"completed {state.run} success"]
+    assert run.lab.client.smembers(scheduler.LIVE) == set()
+
+
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
+def test_a_grade_ref_head_records_its_moves_for_the_relay_while_its_repository_posts_are_held(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})})
+    run.lab.poster = Holding(refusals={(HEAD_B, "queued"): GitAuthRefused(REFUSED)})
+    run.push(HEAD_B, lane="second")
+    run.tick(1000)
+    assert run.engine.held[REPO] == 1000 + HOLD_MS
+    run.push(HEAD_A, lane="first", ref="refs/grade/t1")
+    actions = run.tick(1100)
+    assert f"left lint queued on {HEAD_A} to the relay" in actions
+    assert run.grade(HEAD_A).posted == {"lint": ["queued", None], scheduler.REQUIRED: ["queued", None]}
+    assert run.lab.poster.moves(HEAD_B, "lint") == []
+
+
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
+def test_a_grade_another_scheduler_saves_is_read_again_and_advanced_on_the_next_pass(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.tick(1100)
+    state = run.grade(HEAD_A)
+    state.superseded = True
+    run.lab.build(0, Policy(), None).save(state)
+    assert f"posted lint completed on {HEAD_A}" in run.tick(1200)
+    assert run.lab.poster.moves(HEAD_A, "lint")[-1] == ("completed", "cancelled")
 
 
 def _pair(tmp_path: Path, plans: dict[str, scheduler.Plan]) -> tuple[Run, Run]:

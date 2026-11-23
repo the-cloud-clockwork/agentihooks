@@ -573,7 +573,11 @@
         "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_quiet_pass_reads_and_writes_no_live_grade_whatever_holds_it",
         "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_pass_after_one_job_finishes_reads_and_writes_only_the_grade_holding_it",
         "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_unit_whose_queued_job_vanished_is_dropped_on_the_next_pass",
-        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_warm_scheduler_grades_every_pass_like_one_rebuilt_from_redis"
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_warm_scheduler_grades_every_pass_like_one_rebuilt_from_redis",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_finished_job_its_retry_policy_reruns_goes_back_to_pending_and_leaves_its_grade_unwritten",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_live_grade_saved_with_every_slot_final_and_every_check_posted_closes_on_the_next_pass",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_grade_ref_head_records_its_moves_for_the_relay_while_its_repository_posts_are_held",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_grade_another_scheduler_saves_is_read_again_and_advanced_on_the_next_pass"
       ]
     },
     {
