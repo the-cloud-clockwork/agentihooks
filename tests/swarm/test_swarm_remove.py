@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import fakeredis
 import pytest
 
 from scripts.inbox.seats import SCAN_PAGE
@@ -19,6 +18,8 @@ pytestmark = pytest.mark.unit
 def test_remove_deletes_the_swarm_task_copies_on_every_hive_by_scanning_pages_and_keeps_other_swarms(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    import fakeredis
+
     redis = fakeredis.FakeRedis(decode_responses=True)
     store = RedisStore(redis)
     monkeypatch.setattr(cli, "connect", lambda: store)
