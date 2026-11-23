@@ -114,7 +114,7 @@ def test_next_expert_pass_records_the_live_acknowledgement_on_the_original_execu
         context,
         Ack(
             "live",
-            {"host_id": "remote", "namespace": "expert"},
+            {"host_id": "remote"},
             execution={
                 "pane_id": "expert-pane",
                 "model": "fable",
