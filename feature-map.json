@@ -1,6 +1,26 @@
 {
   "features": [
     {
+      "id": "placement-role-census",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-placement-role-census",
+      "behaviour": "Hive placement excludes reported master executions by role regardless of login markers, leaving one expert place on a root hive with three masters and eleven workers under a twelve worker limit. Marker overlap never subtracts twice; unregistered processes, pending workers, account separation and CPU refusals retain their limits.",
+      "seam": "loaded_hives through HiveLaunch.select",
+      "tests": [
+        "tests/hive/test_placement_role_census.py::test_three_masters_and_eleven_workers_leave_the_kept_expert_room_usable",
+        "tests/hive/test_placement_role_census.py::test_a_master_execution_does_not_prevent_unclaimed_processes_from_absorbing_pending_workers",
+        "tests/hive/test_placement_role_census.py::test_unreported_masters_never_erase_an_unregistered_worker_process",
+        "tests/hive/test_placement_role_census.py::test_interactive_markers_still_exempt_a_master_whose_execution_is_unreported",
+        "tests/hive/test_placement_role_census.py::test_master_exclusion_does_not_absorb_workers_from_another_account_slot",
+        "tests/hive/test_placement_role_census.py::test_excluding_masters_keeps_a_saturated_cpu_refusal",
+        "tests/hive/test_placement_role_census.py::test_reported_masters_alone_leave_zero_workers_on_the_hive",
+        "tests/hive/test_placement_role_census.py::test_an_identified_worker_process_is_not_reused_for_unreported_workers"
+      ],
+      "rules": [
+        "placement-marker-only-worker-census"
+      ]
+    },
+    {
       "id": "lab-shadow-reusable-caller-pairing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2804",
