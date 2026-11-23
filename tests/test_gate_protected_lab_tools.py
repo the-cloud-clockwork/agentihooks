@@ -14,6 +14,7 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
 CANDIDATE = "e285593508ecbac8c01119645580a1d65e48b5e6"
+STEP = "Install the lab verdict dependencies"
 FLOATING = "python -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1"
 PINNED = (
     "python -m pip install --quiet --constraint grader/.github/ci-tools/parser.lock "
@@ -39,7 +40,7 @@ def forms(request: pytest.FixtureRequest) -> Forms:
             "if": "github.event_name == 'pull_request'",
             "permissions": {"contents": "read"},
             "outputs": {"authoritative": "${{ steps.authority.outputs.authoritative }}"},
-            "steps": [{"name": "Install the lab verdict dependencies", "run": FLOATING}],
+            "steps": [{"name": STEP, "run": FLOATING}],
         }
     return (
         workflows,
@@ -49,11 +50,7 @@ def forms(request: pytest.FixtureRequest) -> Forms:
 
 
 def _install(workflows: Workflows, command: str) -> None:
-    [step] = [
-        step
-        for step in workflows["test.yml"]["jobs"]["lab-verdict"]["steps"]
-        if step.get("name") == "Install the lab verdict dependencies"
-    ]
+    [step] = [step for step in workflows["test.yml"]["jobs"]["lab-verdict"]["steps"] if step.get("name") == STEP]
     step["run"] = command
 
 
@@ -162,22 +159,39 @@ def test_a_pinned_base_refuses_a_head_that_removes_the_lab_constraints(grader: G
 @pytest.mark.feature("protected-grader-admits-lab-tool-pins")
 @pytest.mark.parametrize("forms", ["full"], indirect=True)
 @pytest.mark.parametrize("install", [FLOATING, PINNED], ids=["floating", "pinned"])
-@pytest.mark.parametrize("edit", ["env", "if", "continue-on-error", "twice", "other-step", "other-step-dropped"])
-def test_the_candidate_refuses_any_step_change_beside_the_install(
+@pytest.mark.parametrize("edit", ["changed", "dropped"])
+def test_the_candidate_refuses_a_change_to_any_other_lab_step(
+    grader: Grade, forms: Forms, install: str, edit: str
+) -> None:
+    base, config, actors = forms
+    others = [
+        index for index, step in enumerate(base["test.yml"]["jobs"]["lab-verdict"]["steps"]) if step.get("name") != STEP
+    ]
+    assert others
+    for index in others:
+        head = copy.deepcopy(base)
+        _install(head, install)
+        steps = head["test.yml"]["jobs"]["lab-verdict"]["steps"]
+        if edit == "dropped":
+            del steps[index]
+        else:
+            steps[index]["continue-on-error"] = True
+        assert _grade(grader, base, head, config, actors) == [REFUSED], index
+
+
+@pytest.mark.feature("protected-grader-admits-lab-tool-pins")
+@pytest.mark.parametrize("install", [FLOATING, PINNED], ids=["floating", "pinned"])
+@pytest.mark.parametrize("edit", ["env", "if", "continue-on-error", "twice"])
+def test_the_candidate_refuses_any_other_change_to_the_install_step(
     grader: Grade, forms: Forms, install: str, edit: str
 ) -> None:
     base, config, actors = forms
     head = copy.deepcopy(base)
     _install(head, install)
     steps = head["test.yml"]["jobs"]["lab-verdict"]["steps"]
-    [step] = [step for step in steps if step.get("name") == "Install the lab verdict dependencies"]
-    other = next(candidate for candidate in steps if candidate is not step)
+    [step] = [step for step in steps if step.get("name") == STEP]
     if edit == "twice":
         steps.append(copy.deepcopy(step))
-    elif edit == "other-step":
-        other["continue-on-error"] = True
-    elif edit == "other-step-dropped":
-        steps.remove(other)
     else:
         step[edit] = "unreviewed"
     assert _grade(grader, base, head, config, actors) == [REFUSED]
