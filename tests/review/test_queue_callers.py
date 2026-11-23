@@ -8,6 +8,7 @@ from scripts.swarm import ledger_client as client
 from scripts.swarm.store import RedisStore
 from tests.review.fakes import AUTHOR, REVIEWER, SLUG, URL, FakeForge, swarm
 from tests.review.test_queue_gate import _queue
+from tests.swarm.client_class import client_class
 
 pytestmark = pytest.mark.unit
 MASTER = "master@sw"
@@ -24,7 +25,7 @@ def _delegated(monkeypatch: pytest.MonkeyPatch, mode: str, owner: str | None) ->
         assert (slug, task_id) == (SLUG, "t1")
         return {"claimed_by": owner}
 
-    monkeypatch.setattr(client, "LedgerClient", lambda: SimpleNamespace(task=task))
+    monkeypatch.setattr(client, "LedgerClient", client_class(SimpleNamespace(task=task)))
     return found
 
 

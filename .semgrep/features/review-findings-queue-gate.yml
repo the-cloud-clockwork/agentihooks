@@ -1,0 +1,18 @@
+rules:
+  - id: feature-review-findings-queue-gate
+    languages: [python]
+    severity: ERROR
+    message: Review done must require at least one posted finding before completing the task.
+    patterns:
+      - pattern: |
+          def cmd_done(...):
+            ...
+      - pattern-not: |
+          def cmd_done(...):
+            ...
+            review.require_done(...)
+            ...
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - '*.test.py'

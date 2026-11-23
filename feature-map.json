@@ -21,6 +21,8 @@
     {
       "id": "review-findings-queue-gate",
       "origin": "operator",
+      "operator_words": "A review record per change request head stores findings posted through the forge seam; review done refuses zero findings; the author marks findings read; merge queue checks the head has an independent review read by the author, log only first with an enforce switch.",
+      "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-findings-gate",
       "behaviour": "A reviewer posts its findings on a change request head through the forge seam and the review record stores each one with its comment; a review task is refused at swarm done while it posted no finding; the author marks findings read or answered; swarm merge queue logs, or when the review gate is enforced refuses, a head without a review from another agent whose findings the author read.",
       "seam": "scripts.review.record post, mark and done_refusal through scripts.review.cli and scripts.swarm.cli.cmd_done; scripts.review.gate.queue_admit composes intent, review and freshness checks for scripts.swarm.cli.cmd_merge",
@@ -54,10 +56,16 @@
         "tests/review/test_identity.py::test_a_forge_for_another_request_cannot_write_the_record",
         "tests/review/test_queue_callers.py::test_every_queue_caller_requires_the_independent_review",
         "tests/review/test_queue_callers.py::test_a_master_queue_requires_the_actual_authors_review_read",
-        "tests/review/test_queue_callers.py::test_a_missing_author_never_falls_back_to_the_queuing_master"
+        "tests/review/test_queue_callers.py::test_a_missing_author_never_falls_back_to_the_queuing_master",
+        "tests/gates/test_mode_names.py::test_status_uses_new_names_in_modes_and_decisions"
       ],
-      "rules": [
-        "merge-queue-admit-skips-review"
+      "semgrep_rule": "feature-review-findings-queue-gate",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.install",
+        "review",
+        "--help"
       ]
     },
     {
