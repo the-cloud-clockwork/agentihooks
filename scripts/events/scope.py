@@ -6,7 +6,7 @@ from .config import QueuePolicy
 from .envelope import Envelope
 from .subjects import PREFIX, subject
 
-LANES = ("eng", "ci", "plan", "review")
+LANES = ("eng", "ci", "review", "plan")
 
 
 def require_owner(swarm: str, event: Envelope) -> None:
