@@ -184,3 +184,56 @@ def test_split_aggregation_refuses_a_rendering_that_does_not_hold_each_job_list_
 def test_split_aggregation_adds_exactly_the_split_jobs_of_the_queue_gate() -> None:
     names = [set(re.findall(r'"([a-z-]+)"', text)) for pair in ci_reuse.SPLIT_REQUIRED for text in pair]
     assert set().union(*names[1::2]) - set().union(*names[0::2]) == ci_gate_queue.SPLIT
+
+
+@pytest.mark.parametrize(
+    "needs,postgres,asked",
+    [
+        ((), False, []),
+        (("docs",), False, [(False, False, True, False)]),
+        (("type-gate",), False, [(True, False, False, False)]),
+        (("collect", "lint-actions"), False, [(False, False, False, True)]),
+        (("docs", "type-gate", "collect", "lint-actions"), True, [(True, True, True, True)]),
+    ],
+    ids=["no forcing need", "docs", "type gate", "split jobs", "every need over postgres"],
+)
+@pytest.mark.feature("gate-required-split-jobs")
+def test_an_unchanged_gate_is_graded_against_the_renderings_of_its_own_needs(
+    monkeypatch: pytest.MonkeyPatch, needs: tuple[str, ...], postgres: bool, asked: list[tuple[bool, ...]]
+) -> None:
+    steps = ci_reuse.gate_steps(queue_tier=True, consolidated=True, promotion=True)
+    base = _workflow(ci_reuse.postgres_required(steps) if postgres else steps)
+    for job in needs:
+        base["jobs"][job] = {"if": "github.event_name == 'pull_request'", "runs-on": "ubuntu-latest"}
+    base["jobs"]["gate-required"]["needs"] += needs
+    calls: list[tuple[bool, ...]] = []
+
+    def none_accepted(*combination: bool) -> list[list[dict[str, Any]]]:
+        calls.append(combination)
+        return []
+
+    monkeypatch.setattr(gate_protected, "_accepted_steps_renderings", none_accepted)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": copy.deepcopy(base)}, {})
+    assert calls == asked
+    assert problems == ([STEPS] if asked else [])
+
+
+@pytest.mark.feature("gate-required-split-jobs")
+def test_the_split_renderings_are_the_unsplit_ones_of_the_same_gate_that_hold_the_job_lists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    listed = ci_reuse.gate_steps(queue_tier=True, consolidated=True, promotion=True)
+    asked: list[tuple[bool, ...]] = []
+
+    def unsplit(*combination: bool) -> list[list[dict[str, Any]]]:
+        asked.append(combination)
+        return [listed, ci_reuse.gate_steps()]
+
+    renderings = gate_protected._accepted_steps_renderings
+    monkeypatch.setattr(gate_protected, "_accepted_steps_renderings", unsplit)
+    renderings.cache_clear()
+    try:
+        assert renderings(True, True, True, True) == [ci_reuse.split_required(listed)]
+    finally:
+        renderings.cache_clear()
+    assert asked == [(True, True, True, False)]
