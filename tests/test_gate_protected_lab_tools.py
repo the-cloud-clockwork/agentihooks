@@ -1,10 +1,9 @@
 import copy
 import hashlib
 import json
-import runpy
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -28,7 +27,7 @@ Grade = Callable[[Workflows, ci_wiring.Wiring, Workflows, ci_wiring.Wiring, obje
 
 @pytest.fixture(scope="module")
 def grader() -> Grade:
-    return cast("Grade", runpy.run_path(str(ROOT / ci_frozen.CANDIDATES / CANDIDATE))["grade"])
+    return gate_protected.grade
 
 
 @pytest.fixture(params=["full", "small"])
