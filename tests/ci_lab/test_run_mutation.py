@@ -29,6 +29,7 @@ FUNCTION = "scripts.mutation_self_plant_sample.x_fee"
 SAMPLE = "def fee(amount, rate):\n    return amount * rate + 1\n"
 BOTH = SAMPLE + "\n\ndef tax(amount):\n    return amount - 2\n"
 FIXED_COST_RATIO = 0.25
+HOLDS_NO_TEST = "tests/test_holds_no_test.py"
 
 
 class Exited(Exception):
@@ -397,6 +398,29 @@ def test_stats_collection_traces_one_session_and_returns_one_result(monkeypatch:
     }
 
 
+@pytest.mark.feature("lab-stats-of-a-test-file-with-no-test")
+@pytest.mark.parametrize(
+    "code, status",
+    [
+        (pytest.ExitCode.OK, 0),
+        (pytest.ExitCode.TESTS_FAILED, 1),
+        (pytest.ExitCode.INTERRUPTED, 2),
+        (pytest.ExitCode.INTERNAL_ERROR, 3),
+        (pytest.ExitCode.USAGE_ERROR, 4),
+        (pytest.ExitCode.NO_TESTS_COLLECTED, 0),
+    ],
+)
+def test_a_stats_collection_that_collects_no_test_is_an_empty_record_and_every_other_code_stays(
+    code: pytest.ExitCode, status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(run_mutation.SWITCH, run_mutation.environ.get(run_mutation.SWITCH, ""))
+    monkeypatch.setattr(run_mutation, "pytest", SimpleNamespace(main=lambda args, plugins: code))  # pyright: ignore[reportUnknownLambdaType]
+
+    [result] = run_mutation.collect(OPTIONS, [HOLDS_NO_TEST])
+
+    assert (result["status"], result["tests"], result["durations"]) == (status, {}, {})
+
+
 def test_stats_read_the_content_keyed_cache_and_collect_its_misses_here(monkeypatch: pytest.MonkeyPatch) -> None:
     collected: list[tuple[Any, ...]] = []
     monkeypatch.setattr(run_mutation, "collect", lambda *args: collected.append(args) or [{"status": 0}])
@@ -506,6 +530,30 @@ def graded_by_lab(work: Path, tree: Path, names: list[str], tests: dict[str, flo
 
 def statuses(rows: list[dict[str, Any]]) -> dict[str, str]:
     return {row["name"]: row["status"] for row in rows}
+
+
+@pytest.mark.feature("lab-stats-of-a-test-file-with-no-test")
+def test_the_runner_answers_a_stats_request_over_a_test_file_that_holds_no_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    tree = corpus(tmp_path / "tree", "kill")
+    (tree / HOLDS_NO_TEST).write_text("LIMIT = 1\n")
+    subprocess.run(["git", "init", "-q"], cwd=tree, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tree, check=True)
+    run_mutation.trampoline(tree, plant.SAMPLE, {1, 2})
+    alone = subprocess.run([sys.executable, "-m", "pytest", *OPTIONS, HOLDS_NO_TEST], cwd=tree, timeout=50)
+    assert alone.returncode == pytest.ExitCode.NO_TESTS_COLLECTED
+    request = {"kind": "stats", "key": "lab", "options": OPTIONS, "root": str(tree)}
+    cold, warm = str(tmp_path / "cold"), str(tmp_path / "warm")
+
+    empty = lab(tree, {**request, "members": [HOLDS_NO_TEST], "cache": cold})["stats"]
+    lab(tree, {**request, "members": [plant.TEST], "cache": warm})
+    both = lab(tree, {**request, "members": [plant.TEST, HOLDS_NO_TEST], "cache": warm})["stats"]
+
+    assert [(record["status"], record["tests"], record["durations"]) for record in empty] == [(0, {}, {})]
+    assert {record["status"] for record in both} == {0}
+    assert {test for record in both for test in record["tests"].get(FUNCTION, [])}
 
 
 @pytest.fixture(scope="module", params=["kill", "survive"])
