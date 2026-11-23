@@ -62,7 +62,7 @@ from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRef
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
-from scripts.ci_lab.queue import DEFAULT, Job, Queue
+from scripts.ci_lab.queue import DEFAULT, Job, Queue, Trigger
 from scripts.ci_lab.remote.post_receive import GRADE_REFS
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover, plannable, read_events
@@ -1092,10 +1092,8 @@ class Scheduler:
                     admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
                     waiting += DEFAULT.slots
             if admitted:
-                event = EVENT_NAMES[state.tier]
-                self.queue.enqueue(
-                    admitted, state.head, {}, state.base, state.grader, state.tier, event, state.head_branch
-                )
+                trigger = Trigger(EVENT_NAMES[state.tier], state.head_branch)
+                self.queue.enqueue(admitted, state.head, {}, state.base, state.grader, state.tier, trigger)
                 self.save(state)
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions

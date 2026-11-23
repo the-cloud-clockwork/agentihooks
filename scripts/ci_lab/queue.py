@@ -9,7 +9,7 @@ from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import LOST
 from scripts.ci_lab.units import Unit
 
-__all__ = ["BAND", "PAGE", "PREFIX", "RANKS", "UNRANKED", "Job", "Queue", "Requirement"]
+__all__ = ["BAND", "PAGE", "PREFIX", "RANKS", "UNRANKED", "UNTRIGGERED", "Job", "Queue", "Requirement", "Trigger"]
 
 PREFIX = "agentihooks-ci:queue:"
 RANKS = len(CLASSES)
@@ -25,6 +25,17 @@ class Requirement:
 
 
 DEFAULT = Requirement()
+
+
+@dataclass(frozen=True)
+class Trigger:
+    """The Actions event name a job's grade runs under and the head branch of a pull request head."""
+
+    event: str = ""
+    head_branch: str = ""
+
+
+UNTRIGGERED = Trigger()
 
 
 @dataclass(frozen=True)
@@ -188,8 +199,7 @@ class Queue:
         base: str = "",
         grader: str = "",
         rank: int = UNRANKED,
-        event: str = "",
-        head_branch: str = "",
+        trigger: Trigger = UNTRIGGERED,
     ) -> list[str]:
         """Add each unit of the head as a pending job, with the base and grader revision its grade reads and the event
         name and head branch its grade runs under, unless that job is already known. The pending order is the rank
@@ -213,8 +223,8 @@ class Queue:
                 "worker": "",
                 "outcome": "",
                 "rank": rank,
-                "event": event,
-                "head_branch": head_branch,
+                "event": trigger.event,
+                "head_branch": trigger.head_branch,
             }
             fields = [item for pair in record.items() for item in pair]
             keys = [_job(job), _key("pending"), _key("seq"), _head(head, "pending")]

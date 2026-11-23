@@ -710,7 +710,7 @@ def test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slo
 def test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none(
     scheduler: str, jobs: queue.Queue, clock: Clock, sink: Sink
 ) -> None:
-    jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1", event="pull_request", head_branch="fix-x")
+    jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1", trigger=queue.Trigger("pull_request", "fix-x"))
     client = worker.Client(scheduler)
 
     [lease] = client.lease("pod-1", 1, CAPABILITIES, 0)

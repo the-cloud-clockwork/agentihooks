@@ -85,8 +85,7 @@ def granted(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> dict[str, 
         {},
         "b1",
         "g1",
-        event="pull_request",
-        head_branch="fix-x",
+        trigger=queue.Trigger("pull_request", "fix-x"),
     )
     status, body = post(lab, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0})
     assert status == 200

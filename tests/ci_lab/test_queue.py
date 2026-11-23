@@ -61,7 +61,7 @@ def test_enqueue_stores_the_base_and_grader_revision_each_job_reads(jobs: queue.
 
 @pytest.mark.feature("lab-lease-event-branch")
 def test_enqueue_stores_the_event_and_head_branch_each_job_grades_under(jobs: queue.Queue) -> None:
-    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1", event="pull_request", head_branch="fix-x")
+    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1", trigger=queue.Trigger("pull_request", "fix-x"))
     jobs.enqueue([unit("c")], "h2", {})
     jobs.client.hdel(f"{queue.PREFIX}job:h2:test:c", "event", "head_branch")
 
