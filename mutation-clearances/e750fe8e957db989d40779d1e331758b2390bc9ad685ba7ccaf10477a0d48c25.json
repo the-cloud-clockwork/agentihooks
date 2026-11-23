@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/mutation.py:scripts.swarm_ledger.repository.mutation.x_narrow:9102c3682e2e93abac9f863ee778b867f1fc3c1380a043c8c7de6951e20c59a5": {
+    "reader": "standards_reader",
+    "reason": "finish()'s created parameter is consumed only inside bool(ctx.events or ctx.dirty or found != meta.get(\"warnings\") or created). Python's or short-circuits on the first truthy operand, so created is only reached when the earlier operands are falsy, and bool(False) == bool(None) == False either way."
+  }
+}
