@@ -46,7 +46,7 @@ SCENARIOS = (
 )
 PASSES = {"hive-roll": (2, 60_000), "second-pass": (2, 1000), "interval": (2, 60_000), "interval-slow": (3, 60_000)}
 CADENCES = {"interval-slow": "3"}
-LEDGER_WRITES = ("update_task", "_call", "notify", "mark_swarm", "rank_task", "comment", "join", "notice")
+LEDGER_WRITES = ("update_task", "notify", "mark_swarm", "rank_task", "comment", "join", "notice")
 RUNTIME_WRITES = ("spawn", "retire", "reap_name", "nudge", "name_pane", "close_space", "close_pane")
 
 
