@@ -13,6 +13,8 @@ from scripts.swarm.store import RedisStore, SwarmError
 
 TTL_SEC = 30 * 24 * 3600
 OPEN = "open"
+READ = "read"
+ANSWERED = "answered"
 
 
 @dataclass(frozen=True)
@@ -119,8 +121,33 @@ def _post_one(store: RedisStore, forge: Forge, target: Record, who: Who, body: s
     return _write(store, who.swarm, target.url, target.head, append, who.task)
 
 
+def _acknowledge(item: Finding, by: str, answer: str) -> Finding:
+    return replace(
+        item,
+        state=ANSWERED if answer else READ,
+        answer=answer,
+        read_by=tuple(dict.fromkeys((*item.read_by, by))),
+    )
+
+
+def _mark(found: Record, by: str, ids: Sequence[str], answer: str) -> Record:
+    if not found.findings:
+        raise SwarmError(f"no review on head {found.head} of {found.url}")
+    unknown = sorted(set(ids) - {item.id for item in found.findings})
+    if unknown:
+        raise SwarmError(f"no finding {', '.join(unknown)} on head {found.head} of {found.url}")
+    chosen = set(ids) or {item.id for item in found.findings}
+    own = [item.id for item in found.findings if item.id in chosen and item.by == by]
+    if own:
+        raise SwarmError(f"a reviewer cannot mark its own findings read: {', '.join(own)}")
+    return found._replace(
+        findings=tuple(_acknowledge(item, by, answer) if item.id in chosen else item for item in found.findings)
+    )
+
+
 def mark(store: RedisStore, slug: str, forge: Forge, url: str, by: str, ids: Sequence[str], answer: str) -> Record:
-    raise NotImplementedError(store, slug, forge, url, by, ids, answer)
+    head = _head(forge, url)
+    return _write(store, slug, url, head, lambda found: _mark(found, by, ids, answer), "")
 
 
 def post(store: RedisStore, slug: str, forge: Forge, url: str, by: str, task: str, bodies: Sequence[str]) -> Record:

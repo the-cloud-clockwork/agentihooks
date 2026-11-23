@@ -50,7 +50,10 @@ def main(argv: list[str]) -> int:
     try:
         found = connect()
         agent = _agent(found, args.slug)
-        result = record.post(found, args.slug, _forge(), args.url, agent.name, agent.task, args.finding)
+        if args.action == "read":
+            result = record.mark(found, args.slug, _forge(), args.url, agent.name, args.finding, args.answer)
+        else:
+            result = record.post(found, args.slug, _forge(), args.url, agent.name, agent.task, args.finding)
     except (SwarmError, ForgeError) as error:
         print(f"review: {error}", file=sys.stderr)
         return 1
