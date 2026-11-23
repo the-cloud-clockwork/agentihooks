@@ -54,6 +54,77 @@ the client timeout. Each request tries this host's warm writer first, the `agent
 `database_ledger.request` itself never opens the socket, so the controller's hosted ledger and the writer always
 answer in process.
 
+### Parity with the in-process call
+
+`tests/swarm_ledger/test_warm_writer_parity.py` holds the warm writer to the in-process answer for every refusal and
+every audit effect of a ledger write. Each case creates two ledgers from the same content in one store and sends the
+same request twice: to the first ledger in process through `database_ledger.replied`, the route call the in-process
+transport makes, and to the second over the socket through `warm_writer.ask` to a `warm_writer.serve` thread. It then
+requires both to match on:
+
+- What the caller got: the status and decoded body, or the error class and message the request raised.
+- The ledger state, the `events` rows (key, revision, position, value) and the `outbox` rows (revision, subject,
+  value).
+- The `relay_to_inbox`, `doctor_phrase` and `deliver_alerts` hooks the write fired, each with the state it received.
+- The request metric samples the request left.
+
+Each ledger's own slug, every clock field (`at`, `time` and any key ending in `_at`) and each outbox envelope's `id`
+are blanked before the comparison, because the two ledgers are written moments apart. The suite stubs the authority
+fence, Redis, the talk budget marks and the duplicate finder, so only the case under test can refuse.
+
+Every refusal answers alike on both paths:
+
+| Case | The write | Both paths answer |
+|---|---|---|
+| Schema | A comment with no `operation_id` | `400` with code `schema_invalid` |
+| Authority | A comment sent by a caller acting as the agent `eng@ab-1` | `403` with code `forbidden` |
+| Duplicate | A task add the duplicate finder matches to the ledger's first task | `200` with nothing applied, the operation rejected and `task t2 repeats task t1 "Parity task"` |
+| Write gate | A comment from a worker that spent its talk budget after its last outcome | `200` with nothing applied, the operation rejected and `talk refused: <worker> made 10 talk writes` |
+| Revision | A comment whose guard names a revision the thread never had | `409` with code `revision_conflict` |
+| Writer floor, Postgres only | A task add after the stored writer floor is raised one version above the writer's | Both raise `Refused` with a message that starts `ledger writer version 1 is below version 2`; neither ledger's generation moves and the floor stays raised |
+
+A conflicting write retries and lands alike. Both ledgers get a `ResourceClient`, one over `database_ledger.request`
+and one over the socket. Before the first write lands, one comment is slipped into the thread in process, so the
+revision the client read is stale. Both clients send the same four requests: read the thread (`200`), write
+(`409 revision_conflict`), read the thread again (`200`), write (`200`). The retried comment is applied, and both
+ledgers hold the same state, events and outbox rows. `ResourceClient.mutate` retries a `409 revision_conflict` only on a
+path it read itself, up to five times with a jittered backoff that doubles from at most 0.25 seconds, and re-reads the
+path's revision before each retry.
+
+Every audit effect is left alike. One write adds a task, adds a comment and acknowledges events through revision 1 as
+the swarm's own service. Both paths answer `200` with all three operations applied and the same reply, and then each
+effect matches:
+
+| Effect | What the suite requires on both ledgers |
+|---|---|
+| `events` | The same event rows, at least one |
+| `outbox` | The same outbox relay rows, at least one; the ledgers are created at swarm size so their writes leave them |
+| `request-metrics` | No request metric sample on either path: both answer through `database_ledger.replied`, which records none |
+| `inbox-relay` | The same inbox relay, doctor phrase and alert hook calls, at least one |
+| `ack` | The same `events_ack` in the ledger's metadata |
+| `write-ack` | The same reply to the write |
+
+The suite runs on the SQLite test store, and also on shared Postgres when `LEDGER_TEST_POSTGRES_URL` names a database.
+For Postgres it migrates a `PostgresLedgerRepository` on that URL and binds it into the ledger server's route code as
+the publishing repository. With the URL set, 25 cases run: five refusals and six audit effects on each store, the retry
+on each store, and the writer floor on Postgres. Without it, 12 run on SQLite and pytest skips the writer floor test
+for its empty parameter set.
+
+The `Writer lock` workflow runs the suite against its Postgres after the other Postgres scenarios and fails with
+`The warm writer parity scenarios on SQLite and Postgres did not all run.` unless the log reports ` 25 passed`; see
+[Verification in CI](shared-ledger-database.md#verification-in-ci). Run it the same way against a Postgres test
+database of your own, in one process with no test workers as the workflow does, because the writer floor case changes
+the floor row every writer on that database reads:
+
+```bash
+LEDGER_TEST_POSTGRES_URL=postgresql://postgres@<postgres host>:5432/ledger \
+  python -m pytest tests/swarm_ledger/test_warm_writer_parity.py -n 0 -v -rs --tb=short
+```
+
+Leave `LEDGER_TEST_POSTGRES_URL` unset to run the SQLite cases only. The writer floor test restores the floor to the
+required version when it ends, so point the URL only at a test database. In an agent session the
+[Local test guard](local-test-guard.md) blocks this command unless `AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN` is `true`.
+
 ### The store a write lands in
 
 The route code writes the store the process is configured for:
@@ -375,6 +446,8 @@ resolution](deployment-modes.md#client-mode-resolution)).
 | `tests/swarm_ledger/test_ledger_write_cutover.py` | The hub claim and release land in the store with no ledger server request; a stale hub claim is refused by the route; the ledger server answers `POST`, `PUT`, `PATCH` and `DELETE` with `501`; every write hook of the read only ledger server refuses with `405`; a hosted hub without the shared database refuses to start |
 | Feature map entry `swarm-ledger-api-writes` | The behaviour, its operator words and its tests; its Semgrep rule `feature-ledger-api-writes` holds `client` to the warm writer first transport, `partial(routed, timeout)`, and the hub's database check |
 | `tests/tick/test_database_ledger_writer_route.py` | A request goes to a listening writer; an absent or refusing socket runs it in process; a lost reply after send raises `TimeoutError` with the route code never called; a writer refusal raises the in-process HTTP error; a tick pass stays in process and journals while a writer listens |
+| `tests/swarm_ledger/test_warm_writer_parity.py` | Every refusal, the revision conflict retry and every audit effect answer and leave rows alike over the warm writer socket and in process, on SQLite and on shared Postgres in the `Writer lock` workflow; see [Parity with the in-process call](#parity-with-the-in-process-call) |
+| Feature map entry `ledger-warm-writer` | The warm writer's behaviour and its tests: the socket tests in `tests/swarm_ledger/test_warm_writer.py` and the refusal, retry and audit effect parity tests; the Postgres only writer floor parity test carries no feature marker |
 | Feature map entry `compose-api-health-and-front-proxy` | The API service answers a health probe sent to its own loopback port (`test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port`); every front config forwards `Host $http_host` and never `$host` (`test_the_front_forwards_the_host_the_client_sent_with_its_port`); both Compose front configs resolve `swarm` and `api` through `127.0.0.11` (`test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time`) |
 | Feature rule `feature-tick-database-ledger` | The tick route acts as `database_ledger.acting("")`, the tick ledger port builds its client with `ledger.client`, and `ledger.client` returns the in-process client with no other path |
 | Rule `ledger-server-reads-only` | No `do_POST`, `do_PUT`, `do_PATCH` or `do_DELETE` in the ledger server module, whether defined, assigned or set with `setattr`, and no `setattr` under a computed name there |
@@ -413,6 +486,7 @@ These no longer exist; an older page or note that names them describes the previ
 | Compose `swarm init` stops with `api is <state>` | Read `docker compose --project-name agentihooks-swarm logs api`; the API service starts once Redis and NATS are healthy. Log lines `"GET /healthz HTTP/1.1" 403` mean the image predates the [Host check](#host-check) entries for the service's own port: run an image built after pull request 11667 |
 | Every request through a front answers `403 host not allowed`, or under `/api/v1/` `403 forbidden` with `Host not allowed` | The `Host` the client sent is not listed: add the `host:port` to `SWARM_ALLOWED_HOSTS` or set `SWARM_PUBLIC_URL`. When the address is listed, the front forwards `$host` and drops the port; forward `$http_host` |
 | A Compose front answers `502` and logs `no resolver defined to resolve swarm` | The front config has no `resolver` line, so nginx cannot resolve the variable upstream. Add `resolver 127.0.0.11 valid=1s;` and restart the front |
+| The `Writer lock` job fails with `The warm writer parity scenarios on SQLite and Postgres did not all run.` | Fewer than 25 parity cases passed. A failed case means the socket answer, the rows or the hooks differ from the in-process call: read its assertion in the job log. Exactly 12 passed with the writer floor test skipped means `LEDGER_TEST_POSTGRES_URL` was not set for the step |
 
 ## Related pages
 
