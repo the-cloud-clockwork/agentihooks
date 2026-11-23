@@ -3,7 +3,7 @@ def client(base: str, timeout: float) -> ResourceClient:
     return ResourceClient(base, credentials(), timeout)
 
 
-# ok: feature-ledger-api-writes
+# ruleid: feature-ledger-api-writes
 def client(base: str, timeout: float) -> ResourceClient:
     """A ledger API client whose requests run the ledger API route code in this process."""
     return ResourceClient(base, {}, timeout, transport=request)
@@ -13,16 +13,6 @@ def client(base: str, timeout: float) -> ResourceClient:
 def client(base: str, timeout: float) -> ResourceClient:
     """A ledger API client whose requests go to this host's warm writer first and otherwise run in process."""
     return ResourceClient(base, {}, timeout, transport=partial(routed, timeout))
-
-
-# ruleid: feature-ledger-api-writes
-def client(base: str, timeout: float) -> ResourceClient:
-    return ResourceClient(base, {}, timeout)
-
-
-def client(base: str, timeout: float) -> ResourceClient:
-    # ruleid: feature-ledger-api-writes
-    return ResourceClient(base, {}, timeout, transport=None)
 
 
 # ruleid: feature-ledger-api-writes
