@@ -193,8 +193,9 @@ def mutant_units(
     changes maps each mutated source file, a Python file present under root, to its changed lines; covering maps a
     qualified mutmut function name to the fingerprints of the tests that cover it; unlisted maps each test module
     under root that holds no manifest test to its hash, together with every file under the measured and test trees
-    while such a module exists, and enters every key, since the mutant runner runs it too. timeout is the sandbox
-    bound one unit's mutants run under; a function whose mutants price over it gets several units.
+    while such a module exists, and each test module the head changes, whose tests the manifest did not record as
+    they stand; it enters every key, since the mutant runner runs those files too. timeout is the sandbox bound one
+    unit's mutants run under; a function whose mutants price over it gets several units.
     """
     runner = runner_digest(root)
     return tuple(

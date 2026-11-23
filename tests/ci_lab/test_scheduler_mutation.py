@@ -70,6 +70,29 @@ def test_every_part_of_a_split_mutant_unit_names_the_test_files_it_traces(
 
 @pytest.mark.feature("lab-mutation-units-work-on-the-change")
 @pytest.mark.usefixtures("staticless")
+def test_a_test_module_the_head_changes_rekeys_the_mutant_units_that_trace_it(tmp_path: Path) -> None:
+    suite = _suite(tmp_path, DELIVERY["lab"])
+    expander = Port(SUITE_MANIFEST).expander(tmp_path)
+    _git(suite.repo, "switch", "-q", "-c", "other", suite.base)
+    changed = _commit(suite.repo, {"scripts/alpha.py": ALPHA.replace("return 1", "return 4")})
+    weak = _commit(suite.repo, {"tests/test_beta.py": "def test_second():\n    assert True\n"})
+    exact = _commit(suite.repo, {"tests/test_beta.py": "def test_second():\n    assert 1 == 1\n"})
+
+    found = [
+        expander.expand(suite.request(Priority.PROMOTION, head)).gates["mutation"] for head in (changed, weak, exact)
+    ]
+
+    assert [[unit.members for unit in units] for units in found] == [[unit.members for unit in found[0]]] * 3
+    assert [json.loads(units[0].manifest) for units in found] == [
+        ["tests/test_alpha.py"],
+        ["tests/test_alpha.py", "tests/test_beta.py"],
+        ["tests/test_alpha.py", "tests/test_beta.py"],
+    ]
+    assert len({units[0].key for units in found}) == 3
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+@pytest.mark.usefixtures("staticless")
 def test_a_promotion_head_that_changes_no_function_plans_no_stats_unit_for_its_test_modules(tmp_path: Path) -> None:
     suite = _suite(tmp_path, DELIVERY["lab"])
     _git(suite.repo, "switch", "-q", "-c", "other", suite.base)

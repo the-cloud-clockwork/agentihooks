@@ -1607,8 +1607,9 @@ class MirrorExpander:
         """Return one mutant unit per function the head changes against its base and one stats unit per test file
         its mutant units trace, built in a temporary checkout of the head: the files present at the head that hold a
         manifest test running such a function, the test modules the manifest lists no test of and the test modules
-        the head changes against its base. Every mutant unit carries those files as its manifest, a JSON list; none
-        when the head changes no function of a measured Python file."""
+        the head changes against its base. Every mutant unit carries those files as its manifest, a JSON list, and
+        the hash of each such changed test module enters its key with the unlisted test hashes; none when the head
+        changes no function of a measured Python file."""
         from scripts.ci_lab import executors, expand_mutation
 
         with self._checkout(mirror, request.head) as root:
@@ -1616,19 +1617,16 @@ class MirrorExpander:
             if not changes:
                 return {}
             covering = expand_mutation.covering(root, manifest, expand_tests.fingerprints(manifest, contents), changes)
-            mutants = expand_mutation.mutant_units(
-                root,
-                changes,
-                covering,
-                expand_tests.unlisted_test_hashes(manifest, contents),
-                timeout=executors.UNIT_TIMEOUT_S,
-            )
+            changed = expand_mutation.changed_tests(root, request.base, request.head)
+            keyed = expand_tests.unlisted_test_hashes(manifest, contents)
+            keyed.update({path: expand_mutation.file_digest(root / path) for path in changed})
+            mutants = expand_mutation.mutant_units(root, changes, covering, keyed, timeout=executors.UNIT_TIMEOUT_S)
             if not mutants:
                 return {}
             owners = {executors.function_of(unit.members[0]) for unit in mutants}
             tests = {test.partition("::")[0] for name in owners for test in covering.get(name, {})}
             tests.update(expand_tests.unlisted_modules(manifest, contents))
-            tests.update(expand_mutation.changed_tests(root, request.base, request.head))
+            tests.update(changed)
             files = sorted(path for path in tests if (root / path).is_file())
             stats = expand_mutation.stats_units(root, files, executors.OPTIONS)
         traced = json.dumps(files)
