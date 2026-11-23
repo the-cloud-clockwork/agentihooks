@@ -95,7 +95,7 @@ def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step() -> None:
     assert 'copy="$(mktemp -d -p "$RUNNER_TEMP")"' in fixture_run
     assert 'cp -r .semgrep-incidents "$copy/rules"' in fixture_run
     assert ': > "$copy/.semgrepignore"' in fixture_run
-    assert '(cd "$copy" && semgrep --metrics off --test --config rules rules)' in fixture_run
+    assert '(cd "$copy" && semgrep --metrics off --test --strict --config rules rules)' in fixture_run
     assert ".semgrep-incidents/" in (_ROOT / ".semgrepignore").read_text().splitlines()
 
 
@@ -282,7 +282,7 @@ def test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds
 def test_feature_fixture_command_runs_recursively():
     job = _jobs()["feature-tests"]
     commands = [step["run"] for step in job["steps"] if "run" in step]
-    assert "semgrep --metrics off --test .semgrep/features" in commands
+    assert "semgrep --metrics off --test --strict .semgrep/features" in commands
     assert "if" not in job and "continue-on-error" not in job
     assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
 
@@ -533,7 +533,7 @@ def test_scan_reads_the_domain_rules_folder_that_holds_rule_files() -> None:
     rules_dir = _ROOT / step["env"]["RULES"]
     assert rules_dir == _ROOT / ".semgrep"
     assert any(_ROOT.glob(".semgrep/*.yml"))
-    assert "semgrep --metrics off --test --config rules rules" in step["run"]
+    assert "semgrep --metrics off --test --strict --config rules rules" in step["run"]
     assert '--config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .' in step["run"]
 
 
