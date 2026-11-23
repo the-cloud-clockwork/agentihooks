@@ -429,7 +429,7 @@ def test_the_reap_step_judges_an_admitted_agent_by_its_pane_and_whether_its_work
     monkeypatch.setattr(
         reconciler,
         "stop_admitted",
-        lambda slug, stopped, reason: stops.append((slug, stopped.name, reason)) or execution_stop.SENT,
+        lambda slug, stopped, reason, *, store: stops.append((slug, stopped.name, reason)) or execution_stop.SENT,
     )
     judging = SimpleNamespace(
         slug=SLUG, store=None, ledger=None, runtime=None, rows={}, live={"a1"} if live else set(), now_ms=NOW
@@ -609,7 +609,7 @@ def test_an_ended_admitted_agent_is_retired_only_once_its_stop_answers_ended_or_
     returned: list[tuple[Any, ...]] = []
     monkeypatch.setattr(tick, "_acknowledging", lambda *_args: False)
     monkeypatch.setattr(tick, "_ended", lambda *_args: True)
-    monkeypatch.setattr(reconciler, "stop_admitted", lambda _slug, _agent, _reason: outcome)
+    monkeypatch.setattr(reconciler, "stop_admitted", lambda _slug, _agent, _reason, *, store: outcome)
     monkeypatch.setattr(
         reconciler, "settled_admitted", lambda slug, checked: asked.append((slug, checked.name)) or settled
     )
