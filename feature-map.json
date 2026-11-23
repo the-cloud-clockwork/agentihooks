@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "lab-scheduler-access-log-query-redaction",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2855",
+      "behaviour": "Scheduler access logs retain the request method, path and response status while omitting query strings, including upload lease tokens. Routing receives the complete request target for successful and refused requests.",
+      "seam": "scripts.ci_lab.lease_api.bind HTTP access logging",
+      "tests": [
+        "tests/ci_lab/test_lease_api.py::test_access_logs_omit_upload_query_strings"
+      ]
+    },
+    {
       "id": "lab-shadow-reusable-caller-pairing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2804",
