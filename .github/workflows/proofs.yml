@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: tests
-        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
+        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts, lab-mutation-plant]
       base:
         description: Base revision for mutation or Semgrep scope
         required: true
@@ -27,6 +27,16 @@ on:
         type: boolean
         required: false
         default: false
+      unit_timeout:
+        description: Seconds one lab mutation unit sandbox call may run in the lab mutation plant proof; 0 keeps the lab's own
+        required: false
+        default: '0'
+      stats_scope:
+        description: Test files a mutant unit collects stats over in the lab mutation plant proof
+        type: choice
+        required: false
+        default: every
+        options: [every, plant, none]
 
 concurrency:
   group: ${{ format('focused-proof-{0}', github.run_id) }}
@@ -42,6 +52,82 @@ jobs:
   mutation-deadlines:
     if: inputs.proof == 'mutation-deadlines'
     uses: ./.github/workflows/mutation-deadline-proof.yml
+
+  lab-mutation-plant:
+    if: inputs.proof == 'lab-mutation-plant'
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      PROOF_BASE: ${{ inputs.base }}
+      PROOF_TIMEOUT: ${{ inputs.unit_timeout }}
+      PROOF_SCOPE: ${{ inputs.stats_scope }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+
+      - name: Let bubblewrap create user and network namespaces
+        shell: bash
+        run: |
+          if ! command -v bwrap >/dev/null; then
+            archive=/etc/apt/sources.list.d/ubuntu.sources
+            [[ -f "$archive" ]] || archive=/etc/apt/sources.list
+            only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)
+            sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete; installing bubblewrap from the indexes that loaded"
+            sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" bubblewrap
+          fi
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --dev-bind / / --unshare-net true
+
+      - name: Build the scratch venv and place the driver outside the checkout
+        shell: bash
+        run: |
+          proof="$RUNNER_TEMP/lab-mutation-plant"
+          mkdir -p "$proof/driver"
+          uv venv "$proof/venv" --python 3.12
+          uv pip install --python "$proof/venv/bin/python" --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -r pyproject.toml --extra dev --extra all
+          cp .github/proofs/lab_mutation_plant.py "$proof/driver/"
+          env -i "$proof/venv/bin/python" -I -c 'import sys; print(sys.version); print(sys.base_prefix)'
+
+      - name: Expand and grade the twin, the plant and the control in process
+        shell: bash
+        working-directory: ${{ runner.temp }}/lab-mutation-plant/driver
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          proof="$RUNNER_TEMP/lab-mutation-plant"
+          base="$PROOF_BASE"
+          if [[ "$base" == origin/dev ]]; then
+            base="$(git -C "$GITHUB_WORKSPACE" merge-base HEAD origin/dev)"
+          fi
+          scope=(--stats-scope "${PROOF_SCOPE:-every}")
+          if [[ "${PROOF_SCOPE:-every}" == none ]]; then
+            scope=(--expand-only)
+          fi
+          "$proof/venv/bin/python" -I lab_mutation_plant.py --repo "$GITHUB_WORKSPACE" --base "$base" \
+            --work "$proof/work" --out "$proof/out" --timeout "${PROOF_TIMEOUT:-0}" "${scope[@]}"
+
+      - name: Publish the proof table
+        if: always()
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/lab-mutation-plant/out"
+          [[ -f "$out/summary.md" ]] && cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          [[ -f "$out/proof.json" ]] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps({k: d[k] for k in ("verdicts","checks","expansion") if k in d}, indent=1)[:60000])' "$out/proof.json"
+          true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lab-mutation-plant-proof
+          path: ${{ runner.temp }}/lab-mutation-plant/out
 
   operations-receipts:
     if: inputs.proof == 'operations-receipts'
