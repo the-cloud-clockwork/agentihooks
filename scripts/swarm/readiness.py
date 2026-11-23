@@ -35,6 +35,15 @@ class Classes(NamedTuple):
     band: Callable[[dict[str, Any]], tuple[int, ...]]
 
 
+class Classes(NamedTuple):
+    """The focus rank of each task of a snapshot, the rank of a task no focus covers, and the one function that gives
+    a task's offer its class with the keys that order offers inside it."""
+
+    focus: dict[str, int]
+    unfocused: int
+    band: Callable[[dict[str, Any]], tuple[int, ...]]
+
+
 @dataclass(frozen=True)
 class Snapshot:
     slug: str

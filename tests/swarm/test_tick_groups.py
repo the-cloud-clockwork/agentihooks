@@ -437,6 +437,8 @@ def test_a_tick_value_left_drops_the_tick_actions_and_the_wrapper_goes_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     swarm, ledger, rt = env
+    for row in ledger.rows.values():
+        row["enhancement"] = "skipped"
     run("sw", "create", "--repo", "/repo")
     later: list[str] = []
     _with(
