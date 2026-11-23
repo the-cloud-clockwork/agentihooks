@@ -4066,7 +4066,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-slow-lane-deadline",
       "behaviour": "The slow tick lane covers the accumulated live budgets of its scheduled steps, including budgets resolved after the pass starts, so later slow work finishes beyond the former shared deadline while critical timing and the pass join window stay fixed.",
       "seam": "scripts.tick.engine.run_group and scripts.tick.pool.running",
-      "rules": ["tick-slow-lane-fixed-deadline"],
+      "rules": [
+        "tick-slow-lane-fixed-deadline"
+      ],
       "tests": [
         "tests/tick/test_slow_lane_deadline.py::test_slow_deadline_uses_live_budgets_resolved_after_the_pass_starts",
         "tests/tick/test_slow_lane_deadline.py::test_a_later_slow_step_finishes_after_the_former_lane_deadline",
@@ -11742,7 +11744,7 @@
       "id": "lab-scheduler-test-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2629",
-      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. A pull request or hotfix head gets none. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A merge group head also runs one unit per test module its entries change that the head holds and the manifest lists no test of, its member the module path, keyed as a broad test over the measured and test trees, whether the rule chose a unit set or the whole suite; the test executor grades such a member, which the manifest records no files for. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it makes the grade red.",
+      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. An ordinary pull request or hotfix head gets none; a plant pull request runs the listed batches and unlisted module units for the test modules it adds or changes. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A merge group head also runs one unit per test module its entries change that the head holds and the manifest lists no test of, its member the module path, keyed as a broad test over the measured and test trees, whether the rule chose a unit set or the whole suite; the test executor grades such a member, which the manifest records no files for. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it makes the grade red.",
       "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.expand_tests.units, scripts.ci_lab.expand_tests.unlisted_units, scripts.ci_lab.run_tests.outside, scripts.ci_lab.queue.Queue.retry and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
       "tests": [
         "tests/ci_lab/test_expand_tests.py::test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_toolchain",
@@ -14847,6 +14849,22 @@
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_window",
         "tests/hive/test_daemon_presence.py::test_the_daemon_token_gauges_carry_the_session_agent_and_profile_from_the_seen_record",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_skips_token_values_it_cannot_read_and_sends_the_rest"
+      ]
+    },
+    {
+      "id": "lab-plant-test-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-flake-plant-units",
+      "behaviour": "A plant head carries its plant marker through intake and held grade requests. Old requests without the marker default to false. At the pull request tier a plant grades listed test batches whose module changed and unlisted added or changed test modules, omits deleted and unchanged modules, and retains the unit job so its check posts. Ordinary pull request and hotfix grades keep no test units.",
+      "seam": "request_from, held request serialization, MirrorExpander.expand over a git origin fixture, and Scheduler.tick check posting",
+      "tests": [
+        "tests/ci_lab/test_plant_test_units.py::test_only_a_plant_event_marks_its_grade_request",
+        "tests/ci_lab/test_plant_test_units.py::test_a_stored_grade_request_keeps_its_plant_marker",
+        "tests/ci_lab/test_plant_test_units.py::test_a_grade_request_stored_before_plant_markers_loads_as_an_ordinary_request",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_keeps_its_marker_while_held_before_expansion",
+        "tests/ci_lab/test_plant_test_units.py::test_a_pull_request_plant_grades_only_its_added_and_changed_test_modules",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_with_no_added_or_changed_test_module_grades_no_test_unit",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_unit_job_posts_its_check"
       ]
     }
   ],
