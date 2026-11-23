@@ -369,7 +369,6 @@ INTENTIONAL_SMOKES = {
     ),
 }
 FLOATING_INSTALLS: tuple[str, ...] = (
-    ".github/workflows/branch-lanes.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/coverage-stability.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
     ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/test.yml: pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1",

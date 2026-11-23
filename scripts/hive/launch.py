@@ -24,7 +24,7 @@ from scripts.swarm_v2.kubernetes import approved
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
 
 HIVE = "hive"
-ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "planner": "plan", "dispatcher": "dispatch"}
+ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "reviewer": "review", "planner": "plan", "dispatcher": "dispatch"}
 TTL_MS = 300000
 LAUNCH_MS = 75000
 ORDERS = "controller-launch-orders"

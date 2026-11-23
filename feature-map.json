@@ -324,6 +324,25 @@
       ]
     },
     {
+      "id": "ledger-hook-bounded-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-hook-bounded-read",
+      "behaviour": "The swarm ledger hook of a bound session reads the members, events and policy, only the done and out of scope flags of each phase and follow up, and only the tasks its unhandled operator events target, never a whole tasks, phases or followups collection, while routing owed events, skipping a closed ledger and handing the policy exactly as before.",
+      "seam": "scripts.swarm_ledger.ledger_hook.dispatch for a bound session, storage.read_flags and ledger_gate.task_targets",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_for_a_bound_session_never_reads_the_whole_tasks_phases_or_followups",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_routes_owed_operator_events_to_the_task_claimant_claims_holder_or_orchestrator",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_hands_the_ledger_policy_and_reaches_the_orchestrator_for_a_task_the_ledger_lacks",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_skips_only_a_ledger_whose_phases_and_follow_ups_are_all_done_or_out_of_scope",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_skips_the_handler_when_the_ledger_vanishes_before_the_task_read",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_skips_the_handler_when_the_flags_read_finds_no_database",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_skips_the_handler_when_the_ledger_is_gone_before_the_flags_read",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_does_not_run_the_handler_for_a_ledger_with_no_member_record",
+        "tests/swarm_ledger/test_sqlite_reads.py::test_read_flags_reads_only_the_named_flags_of_each_item_in_stored_order",
+        "tests/swarm_ledger/test_ledger_gate.py::test_task_targets_name_only_unhandled_operator_task_targets_once_each"
+      ]
+    },
+    {
       "id": "lab-zero-base-push",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",
@@ -1182,6 +1201,17 @@
       "tests": [
         "tests/swarm/test_metrics_outbox.py::test_a_new_spool_waits_out_another_connections_write_lock_before_it_turns_on_wal",
         "tests/recall/test_store.py::test_a_new_store_waits_out_another_connections_write_lock_before_it_turns_on_wal"
+      ]
+    },
+    {
+      "id": "metrics-spool-drops-shipped-ledger-snapshots",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-ephemeral-disk",
+      "behaviour": "A ledger metrics record drops the ledger snapshot rows the spool has already shipped, so the controller's metrics spool holds the newest snapshot cycle plus any cycle not yet shipped instead of a day of them, while unshipped snapshot rows and shipped rows of every other table stay.",
+      "seam": "metrics_ledger.record against a metrics outbox whose flush shipped or failed to ship earlier snapshot cycles",
+      "tests": [
+        "tests/swarm/test_metrics_ledger.py::test_unshipped_snapshots_and_shipped_ledger_events_survive_the_next_record",
+        "tests/swarm/test_metrics_ledger.py::test_the_spool_keeps_only_the_newest_snapshot_cycle_once_earlier_ones_shipped"
       ]
     },
     {
@@ -2328,6 +2358,32 @@
       ],
       "rules": [
         "hub-mint-unscoped-member-grant"
+      ]
+    },
+    {
+      "id": "review-lane-spawn",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-lane-spawn",
+      "behaviour": "A review lane task launches a reviewer with the reviewer profile wherever an engineering task launches: a workstation spawn goes through the model pick, the version two runtime routes review to hives and the kubernetes backend, every hive that does not exclude review runs a review spoke on the review ready queue, the queue lanes accept the review queue, the hive member grant takes from every queue lane including review, a hive order keeps the reviewer profile with the review lane, and seat spawn places a reviewer seat; eng, ci and plan keep every path they had.",
+      "seam": "runtime PICKED_LANES and spawn, swarm_v2 HIVE_LANES and Placement, controller hive lane routing, hive lanes LANES and spokes, events scope LANES and queue_lane, nats_grant swarm_publish, launch ROLE_PROFILES, the hive order consumer, and seat_spawn place",
+      "tests": [
+        "tests/hive/test_review_lane_spawn.py::test_every_spawn_lane_set_carries_ci_beside_eng",
+        "tests/hive/test_review_lane_spawn.py::test_every_spawn_lane_set_carries_review_beside_eng",
+        "tests/hive/test_review_lane_spawn.py::test_the_hive_member_grant_takes_from_every_ready_queue_lane",
+        "tests/hive/test_review_lane_spawn.py::test_the_hive_member_grant_names_the_review_queue",
+        "tests/hive/test_review_lane_spawn.py::test_an_engineering_ready_queue_belongs_to_its_swarm",
+        "tests/hive/test_review_lane_spawn.py::test_the_review_ready_queue_belongs_to_its_swarm",
+        "tests/hive/test_review_lane_spawn.py::test_each_hive_lane_profile_takes_its_lane_as_hive_role",
+        "tests/hive/test_review_lane_spawn.py::test_the_reviewer_profile_takes_the_review_role_on_a_hive",
+        "tests/hive/test_review_lane_spawn.py::test_the_hive_controller_places_the_lane_on_a_hive",
+        "tests/hive/test_review_lane_spawn.py::test_a_kubernetes_proof_keeps_reviewers_off_hives_like_engineers",
+        "tests/hive/test_review_lane_spawn.py::test_the_kubernetes_backend_places_the_lane",
+        "tests/hive/test_review_lane_spawn.py::test_a_hive_runs_a_review_spoke_on_the_review_ready_queue",
+        "tests/hive/test_review_lane_spawn.py::test_a_workstation_engineer_spawn_takes_the_model_pick",
+        "tests/hive/test_review_lane_spawn.py::test_a_workstation_review_spawn_launches_the_reviewer_profile_through_the_model_pick",
+        "tests/hive/test_review_lane_spawn.py::test_a_review_opening_prompt_names_the_agent_a_reviewer",
+        "tests/hive/test_review_lane_spawn.py::test_seat_spawn_places_a_review_seat",
+        "tests/hive/test_orders.py::test_a_hive_order_launches_a_review_seat_with_the_reviewer_profile"
       ]
     },
     {
@@ -14329,6 +14385,23 @@
         "tests/observability/test_presence.py::test_a_hook_payload_marks_its_session_under_the_process_environment",
         "tests/observability/test_presence.py::test_a_failing_mark_never_raises_into_the_hook",
         "tests/observability/test_presence.py::test_the_hook_manager_marks_presence_for_every_event"
+      ]
+    },
+    {
+      "id": "protected-grader-admits-lab-tool-pins",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2867",
+      "behaviour": "The announced protected grader candidate admits only the exact lab verdict dependency install under both parser and lint tool locks from the grader checkout, preserves every other job field, leaves its inputs unchanged, and refuses removal of the constraints once the base is pinned.",
+      "seam": "gate_protected.grade through the announced frozen grader candidate",
+      "tests": [
+        "tests/test_gate_protected_lab_tools.py::test_the_lab_tool_pin_candidate_is_stored_under_its_announced_hash",
+        "tests/test_gate_protected_lab_tools.py::test_the_candidate_preserves_unchanged_full_and_small_lab_jobs",
+        "tests/test_gate_protected_lab_tools.py::test_the_candidate_refuses_changes_to_the_reviewed_lab_job",
+        "tests/test_gate_protected_lab_tools.py::test_the_candidate_admits_only_the_exact_paired_grader_locks",
+        "tests/test_gate_protected_lab_tools.py::test_a_pinned_base_refuses_a_head_that_removes_the_lab_constraints",
+        "tests/test_gate_protected_lab_tools.py::test_the_candidate_refuses_a_change_to_any_other_lab_step",
+        "tests/test_gate_protected_lab_tools.py::test_the_candidate_refuses_any_other_change_to_the_install_step",
+        "tests/test_gate_protected_lab_tools.py::test_a_base_without_a_lab_job_refuses_a_head_that_adds_one"
       ]
     }
   ],
