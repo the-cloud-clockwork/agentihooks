@@ -116,14 +116,19 @@ def test_live_slow_budgets_keep_the_pass_join_inside_its_original_window(monkeyp
 
 @pytest.mark.feature("swarm-tick-slow-lane-live-budget")
 def test_slow_dependents_and_finished_records_survive_the_pass_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from threading import current_thread
+
+    assert not current_thread().daemon
     release, started, completed, called, cleaned = Event(), Event(), Event(), Event(), Event()
     rows: list[tuple[engine.StepRecord, ...]] = []
+    shutdown_daemons = list[bool]()
     watched, closed = set[ThreadPoolExecutor](), set[ThreadPoolExecutor]()
     original_shutdown = ThreadPoolExecutor.shutdown
 
     def shutdown(executor: ThreadPoolExecutor, wait: bool = True, *, cancel_futures: bool = False) -> None:
         original_shutdown(executor, wait=wait, cancel_futures=cancel_futures)
         if executor in watched:
+            shutdown_daemons.append(current_thread().daemon)
             closed.add(executor)
             if closed == watched:
                 cleaned.set()
@@ -174,6 +179,7 @@ def test_slow_dependents_and_finished_records_survive_the_pass_exit(monkeypatch:
     assert completed.wait(10.0)
     assert cleaned.wait(10.0)
     assert called.is_set()
+    assert shutdown_daemons and all(shutdown_daemons)
     assert [[(row.name, row.outcome) for row in group] for group in rows] == [
         [("across exit", engine.OK), ("after exit", engine.OK)]
     ]
