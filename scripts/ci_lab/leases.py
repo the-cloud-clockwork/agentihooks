@@ -65,7 +65,7 @@ class Leases:
 
     def _take(self, worker: str, free_slots: int, capabilities: frozenset[str]) -> list[Grant]:
         grants: list[Grant] = []
-        for job_id in self.queue.pending():
+        for job_id in self.queue.ordered():
             if free_slots <= 0:
                 break
             job = self.queue.job(job_id)
