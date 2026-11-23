@@ -2783,7 +2783,7 @@ jobs:
           dashboard=$(sed -n 's/^dashboardUrl=//p' .scannerwork/report-task.txt)
           if [[ "$gate" != OK ]]; then
             echo "::error::Quality Gate has FAILED ($gate). Detailed information can be found at: $dashboard"
-            { GITHUB_STEP_SUMMARY= SONAR_RETRY_SECONDS=30 api "issues/search?componentKeys=${dashboard#*\?id=}&types=BUG,VULNERABILITY&inNewCodePeriod=true&resolved=false&ps=100" | jq -r '.issues[] | "\(.component):\(.line // 0) \(.rule) \(.message)"'; } 2> /dev/null || true
+            { GITHUB_STEP_SUMMARY= SONAR_RETRY_SECONDS=30 api "issues/search?componentKeys=${dashboard#*\?id=}&types=BUG,VULNERABILITY&inNewCodePeriod=true&resolved=false&ps=100" | jq -r '(.issues[] | "\(.component):\(.line // 0) \(.rule) \(.message)"), (select(.total > (.issues | length)) | "\(.total - (.issues | length)) more not shown")'; } 2> /dev/null || true
             exit 1
           fi
           echo "Quality Gate has PASSED. $dashboard"

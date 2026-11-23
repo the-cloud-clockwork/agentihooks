@@ -163,7 +163,7 @@ def _searches(tmp_path: Path) -> list[str]:
 def test_a_failed_gate_names_its_new_bugs(tmp_path: Path, scope: str) -> None:
     dashboard = f"http://sonar/dashboard?id=agentihooks&{scope}"
     result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", issues=_BUGS, dashboard=dashboard)
-    assert result.returncode != 0
+    assert result.returncode == 1
     assert result.stdout.splitlines() == [
         f"::error::Quality Gate has FAILED (ERROR). Detailed information can be found at: {dashboard}",
         "agentihooks:scripts/example.py:7 python:S905 Remove or refactor this statement; it has no side effects.",
@@ -179,7 +179,7 @@ def test_a_failed_gate_names_its_new_bugs(tmp_path: Path, scope: str) -> None:
 @pytest.mark.feature("sonar-failed-gate-names-new-bugs")
 def test_a_failed_gate_stays_red_when_the_bug_read_is_refused(tmp_path: Path) -> None:
     result, sleeps = _gate(tmp_path, ["SUCCESS"], "ERROR", issues=400, dashboard=_BRANCH)
-    assert result.returncode != 0
+    assert result.returncode == 1
     assert result.stdout.splitlines() == [_FAILED]
     assert result.stderr == ""
     assert sleeps == []
@@ -188,9 +188,18 @@ def test_a_failed_gate_stays_red_when_the_bug_read_is_refused(tmp_path: Path) ->
 
 
 @pytest.mark.feature("sonar-failed-gate-names-new-bugs")
-def test_a_failed_gate_stays_a_code_verdict_when_the_bug_read_meets_an_outage(tmp_path: Path) -> None:
-    result, sleeps = _gate(tmp_path, ["SUCCESS"], "ERROR", issues=503, dashboard=_BRANCH)
-    assert result.returncode != 0
+def test_a_failed_gate_says_how_many_new_bugs_it_left_out(tmp_path: Path) -> None:
+    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", issues={**_BUGS, "total": 102}, dashboard=_BRANCH)
+    assert result.returncode == 1
+    assert len(result.stdout.splitlines()) == 4
+    assert result.stdout.splitlines()[-1] == "100 more not shown"
+
+
+@pytest.mark.parametrize("status", [503, 403])
+@pytest.mark.feature("sonar-failed-gate-names-new-bugs")
+def test_a_failed_gate_stays_a_code_verdict_when_the_bug_read_meets_an_outage(tmp_path: Path, status: int) -> None:
+    result, sleeps = _gate(tmp_path, ["SUCCESS"], "ERROR", issues=status, dashboard=_BRANCH)
+    assert result.returncode == 1
     assert result.stdout.splitlines() == [_FAILED]
     assert result.stderr == ""
     assert not (tmp_path / "summary").exists()
@@ -212,6 +221,7 @@ def test_a_dev_push_analysis_sonar_refuses_as_older_ends_superseded_and_ungraded
     assert "::notice::" in result.stdout
     assert (tmp_path / "output").read_text() == "superseded=true\n"
     assert not any("project_status" in url for url in (tmp_path / "urls").read_text().splitlines())
+    assert _searches(tmp_path) == []
 
 
 def test_the_condition_hold_skips_a_superseded_analysis_and_only_the_gate_names_one():
