@@ -12,7 +12,9 @@
         "tests/hive/test_placement_role_census.py::test_unreported_masters_never_erase_an_unregistered_worker_process",
         "tests/hive/test_placement_role_census.py::test_interactive_markers_still_exempt_a_master_whose_execution_is_unreported",
         "tests/hive/test_placement_role_census.py::test_master_exclusion_does_not_absorb_workers_from_another_account_slot",
-        "tests/hive/test_placement_role_census.py::test_excluding_masters_keeps_a_saturated_cpu_refusal"
+        "tests/hive/test_placement_role_census.py::test_excluding_masters_keeps_a_saturated_cpu_refusal",
+        "tests/hive/test_placement_role_census.py::test_reported_masters_alone_leave_zero_workers_on_the_hive",
+        "tests/hive/test_placement_role_census.py::test_an_identified_worker_process_is_not_reused_for_unreported_workers"
       ],
       "rules": [
         "placement-marker-only-worker-census"

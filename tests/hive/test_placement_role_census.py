@@ -132,3 +132,22 @@ def test_excluding_masters_keeps_a_saturated_cpu_refusal(census: SimpleNamespace
     assert "cpu" in hive["refusal"].lower()
     selected = census.launcher.select(census.config, "expert", {"id": "expert-successor"})
     assert isinstance(selected, placement.Wait)
+
+
+@pytest.mark.feature("placement-role-census")
+def test_reported_masters_alone_leave_zero_workers_on_the_hive(census: SimpleNamespace) -> None:
+    masters = [_start(census, "master", index) for index in range(3)]
+    _report(census, 3, [agent.execution_id for agent in masters])
+
+    hive = launch.loaded_hives(census.store)[0]
+    assert (hive["agents"], hive["room"]) == (0, 12)
+
+
+@pytest.mark.feature("placement-role-census")
+def test_an_identified_worker_process_is_not_reused_for_unreported_workers(census: SimpleNamespace) -> None:
+    master = _start(census, "master", 1)
+    _start(census, "eng", 1)
+    _start(census, "eng", 2)
+    _report(census, 2, [master.execution_id, "unregistered-worker"])
+
+    assert launch.loaded_hives(census.store)[0]["agents"] == 3
