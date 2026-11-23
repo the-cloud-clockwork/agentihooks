@@ -155,8 +155,9 @@ check and applies to every task in the review lane or of the review kind. A
 review task handed to the merge pass with `swarm ready` goes back open after
 its pull request merges, so it still closes through `done`. A review task that
 records a pull request, through `--pr` or its stored one, closes only after
-that pull request merges, unless `--filed` names a follow up. The `--must`, `--check` and `--judge`
-contract goes into the agent's prompt as its proof contract line.
+that pull request merges, unless `--filed` names a follow up. The `--must`,
+`--check` and `--judge` contract goes into the agent's prompt as its proof
+contract line.
 
 ## Where reviewers launch
 

@@ -4,10 +4,11 @@ from typing import Any, NoReturn, cast
 
 import pytest
 
+from scripts.review import record
 from scripts.swarm import cli
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
-from tests.review.fakes import REVIEWER, SLUG, store
+from tests.review.fakes import REVIEWER, SLUG, URL, FakeForge, store
 
 TASK = "r1"
 REFUSAL = (
@@ -76,6 +77,16 @@ def test_one_posted_finding_lets_a_review_task_reach_the_proof_check(
     _count(found, SLUG, TASK)
     with pytest.raises(Reached):
         _done(monkeypatch, found, lane, kind)
+
+
+@pytest.mark.feature("review-done-findings")
+def test_a_finding_posted_through_the_review_record_lets_its_task_reach_the_proof_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    found = store()
+    record.post(found, SLUG, FakeForge(), URL, REVIEWER, TASK, ["First"])
+    with pytest.raises(Reached):
+        _done(monkeypatch, found, "review", "review")
 
 
 @pytest.mark.feature("review-done-findings")
