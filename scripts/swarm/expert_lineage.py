@@ -7,7 +7,7 @@ ends; this module is the only writer of the lineage records and of the saved mis
 
 import json
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
@@ -20,6 +20,7 @@ SEQUENCE = "expert-seq"
 ACTIVE = "expert-running"
 PROOFS = "expert-proofs"
 LAUNCHES = "expert-launches"
+FAILURES = "expert-launch-failures"
 CLOSING = "expert-closing"
 RUNNING = "running"
 STOPPED = "stopped"
@@ -49,7 +50,6 @@ class Lineage:
     ended_by: str = ""
     ended_at: int = 0
     note: str = ""
-    launch_failure: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 def start(store: Any, slug: str, text: str, source: str, effort: str, by: str, at: int) -> Lineage:
@@ -162,19 +162,29 @@ def unlaunched(store: Any, slug: str, name: str) -> int:
 
 
 def launch_failed(store: Any, slug: str, name: str, agent: str, reason: str, at: int) -> None:
-    """Keep the last failed launch of a running lineage: why it failed, the expert that did not start and when. A
-    lineage that ended, or that the swarm does not hold, is left as it is."""
+    """Keep the last failed launch of a running lineage beside its record: why it failed, the expert that did not
+    start and when. The record itself keeps its shape, so a member on an older release still reads it. A lineage
+    that ended, or that the swarm does not hold, gets none."""
     key = store.key(slug, LINEAGES)
 
     def write(pipe: Any) -> None:
         raw = pipe.hget(key, name)
-        found = Lineage(**json.loads(raw)) if raw else None
         pipe.multi()
-        if found is not None and found.state == RUNNING:
-            failure = {"at": at, "agent": agent, "reason": reason}
-            pipe.hset(key, name, json.dumps(asdict(replace(found, launch_failure=failure))))
+        if raw and Lineage(**json.loads(raw)).state == RUNNING:
+            pipe.hset(store.key(slug, FAILURES), name, json.dumps({"at": at, "agent": agent, "reason": reason}))
 
     store.redis.transaction(write, key)
+
+
+def launch_recovered(store: Any, slug: str, name: str) -> None:
+    """Drop the failed launch kept for the lineage: an expert of it launched since."""
+    store.redis.hdel(store.key(slug, FAILURES), name)
+
+
+def launch_failures(store: Any, slug: str) -> dict[str, dict[str, Any]]:
+    """The last failed launch of each lineage that has had none succeed since, by lineage id."""
+    raws: dict[str, str] = store.redis.hgetall(store.key(slug, FAILURES))
+    return {name: json.loads(raw) for name, raw in raws.items()}
 
 
 def closing(store: Any, slug: str) -> list[Lineage]:

@@ -201,23 +201,26 @@ def failing(text: str = REFUSED) -> FakeRuntime:
 
 
 def failure(found: RedisStore) -> dict[str, Any]:
-    kept: dict[str, Any] = expert_lineage.get(found, "sw", "expert-1").launch_failure
-    return kept
+    return expert_lineage.launch_failures(found, "sw").get("expert-1", {})
 
 
 @pytest.mark.feature("expert-launch-failure-reason")
-def test_a_successor_launch_that_fails_keeps_its_error_on_the_binding_and_on_the_lineage(store: RedisStore) -> None:
+def test_a_successor_launch_that_fails_keeps_its_error_on_the_binding_and_beside_the_lineage(
+    store: RedisStore,
+) -> None:
     started(store)
     row = handed_off(store, launched(store, FakeRuntime()))
+    record = store.redis.hgetall(store.key("sw", "expert-lineages"))
     assert go(store, failing(), NOW + MINUTE) == [f"expert spawn failed on lineage expert-1: {REFUSED}"]
     [failed] = [found for found in rows(store) if found["id"] == row["id"]]
     assert (failed["binding"]["state"], failed["binding"]["reason"]) == ("absent", REFUSED)
     assert failed["binding"]["session"] == failed["successor"] != ""
     assert failure(store) == {"at": NOW + MINUTE, "agent": failed["successor"], "reason": REFUSED}
+    assert store.redis.hgetall(store.key("sw", "expert-lineages")) == record
 
 
 @pytest.mark.feature("expert-launch-failure-reason")
-def test_a_first_launch_that_fails_keeps_its_error_on_the_lineage_with_no_transfer_to_carry_it(
+def test_a_first_launch_that_fails_keeps_its_error_with_no_transfer_to_carry_it_until_a_launch_succeeds(
     store: RedisStore,
 ) -> None:
     started(store)
@@ -226,7 +229,19 @@ def test_a_first_launch_that_fails_keeps_its_error_on_the_lineage_with_no_transf
     assert rows(store) == [] and experts(store) == []
     assert (kept["at"], kept["reason"], naming.lane_of(kept["agent"])) == (NOW, REFUSED, "expert")
     launched(store, FakeRuntime(), NOW + MINUTE)
-    assert failure(store) == kept
+    assert failure(store) == {}
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_the_kept_reason_and_the_line_of_the_pass_hold_no_secret_and_no_login_of_an_address(
+    store: RedisStore,
+) -> None:
+    started(store)
+    key = "API_KEY=" + "k" * 16
+    raw = f"clone of https://deploy:hunter2word@git.example/repo.git failed with {key} set"
+    safe = "clone of https://git.example/repo.git failed with [REDACTED:generic_secret] set"
+    assert go(store, failing(raw)) == [f"expert spawn failed on lineage expert-1: {safe}"]
+    assert failure(store)["reason"] == safe
 
 
 @pytest.mark.feature("expert-launch-failure-reason")
@@ -287,7 +302,9 @@ def test_a_pass_the_tick_abandons_still_leaves_the_reason_expert_status_reads(
         assert failure(store) == {}
     finally:
         release.set()
-        engine._RUNNING[(timing.SWARM.get(), step.name)].join(30)
+        abandoned = engine._RUNNING[(timing.SWARM.get(), step.name)]
+        abandoned.join(30)
+    assert not abandoned.is_alive()
     assert run("sw", "expert", "status") == 0
     assert capsys.readouterr().out.endswith(f" failed: {REFUSED})\n")
 

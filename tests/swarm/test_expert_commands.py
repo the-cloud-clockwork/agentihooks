@@ -66,7 +66,6 @@ def test_the_operator_and_the_master_start_a_lineage_from_a_mission_file(
         "ended_by": "",
         "ended_at": 0,
         "note": "",
-        "launch_failure": {},
     }
     assert expert_lineage.mission(store, "sw", expert_lineage.get(store, "sw", "expert-1")) == GOOD
     assert store.handoff("sw", "expert-1") == "" and store.redis.hgetall(store.key("sw", "transfers")) == {}
@@ -188,16 +187,16 @@ def test_status_as_json_carries_each_running_record_and_its_occupant(
     seated(store, EXPERT, "expert-2")
     assert run("sw", "expert", "status", "--json") == 0
     assert json.loads(capsys.readouterr().out) == [
-        {**asdict(first), "occupant": ""},
-        {**asdict(second), "occupant": EXPERT},
+        {**asdict(first), "occupant": "", "launch_failure": {}},
+        {**asdict(second), "occupant": EXPERT, "launch_failure": {}},
     ]
     assert run("sw", "expert", "status", "expert-1", "--json") == 0
-    assert json.loads(capsys.readouterr().out) == [{**asdict(first), "occupant": ""}]
+    assert json.loads(capsys.readouterr().out) == [{**asdict(first), "occupant": "", "launch_failure": {}}]
     ended = expert_lineage.stop(store, "sw", "expert-1", MASTER, "superseded", 3)
     assert run("sw", "expert", "status", "--json") == 0
-    assert json.loads(capsys.readouterr().out) == [{**asdict(second), "occupant": EXPERT}]
+    assert json.loads(capsys.readouterr().out) == [{**asdict(second), "occupant": EXPERT, "launch_failure": {}}]
     assert run("sw", "expert", "status", "expert-1", "--json") == 0
-    assert json.loads(capsys.readouterr().out) == [{**asdict(ended), "occupant": ""}]
+    assert json.loads(capsys.readouterr().out) == [{**asdict(ended), "occupant": "", "launch_failure": {}}]
 
 
 @pytest.mark.feature("expert-launch-failure-reason")
@@ -215,14 +214,22 @@ def test_status_names_the_last_failed_launch_while_the_seat_is_empty_and_carries
     seated(store, EXPERT, "expert-1", state="finished")
     assert run("sw", "expert", "status", "expert-1") == 0
     assert capsys.readouterr().out.endswith(f"; last launch as {EXPERT} failed: herdr refused the pane: exit 3)\n")
+    assert run("sw", "expert", "status", "--json") == 0
+    [row] = json.loads(capsys.readouterr().out)
+    assert (row["launch_failure"], row["occupant"]) == (failure, "")
     seated(store, SECOND_EXPERT, "expert-1")
     assert run("sw", "expert", "status") == 0
     assert capsys.readouterr().out == (f"expert-1 running at xhigh, {SECOND_EXPERT}: {TITLE} (started by {MASTER})\n")
+    expert_lineage.launch_recovered(store, "sw", "expert-1")
     assert run("sw", "expert", "status", "--json") == 0
     [row] = json.loads(capsys.readouterr().out)
-    assert (row["launch_failure"], row["occupant"]) == (failure, SECOND_EXPERT)
+    assert (row["launch_failure"], row["occupant"]) == ({}, SECOND_EXPERT)
     store.drop_agent("sw", SECOND_EXPERT)
+    expert_lineage.launch_failed(store, "sw", "expert-1", SECOND_EXPERT, "herdr down", 8)
     expert_lineage.stop(store, "sw", "expert-1", MASTER, "superseded", 9)
+    assert run("sw", "expert", "status", "expert-1", "--json") == 0
+    [row] = json.loads(capsys.readouterr().out)
+    assert (row["state"], row["launch_failure"]) == ("stopped", {})
     assert run("sw", "expert", "status", "expert-1") == 0
     assert capsys.readouterr().out == (
         f"expert-1 stopped at xhigh: {TITLE} (started by {MASTER}, ended by {MASTER}: superseded)\n"

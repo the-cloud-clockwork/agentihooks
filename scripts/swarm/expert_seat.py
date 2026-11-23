@@ -7,6 +7,7 @@ finishes the expert of a lineage that ended. The expert verb of the command line
 """
 
 import contextlib
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from importlib import import_module
@@ -41,6 +42,7 @@ SPAWNED = "spawned expert {name} on lineage {lineage} as its expert number {numb
 WAITS = "lineage {lineage} waits: {error}"
 FAILED = "expert spawn failed on lineage {lineage}: {error}"
 WHY_CHARS = 300
+ADDRESS_LOGIN = re.compile(r"(?<=://)[^/\s@]+@")
 ENDED = "ended expert {name}: lineage {lineage} is {state}"
 STOPPED = "left when its lineage {lineage} was stopped"
 OFFERED = "offered the handoff of lineage {lineage} again: {name} was lost before it confirmed it"
@@ -232,17 +234,18 @@ def _launch(
         why = _why(failed.error)
         expert_lineage.launch_failed(store, slug, lineage.id, failed.record.name, why, now_ms)
         SEAT.transfers.failed(store, slug, failed.record, why)
-        return [*left, FAILED.format(lineage=lineage.id, error=failed.error)]
+        return [*left, FAILED.format(lineage=lineage.id, error=why)]
     record = tick.placed_record(record, placed)
     store.put_agent(slug, record)
+    expert_lineage.launch_recovered(store, slug, lineage.id)
     SEAT.dispatch_seat.move_mail_home(store, record)
     return [*left, SPAWNED.format(name=record.name, lineage=lineage.id, number=number)]
 
 
 def _why(error: BaseException) -> str:
-    """The text a failed launch is kept with: its error with secrets redacted, on one line and cut at WHY_CHARS, or
-    the name of the error's type when it says nothing."""
-    text = " ".join(redact(str(error), mode="strict").split())
+    """The text a failed launch is kept and printed with: its error with secrets redacted and the login of any
+    address dropped, on one line and cut at WHY_CHARS, or the name of the error's type when it says nothing."""
+    text = " ".join(ADDRESS_LOGIN.sub("", redact(str(error), mode="strict")).split())
     return text[:WHY_CHARS] or type(error).__name__
 
 
