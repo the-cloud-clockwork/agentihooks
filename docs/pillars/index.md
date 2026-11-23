@@ -58,6 +58,8 @@ See [hives](hives.md) for joining machines, roles, placement, launches on a hive
 
 See [hive endpoint limits](hives.md#hive-endpoint-limits) for the hive endpoint request, handler and Redis time limits, the 503 it answers when Redis does not reply, and what a client does after it.
 
+See [what an admission reads](hives.md#what-an-admission-reads) for the narrow ledger reads an events hub admission makes instead of the whole export, the order of its local checks and the ledger's claim gate verdict, the tasks selection with its parameters and refusal, the timing marks of its `late:` line, guards and troubleshooting.
+
 See [handoff continuity on admission](hives.md#handoff-continuity-on-admission) for the handoff text, envelope and transfer an events hub admission hands its successor, when the transfer binds, how a reopen or a refused attach hands it back, and how to check it on a live swarm.
 
 See [retiring a hub admitted agent](hives.md#retiring-a-hub-admitted-agent) for the idle, revoked, refused, stuck and mismatch retirements of a hub admitted agent, the order of retire, drop and hive stop, the claim life refund, what holds an idle agent, resent stops and troubleshooting.

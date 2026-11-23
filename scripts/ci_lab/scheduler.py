@@ -77,6 +77,7 @@ from scripts.github_app import GitAuthRefused
 
 __all__ = [
     "GRADES",
+    "ORIGINS",
     "BusInbox",
     "Flags",
     "Head",
@@ -112,6 +113,9 @@ RECORDS = f"{PREFIX}records"
 LANES = f"{PREFIX}lane:"
 WAITING = f"{PREFIX}waiting"
 TREES = f"{PREFIX}tree:"
+ORIGINS = f"{PREFIX}origins"
+MERGE_GROUPS = "refs/heads/gh-readonly-queue/*"
+GROUPS_TIMEOUT_S = 30.0
 UNGRADED = frozenset({*LOSSES, CANNOT_RUN, DROPPED})
 FINISHED = frozenset({"done", "lost"})
 REAPED = {"pending": contract.UNITS_REDELIVERED_TOTAL, "lost": contract.UNITS_LOST_TOTAL}
@@ -366,6 +370,11 @@ class Expander(Protocol):
         """Return whether a ref every node mirror fetches reaches the head."""
         ...
 
+    def groups(self, repo: str) -> frozenset[str]:
+        """Return the head of every merge group ref the repository lists; git fails when it cannot list them in
+        time."""
+        ...
+
 
 class Poster(Protocol):
     """Where check runs go: `Checks.post`, seeded by `Checks.seed` with the check runs a grade already holds."""
@@ -535,6 +544,11 @@ def _request(data: Mapping[str, Any]) -> GradeRequest:
     )
 
 
+def _origin(tier: int, repo: str, head: str, ref: str) -> str:
+    """Return the origin of a live grade as its stored document: its class, repository, head and grade ref."""
+    return json.dumps({"tier": tier, "repo": repo, "head": head, "ref": ref})
+
+
 def _urgency(entry: tuple[str, str]) -> tuple[int, int, str]:
     """Return a waiting head's place in release order: its class, then when it began waiting, then its lane."""
     held = json.loads(entry[1])
@@ -640,10 +654,16 @@ class Scheduler:
         self._demand_cache: dict[str, tuple[str, _Demand]] = {}
 
     def tick(self, now_ms: int) -> list[str]:
-        """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
-        then advance every live grade, counting each finished job in the most urgent tier of the live grades holding
-        it."""
-        actions = [*self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms), *self._admit(now_ms)]
+        """Run one pass: retire the merge group grades whose merge group is gone, intake, release quiet lanes, reap
+        expired leases, enqueue the held units the budget admits, then advance every live grade, counting each
+        finished job in the most urgent tier of the live grades holding it."""
+        actions = [
+            *self._retire_groups(),
+            *self._intake(now_ms),
+            *self._release(now_ms),
+            *self._reap(now_ms),
+            *self._admit(now_ms),
+        ]
         tiers, _, _ = self._demand()
         for run in sorted(self.client.smembers(LIVE)):
             actions.extend(self._advance(run, tiers, now_ms))
@@ -886,6 +906,62 @@ class Scheduler:
             refusals = self._fail(request, f"{CLASSES[request.tier]} grade retired", reason, f"uncarried-{now_ms}")
         return "; ".join([f"retiring {request.head}: {reason}", *refusals])
 
+    def _origins(self) -> dict[str, dict[str, Any]]:
+        """Return the origin of every live grade by run: its class, repository, head and grade ref. A live grade with
+        no origin recorded gets one from its grade document, and the origin of a run that is no longer live is
+        removed, so a pass reads a grade document here once in the life of a grade at most."""
+        live = self.client.smembers(LIVE)
+        recorded = {run: json.loads(raw) for run, raw in self.client.hgetall(ORIGINS).items()}
+        for run in sorted(recorded.keys() - live):
+            self.client.hdel(ORIGINS, run)
+        origins = {run: origin for run, origin in recorded.items() if run in live}
+        for run in sorted(live - recorded.keys()):
+            raw = self.client.get(GRADES + run)
+            if raw is None:
+                continue
+            grade = json.loads(raw)
+            origin = _origin(grade["tier"], grade["repo"], grade["head"], grade.get("ref", ""))
+            self.client.hset(ORIGINS, run, origin)
+            origins[run] = json.loads(origin)
+        return origins
+
+    def _forget(self, run: str) -> None:
+        """Delete a run's grade document and origin, then take it out of the live set with its revision and demand
+        record; a pass that ends in between leaves a live run with no document, which the next pass retires again
+        while its origin is still recorded and its merge group is still gone, and forgets once its origin is gone."""
+        self.client.delete(GRADES + run)
+        self.client.hdel(ORIGINS, run)
+        self._drop(run)
+
+    def _retire_groups(self) -> list[str]:
+        """Close every live merge group grade whose head no merge group ref of its repository carries, listing the
+        refs of each such repository once: the run is forgotten and the pending jobs of its head are dropped unless
+        another live grade of any repository grades that head, since a job names its head alone. Nothing is posted,
+        recorded as evidence or counted as graded. A grade pushed to a grade ref is never retired, and a listing git
+        cannot produce retires nothing of that repository and is named in the actions."""
+        origins = self._origins()
+        groups = {
+            run: origin for run, origin in origins.items() if origin["tier"] == Priority.QUEUE and not origin["ref"]
+        }
+        actions: list[str] = []
+        gone: dict[str, tuple[str, str]] = {}
+        for repo in sorted({origin["repo"] for origin in groups.values()}):
+            try:
+                carried = self.ports.expander.groups(repo)
+            except subprocess.SubprocessError as error:
+                actions.append(f"cannot list the merge groups of {repo}: {error}")
+                continue
+            for run, origin in groups.items():
+                if origin["repo"] == repo and origin["head"] not in carried:
+                    gone[run] = (repo, origin["head"])
+        kept = {origin["head"] for run, origin in origins.items() if run not in gone}
+        for run, (repo, head) in sorted(gone.items()):
+            dropped = [] if head in kept else self.queue.drop(head)
+            self._forget(run)
+            reason = f"no merge group ref of {repo} carries {head}"
+            actions.append(f"retired {run}: {reason}, dropped {len(dropped)} pending units")
+        return actions
+
     def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
         and hold the store's misses for the budget; a request that bypasses negative verdicts grades again under a run
@@ -928,6 +1004,7 @@ class Scheduler:
             state.gates[gate] = [self._place(state, unit, request.bypass_negative, carried, misses) for unit in units]
         keep_manifests(self.objects, misses)
         self.save(state)
+        self.client.hset(ORIGINS, run, _origin(state.tier, state.repo, state.head, state.ref))
         self.client.sadd(LIVE, run)
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
         return f"grading {run} with {len(misses)} of {len(state.units)} units held"
@@ -1426,6 +1503,13 @@ class MirrorExpander:
         return (
             subprocess.run(["git", "-C", str(mirror.store), "merge-base", "--is-ancestor", head, dev]).returncode == 0
         )
+
+    def groups(self, repo: str) -> frozenset[str]:
+        """Return the head of every merge group ref the repository lists; git fails when it cannot list them within
+        GROUPS_TIMEOUT_S."""
+        argv = ["git", "ls-remote", repo, MERGE_GROUPS]
+        listing = subprocess.run(argv, capture_output=True, text=True, check=True, timeout=GROUPS_TIMEOUT_S)
+        return frozenset(line.split()[0] for line in listing.stdout.splitlines())
 
     def trusted(self, repo: str) -> frozenset[str]:
         """Return the runner trust list on the repository's dev branch."""

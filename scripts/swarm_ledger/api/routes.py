@@ -71,6 +71,8 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
         raise APIError(400, "schema_invalid", resources.DONE_ONLY)
     if "targets" in query and (path != "tasks" or query.keys() & {"state", "offset", "q", "cursor", "limit"}):
         raise APIError(400, "schema_invalid", "Only a plain tasks read takes targets")
+    if query.keys() & set(task_list.SELECTION) and not task_list.selection(path, query):  # pyright: ignore[reportUnknownArgumentType]
+        raise APIError(400, "schema_invalid", task_list.SELECTION_ONLY)
     if path == "events" and handler.headers.get("Accept") == "text/event-stream":
         return events(handler, services, slug)
     if path == "swarm/models":
