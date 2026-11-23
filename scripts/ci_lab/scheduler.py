@@ -85,7 +85,9 @@ __all__ = [
     "Plan",
     "Ports",
     "READY_MS",
+    "RECORDS",
     "REFRESH_MS",
+    "REVISIONS",
     "Scheduler",
     "Settings",
     "StoredManifests",
@@ -105,6 +107,8 @@ __all__ = [
 
 GRADES = f"{PREFIX}grade:"
 LIVE = f"{PREFIX}grades"
+REVISIONS = f"{PREFIX}revisions"
+RECORDS = f"{PREFIX}records"
 LANES = f"{PREFIX}lane:"
 WAITING = f"{PREFIX}waiting"
 TREES = f"{PREFIX}tree:"

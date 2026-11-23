@@ -18,20 +18,39 @@ from tests.ci_lab.test_scheduler import lab as lab
 
 def stripped(found: dict[str, Any]) -> dict[str, Any]:
     kept: dict[str, Any] = {}
+    carrying: dict[str, dict[str, Any]] = {}
     for name, value in found.items():
         if name.startswith(scheduler.GRADES):
             document = json.loads(value)
+            if any("manifest" in slot for slot in document["units"].values()):
+                carrying[name.removeprefix(scheduler.GRADES)] = document
             for slot in document["units"].values():
                 slot.pop("manifest", None)
             value = document
         elif name.startswith(JOBS):
             value = {field: text for field, text in value.items() if field != "manifest"}
+        elif name == scheduler.RECORDS:
+            value = {run: json.loads(text) for run, text in value.items()}
         kept[name] = value
+    for run, document in carrying.items():
+        if run in kept.get(scheduler.REVISIONS, {}):
+            revision = int(kept[scheduler.REVISIONS][run]) + 1
+            jobs = [slot["job"] for slot in document["units"].values() if slot.get("job")]
+            record = {"revision": revision, "tier": document["tier"], "hits": len(document["units"]) - len(jobs)}
+            kept[scheduler.REVISIONS] = {**kept[scheduler.REVISIONS], run: str(revision)}
+            kept[scheduler.RECORDS] = {**kept[scheduler.RECORDS], run: {**record, "jobs": jobs}}
     return kept
 
 
 def parsed(found: dict[str, Any]) -> dict[str, Any]:
-    return {name: json.loads(value) if name.startswith(scheduler.GRADES) else value for name, value in found.items()}
+    return {
+        name: json.loads(value)
+        if name.startswith(scheduler.GRADES)
+        else {run: json.loads(text) for run, text in value.items()}
+        if name == scheduler.RECORDS
+        else value
+        for name, value in found.items()
+    }
 
 
 class Counted(LocalObjects):
@@ -277,3 +296,33 @@ def test_the_compact_command_help_names_its_invocation(capsys: pytest.CaptureFix
         cli.main(["compact", "--help"], {})
     assert exited.value.code == 0
     assert capsys.readouterr().out.startswith("usage: python -m scripts.ci_lab compact")
+
+
+@pytest.mark.feature("lab-scheduler-grade-demand-records")
+def test_compaction_bumps_the_revision_and_rewrites_the_record_of_each_grade_it_strips(
+    lab: Callable[..., Run],
+) -> None:
+    _, first = batches(1)
+    _, second = batches(2)
+    run = opened(lab, (first, BASE), (second, BASE))
+    client = run.lab.client
+    carrying, plain = run.grade(HEAD_A).run, run.grade(HEAD_B).run
+    name = scheduler.GRADES + carrying
+    document = json.loads(client.get(name))
+    for slot in document["units"].values():
+        slot["manifest"] = json.dumps({"tests": {}})
+    client.set(name, json.dumps(document))
+    before = client.hgetall(scheduler.REVISIONS)
+    assert {carrying, plain} <= set(before)
+    plain_record = client.hget(scheduler.RECORDS, plain)
+    assert compact.compact(client, run.lab.objects)["grades stripped"] == 1
+    revisions = client.hgetall(scheduler.REVISIONS)
+    demand = scheduler._grade_demand(client.get(name), b"")
+    assert revisions == {**before, carrying: str(int(before[carrying]) + 1)}
+    assert json.loads(client.hget(scheduler.RECORDS, carrying)) == {
+        "revision": int(before[carrying]) + 1,
+        "tier": demand.tier,
+        "hits": demand.hits,
+        "jobs": list(demand.jobs),
+    }
+    assert client.hget(scheduler.RECORDS, plain) == plain_record
