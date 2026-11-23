@@ -51,6 +51,11 @@ def unit_path(kind: str, key: str, name: str) -> str:
     return f"{ROOT}{kind}/{match['digest']}/{FILES[name]}"
 
 
+def flakes_path(kind: str, key: str) -> str:
+    """Return the path of a unit's flake rows."""
+    raise NotImplementedError(f"{kind} {key}")
+
+
 def grade_prefix(run: str) -> str:
     """Return the folder of one grade run."""
     return f"{ROOT}grades/{run}/"
