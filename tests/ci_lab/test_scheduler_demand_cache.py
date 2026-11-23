@@ -108,6 +108,9 @@ def test_a_saved_grade_is_reparsed_and_changes_the_next_load_demand(
     calls.clear()
     grades.engine.save(changed)
     assert grades.engine.load(1000) == updated
+    assert calls == [changed.run]
+    calls.clear()
+    assert grades.engine.load(1000) == updated
     assert calls == []
 
 

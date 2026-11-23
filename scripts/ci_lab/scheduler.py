@@ -714,22 +714,27 @@ class Scheduler:
 
     def _contributions(self, live: list[str]) -> Iterable[_Demand]:
         """Return each live run's demand contribution and keep them for the next build: the kept one while the stored
-        revision is unchanged, else the run's stored demand record under the revision it carries, else its parsed grade
-        document under revision 0, which no stored revision matches; a run with neither contributes nothing."""
+        revision is unchanged, else the one read again."""
         revisions = self.client.hgetall(REVISIONS)
         cache = {
             run: demand
             for run in live
             if (demand := self._demand_cache.get(run)) is not None and revisions.get(run) == str(demand.revision)
         }
-        moved = [run for run in live if run not in cache]
-        for run, record in zip(moved, _records(self.client, moved)):
-            if record is not None:
-                cache[run] = _record_demand(record)
-            elif (raw := _document(self.client, run)) is not None:
-                cache[run] = _grade_demand(raw, 0)
+        cache.update(self._read_demand([run for run in live if run not in cache]))
         self._demand_cache = cache
         return cache.values()
+
+    def _read_demand(self, runs: list[str]) -> dict[str, _Demand]:
+        """Return each run's demand read again: its stored demand record under the revision it carries, else its parsed
+        grade document under revision 0, which no stored revision matches; a run with neither is left out."""
+        read: dict[str, _Demand] = {}
+        for run, record in zip(runs, _records(self.client, runs)):
+            if record is not None:
+                read[run] = _record_demand(record)
+            elif (raw := _document(self.client, run)) is not None:
+                read[run] = _grade_demand(raw, 0)
+        return read
 
     def grades_of(self, head: str) -> list[dict[str, Any]]:
         """Return every grade of a commit by run: its live grades and the closed ones its evidence markers name."""

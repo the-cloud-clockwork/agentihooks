@@ -67,7 +67,7 @@ class Reads:
     def fetch_records(self, client: Any, runs: Sequence[str]) -> list[str | None]:
         """Read the runs' demand records and count their bytes in the current build."""
         found = self.records(client, runs)
-        self.record_bytes[-1] += sum(len(record.encode()) for record in found if record is not None)
+        self.record_bytes[-1] += sum(len(record) for record in found if record is not None)
         return found
 
     def fetch_document(self, client: Any, run: str) -> str | None:
