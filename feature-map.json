@@ -538,7 +538,7 @@
       "seam": "scripts.ci_lab.scheduler.Scheduler.load and Scheduler.save over the scheduler lab fixture, counting the demand records and grade documents each build reads (through the client's commands, or module level _records and _parse calls) and comparing capacity.Load values",
       "tests": [
         "tests/ci_lab/test_scheduler_demand_cache.py::test_an_unchanged_load_equals_a_fresh_build_without_parsing_grades",
-        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_saved_grade_is_reparsed_and_changes_the_next_load_demand",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_saved_grade_is_read_again_and_changes_the_next_load_demand",
         "tests/ci_lab/test_scheduler_demand_cache.py::test_a_run_leaving_the_live_set_is_parsed_again_if_it_returns",
         "tests/ci_lab/test_scheduler_demand_cache.py::test_a_missing_grade_stops_contributing_and_is_parsed_when_restored",
         "tests/ci_lab/test_scheduler_demand_cache.py::test_cached_contributions_preserve_duplicate_slots_and_the_most_urgent_shared_job",

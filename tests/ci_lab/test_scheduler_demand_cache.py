@@ -91,7 +91,7 @@ def test_an_unchanged_load_equals_a_fresh_build_without_parsing_grades(
 
 
 @pytest.mark.feature("lab-scheduler-grade-demand-cache")
-def test_a_saved_grade_is_reparsed_and_changes_the_next_load_demand(
+def test_a_saved_grade_is_read_again_and_changes_the_next_load_demand(
     grades: Run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     changed = grades.grade(HEAD_A)
