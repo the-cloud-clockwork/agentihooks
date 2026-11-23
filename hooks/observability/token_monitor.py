@@ -14,10 +14,14 @@ Usage::
 
 import os
 import time
-from typing import Optional, Tuple
+from collections.abc import Mapping
+from typing import Optional, Tuple, cast
 
 from hooks._redis import get_redis, redis_key
 from hooks.common import log
+
+FILL = "agentihooks.tokens.fill_pct"
+BURN = "agentihooks.tokens.burn_rate"
 
 
 def get_context_fill_pct(payload: dict) -> Optional[float]:
@@ -161,13 +165,7 @@ def update_context_metrics(payload: dict) -> str:
                 "last_updated": time.time(),
             }
             persist_token_metrics(session_id, metrics)
-
-            # Bridge to OTEL gauges
-            from hooks.observability import otel
-
-            otel.record_gauge("agentihooks.tokens.fill_pct", fill_pct, {"session.id": session_id})
-            if burn_rate is not None:
-                otel.record_gauge("agentihooks.tokens.burn_rate", burn_rate, {"session.id": session_id})
+            record_tokens(session_id, fill_pct, burn_rate, time.time())
 
         return status_line
 
@@ -177,7 +175,48 @@ def update_context_metrics(payload: dict) -> str:
 
 
 def record_tokens(session_id: str, fill_pct: float, burn_rate: float | None, now_s: float) -> None:
-    """Writes the session's last fill and burn rate into its presence seen record for the hive daemon to export."""
+    """Writes the session's last fill and burn rate into its presence seen record for the hive daemon to export,
+    keeping every presence key and giving a record without one a seen time; a failed write never reaches the caller."""
+    from hooks.observability import presence
+    from hooks.observability.signals import safe_name
+
+    path = presence.seen_dir() / f"{safe_name(session_id)}.json"
+    tokens = {"session_id": session_id, "fill_pct": fill_pct, "burn_rate": burn_rate, "at_s": now_s}
+    try:
+        presence.write_record(path, {"seen_s": now_s, **presence.read_record(path), "tokens": tokens})
+    except OSError:
+        return
+
+
+def export_tokens(now_s: float) -> None:
+    """Sends the last fill, and the burn rate when known, under its session id for every seen record whose tokens were
+    written within the presence fresh window."""
+    from hooks.observability import otel, presence
+
+    for path in sorted(presence.seen_dir().glob("*.json")):
+        fresh = _fresh_tokens(presence.read_record(path), now_s)
+        if fresh is None:
+            continue
+        session_id, fill_pct, burn_rate = fresh
+        otel.record_gauge(FILL, fill_pct, {"session.id": session_id})
+        if burn_rate is not None:
+            otel.record_gauge(BURN, burn_rate, {"session.id": session_id})
+
+
+def _fresh_tokens(record: Mapping[str, object], now_s: float) -> tuple[str, float, float | None] | None:
+    """The session id, fill and burn rate a seen record holds when its tokens were written within the fresh window."""
+    from hooks.observability.presence import FRESH_S
+
+    tokens = record.get("tokens")
+    if not isinstance(tokens, dict):
+        return None
+    values = cast(dict[str, object], tokens)
+    session_id, fill_pct, burn_rate, at_s = (values.get(key) for key in ("session_id", "fill_pct", "burn_rate", "at_s"))
+    if not isinstance(session_id, str) or not isinstance(fill_pct, int | float) or not isinstance(at_s, int | float):
+        return None
+    if now_s - at_s > FRESH_S:
+        return None
+    return session_id, fill_pct, burn_rate if isinstance(burn_rate, int | float) else None
 
 
 def record_lifecycle_context(payload: dict) -> None:
