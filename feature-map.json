@@ -10892,6 +10892,18 @@
       ]
     },
     {
+      "id": "ready-offer-class-one-decider",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "One decider gives a task's offer its class for both the order the hub readiness pass offers tasks in and the waiting offers it moves behind a higher class: urgent or under a focus, then under an operator order, then the rest. Every focus selector has a case through both, so a selector added without one is red, and a recorded run of generated ledgers keeps its offers and its moves.",
+      "seam": "scripts.swarm.readiness.offers and behind over a snapshot, for every key of scripts.swarm.freeze.SELECTORS",
+      "tests": [
+        "tests/swarm/test_readiness.py::test_the_selector_cases_name_exactly_the_focus_selectors_that_exist",
+        "tests/swarm/test_readiness.py::test_offers_and_behind_class_a_task_under_a_focus_selector_alike",
+        "tests/swarm/test_readiness.py::test_a_recorded_run_of_generated_ledgers_keeps_its_offers_and_its_moves"
+      ]
+    },
+    {
       "id": "hive-own-exit-subject",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-exited-own-subject",
