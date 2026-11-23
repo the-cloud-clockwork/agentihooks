@@ -9,6 +9,7 @@ import pytest
 from scripts.swarm_ledger import api_service
 from scripts.swarm_ledger.api import mutations, resources
 from scripts.swarm_ledger.events.publishing import Publishing
+from scripts.swarm_ledger.repository import task_write
 from scripts.swarm_ledger.repository.entry import Entry
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 from tests.swarm_ledger import test_api_v1
@@ -258,7 +259,7 @@ def test_a_claim_the_narrow_write_cannot_prove_falls_back_with_nothing_written(t
 def test_the_narrow_write_returns_only_the_touched_row_and_the_new_revision(tmp_path) -> None:
     repository = large(tmp_path, tasks=50)
     written = repository.apply_task_update(LARGE, claim_op("t7"))
-    assert written is not None and written.rejected == []
+    assert isinstance(written, task_write.Written) and written.rejected == []
     assert (written.task["id"], written.task["claimed_by"]) == ("t7", CLAIMANT)
     assert [task["id"] for task in written.state["tasks"]] == ["t7"]
     assert "phases" not in written.state and "chat" not in written.state
