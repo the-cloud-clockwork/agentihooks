@@ -4,7 +4,6 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -144,8 +143,18 @@ def test_the_entry_hands_the_mode_to_the_intent_gate_and_three_arguments_to_any_
     [(got_call, got_who, state, mode)] = seen
     assert got_call is call and got_who is who and mode == "coach" and isinstance(state, Verdicts)
     seen.clear()
-    plain = SimpleNamespace(name="plain", decide=recording)
-    assert entry._decide(plain, call, who, tmp_path, "coach").reason == "held"
+
+    class Plain:
+        name = "plain"
+        default_mode = "enforce"
+
+        def matches(self, call: Call) -> bool:
+            return True
+
+        def decide(self, call: Call, who: Who, state: object) -> Decision:
+            return recording(call, who, state)
+
+    assert entry._decide(Plain(), call, who, tmp_path, "coach").reason == "held"
     [(got_call, got_who, state)] = seen
     assert got_call is call and got_who is who and isinstance(state, Verdicts)
 
