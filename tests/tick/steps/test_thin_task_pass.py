@@ -1,23 +1,29 @@
 """The thin task pass tick step queues one enhancement plan task for each thin open engineer or ci task, marks the
 task as needing enhancement in the same ledger write and tells the master once."""
 
+import io
+import json
+import urllib.error
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from email.message import Message
 from importlib import import_module
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 
 from scripts.swarm import thin_task
 from scripts.swarm.ledger_client import LedgerRefused
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import ledger_enhancement, ledger_server
+from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import schemas
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.tick import registry
 from scripts.tick.adapters.fakes import FakeLedger, fake_tools
 from scripts.tick.adapters.ledger import ClientLedger
 from scripts.tick.deadline import Deadline
-from scripts.tick.steps import CallStep, actions_of, hook_domains
+from scripts.tick.steps import CallStep, actions_of, hook_domains, thin
 
 pytestmark = pytest.mark.unit
 
@@ -307,3 +313,58 @@ def test_every_write_of_a_pass_is_one_the_ledger_api_accepts() -> None:
     assert client.refused == []
     assert [[operation["op"] for operation in batch] for batch in client.sent] == [["task_add", "task_enhancement"]]
     assert found.lines == ["queued enhance-t1 for thin task t1"]
+
+
+@pytest.mark.feature("thin-task-enhancement-snapshot")
+@pytest.mark.parametrize("held", [{}, {"enhancement": None}, {"enhancement": ""}], ids=["absent", "null", "empty"])
+def test_the_thin_mark_carries_the_enhancement_value_read(held: dict[str, Any]) -> None:
+    assert thin.unchecked({**THIN, **held}) is True
+    found = _run([{**THIN, **held}])
+    assert _operations(found)[-1] == {**MARK, "expected": held.get("enhancement")}
+
+
+@pytest.mark.feature("thin-task-enhancement-snapshot")
+@pytest.mark.parametrize("decided", ["planned", "skipped"])
+def test_a_revision_retry_preserves_the_thin_snapshot_and_refuses_a_concurrent_decision(
+    monkeypatch: pytest.MonkeyPatch, decided: str
+) -> None:
+    row = {"id": "t1"}
+    posts: list[dict[str, Any]] = []
+    paths: list[str] = []
+    ctx = Mock()
+    ctx.refused = []
+    client = api_client.ResourceClient("http://ledger.test", {})
+
+    def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        assert slug == SLUG
+        paths.append(path)
+        if path == "tasks/t1":
+            return {"revision": f"r{len(posts) + 1}"}
+        assert path == "operations"
+        assert payload is not None
+        posts.append(json.loads(json.dumps(payload)))
+        if len(posts) == 1:
+            row["enhancement"] = decided
+            body = (
+                b'{"error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}}'
+            )
+            raise urllib.error.HTTPError("http://ledger.test", 409, "Refused", Message(), io.BytesIO(body))
+        schemas.check_operations(payload, ledger_server.core, ("t1",))
+        [mark] = [operation for operation in payload["ops"] if operation["op"] == "task_enhancement"]
+        ledger_enhancement.apply({"tasks": [row]}, mark, ctx)
+        return {"rejected": ctx.refused}
+
+    monkeypatch.setattr(client, "request", request)
+    monkeypatch.setattr(api_client.time, "sleep", Mock())
+    found = _run([THIN], cast(FakeLedger, ClientLedger(SLUG, lambda remaining: client)))
+    assert paths == ["tasks/t1", "operations", "tasks/t1", "operations"]
+    assert [post["guards"] for post in posts] == [{"tasks/t1": "r1"}, {"tasks/t1": "r2"}]
+    assert [[operation for operation in post["ops"] if operation["op"] == "task_enhancement"] for post in posts] == [
+        [{**MARK, "expected": None}],
+        [{**MARK, "expected": None}],
+    ]
+    assert row == {"id": "t1", "enhancement": decided}
+    assert found.lines == ["refused the enhancement of t1: ledger sw refused: ['task t1 enhancement changed']"]
+    assert found.inbox.sent == []
+    ctx.stamp.assert_not_called()
+    ctx.record.assert_not_called()
