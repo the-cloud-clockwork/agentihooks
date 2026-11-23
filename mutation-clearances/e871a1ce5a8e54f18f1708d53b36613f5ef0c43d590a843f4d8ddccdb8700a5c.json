@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__backgrounded:80a83e7b5d59148fd2ac19d90f6e2cac88e60483a55cfa766366e2ce8c4dc9be": {
+    "reader": "standards_reader",
+    "reason": "Exhaustive over all 797,160 strings of \"&<>\" up to length 12 gives no difference in the result."
+  }
+}

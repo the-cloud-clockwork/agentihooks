@@ -1,7 +1,9 @@
 """The deterministic check of a planner's slice: one plain-words line per problem, never a refusal by itself."""
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_kinds, plan_shape
@@ -19,7 +21,7 @@ class Limits:
     flag_confidence: float = 0.7
 
     @classmethod
-    def from_env(cls, env):
+    def from_env(cls, env: Mapping[str, str]) -> "Limits":
         return cls(
             int(env.get("AGENTIHOOKS_PLAN_MAX_TASKS", 12)),
             int(env.get("AGENTIHOOKS_PLAN_MAX_AREAS", 6)),
@@ -33,6 +35,16 @@ def slice_ids(plan):
 
 def plan_task(phase, doc):
     return next(t for t in doc["tasks"] if t.get("phase") == phase["id"] and ledger_kinds.kind(t) == "plan")
+
+
+def short(text: str, words: int = MIN_WORDS) -> bool:
+    """Whether ``text`` holds fewer than ``words`` words."""
+    return len(text.split()) < words
+
+
+def done_when(text: str) -> bool:
+    """Whether ``text`` carries a done when sentence."""
+    return DONE_WHEN_RE.search(text) is not None
 
 
 def check(phase, doc, limits):
@@ -50,6 +62,11 @@ def check(phase, doc, limits):
     return problems + _cycle(mine) + _unlined(phase, doc)
 
 
+def task_problems(task: dict[str, Any], doc: dict[str, Any], limits: Limits) -> list[str]:
+    """The slice check's single task rules for one task, graded in the task's own phase."""
+    return _task(task, {"id": task.get("phase")}, doc, limits)
+
+
 def _count(ids, limits):
     if not ids:
         return ["The slice holds no task."]
@@ -58,12 +75,12 @@ def _count(ids, limits):
     return []
 
 
-def _task(task, phase, doc, limits):
+def _task(task: dict[str, Any], phase: dict[str, Any], doc: dict[str, Any], limits: Limits) -> list[str]:
     tid, kind, description = task["id"], ledger_kinds.kind(task), task.get("description", "")
     problems = []
-    if len(description.split()) < MIN_WORDS:
+    if short(description):
         problems.append(f"Task {tid} has a description under {MIN_WORDS} words.")
-    elif not DONE_WHEN_RE.search(description):
+    elif not done_when(description):
         problems.append(f"Task {tid} has no done when sentence.")
     contract = task.get("contract") or {}
     if kind not in CODE_KINDS and not all(contract.get(key) for key in ledger_kinds.CONTRACT_KEYS):

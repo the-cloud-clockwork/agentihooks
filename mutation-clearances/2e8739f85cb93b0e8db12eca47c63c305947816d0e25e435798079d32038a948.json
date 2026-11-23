@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/metrics.py:scripts.ci_lab.metrics.x\u01c1Latest\u01c1refresh:4e262a90938ea7159d79c711072c55534f7a922b6f538d713b9cac0b7f9f1ded": {
+    "reader": "standards_reader",
+    "reason": "On CPython 3.12 and later, threading.Lock.acquire reads blocking as a truth value, so blocking=None behaves exactly like blocking=False and no test can tell the mutant from the original."
+  }
+}

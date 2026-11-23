@@ -1,6 +1,7 @@
 import fcntl
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,10 @@ class _Uv:
             Path(command[-1], "bin").mkdir(parents=True, exist_ok=True)
             Path(command[-1], "bin", "python").touch()
         return subprocess.CompletedProcess(command, 0)
+
+
+def _use(returned: list[Path], root: Path, home: Path, uv: _Uv) -> None:
+    returned.append(type_env.environment(root, home, uv))
 
 
 @pytest.mark.parametrize("name", type_env.INPUTS)
@@ -218,6 +223,87 @@ def test_an_environment_without_its_interpreter_is_rebuilt(tmp_path: Path) -> No
     type_env.environment(root, home, uv)
 
     assert [command[1] for command, _ in uv.calls] == ["venv", "pip"]
+
+
+@pytest.mark.feature("type-env-ready-fast-path")
+def test_a_ready_environment_returns_while_a_grade_holds_its_shared_lock(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    home = tmp_path / "home"
+    python = type_env.environment(root, home, _Uv())
+    uv = _Uv()
+    returned: list[Path] = []
+    reuse = threading.Thread(target=_use, args=(returned, root, home, uv), daemon=True)
+
+    with (home / f"{type_env.key(root)}.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        reuse.start()
+        reuse.join(2)
+        waited = reuse.is_alive()
+    reuse.join()
+
+    assert not waited
+    assert returned == [python]
+    assert uv.calls == []
+
+
+@pytest.mark.feature("type-env-ready-fast-path")
+def test_builders_racing_for_one_environment_build_it_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path)
+    home = tmp_path / "home"
+    flock = fcntl.flock
+    both = threading.Barrier(2, timeout=30)
+
+    def meet(lock: Any, operation: int) -> None:
+        if operation == fcntl.LOCK_EX:
+            both.wait()
+        flock(lock, operation)
+
+    monkeypatch.setattr(type_env.fcntl, "flock", meet)
+    stubs = [_Uv(), _Uv()]
+    returned: list[Path] = []
+    builders = [threading.Thread(target=_use, args=(returned, root, home, uv), daemon=True) for uv in stubs]
+    for builder in builders:
+        builder.start()
+    for builder in builders:
+        builder.join(30)
+
+    assert returned == [home / type_env.key(root) / "bin" / "python"] * 2
+    assert sorted(len(uv.calls) for uv in stubs) == [0, 2]
+
+
+@pytest.mark.feature("type-env-ready-fast-path")
+def test_reuse_waits_while_a_build_holds_the_lock(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    home = tmp_path / "home"
+    python = type_env.environment(root, home, _Uv())
+    returned: list[Path] = []
+    reuse = threading.Thread(target=_use, args=(returned, root, home, _Uv()), daemon=True)
+
+    with (home / f"{type_env.key(root)}.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        reuse.start()
+        reuse.join(0.5)
+        waited = reuse.is_alive()
+    reuse.join()
+
+    assert waited
+    assert returned == [python]
+
+
+@pytest.mark.feature("type-env-ready-fast-path")
+def test_reuse_leaves_other_environments_in_place(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    home = tmp_path / "home"
+    type_env.environment(root, home, _Uv())
+    old = home / type_env.key(root)
+    (root / type_env.LOCK).write_text("moved\n")
+    type_env.environment(root, home, _Uv())
+    aged = time.time() - type_env.STALE_SECONDS - 60
+    os.utime(old / type_env.READY, (aged, aged))
+
+    type_env.environment(root, home, _Uv())
+
+    assert _environments(home) == sorted([old.name, type_env.key(root)])
 
 
 def test_main_runs_the_grader_with_the_environment_python_under_its_shared_lock(

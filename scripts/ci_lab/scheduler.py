@@ -84,6 +84,7 @@ __all__ = [
     "Plan",
     "Ports",
     "READY_MS",
+    "REFRESH_MS",
     "Scheduler",
     "Settings",
     "StoredManifests",
@@ -146,6 +147,7 @@ LEASE_TTL_MS = 120_000
 LEASE_POLL_MS = 500
 UNIT_ESTIMATE_S = 60.0
 READY_MS = 2 * lease_api.MAX_WAIT_MS
+REFRESH_MS = 15_000
 MINIO_ENDPOINT = f"{contract.MINIO_PREFIX}ENDPOINT"
 MINIO_BUCKET = f"{contract.MINIO_PREFIX}BUCKET"
 MINIO_ACCESS_KEY = f"{contract.MINIO_PREFIX}ACCESS_KEY"
@@ -753,6 +755,7 @@ class Scheduler:
                 subprocess.CalledProcessError,
                 ValueError,
                 KeyError,
+                SyntaxError,
                 yaml.YAMLError,
                 jsonschema.ValidationError,
             ) as error:
@@ -1506,13 +1509,19 @@ def serve(
     sleep: Callable[[float], None],
 ) -> int:
     """Run passes every interval, forever when passes is zero, ticking the relay after each pass and printing each
-    action of both; return 0."""
+    action of both; a Redis error ends only its pass, which prints one line naming the pass and the error, and the next
+    pass runs on schedule; return 0."""
+    from redis import RedisError
+
     done = 0
     while passes == 0 or done < passes:
-        for action in scheduler.tick(int(clock() * 1000)):
-            print(action, flush=True)
-        for action in relaying.tick():
-            print(action, flush=True)
+        try:
+            for action in scheduler.tick(int(clock() * 1000)):
+                print(action, flush=True)
+            for action in relaying.tick():
+                print(action, flush=True)
+        except RedisError as error:
+            print(f"pass {done + 1} skipped on {type(error).__name__}: {error}", flush=True)
         done += 1
         sleep(interval_s)
     return 0
@@ -1528,25 +1537,31 @@ def listen(
     mirror: Path | None = None,
 ) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, ThreadingHTTPServer]:
     """Bind the scheduler port's lease API, capacity and grades routes, the control port's control routes and the
-    metrics port, the scheduler and metrics ports over one load whose budget fraction and shed classes come from the
-    day's spending, the metrics port with the counters the scheduler's passes keep and the age of the node mirror at
-    each scrape when one is given; the caller runs each serve_forever."""
+    metrics port, the scheduler and metrics ports over loads whose budget fraction and shed classes come from the day's
+    spending: the scheduler port builds one per capacity request, and the metrics port serves the last one its serve
+    loop rebuilt once REFRESH_MS had passed since the build before started, with that load's age, the counters the
+    scheduler's passes keep and the age of the node mirror at each scrape when one is given; the caller runs each
+    serve_forever."""
 
-    def snapshot() -> Load:
-        return budget.observe(scheduler.load(clock()), spending.status())
+    def snapshot(now_ms: int) -> Load:
+        return budget.observe(scheduler.load(now_ms), spending.status())
+
+    latest = metrics.Latest(snapshot, clock, REFRESH_MS)
 
     def scrape() -> Load:
         if mirror is not None:
             metrics.observe_mirror(scheduler.registry, mirror, clock())
-        return snapshot()
+        load, built_ms = latest.read()
+        metrics.observe_age(scheduler.registry, built_ms, clock())
+        return load
 
     api, steering, exposition = ports
     lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
-    port = service.Routes(lease, snapshot, scheduler.grades_of)
+    port = service.Routes(lease, lambda: snapshot(clock()), scheduler.grades_of)
     return (
         service.serve("", api, port),
         lease_api.serve_control("", steering, routes),
-        metrics.serve("", exposition, scrape, scheduler.registry),
+        metrics.serve("", exposition, scrape, scheduler.registry, latest.refresh),
     )
 
 

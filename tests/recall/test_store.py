@@ -2,11 +2,13 @@ import sqlite3
 import threading
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from scripts.recall.models import RecallRecord
 from scripts.recall.store import RecallStore, SQLiteRecallStore, SyncCounts, default_path
+from scripts.swarm_ledger.repository import sqlite
 
 
 def record(ref, text="body", index=0, **fields):
@@ -55,6 +57,27 @@ def test_the_database_runs_in_wal_mode_with_a_busy_timeout(store):
     with store.connect() as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone() == ("wal",)
         assert connection.execute("PRAGMA busy_timeout").fetchone() == (30000,)
+
+
+@pytest.mark.feature("metrics-outbox-and-recall-store-wait-out-another-write-lock")
+def test_a_new_store_waits_out_another_connections_write_lock_before_it_turns_on_wal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "recall.sqlite3"
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    pauses: list[float] = []
+
+    def pause(seconds: float) -> None:
+        pauses.append(seconds)
+        holder.execute("ROLLBACK")
+
+    monkeypatch.setattr(sqlite, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=pause))
+    opened = SQLiteRecallStore(path)
+    holder.close()
+    assert pauses == [0.05]
+    with opened.connect() as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone() == ("wal",)
 
 
 def test_upsert_inserts_new_records_and_rewrites_changed_ones(store):
