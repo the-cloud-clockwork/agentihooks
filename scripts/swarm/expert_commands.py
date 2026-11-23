@@ -101,14 +101,15 @@ def cmd_status(store: Any, args: argparse.Namespace) -> None:
     else:
         rows = expert_lineage.running(store, args.slug)
     agents = store.agents(args.slug)
-    kept = expert_lineage.launch_failures(store, args.slug)
-    failures = {row.id: kept.get(row.id, {}) if row.state == expert_lineage.RUNNING else {} for row in rows}
+    failed = expert_lineage.launch_failures(store, args.slug)
     if args.json:
         seats = [(row, occupant(agents, row.id)) for row in rows]
-        print(json.dumps([{**asdict(row), "occupant": by, "launch_failure": failures[row.id]} for row, by in seats]))
+        print(
+            json.dumps([{**asdict(row), "occupant": by, "launch_failure": failed.get(row.id, {})} for row, by in seats])
+        )
         return
     for row in rows:
-        print(stands(row, occupant(agents, row.id), failures[row.id]))
+        print(stands(row, occupant(agents, row.id), failed.get(row.id, {})))
     if not rows:
         print(expert_lineage.NO_RUNNING)
 

@@ -213,9 +213,11 @@ def test_the_last_failed_launch_is_kept_beside_a_running_lineage_and_beside_no_o
     assert (stored(store, "expert-lineages"), indexed(store)) == (record, {"expert-1"})
     assert expert_lineage.get(store, "sw", "expert-1") == lineage
     expert_lineage.stop(store, "sw", "expert-1", MASTER, "superseded", 7)
+    assert expert_lineage.launch_failures(store, "sw") == {}
     expert_lineage.launch_failed(store, "sw", "expert-1", EXPERT, "too late", 8)
     expert_lineage.launch_failed(store, "sw", "expert-9", EXPERT, "no such lineage", 9)
-    assert expert_lineage.launch_failures(store, "sw") == kept
+    assert expert_lineage.launch_failures(store, "sw") == {}
+    assert json.loads(stored(store, "expert-launch-failures")["expert-1"])["reason"] == "no pane"
     assert set(stored(store, "expert-lineages")) == {"expert-1"}
 
 

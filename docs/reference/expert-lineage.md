@@ -139,8 +139,10 @@ full or the lineage is placed elsewhere. A launch that fails for another reason
 is tried again on the next pass, and its error is kept: beside the lineage, as
 its last failed launch until a launch succeeds, and on the binding of the
 transfer when the expert followed a handoff. The kept text is one line of at
-most 300 characters with secrets redacted and the login of any address dropped;
-the line the pass prints carries the same text. Nothing launches while the swarm is
+most 300 characters with secrets redacted and the login of any address dropped
+(everything up to the last at sign of the address, so an address that holds a
+later at sign loses the text before it); the line the pass prints carries the
+same text. Nothing launches while the swarm is
 paused, stopping, stopped or in panic. A sleeping swarm still keeps its expert
 seats: a lineage waits for no ledger work. The handoff an expert was given stays on
 the seat until that expert confirms it. When a lineage is stopped or completes,
