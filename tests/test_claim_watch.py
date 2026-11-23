@@ -69,7 +69,7 @@ def hive(monkeypatch):
 
 @pytest.fixture
 def hosted(monkeypatch: pytest.MonkeyPatch) -> list:
-    from scripts.tick.adapters import database_ledger
+    from scripts.tick.adapters import writer_client
 
     reads = []
 
@@ -85,7 +85,7 @@ def hosted(monkeypatch: pytest.MonkeyPatch) -> list:
             return [self.request(slug, path)]
 
     module = ledger_client._ledger()
-    monkeypatch.setattr(database_ledger, "ResourceClient", Slow)
+    monkeypatch.setattr(writer_client, "ResourceClient", Slow)
     monkeypatch.setattr(module.ledger_link, "remote", lambda environ=None, slug="": True)
     monkeypatch.setattr(module, "base", lambda slug="": "http://hosted.test")
     monkeypatch.setattr(module, "credentials", lambda slug, service=False: {})
