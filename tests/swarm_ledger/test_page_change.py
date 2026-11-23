@@ -4,12 +4,14 @@ import os
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Collection
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from scripts.swarm_ledger import page_policy
 from tests.swarm_ledger import page_replay
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 from tests.test_codeowners import _owners
@@ -17,6 +19,7 @@ from tests.test_codeowners import _owners
 browser = chromium_browser
 
 ROOT = Path(__file__).resolve().parents[2]
+STYLE_POLICY = next(part for part in page_policy.policy({}, ROOT, 0).split("; ") if part.startswith("style-src"))
 BASE = (
     '<main id="main-content"><p id="keep">Notes</p><button id="drop">Old</button>'
     '<input id="drop-field" class="drop" value="x"><p id="after">After</p></main>'
@@ -25,13 +28,16 @@ HEAD = '<main id="main-content"><p id="keep">Notes</p><p id="after">After</p></m
 REMOVED = {"#drop": 1, ".drop": 1}
 
 
-def capture(browser, body, removed=()):
+def capture(browser: Any, body: str, removed: Collection[str] = ()) -> tuple[dict[str, int], str]:
     context = browser.new_context(viewport=page_replay.VIEWPORT)
     try:
         if removed:
             context.add_init_script(page_replay.removal(removed))
         page = context.new_page()
-        page.route("http://replay.test/", lambda route: route.fulfill(content_type="text/html", body=body))
+        headers = {"Content-Security-Policy": STYLE_POLICY}
+        page.route(
+            "http://replay.test/", lambda route: route.fulfill(content_type="text/html", body=body, headers=headers)
+        )
         page.goto("http://replay.test/")
         return page_replay.seen(page, removed), json.dumps(page.evaluate(page_replay.CAPTURE))
     finally:

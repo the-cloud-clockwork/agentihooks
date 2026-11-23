@@ -7,6 +7,7 @@ import threading
 import time
 import urllib.parse
 from collections import Counter
+from collections.abc import Collection
 from contextlib import ExitStack
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -257,15 +258,13 @@ def load_contract(path: Path, side: str = "removed") -> tuple[dict[str, int], di
     )
 
 
-def removal(selectors) -> str:
+def removal(selectors: Collection[str]) -> str:
     hidden = json.dumps(",".join(selectors) + "{display:none !important}")
     return f"""(() => {{
   window.__removed = {json.dumps(list(selectors))};
-  document.addEventListener("DOMContentLoaded", () => {{
-    const style = document.createElement("style");
-    style.textContent = {hidden};
-    document.head.append(style);
-  }});
+  const sheet = new CSSStyleSheet();
+  sheet.replaceSync({hidden});
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 }})();"""
 
 
