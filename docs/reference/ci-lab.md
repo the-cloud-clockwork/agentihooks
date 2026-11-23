@@ -2696,7 +2696,7 @@ before its step ran, so its unit was requeued once and then lost.
 
 | Class | Static gates with units |
 |---|---|
-| Pull request, hotfix | `lint`, `type-gate` and `test-count`. `semgrep` is framed as a gate without units, which passes. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), while its units sit under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels |
+| Pull request, hotfix | `lint`, `type-gate`, `test-count` and `semgrep`. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), and its frame takes the units filed under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels, in that mapping's order: each required job grades its own units and those of every label that starts with the job and a slash |
 | Merge group | `test-count`, the one static job the queue rules require (`scheduler.QUEUE_REQUIRED`) |
 | Promotion, backfill | All six |
 
@@ -2802,7 +2802,6 @@ or an empty log, and the required check show only unit keys.
   workflow gets no units, and its Actions job keeps the verdict; `--ci-only` names it.
 - Every expansion parses each workflow file directly in the folder, so one file that does not
   parse drops every head the lab grades at that grader revision.
-- Pull request and hotfix grades run no `semgrep` units, as the frame table above shows.
 
 #### Verify
 
@@ -2844,7 +2843,7 @@ and both passed in
 | The same text names a workflow you just added to a static job | The called file is in a folder below `.github/workflows`, or not on the grader revision yet. A pull request, hotfix or merge group grade reads the base, so a new workflow counts only once the base holds it | `git ls-tree --name-only <grader> .github/workflows/` lists the file |
 | Every head graded at one grader revision is dropped with a YAML error | A workflow file directly in `.github/workflows` at that revision does not parse | In a checkout of that revision, `python -c 'import pathlib,yaml; [print(p) or yaml.safe_load(p.read_text()) for p in sorted(pathlib.Path(".github/workflows").glob("*.y*ml"))]'` prints each file before parsing it, so the last name printed before the traceback is the file |
 | The worker's standard error reads `ci-lab worker: unit <job> crashed: ValueError('semgrep uses ./.github/workflows/semgrep.yml, which was not given')` | The worker runs a release older than the fix while the scheduler expands with it | The `ci-lab-worker` image, as for the scheduler; the unit's lease expires and follows step 6 of the [Scheduler loop](#scheduler-loop) |
-| A pull request grade passes `semgrep` with no units | The pull request frame names the job `semgrep` while its units sit under the `semgrep/` labels | Expected today; see [Which grades run static units](#which-grades-run-static-units) |
+| A pull request grade passes `semgrep` with no units | The scheduler runs a release from before pull request frames graded reusable workflow job units under their calling job; that frame looked the job `semgrep` up by its bare name while its units sit under the `semgrep/` labels | The `ci-lab-scheduler` image, read as in the first row, names a release older than the first one whose release notes list this change to pull request frames; see [Which grades run static units](#which-grades-run-static-units) |
 
 ### Test units
 
@@ -4934,8 +4933,11 @@ an import sorting fault. Use `--plant gate-script` to prove that a head cannot t
 own comment grader to accept a new directive. Test and mutation plants are separate proofs.
 
 The command also accepts every JSON plant name in the catalog, including dotted names such as
-`lint.lint-check`. A plant keeps its full discovered step in `gate`; grading reads that step's job
-check and requires its named diagnostic. The JSON result and summary row include `green_run` and
+`lint.lint-check`. A plant keeps its full discovered step in `gate`; grading reads the check of the
+job the pull request rules require, the first path segment of the gate, and requires its named
+diagnostic. A step of a reusable workflow job, such as `semgrep/scan/rule-exceptions-only-shrink`,
+is therefore read from the `semgrep` check, where a pull request grade posts the units of every
+job that workflow holds. The JSON result and summary row include `green_run` and
 `red_run`, the exact grade identifiers for the two check links. `lint.threshold-pins` is the shorter
 alias for the threshold pin plant; its full gate identity is unchanged.
 

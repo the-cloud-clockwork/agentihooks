@@ -477,6 +477,16 @@
       ]
     },
     {
+      "id": "lab-pull-request-reusable-job-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2722",
+      "behaviour": "A hotfix or pull request grade frames each job its Gate Required rules require with the job's own units and the units of every reusable workflow job it calls, which the mirror expander files under the calling job, a slash and the called job, so the Tests workflow's semgrep job grades its scan, feature tests and charts units under semgrep instead of framing semgrep as a gate with no units, which passes, or posting it as skipped when it is authoritative. Promotion and backfill grades keep the labelled keys.",
+      "seam": "scripts.ci_lab.scheduler.frame over a gates mapping that holds units under labelled reusable workflow job keys",
+      "tests": [
+        "tests/ci_lab/test_skipped_gates.py::test_a_pull_request_frame_grades_each_reusable_workflow_job_under_the_job_that_calls_it"
+      ]
+    },
+    {
       "id": "swarm-refusal-size-warnings",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-limit-scope",
