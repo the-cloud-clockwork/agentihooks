@@ -1056,6 +1056,38 @@ def test_only_the_trusted_swarm_worker_image_hive_job_may_queue_on_the_hive_rele
         assert any(problem.startswith(f"job {name} ") for problem in found)
 
 
+@pytest.mark.parametrize("change", [None, "group", "queue", "cancel", "other-job", "untrusted", "name", "events"])
+def test_a_hive_job_that_gains_the_chart_steps_keeps_the_hive_release_group_its_base_holds(change: str | None) -> None:
+    import copy
+
+    updated = yaml.safe_load((ROOT / lanes.WORKFLOWS / "swarm-node-image.yml").read_text())
+    baseline = copy.deepcopy(updated)
+    names = [step.get("name") for step in updated["jobs"]["hive"]["steps"]]
+    published = names.index("Publish the hive worker once per release version") + 1
+    assert len(names) > published
+    baseline["jobs"]["hive"]["steps"] = baseline["jobs"]["hive"]["steps"][:published]
+    baseline["jobs"]["hive"]["timeout-minutes"] = 30
+    name = "image" if change == "other-job" else "hive"
+    if change == "group":
+        updated["jobs"]["hive"]["concurrency"]["group"] = "hive-worker-release-chart"
+    elif change == "queue":
+        updated["jobs"]["hive"]["concurrency"]["queue"] = "single"
+    elif change == "cancel":
+        updated["jobs"]["hive"]["concurrency"]["cancel-in-progress"] = True
+    elif change == "other-job":
+        updated["jobs"]["image"]["concurrency"] = dict(updated["jobs"]["hive"]["concurrency"])
+    elif change == "untrusted":
+        baseline = None
+    elif change == "name":
+        updated["name"] = "Other image"
+    elif change == "events":
+        updated[True] = {"workflow_dispatch": None}
+    found = lanes.problems(updated, baseline)
+    assert bool(found) == (change is not None)
+    if found:
+        assert any(problem.startswith(f"job {name} ") for problem in found)
+
+
 def test_a_tests_workflow_whose_trusted_baseline_has_no_jobs_mapping_is_still_graded() -> None:
     baseline = _workflow()
     baseline["name"] = "Tests"
