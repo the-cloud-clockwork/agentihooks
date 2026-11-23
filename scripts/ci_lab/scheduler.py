@@ -1566,10 +1566,11 @@ def listen(
     ports: tuple[int, int, int],
     mirror: Path | None = None,
 ) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, ThreadingHTTPServer]:
-    """Bind the lease, capacity, grades, control and metrics routes.
+    """Bind the lease, capacity, grades, control and metrics routes, then start the first load build.
     Both capacity ports serve the same cached budgeted load, refreshed by the metrics
-    serve loop after REFRESH_MS. Grade lookups remain per request. Each scrape observes
-    load and mirror ages. The caller runs each serve_forever.
+    serve loop after REFRESH_MS; no read waits for a build, so before the first one
+    finishes capacity answers 503 and a scrape the registry alone. Grade lookups remain
+    per request. Each scrape observes load and mirror ages. The caller runs each serve_forever.
     """
 
     def snapshot(now_ms: int) -> Load:
@@ -1577,21 +1578,30 @@ def listen(
 
     latest = metrics.Latest(snapshot, clock, REFRESH_MS)
 
-    def scrape() -> Load:
+    def scrape() -> Load | None:
         if mirror is not None:
             metrics.observe_mirror(scheduler.registry, mirror, clock())
-        load, built_ms = latest.read()
+        built = latest.peek()
+        if built is None:
+            return None
+        load, built_ms = built
         metrics.observe_age(scheduler.registry, built_ms, clock())
         return load
 
+    def capacity() -> Load | None:
+        built = latest.peek()
+        return None if built is None else built[0]
+
     api, steering, exposition = ports
     lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
-    port = service.Routes(lease, lambda: latest.read()[0], scheduler.grades_of)
-    return (
+    port = service.Routes(lease, capacity, scheduler.grades_of)
+    servers = (
         service.serve("", api, port),
         lease_api.serve_control("", steering, routes),
         metrics.serve("", exposition, scrape, scheduler.registry, latest.refresh),
     )
+    latest.start()
+    return servers
 
 
 def _now_ms() -> int:
