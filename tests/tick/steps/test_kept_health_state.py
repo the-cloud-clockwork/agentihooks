@@ -129,10 +129,10 @@ def test_the_checks_that_keep_state_through_the_helper_are_found_in_the_tree() -
 @pytest.mark.parametrize("check", keepers(), ids=named)
 def test_only_the_check_names_the_key_of_the_state_it_keeps(check: ModuleType) -> None:
     own = Path(str(check.__file__)).resolve()
-    named = [
+    holders = [
         path.relative_to(ROOT).as_posix()
         for folder in ("scripts", "hooks")
         for path in sorted((ROOT / folder).rglob("*.py"))
         if path.resolve() != own and f'"{check.KEY}"' in path.read_text()
     ]
-    assert named == []
+    assert holders == []
