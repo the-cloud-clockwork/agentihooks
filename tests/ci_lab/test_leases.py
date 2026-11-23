@@ -59,6 +59,18 @@ def unit(key: str) -> Unit:
     return Unit(kind="test", key=key, members=(f"tests/{key}.py::t",))
 
 
+def page_reads(jobs: queue.Queue, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    pages: list[dict[str, object]] = []
+    read = jobs.client.zrangebyscore
+
+    def counted(*arguments: object, **options: object) -> object:
+        pages.append(options)
+        return read(*arguments, **options)
+
+    monkeypatch.setattr(jobs.client, "zrangebyscore", counted)
+    return pages
+
+
 def test_lease_grants_fitting_jobs_in_order_with_distinct_tokens(jobs: queue.Queue, lab: leases.Leases) -> None:
     needs = {
         "big": queue.Requirement(slots=4),
@@ -124,6 +136,54 @@ def test_lease_stops_reading_once_slots_run_out(
 
     assert len(lab.lease("w1", 2, frozenset(), 0)) == 2
     assert reads == ["h1:test:a", "h1:test:b"]
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_lease_grants_the_most_urgent_class_first(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([unit("q1"), unit("q2")], "merge", {}, rank=2)
+    jobs.enqueue([unit("old")], "before", {})
+    jobs.enqueue([unit("p1")], "pull", {}, rank=1)
+
+    assert [grant.job for grant in lab.lease("w1", 2, frozenset(), 0)] == ["pull:test:p1", "merge:test:q1"]
+    assert [grant.job for grant in lab.lease("w1", 2, frozenset(), 0)] == ["merge:test:q2", "before:test:old"]
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_lease_poll_reads_one_page_of_a_long_pending_order(
+    jobs: queue.Queue, lab: leases.Leases, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([unit(f"{number:03}") for number in range(queue.PAGE * 2 + 1)], "h1", {}, rank=1)
+    pages = page_reads(jobs, monkeypatch)
+
+    def whole(*arguments: object, **options: object) -> object:
+        raise AssertionError("a lease poll read the whole pending set")
+
+    monkeypatch.setattr(jobs.client, "zrange", whole)
+
+    assert [grant.job for grant in lab.lease("w1", 2, frozenset(), 0)] == ["h1:test:000", "h1:test:001"]
+    assert [page["num"] for page in pages] == [queue.PAGE]
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_lease_reads_no_page_once_its_slots_are_full(
+    jobs: queue.Queue, lab: leases.Leases, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([unit(f"{number:03}") for number in range(queue.PAGE + 1)], "h1", {}, rank=1)
+    pages = page_reads(jobs, monkeypatch)
+
+    assert len(lab.lease("w1", queue.PAGE, frozenset(), 0)) == queue.PAGE
+    assert len(pages) == 1
+    assert lab.lease("w1", 0, frozenset(), 0) == []
+    assert len(pages) == 1
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_lease_reads_past_a_page_of_jobs_that_do_not_fit(jobs: queue.Queue, lab: leases.Leases) -> None:
+    wide = {f"{number:03}": queue.Requirement(slots=3) for number in range(queue.PAGE)}
+    jobs.enqueue([unit(key) for key in wide], "h1", wide, rank=1)
+    jobs.enqueue([unit("narrow")], "h2", {}, rank=2)
+
+    assert [grant.job for grant in lab.lease("w1", 1, frozenset(), 0)] == ["h2:test:narrow"]
 
 
 def test_long_poll_waits_until_work_arrives(jobs: queue.Queue, clock: Clock) -> None:

@@ -7,7 +7,7 @@ rules:
       the ledger API route code run in process and never through the ledger server: the tick route runs its pass
       inside database_ledger.acting(""), the swarm's own service, the tick ledger port builds its client with
       ledger.client and builds no ResourceClient of its own, and ledger.client returns the in process database
-      client with no other path.
+      client or the writer client, this host's warm writer first, with no other path.
     patterns:
       - pattern-either:
           - patterns:
@@ -40,9 +40,9 @@ rules:
               - pattern-not: |
                   def client(...):
                     "..."
-                    from scripts.tick.adapters import database_ledger
+                    from scripts.tick.adapters import $ADAPTER
 
-                    return database_ledger.client(...)
+                    return $ADAPTER.client(...)
     paths:
       include:
         - /scripts/swarm_ledger/ledger_route.py

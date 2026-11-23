@@ -65,9 +65,9 @@ class Leases:
 
     def _take(self, worker: str, free_slots: int, capabilities: frozenset[str]) -> list[Grant]:
         grants: list[Grant] = []
-        for job_id in self.queue.pending():
-            if free_slots <= 0:
-                break
+        if free_slots <= 0:
+            return grants
+        for job_id in self.queue.ordered():
             job = self.queue.job(job_id)
             if job is None or job.requirement.slots > free_slots:
                 continue
@@ -81,6 +81,8 @@ class Leases:
                 continue
             grants.append(Grant(job_id, token, job.head, unit, job.requirement.slots, expires_ms, job.base, job.grader))
             free_slots -= job.requirement.slots
+            if free_slots <= 0:
+                break
         return grants
 
     def owns(self, job: str, token: str) -> bool:

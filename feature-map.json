@@ -1,20 +1,15 @@
 {
   "features": [
     {
-      "id": "ledger-orders-panel",
+      "id": "lab-shadow-reusable-caller-pairing",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-orders-page-panel",
-      "behaviour": "The ledger page lists every open operator order from the master orders read with its title, quoted words and claimable, busy and done counts, and distinguishes an empty set from a failed read while preserving phase views.",
-      "seam": "the ledger page in Chromium at 1920 by 1080 consuming the existing orders resource",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2804",
+      "behaviour": "Shadow discovery groups reusable static jobs by their calling job, so a bare semgrep lab verdict pairs with all three Actions children in the report and recorder. Any failed child fails the report group, a running or cancelled child excludes the head, and the latest child completion determines the Actions completion time. Explicit labelled mapping collections retain their existing behavior.",
+      "seam": "scripts.ci_lab.shadow.static_jobs and Shadow.observe, and scripts.ci_lab.shadow_report.head using the discovered workflow jobs",
       "tests": [
-        "tests/swarm_ledger/test_orders_page.py::test_existing_phase_and_overview_remain_visible",
-        "tests/swarm_ledger/test_orders_page.py::test_ordered_phase_shows_quoted_words_and_master_counts",
-        "tests/swarm_ledger/test_orders_page.py::test_no_open_order_has_an_explicit_empty_state",
-        "tests/swarm_ledger/test_orders_page.py::test_every_open_order_is_rendered_oldest_first_with_safe_text",
-        "tests/swarm_ledger/test_orders_page.py::test_order_counts_refresh_and_closed_orders_leave_the_panel",
-        "tests/swarm_ledger/test_orders_page.py::test_failed_read_preserves_orders_and_recovers_on_the_next_update",
-        "tests/swarm_ledger/test_orders_page.py::test_order_panel_fold_choice_survives_reload",
-        "tests/swarm_ledger/test_page_events.py::test_tabs_get_ledger_and_swarm_changes_without_polling_the_document"
+        "tests/ci_lab/test_shadow_report.py::test_bare_semgrep_pairs_with_all_reusable_actions_jobs",
+        "tests/ci_lab/test_shadow_report.py::test_an_unfinished_reusable_child_excludes_the_semgrep_head",
+        "tests/ci_lab/test_shadow.py::test_the_recorder_pairs_bare_semgrep_with_every_reusable_actions_job"
       ]
     },
     {
@@ -112,6 +107,28 @@
       "tests": [
         "tests/hive/test_auth.py::test_a_member_writes_the_expert_keys_a_completion_writes_and_no_other_expert_key",
         "tests/hive/test_auth.py::test_a_member_expert_ends_its_lineage_on_a_proof_and_is_refused_without_one_of_its_keys"
+      ]
+    },
+    {
+      "id": "expert-launch-failure-reason",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-expert-seat-launch-failure-reason",
+      "behaviour": "When the launch of an expert fails for another reason than room, the expert seats pass keeps the error as it happens: secrets redacted in strict mode and the login of any address dropped, on one line, at most 300 characters, and the name of its type when it has no text. The line the pass returns carries the same text. A successor launch stores it as the reason of the failed transfer binding in place of the fixed words. Every failed launch, a first one included, is kept beside the lineage record as its last failed launch with its time and the name of the expert that did not start, only for a running lineage and until a launch succeeds; the record keeps its shape, so a member on an older release still reads it. Expert status carries it as JSON and names it in its text line while the lineage runs with no expert on its seat. A launch refused for room records none. The reason is there when the tick abandoned the step and dropped the lines it returned.",
+      "seam": "swarm.expert_seat.run over a fake runtime and store; handoff.transfers.failed with a reason; expert_lineage.launch_failed, launch_recovered and launch_failures; the swarm command expert status through cli.main; tick.engine.run_step abandoning the pass at its budget",
+      "semgrep_rule": "feature-expert-launch-failure-reason",
+      "tests": [
+        "tests/handoff/test_transfers.py::test_a_failed_launch_keeps_the_reason_it_is_given_in_place_of_the_fixed_words",
+        "tests/swarm/test_expert_lineage.py::test_the_last_failed_launch_is_kept_beside_a_running_lineage_and_beside_no_other",
+        "tests/swarm/test_expert_lineage.py::test_a_launch_that_succeeds_drops_the_failure_kept_before_it",
+        "tests/swarm/test_expert_commands.py::test_status_names_the_last_failed_launch_while_the_seat_is_empty_and_carries_it_as_json",
+        "tests/swarm/test_expert_seat.py::test_a_successor_launch_that_fails_keeps_its_error_on_the_binding_and_beside_the_lineage",
+        "tests/swarm/test_expert_seat.py::test_a_first_launch_that_fails_keeps_its_error_with_no_transfer_to_carry_it_until_a_launch_succeeds",
+        "tests/swarm/test_expert_seat.py::test_the_kept_reason_and_the_line_of_the_pass_hold_no_secret_and_no_login_of_an_address",
+        "tests/swarm/test_expert_seat.py::test_the_login_dropped_from_a_word_runs_from_its_first_address_mark_to_the_last_at_sign_after_it",
+        "tests/swarm/test_expert_seat.py::test_a_launch_refused_for_room_records_no_failed_launch",
+        "tests/swarm/test_expert_seat.py::test_the_kept_reason_is_redacted_put_on_one_line_and_cut_at_three_hundred_characters",
+        "tests/swarm/test_expert_seat.py::test_an_error_with_no_text_is_kept_as_the_name_of_its_type",
+        "tests/swarm/test_expert_seat.py::test_a_pass_the_tick_abandons_still_leaves_the_reason_expert_status_reads"
       ]
     },
     {
@@ -626,6 +643,27 @@
       ]
     },
     {
+      "id": "lab-lease-class-order",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "CI lab workers lease the most urgent class first, in the order hotfix, pull request, queue, promotion, backfill, and first in first out inside a class: Queue.enqueue stores the class rank of the grade that enqueues and scores the pending entry by it, a job enqueued with no rank sorts after every ranked one, a reaped or retried job keeps its rank, a more urgent enqueue of a pending job moves it up and leaves a leased one, Scheduler.tick enqueues a grade's units with its tier, and a lease poll reads the pending order one page at a time by score.",
+      "seam": "scripts.ci_lab.queue.Queue.enqueue, ordered, reap and retry and scripts.ci_lab.leases.Leases.lease over fakeredis, and scripts.ci_lab.scheduler.Scheduler.tick admitting grades of two tiers",
+      "tests": [
+        "tests/ci_lab/test_queue.py::test_a_more_urgent_rank_sorts_ahead_of_work_enqueued_earlier",
+        "tests/ci_lab/test_queue.py::test_an_unranked_job_keeps_its_counter_score_and_sorts_after_every_ranked_one",
+        "tests/ci_lab/test_queue.py::test_a_job_enqueued_before_ranks_existed_sorts_after_ranked_work_and_moves_under_a_rank",
+        "tests/ci_lab/test_queue.py::test_a_reaped_or_retried_job_keeps_its_rank",
+        "tests/ci_lab/test_queue.py::test_a_more_urgent_enqueue_moves_a_pending_job_and_leaves_a_leased_one",
+        "tests/ci_lab/test_queue.py::test_a_more_urgent_enqueue_leaves_a_finished_job_alone",
+        "tests/ci_lab/test_queue.py::test_the_lease_order_is_read_in_pages_that_a_claim_between_them_cannot_shift",
+        "tests/ci_lab/test_leases.py::test_a_lease_grants_the_most_urgent_class_first",
+        "tests/ci_lab/test_leases.py::test_a_lease_poll_reads_one_page_of_a_long_pending_order",
+        "tests/ci_lab/test_leases.py::test_a_lease_reads_no_page_once_its_slots_are_full",
+        "tests/ci_lab/test_leases.py::test_a_lease_reads_past_a_page_of_jobs_that_do_not_fit",
+        "tests/ci_lab/test_scheduler.py::test_a_pull_request_grade_admitted_after_a_merge_group_grade_is_leased_first"
+      ]
+    },
+    {
       "id": "lab-scheduler-budget-charge",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2718",
@@ -640,14 +678,19 @@
       "id": "lab-scheduler-grade-demand-cache",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-grade-demand-cache",
-      "behaviour": "Scheduler load builds reuse a live grade demand contribution only while its stored raw bytes match the cached digest, parse changed grades on the next build, evict removed or missing grades, and retain no parsed State. Cached builds equal fresh builds, preserve per slot hit and miss counts and the most urgent tier of shared jobs, and a grade rewritten by Scheduler.save updates demand without changing mutating grade reads.",
-      "seam": "scripts.ci_lab.scheduler.Scheduler.load and Scheduler.save over the scheduler lab fixture, counting module level _parse calls and comparing capacity.Load values",
+      "behaviour": "Scheduler load builds read the grade revisions hash once and reuse a live grade demand contribution only while its stored revision equals the revision kept with it; every other live grade's demand record is read with one HMGET per grade in a pipeline that opens no transaction and kept under the revision the record carries, a live grade with no record is read from its grade document and parsed on every build until a save records it, and a grade with neither counts nowhere. No build reads or hashes the document of a grade with a record, a cold build reads every live record and no document, runs leaving the live set are evicted, and no parsed State is retained. Builds equal fresh builds and builds from the grade documents alone, preserve per slot hit and miss counts and the most urgent tier of shared jobs, and a grade rewritten by Scheduler.save updates demand on the next build.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.load and Scheduler.save over the scheduler lab fixture, counting the demand records and grade documents each build reads (through the client's commands, or module level _records and _parse calls) and comparing capacity.Load values",
       "tests": [
         "tests/ci_lab/test_scheduler_demand_cache.py::test_an_unchanged_load_equals_a_fresh_build_without_parsing_grades",
-        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_saved_grade_is_reparsed_and_changes_the_next_load_demand",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_saved_grade_is_read_again_and_changes_the_next_load_demand",
         "tests/ci_lab/test_scheduler_demand_cache.py::test_a_run_leaving_the_live_set_is_parsed_again_if_it_returns",
         "tests/ci_lab/test_scheduler_demand_cache.py::test_a_missing_grade_stops_contributing_and_is_parsed_when_restored",
-        "tests/ci_lab/test_scheduler_demand_cache.py::test_cached_contributions_preserve_duplicate_slots_and_the_most_urgent_shared_job"
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_cached_contributions_preserve_duplicate_slots_and_the_most_urgent_shared_job",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_load_with_demand_records_equals_a_fresh_load_from_the_grade_documents_alone",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_load_after_an_unchanged_revision_reads_no_record_and_no_grade_document",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_moved_revision_reads_only_that_run_s_record_and_no_grade_document",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_live_run_without_a_record_reads_its_grade_document_on_every_build_until_a_save_records_it",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_cold_build_reads_every_live_run_s_record_and_no_grade_document_when_each_has_a_record"
       ]
     },
     {
@@ -681,13 +724,14 @@
       "id": "lab-scheduler-load-measure",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-parse-measure",
-      "behaviour": "python -m scripts.ci_lab.load_measure runs Scheduler.load a fixed number of builds, three unless --builds says otherwise, on one scheduler over the scheduler Redis that CI_LAB_REDIS_URL names, and prints one JSON object with the build count, the live grade count (the live set size, which also counts a live run whose grade document is gone), each build's processor and wall seconds, the grade parses the builds ran and a note that the figures leave out the offer prune round trip; on current code the first build parses each live grade with a stored document once and later builds over unchanged grades parse none. It sends only read commands, directly and through pipelines, and no script: the measured scheduler's queue keeps every worker offer, so a stale offer stays stored, and each build returns the load a plain Scheduler.load returns on the same data. Every field it prints is named in the CI lab reference, and the module level scheduler parser is put back after the builds, also when a build raises.",
+      "behaviour": "python -m scripts.ci_lab.load_measure runs Scheduler.load a fixed number of builds, three unless --builds says otherwise, on one scheduler over the scheduler Redis that CI_LAB_REDIS_URL names, and prints one JSON object with the build count, the live grade count (the live set size, which also counts a live run whose grade document is gone), each build's processor and wall seconds, the grade parses the builds ran, each build's grade documents fetched and demand record bytes read, and a note that the figures leave out the offer prune round trip; the first build reads every live demand record, later builds read only records whose revision moved, and every build fetches and parses the document of each live grade with no record. It sends only read commands, directly and through pipelines, and no script: the measured scheduler's queue keeps every worker offer, so a stale offer stays stored, and each build returns the load a plain Scheduler.load returns on the same data. Every field it prints is named in the CI lab reference, and the module level scheduler parser, record reader and document reader are put back after the builds, also when a build raises.",
       "seam": "scripts.ci_lab.load_measure.main over fakeredis through redis.Redis.from_url, load_measure.measure with injected process and wall clocks, and load_measure.measured_scheduler against Scheduler.load on the same lab data",
       "tests": [
-        "tests/ci_lab/test_load_measure.py::test_the_measure_prints_three_builds_and_parses_each_stored_live_grade_once_on_its_cold_build",
+        "tests/ci_lab/test_load_measure.py::test_the_measure_prints_three_builds_with_the_documents_fetched_and_record_bytes_read_by_each",
         "tests/ci_lab/test_load_measure.py::test_the_measure_sends_only_read_commands_directly_and_through_pipelines_and_keeps_the_stale_offer",
         "tests/ci_lab/test_load_measure.py::test_each_measured_build_returns_the_load_a_plain_build_returns_with_offers_on_both_sides_of_the_ready_cut",
-        "tests/ci_lab/test_load_measure.py::test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_parser_back_even_when_a_build_raises"
+        "tests/ci_lab/test_load_measure.py::test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_parser_back_even_when_a_build_raises",
+        "tests/ci_lab/test_load_measure.py::test_the_read_counter_adds_every_fetch_of_a_build_to_that_build_alone"
       ]
     },
     {
@@ -13076,6 +13120,16 @@
       ]
     },
     {
+      "id": "lab-sandbox-gone-probe-reaped-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "The probe the lab sandbox tests ask whether a unit's child is gone counts a child reaped between the open and the read of its stat file as gone, so the tests of the process group kill do not fail on a child that ends at that moment.",
+      "seam": "tests/ci_lab/test_sandbox.py _gone, the gone probe under _gone_within",
+      "tests": [
+        "tests/ci_lab/test_sandbox.py::test_a_child_reaped_between_the_open_and_the_read_of_its_stat_counts_as_gone"
+      ]
+    },
+    {
       "id": "lab-venv-build-sandbox",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2644",
@@ -13147,6 +13201,18 @@
       "seam": "scripts.ci_lab.run_static run, the Sandbox it builds for the gate step and the bubblewrap arguments the step runs under",
       "tests": [
         "tests/ci_lab/test_run_static.py::test_the_step_runs_with_the_grader_and_base_trees_bound_read_only"
+      ]
+    },
+    {
+      "id": "lab-static-step-tools",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "A CI lab static gate step finds the tools the worker image installs beside the system ones and never writes a ruff cache into a leased tree: its PATH is the venv bin folder, then /usr/local/bin, then the system default path, and its RUFF_CACHE_DIR lies in the step's run folder unless the step's own env names another, so ruff passes on a head tree that refuses writes.",
+      "seam": "scripts.ci_lab.run_static.run over a head, base and grader tree with a stand in bubblewrap, reading the PATH and RUFF_CACHE_DIR a step sees and running ruff on a read only head tree",
+      "tests": [
+        "tests/ci_lab/test_run_static.py::test_the_step_reads_each_tree_where_the_workflow_puts_it",
+        "tests/ci_lab/test_run_static.py::test_a_step_keeps_the_ruff_cache_in_its_run_folder_outside_every_tree",
+        "tests/ci_lab/test_run_static.py::test_ruff_passes_on_a_head_tree_that_refuses_writes"
       ]
     },
     {
@@ -13511,7 +13577,7 @@
       "ordered_at": "2026-11-22",
       "ledger_item": "ledger:rig-grade-swarm/phases/p130",
       "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
-      "behaviour": "Every pass of the tick keeps the seat of each running expert lineage. An empty seat gets one expert, launched on Claude Code at the lineage's effort with the lineage, the mission and its number in the lineage; a seat that holds a record in any state gets no second one. After an accepted handoff the next expert launches on the same seat with the handoff and the transfer it confirms, and the handoff stays on the seat until that expert confirms it. A launch that fails leaves no record and a failed binding, one refused for room hands the transfer back, and no slot, a full host or a placement elsewhere holds the launch by name. An expert lost without a handoff leaves its successor one: the handoff it never confirmed, offered again, or a recovery handoff in the expert handoff form with every deliverable pending and unknown. The expert of a stopped lineage is finished with its open mail closed, and the expert of a completed lineage is closed from the kept proof with the master told once. Nothing launches while the swarm is paused, stopping, stopped or in panic. A lineage started from the Handoff v2 of a session that was not an expert gives its first expert that handoff to confirm.",
+      "behaviour": "Every pass of the tick keeps the seat of each running expert lineage. An empty seat gets one expert, launched on Claude Code at the lineage's effort with the lineage, the mission and its number in the lineage; a seat that holds a record in any state gets no second one. After an accepted handoff the next expert launches on the same seat with the handoff and the transfer it confirms, and the handoff stays on the seat until that expert confirms it. A launch that fails leaves no record; a successor launch leaves a failed binding carrying the reason, and every failed launch its reason kept beside the lineage; one refused for room hands the transfer back, and no slot, a full host or a placement elsewhere holds the launch by name. An expert lost without a handoff leaves its successor one: the handoff it never confirmed, offered again, or a recovery handoff in the expert handoff form with every deliverable pending and unknown. The expert of a stopped lineage is finished with its open mail closed, and the expert of a completed lineage is closed from the kept proof with the master told once. Nothing launches while the swarm is paused, stopping, stopped or in panic. A lineage started from the Handoff v2 of a session that was not an expert gives its first expert that handoff to confirm.",
       "seam": "swarm.expert_seat.run over a fake runtime and store; the tick step expert seats in tick.steps.experts; expert_lineage.launches, launched and unlaunched, closing and closed; expert_seat.close, drop_confirmed and keep_handoff; the confirm-handoff verb, swarm.handoff_commands.confirm, which calls drop_confirmed; the expert start --handoff and --from options; the live checks scripts.feature_checks.expert_seats over the experts of each running swarm and scripts.feature_checks.expert_handoffs over the handoff a lineage was started from",
       "semgrep_rule": "feature-expert-seat-in-tick",
       "tests": [
@@ -14032,6 +14098,18 @@
         "tests/swarm/test_order_check.py::test_one_ledger_reads_the_same_orders_with_and_without_its_slices",
         "tests/swarm/test_order_check.py::test_a_member_merged_into_a_lead_under_a_slice_is_listed_on_a_read_that_carries_no_slices",
         "tests/swarm/test_order_check.py::test_a_whole_ledger_lists_a_task_under_the_phase_of_its_slice_whatever_phase_its_row_names"
+      ]
+    },
+    {
+      "id": "ledger-verdict-reads-one-reply",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "The orders read and the focus read serve the data they work out from the ledger state under the swarm's fix phase, the revision of that data, an empty cursor on a read that lists and nothing past the reply limit, each refusing with its own message. A recorded run of the orders read, the focus list and two focus targets, of each one byte past the limit and of a target that does not exist keeps the text of every reply. One helper builds both replies, and no module outside the resources module measures a reply to bound it by hand, apart from the error envelope and the mutation acknowledgement, which shrink a reply before it is bounded.",
+      "seam": "scripts.swarm_ledger.api.routes.ledger_read at orders, focus and focus/<target>, and every module under scripts and hooks against resources.reply_size",
+      "semgrep_rule": "feature-api-reply-bound-one-helper",
+      "tests": [
+        "tests/swarm_ledger/test_read_replies_recorded.py::test_a_recorded_run_of_the_orders_and_focus_reads_keeps_the_text_of_every_reply",
+        "tests/swarm_ledger/test_read_replies_recorded.py::test_the_rule_excuses_only_the_modules_that_measure_a_reply_before_it_is_bounded"
       ]
     },
     {
@@ -14805,6 +14883,23 @@
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_window",
         "tests/hive/test_daemon_presence.py::test_the_daemon_token_gauges_carry_the_session_agent_and_profile_from_the_seen_record",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_skips_token_values_it_cannot_read_and_sends_the_rest"
+      ]
+    },
+    {
+      "id": "ledger-orders-panel",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-orders-page-panel",
+      "behaviour": "The ledger page lists every open operator order from the master orders read with its title, quoted words and claimable, busy and done counts, and distinguishes an empty set from a failed read while preserving phase views.",
+      "seam": "the ledger page in Chromium at 1920 by 1080 consuming the existing orders resource",
+      "tests": [
+        "tests/swarm_ledger/test_orders_page.py::test_existing_phase_and_overview_remain_visible",
+        "tests/swarm_ledger/test_orders_page.py::test_ordered_phase_shows_quoted_words_and_master_counts",
+        "tests/swarm_ledger/test_orders_page.py::test_no_open_order_has_an_explicit_empty_state",
+        "tests/swarm_ledger/test_orders_page.py::test_every_open_order_is_rendered_oldest_first_with_safe_text",
+        "tests/swarm_ledger/test_orders_page.py::test_order_counts_refresh_and_closed_orders_leave_the_panel",
+        "tests/swarm_ledger/test_orders_page.py::test_failed_read_preserves_orders_and_recovers_on_the_next_update",
+        "tests/swarm_ledger/test_orders_page.py::test_order_panel_fold_choice_survives_reload",
+        "tests/swarm_ledger/test_page_events.py::test_tabs_get_ledger_and_swarm_changes_without_polling_the_document"
       ]
     }
   ],
