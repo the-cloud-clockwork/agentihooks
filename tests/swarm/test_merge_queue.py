@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from scripts.review import gate as review_gate
 from scripts.swarm import cli, fencing, ledger_events, merge_queue, queue_exit, waits
 from scripts.swarm.store import MASTER, SwarmError
 from tests.swarm.graph_port import view as port_view
@@ -861,7 +862,10 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
 
 
 @pytest.mark.parametrize("failed", [False, True])
-def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(monkeypatch, capsys, failed):
+def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failed: bool
+) -> None:
+    monkeypatch.setattr(review_gate, "admit", lambda *args: None)
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     seen = []
@@ -1028,7 +1032,16 @@ def test_cli_queue_declares_no_checks_wait(monkeypatch, capsys):
         ("off", 0, False, None),
     ],
 )
-def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys, mode, code, warned, logged):
+def test_cli_queue_applies_the_judged_intent_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+    code: int,
+    warned: bool,
+    logged: str | None,
+) -> None:
+    monkeypatch.setattr(review_gate, "admit", lambda *args: None)
     from types import SimpleNamespace
 
     from scripts.gates import intent

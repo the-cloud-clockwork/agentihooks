@@ -38,10 +38,11 @@ def queue_admit(
     store: RedisStore,
     args: argparse.Namespace,
     agent: AgentRecord | None,
+    author: AgentRecord,
     head: str,
     intent: Callable[[RedisStore, argparse.Namespace, AgentRecord, str], None],
 ) -> None:
     if agent is not None:
         intent(store, args, agent, head)
-        admit(store, args.slug, agent, args.url, head)
-    queue_exit.require_fresh(args.url, head)
+    admit(store, args.slug, author, args.url, head)
+    return queue_exit.require_fresh(args.url, head)  # pyright: ignore[reportUnknownMemberType]

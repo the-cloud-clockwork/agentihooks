@@ -128,6 +128,7 @@ from scripts.swarm import (
     waits,
 )
 from scripts.swarm import ledger_client as ledger_client
+from scripts.swarm import queue_exit as queue_exit
 from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.health import activity, focus_check, report
@@ -2192,7 +2193,7 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: review_gate.queue_admit(store, args, agent, head, _queue_intent),
+                admit=lambda head: review_gate.queue_admit(store, args, agent, _me(store, args), head, _queue_intent),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
                 priority=lambda: queue_priority.automatic(store, args.slug, args.url, LedgerClient()),

@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple, Protocol, cast
 from urllib.parse import urlsplit
 
 from scripts.forge.model import Forge
@@ -42,6 +42,16 @@ class Record(NamedTuple):
         return any(item.by != author and item.task != task for item in self.findings)
 
 
+class _Redis(Protocol):
+    def hget(self, name: str, key: str) -> str | None: ...
+
+    def transaction(self, update: Callable[[Any], Record], key: str, *, value_from_callable: bool) -> Record: ...
+
+
+def _redis(store: RedisStore) -> _Redis:
+    return cast(_Redis, cast(Any, store).redis)  # pragma: no mutate
+
+
 def document(found: Record) -> dict[str, Any]:
     return {"url": found.url, "head": found.head, "findings": [asdict(item) for item in found.findings]}
 
@@ -57,12 +67,24 @@ def _decode(raw: str | None, url: str, head: str) -> Record:
     return Record(
         data["url"],
         data["head"],
-        tuple(Finding(**{**item, "read_by": tuple(item["read_by"])}) for item in data["findings"]),
+        tuple(
+            Finding(
+                id=item["id"],
+                body=item["body"],
+                comment=item["comment"],
+                by=item["by"],
+                task=item["task"],
+                state=item["state"],
+                answer=item["answer"],
+                read_by=tuple(item["read_by"]),
+            )
+            for item in data["findings"]
+        ),
     )
 
 
 def read(store: RedisStore, slug: str, url: str, head: str) -> Record | None:
-    raw = store.redis.hget(_key(store, slug, url), head)
+    raw = _redis(store).hget(_key(store, slug, url), head)
     return None if raw is None else _decode(raw, url, head)
 
 
@@ -80,7 +102,7 @@ def _write(store: RedisStore, slug: str, url: str, head: str, update: Callable[[
         pipe.expire(tasks, TTL_SEC)
         return found
 
-    return cast(Record, store.redis.transaction(change, key, value_from_callable=True))
+    return _redis(store).transaction(change, key, value_from_callable=True)
 
 
 def number_of(url: str) -> int:
@@ -88,6 +110,13 @@ def number_of(url: str) -> int:
         return int(urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1])
     except ValueError:
         raise SwarmError(f"not a change request URL: {url}") from None
+
+
+def _head(forge: Forge, url: str) -> str:
+    found = forge.read(number_of(url))
+    if found.url.rstrip("/") != url.rstrip("/"):
+        raise SwarmError(f"change request {url} does not match forge target {found.url}")
+    return found.head
 
 
 def _post_one(store: RedisStore, forge: Forge, target: Record, who: Who, body: str) -> Record:
@@ -104,7 +133,7 @@ def post(store: RedisStore, slug: str, forge: Forge, url: str, by: str, task: st
     cleaned = tuple(text for body in bodies if (text := body.strip()))
     if not cleaned:
         raise SwarmError("a review posts at least one finding")
-    target = Record(url, forge.read(number_of(url)).head)
+    target = Record(url, _head(forge, url))
     who = Who(name=by, swarm=slug, task=task)
     return [_post_one(store, forge, target, who, body) for body in cleaned][-1]
 
@@ -134,14 +163,14 @@ def _mark(found: Record, by: str, ids: Sequence[str], answer: str) -> Record:
 
 
 def mark(store: RedisStore, slug: str, forge: Forge, url: str, by: str, ids: Sequence[str], answer: str) -> Record:
-    head = forge.read(number_of(url)).head
+    head = _head(forge, url)
     return _write(store, slug, url, head, lambda found: _mark(found, by, ids, answer), "")
 
 
 def done_refusal(store: RedisStore, slug: str, kind: str, task: str) -> str | None:
     if kind != REVIEW_KIND:
         return None
-    count = store.redis.hget(store.key(slug, "review-tasks"), task)
+    count = _redis(store).hget(store.key(slug, "review-tasks"), task)
     if count and int(count) > 0:
         return None
     return (
