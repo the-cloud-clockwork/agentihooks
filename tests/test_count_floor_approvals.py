@@ -162,15 +162,19 @@ def test_the_approvals_mode_collects_nothing_and_passes_a_head_the_floor_refuses
     assert "head collects 1 tests, base floor 2" in floor.stdout
 
 
-@pytest.mark.parametrize("side", [["--record", "record.json"], ["--retire", NODE]], ids=["record", "retire"])
+@pytest.mark.parametrize("mode", ["record", "retire"])
 @pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
-def test_the_approvals_mode_is_refused_beside_another_mode(tmp_path: Path, side: list[str]) -> None:
+def test_the_approvals_mode_is_refused_beside_another_mode(tmp_path: Path, mode: str) -> None:
+    head = _tree(tmp_path / "head", {})
+    record = tmp_path / "record.json"
+    side = {"record": ["--record", str(record)], "retire": ["--retire", NODE]}[mode]
     result = subprocess.run(
-        [sys.executable, "-m", "tests.count_floor", "--approvals", *side, "--head", str(tmp_path)],
+        [sys.executable, "-m", "tests.count_floor", "--approvals", *side, "--head", str(head)],
         cwd=ROOT,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 2, result.stdout + result.stderr
     assert "--approvals grades a head against a base, so it needs --base" in result.stderr
-    assert list(tmp_path.iterdir()) == []
+    assert list(head.iterdir()) == []
+    assert not record.exists()
