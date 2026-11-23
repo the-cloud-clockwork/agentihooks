@@ -501,7 +501,10 @@
         "tests/test_gate_protected_split.py::test_the_repository_gate_refuses_one_split_job_through_the_early_queue_gate",
         "tests/test_gate_protected_split.py::test_split_aggregation_refuses_a_rendering_that_does_not_hold_each_job_list_once",
         "tests/test_gate_protected_split.py::test_split_aggregation_adds_exactly_the_split_jobs_of_the_queue_gate",
-        "tests/test_ci_gate_queue.py::test_the_early_gate_accepts_the_split_jobs_only_together"
+        "tests/test_ci_gate_queue.py::test_the_early_gate_accepts_the_split_jobs_only_together",
+        "tests/test_ci_gate_queue.py::test_the_early_gate_refuses_a_gate_that_names_no_needs",
+        "tests/test_gate_protected_split.py::test_an_unchanged_gate_is_graded_against_the_renderings_of_its_own_needs",
+        "tests/test_gate_protected_split.py::test_the_split_renderings_are_the_unsplit_ones_of_the_same_gate_that_hold_the_job_lists"
       ]
     },
     {

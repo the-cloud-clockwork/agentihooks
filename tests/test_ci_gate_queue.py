@@ -457,6 +457,14 @@ def test_the_early_gate_accepts_the_split_jobs_only_together(
             ci_gate_queue.normalize(workflows)
 
 
+@pytest.mark.feature("gate-required-split-jobs")
+def test_the_early_gate_refuses_a_gate_that_names_no_needs() -> None:
+    workflows = _reviewed_pair([])
+    workflows["test.yml"]["jobs"]["gate-required"] = {"name": ci_gate_queue.SUMMARY_NAME, "runs-on": "runner"}
+    with pytest.raises(ValueError, match="reviewed graded inventory"):
+        ci_gate_queue.normalize(workflows)
+
+
 def test_pending_originals_wait_without_misclassifying_started_recovery():
     jobs = complete()
     next(job for job in jobs if job["name"] == "unit (3.12, 7)").update(status="in_progress", conclusion=None)
