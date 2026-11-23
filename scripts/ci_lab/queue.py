@@ -189,9 +189,15 @@ class Queue:
         return [job for job in self.pending() if job in mine and self._drop(keys=[_job(job), *keys], args=[job])]
 
     def drop(self, head: str) -> list[str]:
-        """Remove the head's pending jobs, read from the head's own pending set, and return them by name; its leased
-        jobs run to completion."""
-        return []
+        """Remove the head's pending jobs and return them by name; its leased jobs run to completion. The jobs are
+        read from the head's own pending set and dropped in one transaction, so the whole pending order is never
+        read."""
+        jobs = sorted(self.members(head, "pending"))
+        keys = [_key("pending"), _head(head, "pending")]
+        pipe = self.client.pipeline()
+        for job in jobs:
+            self._drop(keys=[_job(job), *keys], args=[job], client=pipe)
+        return [job for job, dropped in zip(jobs, pipe.execute()) if dropped]
 
     def pending(self) -> list[str]:
         return list(self.client.zrange(_key("pending"), 0, -1))

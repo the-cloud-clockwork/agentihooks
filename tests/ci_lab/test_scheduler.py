@@ -140,7 +140,7 @@ class Expander:
     plans: dict[str, scheduler.Plan]
     seen: list[GradeRequest] = field(default_factory=list[GradeRequest])
     gone: set[str] = field(default_factory=set[str])
-    unlisted: bool = False
+    unlisted: dict[str, subprocess.SubprocessError] = field(default_factory=dict[str, subprocess.SubprocessError])
 
     def expand(self, request: GradeRequest) -> scheduler.Plan:
         self.seen.append(request)
@@ -153,8 +153,8 @@ class Expander:
         return True
 
     def groups(self, repo: str) -> frozenset[str]:
-        if self.unlisted:
-            raise subprocess.CalledProcessError(128, ["git", "ls-remote", repo])
+        if repo in self.unlisted:
+            raise self.unlisted[repo]
         return frozenset(self.plans) - self.gone
 
 
