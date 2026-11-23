@@ -13059,7 +13059,13 @@
         "tests/test_count_floor.py::test_a_signed_retirement_is_admitted_only_with_a_code_owner_approval_of_the_head",
         "tests/test_count_floor.py::test_a_code_owner_rule_the_floor_cannot_match_admits_no_retirement",
         "tests/test_count_floor.py::test_reviews_without_a_reviewed_head_leave_a_signed_retirement_graded_as_before",
-        "tests/test_ci_gate_workflow.py::test_a_pull_request_count_floor_reads_its_reviews_on_the_app_token"
+        "tests/test_ci_gate_workflow.py::test_a_pull_request_count_floor_reads_its_reviews_on_the_app_token",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_fails_a_new_signed_retirement_no_code_owner_approved_on_the_head",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_fails_a_new_signed_retirement_whose_reviews_cannot_be_read",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_fails_a_retirement_whose_file_has_no_code_owner_on_the_base",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_holds_only_new_signed_retirements",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_passes_without_a_reviewed_head",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_grades_without_collecting_either_tree"
       ]
     },
     {
