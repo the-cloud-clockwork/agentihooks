@@ -98,7 +98,7 @@ jobs:
 
       - name: Expand and grade the twin, the plant and the control in process
         shell: bash
-        working-directory: ${{ runner.temp }}/lab-mutation-plant/driver
+        working-directory: /
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -111,7 +111,7 @@ jobs:
           if [[ "${PROOF_SCOPE:-every}" == none ]]; then
             scope=(--expand-only)
           fi
-          "$proof/venv/bin/python" -I lab_mutation_plant.py --repo "$GITHUB_WORKSPACE" --base "$base" \
+          "$proof/venv/bin/python" -I "$proof/driver/lab_mutation_plant.py" --repo "$GITHUB_WORKSPACE" --base "$base" \
             --work "$proof/work" --out "$proof/out" --timeout "${PROOF_TIMEOUT:-0}" "${scope[@]}"
 
       - name: Publish the proof table
