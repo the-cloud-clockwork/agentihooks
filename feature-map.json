@@ -530,6 +530,19 @@
       ]
     },
     {
+      "id": "lab-scheduler-load-measure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-parse-measure",
+      "behaviour": "python -m scripts.ci_lab.load_measure runs Scheduler.load a fixed number of builds, three unless --builds says otherwise, on one scheduler over the scheduler Redis that CI_LAB_REDIS_URL names, and prints one JSON object with the build count, the live grade count (the live set size, which also counts a live run whose grade document is gone), each build's processor and wall seconds, the grade parses the builds ran and a note that the figures leave out the offer prune round trip; on current code the first build parses each live grade with a stored document once and later builds over unchanged grades parse none. It sends only read commands, directly and through pipelines, and no script: the measured scheduler's queue keeps every worker offer, so a stale offer stays stored, and each build returns the load a plain Scheduler.load returns on the same data. Every field it prints is named in the CI lab reference, and the module level scheduler parser is put back after the builds, also when a build raises.",
+      "seam": "scripts.ci_lab.load_measure.main over fakeredis through redis.Redis.from_url, load_measure.measure with injected process and wall clocks, and load_measure.measured_scheduler against Scheduler.load on the same lab data",
+      "tests": [
+        "tests/ci_lab/test_load_measure.py::test_the_measure_prints_three_builds_and_parses_each_stored_live_grade_once_on_its_cold_build",
+        "tests/ci_lab/test_load_measure.py::test_the_measure_sends_only_read_commands_directly_and_through_pipelines_and_keeps_the_stale_offer",
+        "tests/ci_lab/test_load_measure.py::test_each_measured_build_returns_the_load_a_plain_build_returns_with_offers_on_both_sides_of_the_ready_cut",
+        "tests/ci_lab/test_load_measure.py::test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_parser_back_even_when_a_build_raises"
+      ]
+    },
+    {
       "id": "lab-scheduler-load-reads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-load-slots-only",
@@ -556,6 +569,20 @@
         "tests/ci_lab/test_metrics.py::test_a_failed_first_build_fails_its_read_and_the_next_read_builds_again",
         "tests/ci_lab/test_metrics.py::test_the_load_age_counts_the_seconds_since_the_served_build_started_never_below_zero",
         "tests/ci_lab/test_metrics.py::test_the_served_port_runs_its_actions_between_requests_and_a_port_without_actions_runs_none"
+      ]
+    },
+    {
+      "id": "lab-scheduler-capacity-cached",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-capacity-cached",
+      "behaviour": "The CI lab scheduler port 8800 answers GET /capacity from the same metrics.Latest load snapshot the metrics port 9108 serves instead of building a full load per request: two capacity reads in a row build the load once, a capacity read and a metrics scrape share one build, the capacity document equals a fresh Scheduler.load of the same state, a capacity read after the metrics port's serve loop refreshed the snapshot serves that newer build, and GET /grades/<sha> still reads the grade store on every request.",
+      "seam": "scripts.ci_lab.scheduler.listen over fakeredis read through GET /capacity, GET /grades/<sha> and GET /metrics with a counting Scheduler.load and a movable clock",
+      "tests": [
+        "tests/ci_lab/test_scheduler_snapshot.py::test_two_capacity_reads_in_a_row_build_the_load_once",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_a_capacity_read_and_a_scrape_share_one_load_build",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_the_capacity_document_equals_a_fresh_build_of_the_same_state",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_the_capacity_route_serves_the_build_the_metrics_port_refreshed",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_the_grades_route_reads_every_request_beside_the_cached_capacity"
       ]
     },
     {
@@ -14071,6 +14098,41 @@
         "tests/swarm/test_review_lane.py::test_capacity_places_a_reviewer_only_for_review_demand",
         "tests/swarm/test_review_lane.py::test_quota_status_reads_a_decision_stored_before_the_review_lane",
         "tests/swarm/test_review_lane.py::test_quota_status_shows_the_configured_review_cap_beside_the_autoscaled_ceilings"
+      ]
+    },
+    {
+      "id": "swarm-review-trigger",
+      "origin": "inventory",
+      "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
+      "seam": "scripts.tick.steps.review.review_pass, scripts.hub.github_webhooks.repository_events and scripts.hub.pulls.Pulls.announce",
+      "tests": [
+        "tests/tick/steps/test_review_pass.py::test_review_pass",
+        "tests/tick/steps/test_review_queue.py::test_one_pull_opened_event_queues_exactly_one_review_task_and_a_repeat_queues_none",
+        "tests/tick/steps/test_review_queue.py::test_a_merge_group_and_a_release_each_queue_one_review_task",
+        "tests/tick/steps/test_review_queue.py::test_review_task_ids_are_keyed_by_the_change_alone",
+        "tests/tick/steps/test_review_queue.py::test_events_from_before_the_replay_window_queue_nothing",
+        "tests/tick/steps/test_review_queue.py::test_a_ledger_refusal_is_skipped_and_never_fails_the_pass",
+        "tests/tick/steps/test_review_queue.py::test_the_step_is_inert_without_a_review_lane_or_a_running_swarm",
+        "tests/tick/steps/test_review_queue.py::test_the_step_runs_the_pass_on_the_swarm_bus",
+        "tests/tick/steps/test_review_queue.py::test_the_step_opens_no_bus_on_the_memory_backend",
+        "tests/hub/test_pulls.py::test_tracking_a_pull_request_records_its_swarms_for_the_repository",
+        "tests/hub/test_pulls.py::test_a_repository_event_reaches_each_tracking_swarm_with_one_id_per_change",
+        "tests/hub/test_pulls.py::test_a_repository_event_for_an_untracked_repository_publishes_nothing",
+        "tests/hub/test_github_webhooks.py::test_repository_events_from_recorded_payloads",
+        "tests/hub/test_github_webhooks.py::test_a_merge_group_and_a_release_reach_each_swarm_tracking_the_repository",
+        "tests/hub/test_github_webhooks.py::test_a_failed_repository_publish_answers_503_after_the_lab_head_is_published",
+        "tests/hub/test_github_webhooks.py::test_a_merge_group_without_a_head_ref_names_no_pull_request",
+        "tests/hub/test_github_webhooks.py::test_the_lazy_pull_tracker_announces_a_repository_event_to_the_tracking_swarm",
+        "tests/hub/test_pulls.py::test_the_repository_key_hashes_the_lowercased_repository",
+        "tests/hub/test_pulls.py::test_the_repository_of_a_pull_is_everything_before_its_last_pull_segment",
+        "tests/hub/test_pulls.py::test_a_repository_event_is_published_on_the_swarm_subject_of_its_kind",
+        "tests/tick/steps/test_review_queue.py::test_a_pull_review_task_names_its_change_and_author_exactly",
+        "tests/tick/steps/test_review_queue.py::test_a_release_review_task_names_its_tag_and_no_author",
+        "tests/tick/steps/test_review_queue.py::test_a_merge_group_naming_no_pull_request_has_no_author",
+        "tests/tick/steps/test_review_queue.py::test_an_author_task_without_a_phase_gives_the_review_no_phase",
+        "tests/tick/steps/test_review_queue.py::test_the_durable_consumer_is_named_by_kind_and_swarm",
+        "tests/tick/steps/test_review_queue.py::test_an_event_at_the_edge_of_the_replay_window_still_queues",
+        "tests/tick/steps/test_review_queue.py::test_the_step_opens_the_configured_shared_bus"
       ]
     },
     {

@@ -121,6 +121,7 @@ def test_only_the_reap_and_spawn_steps_declare_their_effects_yet() -> None:
         "focus unclaimed": frozenset({"coordination"}),
         "order waiting": frozenset({"coordination"}),
         "expert seats": frozenset({"coordination", "inbox", "runtime"}),
+        "review pass": frozenset({"ledger"}),
     }
 
 
