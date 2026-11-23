@@ -84,11 +84,14 @@ import importlib.abc
 import io
 import sys
 
+attempted: list[str] = []
+
 class NamedGateOnly(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname: str, path: object = None, target: object = None) -> None:
         if fullname.startswith("scripts.gates.") and fullname.rsplit(".", 1)[-1] not in {
             "entry", "base", "lift", "log", "modes", "node_caps", "verdicts"
         }:
+            attempted.append(fullname)
             raise AssertionError("unrelated gate imported: " + fullname)
 
 sys.meta_path.insert(0, NamedGateOnly())
@@ -97,6 +100,7 @@ from scripts.gates import entry
 from scripts.gates.node_caps import NodeCaps
 assert isinstance(entry.HOST_GATES["node-caps"], NodeCaps)
 assert entry.main(["node-caps"], io.StringIO('{"tool_name":"Bash","tool_input":{"command":"printf ok"}}'), {}, Path(sys.argv[1])) == 0
+assert not attempted, attempted
 """
     completed = subprocess.run(
         [sys.executable, "-c", program, str(tmp_path)], capture_output=True, text=True, timeout=30
