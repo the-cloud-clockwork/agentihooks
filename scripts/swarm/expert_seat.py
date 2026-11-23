@@ -42,7 +42,7 @@ SPAWNED = "spawned expert {name} on lineage {lineage} as its expert number {numb
 WAITS = "lineage {lineage} waits: {error}"
 FAILED = "expert spawn failed on lineage {lineage}: {error}"
 WHY_CHARS = 300
-ADDRESS_LOGIN = re.compile(r"(?<=://)[^/\s@]+@")
+ADDRESS_LOGIN = re.compile(r"(?<=://)\S*@")
 ENDED = "ended expert {name}: lineage {lineage} is {state}"
 STOPPED = "left when its lineage {lineage} was stopped"
 OFFERED = "offered the handoff of lineage {lineage} again: {name} was lost before it confirmed it"

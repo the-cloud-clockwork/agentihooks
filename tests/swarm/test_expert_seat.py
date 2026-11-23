@@ -233,12 +233,13 @@ def test_a_first_launch_that_fails_keeps_its_error_with_no_transfer_to_carry_it_
 
 
 @pytest.mark.feature("expert-launch-failure-reason")
+@pytest.mark.parametrize("login", ["deploy:hunter2word", "deploy:hunter/2word", "deploy:hunter@2word", "deploy"])
 def test_the_kept_reason_and_the_line_of_the_pass_hold_no_secret_and_no_login_of_an_address(
-    store: RedisStore,
+    store: RedisStore, login: str
 ) -> None:
     started(store)
     key = "API_KEY=" + "k" * 16
-    raw = f"clone of https://deploy:hunter2word@git.example/repo.git failed with {key} set"
+    raw = f"clone of https://{login}@git.example/repo.git failed with {key} set"
     safe = "clone of https://git.example/repo.git failed with [REDACTED:generic_secret] set"
     assert go(store, failing(raw)) == [f"expert spawn failed on lineage expert-1: {safe}"]
     assert failure(store)["reason"] == safe
