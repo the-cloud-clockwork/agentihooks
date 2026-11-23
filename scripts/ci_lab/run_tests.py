@@ -64,7 +64,8 @@ class Attempt:
 @dataclass(frozen=True)
 class Verdict:
     """A batch's verdict: passed or failed, whether a retry passed it, the repository files it opened outside its
-    manifest, the final attempt's durations, log and coverage data, and how many attempts ran."""
+    manifest, the final attempt's durations, log and coverage data, how many attempts ran, and the flake ledger rows
+    of a batch a retry passed."""
 
     outcome: str
     flaky: bool
@@ -73,6 +74,7 @@ class Verdict:
     attempts: int
     log: Path
     coverage: Path
+    flakes: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def broad(self) -> bool:

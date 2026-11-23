@@ -11687,6 +11687,22 @@
       ]
     },
     {
+      "id": "lab-report-flake-rows",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-report",
+      "behaviour": "A CI lab test unit whose retry passes appends its flake rows to the pod flake ledger and returns the same rows on its verdict, and the tests executor writes them into the unit report under flakes in the flake ledger line format with run set to the unit key and run_attempt to the lab attempt count; a green first attempt and a red retry return no rows and report an empty flakes list.",
+      "seam": "scripts.ci_lab.run_tests run and Verdict flakes, and the report.json scripts.ci_lab.executors tests returns",
+      "tests": [
+        "tests/ci_lab/test_run_tests.py::test_a_planted_failure_is_red_on_both_attempts_and_final",
+        "tests/ci_lab/test_run_tests.py::test_a_seeded_flake_is_green_flaky_and_written_to_the_flake_ledger",
+        "tests/ci_lab/test_run_tests.py::test_a_seeded_flaky_batch_returns_the_rows_it_writes_to_the_flake_ledger",
+        "tests/ci_lab/test_run_tests.py::test_a_red_retry_returns_no_flake_rows",
+        "tests/ci_lab/test_run_tests.py::test_a_green_first_attempt_returns_no_flake_rows",
+        "tests/ci_lab/test_executors.py::test_tests_reports_a_flaky_batchs_rows_with_the_unit_key_as_run_and_its_attempts_as_run_attempt",
+        "tests/ci_lab/test_executors.py::test_tests_reports_no_flake_rows_for_a_red_retry"
+      ]
+    },
+    {
       "id": "lab-worker-metrics",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-metrics",
