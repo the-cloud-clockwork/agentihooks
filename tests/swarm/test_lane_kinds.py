@@ -35,6 +35,7 @@ PLACED = {
     "ci": TASK_LANE,
     "plan": TASK_LANE - {"stall watched lane"},
     "review": {
+        "event scope lane",
         "default profile",
         "configurable lane",
         "lane cap",
