@@ -158,10 +158,10 @@ curl -fsS http://lab:9108/metrics \
   | grep --line-buffered -E '^ci_lab_(slots_total|slots_busy|queue_wait_seconds|budget_fraction|class_shed)'
 ```
 
-`/capacity` returns the [capacity document](#capacity-document). Each capacity request on 8800
-builds a fresh load from queue, lease, live grade, recent worker offer and daily budget state;
-separate requests can observe different instants. Port 9108 answers `/metrics` and `/capacity`
-from the last load its own serve loop built, and `ci_lab_load_age_seconds` gives that load's age.
+`/capacity` returns the [capacity document](#capacity-document). Ports 8800 and 9108 share the
+last load built from queue, lease, live grade, recent worker offer and daily budget state.
+Port 9108 answers `/metrics` and `/capacity` from that same snapshot, refreshed by its serve
+loop, and `ci_lab_load_age_seconds` gives that load's age at each metrics port read.
 Without recent worker
 offers and leased jobs, a running scheduler can report zero total slots. Offers expire after
 60 seconds, and unit estimates remain fixed at 60 seconds per slot.
@@ -319,13 +319,13 @@ snapshot sets the queue, slot and `ci_lab_queue_wait_seconds` gauges through
 [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold).
 
 The scheduler service builds the snapshot with `scripts.ci_lab.scheduler.Scheduler.load` and
-serves it through `scripts.ci_lab.scheduler.listen`. Port 8800 builds one on every `/capacity`
-request. Port 9108 serves `/metrics` and `/capacity` from the last snapshot a
-`scripts.ci_lab.metrics.Latest` holds. The port's first read after a start builds the snapshot once,
+serves it through `scripts.ci_lab.scheduler.listen`. Ports 8800 and 9108 serve `/capacity`
+from the same last snapshot a `scripts.ci_lab.metrics.Latest` holds; port 9108 also serves
+`/metrics` from it. The first read of either port after a start builds the snapshot once,
 however many reads meet that build, so the lab series stay without samples until that build
 finishes. A failed first build fails its own read, and each read that waited on it builds again in
-turn. Every later read of the port answers at once with the last finished build and sets
-`ci_lab_load_age_seconds` to the seconds since that build started. Between requests the port's serve loop runs `Latest.refresh`,
+turn. Every later capacity read answers at once with the last finished build. Reads on port 9108 set
+`ci_lab_load_age_seconds` to the seconds since that build started. Between requests that port's serve loop runs `Latest.refresh`,
 which starts one background build, a daemon thread named `ci-lab-load-refresh`, once the last
 build started `REFRESH_MS` (15 seconds) ago and no build runs. The serve loop checks after each
 request and at least every half second, and builds run one at a time, back to back while one takes

@@ -1536,12 +1536,11 @@ def listen(
     ports: tuple[int, int, int],
     mirror: Path | None = None,
 ) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, ThreadingHTTPServer]:
-    """Bind the scheduler port's lease API, capacity and grades routes, the control port's control routes and the
-    metrics port, the scheduler and metrics ports over loads whose budget fraction and shed classes come from the day's
-    spending: the scheduler port builds one per capacity request, and the metrics port serves the last one its serve
-    loop rebuilt once REFRESH_MS had passed since the build before started, with that load's age, the counters the
-    scheduler's passes keep and the age of the node mirror at each scrape when one is given; the caller runs each
-    serve_forever."""
+    """Bind the lease, capacity, grades, control and metrics routes.
+    Both capacity ports serve the same cached budgeted load, refreshed by the metrics
+    serve loop after REFRESH_MS. Grade lookups remain per request. Each scrape observes
+    load and mirror ages. The caller runs each serve_forever.
+    """
 
     def snapshot(now_ms: int) -> Load:
         return budget.observe(scheduler.load(now_ms), spending.status())
@@ -1557,7 +1556,7 @@ def listen(
 
     api, steering, exposition = ports
     lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
-    port = service.Routes(lease, lambda: snapshot(clock()), scheduler.grades_of)
+    port = service.Routes(lease, lambda: latest.read()[0], scheduler.grades_of)
     return (
         service.serve("", api, port),
         lease_api.serve_control("", steering, routes),
