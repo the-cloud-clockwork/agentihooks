@@ -12,6 +12,10 @@
      "outputs": {},
      "result": "skipped"
     },
+    "collect": {
+     "outputs": {},
+     "result": "success"
+    },
     "coverage-ratchet": {
      "outputs": {},
      "result": "skipped"
@@ -45,6 +49,10 @@
      "result": "skipped"
     },
     "lint": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "lint-actions": {
      "outputs": {},
      "result": "skipped"
     },
@@ -155,6 +163,10 @@
      "outputs": {},
      "result": "skipped"
     },
+    "collect": {
+     "outputs": {},
+     "result": "success"
+    },
     "coverage-ratchet": {
      "outputs": {},
      "result": "skipped"
@@ -190,6 +202,10 @@
      "result": "skipped"
     },
     "lint": {
+     "outputs": {},
+     "result": "success"
+    },
+    "lint-actions": {
      "outputs": {},
      "result": "success"
     },
@@ -305,6 +321,10 @@
      "outputs": {},
      "result": "success"
     },
+    "collect": {
+     "outputs": {},
+     "result": "skipped"
+    },
     "coverage-ratchet": {
      "outputs": {},
      "result": "success"
@@ -340,6 +360,10 @@
      "result": "success"
     },
     "lint": {
+     "outputs": {},
+     "result": "skipped"
+    },
+    "lint-actions": {
      "outputs": {},
      "result": "skipped"
     },
@@ -477,6 +501,38 @@
     "brain-smoke"
    ],
    "name": "push without brain-smoke",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push collect failure",
+   "passes": false,
+   "results": {
+    "collect": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push collect cancelled",
+   "passes": false,
+   "results": {
+    "collect": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push collect success",
+   "passes": true,
+   "results": {
+    "collect": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "collect"
+   ],
+   "name": "push without collect",
    "passes": true
   },
   {
@@ -765,6 +821,38 @@
     "lint"
    ],
    "name": "push without lint",
+   "passes": true
+  },
+  {
+   "base": "push",
+   "name": "push lint-actions failure",
+   "passes": false,
+   "results": {
+    "lint-actions": "failure"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push lint-actions cancelled",
+   "passes": false,
+   "results": {
+    "lint-actions": "cancelled"
+   }
+  },
+  {
+   "base": "push",
+   "name": "push lint-actions success",
+   "passes": true,
+   "results": {
+    "lint-actions": "success"
+   }
+  },
+  {
+   "base": "push",
+   "delete": [
+    "lint-actions"
+   ],
+   "name": "push without lint-actions",
    "passes": true
   },
   {
@@ -1446,6 +1534,38 @@
   },
   {
    "base": "pull_request",
+   "name": "pull_request collect failure",
+   "passes": false,
+   "results": {
+    "collect": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request collect cancelled",
+   "passes": false,
+   "results": {
+    "collect": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request collect skipped",
+   "passes": false,
+   "results": {
+    "collect": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "collect"
+   ],
+   "name": "pull_request without collect",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
    "name": "pull_request coverage-ratchet failure",
    "passes": false,
    "results": {
@@ -1730,6 +1850,38 @@
     "lint"
    ],
    "name": "pull_request without lint",
+   "passes": false
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lint-actions failure",
+   "passes": false,
+   "results": {
+    "lint-actions": "failure"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lint-actions cancelled",
+   "passes": false,
+   "results": {
+    "lint-actions": "cancelled"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull_request lint-actions skipped",
+   "passes": false,
+   "results": {
+    "lint-actions": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "delete": [
+    "lint-actions"
+   ],
+   "name": "pull_request without lint-actions",
    "passes": false
   },
   {
@@ -2411,6 +2563,38 @@
   },
   {
    "base": "merge_group",
+   "name": "merge_group collect failure",
+   "passes": false,
+   "results": {
+    "collect": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group collect cancelled",
+   "passes": false,
+   "results": {
+    "collect": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group collect skipped",
+   "passes": false,
+   "results": {
+    "collect": "skipped"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "collect"
+   ],
+   "name": "merge_group without collect",
+   "passes": false
+  },
+  {
+   "base": "merge_group",
    "name": "merge_group coverage-ratchet failure",
    "passes": false,
    "results": {
@@ -2695,6 +2879,38 @@
     "lint"
    ],
    "name": "merge_group without lint",
+   "passes": true
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lint-actions failure",
+   "passes": false,
+   "results": {
+    "lint-actions": "failure"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lint-actions cancelled",
+   "passes": false,
+   "results": {
+    "lint-actions": "cancelled"
+   }
+  },
+  {
+   "base": "merge_group",
+   "name": "merge_group lint-actions success",
+   "passes": false,
+   "results": {
+    "lint-actions": "success"
+   }
+  },
+  {
+   "base": "merge_group",
+   "delete": [
+    "lint-actions"
+   ],
+   "name": "merge_group without lint-actions",
    "passes": true
   },
   {
@@ -3378,6 +3594,20 @@
    "event": "workflow_dispatch",
    "name": "dispatch with lint",
    "passes": true,
+   "results": {
+    "collect": "success",
+    "lint": "success",
+    "lint-actions": "success",
+    "semgrep": "success",
+    "test-count": "success",
+    "type-gate": "success"
+   }
+  },
+  {
+   "base": "push",
+   "event": "workflow_dispatch",
+   "name": "dispatch with collect and lint-actions skipped",
+   "passes": false,
    "results": {
     "lint": "success",
     "semgrep": "success",

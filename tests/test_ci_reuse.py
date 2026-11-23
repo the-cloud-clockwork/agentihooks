@@ -268,7 +268,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
     assert "type-gate" in workflow["jobs"]["gate-required"]["needs"]
-    assert steps in [
+    unsplit = [
         ci_reuse.typing_required(
             ci_reuse.test_only_sonar(
                 diagnostic(
@@ -277,13 +277,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
                             rerun(
                                 ci_reuse.inline_mutation(
                                     ci_reuse.postgres_required(
-                                        lab(
-                                            ci_reuse.split_required(
-                                                ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
-                                            )
-                                            if form.get("promotion")
-                                            else ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
-                                        )
+                                        lab(ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss))
                                     )
                                 )
                             )
@@ -305,6 +299,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         for finish in (list, ci_reuse.pipefail_summary)
         for lab in (list, ci_reuse.lab_verdict)
     ]
+    assert steps in [ci_reuse.split_required(rendering) for rendering in unsplit if ci_reuse.split_lists(rendering)]
     [collected, *collected_rest] = ci_reuse.collected_stats(steps)
     assert collected == {**steps[0], "run": ci_reuse.COLLECTED_STATS + steps[0]["run"]}
     assert collected_rest == steps[1:]
