@@ -89,6 +89,123 @@ Two refusals protect this:
 `X-Ledger-Token` is checked only behind the HTTP service. In process the store access is the credential, so a join
 or acknowledgement probe reports only refused and unreachable faults.
 
+### How a hub claim is written
+
+A hub claim is guarded, applied and written on the claimed task's own stored rows. It never reads the whole ledger
+and never builds the whole written state, so its cost follows the size of one task, not the size of the ledger.
+
+Before this change every claim ran the whole ledger write. On 23 November 2026 seven claim shaped writes on the
+busiest swarm, a ledger of about 39 MB, spent 1.8 to 3.0 seconds of a fresh process loading the whole state for the
+guard and 0.35 to 0.81 seconds applying the operation to it under the ledger lock. With the admission snapshot's own
+whole ledger reads, hub admissions answered in 8.1 to 22.2 seconds against their eight second budget
+([Launch failure limits](../pillars/hives.md#launch-failure-limits)).
+
+#### The claim operation
+
+`Admission._mark` claims through `LedgerClient.update_task`, guarded on the state and the owner the offer saw:
+
+```python
+live = ledger.update_task(
+    slug,
+    task_id,
+    {"state": "claimed", "claimed_by": name, "workspace": workspace},
+    if_state=("open",),
+    if_match={"claimed_by": row.get("claimed_by", ""), "claim_generation": generation},
+)
+```
+
+The hub sets `state` to `pr` instead when the task already has a pull request, and clears `branch` when the task
+names a protected branch. The client sends one operation by the swarm's own service:
+
+```json
+{
+  "ops": [
+    {
+      "op": "task_update",
+      "id": "claim",
+      "by": "swarm",
+      "item": "tasks/t1",
+      "fields": {"state": "claimed", "claimed_by": "engineer@host-1", "workspace": "~/.agentihooks/swarm/my-swarm/tasks/t1"},
+      "if_state": ["open"],
+      "if_match": {"claimed_by": "", "claim_generation": 0}
+    }
+  ]
+}
+```
+
+A request may also carry `"guards": {"tasks/t1": "<revision>"}` and an `operation_id`; the claim checks them the
+same way the whole write does, and a replayed `operation_id` answers from its stored receipt.
+
+#### Which writes take the narrow write
+
+`mutations.apply` hands a request to the repository's `apply_task_update` before any whole ledger read when all of
+these hold:
+
+- The request is one `task_update` operation on one `tasks/<id>` item, by the swarm, with no other changes.
+- It carries `if_state` or `if_match`.
+- It sets only the claim fields `state`, `claimed_by`, `workspace` and `branch`.
+
+`apply_task_update` returns nothing and writes nothing when it cannot prove the narrow write stores what the whole
+write would. The request then takes the whole ledger write, `apply_ops`, unchanged. That happens when:
+
+- The task is `blocked` or `done`.
+- The ledger's metadata has no `priorities_dismissed` record yet; the whole write creates it.
+
+Every other write, including a claim that sets any other field, takes the whole ledger write as before.
+
+#### What the narrow write does
+
+Under the ledger lock, on the task's own stored rows and the metadata rows it needs, `apply_task_update`:
+
+1. Checks the request's revision guard, the operation receipt, the controller epoch fence and the write gate, then
+   `if_state` and `if_match` against the stored row.
+2. Holds the claim when the task has an open dependency, and refuses it when the task has a committed outcome.
+3. Applies the fields, raises `claim_generation` by one when `claimed_by` changes, stamps each changed field with the
+   time, the new revision and `swarm`, and records a `task claimed` event at the new revision.
+4. Writes only the rows that changed, the event, the one task's outbox row, the change record and the ledger's
+   revision and summary.
+5. Returns the touched row, the new revision, this write's events and the rejected operations.
+
+The stored result is the same as the whole write's: for every case the tests cover, the `fields`, `resources`,
+`threads`, `events`, `outbox`, `row_changes` and `ledgers` rows and the read back ledger match a whole write of the
+same operation on a twin ledger. `PostgresLedgerRepository` inherits the method from `SQLiteLedgerRepository`, so the
+shared database runs the same write.
+
+#### What the hub gets back
+
+| Case | Status | Reply | Stored |
+|---|---|---|---|
+| The claim applies | `200` | `applied` names the operation, `rejected` is empty, `tasks` holds the claimed row with `claim_generation` one higher | The claim fields, their stamps and a `task claimed` event |
+| A guard misses: the task is no longer `open`, or `claimed_by` or `claim_generation` moved | `200` | `rejected` is empty, `tasks` holds the row as stored | Nothing changes |
+| The task has an open dependency | `200` | `tasks` holds the row, still `open` and unclaimed | Nothing changes on the task |
+| The task has a committed outcome | `200` | `rejected` names the operation, `applied` is empty | An open alert on `tasks/<id>` at the reply's revision: `committed outcomes require controller reconciliation` |
+
+The reply carries only these keys, with the row projected the way the read API projects it:
+
+```json
+{
+  "tasks": [{"id": "t1", "state": "claimed", "claimed_by": "engineer@host-1", "claim_generation": 1}],
+  "applied": ["claim"],
+  "rejected": [],
+  "_meta": {"rev": 9, "warnings": []}
+}
+```
+
+On a ledger of 1,000 tasks the reply stays under 4,000 characters. `LedgerClient.update_task` picks the row by id
+from `tasks`, and `LedgerClient` raises `LedgerRefused` when `rejected` is not empty. The hub keeps its existing
+check: when the returned row's `claimed_by` is not the agent it admitted, `Admission._mark` releases the claim and
+the agent and admits nothing.
+
+#### After write hooks and publishing
+
+`relay_to_inbox`, `doctor_phrase` and `deliver_alerts` still run after a narrow write, in that order. Each gets a
+small state: `tasks` holds only the touched row, `_meta` carries the new revision and the write's events, and
+`alerts` holds the alerts to deliver, including one the write raised.
+
+`Publishing.apply_task_update` passes the write through. It reads the stored ledger once to queue a stream
+publication only when the read only ledger server has already published that ledger and the narrow write applied;
+otherwise it reads nothing.
+
 ### Use it
 
 The ledger command runs the route code in process. Reads and writes look the same as before the change:
@@ -373,6 +490,9 @@ resolution](deployment-modes.md#client-mode-resolution)).
 | Guard | What it holds |
 |---|---|
 | `tests/swarm_ledger/test_ledger_write_cutover.py` | The hub claim and release land in the store with no ledger server request; a stale hub claim is refused by the route; the ledger server answers `POST`, `PUT`, `PATCH` and `DELETE` with `501`; every write hook of the read only ledger server refuses with `405`; a hosted hub without the shared database refuses to start |
+| `tests/swarm_ledger/test_task_update_narrow_write.py` with its cases in `tests/swarm_ledger/narrow_write_cases.py` | A hub claim through the API bumps the claim generation, stamps its fields and records `task claimed`; a guard miss leaves the task as it was; an open dependency keeps the task open; relay, doctor and alerts run at the claim's revision; a refused claim raises its alert; the reply is the projected row and the new revision; a claim on a ledger of 1,000 tasks never calls `current`, `get_document`, `_entry` or `Entry.for_write` and answers under 4,000 characters; the narrow write stores the same rows as the whole write in every case, with a guard and on replay; a blocked or done task, or a ledger with no `priorities_dismissed` record, falls back with nothing written; publishing reads the ledger only when it is published and the write applied |
+| `tests/swarm_ledger/test_postgres_repository.py` narrow claim tests | The same storage match and fallback on the shared database; they run where `LEDGER_TEST_POSTGRES_URL` is set |
+| Feature map entry `ledger-task-update-narrow-write` | The narrow claim write's behaviour and its 14 tests, including `tests/swarm/test_ledger_client_task_guard.py`, where `update_task` returns the claimed row from a reply that holds only that row |
 | Feature map entry `swarm-ledger-api-writes` | The behaviour, its operator words and its tests; its Semgrep rule `feature-ledger-api-writes` holds `client` to the warm writer first transport, `partial(routed, timeout)`, and the hub's database check |
 | `tests/tick/test_database_ledger_writer_route.py` | A request goes to a listening writer; an absent or refusing socket runs it in process; a lost reply after send raises `TimeoutError` with the route code never called; a writer refusal raises the in-process HTTP error; a tick pass stays in process and journals while a writer listens |
 | Feature map entry `compose-api-health-and-front-proxy` | The API service answers a health probe sent to its own loopback port (`test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port`); every front config forwards `Host $http_host` and never `$host` (`test_the_front_forwards_the_host_the_client_sent_with_its_port`); both Compose front configs resolve `swarm` and `api` through `127.0.0.11` (`test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time`) |
@@ -407,6 +527,8 @@ These no longer exist; an older page or note that names them describes the previ
 | `this process acts as <principal>, not <claimed>` | The request names another agent in `X-Ledger-Agent` than the pinned agent or the `acting` name. Write as the process's own agent |
 | `a remote ledger client cannot make service writes; the operator credential stays on its host` | A pinned agent on a remote host asked for a service write. Write as the agent; service writes belong to the tick, hub and controller |
 | `agentihooks hub run` exits 2 naming `AGENTIHOOKS_SWARM_DATABASE_URL` | A hosted hub has no shared database. Set the URL on the hub; the chart copies it from `ledger.secretEnv` |
+| A hub claim still spends seconds in the `guard_read` write step ([Ledger request metrics](ledger-request-metrics.md)) | The claim took the whole ledger write: it sets a field outside `state`, `claimed_by`, `workspace` and `branch`, the task is `blocked` or `done`, or the ledger has no `priorities_dismissed` record yet. The first whole write creates that record. A hub on a release from before the narrow write always takes the whole write: roll it onto the current release |
+| The claim write answers `200` but the hub admits nothing | A guard missed: another agent claimed the task, or its claim generation moved after the offer. The reply holds the row as stored, its `claimed_by` is not the admitted agent, and `Admission._mark` released the claim. Nothing to fix |
 | The API service exits at start with `already has an active writer` | Another process holds the SQLite folder's writer lease. Stop that writer by its process id, or move both onto the shared database |
 | A controller, hub or worker gets `404 ledger_missing` (`No such ledger`) for a ledger the page shows | Its process writes a different store: it has no database URL and opens an empty SQLite folder of its own, or the shared schema was never migrated. Give it the shared URL and start the API service against that database first, since only the API service creates the schema |
 | `server refused: 500` with `storage_error` and `Resource could not be read or written` | The route code could not read or write the store. Check that the process's database URL or `LEDGER_DIR` names the shared store and that the database answers |
