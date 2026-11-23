@@ -1,0 +1,21 @@
+rules:
+  - id: feature-expert-seat-recovery
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-22, an expert keeps exactly the same seat as any swarm agent: the check that lets a lost agent
+      reopen its own conversation answers for an expert by whether its lineage still runs.
+    patterns:
+      - pattern: |
+          def _owns(...):
+            ...
+      - pattern-not: |
+          def _owns(...):
+            ...
+            if $AGENT.lane == expert_launch.LANE:
+              return expert_lineage.goes_on(...)
+            ...
+    paths:
+      include:
+        - /scripts/swarm/dead_resume.py
+        - '*.test.py'

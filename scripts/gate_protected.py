@@ -91,6 +91,23 @@ def runners(policy: object = None) -> list[str]:
     return ["ubuntu-latest", *anton]
 
 
+def _pinned_tool_form(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _pinned_tool_form(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_pinned_tool_form(item) for item in value]
+    if not isinstance(value, str):
+        return value
+    for requirement in ('"pyyaml>=6.0"', "'pyyaml>=6.0'"):
+        value = value.replace(
+            f"pip install {requirement}",
+            "pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3",
+        )
+    if value == SHALLOW_PREFLIGHT_CHECKOUT["sparse-checkout"]:
+        return value + "/.github/ci-tools/\n"
+    return value
+
+
 def reuse_jobs(policy: object = None) -> list[dict]:
     jobs = []
     for factory in (ci_reuse.reuse_job, ci_reuse.paged_reuse_job, ci_reuse.retried_reuse_job):
@@ -102,7 +119,7 @@ def reuse_jobs(policy: object = None) -> list[dict]:
                 install["env"] = {"PYTHONNOUSERSITE": "1"}
             jobs.append(job)
             jobs.append({**job, "if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"})
-    return jobs
+    return [*jobs, *(_pinned_tool_form(job) for job in jobs)]
 
 
 @lru_cache(maxsize=None)
@@ -272,6 +289,7 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
         }
     bounds = {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}}
     admitted = [variant for steps in (prefix, retried) for variant in (steps, [steps[0] | bounds, *steps[1:]])]
+    admitted += [_pinned_tool_form(steps) for steps in admitted]
     if producer.get("steps", [])[: len(prefix)] not in admitted:
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
@@ -436,7 +454,8 @@ def _preflight_problems(
     if "diffcheck/**" in ignored:
         ignored.remove("diffcheck/**")
     forms = [*_path_forms(baseline, "push", PREFLIGHT_PATHS), *_path_forms(expanded, "push", PREFLIGHT_PATHS)]
-    if head_workflows.get("branch-lanes.yml") in [*forms, *(form for kept in forms for form in _checkout_forms(kept))]:
+    admitted = [*forms, *(form for kept in forms for form in _checkout_forms(kept))]
+    if head_workflows.get("branch-lanes.yml") in [*admitted, *(_pinned_tool_form(form) for form in admitted)]:
         return []
     return ["The head changes or removes the trusted branch lane preflight."]
 

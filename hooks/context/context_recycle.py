@@ -15,7 +15,7 @@ from scripts.quick import handoff as quick_handoff
 from scripts.quick import paths as quick_paths
 from scripts.quick.member import Member
 from scripts.quick.member import find as find_member
-from scripts.swarm import naming
+from scripts.swarm import expert_launch, naming
 
 _INSTRUCTIONS = (
     "in Handoff v2 form: the line # Handoff v2, then ## Intent, ## Done, ## Stopped at, ## Decisions and promises, "
@@ -27,6 +27,19 @@ _INSTRUCTIONS = (
     "promised) to files under ~/scratchpad, record any lesson for your seat with "
     '`agentihooks swarm {slug} learned "<lesson>"`, then run `agentihooks swarm {slug} handoff <doc> --recap <recap>` '
     "and stop. A successor continues the task from them."
+)
+_EXPERT_INSTRUCTIONS = (
+    "in expert handoff form, as the expert-handoff skill lays it out: the line # Expert handoff, then ## Mission, "
+    "## Done, ## Pending, ## Assumptions, ## Tests, ## Validation, ## Stopped at, ## Decisions and promises, ## Next "
+    "and ## Read first, each once and in that order, None under a heading with nothing to say, and "
+    "<!-- handoff complete --> as the last line. Mission opens with the mission line that "
+    "`agentihooks swarm {slug} expert mission` prints. Every deliverable of the mission is named once, by a Done or "
+    "a Pending bullet that starts D and its number. Every Done, Tests and Validation bullet carries its evidence or "
+    "the word hypothesis; Read first lists addresses (an issue or pull request link, mission:<slug>/<sha256>, "
+    "recap:<seat>, inbox:<id>), each with the question it answers; no file paths, line numbers or credential "
+    "values. Write it to a file under ~/scratchpad, record any lesson for your seat with "
+    '`agentihooks swarm {slug} learned "<lesson>"`, then run `agentihooks swarm {slug} handoff <doc>` and stop. '
+    "The next expert of your lineage continues the mission from it."
 )
 _HEAD = "CONTEXT RECYCLE — this session holds {used}k tokens, at or over the {limit}k limit. Write a handoff document "
 _DIRECTIVE = _HEAD + _INSTRUCTIONS
@@ -43,12 +56,21 @@ _QUICK_ALLOWED = (
     "log, diff, show in the shell), writing under ~/scratchpad and `agentihooks quick handoff`, each as one command."
 )
 
-_ALLOWED = (
+_ALLOWED_UNTIL = (
     " Until the handoff every tool call is denied except reading files (cat, head, tail, ls, wc, grep and git status, "
-    "log, diff, show in the shell), writing the handoff document under "
-    "~/scratchpad, `agentihooks swarm {slug} handoff <doc> [--recap <recap>]`, `agentihooks swarm {slug} learned` "
-    "and `agentihooks api` comment, say, leave and ack, "
-    "each as one command."
+    "log, diff, show in the shell), writing the handoff document"
+)
+_ALLOWED_ALSO = (
+    "`agentihooks swarm {slug} learned` and `agentihooks api` comment, say, leave and ack, each as one command."
+)
+_ALLOWED = (
+    _ALLOWED_UNTIL + " under ~/scratchpad, `agentihooks swarm {slug} handoff <doc> [--recap <recap>]`, " + _ALLOWED_ALSO
+)
+_EXPERT_ALLOWED = (
+    _ALLOWED_UNTIL
+    + " or the mission proof under ~/scratchpad, `agentihooks swarm {slug} expert mission`, "
+    + "`agentihooks swarm {slug} handoff <doc>`, `agentihooks swarm {slug} expert complete <proof>`, "
+    + _ALLOWED_ALSO
 )
 
 _READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS", "NotebookRead"})
@@ -132,7 +154,7 @@ def directive(session_id: str, environ: Mapping[str, str] | None = None, now: da
         return None
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
-    instructions = _quick_instructions(found) if found else _INSTRUCTIONS.format(slug=slug)
+    instructions = _quick_instructions(found) if found else _instructions(env).format(slug=slug)
     if hard:
         return _HEAD.format(used=used // 1000, limit=_gate_limit()) + instructions
     deadline = (now or datetime.now(timezone.utc)) + timedelta(minutes=25)
@@ -141,6 +163,14 @@ def directive(session_id: str, environ: Mapping[str, str] | None = None, now: da
         f"Deadline: {deadline:%Y-%m-%d %H:%M UTC}, or before the {_gate_limit()}k hard gate, whichever comes first. "
         + instructions
     )
+
+
+def _expert(environ: Mapping[str, str]) -> bool:
+    return naming.lane_of(environ.get("AGENTIHOOKS_AGENT_NAME")) == expert_launch.LANE
+
+
+def _instructions(environ: Mapping[str, str]) -> str:
+    return _EXPERT_INSTRUCTIONS if _expert(environ) else _INSTRUCTIONS
 
 
 def _quick(environ: Mapping[str, str]) -> Member | None:
@@ -207,7 +237,7 @@ def _shell_read(tokens: list[str]) -> bool:
     )
 
 
-def _allowed_command(command: str, slug: str) -> bool:
+def _allowed_command(command: str, slug: str, expert: bool) -> bool:
     tokens = _single_command(command)
     if tokens is None:
         return False
@@ -216,31 +246,36 @@ def _allowed_command(command: str, slug: str) -> bool:
     if len(tokens) < 3 or os.path.basename(tokens[0]) != "agentihooks":
         return False
     if tokens[1] == "swarm":
-        return _swarm_step(tokens[2:], slug)
+        return _swarm_step(tokens[2:], slug, expert)
     return tokens[1] == "ledger" and _ledger_step(tokens[2:]) in _LEDGER_STEPS
 
 
-def _swarm_step(args: list[str], slug: str) -> bool:
+def _swarm_step(args: list[str], slug: str, expert: bool) -> bool:
     if args[:2] == [slug, "learned"]:
         return len(args) == 3 or (len(args) == 5 and args[3] == "--maturity")
+    if args[:2] == [slug, "expert"]:
+        return expert and (args[2:] == ["mission"] or (len(args) == 4 and args[2] == "complete"))
     return args[:2] == [slug, "handoff"] and (len(args) == 3 or (len(args) == 5 and args[3] == "--recap"))
 
 
 def gate(
     tool_name: str, tool_input: dict[str, Any], session_id: str, environ: Mapping[str, str] | None = None
 ) -> str | None:
+    env = os.environ if environ is None else environ
     overrun = _overrun(session_id, environ)
     if overrun is None:
-        return _quick_gate(tool_name, tool_input, session_id, os.environ if environ is None else environ)
+        return _quick_gate(tool_name, tool_input, session_id, env)
     if tool_name in _READ_TOOLS:
         return None
     slug, used = overrun
     if tool_name in _WRITE_TOOLS and _handoff_write(tool_input):
         return None
     command = str(tool_input.get("command") or "")
-    if tool_name == "Bash" and _allowed_command(command, slug):
-        return _handoff_refusal(command, slug)
-    return "BLOCKED: " + (_DIRECTIVE + _ALLOWED).format(used=used // 1000, limit=_gate_limit(), slug=slug)
+    expert = _expert(env)
+    if tool_name == "Bash" and _allowed_command(command, slug, expert):
+        return _handoff_refusal(command, slug, env)
+    told = _HEAD + _EXPERT_INSTRUCTIONS + _EXPERT_ALLOWED if expert else _DIRECTIVE + _ALLOWED
+    return "BLOCKED: " + told.format(used=used // 1000, limit=_gate_limit(), slug=slug)
 
 
 def _quick_gate(tool_name: str, tool_input: dict[str, Any], session_id: str, environ: Mapping[str, str]) -> str | None:
@@ -280,7 +315,9 @@ def _resolver(slug: str):
     return Resolver(slug, redis)
 
 
-def _handoff_refusal(command: str, slug: str) -> str | None:
+def _handoff_refusal(command: str, slug: str, environ: Mapping[str, str]) -> str | None:
+    from scripts.swarm.store import SwarmError
+
     tokens = _single_command(command) or []
     if tokens[1:2] != ["swarm"] or tokens[3:4] != ["handoff"]:
         return None
@@ -288,5 +325,34 @@ def _handoff_refusal(command: str, slug: str) -> str | None:
         text = Path(tokens[4]).expanduser().read_text(encoding="utf-8")
     except OSError:
         return None
-    found = handoff_check.problems(text, _resolver(slug))
+    try:
+        found = _problems(text, slug, environ)
+    except SwarmError as gone:
+        return f"BLOCKED: {gone}"
     return "BLOCKED: " + handoff_check.refusal(found) if found else None
+
+
+def _problems(text: str, slug: str, environ: Mapping[str, str]) -> list[str]:
+    """The problems of the document under the contract its author is held to. An expert the swarm store cannot place,
+    or a store that cannot be reached, is left to the handoff command, which checks it again; an expert whose lineage
+    or saved mission is gone raises the refusal that names it."""
+    if not _expert(environ):
+        return handoff_check.problems(text, _resolver(slug))
+    from redis.exceptions import RedisError
+
+    from scripts.handoff import contracts
+    from scripts.handoff.resolve import Resolver
+    from scripts.swarm.store import SwarmError, connect
+
+    try:
+        store = connect()
+        name = store.names.resolve(environ["AGENTIHOOKS_AGENT_NAME"])
+        agent = next((found for found in store.agents(slug) if found.name == name), None)
+    except (SwarmError, RedisError):
+        return []
+    if agent is None:
+        return []
+    try:
+        return contracts.problems(text, Resolver(slug, store.redis), store, slug, agent)
+    except RedisError:
+        return []

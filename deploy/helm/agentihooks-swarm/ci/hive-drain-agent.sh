@@ -54,7 +54,7 @@ def stopped(store: RedisStore, hive: str) -> None:
 def hand_off(store: RedisStore, agent: AgentRecord) -> None:
     """Wait for the roll order in the agent's inbox, then record the agent's own handoff."""
     inbox = InboxStore(store.redis)
-    while not inbox.inbox(SEAT):
+    while not inbox.pending_mail(agent.name):
         time.sleep(1)
     store.redis.set(key("ordered"), now_ms())
     time.sleep(DELAY_S)
