@@ -392,7 +392,7 @@ def test_a_task_update_never_writes_an_enhancement(thin: Seats) -> None:
 def test_enhances_survives_task_add_and_the_hosted_schemas_accept_the_fields(thin: Seats) -> None:
     assert task(ENHANCE)["enhances"] == TARGET
     assert "enhances" in schemas.FIELDS["task_add"].split()
-    assert schemas.FIELDS["task_enhancement"].split() == ["by", "item", "enhancement"]
+    assert schemas.FIELDS["task_enhancement"].split() == ["by", "item", "enhancement", "expected"]
 
 
 @pytest.mark.feature("swarm-enhance-close")
