@@ -1,0 +1,6 @@
+{
+  "scripts/gate_protected.py:scripts.gate_protected.x__floating_tool_form:b53c06dc5bfb223dec1a435d4f819b7f1d1bc8c73d461cb5c391beb7e4e309c7": {
+    "reader": "standards_reader",
+    "reason": "typing.cast(typ, val) returns val unchanged on Python 3.12 and never inspects typ, so replacing dict[Any, Any] with None returns the same object and the same items for every input. The argument sits inside a function body rather than an annotation, so nothing evaluates it at runtime."
+  }
+}
