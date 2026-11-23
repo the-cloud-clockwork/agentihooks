@@ -516,11 +516,12 @@ def lab_repository(remote: str) -> str:
 
 
 def notify_lab(root: Path, fields: dict[str, str], head: str) -> None:
-    """Send the lab receiver the signed notice of the head just pushed, based on its merge base with dev, and record
-    the receiver's answer as lab_notice; a notice that is not configured is not sent, and one that fails leaves the
-    push standing."""
+    """Send the lab receiver the signed notice of the head just pushed and its branch, based on its merge base with
+    dev, and record the receiver's answer as lab_notice; a notice that is not configured is not sent, and one that
+    fails leaves the push standing."""
     base = subprocess.run(["git", "merge-base", head, "origin/dev"], cwd=root, capture_output=True, text=True)
-    status = head_notice.send(os.environ, lab_repository(fields["branch_repo"]), head, base.stdout.strip())
+    repository = lab_repository(fields["branch_repo"])
+    status = head_notice.send(os.environ, repository, head, base.stdout.strip(), branch=fields["branch"])
     if status is not None:
         fields["lab_notice"] = str(status)
 

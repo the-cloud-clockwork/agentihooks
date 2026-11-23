@@ -8,12 +8,13 @@ from pathlib import Path
 
 from scripts.ci_lab import expressions
 from scripts.ci_lab.sandbox import Outcome, PortAllocator, Sandbox
-from scripts.ci_lab.static_gates import RUN_FOLDER, Producer, StaticGate
+from scripts.ci_lab.static_gates import EVENT_NAME, RUN_FOLDER, Producer, StaticGate
 
 __all__ = ["SHELL", "SUMMARY", "Result", "Settings", "run"]
 
 SHELL = ("bash", "--noprofile", "--norc", "-eo", "pipefail", "-c")
 SUMMARY = "GITHUB_STEP_SUMMARY"
+EVENT_VARIABLE = "GITHUB_EVENT_NAME"
 OUTPUT = "GITHUB_OUTPUT"
 IMAGE_TOOLS = "/usr/local/bin"
 RUFF_CACHE = "RUFF_CACHE_DIR"
@@ -36,19 +37,22 @@ class Settings:
 
 @dataclass(frozen=True)
 class Result:
-    """A gate's verdict over one head: the exit code, None on timeout or skip, its combined log, its step summary and
-    whether its if condition skipped it."""
+    """A gate's verdict over one head: the exit code, None on timeout or skip, its combined log, its step summary,
+    whether its if condition skipped it and whether continue-on-error keeps its job green when it fails."""
 
     gate: str
     code: int | None
     log: Path
     report: Path
     skipped: bool = False
+    tolerated: bool = False
 
     @property
     def green(self) -> bool:
-        """True when the step exited zero or its if condition skipped it, as CI passes a skipped step."""
-        return self.skipped or self.code == 0
+        """True when the step exited zero, exited non zero under continue-on-error, or its if condition skipped it, as
+        CI passes such a step; a timeout stays red, as the job time limit it stands for ends the job whatever the step
+        sets."""
+        return self.skipped or self.code == 0 or (self.tolerated and self.code is not None)
 
 
 def _folder(root: Path, base_tree: Path, grader_tree: Path) -> Path:
@@ -73,6 +77,7 @@ def _sandbox(settings: Settings, trees: tuple[Path, Path, Path], folder: Path, e
         **env,
         "RUNNER_TEMP": str(folder),
         "GITHUB_WORKSPACE": str(head_tree),
+        EVENT_VARIABLE: settings.context.get(EVENT_NAME, ""),
         SUMMARY: str(folder / SUMMARY),
     }
     return Sandbox(
@@ -145,4 +150,4 @@ def run(gate: StaticGate, head_tree: Path, base_tree: Path, grader_tree: Path, s
         return Result(gate=gate.name, code=None, log=log, report=folder / SUMMARY, skipped=True)
     env = {name: expressions.interpolate(value, context) for name, value in gate.env}
     outcome = _sandbox(settings, trees, folder, env).run([*SHELL, gate.run], settings.timeout)
-    return Result(gate=gate.name, code=outcome.code, log=outcome.log, report=folder / SUMMARY)
+    return Result(gate.name, outcome.code, outcome.log, folder / SUMMARY, tolerated=gate.tolerated)

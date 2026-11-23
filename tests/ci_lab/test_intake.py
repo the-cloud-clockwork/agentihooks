@@ -77,7 +77,7 @@ def test_a_push_to_a_branch_is_a_head_event() -> None:
 @pytest.mark.parametrize("before", ["0" * 40, BASE])
 def test_a_push_to_a_plant_branch_names_a_plant_head_with_no_base_whatever_its_before(before: str) -> None:
     (event,) = webhooks.head_events("push", {**push(ref=PLANT_REF), "before": before})
-    assert event == HeadEvent("plant", REPO, HEAD, "", "nestorcolt", "pushed", "diffcheck/lab-plant-size-green")
+    assert event == HeadEvent("plant", REPO, HEAD, "", "nestorcolt", "pushed")
     assert webhooks.envelope(event).type == "ci.lab.head.plant"
 
 
@@ -242,6 +242,27 @@ def test_a_grade_request_keeps_the_head_branch_its_head_event_recorded() -> None
     request = intake.request_from(head("pull_request", "nestorcolt", "opened", head_branch="fix-x"))
     assert request.head_branch == "fix-x"
     assert intake.request_from(head("push", "nestorcolt", "pushed")).head_branch == ""
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_only_a_pull_request_class_head_records_a_head_branch() -> None:
+    branched = [
+        *webhooks.head_events("pull_request", pull_request("opened")),
+        *webhooks.head_events("check_run", check_run()),
+    ]
+    unbranched = [
+        *webhooks.head_events("push", push()),
+        *webhooks.head_events("push", push(ref=PLANT_REF)),
+        *webhooks.head_events("merge_group", merge_group()),
+        *webhooks.head_events("check_run", check_run(pulls=False)),
+    ]
+    assert [event.head_branch for event in branched] == ["fix-x", "fix-x"]
+    assert [(event.event, event.head_branch) for event in unbranched] == [
+        ("push", ""),
+        ("plant", ""),
+        ("merge_group", ""),
+        ("check_run", ""),
+    ]
 
 
 @pytest.mark.parametrize(

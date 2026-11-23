@@ -4,8 +4,8 @@
     "reason": "reads the agentibrain kernel dev checkout an earlier step clones into .marker-kernel"
   },
   "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": {
-    "needs": ["step env"],
-    "reason": "its BRANCH env reads github.head_ref and github.ref_name, which the lab context does not supply"
+    "needs": ["plant"],
+    "reason": "it grades the fragment a pull request adds, which no plant edit can add, and every plant twin adds none, so no plant pair can prove it"
   },
   "lint/fail-on-known-vulnerabilities-new-against-the-base": {
     "needs": ["network"],
@@ -53,6 +53,6 @@
   },
   "test-count/record-the-head-count-for-the-next-queue-group": {
     "needs": ["earlier step"],
-    "reason": "skipped because the supplied event is pull_request and this step requires merge_group; it also reads a suite count collected earlier in that job"
+    "reason": "it reads a suite count an earlier step of its job collects, which no producer supplies"
   }
 }

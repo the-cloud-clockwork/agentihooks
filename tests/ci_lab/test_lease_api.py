@@ -80,7 +80,13 @@ def post(lab: leases.Leases, signer: Signer, path: str, body: object) -> tuple[i
 
 def granted(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> dict[str, Any]:
     jobs.enqueue(
-        [Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {}, "b1", "g1", "pull_request", "fix-x"
+        [Unit(kind="test", key="a", members=("tests/a.py::t",))],
+        "h1",
+        {},
+        "b1",
+        "g1",
+        event="pull_request",
+        head_branch="fix-x",
     )
     status, body = post(lab, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0})
     assert status == 200

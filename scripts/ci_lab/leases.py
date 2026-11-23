@@ -81,7 +81,12 @@ class Leases:
             unit = replace(job.unit, manifest=self.manifests(job.unit))
             if not self.queue.claim(job, worker, token, expires_ms, now):
                 continue
-            grants.append(Grant(job_id, token, job.head, unit, job.requirement.slots, expires_ms, job.base, job.grader))
+            slots = job.requirement.slots
+            grants.append(
+                Grant(
+                    job_id, token, job.head, unit, slots, expires_ms, job.base, job.grader, job.event, job.head_branch
+                )
+            )
             free_slots -= job.requirement.slots
             if free_slots <= 0:
                 break

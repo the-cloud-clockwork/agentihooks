@@ -26,7 +26,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field, fields, replace
+from dataclasses import MISSING, asdict, dataclass, field, fields, replace
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
@@ -65,9 +65,9 @@ from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
 from scripts.ci_lab.queue import DEFAULT, Job, Queue
 from scripts.ci_lab.remote.post_receive import GRADE_REFS
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
-from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
+from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover, plannable, read_events
 from scripts.ci_lab.store import PREFIX, Store, Verdict
-from scripts.ci_lab.units import Priority, Unit
+from scripts.ci_lab.units import EVENT_NAMES, Priority, Unit
 from scripts.ci_lab.webhooks import HEAD_SUBJECT, PLANT, HeadEvent
 from scripts.ci_lab.worktrees import Lab, Mirror, lab
 from scripts.ci_mutation import scope
@@ -137,7 +137,7 @@ STATS_JOB = "mutation-stats"
 MUTANT_JOB = "mutation"
 ALWAYS_SKIPPABLE = frozenset({"unit-lost", "unit-rerun", "queue-baseline", "unit-selected"})
 PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
-HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent))
+HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent) if item.default is MISSING)
 STATIC = "static"
 WHOLE_TREE = "."
 DURATIONS = ".test_durations"
@@ -436,8 +436,8 @@ class State:
     """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted, the
     id of each check run it posted, the grade ref a lab remote push wrote its head to, if any, the dev commit of the
     dependency manifest its test units are keyed on, if any, the authoritative gates it runs no unit of, the gates it
-    posts as lab/<gate> rather than lab-shadow/<gate>, and the clock before which it posts nothing after GitHub refused
-    one of its posts."""
+    posts as lab/<gate> rather than lab-shadow/<gate>, the clock before which it posts nothing after GitHub refused
+    one of its posts, and the head branch of a pull request head, empty for any other head."""
 
     run: str
     repo: str
@@ -534,7 +534,7 @@ def _evidence(state: State) -> evidence.GradeEvidence:
 
 
 def _request(data: Mapping[str, Any]) -> GradeRequest:
-    """Read a held grade request."""
+    """Read a held grade request; one held before the head branch existed reads with none."""
     return GradeRequest(
         repo=str(data["repo"]),
         head=str(data["head"]),
@@ -542,6 +542,7 @@ def _request(data: Mapping[str, Any]) -> GradeRequest:
         tier=Priority(data["tier"]),
         actor=str(data["actor"]),
         bypass_negative=bool(data["bypass_negative"]),
+        head_branch=str(data.get("head_branch", "")),
     )
 
 
@@ -994,6 +995,7 @@ class Scheduler:
             manifest=plan.manifest,
             idle=sorted(plan.idle),
             authoritative=sorted(plan.authoritative),
+            head_branch=request.head_branch,
         )
         source = self._merge_group(request, plan.tree)
         misses: list[Unit] = []
@@ -1071,8 +1073,9 @@ class Scheduler:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
         and backfill only into the slots workers offered free after every unit already waiting in the queue, backfill
         and those admitted in this pass included, since the queue leases the most urgent class first and in order
-        inside a class, which each unit is enqueued under by its grade's tier. A class the budget newly sheds is named
-        first. Each grade with held units is read again as it is admitted, so the pass holds one at a time."""
+        inside a class, which each unit is enqueued under by its grade's tier, with the event name of that tier and the
+        grade's head branch. A class the budget newly sheds is named first. Each grade with held units is read again as
+        it is admitted, so the pass holds one at a time."""
         actions = self._shedding()
         held = sorted(
             (state.tier, state.run) for state in self._live() if any(slot.held for slot in state.units.values())
@@ -1089,7 +1092,10 @@ class Scheduler:
                     admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
                     waiting += DEFAULT.slots
             if admitted:
-                self.queue.enqueue(admitted, state.head, {}, state.base, state.grader, state.tier)
+                event = EVENT_NAMES[state.tier]
+                self.queue.enqueue(
+                    admitted, state.head, {}, state.base, state.grader, state.tier, event, state.head_branch
+                )
                 self.save(state)
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions
@@ -1261,7 +1267,8 @@ class BusInbox:
     def heads(self) -> list[Head]:
         """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself, and its
         ref the grade ref a lab remote notice names. An envelope missing a head field is terminated with a logged
-        warning, never redelivered to the dead letter cap.
+        warning, never redelivered to the dead letter cap; the head branch is optional, so an envelope published
+        before it existed reads with none.
         """
         heads: list[Head] = []
         for delivery in self.consumer.fetch(self.batch, self.timeout_ms):
@@ -1273,7 +1280,7 @@ class BusInbox:
                 )
                 delivery.term()
                 continue
-            event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
+            event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS), head_branch=str(data.get("head_branch", "")))
             heads.append(Head(event, str(data.get("branch") or event.head), str(data.get("ref") or "")))
             delivery.ack()
         return heads
@@ -1526,8 +1533,9 @@ class MirrorExpander:
         return static_exclusions.read(self._git(mirror, "show", f"{grader}:{static_exclusions.PATH}"))
 
     def expand(self, request: GradeRequest) -> Plan:
-        """Return one unit per supported static gate outside the protected exclusion catalog, with Actions retaining
-        authority for jobs with exclusions, keyed by the files each gate reads at head and base, the unit job's test
+        """Return one unit per supported static gate outside the protected exclusion catalog, a gate that reads a branch
+        name only for a request with a head branch, with Actions retaining authority for jobs with exclusions, keyed by
+        the files each gate reads at head and base and the event names it reads with their values, the unit job's test
         units of a merge group, promotion or backfill head and the mutation stats and mutant units of a promotion or
         backfill head, framed by the request's tier with the authoritative gates of the grader's delivery.yaml for a
         hotfix or pull request head, with the dev commit of the manifest its test units are keyed on.
@@ -1541,12 +1549,18 @@ class MirrorExpander:
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
         excluded = self._exclusions(mirror, grader, head if grader == request.head else base)
         toolchain = replace(self.toolchain, lockfile=head.get(LOCKFILE, ""), pyproject=head.get("pyproject.toml", ""))
+        event, branch = EVENT_NAMES[request.tier], request.head_branch
         gates: dict[str, list[Unit]] = {}
         for gate in discover(workflow, registry, self._workflows(mirror, grader)):
-            if gate.missing or gate.name in excluded:
+            if gate.missing or gate.name in excluded or not plannable(gate, branch):
                 continue
             inputs = StaticInputs(
-                gate.name, _within(head, gate.paths), _within(base, gate.base_paths), grader, toolchain
+                gate.name,
+                _within(head, gate.paths),
+                _within(base, gate.base_paths),
+                grader,
+                toolchain,
+                read_events(gate, event, branch),
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         commit = ""

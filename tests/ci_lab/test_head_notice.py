@@ -55,15 +55,16 @@ def raising(error: BaseException) -> Callable[..., Answer]:
 
 
 @pytest.mark.feature("lab-head-notice-push")
-def test_a_configured_send_posts_one_notice_signed_over_its_exact_body() -> None:
+@pytest.mark.parametrize(("branch", "named"), [("", {}), ("fix-x", {"branch": "fix-x"})])
+def test_a_configured_send_posts_one_notice_signed_over_its_exact_body(branch: str, named: dict[str, str]) -> None:
     sent: list[tuple[urllib.request.Request, float]] = []
-    assert head_notice.send(ENVIRON, REPO, "a1", "b0", recording(sent, 202), branch="fix-x") == 202
+    assert head_notice.send(ENVIRON, REPO, "a1", "b0", recording(sent, 202), branch=branch) == 202
     [(request, timeout)] = sent
     assert timeout == 5
     assert request.full_url == URL
     assert request.get_method() == "POST"
     assert isinstance(request.data, bytes)
-    assert json.loads(request.data) == {"repo": REPO, "head": "a1", "base": "b0", "actor": ACTOR, "branch": "fix-x"}
+    assert json.loads(request.data) == {"repo": REPO, "head": "a1", "base": "b0", "actor": ACTOR, **named}
     signed = "sha256=" + hmac.new(SIGNER.encode(), request.data, hashlib.sha256).hexdigest()
     assert request.header_items() == [("X-hub-signature-256", signed)]
 

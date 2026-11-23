@@ -17,7 +17,9 @@ from scripts import ci_wiring
 from scripts.ci_lab import expressions, grader
 
 __all__ = [
+    "BRANCH_FIELDS",
     "CI_ONLY",
+    "EVENT_NAME",
     "LEASE_FIELDS",
     "RUN_FOLDER",
     "STATIC_JOBS",
@@ -27,16 +29,22 @@ __all__ = [
     "StaticGate",
     "ci_only",
     "discover",
+    "event_fields",
     "main",
+    "plannable",
+    "read_events",
 ]
 
+EVENT_NAME = "github.event_name"
+BRANCH_FIELDS = ("github.head_ref", "github.ref_name")
 LEASE_FIELDS: frozenset[str] = frozenset(
     {
         "inputs.base",
         "github.sha",
         "github.event.pull_request.head.sha",
         "github.event.pull_request.base.sha",
-        "github.event_name",
+        EVENT_NAME,
+        *BRANCH_FIELDS,
         "github.run_id",
         "github.run_attempt",
         "github.run_number",
@@ -89,8 +97,9 @@ class Producer:
 class StaticGate:
     """One gate step of a static job: the repository modules it runs, the input paths that key it, its env values
     and if condition as the workflow writes them, an empty condition when the step has none, the earlier steps whose
-    outputs, outcome or conclusion it reads, the sorted context names it and those steps read, and each matrix name
-    among them that its job holds at one value, with that value."""
+    outputs, outcome or conclusion it reads, the sorted context names it and those steps read, each matrix name
+    among them that its job holds at one value, with that value, and whether continue-on-error keeps its job green
+    when it fails."""
 
     name: str
     job: str
@@ -123,6 +132,22 @@ class StaticGate:
             and not name.startswith(SECRETS)
             and _step(name) not in produced
         )
+
+
+def event_fields(event: str, head_branch: str) -> dict[str, str]:
+    """The event names a lease supplies with their values: the event name of the grade's class, the head branch of a
+    pull request head as the head ref, and an empty ref name, since the lab never knows a pull request's merge ref."""
+    return {EVENT_NAME: event, BRANCH_FIELDS[0]: head_branch, BRANCH_FIELDS[1]: ""}
+
+
+def read_events(gate: StaticGate, event: str, head_branch: str) -> dict[str, str]:
+    """The event names the gate reads with the values a lease supplies, empty for a gate that reads none."""
+    return {name: value for name, value in event_fields(event, head_branch).items() if name in gate.reads}
+
+
+def plannable(gate: StaticGate, head_branch: str) -> bool:
+    """True when a grade with this head branch can plan the gate: it reads no branch name, or the grade has one."""
+    return bool(head_branch) or not set(BRANCH_FIELDS) & set(gate.reads)
 
 
 @dataclass(frozen=True)
@@ -233,8 +258,9 @@ def _gate(
         sorted(own.union(*(_reads(producer.condition, producer.env) for producer in producers if producer.run)))
     )
     matrix = tuple((read, held[read]) for read in reads if read in held)
+    tolerated = step.get("continue-on-error") is True
     return StaticGate(
-        name, job, title, tools, modules, run, paths, base_paths, env, condition, producers, reads, matrix
+        name, job, title, tools, modules, run, paths, base_paths, env, condition, producers, reads, matrix, tolerated
     )
 
 

@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping
 from http.client import HTTPException
 from typing import Any
 
-from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV
+from scripts.ci_lab.webhooks import NOTICE_BRANCH, NOTICE_SECRET_ENV
 
 URL_ENV = "AGENTIHOOKS_CI_LAB_NOTICE_URL"
 ACTOR_ENV = "AGENTIHOOKS_CI_LAB_NOTICE_ACTOR"
@@ -43,12 +43,13 @@ def send(
     opener: Opener = urllib.request.urlopen,
     branch: str = "",
 ) -> int | None:
-    """Post the signed notice of a pushed head and return the receiver's status, 0 when the send failed, or None when
-    the environment does not name a receiver, a secret and an actor."""
+    """Post the signed notice of a pushed head, naming its branch when one is given, and return the receiver's status,
+    0 when the send failed, or None when the environment does not name a receiver, a secret and an actor."""
     url, secret, actor = environ.get(URL_ENV), environ.get(NOTICE_SECRET_ENV), environ.get(ACTOR_ENV)
     if not (url and secret and actor):
         return None
-    request = notice(url, secret.encode(), {"repo": repo, "head": head, "base": base, "actor": actor})
+    fields = {"repo": repo, "head": head, "base": base, "actor": actor}
+    request = notice(url, secret.encode(), fields | ({NOTICE_BRANCH: branch} if branch else {}))
     try:
         with opener(request, timeout=TIMEOUT_S) as answer:
             return answer.status

@@ -25,6 +25,7 @@ BRANCHES = "refs/heads/"
 PLANT_PREFIX = "refs/heads/diffcheck/lab-plant-"
 PULL_ACTIONS = frozenset({"opened", "synchronize", "reopened"})
 NOTICE_FIELDS = ("repo", "head", "base", "actor")
+NOTICE_BRANCH = "branch"
 NOTICE_SECRET_ENV = "AGENTIHOOKS_CI_LAB_NOTICE_SECRET"
 NO_NOTICE_SECRET = f"{NOTICE_SECRET_ENV} must be set to verify lab head notices"
 
@@ -59,7 +60,7 @@ def _pull_request(payload: Mapping[str, Any]) -> list[HeadEvent]:
         return []
     pull, repo = payload["pull_request"], payload["repository"]["html_url"]
     head, base, author = pull["head"]["sha"], pull["base"]["sha"], pull["user"]["login"]
-    return [HeadEvent("pull_request", repo, head, base, author, payload["action"])]
+    return [HeadEvent("pull_request", repo, head, base, author, payload["action"], pull["head"]["ref"])]
 
 
 def _merge_group(payload: Mapping[str, Any]) -> list[HeadEvent]:
@@ -74,9 +75,9 @@ def _check_run(payload: Mapping[str, Any]) -> list[HeadEvent]:
     if payload["action"] != "rerequested" or not str(run["name"]).startswith(CHECK_PREFIX):
         return []
     pulls = run["pull_requests"]
-    base = pulls[0]["base"]["sha"] if pulls else ""
+    base, branch = (pulls[0]["base"]["sha"], pulls[0]["head"]["ref"]) if pulls else ("", "")
     repo, actor = payload["repository"]["html_url"], payload["sender"]["login"]
-    return [HeadEvent("check_run", repo, run["head_sha"], base, actor, payload["action"])]
+    return [HeadEvent("check_run", repo, run["head_sha"], base, actor, payload["action"], branch)]
 
 
 HEADS: Mapping[str, Callable[[Mapping[str, Any]], list[HeadEvent]]] = {
@@ -102,12 +103,13 @@ def head_events(name: str | None, payload: Mapping[str, Any]) -> list[HeadEvent]
 
 
 def notice_event(payload: Mapping[str, Any]) -> HeadEvent:
-    """Return the head a signed head notice names, refusing a notice without non empty repo, head, base and actor."""
+    """Return the head a signed head notice names, with the head branch the notice names, if any, refusing a notice
+    without non empty repo, head, base and actor."""
     values = [payload[field] for field in NOTICE_FIELDS]
     if not all(isinstance(value, str) and value for value in values):
         raise ValueError(f"a lab head notice needs non empty {', '.join(NOTICE_FIELDS)}")
     repo, head, base, actor = values
-    return HeadEvent(NOTICE, repo, head, base, actor, PUSHED)
+    return HeadEvent(NOTICE, repo, head, base, actor, PUSHED, str(payload.get(NOTICE_BRANCH, "")))
 
 
 def envelope(event: HeadEvent) -> Envelope:

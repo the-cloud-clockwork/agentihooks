@@ -37,7 +37,8 @@ class GradeRequest:
 
 
 def request_from(event: HeadEvent) -> GradeRequest:
-    """Return the grade request a head event asks for; a rerequested check bypasses a cached negative verdict."""
+    """Return the grade request a head event asks for, with the head branch it recorded; a rerequested check bypasses
+    a cached negative verdict."""
     return GradeRequest(
         repo=event.repo,
         head=event.head,
@@ -45,6 +46,7 @@ def request_from(event: HeadEvent) -> GradeRequest:
         tier=priority_of({"event_name": TIER_EVENTS.get(event.event, event.event)}),
         actor=event.actor,
         bypass_negative=event.action == RERUN,
+        head_branch=event.head_branch,
     )
 
 
@@ -69,5 +71,6 @@ def reconcile(open_pull_requests: Iterable[Mapping[str, Any]], graded: Callable[
     for pull in open_pull_requests:
         repo, head = pull["base"]["repo"]["html_url"], pull["head"]["sha"]
         if not graded(repo, head):
-            heads.append(HeadEvent(PULL_REQUEST, repo, head, pull["base"]["sha"], pull["user"]["login"], RECONCILE))
+            author, branch = pull["user"]["login"], pull["head"]["ref"]
+            heads.append(HeadEvent(PULL_REQUEST, repo, head, pull["base"]["sha"], author, RECONCILE, branch))
     return heads

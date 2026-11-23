@@ -102,7 +102,8 @@ class Lost(RuntimeError):
 
 
 def _lease(grant: Mapping[str, Any]) -> Lease:
-    """Read one grant of the lease API's POST /lease reply."""
+    """Read one grant of the lease API's POST /lease reply; a reply from a scheduler older than the event and head
+    branch fields reads with neither."""
     unit = Unit(
         kind=grant["kind"], key=grant["key"], members=tuple(grant["members"]), manifest=grant.get("manifest", "")
     )
@@ -115,6 +116,8 @@ def _lease(grant: Mapping[str, Any]) -> Lease:
         grant["expires_ms"],
         grant["base"],
         grant["grader"],
+        grant.get("event", ""),
+        grant.get("head_branch", ""),
     )
 
 

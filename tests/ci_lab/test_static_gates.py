@@ -1,3 +1,4 @@
+import dataclasses
 import hashlib
 import json
 import re
@@ -759,6 +760,46 @@ def test_a_continue_on_error_gate_step_is_tolerated_and_the_real_workflow_tolera
     assert [gate.name for gate in gates if gate.tolerated] == [
         "test-count/record-the-head-count-for-the-next-queue-group"
     ]
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_a_gate_reads_the_event_names_it_names_with_the_values_of_its_lease_and_plans_a_branch_only_with_one() -> None:
+    plain = StaticGate("lint/a", "lint", "a", (), (), "true", (), ())
+    evented = dataclasses.replace(plain, reads=("github.event_name", "github.sha"))
+    branched = dataclasses.replace(plain, reads=("github.head_ref", "github.ref_name"))
+    assert static_gates.event_fields("merge_group", "fix-x") == {
+        "github.event_name": "merge_group",
+        "github.head_ref": "fix-x",
+        "github.ref_name": "",
+    }
+    assert static_gates.read_events(plain, "merge_group", "fix-x") == {}
+    assert static_gates.read_events(evented, "merge_group", "fix-x") == {"github.event_name": "merge_group"}
+    assert static_gates.read_events(branched, "pull_request", "fix-x") == {
+        "github.head_ref": "fix-x",
+        "github.ref_name": "",
+    }
+    assert [static_gates.plannable(gate, "") for gate in (plain, evented, branched)] == [True, True, False]
+    assert static_gates.plannable(branched, "fix-x")
+    assert static_gates.plannable(dataclasses.replace(plain, reads=("github.ref_name",)), "") is False
+
+
+@pytest.mark.feature("lab-lease-event-branch")
+def test_the_only_lab_gate_whose_step_reads_the_event_name_variable_keys_on_the_branch_it_reads() -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+
+    def reads_variable(gate: StaticGate) -> bool:
+        modules = (ROOT / f"{module.replace('.', '/')}.py" for module in gate.modules)
+        texts = [gate.run, *(producer.run for producer in gate.producers)]
+        texts += [path.read_text() for path in modules if path.is_file()]
+        return any("GITHUB_EVENT_NAME" in text for text in texts)
+
+    readers = [gate for gate in gates if not gate.missing and reads_variable(gate)]
+    assert [gate.name for gate in readers] == [
+        "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading"
+    ]
+    assert all(not static_gates.plannable(gate, "") for gate in readers)
 
 
 def test_the_command_adds_each_gate_closure_digest_at_the_grader_tree(

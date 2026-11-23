@@ -105,7 +105,7 @@ def test_a_grant_carries_the_base_and_grader_revision_of_its_job(jobs: queue.Que
 
 @pytest.mark.feature("lab-lease-event-branch")
 def test_a_grant_carries_the_event_and_head_branch_of_its_job(jobs: queue.Queue, lab: leases.Leases) -> None:
-    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1", "merge_group", "fix-x")
+    jobs.enqueue([unit("a")], "h1", {}, "b1", "g1", event="merge_group", head_branch="fix-x")
 
     [grant] = lab.lease("w1", 1, frozenset(), 0)
 

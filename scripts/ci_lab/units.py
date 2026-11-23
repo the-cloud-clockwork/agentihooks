@@ -2,7 +2,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum
 
-__all__ = ["Grade", "Priority", "Unit", "priority_of"]
+__all__ = ["EVENT_NAMES", "Grade", "Priority", "Unit", "priority_of"]
 
 
 class Priority(IntEnum):
@@ -11,6 +11,15 @@ class Priority(IntEnum):
     QUEUE = 2
     PROMOTION = 3
     BACKFILL = 4
+
+
+EVENT_NAMES: Mapping[int, str] = {
+    Priority.HOTFIX: "pull_request",
+    Priority.PULL_REQUEST: "pull_request",
+    Priority.QUEUE: "merge_group",
+    Priority.PROMOTION: "push",
+    Priority.BACKFILL: "push",
+}
 
 
 @dataclass(frozen=True)
