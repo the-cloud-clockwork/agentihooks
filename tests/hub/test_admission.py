@@ -1069,6 +1069,77 @@ def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_readiness_wi
     assert asks == ["admit", "admit", "launched"]
 
 
+@pytest.mark.feature("hub-late-admission-retry-launches")
+def test_a_late_kept_admission_launches_on_the_hives_next_ask_after_a_reap_judged_a_row_read_before_its_claim(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import copy
+
+    from scripts import serena_router_daemon
+    from scripts.events.config import QueuePolicy
+    from scripts.hive import lanes
+    from scripts.hive.spoke import Spoke, SpokeConfig
+    from scripts.swarm import readiness, tick
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+    from scripts.tick.steps import agents
+
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
+    monkeypatch.setenv("SWARM_HIVE_ID", "workstation")
+    bus: Any = open_bus(BusConfig())
+    slots.serve(bus, admitter=rig.admitter)
+    request = type(bus).request
+    asks: list[str] = []
+
+    def late_first(self: Any, subject: str, data: bytes, timeout_ms: int) -> bytes:
+        answer: bytes = request(self, subject, data, timeout_ms)
+        asks.append(json.loads(data)["op"])
+        if asks == ["admit"]:
+            raise TimeoutError(f"no responders for {subject!r}")
+        return answer
+
+    monkeypatch.setattr(type(bus), "request", late_first)
+    rig.admitter.clock = late_clock(0)
+    runtime = Mock()
+    placed = SimpleNamespace(pane_id="pane-a", harness="claude", account="slot-a", launched_at=1_500)
+    runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    reading = {"cpus": 32, "load5": 0, "available_mb": 60_000, "total_mb": 64_000}
+    tasks = lanes.LaneTasks(bus, "hive-a", rig.store.config)
+    config = SpokeConfig(rig.store.config(SLUG), "eng", "hive-a")
+    spoke = Spoke(config, bus, runtime, tasks, lambda: reading, view=Mock(return_value=None))
+    queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
+    pass_rows = copy.deepcopy(rig.rows)
+    gone = SimpleNamespace(
+        live_names=set,
+        observe=lambda agent: PaneObservation("unknown"),
+        retire=lambda agent, homes=(): True,
+        refusal=lambda agent: {},
+        reported=lambda agent: False,
+    )
+
+    def unsettled(event: Any) -> bool:
+        return False
+
+    try:
+        readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 1)
+        assert spoke.poll() == "asked"
+        name = rig.store.claimant(SLUG, "t1")
+        [admitted] = [agent for agent in rig.store.agents(SLUG) if agent.name == name]
+        agents._reap_agent(tick._Reaping(SLUG, rig.store, SimpleNamespace(), gone, pass_rows, set(), 7_000), admitted)
+        queue.withdraw(unsettled)
+        readiness.publish(bus, rig.admitter.source.snapshot(SLUG), 2)
+        queue.withdraw(unsettled)
+        assert spoke.poll() == "started"
+    finally:
+        bus.close()
+
+    assert "late: finished after" in capsys.readouterr().err
+    [launched] = [call.args[0] for call in runtime.spawn.call_args_list]
+    assert launched.name == name
+    assert rig.store.claimant(SLUG, "t1") == name
+    assert asks == ["admit", "admit", "launched"]
+
+
 @pytest.mark.feature("events-admission-saved-fleet-red-listing")
 def test_an_admission_of_a_task_with_a_pull_request_answers_inside_the_wait_while_a_live_listing_is_slow(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch

@@ -18,67 +18,20 @@ from __future__ import annotations
 import json
 import os
 import re
-import threading
 import time
 import urllib.request
 import uuid
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-_SDK_TRACER = None
-_SDK_INIT_ATTEMPTED = False
-_SDK_LOCK = threading.Lock()
 
+def _try_init_sdk() -> Any:
+    try:
+        from hooks.observability import otel
 
-def _try_init_sdk():
-    """Initialise the OTel SDK tracer lazily. Safe to call repeatedly.
-
-    Spans export through SimpleSpanProcessor, because short lived hook processes exit before a batch
-    processor would flush.
-    """
-    global _SDK_TRACER, _SDK_INIT_ATTEMPTED
-    if _SDK_INIT_ATTEMPTED:
-        return _SDK_TRACER
-    with _SDK_LOCK:
-        if _SDK_INIT_ATTEMPTED:
-            return _SDK_TRACER
-        _SDK_INIT_ATTEMPTED = True
-        try:
-            from opentelemetry import trace
-            from opentelemetry.sdk.resources import Resource
-            from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-
-            from hooks.config import OTEL_HOOKS_SERVICE_NAME, hook_collector
-
-            endpoint, protocol = hook_collector(os.environ)
-            if not endpoint:
-                return None
-
-            protocol = protocol or "http/protobuf"
-
-            if protocol == "grpc":
-                from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-                    OTLPSpanExporter,
-                )
-
-                exporter = OTLPSpanExporter(endpoint=endpoint, insecure=True)
-            else:
-                from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-                    OTLPSpanExporter,
-                )
-
-                traces_endpoint = endpoint.rstrip("/") + "/v1/traces"
-                exporter = OTLPSpanExporter(endpoint=traces_endpoint)
-
-            resource = Resource.create({"service.name": OTEL_HOOKS_SERVICE_NAME})
-            provider = TracerProvider(resource=resource)
-            provider.add_span_processor(SimpleSpanProcessor(exporter))
-            trace.set_tracer_provider(provider)
-            _SDK_TRACER = trace.get_tracer("agentihooks.brain")
-        except Exception:
-            _SDK_TRACER = None
-        return _SDK_TRACER
+        return otel.get_tracer("agentihooks.brain")
+    except Exception:
+        return None
 
 
 def _enabled() -> bool:
@@ -329,13 +282,9 @@ def emit_log(message: str, attrs: dict[str, Any]) -> None:
 
 def flush() -> None:
     """Drain queued spans. Safe to call at process exit."""
-    if _SDK_TRACER is None:
-        return
     try:
-        from opentelemetry import trace
+        from hooks.observability import otel
 
-        provider = trace.get_tracer_provider()
-        if hasattr(provider, "force_flush"):
-            provider.force_flush(timeout_millis=1000)
+        otel.flush()
     except Exception:
         pass

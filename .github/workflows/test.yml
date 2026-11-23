@@ -93,7 +93,7 @@ jobs:
         if: hashFiles('scripts/ci_reuse.py') != ''
         env:
           PYTHONNOUSERSITE: "1"
-        run: python -m pip install "pyyaml>=6.0"
+        run: python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
 
       - name: Mint the tcc main ci App token
         id: app-token
@@ -502,7 +502,7 @@ jobs:
 
       - name: Install unit reuse metadata dependencies
         if: github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != ''
-        run: python -m pip install "pyyaml>=6.0"
+        run: python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
 
       - name: Look up the base revision's dev durations
         id: stored
@@ -796,7 +796,7 @@ jobs:
           if [[ "$(python -I -m ruff --version 2>/dev/null)" == "ruff 0.15.12" ]]; then
             echo "ruff 0.15.12 comes from the runner image"
           else
-            python -m pip install ruff==0.15.12
+            python -m pip install --constraint .github/ci-tools/lint-tools.lock ruff==0.15.12
           fi
           test "$(python -I -m ruff --version)" = "ruff 0.15.12"
 
@@ -2503,7 +2503,7 @@ jobs:
 
       - name: Install coverage
         if: steps.source.outputs.test_only != 'true'
-        run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4" PyYAML==6.0.3
+        run: python -m pip install --constraint .github/test-requirements.lock coverage==7.17.0 PyYAML==6.0.3
 
       - name: Mint the token that reads the pull request runs' coverage
         id: app-token
@@ -2783,6 +2783,7 @@ jobs:
           dashboard=$(sed -n 's/^dashboardUrl=//p' .scannerwork/report-task.txt)
           if [[ "$gate" != OK ]]; then
             echo "::error::Quality Gate has FAILED ($gate). Detailed information can be found at: $dashboard"
+            { GITHUB_STEP_SUMMARY= SONAR_RETRY_SECONDS=30 api "issues/search?componentKeys=${dashboard#*\?id=}&types=BUG,VULNERABILITY&inNewCodePeriod=true&resolved=false&ps=100" | jq -r '(.issues[] | "\(.component):\(.line // 0) \(.rule) \(.message)"), (select(.total > (.issues | length)) | "\(.total - (.issues | length)) more not shown")'; } 2> /dev/null || true
             exit 1
           fi
           echo "Quality Gate has PASSED. $dashboard"
@@ -2851,7 +2852,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install coverage
-        run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4" PyYAML==6.0.3
+        run: python -m pip install --constraint .github/test-requirements.lock coverage==7.17.0 PyYAML==6.0.3
 
       - name: Download shard coverage
         id: download-shard-coverage
@@ -3020,20 +3021,20 @@ jobs:
         run: |
           set -euo pipefail
           # The checker's own environment carries antoncore's job pins without changing the lint interpreter.
-          (python -m venv "$RUNNER_TEMP/columns" && "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0; echo $? > "$RUNNER_TEMP/columns-venv.status") > "$RUNNER_TEMP/columns-venv.log" 2>&1 < /dev/null &
+          (python -m venv "$RUNNER_TEMP/columns" && "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet --constraint .github/ci-tools/parser.lock --constraint .github/ci-tools/lint-tools.lock PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0; echo $? > "$RUNNER_TEMP/columns-venv.status") > "$RUNNER_TEMP/columns-venv.log" 2>&1 < /dev/null &
           (docker run -d --rm --name "$CLICKHOUSE" clickhouse/clickhouse-server:24.1-alpine; echo $? > "$RUNNER_TEMP/clickhouse.status") > "$RUNNER_TEMP/clickhouse.log" 2>&1 < /dev/null &
 
       - name: Install ruff
-        run: python -m pip install ruff==0.15.12
+        run: python -m pip install --constraint .github/ci-tools/lint-tools.lock ruff==0.15.12
 
       - name: Install PyYAML
-        run: python -m pip install "pyyaml>=6.0"
+        run: python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
 
       - name: Install vulture
-        run: python -m pip install vulture==2.14
+        run: python -m pip install --constraint .github/ci-tools/lint-tools.lock vulture==2.14
 
       - name: Install the comment gate grammars
-        run: python -m pip install --constraint .github/test-requirements.lock tree-sitter tree-sitter-bash tree-sitter-javascript tree-sitter-css
+        run: python -m pip install --constraint .github/test-requirements.lock tree-sitter==0.26.0 tree-sitter-bash==0.25.1 tree-sitter-javascript==0.25.0 tree-sitter-css==0.25.0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
@@ -3366,7 +3367,7 @@ jobs:
             echo "::error::The protected grader carries no scripts/ci_hive_nats_grants.py, so nothing trusted can grade the hive member grants."
             exit 1
           fi
-          python -m pip install --quiet "cryptography>=42"
+          python -m pip install --quiet --constraint .github/ci-tools/browser-crypto.lock cryptography==50.0.2
           cd "$RUNNER_TEMP/grader"
           python -m scripts.ci_hive_nats_grants --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
 
@@ -3389,7 +3390,7 @@ jobs:
 
       - name: Install Playwright for artifact checks
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
-        run: python -m pip install "playwright>=1.44.0" "orjson>=3.10"
+        run: python -m pip install --constraint .github/ci-tools/browser-crypto.lock playwright==1.63.0 orjson==3.13.0
 
       - name: Install the artifact viewer browser
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
@@ -3530,7 +3531,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install coverage
-        run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4"
+        run: python -m pip install --constraint .github/test-requirements.lock coverage==7.17.0
 
       - name: Resolve the measured base tree
         id: base
@@ -4153,7 +4154,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install coverage
-        run: python -m pip install --constraint .github/test-requirements.lock "coverage>=7.4"
+        run: python -m pip install --constraint .github/test-requirements.lock coverage==7.17.0
 
       - name: Resolve baseline trees
         id: tree
@@ -4288,7 +4289,7 @@ jobs:
 
       - &mutation-planning-install
         name: Install dependencies
-        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest>=8.0,<9.2" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest==9.1.1" "pyyaml==6.0.3" "tomlkit==0.15.2"
 
       - name: Restore latest dev durations
         id: durations

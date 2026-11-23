@@ -814,3 +814,15 @@ def test_a_spent_budget_never_reads_the_head_lift_for_a_launch_that_names_no_rea
     budget = SubagentBudget(launches=0)
     decision = budget.decide(Call(tool="Agent", tool_input={"name": "helper"}), ME, state(tmp_path))
     assert (decision.allowed, asked) == (False, [])
+
+
+@pytest.mark.feature("reviewer-worker-gates")
+@pytest.mark.parametrize("lane", ["eng", "ci", "review"])
+def test_worker_lanes_cannot_push_while_checks_run(
+    tree: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str
+) -> None:
+    monkeypatch.setattr("scripts.gates.one_push.lane_of", lambda name: lane)
+    who = Who(name=ME.name, swarm=ME.swarm, lane=lane, task=ME.task)
+    decision = gate(pull()).decide(bash("git push", tree), who, state(tmp_path))
+    assert not decision.allowed
+    assert decision.reason == push_refusal("demo", URL)
