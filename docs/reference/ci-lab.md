@@ -3263,6 +3263,9 @@ scheduler and the worker disagree on the change, which must not grade as a survi
 
 The stats request of a mutant unit reuses every record in `CI_LAB_MUTATION_CACHE` whose inputs
 still match, such as those the grade's stats units stored, and measures only the other test files.
+A stats collection over test files that collect no test, such as a traced test module that holds no
+test, ends as a record with status 0 and no test: `run_mutation.collected_status` reads pytest's no
+tests collected exit code as 0 and keeps every other code, which still fails the collection.
 Each mutant row has a status:
 
 | Status | Meaning |
