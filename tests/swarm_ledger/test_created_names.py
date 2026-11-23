@@ -184,6 +184,9 @@ def test_name_worktree_skips_a_name_whose_changelog_fragment_is_on_origin_dev(
     subprocess.run([*git, "add", "changelog.d"], check=True)
     subprocess.run([*git, "commit", "-q", "-m", "f"], check=True)
     subprocess.run([*git, "update-ref", "refs/remotes/origin/dev", "HEAD"], check=True)
+    (primary / "changelog.d" / "engineer-a1b2c3-0002-2.md").write_text("### Fixed\n\n- A branch not yet on dev.\n")
+    subprocess.run([*git, "add", "changelog.d"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "g"], check=True)
     assert gc_cli.main(["name", "worktree", "--repo", str(primary)]) == 0
     assert capsys.readouterr().out == "engineer-a1b2c3-0002-2\n"
 
