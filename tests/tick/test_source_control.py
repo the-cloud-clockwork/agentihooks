@@ -550,6 +550,7 @@ def test_github_open_changes_reads_rollups_in_batches_of_twenty_five_and_keeps_t
     assert sorted(batches) == sorted([numbers[:25], numbers[25:50], numbers[50:]])
 
 
+@pytest.mark.feature("fleet-red-open-listing-batches")
 def test_github_open_changes_drops_the_batches_not_started_once_a_batch_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

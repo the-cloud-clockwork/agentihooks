@@ -4,7 +4,7 @@
       "id": "fleet-red-open-listing-batches",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fleet-red-window-rollups",
-      "behaviour": "The GitHub open pull request listing that the fleet red notice step reads lists open pull request numbers first, then reads every full check rollup by number in batches on several threads under the caller's deadline, so 179 open pull requests list in about twenty seconds instead of about forty one. The listing holds the same pull requests, order and checks as the paged listing, so every fleet red verdict is unchanged, and a pull request whose rollup the App may not read is still listed with no checks.",
+      "behaviour": "The GitHub open pull request listing that the fleet red notice step reads lists open pull request numbers first, then reads every full check rollup by number in batches on several threads under the caller's deadline, so 179 open pull requests list in about twenty seconds instead of about forty one. The listing holds the same pull requests, order and checks as the paged listing, so every fleet red verdict is unchanged, and a pull request whose rollup the App may not read is still listed with no checks. Any other failed batch fails the listing and drops the batches not yet started.",
       "seam": "scripts.tick.adapters.github.GitHubSourceControl.open_changes, judged through scripts.swarm.fleet_red.held and shared",
       "rules": [
         "open-listing-with-rollups"
@@ -12,7 +12,8 @@
       "tests": [
         "tests/tick/test_open_listing_batches.py::test_the_open_listing_returns_the_recorded_listing_and_its_verdicts",
         "tests/tick/test_open_listing_batches.py::test_the_open_listing_reads_its_rollups_concurrently",
-        "tests/tick/test_open_listing_batches.py::test_a_rollup_the_app_cannot_read_lists_the_pull_request_with_no_checks"
+        "tests/tick/test_open_listing_batches.py::test_a_rollup_the_app_cannot_read_lists_the_pull_request_with_no_checks",
+        "tests/tick/test_source_control.py::test_github_open_changes_drops_the_batches_not_started_once_a_batch_fails"
       ]
     },
     {
