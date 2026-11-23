@@ -3275,8 +3275,6 @@ jobs:
           python -m scripts.threshold_pins --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
-      # The constraint protects this head's own run against a broken pip-audit dependency release;
-      # a fixed base's script carries the same pin and needs no constraint file.
       - name: Fail on known vulnerabilities new against the base
         if: ${{ !cancelled() }}
         run: |
@@ -3284,8 +3282,6 @@ jobs:
             echo "::error::The base carries no scripts/ci_dependency_audit.py, so nothing trusted can grade."
             exit 1
           fi
-          echo "platformdirs!=4.14.8" > "$RUNNER_TEMP/pip-audit-constraints.txt"
-          export UV_CONSTRAINT="$RUNNER_TEMP/pip-audit-constraints.txt"
           cd "$RUNNER_TEMP/base"
           python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
