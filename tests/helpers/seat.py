@@ -14,7 +14,7 @@ from scripts.hub import admission, claims, lease
 from scripts.swarm import commands, readiness
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger.repository import hierarchy
-from tests.helpers import store_seed
+from tests.helpers import narrow_ledger, store_seed
 
 SLUG = "sw"
 LAUNCH = {"harness": "claude", "account": "acct", "model": "opus", "effort": "high"}
@@ -74,7 +74,7 @@ def seat_agent(
     request = {"hive": hive, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
     decision = {**LAUNCH, "profile": PROFILES.get(row["lane"], "engineer"), **(launch or {})}
     source = SimpleNamespace(slugs=lambda: [slug], snapshot=lambda name: view(store, ledger, name))
-    admitter = admission.Admission(store, ledger, source, clock)  # pyright: ignore[reportArgumentType]
+    admitter = narrow_ledger.viewed(admission.Admission(store, ledger, source, clock))  # pyright: ignore[reportArgumentType]
     admitted = admitter.admit(slug, request)
     if not admitted or "name" not in admitted:
         pytest.fail(f"hub admission refused {task_id}: {admitted}")

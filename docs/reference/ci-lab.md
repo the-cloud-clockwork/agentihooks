@@ -3158,6 +3158,10 @@ A head with no kept line gets neither mutation job, and its grade folds on its o
 | `CI_LAB_MIRROR_STORE` | The scheduler's [environment](#environment) | The scheduler does not start |
 | `CI_LAB_MUTATION_CACHE`, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` | The worker's [environment](#environment) | The worker does not start |
 
+The lab reads no other mutmut setting. The scheduler names the mutants and the worker trampolines
+them in their own processes without loading mutmut's config, so neither depends on its working
+directory. A head's `do_not_mutate_patterns` are not applied; its `# pragma: no mutate` lines are.
+
 This repository's `pyproject.toml` holds both:
 
 ```toml

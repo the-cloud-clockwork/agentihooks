@@ -57,15 +57,23 @@ def enhance(
     tid, enhancement = task["id"], thin_task.ENHANCE.format(task["id"])
     added = [] if enhancement in ids else [_addition(task, problems)]
     try:
-        ledger.mutate([*added, _marking(tid)], deadline=deadline)
+        ledger.mutate([*added, _marking(task)], deadline=deadline)
     except LedgerRefused as exc:
         return f"refused the enhancement of {tid}: {exc}", False
     return f"queued {enhancement} for thin task {tid}", True
 
 
-def _marking(tid: str) -> dict[str, object]:
-    """Return the enhancement operation that marks task ``tid`` as needing enhancement."""
-    return {"op": "task_enhancement", "id": f"thin-mark-{tid}", "by": SENDER, "item": f"tasks/{tid}", **NEEDED}
+def _marking(task: dict[str, Any]) -> dict[str, object]:
+    """Return the enhancement operation guarded by the task's observed enhancement."""
+    tid = task["id"]
+    return {
+        "op": "task_enhancement",
+        "id": f"thin-mark-{tid}",
+        "by": SENDER,
+        "item": f"tasks/{tid}",
+        "expected": task.get("enhancement"),
+        **NEEDED,
+    }
 
 
 def _addition(task: dict[str, Any], problems: list[str]) -> dict[str, object]:
