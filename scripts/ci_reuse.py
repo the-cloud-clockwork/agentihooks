@@ -94,6 +94,11 @@ LEDGER_REQUIRED = (
     '\n      + (if $mutation == "true"',
     '\n      + (if .select.outputs.ledger == "run" then ["ledger-load"] else [] end)\n      + (if $mutation == "true"',
 )
+SPLIT_REQUIRED = (
+    ('"test-count", "lint", ', '"collect", "test-count", "lint", "lint-actions", '),
+    ('"shard-check", "test-count"', '"shard-check", "test-count", "collect"'),
+    ('.key == "lint" or ', '.key == "lint" or .key == "lint-actions" or .key == "collect" or '),
+)
 
 FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
 """
@@ -244,7 +249,11 @@ def ledger_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def split_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return the aggregation that requires the collect and lint-actions jobs split out of test-count and lint."""
-    return steps
+    [aggregation, *rest] = steps
+    run = aggregation["run"]
+    for old, new in SPLIT_REQUIRED:
+        run = run.replace(old, new)
+    return [{**aggregation, "run": run}, *rest]
 
 
 def summary_steps() -> list[dict[str, Any]]:
