@@ -222,7 +222,7 @@ def _pick(
     return Choice(min(candidates, key=_order(role))["id"], spill=spill)
 
 
-def unhosted(role: str, hives: list[dict], now: int, aliases: tuple[str, ...] = ()) -> Spill | None:
+def unhosted(role: str, hives: list[dict[str, Any]], now: int, aliases: tuple[str, ...] = ()) -> Spill | None:
     ranked = [hive for hive in hives if SPREAD not in hive and role in hive["prefer"]]
     if not ranked:
         return None
