@@ -624,3 +624,75 @@ def test_the_served_port_runs_its_actions_between_requests_and_a_port_without_ac
     finally:
         acting.server_close()
         plain.server_close()
+
+
+@pytest.mark.feature("lab-scheduler-first-build-at-bind")
+def test_start_builds_the_first_load_on_a_daemon_thread_with_no_read_and_starts_it_once() -> None:
+    builds: list[int] = []
+    workers: list[threading.Thread] = []
+    entered, gate = threading.Event(), threading.Event()
+
+    def build(now_ms: int) -> Load:
+        builds.append(now_ms)
+        workers.append(threading.current_thread())
+        entered.set()
+        assert gate.wait(10)
+        return replace(LOAD, slots_busy=len(builds))
+
+    latest = metrics.Latest(build, lambda: 1000, 15_000)
+    latest.start()
+    try:
+        assert entered.wait(10)
+        latest.start()
+    finally:
+        gate.set()
+    with latest.building:
+        latest.start()
+    latest.start()
+    assert builds == [1000]
+    assert [(worker.name, worker.daemon) for worker in workers] == [("ci-lab-load-refresh", True)]
+    assert workers[0] is not threading.current_thread()
+    assert latest.peek() == (replace(LOAD, slots_busy=1), 1000)
+
+
+@pytest.mark.feature("lab-scheduler-first-build-at-bind")
+def test_peek_answers_at_once_while_the_first_build_runs_and_then_the_finished_load() -> None:
+    entered, gate = threading.Event(), threading.Event()
+
+    def build(now_ms: int) -> Load:
+        entered.set()
+        assert gate.wait(10)
+        return replace(LOAD, slots_busy=now_ms)
+
+    latest = metrics.Latest(build, lambda: 1000, 15_000)
+    assert latest.peek() is None
+    latest.start()
+    answers: list[tuple[Load, int] | None] = []
+    try:
+        assert entered.wait(10)
+        peeker = threading.Thread(target=lambda: answers.append(latest.peek()), daemon=True)
+        peeker.start()
+        peeker.join(5)
+        assert answers == [None]
+    finally:
+        gate.set()
+    with latest.building:
+        assert latest.peek() == (replace(LOAD, slots_busy=1000), 1000)
+
+
+@pytest.mark.feature("lab-scheduler-first-build-at-bind")
+def test_before_the_first_build_capacity_answers_not_built_and_metrics_the_registry_alone() -> None:
+    calls: list[int] = []
+
+    def unbuilt() -> Load | None:
+        calls.append(1)
+        return None
+
+    capacity_answer = metrics.respond(unbuilt, metrics.Registry(), "GET", "/capacity")
+    assert capacity_answer == (503, "application/json", b'{"error": "the load snapshot is not built yet"}')
+    registry = metrics.Registry()
+    status, content_type, body = metrics.respond(unbuilt, registry, "GET", "/metrics")
+    assert (status, content_type) == (200, "text/plain; version=0.0.4; charset=utf-8")
+    assert body.decode() == metrics.Registry().render() == registry.render()
+    assert [line for line in body.decode().splitlines() if line and not line.startswith("#")] == []
+    assert calls == [1, 1]

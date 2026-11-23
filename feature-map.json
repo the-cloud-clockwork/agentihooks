@@ -611,6 +611,20 @@
       ]
     },
     {
+      "id": "lab-scheduler-first-build-at-bind",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-labload-cold-start",
+      "behaviour": "The CI lab scheduler starts its first load build in a daemon thread when listen binds its ports, with no read, and no read waits for it: until that build finishes GET /capacity on ports 8800 and 9108 answers 503 with {\"error\": \"the load snapshot is not built yet\"} and GET /metrics answers 200 with the registry alone, carrying no load series and no load age; once it finishes both ports serve that build. metrics.Latest.start starts the first build only once, and metrics.Latest.peek answers None at once before the first build finishes and the finished snapshot after.",
+      "seam": "scripts.ci_lab.scheduler.listen over fakeredis with a held Scheduler.load read through GET /capacity and GET /metrics; scripts.ci_lab.metrics.Latest.start and Latest.peek with a held recording build; metrics.respond and service.Routes.respond with a snapshot answering None",
+      "tests": [
+        "tests/ci_lab/test_scheduler_snapshot.py::test_listen_starts_the_first_build_at_bind_and_no_read_waits_for_it",
+        "tests/ci_lab/test_metrics.py::test_start_builds_the_first_load_on_a_daemon_thread_with_no_read_and_starts_it_once",
+        "tests/ci_lab/test_metrics.py::test_peek_answers_at_once_while_the_first_build_runs_and_then_the_finished_load",
+        "tests/ci_lab/test_metrics.py::test_before_the_first_build_capacity_answers_not_built_and_metrics_the_registry_alone",
+        "tests/ci_lab/test_service.py::test_the_scheduler_port_answers_capacity_not_built_before_the_first_build"
+      ]
+    },
+    {
       "id": "lab-scheduler-release-bound",
       "rules": [
         "lab-release-starts-every-waiting-head"
