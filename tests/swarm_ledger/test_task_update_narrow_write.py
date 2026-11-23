@@ -14,7 +14,6 @@ from tests.swarm_ledger import test_api_v1
 from tests.swarm_ledger.narrow_write_cases import (
     CLAIMANT,
     FALLBACKS,
-    FEATURE,
     SCENARIOS,
     WORKSPACE,
     assert_falls_back,
@@ -62,7 +61,7 @@ def exported(live: dict) -> dict:
     return request(live, "POST", "export", {"since": 0})[1]["data"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 def test_a_hub_claim_through_the_api_bumps_the_claim_generation_and_records_the_claim(live: dict) -> None:
     add_task(live, "t1")
     status, reply = hub_claim(live, "t1")
@@ -78,7 +77,7 @@ def test_a_hub_claim_through_the_api_bumps_the_claim_generation_and_records_the_
         assert meta["stamps"][f"tasks/t1/{field}"] == {"at": meta["updated_at"], "rev": meta["rev"], "by": "swarm"}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 def test_a_hub_claim_whose_guard_misses_leaves_the_task_as_it_was(live: dict) -> None:
     add_task(live, "t1")
     assert hub_claim(live, "t1")[0] == 200
@@ -92,7 +91,7 @@ def test_a_hub_claim_whose_guard_misses_leaves_the_task_as_it_was(live: dict) ->
     assert status == 200 and row(live, "t1") == before
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 def test_a_hub_claim_on_a_task_with_an_open_dependency_keeps_it_open(live: dict) -> None:
     add_task(live, "t1")
     add_task(live, "t2", depends_on=["t1"])
@@ -102,7 +101,7 @@ def test_a_hub_claim_on_a_task_with_an_open_dependency_keeps_it_open(live: dict)
     assert (held["state"], held["claimed_by"], held.get("claim_generation", 0)) == ("open", "", 0)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 def test_a_hub_claim_relays_doctors_and_delivers_alerts_at_its_revision(live: dict, monkeypatch) -> None:
     add_task(live, "t1")
     seen = []
@@ -118,7 +117,7 @@ def test_a_hub_claim_relays_doctors_and_delivers_alerts_at_its_revision(live: di
         assert isinstance(state["alerts"], list)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 def test_a_refused_hub_claim_raises_its_alert_for_delivery(live: dict, monkeypatch) -> None:
     from scripts.swarm_ledger import ledger_server as server
 
@@ -137,7 +136,7 @@ def test_a_refused_hub_claim_raises_its_alert_for_delivery(live: dict, monkeypat
     assert row(live, "t1")["state"] == "open"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 def test_a_hub_claim_reply_carries_the_projected_row_and_the_new_revision(live: dict) -> None:
     add_task(live, "t1")
     status, reply = hub_claim(live, "t1")
@@ -185,7 +184,7 @@ def large(tmp_path: Any, tasks: int = 1000) -> SQLiteLedgerRepository:
     return repository
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 def test_a_hub_claim_on_a_large_ledger_never_reads_or_returns_the_whole_ledger(tmp_path, monkeypatch) -> None:
     repository = large(tmp_path)
     revision = resources.resource_revision(repository.read(LARGE, "tasks/t500"), "tasks/t500")
@@ -208,7 +207,7 @@ def test_a_hub_claim_on_a_large_ledger_never_reads_or_returns_the_whole_ledger(t
     assert stored["_meta"]["rev"] == reply["_meta"]["rev"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 @pytest.mark.parametrize("scenario", sorted(SCENARIOS))
 def test_a_narrow_claim_stores_what_the_whole_write_stores(tmp_path, monkeypatch, scenario: str) -> None:
     def make(name: str) -> SQLiteLedgerRepository:
@@ -224,7 +223,7 @@ def guarded(repository: Any, slug: str, op: dict, guards: bool = True) -> mutati
     return mutations.GuardedOperations(payload, budget, repository.domain, lambda epoch: None, slug)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 def test_a_guarded_narrow_claim_and_its_replay_then_a_whole_write_match_the_whole_path(tmp_path, monkeypatch) -> None:
     def make(name: str) -> SQLiteLedgerRepository:
         return SQLiteLedgerRepository(tmp_path / name / "ledger.sqlite3")
@@ -248,13 +247,13 @@ def test_a_guarded_narrow_claim_and_its_replay_then_a_whole_write_match_the_whol
     assert narrow.get_document(right) == make("narrow").get_document(right) == whole.get_document(left)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 @pytest.mark.parametrize("prepare", FALLBACKS)
 def test_a_claim_the_narrow_write_cannot_prove_falls_back_with_nothing_written(tmp_path, monkeypatch, prepare) -> None:
     assert_falls_back(lambda name: SQLiteLedgerRepository(tmp_path / name / "ledger.sqlite3"), prepare, monkeypatch)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 def test_the_narrow_write_returns_only_the_touched_row_and_the_new_revision(tmp_path) -> None:
     repository = large(tmp_path, tasks=50)
     written = repository.apply_task_update(LARGE, claim_op("t7"))
@@ -265,7 +264,7 @@ def test_the_narrow_write_returns_only_the_touched_row_and_the_new_revision(tmp_
     assert written.state["_meta"]["rev"] == repository.read(LARGE, "_meta.rev")["_meta"]["rev"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 def test_only_a_single_guarded_hub_claim_takes_the_narrow_path() -> None:
     hub = {"operation_id": "o", "ops": [claim_op()], "guards": {}}
     assert mutations.claim(hub) == claim_op()
@@ -283,7 +282,7 @@ def test_only_a_single_guarded_hub_claim_takes_the_narrow_path() -> None:
     assert [mutations.claim(payload) for payload in refused] == [None] * len(refused)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("ledger-task-update-narrow-write")
 @pytest.mark.parametrize(("published", "written", "reads"), [(True, "row", 1), (False, "row", 0), (True, None, 0)])
 def test_publishing_refreshes_only_a_published_ledger_after_a_narrow_write(published, written, reads) -> None:
     seen = []
