@@ -162,7 +162,7 @@ class SwarmConfig:
             raise SwarmError(f"tick mode must be one of {', '.join(TICK_MODES)}")
         if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
             raise SwarmError("focus weight must be a whole number from 0 to 100")
-        if type(self.review_share) is not int or not 0 <= self.review_share <= 100:
+        if type(self.review_share) is not int or self.review_share not in range(101):
             raise SwarmError("review share must be a whole number from 0 to 100")
         if self.placement_mode not in PLACEMENT_MODES:
             raise SwarmError(f"placement mode must be one of {', '.join(PLACEMENT_MODES)}")

@@ -784,19 +784,33 @@ def test_links_round_trip_and_an_old_config_reads_as_none(store):
     assert store.config("smoke").links == []
 
 
-def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store):
-    from scripts.swarm.store import DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW, DEFAULT_MEMORY_PER_AGENT_MB
+def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store: RedisStore) -> None:
+    from scripts.swarm.store import (
+        DEFAULT_LOAD_HIGH,
+        DEFAULT_LOAD_LOW,
+        DEFAULT_MEMORY_PER_AGENT_MB,
+        DEFAULT_REVIEW_SHARE,
+    )
 
-    store.create(config(scaling="manual", load_high=1.5, load_low=0.5, memory_per_agent_mb=900))
+    store.create(config(scaling="manual", load_high=1.5, load_low=0.5, memory_per_agent_mb=900, review_share=100))
     read = store.config("smoke")
-    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb) == ("manual", 1.5, 0.5, 900)
-    store.redis.hdel(store.key("smoke", "config"), "scaling", "load_high", "load_low", "memory_per_agent_mb")
+    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb, read.review_share) == (
+        "manual",
+        1.5,
+        0.5,
+        900,
+        100,
+    )
+    store.redis.hdel(
+        store.key("smoke", "config"), "scaling", "load_high", "load_low", "memory_per_agent_mb", "review_share"
+    )
     read = store.config("smoke")
-    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb) == (
+    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb, read.review_share) == (
         "auto",
         DEFAULT_LOAD_HIGH,
         DEFAULT_LOAD_LOW,
         DEFAULT_MEMORY_PER_AGENT_MB,
+        DEFAULT_REVIEW_SHARE,
     )
     assert DEFAULT_LOAD_LOW < DEFAULT_LOAD_HIGH
 
