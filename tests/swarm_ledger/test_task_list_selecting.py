@@ -8,6 +8,7 @@ import pytest
 
 from scripts.swarm import ledger_client
 from scripts.swarm_ledger.api import task_list
+from tests.swarm_ledger.test_api_services import SLUG, fake_services, served
 
 ROWS: list[dict[str, Any]] = [
     {"id": "a", "state": "open", "title": "A", "comments": [{"text": "x"}]},
@@ -98,8 +99,6 @@ def test_only_a_plain_tasks_read_naming_a_filter_is_a_selection(
 def test_the_tasks_route_serves_every_selection_the_client_asks_for(
     filters: dict[str, Any], expected: list[str]
 ) -> None:
-    from tests.swarm_ledger.test_api_services import SLUG, fake_services, served
-
     query = urlencode(ledger_client.where_query(**filters))
     status, body = served(fake_services([]), "GET", f"/api/v1/ledgers/{SLUG}/tasks?{query}")
 
