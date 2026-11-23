@@ -102,6 +102,7 @@ def _pytest(tmp_path, ledger, targets, workers, reruns, extra):
     )
 
 
+@pytest.mark.feature("flake-ledger-retry-pass-recorded")
 @pytest.mark.parametrize("workers", ["0", "2"])
 def test_a_test_that_passes_on_retry_passes_and_is_recorded_as_a_flake(tmp_path, workers):
     result, records = _run(tmp_path, "test_passes", "test_fails_once", workers=workers)
@@ -120,6 +121,7 @@ def test_a_test_that_passes_on_retry_passes_and_is_recorded_as_a_flake(tmp_path,
     ]
 
 
+@pytest.mark.feature("flake-ledger-retry-pass-recorded")
 @pytest.mark.parametrize("workers", ["0", "2"])
 def test_retry_pass_publishes_the_first_attempt_traceback(tmp_path, workers, capsys):
     from tests import flake_budget

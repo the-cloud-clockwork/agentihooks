@@ -122,6 +122,7 @@ def test_only_the_reap_and_spawn_steps_declare_their_effects_yet() -> None:
         "order waiting": frozenset({"coordination"}),
         "expert seats": frozenset({"coordination", "inbox", "runtime"}),
         "review pass": frozenset({"ledger"}),
+        "thin task pass": frozenset({"inbox", "ledger"}),
     }
 
 

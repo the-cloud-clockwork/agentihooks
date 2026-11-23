@@ -1,0 +1,6 @@
+{
+  "scripts/tick/pool.py:scripts.tick.pool.x_running:325f77b56f480612543b8fc5204705f5faf20fd45f9c87f2c033f21c9e13ee03": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: omitting name changes only the cleanup thread diagnostic label. No tick consumer reads this name; the target, arguments, daemon state, scheduling, records and executor cleanup remain identical."
+  }
+}

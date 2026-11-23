@@ -82,6 +82,30 @@ def test_a_seat_with_no_possible_successor_keeps_unread_delivery(state, cap, add
     assert "seat is empty" in finding.evidence
 
 
+@pytest.mark.feature("swarm-review-seat-mail")
+@pytest.mark.parametrize(("address", "waits"), [("review-2@demo", False), ("review-1@demo", True)])
+def test_a_review_seat_above_the_review_lane_cap_has_no_seat_wait(address: str, waits: bool) -> None:
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("demo", "/r", 1, 1, max_review=1))
+    item = {"address": address, "history": []}
+    receiver = read.inbox_receivers(store, InboxStore(store.redis), "demo", [item])[address]
+    assert receiver == inbox.Receiver(seat_wait=waits)
+
+
+@pytest.mark.feature("swarm-review-seat-mail")
+def test_a_review_seat_on_a_config_stored_without_a_review_cap_has_no_seat_wait() -> None:
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("demo", "/r", 1, 1, max_review=1))
+    store.redis.hdel(store.key("demo", "config"), "max_review")
+    item = {"address": "review-1@demo", "history": []}
+    receiver = read.inbox_receivers(store, InboxStore(store.redis), "demo", [item])["review-1@demo"]
+    assert receiver == inbox.Receiver(seat_wait=False)
+
+
 def test_every_inbox_finding_names_the_current_seat_occupant_and_harness():
     pending = {
         "id": "pending",

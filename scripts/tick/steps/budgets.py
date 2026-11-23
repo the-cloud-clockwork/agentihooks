@@ -157,6 +157,7 @@ FLOORS: dict[str, Timing] = {
     "order waiting": Timing(LIGHT_S, SLOW_S),
     "expert seats": Timing(LIGHT_S, CRITICAL_S),
     "review pass": Timing(LIGHT_S, CRITICAL_S),
+    "thin task pass": Timing(LIGHT_S, WIDE_S),
 }
 
 

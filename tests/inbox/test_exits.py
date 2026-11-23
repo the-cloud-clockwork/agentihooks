@@ -996,6 +996,23 @@ def test_seat_mail_within_its_lane_cap_waits_for_the_next_occupant(redis, seat):
     assert inbox.pending_items("sender") == []
 
 
+@pytest.mark.feature("swarm-review-seat-mail")
+def test_review_seat_mail_above_the_review_lane_cap_is_settled_and_within_it_waits(redis: Any) -> None:
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 2, 1, max_review=1))
+    kept, _ = seat_mail(inbox, store, "review-1@sw")
+    item, _ = seat_mail(inbox, store, "review-2@sw")
+    exits.sweep(inbox, "sw", store, dict)
+    after = inbox.get(item.id)
+    assert (inbox.get(kept.id).address, inbox.get(kept.id).state) == ("review-1@sw", "pending")
+    assert (after.address, after.state) == ("review-2@sw", "cancelled")
+    assert after.reason == "cancelled: review-2@sw can get no successor: the review lane cap is 1"
+    assert [notice.text for notice in inbox.pending_items("sender")] == [
+        f"review-2@sw can get no successor: the review lane cap is 1, so your message {item.id}: contract "
+        "is closed. Send it to whoever carries that work on if it still matters."
+    ]
+
+
 def test_a_live_agent_above_the_cap_keeps_its_seat_mail(redis):
     from scripts.swarm.store import AgentRecord
 
