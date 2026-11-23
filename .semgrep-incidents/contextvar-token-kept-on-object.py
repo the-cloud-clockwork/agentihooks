@@ -1,4 +1,4 @@
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from threading import Event
 
 from scripts.swarm import reaper
@@ -15,6 +15,10 @@ class TokenSites:
     def begin(self) -> None:
         # ruleid: contextvar-token-kept-on-object
         self.token = PASS.set(PassProcesses())
+
+    def annotated(self) -> None:
+        # ruleid: contextvar-token-kept-on-object
+        self.held: Token[PassProcesses | None] = reaper.PASS.set(PassProcesses())
 
     def close(self) -> None:
         reaper.PASS.reset(self.scan)
