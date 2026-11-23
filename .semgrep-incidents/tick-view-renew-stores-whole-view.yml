@@ -1,0 +1,17 @@
+rules:
+  - id: tick-view-renew-stores-whole-view
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Bind the held view refresh with renew=True so ordinary delta renewals
+      do not rewrite the whole stored view and block tick scheduling on disk.
+    paths:
+      include:
+        - /scripts/tick/view.py
+        - tick-view-renew-stores-whole-view.py
+    patterns:
+      - pattern-inside: |
+          def start(...):
+              ...
+      - pattern: _kept($REFRESH)
+      - pattern-not: _kept(partial(..., renew=True, ...))
