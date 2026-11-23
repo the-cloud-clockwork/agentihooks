@@ -16,8 +16,6 @@ from tests.hive.test_controller_launch import setup, write_hive
 pytestmark = pytest.mark.unit
 _fixtures = (setup,)
 
-FEATURE = "hive-worker-total-excludes-masters-by-role"
-
 
 def _record(setup: Any, lane: str, hive: str, route: str = "subscription", account: str = "account") -> AgentRecord:
     slug = setup.config.slug
@@ -53,7 +51,7 @@ def remote(setup: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     return setup
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-worker-total-excludes-masters-by-role")
 @pytest.mark.parametrize(
     ("route", "marked"), [("interactive", 1), ("master-login", 1), ("subscription", 0), ("api", 0)]
 )
@@ -70,7 +68,7 @@ def test_a_master_on_any_login_route_is_no_worker_and_the_real_worker_still_coun
     assert (hive["agents"], hive["room"], hive["refusal"]) == (1, 1, "")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-worker-total-excludes-masters-by-role")
 def test_a_root_master_with_no_hive_name_leaves_only_the_root_worker_total(remote: Any) -> None:
     write_hive(remote, id="root", max_agents=2)
     worker = _record(remote, "eng", "root")
@@ -80,7 +78,7 @@ def test_a_root_master_with_no_hive_name_leaves_only_the_root_worker_total(remot
     assert (_loaded(remote, "root")["agents"], _loaded(remote, "remote")["agents"]) == (1, 1)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-worker-total-excludes-masters-by-role")
 def test_a_master_record_without_an_unmarked_session_of_its_slot_removes_no_other_worker(remote: Any) -> None:
     _record(remote, "master", "remote")
     _record(remote, "master", "remote", account="gone")
@@ -88,7 +86,7 @@ def test_a_master_record_without_an_unmarked_session_of_its_slot_removes_no_othe
     assert _loaded(remote, "remote")["agents"] == 1
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-worker-total-excludes-masters-by-role")
 def test_zero_cpu_room_still_refuses_once_the_master_leaves_the_worker_total(remote: Any) -> None:
     from scripts.hive import headroom
 
@@ -102,7 +100,7 @@ def test_zero_cpu_room_still_refuses_once_the_master_leaves_the_worker_total(rem
     assert hive["refusal"].startswith("cpu: ")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-worker-total-excludes-masters-by-role")
 def test_an_expert_takes_the_root_hive_whose_count_only_a_subscription_master_fills(remote: Any) -> None:
     remote.herdr._profile_decision.return_value = ProfileDecision("expert", "task", "expert")
     write_hive(remote, excluded=["master", "expert"])
