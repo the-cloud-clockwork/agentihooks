@@ -74,7 +74,7 @@ def test_a_member_can_drop_task_lifts_from_either_worker_version(redis_lib):
     assert admin.hget(drops, "t1") == "100.000005"
 
 
-def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patterns():
+def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patterns() -> None:
     calls = []
 
     class Recorder:
@@ -124,6 +124,9 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:checks:*",
                     f"~{ROOT}:swarm:*:merge-stall",
                     f"~{ROOT}:swarm:*:merge-stall-notice",
+                    f"~{ROOT}:swarm:*:queue-priority-active",
+                    f"~{ROOT}:swarm:*:queue-priority-displaced",
+                    f"~{ROOT}:swarm:*:merge-priority-order",
                     f"~{ROOT}:swarm:*:hive-placement-waits",
                     f"~{ROOT}:swarm:*:dev-red",
                     f"~{ROOT}:swarm:*:prerequisite-waits",
@@ -780,3 +783,75 @@ def test_the_member_acl_writes_every_key_the_fenced_record_batch_touches() -> No
     keys = _fenced_record_keys(fakeredis.FakeRedis(decode_responses=True))
 
     assert [key for key in keys if not any(fnmatchcase(key, pattern) for pattern in patterns)] == []
+
+
+@pytest.mark.feature("hive-member-queue-priority")
+@pytest.mark.parametrize("denied", ["", "queue-priority-active", "queue-priority-displaced", "merge-priority-order"])
+def test_a_member_queue_applies_priority_or_reports_a_permission_refusal(
+    monkeypatch: pytest.MonkeyPatch, denied: str
+) -> None:
+    from types import SimpleNamespace
+    from typing import Any
+
+    import fakeredis
+
+    from scripts.swarm import ledger_events, merge_queue, queue_priority, queue_record
+    from tests.swarm.test_merge_queue_priority import READ_PULL, URL, FakeQueue
+
+    fake_server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=fake_server, decode_responses=True)
+    patterns = [pattern for pattern in auth._acl_keys("m1") if not denied or not pattern.endswith(f":{denied}")]
+    admin.acl_setuser(
+        "hive-m1", enabled=True, nopass=True, categories=auth.ACL_CATEGORIES, keys=patterns, channels=auth.ACL_PATTERNS
+    )
+    reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "HVALS", "HMGET"}
+    writes: list[tuple[str, str]] = []
+
+    class Member(fakeredis.FakeRedis):
+        def execute_command(self, *args: Any, **options: Any) -> Any:
+            command = str(args[0]).upper()
+            if command in reads:
+                return admin.execute_command(*args, **options)
+            if command in {"SET", "DEL", "INCRBY", "INCR", "HSET", "HDEL"}:
+                writes.append((command, str(args[1])))
+            return super().execute_command(*args, **options)
+
+    member = Member(server=fake_server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    host = store.RedisStore(admin)
+    host.create(store.SwarmConfig("proof", "/repo", 1, 0, "running"))
+    swarm = store.RedisStore(member)
+    queue = FakeQueue()
+    ledger = SimpleNamespace(tasks_targeting=lambda slug, url: [{"id": "t9", "rank": "urgent", "pr_url": URL}])
+    original = merge_queue.prioritize
+
+    def prioritize(url: str, **kwargs: Any) -> dict[str, Any]:
+        return original(url, run=queue.run, **kwargs)
+
+    monkeypatch.setattr(ledger_events, "view", READ_PULL)
+    monkeypatch.setattr(merge_queue, "prioritize", prioritize)
+    monkeypatch.setattr(queue_record.Journal, "groups", lambda self: [])
+    monkeypatch.setattr(queue_record.Journal, "write", lambda *args, **kwargs: None)
+    monkeypatch.setattr(queue_priority.lab_control, "acknowledge", lambda *args: {"accepted": True})
+
+    result = merge_queue.operate(
+        "queue", URL, run=queue.run, priority=lambda: queue_priority.automatic(swarm, "proof", URL, ledger)
+    )
+
+    assert result["queued"] is True
+    if denied:
+        assert "permission" in "; ".join(result["priority"]["errors"]).lower()
+        assert [entry["pullRequest"]["id"] for entry in queue.entries] == ["P1", "P2", "P3", "P9"]
+        assert queue.mutations == [("queue", 9)]
+    else:
+        assert result["priority"]["errors"] == []
+        assert [entry["pullRequest"]["id"] for entry in queue.entries] == ["P1", "P9", "P2", "P3"]
+        assert queue.mutations == [("queue", 9), ("dequeue", 3), ("dequeue", 2), ("queue", 2), ("queue", 3)]
+        assert {key for _, key in writes} == {
+            swarm.key("proof", queue_priority.ACTIVE),
+            swarm.key("proof", queue_priority.DISPLACED),
+            swarm.key("proof", queue_priority.ORDER),
+        }
+        assert admin.get(swarm.key("proof", queue_priority.ORDER)) == "2"
+        assert not admin.exists(swarm.key("proof", queue_priority.DISPLACED))
+    assert not admin.exists(swarm.key("proof", queue_priority.ACTIVE))

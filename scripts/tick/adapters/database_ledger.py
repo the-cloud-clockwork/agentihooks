@@ -16,6 +16,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 from scripts.swarm import timing
+from scripts.swarm_ledger import request_metrics
 from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import resources as api_resources
 from scripts.swarm_ledger.api import routes as api_routes
@@ -133,25 +134,48 @@ def answer(found: Services, exchange: Exchange, slug: str, path: str) -> tuple[i
     return settled(exchange, path, route)
 
 
-def answered(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Answer one ledger API request in process, a refusal raised as the server's HTTP error."""
+def written(path: str) -> dict[str, str]:
+    """The headers a ledger API request from this process carries beside its body: the writer's worktree on
+    operations."""
+    extra: dict[str, str] = writer_header() if path == "operations" else {}
+    return extra
+
+
+def replied(
+    slug: str, path: str, payload: dict[str, Any] | None, extra: Mapping[str, str]
+) -> tuple[Message, int, bytes]:
+    """The headers one ledger API request is sent with in process, ``extra`` beside its body headers, and the status
+    and body the route code answers it with for the caller ``principal`` names."""
     encoded = b"" if payload is None else json.dumps(payload).encode()
     headers = Message()
     headers["Content-Type"] = "application/json"
     headers["Content-Length"] = str(len(encoded))
-    extra: dict[str, str] = writer_header() if path == "operations" else {}
     for name, value in extra.items():
         headers[name] = value
     url = f"/api/v1/ledgers/{slug}/{path}"
     exchange = Exchange("GET" if payload is None else "POST", url, headers, io.BytesIO(encoded))
     status, body = answer(services(), exchange, slug, urlsplit(path).path or "metadata")
+    return headers, status, body
+
+
+def answered(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Answer one ledger API request in process, a refusal raised as the server's HTTP error."""
+    headers, status, body = replied(slug, path, payload, written(path))
     if status >= 400:
+        url = f"/api/v1/ledgers/{slug}/{path}"
         raise urllib.error.HTTPError(url, status, "ledger refused", headers, io.BytesIO(body))
     reply: dict[str, Any] = json.loads(body)
     return reply
 
 
 def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Answer one ledger API request in process as ``journaled`` does, timed through request metrics as the ledger
+    server times its requests."""
+    with request_metrics.command("GET" if payload is None else "POST", f"/api/v1/ledgers/{slug}/{path}"):
+        return journaled(slug, path, payload)
+
+
+def journaled(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Answer one ledger API request in process as ``answered`` does; inside a tick pass, also journal one
     ``swarm_tick_ledger_call`` line naming its ledger, method, path and outcome with its wall seconds."""
     current = timing.PASS.get()
