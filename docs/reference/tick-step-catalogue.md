@@ -27,6 +27,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | status publish | closing | closing | 2 | 60 | health findings | none | tick-status-publish-last-findings |
 | step starvation | closing | closing | 2 | 60 | none | inbox | tick-step-starvation |
 | dispatch seat | dispatch seat | tick | 2 | 60 | drained resume, sleeping | none | none |
+| expert seats | dispatch seat | tick | 2 | 60 | drained resume, reap | coordination, inbox, runtime | expert-seat-step |
 | drained resume | drained resume | tick | 2 | 60 | automated cleanup, ledger state, master move fail over, master start watch, master wake, recover master, sleeping, stopped branch | none | none |
 | sleeping | drained resume | tick | 2 | 60 | automated cleanup, ledger state, stopped branch | none | none |
 | master down | master seats | tick | 2 | 60 | drained resume | none | none |
@@ -101,6 +102,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | snapshot job | wrapper metrics | tick | 2 | 60 | none | none | none |
 | dependency audit | wrapper phases | tick | 2 | 60 | none | none | swarm-ordering-dependency-audit |
 | focus unclaimed | wrapper phases | tick | 2 | 60 | none | coordination | swarm-focus-unclaimed-finding |
+| order waiting | wrapper phases | slow | 2 | 600 | none | coordination | swarm-order-waiting-finding |
 | planning after phase | wrapper phases | tick | 12 | 60 | planning and phase pass | none | none |
 | planning and phase pass | wrapper phases | tick | 12 | 60 | none | none | none |
 | thin task pass | wrapper phases | tick | 2 | 120 | none | inbox, ledger | tick-thin-task-pass |

@@ -420,6 +420,7 @@ def _refresh(
         actions = [HELD.format(run_id=last["id"])]
     else:
         actions = _recover(slug, redis, ledger, doc, last, config.repo)
+        actions += release_wait.announce(Mail(InboxStore(redis), store, slug), config, last["id"], last["html_url"])
     redis.set(key(slug, "seen"), last["id"])
     return actions
 

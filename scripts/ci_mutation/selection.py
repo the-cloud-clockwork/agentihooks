@@ -12,7 +12,7 @@ from collections import Counter
 from pathlib import Path
 from time import process_time
 from types import ModuleType, SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from mutmut.utils.format_utils import get_mutant_name
@@ -26,6 +26,7 @@ from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import split_key, write_part
 from scripts.ci_mutation.stats_dependencies import records_within
+from scripts.ci_mutation.timeouts import retry_timeouts
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -354,8 +355,23 @@ def loaded_files(bases: list[Path], modules: dict[str, ModuleType] = sys.modules
     return sorted(found)
 
 
-def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
+def run_stats_with_flake_ledger(test_runner: Any, tests: list[str], output: Path) -> int:
     os.environ["MUTANT_UNDER_TEST"] = "stats"
+    flakes = output.with_suffix(".flakes.jsonl")
+    flakes.unlink(missing_ok=True)
+    test_runner._pytest_add_cli_args.extend(["-p", "xdist", "-p", "tests.flake_ledger"])
+    previous = os.environ.get("CI_FLAKES")
+    os.environ["CI_FLAKES"] = str(flakes)
+    try:
+        return test_runner.run_stats(tests=tests)
+    finally:
+        if previous is None:
+            os.environ.pop("CI_FLAKES", None)
+        else:
+            os.environ["CI_FLAKES"] = previous
+
+
+def collect_shard_stats(runner: Any, test_runner: Any, tests: list[str], output: Path, basetemp: str) -> None:
     os.environ["PY_IGNORE_IMPORTMISMATCH"] = "1"
     # Stats tracing slows every test, so a wall clock bound only holds in the unit shards.
     test_runner._pytest_add_cli_args = [
@@ -385,7 +401,7 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
         *(Path(root).resolve() for root in [os.environ.get("MUTATION_STATS_ROOT")] if root),
     ]
     start = process_time()
-    status = test_runner.run_stats(tests=tests)
+    status = run_stats_with_flake_ledger(test_runner, tests, output)
     # A bucket of only wall clock tests deselects everything, and pytest reports that as no tests collected.
     status = 0 if status == pytest.ExitCode.NO_TESTS_COLLECTED else status
     dependencies = {}
@@ -498,7 +514,21 @@ def collect_file_stats(runner, test_runner, files: list[str], workers: int, work
     return collect(files)
 
 
-def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stats: tuple[str, ...]) -> None:
+def collect_stats_with_flake_ledger(
+    runner: Any, test_runner: Any, files: list[str], workers: int, work: Path, output: Path, index: int
+) -> list[dict[str, Any]]:
+    for flakes in work.glob("stats-*.flakes.jsonl"):
+        flakes.unlink()
+    try:
+        return collect_file_stats(runner, test_runner, files, workers, work)
+    finally:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.with_name(f"flakes-{index}.jsonl").write_text(
+            "".join(flakes.read_text() for flakes in sorted(work.glob("stats-*.flakes.jsonl")))
+        )
+
+
+def load_or_collect_stats(runner: Any, test_runner: Any, paths: list[str], mode: str, stats: tuple[str, ...]) -> None:
     if mode not in ("", "collect", "reuse"):
         raise ValueError(f"unknown mutation stats mode {mode!r}")
     for path in paths:
@@ -508,7 +538,9 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
             break
     else:
         if mode == "collect":
-            write_part(Path(stats[0]), stats[1], (int(stats[2]), int(stats[3])), [])
+            output = Path(stats[0])
+            write_part(output, stats[1], (int(stats[2]), int(stats[3])), [])
+            output.with_name(f"flakes-{int(stats[2])}.jsonl").write_text("")
         raise SystemExit(0)
     if mode == "reuse":
         apply_stats(runner, json.loads(Path(stats[0]).read_text()))
@@ -525,7 +557,9 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
             if total > 1:
                 files = collect_test_ids(test_runner, files)
             split = split_files(Path.cwd(), files, total)
-            results = collect_file_stats(runner, test_runner, split[index], workers, Path.cwd())
+            results = collect_stats_with_flake_ledger(
+                runner, test_runner, split[index], workers, Path.cwd(), output, index
+            )
             write_part(output, key, (index, total), results, split_key(split))
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
@@ -588,30 +622,38 @@ def run_unit(
         return 1
 
 
-def forked_children():
-    # Defined inside a function: a mutated copy trampolines top level methods,
-    # and mutmut reads os.environ in its forced fail.
+def forked_children(retry: Callable[[int, int], int | None] | None = None) -> ModuleType:
     class ForkedChildren(ModuleType):
-        # mutmut reaps with os.wait() and raises KeyError on a child a test left behind in its own process.
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__(os.__name__)
-            self.pids = set()
+            self.pids: set[int] = set()
+            self.retries: dict[int, int] = {}
 
-        def __getattr__(self, name):
+        def __getattr__(self, name: str) -> object:
             return getattr(os, name)
 
-        def fork(self):
+        def fork(self) -> int:
             pid = os.fork()
             if pid:
                 self.pids.add(pid)
             return pid
 
-        def wait(self):
+        def wait(self) -> tuple[int, int]:
             while True:
                 pid, status = os.wait()
+                if pid in self.retries:
+                    self.pids.discard(pid)
+                    return self.retries.pop(pid), status
                 if pid in self.pids:
                     self.pids.discard(pid)
-                    return pid, status
+                    replacement = retry(pid, status) if retry is not None else None
+                    if replacement is None:
+                        return pid, status
+                    self.retries[replacement] = pid
+
+        def kill(self, pid: int, sig: int) -> None:
+            targets = dict(zip(self.retries.values(), self.retries, strict=True))
+            os.kill(targets.get(pid, pid), sig)
 
     return ForkedChildren()
 
@@ -708,10 +750,11 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     runner.PytestRunner.execute_pytest = memory.wrap(runner.PytestRunner.execute_pytest)
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
     runner.write_all_mutants_to_file = write_selected
-    runner.os = forked_children()
-    for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
-        sys.modules.pop(name)
-    runner.cli(["run", "--max-children", str(worker_count(os.cpu_count()))])
+    with retry_timeouts(runner, memory, shard[0], run_tests, run_unit) as retry:
+        runner.os = forked_children(retry)
+        for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
+            sys.modules.pop(name)
+        runner.cli(["run", "--max-children", str(worker_count(os.cpu_count()))])
 
 
 if __name__ == "__main__":

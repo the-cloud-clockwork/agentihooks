@@ -1,0 +1,11 @@
+{
+  "gate": "test-count/hold-the-base-revision-s-test-count",
+  "reason": "fewer tests than the base floor",
+  "edits": [
+    {
+      "path": "tests/ci_lab/test_expressions.py",
+      "before": "def test_interpolate_replaces_each_embedded_expression_with_its_text() -> None:",
+      "after": "def interpolate_replaces_each_embedded_expression_with_its_text() -> None:"
+    }
+  ]
+}

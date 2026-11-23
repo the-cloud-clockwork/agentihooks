@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from scripts.swarm import expert_launch
+
 EFFORTS = {"claude": ("low", "medium", "high", "xhigh", "max"), "codex": ("low", "medium", "high", "xhigh")}
 DEFAULT = ("medium", "xhigh")
 MASTER_FLOOR = "xhigh"
@@ -35,7 +37,9 @@ def of(config):
 
 
 def bounds(config: Any, lane: str) -> tuple[str, ...]:
-    """The swarm range, lifted for masters so they never start below xhigh."""
+    """The swarm range, lifted for masters so they never start below xhigh; an expert's own range whatever it is."""
+    if lane == expert_launch.LANE:
+        return expert_launch.EFFORTS
     found = of(config)
     if lane != "master":
         return found

@@ -1,4 +1,7 @@
-"""The gate entry point a condition shim runs: python -m scripts.gates NAME, the hook payload on stdin.
+"""The gate entry point a condition shim runs: python -m scripts.gates NAME [NAME ...], the hook payload on stdin.
+
+Several names are judged in order on the one payload and the first gate that does not let the call through ends it; a
+name BEFORE lists is preceded by its gates, so the build gate's callers judge the recon gate first.
 
 Exit 2 with the reason on stderr denies the call; exit 0 lets it through; an unknown gate exits 1, which the
 condition engine logs and skips. A gate in observe mode, an operator lift and a gate that raises let the call through
@@ -8,12 +11,16 @@ and write the gate log row instead.
 import json
 import os
 import sys
+from collections.abc import MutableMapping
+from pathlib import Path
+from typing import Protocol
 
 from scripts.gates import lift, log, modes
 from scripts.gates.base import Call, Decision, Who
 from scripts.gates.brain import BrainGate
 from scripts.gates.build import BuildGate
 from scripts.gates.claim_stop import ClaimStop
+from scripts.gates.expert_stop import ExpertStop
 from scripts.gates.identity import PinnedIdentity
 from scripts.gates.intent import IntentGate
 from scripts.gates.node_caps import NodeCaps
@@ -22,6 +29,7 @@ from scripts.gates.placement import PlacementGate
 from scripts.gates.prompts import PromptGuard
 from scripts.gates.push_stop import PushStop
 from scripts.gates.quiet import QuietClaim
+from scripts.gates.recon import ReconGate
 from scripts.gates.reruns import RerunBudget
 from scripts.gates.sign_ins import SignIns
 from scripts.gates.subagents import SubagentBudget
@@ -40,8 +48,10 @@ GATES = {
         SubagentBudget(),
         RerunBudget(),
         IntentGate(),
+        ReconGate(),
         BuildGate(),
         ClaimStop(),
+        ExpertStop(),
         PushStop(),
         QuietClaim(),
         OnePush(),
@@ -49,19 +59,31 @@ GATES = {
     )
 }
 HOST_GATES = {gate.name: gate for gate in (PlacementGate(), PromptGuard(), NodeCaps(), Terminations(), SignIns())}
+BEFORE = {BuildGate.name: (ReconGate.name,)}
 
 
-def main(argv=None, stdin=None, environ=None, home=None):
+class Stdin(Protocol):
+    def read(self) -> str: ...
+
+
+def main(
+    argv: list[str] | None = None,
+    stdin: Stdin | None = None,
+    environ: MutableMapping[str, str] | None = None,
+    home: Path | str | None = None,
+) -> int:
+    """Judge the payload by each named gate, after the gates BEFORE lists for it, in order; the first that does not let
+    it through gives the exit code."""
     argv = sys.argv[1:] if argv is None else argv
     environ = os.environ if environ is None else environ
     named = {**GATES, **HOST_GATES}
-    gate = named.get(argv[0]) if argv else None
-    if gate is None:
+    gates = [named.get(first) for name in argv for first in (*BEFORE.get(name, ()), name)]
+    if not gates or None in gates:
         print(f"agentihooks gate: name one gate of: {', '.join(sorted(named))}", file=sys.stderr)
         return 1
     payload = json.loads((stdin or sys.stdin).read() or "{}")
     call = Call.from_payload(payload)
-    return evaluate(gate, call, environ, home)
+    return next((code for gate in gates if (code := evaluate(gate, call, environ, home))), 0)
 
 
 def _brain_metric(gate, call, who, result):

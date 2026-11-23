@@ -1,0 +1,11 @@
+{
+  "gate": "semgrep/scan/new-test-waits-keep-a-bound-of-ten-seconds-or-more",
+  "reason": "test-wait-bound-under-ten-seconds: a successful event wait has a one second bound",
+  "edits": [
+    {
+      "path": "tests/test_claude_md_sanity.py",
+      "before": "\n\nclass TestClaudeMdSanity:\n",
+      "after": "\n\ndef test_planted_short_wait() -> None:\n    from threading import Event\n\n    event = Event()\n    event.set()\n    assert event.wait(1)\n\n\nclass TestClaudeMdSanity:\n"
+    }
+  ]
+}

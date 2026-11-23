@@ -41,7 +41,7 @@ def _git(root: Path, *arguments: str, data: str | None = None, environ: Mapping[
 
 
 def prepare(root: Path, name: str, base: str) -> Pair:
-    if re.fullmatch(r"[a-z][a-z0-9-]*", name) is None:
+    if re.fullmatch(r"[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*", name) is None:
         raise ValueError("a plant name contains lowercase words and hyphens")
     fixture = json.loads((root / CATALOG / f"{name}.json").read_text())
     revision = _git(root, "rev-parse", "--verify", f"{base}^{{commit}}").strip()

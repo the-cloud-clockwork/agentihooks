@@ -1,0 +1,37 @@
+[
+  {
+    "query": "HANDOFF PREPARATION arrived. I am an expert on a mission with three deliverables: the first is merged, the second has an open pull request, the third is not started. Prepare my handoff.",
+    "files": [],
+    "expected_behavior": [
+      "Runs the expert mission command and opens the Mission section with the mission line it prints.",
+      "Writes the ten headings in order with D1 under Done with its evidence and D2 and D3 under Pending, each deliverable named exactly once.",
+      "Gives every Done, Tests and Validation bullet its evidence or the word hypothesis, ends with the handoff complete marker and submits with the swarm handoff command."
+    ]
+  },
+  {
+    "query": "The handoff command refused my expert handoff: deliverable D2 is named by 2 bullets, and Tests bullet 1 carries no evidence.",
+    "files": [],
+    "expected_behavior": [
+      "Keeps one D2 bullet, under Pending when anything of it is open, and removes the other.",
+      "Adds the run or command evidence to the Tests bullet, or labels it hypothesis with the check still needed.",
+      "Fixes every listed fault before submitting again."
+    ]
+  },
+  {
+    "query": "I am the next expert of this lineage. The prompt carries the last expert's handoff and transfer 4c1d. What do I do first?",
+    "files": [],
+    "expected_behavior": [
+      "Reads the runtime envelope, the handoff body and its Read first addresses in rank order.",
+      "Confirms the first Next action exactly as written with confirm-handoff 4c1d --next.",
+      "Verifies each listed assumption before depending on it and continues from Stopped at."
+    ]
+  },
+  {
+    "query": "Half of deliverable four works but its regression test is still red. Where does it go in my expert handoff?",
+    "files": [],
+    "expected_behavior": [
+      "Places D4 under Pending, once, saying what is done and what is left.",
+      "Records the red test under Tests with the run it failed in."
+    ]
+  }
+]
