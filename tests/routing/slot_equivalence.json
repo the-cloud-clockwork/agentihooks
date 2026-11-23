@@ -169,17 +169,23 @@
         "plan": {
           "claude": 1,
           "codex": 0
+        },
+        "review": {
+          "claude": 0,
+          "codex": 0
         }
       },
       "configured": {
         "ci": 2,
         "eng": 4,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 2,
         "eng": 4,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 24,
@@ -216,7 +222,8 @@
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed, unknown; Claude has 24 free seats and Codex has 10 free seats"
     },
@@ -334,17 +341,23 @@
         "plan": {
           "claude": 1,
           "codex": 0
+        },
+        "review": {
+          "claude": 0,
+          "codex": 0
         }
       },
       "configured": {
         "ci": 3,
         "eng": 8,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 3,
         "eng": 8,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -416,7 +429,8 @@
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed; Claude has 28 free seats and Codex has 6 free seats"
     },
@@ -567,17 +581,23 @@
         "plan": {
           "claude": 0,
           "codex": 0
+        },
+        "review": {
+          "claude": 0,
+          "codex": 0
         }
       },
       "configured": {
         "ci": 2,
         "eng": 6,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 1,
         "eng": 4,
-        "plan": 0
+        "plan": 0,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -613,7 +633,8 @@
             "index": 3
           }
         ],
-        "plan": []
+        "plan": [],
+        "review": []
       },
       "reason": "eng, ci and plan have no more ready tasks; accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
@@ -764,17 +785,23 @@
         "plan": {
           "claude": 1,
           "codex": 0
+        },
+        "review": {
+          "claude": 0,
+          "codex": 0
         }
       },
       "configured": {
         "ci": 2,
         "eng": 6,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 2,
         "eng": 6,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -831,7 +858,8 @@
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
@@ -982,17 +1010,23 @@
         "plan": {
           "claude": 1,
           "codex": 0
+        },
+        "review": {
+          "claude": 0,
+          "codex": 0
         }
       },
       "configured": {
         "ci": 1,
         "eng": 3,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 1,
         "eng": 3,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -1029,7 +1063,8 @@
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
@@ -1180,17 +1215,23 @@
         "plan": {
           "claude": 1,
           "codex": 0
+        },
+        "review": {
+          "claude": 0,
+          "codex": 0
         }
       },
       "configured": {
         "ci": 1,
         "eng": 3,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 1,
         "eng": 3,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -1227,7 +1268,8 @@
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
@@ -1378,17 +1420,23 @@
         "plan": {
           "claude": 1,
           "codex": 0
+        },
+        "review": {
+          "claude": 0,
+          "codex": 0
         }
       },
       "configured": {
         "ci": 2,
         "eng": 5,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 2,
         "eng": 5,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -1440,7 +1488,8 @@
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     }

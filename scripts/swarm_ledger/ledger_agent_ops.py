@@ -4,8 +4,10 @@ Every op carries `by`, the agent's name; the server records it so the gate can a
 """
 
 import re
+from typing import Any
 
 import ledger_comments
+import ledger_tasks
 
 from scripts.swarm_ledger import ports
 
@@ -210,7 +212,10 @@ def _set(doc, op, ctx):
     return True
 
 
-def _add_item(doc, op, ctx):
+def _add_item(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+    if op["list"] == "followups" and (refused := ledger_tasks.expert_refusal(op["by"], "files no follow up")):
+        ctx.refused.append(refused)
+        return False
     items = doc.setdefault(op["list"], [])
     if any(i["id"] == op["id"] for i in items):
         return True

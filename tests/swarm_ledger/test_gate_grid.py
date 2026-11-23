@@ -14,6 +14,7 @@ ORDER = [
     "recon",
     "build",
     "claim-stop",
+    "expert-stop",
     "push-stop",
     "quiet",
     "one-push",

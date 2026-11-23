@@ -3,10 +3,12 @@ import hmac
 import io
 import json
 import signal
+from typing import cast
 
 import pytest
 
 from scripts.ci_lab.webhooks import LabIntake
+from scripts.events.bus import Bus
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
@@ -427,7 +429,12 @@ def merge_group(action="checks_requested"):
         "action": action,
         "repository": {"html_url": REPO},
         "sender": {"login": "github-merge-queue[bot]"},
-        "merge_group": {"head_sha": "a1", "base_sha": "b0"},
+        "merge_group": {
+            "head_sha": "a1",
+            "base_sha": "b0",
+            "head_ref": "refs/heads/gh-readonly-queue/dev/pr-7-c3",
+            "base_ref": "refs/heads/dev",
+        },
     }
 
 
@@ -448,7 +455,7 @@ def send_notice(ingress, payload, signature=None):
 def test_a_merge_group_asking_for_checks_is_published_as_a_lab_head():
     ingress, swarm, lab = lab_setup()
     assert deliver(ingress, "merge_group", merge_group()) == 200
-    assert drain(swarm) == []
+    assert [(e.swarm, e.type) for e in drain(swarm)] == [("crew", "merge_group.requested")]
     assert [(e.type, e.data["head"], e.data["base"], e.author) for e in drain(lab)] == [
         ("ci.lab.head.merge_group", "a1", "b0", "github-merge-queue[bot]")
     ]
@@ -590,3 +597,96 @@ def test_main_wires_the_lab_intake_only_when_its_notice_secret_is_set(monkeypatc
     assert [subject for subject, _ in buses[0].lab_heads.entries] == []
     assert [subject for subject, _ in buses[1].lab_heads.entries] == ["ci.lab.head.notice"]
     assert [subject for subject, _ in buses[1].events.entries] == []
+
+
+def release(action="published", tag="v1.2.3"):
+    return {
+        "action": action,
+        "repository": {"html_url": REPO},
+        "release": {"tag_name": tag, "html_url": f"{REPO}/releases/tag/{tag}"},
+    }
+
+
+def untracked(payload):
+    payload["repository"] = {"html_url": "https://github.com/acme/gadgets"}
+    return payload
+
+
+def test_a_merge_group_for_an_untracked_repository_still_reaches_the_lab_and_publishes_no_swarm_event():
+    ingress, swarm, lab = lab_setup()
+    assert deliver(ingress, "merge_group", untracked(merge_group())) == 200
+    assert drain(swarm) == []
+    assert [e.type for e in drain(lab)] == ["ci.lab.head.merge_group"]
+
+
+def test_a_release_for_an_untracked_repository_answers_ok_and_publishes_nothing():
+    _, ingress, swarm = setup()
+    assert deliver(ingress, "release", untracked(release())) == 200
+    assert drain(swarm) == []
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_repository_events_from_recorded_payloads():
+    assert github_webhooks.repository_events("merge_group", merge_group()) == [
+        (
+            REPO,
+            "merge_group.requested",
+            "a1",
+            {"head": "a1", "base": "b0", "head_ref": "refs/heads/gh-readonly-queue/dev/pr-7-c3", "number": 7},
+        )
+    ]
+    assert github_webhooks.repository_events("release", release()) == [
+        (REPO, "release.published", "v1.2.3", {"tag": "v1.2.3", "url": f"{REPO}/releases/tag/v1.2.3"})
+    ]
+    assert github_webhooks.repository_events("merge_group", merge_group("destroyed")) == []
+    assert github_webhooks.repository_events("release", release("created")) == []
+    assert github_webhooks.repository_events("pull_request", pull_request()) == []
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_merge_group_without_a_head_ref_names_no_pull_request() -> None:
+    payload = merge_group()
+    del payload["merge_group"]["head_ref"]
+    [(_, _, _, data)] = github_webhooks.repository_events("merge_group", payload)
+    assert (data["head_ref"], data["number"]) == ("", None)
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_the_lazy_pull_tracker_announces_a_repository_event_to_the_tracking_swarm() -> None:
+    bus, _, _ = setup()
+    consumer = bus.events.consumer("release", "swarm.crew.release.published")
+    github_webhooks.LazyPulls(cast(Bus, bus)).announce(REPO, "release.published", "v1", {"tag": "v1"})
+    [event] = drain(consumer)
+    assert (event.swarm, event.type, event.key, event.data) == (
+        "crew",
+        "release.published",
+        "v1",
+        {"repository": REPO, "tag": "v1"},
+    )
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_merge_group_and_a_release_reach_each_swarm_tracking_the_repository():
+    _, ingress, swarm = setup()
+    assert deliver(ingress, "merge_group", merge_group()) == 200
+    assert deliver(ingress, "release", release()) == 200
+    events = drain(swarm)
+    assert [(e.swarm, e.type, e.key) for e in events] == [
+        ("crew", "merge_group.requested", "a1"),
+        ("crew", "release.published", "v1.2.3"),
+    ]
+    assert (events[0].data["number"], events[1].data["repository"]) == (7, REPO)
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_failed_repository_publish_answers_503_after_the_lab_head_is_published(monkeypatch, capsys):
+    bus, ingress, swarm = setup(lambda bus: LabIntake(bus.lab_heads, NOTICE_SECRET))
+    lab = bus.lab_heads.consumer("lab", "ci.lab.head.>")
+
+    def refuse(*args):
+        raise RuntimeError("broker refused")
+
+    monkeypatch.setattr(Pulls, "announce", refuse)
+    assert deliver(ingress, "merge_group", merge_group()) == 503
+    assert [e.type for e in drain(lab)] == ["ci.lab.head.merge_group"]
+    assert drain(swarm) == []

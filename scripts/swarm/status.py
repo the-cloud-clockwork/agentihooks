@@ -51,6 +51,7 @@ from scripts.swarm.health import (
     harness_pin,
     merge_stall,
     night_watch,
+    order_waiting,
     ordering_dependencies,
     prompt_backlog,
     quiet_hives,
@@ -183,6 +184,7 @@ def findings(
         + prompt_backlog.findings(store, slug)
         + urgent_hold.findings(store, slug)
         + focus_unclaimed.findings(store, slug)
+        + order_waiting.findings(store, slug)
         + ordering_dependencies.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
@@ -221,7 +223,7 @@ def _health_rows(store, slug, agents, quiet, at):
     return rows
 
 
-def talk_since_outcome(store, slug, rows):
+def talk_since_outcome(store: RedisStore, slug: str, rows: list[dict[str, Any]]) -> dict[str, int]:
     marks = progress.Progress(store.redis, slug)
     held = {row["name"]: marks.read(row["name"]) for row in rows if row.get("lane") in WORKER_LANES}
     return {name: mark.talk if mark.outcome_at else 0 for name, mark in held.items()}

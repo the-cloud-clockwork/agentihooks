@@ -74,8 +74,8 @@ def _task(event):
     return target.removeprefix("tasks/") if target.startswith("tasks/") else ""
 
 
-def _worker(by):
-    return naming.lane_of(by) in ("eng", "ci")
+def _worker(by: str) -> bool:
+    return naming.lane_of(by) in ("eng", "ci", "review")
 
 
 def _talk(event):
@@ -171,11 +171,11 @@ def inherited_rules(records, window):
     }
 
 
-def monitoring(records, window):
+def monitoring(records: Records, window: Window) -> dict[str, int | float | None]:
     workers, master = {"watch": 0, "act": 0}, {"watch": 0, "act": 0}
     for name, rows in records.activity.items():
         lane = naming.lane_of(name)
-        if lane not in ("eng", "ci", "master"):
+        if lane not in ("eng", "ci", "review", "master"):
             continue
         counted = health_activity.tally([r for r in rows if "at" in r and window.holds(r["at"])])
         into = master if lane == "master" else workers

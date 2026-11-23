@@ -18,6 +18,7 @@ from scripts.hive import (
     create_render,
     join_report,
     machine,
+    master_notice,
     member_swarms,
     nats_grant,
     registry,
@@ -157,12 +158,13 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
         return [f"would stop placement on {plan.hive} and wait up to {plan.wait_s} seconds for {names} to hand off"]
     if registry.show(store.redis, plan.hive) is not None:
         deadline_at = int((host.wall() + plan.wait_s) * 1000)
-        registry.update(
+        drained = registry.update(
             store.redis,
             plan.hive,
             ["draining=yes"],
             drain=registry.Drain(registry.drain_owner(), "hive remove", deadline_at),
         )
+        master_notice.drained(store, plan.hive, drained)
     inbox = InboxStore(store.redis)
     ordered: dict[tuple[str, str], str] = {}
     seen: dict[tuple[str, str], "AgentRecord"] = {}
@@ -245,7 +247,7 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str 
     own = host.namespace() if member else ""
     shared = bool(own) and registry.leave(client, hive, member, drain)
     if not shared:
-        registry.update(client, hive, ["draining=yes"], drain=drain)
+        master_notice.drained(store, hive, registry.update(client, hive, ["draining=yes"], drain=drain))
     inbox, ordered = InboxStore(client), {}
     deadline = host.clock() + wait_s
     while remaining := _unhanded(store, client, hive, own if shared else "", int(host.wall() * 1000)):
@@ -312,7 +314,7 @@ def _recover(
             pushed=_pushed(agent, host),
         )
         built = envelope.build(store, slug, agent, "exit", None, at, run=host.run)
-        store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=built)
+        store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope.orders_unread(built, agent))
         transfers.record(store, slug, agent, "exit", text, at)
     names = ", ".join(agent.name for _, agent in remaining)
     return (
