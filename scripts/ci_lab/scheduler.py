@@ -15,7 +15,6 @@ commit's grades on the scheduler port, metrics on the metrics port, both from on
 """
 
 import argparse
-import hashlib
 import io
 import json
 import logging
@@ -85,7 +84,9 @@ __all__ = [
     "Plan",
     "Ports",
     "READY_MS",
+    "RECORDS",
     "REFRESH_MS",
+    "REVISIONS",
     "Scheduler",
     "Settings",
     "StoredManifests",
@@ -98,6 +99,7 @@ __all__ = [
     "listen",
     "main",
     "serve",
+    "stage_grade",
     "storage",
     "stored_manifest",
     "summary",
@@ -105,6 +107,8 @@ __all__ = [
 
 GRADES = f"{PREFIX}grade:"
 LIVE = f"{PREFIX}grades"
+REVISIONS = f"{PREFIX}revisions"
+RECORDS = f"{PREFIX}records"
 LANES = f"{PREFIX}lane:"
 WAITING = f"{PREFIX}waiting"
 TREES = f"{PREFIX}tree:"
@@ -463,16 +467,53 @@ def _parse(raw: str | bytes) -> State:
 
 @dataclass(frozen=True)
 class _Demand:
-    digest: bytes
     tier: int
     hits: int
     jobs: tuple[str, ...]
 
 
-def _grade_demand(raw: str | bytes, fingerprint: bytes) -> _Demand:
+def _grade_demand(raw: str | bytes) -> _Demand:
     state = _parse(raw)
     jobs = tuple(slot.job for slot in state.units.values() if slot.job)
-    return _Demand(fingerprint, state.tier, len(state.units) - len(jobs), jobs)
+    return _Demand(state.tier, len(state.units) - len(jobs), jobs)
+
+
+def _record_demand(record: str | bytes) -> tuple[str, _Demand]:
+    """Read a stored demand record: the revision it was written at, then its grade's tier, the units the verdict store
+    answered and the queue jobs of the rest."""
+    data = json.loads(record)
+    return str(data["revision"]), _Demand(data["tier"], data["hits"], tuple(data["jobs"]))
+
+
+def _records(client: Any, runs: Sequence[str]) -> list[str | None]:
+    """Return each run's stored demand record, or None for a run with none, read with one HMGET per run in a pipeline
+    that opens no transaction."""
+    pipe = client.pipeline(transaction=False)
+    for run in runs:
+        pipe.hmget(RECORDS, run)
+    return [record for (record,) in pipe.execute()]
+
+
+def _document(client: Any, run: str) -> str | None:
+    """Return a grade's stored state document, or None for a run with none."""
+    return client.get(GRADES + run)
+
+
+def stage_grade(pipe: Any, document: dict[str, Any]) -> None:
+    """Queue, on a pipeline watching the grade's key, one transaction storing the grade document and, while the grade
+    is live, its next revision and the demand record of that revision, or for a closed grade the removal of both."""
+    run = document["run"]
+    revision = None if document.get("conclusion") else int(pipe.hget(REVISIONS, run) or 0) + 1
+    pipe.multi()
+    pipe.set(GRADES + run, json.dumps(document))
+    if revision is None:
+        pipe.hdel(REVISIONS, run)
+        pipe.hdel(RECORDS, run)
+        return
+    jobs = [slot["job"] for slot in document["units"].values() if slot.get("job")]
+    hits = len(document["units"]) - len(jobs)
+    pipe.hincrby(REVISIONS, run)
+    pipe.hset(RECORDS, run, json.dumps({"revision": revision, "tier": document["tier"], "hits": hits, "jobs": jobs}))
 
 
 def _evidence(state: State) -> evidence.GradeEvidence:
@@ -596,7 +637,7 @@ class Scheduler:
         self.shed: tuple[str, ...] = ()
         self.registry = metrics.Registry()
         self.held: defaultdict[str, int] = defaultdict(int)
-        self._demand_cache: dict[str, _Demand] = {}
+        self._demand_cache: dict[str, tuple[str, _Demand]] = {}
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
@@ -661,16 +702,7 @@ class Scheduler:
         tiers: dict[str, int] = {}
         hits: Counter[str] = Counter()
         misses: Counter[str] = Counter()
-        cache: dict[str, _Demand] = {}
-        for run in sorted(self.client.smembers(LIVE)):
-            raw = self.client.get(f"{GRADES}{run}")
-            if raw is None:
-                continue
-            fingerprint = hashlib.sha256(raw.encode() if isinstance(raw, str) else raw).digest()
-            contribution = self._demand_cache.get(run)
-            if contribution is None or contribution.digest != fingerprint:
-                contribution = _grade_demand(raw, fingerprint)
-            cache[run] = contribution
+        for contribution in self._contributions(sorted(self.client.smembers(LIVE))):
             name = CLASSES[contribution.tier]
             if contribution.hits:
                 hits[name] += contribution.hits
@@ -678,8 +710,32 @@ class Scheduler:
                 misses[name] += len(contribution.jobs)
             for job in contribution.jobs:
                 tiers[job] = min(tiers.get(job, contribution.tier), contribution.tier)
-        self._demand_cache = cache
         return tiers, hits, misses
+
+    def _contributions(self, live: list[str]) -> list[_Demand]:
+        """Return each live run's demand contribution: the kept one while the stored revision is unchanged, else the
+        one read again; keep those that carry a revision for the next build."""
+        revisions = self.client.hgetall(REVISIONS)
+        kept = {
+            run: entry
+            for run in live
+            if (entry := self._demand_cache.get(run)) is not None and entry[0] == revisions.get(run)
+        }
+        recorded, parsed = self._read_demand([run for run in live if run not in kept])
+        self._demand_cache = kept | recorded
+        return [demand for _, demand in self._demand_cache.values()] + parsed
+
+    def _read_demand(self, runs: list[str]) -> tuple[dict[str, tuple[str, _Demand]], list[_Demand]]:
+        """Return the runs' demand read again: each stored demand record with the revision it carries, and the parsed
+        grade document of each run without a record, which no later build reuses; a run with neither is left out."""
+        recorded: dict[str, tuple[str, _Demand]] = {}
+        parsed: list[_Demand] = []
+        for run, record in zip(runs, _records(self.client, runs)):
+            if record is not None:
+                recorded[run] = _record_demand(record)
+            elif (raw := _document(self.client, run)) is not None:
+                parsed.append(_grade_demand(raw))
+        return recorded, parsed
 
     def grades_of(self, head: str) -> list[dict[str, Any]]:
         """Return every grade of a commit by run: its live grades and the closed ones its evidence markers name."""
@@ -695,8 +751,17 @@ class Scheduler:
                 yield state
 
     def save(self, state: State) -> None:
-        """Store a grade's state, so the next pass and the relay read it back."""
-        self.client.set(GRADES + state.run, json.dumps(asdict(state)))
+        """Store a grade's state, so the next pass and the relay read it back, with a live grade's next revision and
+        demand record in the same transaction, retried while another writer changes the grade."""
+        self.client.transaction(partial(stage_grade, document=asdict(state)), GRADES + state.run)
+
+    def _drop(self, run: str) -> None:
+        """Take a grade out of the live set and remove its revision and demand record in one transaction."""
+        with self.client.pipeline() as pipe:
+            pipe.srem(LIVE, run)
+            pipe.hdel(REVISIONS, run)
+            pipe.hdel(RECORDS, run)
+            pipe.execute()
 
     def _intake(self, now_ms: int) -> list[str]:
         heads = self.ports.inbox.heads()
@@ -927,8 +992,9 @@ class Scheduler:
     def _admit(self, now_ms: int) -> list[str]:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
         and backfill only into the slots workers offered free after every unit already waiting in the queue, backfill
-        and those admitted in this pass included, since the queue leases in order. A class the budget newly sheds is
-        named first. Each grade with held units is read again as it is admitted, so the pass holds one at a time."""
+        and those admitted in this pass included, since the queue leases the most urgent class first and in order
+        inside a class, which each unit is enqueued under by its grade's tier. A class the budget newly sheds is named
+        first. Each grade with held units is read again as it is admitted, so the pass holds one at a time."""
         actions = self._shedding()
         held = sorted(
             (state.tier, state.run) for state in self._live() if any(slot.held for slot in state.units.values())
@@ -945,7 +1011,7 @@ class Scheduler:
                     admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
                     waiting += DEFAULT.slots
             if admitted:
-                self.queue.enqueue(admitted, state.head, {}, state.base, state.grader)
+                self.queue.enqueue(admitted, state.head, {}, state.base, state.grader, state.tier)
                 self.save(state)
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions
@@ -969,13 +1035,13 @@ class Scheduler:
         is final and every check run is posted, counting the closed grade."""
         state = self.grade(run)
         if state is None:
-            self.client.srem(LIVE, run)
+            self._drop(run)
             return [f"forgot {run}"]
         for slot in state.units.values():
             self._collect(slot, tiers, state)
         actions = self._post(state, now_ms)
         if all(slot.outcome for slot in state.units.values()) and not _moved(state):
-            self.client.srem(LIVE, run)
+            self._drop(run)
             state.conclusion = str(state.posted[REQUIRED][1])
             if state.tier == Priority.QUEUE and state.conclusion == "success":
                 self.client.set(f"{TREES}{state.repo}|{state.tree}", run)
@@ -1169,10 +1235,11 @@ def frame(
     """Return a tier's plan: the lab's gates its `Gate — Required` rules require, and every other job they require as
     a gate without units, which passes, so only what the lab grades can turn the grade red.
 
-    A pull request or hotfix grade runs with no test scope and no mutation, and names each authoritative gate it runs
-    no unit of, which it posts as skipped; a merge group grade runs only the queue suite with no lost unit rerun; both
-    keep the authoritative gates, which post as lab/<gate>; a promotion or backfill grade takes every lab gate, since
-    those rules require no job by name, and lists none.
+    A pull request or hotfix grade runs with no test scope and no mutation, grades under each required job the units
+    of every reusable workflow job it calls, which the expander files under the job, a slash and the called job, and
+    names each authoritative gate it runs no unit of, which it posts as skipped; a merge group grade runs only the
+    queue suite with no lost unit rerun; both keep the authoritative gates, which post as lab/<gate>; a promotion or
+    backfill grade takes every lab gate, since those rules require no job by name, and lists none.
     """
     if tier >= Priority.PROMOTION:
         return Plan(tree, grader, dict(gates))
@@ -1181,7 +1248,10 @@ def frame(
         required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
         queued = {job: gates.get(job, ()) for job in required}
         return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed)
-    framed = {job: gates.get(job, ()) for job in PULL_REQUIRED}
+    framed = {
+        job: tuple(unit for key, units in gates.items() if key == job or key.startswith(f"{job}/") for unit in units)
+        for job in PULL_REQUIRED
+    }
     idle = frozenset(gate for gate in authoritative if not framed.get(gate))
     return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}}, idle=idle, authoritative=listed)
 

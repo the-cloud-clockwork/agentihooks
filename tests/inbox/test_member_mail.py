@@ -520,6 +520,31 @@ def test_the_sweep_moves_open_seat_mail_to_the_new_occupants_host(store, moved_s
     assert member.inbox(SEAT) == []
 
 
+@pytest.mark.feature("swarm-review-seat-mail")
+def test_the_sweep_moves_open_review_seat_mail_to_the_new_occupants_host(store: RedisStore) -> None:
+    from scripts.hive import auth
+
+    seat = "review-1@sw"
+    store.update("sw", max_review=1)
+    store.redis.hset(f"{auth.PREFIX}:member:m2", mapping={"name": "m2", "ledger": "digest"})
+    store.redis.sadd(auth.INDEX, "m2")
+    first = store.next_name("sw", "review")
+    store.start_execution("sw", AgentRecord(first, "review", "t1", seat=seat, hive="m1"))
+    store.seats.occupy(seat, first, 1)
+    reviewer = next(a for a in store.agents("sw") if a.name == first)
+    item = InboxStore(store.redis).send("sender", first, "contract")
+    member = InboxStore(store.redis, world="m1")
+    assert [i.id for i in member.inbox(first)] == [item.id]
+    store.put_agent("sw", replace(reviewer, state="finished"))
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    name = store.next_name("sw", "review")
+    store.start_execution("sw", AgentRecord(name, "review", "t1", seat=seat, hive="m2"), reviewer.execution_id)
+    store.seats.occupy(seat, name, 2)
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert [i.id for i in InboxStore(store.redis, world="m2").open_mail(name)] == [item.id]
+    assert member.inbox(seat) == []
+
+
 def test_a_moved_seat_item_is_pending_with_its_history_and_a_move_entry(store, moved_seat):
     member, item, name = moved_seat
     before = member.history(item.id)

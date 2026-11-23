@@ -11,7 +11,7 @@ import subprocess
 import zipfile
 from collections.abc import Callable
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 from scripts.ci_budget import defects, seconds
@@ -74,7 +74,7 @@ def _github(repo_dir: str, endpoint: str, jq: str, run: Callable) -> str:
     ).stdout.strip()
 
 
-def _since_fix(repo_dir: str, branch: str, test: dict, run: Callable) -> tuple[list[str], list[str]]:
+def _since_fix(repo_dir: str, branch: str, test: dict[str, Any], run: Callable) -> tuple[list[str], list[str]]:
     query = urlencode({"sha": branch, "path": test["test"].split("::")[0], "per_page": 1})
     commit = _github(repo_dir, f"commits?{query}", ".[0].sha // empty", run)
     if not commit:
@@ -87,8 +87,12 @@ def _since_fix(repo_dir: str, branch: str, test: dict, run: Callable) -> tuple[l
     )
     if not merged:
         return test["runs"], []
+    sources: dict[str, str] = test.get("sources") or {}
     current, before = [], []
     for run_id in test["runs"]:
+        if sources.get(run_id) == "lab":
+            current.append(run_id)
+            continue
         created = _github(repo_dir, f"actions/runs/{run_id}", ".created_at", run)
         (before if seconds(created) < seconds(merged) else current).append(run_id)
     return current, before

@@ -21,6 +21,7 @@ SEQUENCE = "expert-seq"
 ACTIVE = "expert-running"
 PROOFS = "expert-proofs"
 LAUNCHES = "expert-launches"
+FAILURES = "expert-launch-failures"
 CLOSING = "expert-closing"
 RUNNING = "running"
 STOPPED = "stopped"
@@ -167,6 +168,34 @@ def launched(store: Any, slug: str, name: str) -> int:
 def unlaunched(store: Any, slug: str, name: str) -> int:
     """Take back the count of an expert whose spawn failed after it was counted, and return the count left."""
     return int(store.redis.hincrby(store.key(slug, LAUNCHES), name, -1))
+
+
+def launch_failed(store: Any, slug: str, name: str, agent: str, reason: str, at: int) -> None:
+    """Keep the last failed launch of a running lineage beside its record: why it failed, the expert that did not
+    start and when. The record itself keeps its shape, so a member on an older release still reads it. A lineage
+    that ended, or that the swarm does not hold, gets none."""
+    key = store.key(slug, LINEAGES)
+
+    def write(pipe: Any) -> None:
+        raw = pipe.hget(key, name)
+        pipe.multi()
+        if raw and Lineage(**json.loads(raw)).state == RUNNING:
+            pipe.hset(store.key(slug, FAILURES), name, json.dumps({"at": at, "agent": agent, "reason": reason}))
+
+    store.redis.transaction(write, key)
+
+
+def launch_recovered(store: Any, slug: str, name: str) -> None:
+    """Drop the failed launch kept for the lineage: an expert of it launched since."""
+    store.redis.hdel(store.key(slug, FAILURES), name)
+
+
+def launch_failures(store: Any, slug: str) -> dict[str, dict[str, Any]]:
+    """The last failed launch of each running lineage that has had none succeed since, by lineage id. The set of
+    the running ids bounds the read, so one kept before its lineage ended is no longer read."""
+    names: list[str] = sorted(store.redis.smembers(store.key(slug, ACTIVE)))
+    raws: list[str | None] = store.redis.hmget(store.key(slug, FAILURES), names) if names else []
+    return {name: json.loads(raw) for name, raw in zip(names, raws) if raw}
 
 
 def closing(store: Any, slug: str) -> list[Lineage]:
