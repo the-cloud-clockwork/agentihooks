@@ -68,3 +68,13 @@ def test_a_refused_read_prints_its_reason_and_returns_one(
         ("open", "", ()),
         ("open", "", ()),
     ]
+
+
+@pytest.mark.feature("review-findings-read")
+@pytest.mark.parametrize("args", [["read"], ["read", URL]])
+def test_review_read_requires_a_url_and_swarm(args: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        cli.parser().parse_args(args)
+    assert error.value.code == 2
+    missing = "url, --slug" if args == ["read"] else "--slug"
+    assert capsys.readouterr().err.endswith(f"error: the following arguments are required: {missing}\n")

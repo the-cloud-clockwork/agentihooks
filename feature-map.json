@@ -2618,7 +2618,8 @@
         "tests/review/test_record_mark.py::test_reads_add_no_posts",
         "tests/review/test_cli_read.py::test_read_marks_the_chosen_finding_answered_by_the_calling_author",
         "tests/review/test_cli_read.py::test_read_without_options_marks_every_finding_read",
-        "tests/review/test_cli_read.py::test_a_refused_read_prints_its_reason_and_returns_one"
+        "tests/review/test_cli_read.py::test_a_refused_read_prints_its_reason_and_returns_one",
+        "tests/review/test_cli_read.py::test_review_read_requires_a_url_and_swarm"
       ]
     },
     {

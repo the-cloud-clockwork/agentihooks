@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from typing import Any, NamedTuple, Protocol
 from urllib.parse import urlsplit
