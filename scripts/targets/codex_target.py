@@ -10,6 +10,7 @@ Writes the Codex-shaped install surface (docs/reference/CODEX-COMPAT.md §5):
 - ``~/.codex/AGENTS.md`` — persona: bundle CLAUDE.md ⊕ profile-chain
   CLAUDE.mds ⊕ compiled rules (codex has no rules dir) ⊕ CI manifesto.
 - ``~/.agents/skills/`` — skills symlinks (open agent-skills standard dir).
+- ``~/.codex/agents/`` — agents as Codex custom agent files.
 - ``~/.codex/prompts/`` — never written; prompts an earlier install translated are removed.
 - ``[mcp_servers.*]`` — MCP registration (stdio + http url; SSE entries are
   skipped with a warning until the server side exposes streamable HTTP).
@@ -40,9 +41,11 @@ from scripts.targets._common import (
     _install_module,
     agents_skills_home,
     build_persona,
+    claude_local_entries,
     clear_managed_mcp,
     drop_if_credentialed,
     has_env_reference,
+    load_manifest,
     managed_mcp_names,
     migrate_legacy_mcp,
     reap_translated_commands,
@@ -72,6 +75,8 @@ CODEX_HOOK_EVENTS = (
 )
 
 _NO_CONTEXT_EVENTS = frozenset({"Stop", "SubagentStop", "SessionEnd", "PreCompact", "PermissionRequest"})
+
+_LOCAL_COMMANDS_MANIFEST = ".agentihooks-codex-local-commands.json"
 
 
 _REFERENCE_NAME = re.compile(r"\$\{?(\w+)")
@@ -522,22 +527,28 @@ class CodexAdapter:
         _atomic_write(hooks_path, text)
         _i._cprint(f"[OK] Wrote {hooks_path} ({len(CODEX_HOOK_EVENTS)} events)")
 
-    def install_features(self, subdir: str, layers: list[tuple[str, Path]], filter_fn) -> None:
+    def install_features(self, subdir: str, layers: list[tuple[str, Path]], filter_fn: Callable[[Path], bool]) -> None:
         """
         ~/.agents/skills is shared with the copilot target, which writes translated commands there as real directories.
         Clear any whose name a real skill now claims — the symlinker refuses to replace a non-symlink, so otherwise this
         skill silently never installs.
 
         Codex has no auto-loaded rules dir — compile into AGENTS.md.
+
+        Claude Code also loads what the operator placed in ~/.claude by hand; each feature carries those entries too,
+        under names no layer ships.
         """
         _i = _install_module()
+        local = claude_local_entries(subdir, layers, filter_fn)
         if subdir == "skills":
             dst = agents_skills_home()
             reap_translated_commands(skill_names_in(layers, filter_fn), reason="a real skill now owns the name")
             for label, src in layers:
                 _i._symlink_dir_contents(src, dst, label=f"codex {label}", filter_fn=filter_fn)
+            self._link_local_skills(local)
         elif subdir == "commands":
             self._reap_prompts()
+            self._write_local_commands(local)
         elif subdir == "rules":
             collected: dict[str, tuple[str, str, str]] = {}
             for label, src in layers:
@@ -549,12 +560,25 @@ class CodexAdapter:
                             collected[f.name] = (label, f.name, f.read_text())
                         except OSError:
                             pass
+            for f in local:
+                with contextlib.suppress(OSError):
+                    collected[f.name] = ("local", f.name, f.read_text())
             self._pending_rules = list(collected.values())
             _i._cprint(f"  [OK] {len(self._pending_rules)} rule(s) queued for AGENTS.md compilation")
         elif subdir == "agents":
-            _i._cprint(
-                "  [--] Codex has no custom-subagent registry — agents skipped (docs/reference/CODEX-COMPAT.md §3 row 16)."
-            )
+            self._write_agents(layers, filter_fn, local)
+
+    @staticmethod
+    def _link_local_skills(local: list[Path]) -> None:
+        names = {p.name for p in local}
+
+        def is_local(path: Path) -> bool:
+            return path.name in names
+
+        _i = _install_module()
+        link: Callable[..., None] = getattr(_i, "_symlink_dir_contents")
+        skills = Path(getattr(_i, "CLAUDE_HOME")) / "skills"
+        link(skills, agents_skills_home(), label="codex local skill", filter_fn=is_local)
 
     def _reap_prompts(self) -> None:
         """Remove the prompts an earlier install translated; Codex 0.160 no longer reads ~/.codex/prompts."""
@@ -569,6 +593,68 @@ class CodexAdapter:
                 pass
             manifest_path.unlink()
             _i._cprint(f"  [RM] Removed translated prompts from {prompts_dir}")
+
+    def _write_agents(
+        self, layers: list[tuple[str, Path]], filter_fn: Callable[[Path], bool], local: list[Path]
+    ) -> None:
+        """
+        agents/*.md → ~/.codex/agents/<stem>.toml, the Codex custom agent files Codex loads as spawnable roles.
+        Tracked by a manifest: a later run removes the files it wrote and no longer ships, and an operator's own
+        file of the same name wins.
+        """
+        import tomlkit
+
+        from scripts.profiles.render import codex_agent_doc
+
+        say: Callable[[str], None] = getattr(_install_module(), "_cprint")
+        dst_dir = self.home() / "agents"
+        manifest_path = dst_dir / ".agentihooks-manifest.json"
+        previous = load_manifest(manifest_path)
+        sources = {f.stem: f for _label, src in layers if src.is_dir() for f in sorted(src.iterdir()) if filter_fn(f)}
+        sources.update({f.stem: f for f in local})
+        written: list[str] = []
+        for stem, src in sources.items():
+            dst = dst_dir / f"{stem}.toml"
+            if dst.exists() and dst.name not in previous:
+                say(f"  [!!] {dst} exists and is not agentihooks-managed — skipping (operator file wins)")
+                continue
+            with contextlib.suppress(OSError):
+                if doc := codex_agent_doc(src):
+                    dst_dir.mkdir(parents=True, exist_ok=True)
+                    _atomic_write(dst, tomlkit.dumps(doc))
+                    written.append(dst.name)
+        for stale in set(previous) - set(written):
+            (dst_dir / stale).unlink(missing_ok=True)
+        if written or previous:
+            _atomic_write(manifest_path, json.dumps(sorted(written)))
+        say(f"  [OK] {len(written)} agent(s) written as Codex custom agents → {dst_dir}")
+
+    def _write_local_commands(self, commands: list[Path]) -> None:
+        """
+        A hand-placed ~/.claude/commands file becomes ~/.agents/skills/<stem>/SKILL.md, a copy of the command: Codex
+        skips a symlinked SKILL.md and one without frontmatter. Its own manifest, apart from the copilot translations.
+        """
+        say: Callable[[str], None] = getattr(_install_module(), "_cprint")
+        dst_dir = agents_skills_home()
+        manifest_path = dst_dir / _LOCAL_COMMANDS_MANIFEST
+        previous = load_manifest(manifest_path)
+        written: list[str] = []
+        for src in commands:
+            skill_dir = dst_dir / src.stem
+            with contextlib.suppress(OSError):
+                text = src.read_text()
+                taken = (skill_dir.exists() or skill_dir.is_symlink()) and src.stem not in previous
+                if taken or not text.startswith("---"):
+                    continue
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                _atomic_write(skill_dir / "SKILL.md", text)
+                written.append(src.stem)
+        for stale in set(previous) - set(written):
+            shutil.rmtree(dst_dir / stale, ignore_errors=True)
+        if written or previous:
+            _atomic_write(manifest_path, json.dumps(sorted(written)))
+        if written:
+            say(f"  [OK] {len(written)} local command(s) written as skills → {dst_dir}")
 
     def install_persona(
         self,

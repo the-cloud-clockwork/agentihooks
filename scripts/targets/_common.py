@@ -14,7 +14,7 @@ import os
 import re
 import shutil
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -289,6 +289,21 @@ def load_manifest(path: Path) -> list[str]:
         except (json.JSONDecodeError, OSError):
             pass
     return []
+
+
+def claude_local_entries(subdir: str, layers: list[tuple[str, Path]], keep: Callable[[Path], bool]) -> list[Path]:
+    """Entries an operator placed in ~/.claude/<subdir> by hand, which Claude Code loads and no layer ships."""
+    installer = _install_module()
+    src = Path(getattr(installer, "CLAUDE_HOME")) / subdir
+    if not src.is_dir():
+        return []
+    ledger: dict[str, object] = getattr(installer, "_state_links")()
+    shipped = {item.name for _label, layer in layers if layer.is_dir() for item in layer.iterdir()}
+    return [
+        item
+        for item in sorted(src.iterdir())
+        if not item.name.startswith(".") and str(item) not in ledger and item.name not in shipped and keep(item)
+    ]
 
 
 def reap_translated_commands(names: set[str], *, reason: str) -> set[str]:
