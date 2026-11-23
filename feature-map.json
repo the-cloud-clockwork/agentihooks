@@ -30,17 +30,14 @@
       ]
     },
     {
-      "id": "swarm-parser-extraction",
+      "id": "gate-entry-mode-dispatch",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-cli-split-parser",
-      "behaviour": "The swarm parser preserves every recorded command namespace, help page, refusal and current CLI handler binding while its builder lives separately and the CLI stays below 2850 lines.",
-      "seam": "scripts.swarm.cli.build_parser and scripts.swarm.cli_parser.build_parser",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45097094236-0",
+      "behaviour": "The gates entry hands the mode of the swarm to the intent gate, with the call, the caller and the verdict state, and calls every other gate with the three arguments the gate type declares. The call that carries the mode is made on a name typed as a gate whose decision takes the mode, so a static analyser counts no argument its callee does not take.",
+      "seam": "scripts.gates.entry._decide with a gate that records what it was called with; the source of the entry module, read for every decide call and the number of arguments the declared type of its gate takes",
       "tests": [
-        "tests/swarm/test_parser_equivalence.py::test_recorded_arguments_cover_every_parser_leaf",
-        "tests/swarm/test_parser_equivalence.py::test_namespaces_help_and_refusals_equal_recorded_base",
-        "tests/swarm/test_parser_equivalence.py::test_recorded_invalid_arguments_are_refused",
-        "tests/swarm/test_parser_equivalence.py::test_builder_resolves_current_cli_handlers",
-        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom"
+        "tests/gates/test_node_caps_cpu.py::test_the_entry_hands_the_mode_to_the_intent_gate_and_three_arguments_to_any_other",
+        "tests/gates/test_node_caps_cpu.py::test_every_decide_call_of_the_entry_passes_what_the_type_of_its_gate_declares"
       ]
     },
     {
@@ -6794,6 +6791,20 @@
         "tests/test_package_planners_first_rule.py::test_plan_publishers_point_at_the_rule_instead_of_the_standalone_line",
         "tests/test_package_planners_first_rule.py::test_no_package_file_keeps_the_standalone_line",
         "tests/test_package_planners_first_rule.py::test_planner_skill_plans_one_thin_task_as_well_as_a_phase"
+      ]
+    },
+    {
+      "id": "swarm-parser-extraction",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-cli-split-parser",
+      "behaviour": "The swarm parser preserves every recorded command namespace, help page, refusal and current CLI handler binding while its builder lives separately and the CLI stays below 2850 lines.",
+      "seam": "scripts.swarm.cli.build_parser and scripts.swarm.cli_parser.build_parser",
+      "tests": [
+        "tests/swarm/test_parser_equivalence.py::test_recorded_arguments_cover_every_parser_leaf",
+        "tests/swarm/test_parser_equivalence.py::test_namespaces_help_and_refusals_equal_recorded_base",
+        "tests/swarm/test_parser_equivalence.py::test_recorded_invalid_arguments_are_refused",
+        "tests/swarm/test_parser_equivalence.py::test_builder_resolves_current_cli_handlers",
+        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom"
       ]
     },
     {
@@ -14074,6 +14085,41 @@
         "tests/swarm/test_review_lane.py::test_capacity_places_a_reviewer_only_for_review_demand",
         "tests/swarm/test_review_lane.py::test_quota_status_reads_a_decision_stored_before_the_review_lane",
         "tests/swarm/test_review_lane.py::test_quota_status_shows_the_configured_review_cap_beside_the_autoscaled_ceilings"
+      ]
+    },
+    {
+      "id": "swarm-review-trigger",
+      "origin": "inventory",
+      "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
+      "seam": "scripts.tick.steps.review.review_pass, scripts.hub.github_webhooks.repository_events and scripts.hub.pulls.Pulls.announce",
+      "tests": [
+        "tests/tick/steps/test_review_pass.py::test_review_pass",
+        "tests/tick/steps/test_review_queue.py::test_one_pull_opened_event_queues_exactly_one_review_task_and_a_repeat_queues_none",
+        "tests/tick/steps/test_review_queue.py::test_a_merge_group_and_a_release_each_queue_one_review_task",
+        "tests/tick/steps/test_review_queue.py::test_review_task_ids_are_keyed_by_the_change_alone",
+        "tests/tick/steps/test_review_queue.py::test_events_from_before_the_replay_window_queue_nothing",
+        "tests/tick/steps/test_review_queue.py::test_a_ledger_refusal_is_skipped_and_never_fails_the_pass",
+        "tests/tick/steps/test_review_queue.py::test_the_step_is_inert_without_a_review_lane_or_a_running_swarm",
+        "tests/tick/steps/test_review_queue.py::test_the_step_runs_the_pass_on_the_swarm_bus",
+        "tests/tick/steps/test_review_queue.py::test_the_step_opens_no_bus_on_the_memory_backend",
+        "tests/hub/test_pulls.py::test_tracking_a_pull_request_records_its_swarms_for_the_repository",
+        "tests/hub/test_pulls.py::test_a_repository_event_reaches_each_tracking_swarm_with_one_id_per_change",
+        "tests/hub/test_pulls.py::test_a_repository_event_for_an_untracked_repository_publishes_nothing",
+        "tests/hub/test_github_webhooks.py::test_repository_events_from_recorded_payloads",
+        "tests/hub/test_github_webhooks.py::test_a_merge_group_and_a_release_reach_each_swarm_tracking_the_repository",
+        "tests/hub/test_github_webhooks.py::test_a_failed_repository_publish_answers_503_after_the_lab_head_is_published",
+        "tests/hub/test_github_webhooks.py::test_a_merge_group_without_a_head_ref_names_no_pull_request",
+        "tests/hub/test_github_webhooks.py::test_the_lazy_pull_tracker_announces_a_repository_event_to_the_tracking_swarm",
+        "tests/hub/test_pulls.py::test_the_repository_key_hashes_the_lowercased_repository",
+        "tests/hub/test_pulls.py::test_the_repository_of_a_pull_is_everything_before_its_last_pull_segment",
+        "tests/hub/test_pulls.py::test_a_repository_event_is_published_on_the_swarm_subject_of_its_kind",
+        "tests/tick/steps/test_review_queue.py::test_a_pull_review_task_names_its_change_and_author_exactly",
+        "tests/tick/steps/test_review_queue.py::test_a_release_review_task_names_its_tag_and_no_author",
+        "tests/tick/steps/test_review_queue.py::test_a_merge_group_naming_no_pull_request_has_no_author",
+        "tests/tick/steps/test_review_queue.py::test_an_author_task_without_a_phase_gives_the_review_no_phase",
+        "tests/tick/steps/test_review_queue.py::test_the_durable_consumer_is_named_by_kind_and_swarm",
+        "tests/tick/steps/test_review_queue.py::test_an_event_at_the_edge_of_the_replay_window_still_queues",
+        "tests/tick/steps/test_review_queue.py::test_the_step_opens_the_configured_shared_bus"
       ]
     },
     {
