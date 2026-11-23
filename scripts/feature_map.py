@@ -161,7 +161,9 @@ def _live_check(entry: dict, root: Path, name: str) -> None:
         raise ValueError(f"{name}: missing live check {command}")
 
 
-def _entry(entry: dict, root: Path, rules: set[str], declared: set[str], tests: dict[str, str | None]) -> list[str]:
+def _entry(
+    entry: dict, root: Path, feature_rules: set[str], declared: set[str], tests: dict[str, str | None]
+) -> list[str]:
     name = _require(entry, "id")
     _require(entry, "behaviour")
     _require(entry, "seam")
@@ -170,7 +172,7 @@ def _entry(entry: dict, root: Path, rules: set[str], declared: set[str], tests: 
         raise ValueError(f"{name}: origin must be one of {', '.join(ORIGINS)}")
     _provenance(entry, name, origin)
     if origin == "operator" or "semgrep_rule" in entry:
-        if _require(entry, "semgrep_rule") not in rules:
+        if _require(entry, "semgrep_rule") not in feature_rules:
             raise ValueError(f"{name}: missing rule {entry['semgrep_rule']}")
     for rule in entry.get("rules", []):
         if rule not in declared:
