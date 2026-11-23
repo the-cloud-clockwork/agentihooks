@@ -4,6 +4,7 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -161,10 +162,21 @@ def test_the_entry_hands_the_mode_to_the_intent_gate_and_three_arguments_to_any_
 
 @pytest.mark.feature("gate-entry-mode-dispatch")
 def test_every_decide_call_of_the_entry_passes_what_the_type_of_its_gate_declares() -> None:
-    from scripts.gates import entry
+    from scripts.gates import base, entry
 
-    takes = {"Gate": 3, "ModeGate": 4}
-    tree = ast.parse(Path(entry.__file__).read_text(encoding="utf-8"))
+    def arguments(module: ModuleType, name: str) -> int:
+        declared = ast.parse(Path(str(module.__file__)).read_text(encoding="utf-8"))
+        found = [
+            len(item.args.args) - 1
+            for node in ast.walk(declared)
+            if isinstance(node, ast.ClassDef) and node.name == name
+            for item in node.body
+            if isinstance(item, ast.FunctionDef) and item.name == "decide"
+        ]
+        return found[0] if found else -1
+
+    takes = {"Gate": arguments(base, "Gate"), "ModeGate": arguments(entry, "ModeGate")}
+    tree = ast.parse(Path(str(entry.__file__)).read_text(encoding="utf-8"))
     calls: list[tuple[int, str, int, int]] = []
     for function in ast.walk(tree):
         if not isinstance(function, ast.FunctionDef):
