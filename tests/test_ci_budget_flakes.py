@@ -109,6 +109,50 @@ def test_a_test_flaky_in_two_runs_is_filed_once_in_plain_words(swarm):
     ]
 
 
+@pytest.mark.feature("flake-budget-lab-runs-current")
+def test_a_lab_run_counts_as_current_without_a_github_run_lookup(swarm: tuple) -> None:
+    store, config, ledger = swarm
+    unit = "test-v1-" + "a" * 64
+    budget = {"over_budget": [{"test": TEST, "runs": [unit, "32"], "sources": {unit: "lab", "32": "actions"}}]}
+    artifact = _gh([], budget)
+    responses = {
+        "repos/{owner}/{repo}/commits?sha=dev&path=tests%2Fswarm_ledger%2Ftest_alerts_page.py&per_page=1": "fix-sha\n",
+        "repos/{owner}/{repo}/commits/fix-sha/pulls": "2026-10-23T12:00:00Z\n",
+        "repos/{owner}/{repo}/actions/runs/32": "2026-10-24T00:00:00Z\n",
+    }
+    looked_up = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if "/actions/artifacts" in command[2]:
+            return artifact(command, **kwargs)
+        looked_up.append(command[2])
+        return subprocess.CompletedProcess(command, 0, responses[command[2]], "")
+
+    actions = flakes.refresh("sw", config, store, ledger, NOW_MS, run=run)
+
+    assert ledger.added == [("sw", TEXT)]
+    assert actions == ["filed a ledger follow up for a test flaky in 2 dev runs within seven days"]
+    assert f"repos/{{owner}}/{{repo}}/actions/runs/{unit}" not in looked_up
+    assert looked_up[-1] == "repos/{owner}/{repo}/actions/runs/32"
+
+
+@pytest.mark.feature("flake-budget-lab-runs-current")
+def test_a_lab_run_is_returned_among_the_current_runs_by_its_unit_key() -> None:
+    unit = "test-v1-" + "b" * 64
+    test = {"test": TEST, "runs": ["31", unit, "32"], "sources": {"31": "actions", unit: "lab", "32": "actions"}}
+    responses = {
+        "repos/{owner}/{repo}/commits?sha=dev&path=tests%2Fswarm_ledger%2Ftest_alerts_page.py&per_page=1": "fix-sha\n",
+        "repos/{owner}/{repo}/commits/fix-sha/pulls": "2026-10-23T12:00:00Z\n",
+        "repos/{owner}/{repo}/actions/runs/31": "2026-10-22T00:00:00Z\n",
+        "repos/{owner}/{repo}/actions/runs/32": "2026-10-24T00:00:00Z\n",
+    }
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(command, 0, responses[command[2]], "")
+
+    assert flakes._since_fix("repo", "dev", test, run) == ([unit, "32"], ["31"])
+
+
 def test_the_budget_is_read_at_most_once_per_refresh_interval(swarm):
     store, config, ledger = swarm
     calls = []

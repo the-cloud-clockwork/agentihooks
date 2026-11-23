@@ -1,0 +1,14 @@
+rules:
+  - id: lab-plant-verdict-reads-called-job-check
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A static plant verdict names its check by every path segment of the gate but the step. A pull request grade
+      posts the units of a reusable workflow job under the job that calls it, so the plant of a Semgrep step would
+      look for a check named after the called job, find none and refuse its green twin. Read the first path segment
+      of the gate, the job the pull request rules require.
+    paths:
+      include:
+        - /scripts/ci_lab/plant_grade.py
+        - lab-plant-verdict-reads-called-job-check.py
+    pattern: $PAIR.gate.rpartition("/")

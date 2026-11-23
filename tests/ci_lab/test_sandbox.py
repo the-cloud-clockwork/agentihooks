@@ -52,7 +52,7 @@ open("unit.txt", "w").close()
 def _gone(pid: int) -> bool:
     try:
         state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return True
     return state == "Z"
 
@@ -169,6 +169,33 @@ def test_a_child_left_after_the_unit_exits_is_killed_when_the_run_returns(tmp_pa
     outcome = unit.run(["/bin/sh", "-c", f"sleep 60 & echo $!; exit {code}"], timeout=30, net=True)
     assert outcome.code == code
     assert _gone_within(int(outcome.log.read_text().split()[0]), 5)
+
+
+@pytest.mark.feature("lab-sandbox-gone-probe-reaped-read")
+def test_a_child_reaped_between_the_open_and_the_read_of_its_stat_counts_as_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child = subprocess.Popen(["sleep", "30"])
+    stat_file = Path(f"/proc/{child.pid}/stat")
+    read = Path.read_text
+    reaped: list[Path] = []
+
+    def read_after_reap(path: Path) -> str:
+        if path != stat_file:
+            return read(path)
+        with open(path) as handle:
+            child.kill()
+            child.wait()
+            reaped.append(path)
+            return handle.read()
+
+    monkeypatch.setattr(Path, "read_text", read_after_reap)
+    try:
+        assert _gone(child.pid)
+        assert reaped == [stat_file]
+    finally:
+        child.kill()
+        child.wait()
 
 
 def test_the_unit_sees_only_the_whitelist_and_its_private_environment(
