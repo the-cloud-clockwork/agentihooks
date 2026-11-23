@@ -75,7 +75,8 @@
     "6ac0742c47fad096a715b6f9f0cef687b7c589c3"
   ],
   ".github/workflows/writer-lock.yml": [
-    "ad109bdfc822b81ec9f1e8fb695daf3b464acc5b"
+    "ad109bdfc822b81ec9f1e8fb695daf3b464acc5b",
+    "081278475b2c798b82a60e9359e5a2560c16775b"
   ],
   "scripts/ci_reuse.py": [
     "36835a6f3abb51f660443015407532dfc20bcbae",
