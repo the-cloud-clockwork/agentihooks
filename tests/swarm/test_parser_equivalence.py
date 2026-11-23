@@ -133,4 +133,5 @@ def test_builder_resolves_current_cli_handlers(monkeypatch: pytest.MonkeyPatch, 
 @pytest.mark.feature("swarm-parser-extraction")
 def test_parser_is_separate_and_cli_has_size_headroom() -> None:
     assert cli.build_parser.__module__ == "scripts.swarm.cli_parser"
-    assert len(Path(cli.__file__).read_text().splitlines()) < 2850
+    if "MUTANT_UNDER_TEST" not in os.environ:
+        assert len(Path(cli.__file__).read_text().splitlines()) < 2850
