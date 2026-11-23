@@ -2545,8 +2545,9 @@ key of the repository, head, base, class and grader revision. Live grades sit in
 `agentihooks-ci:tree:<repository>|<tree>`. Every save of a live grade, and every compaction of one,
 increments its revision in the `agentihooks-ci:revisions` hash and writes the demand record of that
 revision, a JSON object of its revision, tier, hits and job ids, to the `agentihooks-ci:records`
-hash, both under `<run>` and in one transaction with the document. A closed grade stores its
-document only, and a grade leaving the live set leaves both hashes with it. A rerequested check
+hash, both under `<run>` and in one transaction with the document. A grade leaving the live set
+leaves both hashes with it, and a save of a closed grade removes both with its document write.
+A rerequested check
 run grades the head again under `<run>-<now_ms>`, bypassing negative verdicts in the store.
 
 Known limits: a lab head event carries no branch yet, so a head's lane is its own sha and a newer
