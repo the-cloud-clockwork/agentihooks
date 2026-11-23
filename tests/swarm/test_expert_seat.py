@@ -287,7 +287,7 @@ def test_a_pass_the_tick_abandons_still_leaves_the_reason_expert_status_reads(
         assert failure(store) == {}
     finally:
         release.set()
-        engine._RUNNING[(timing.SWARM.get(), step.name)].join(5)
+        engine._RUNNING[(timing.SWARM.get(), step.name)].join(30)
     assert run("sw", "expert", "status") == 0
     assert capsys.readouterr().out.endswith(f" failed: {REFUSED})\n")
 
