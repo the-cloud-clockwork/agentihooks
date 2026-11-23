@@ -91,17 +91,17 @@ def test_the_measure_sends_only_read_commands_directly_and_through_pipelines_and
 
 
 @pytest.mark.feature("lab-scheduler-load-measure")
-def test_a_measured_build_returns_the_load_a_plain_build_returns_with_offers_on_both_sides_of_the_ready_cut(
+def test_each_measured_build_returns_the_load_a_plain_build_returns_with_offers_on_both_sides_of_the_ready_cut(
     lab: Callable[..., Run],
 ) -> None:
     run = _live(lab)
     now_ms = 1000 + scheduler.READY_MS
-    kept = load_measure.measured_scheduler(run.lab.client)
-    measured = kept.load(now_ms)
-    assert kept.queue.prune(now_ms) == 0
+    engine = load_measure.measured_scheduler(run.lab.client)
+    builds = [engine.load(now_ms) for _ in range(2)]
+    assert engine.queue.prune(now_ms) == 0
     assert set(run.engine.queue.offers(0)) == {"fresh", "stale"}
-    assert measured.workers_ready == 1
-    assert measured == run.engine.load(now_ms)
+    assert builds[0].workers_ready == 1
+    assert builds == [run.engine.load(now_ms)] * 2
     assert set(run.engine.queue.offers(0)) == {"fresh"}
 
 

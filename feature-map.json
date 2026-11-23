@@ -507,7 +507,7 @@
       "tests": [
         "tests/ci_lab/test_load_measure.py::test_the_measure_prints_three_builds_and_parses_each_stored_live_grade_once_on_its_cold_build",
         "tests/ci_lab/test_load_measure.py::test_the_measure_sends_only_read_commands_directly_and_through_pipelines_and_keeps_the_stale_offer",
-        "tests/ci_lab/test_load_measure.py::test_a_measured_build_returns_the_load_a_plain_build_returns_with_offers_on_both_sides_of_the_ready_cut",
+        "tests/ci_lab/test_load_measure.py::test_each_measured_build_returns_the_load_a_plain_build_returns_with_offers_on_both_sides_of_the_ready_cut",
         "tests/ci_lab/test_load_measure.py::test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_parser_back_even_when_a_build_raises"
       ]
     },
