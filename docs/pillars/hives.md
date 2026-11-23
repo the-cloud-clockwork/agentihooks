@@ -1892,8 +1892,8 @@ because a member's Redis user cannot claim a task, name an agent or take a seat,
 ledger reads. The hub answers `admit` on the same `slots.<swarm>.<hive>` request subject as account slots, which a
 member's credential may publish only for its own hive; a request naming another hive than its subject is refused.
 It rechecks the offer against narrow ledger reads of that task (see
-[What an admission reads](#what-an-admission-reads)), claims the task, starts the execution on that hive, occupies a seat, marks the task claimed (or back in `pr`) and returns the primed
-spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
+[What an admission reads](#what-an-admission-reads)), claims the task, starts the execution on that hive, occupies
+a seat, marks the task claimed (or back in `pr`) and returns the primed spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
 hive gets none. After a failed admit ask or launch, the spoke sends `reopen`, which returns an admitted task to
 `open` (see [When a launch fails](#when-a-launch-fails)). The hub answers these requests on a pool of eight threads
 and drops one that waited there as long as the hive waits for its answer, so an admission the hive gave up on never
@@ -2113,7 +2113,7 @@ offered task right after the claims stopped check:
 | The task | `GET tasks/<task id>` | The task row, or none when the task is gone | `row` |
 | The rows it names | `GET tasks?ids=<ids>` | Every task the row names in `depends_on`, `parked_on` or `group_members`, and its `enhances` and `merged_into` targets. Skipped when it names none. | `rows` |
 | The running rows | `GET tasks?states=claimed,pr` | Every task claimed or in a pull request, which the claim reads for the task's overlaps | `rows` |
-| Its parts | `GET phases/<phase>` and `GET metadata` | The task's phase and the ledger overview, which the claim's profile choice reads. A `plan` task reads the whole document instead; see below. | `parts` |
+| Its parts | `GET phases/<phase>` and `GET metadata` | The task's phase and the ledger overview, which the claim passes to the hive to choose the agent's profile. A `plan` task reads the whole document instead; see below. | `parts` |
 | The claim gate verdict | `GET focus/tasks/<task id>` | The verdict the ledger judges for the task over its whole stored state | inside `withdrawal` |
 
 From these rows the view builds a readiness snapshot with no phases and no freezes, and judges the offer in two
@@ -2182,7 +2182,7 @@ The ledger refuses a selection anywhere else with `400 schema_invalid`,
 `Only a plain tasks read takes a selection, and it names ids, states, pinned or branches`: on any path other than
 `tasks`, with `cursor`, `limit`, `offset`, `q`, `state` or `targets` beside it, or with no non empty `ids`,
 `states`, `pinned` or `branches`, so `fields` alone is refused. A `state`, `offset` or `q` on a path that is not a
-ledger collection answers the done rows refusal first,
+ledger collection is refused before that check, with `400 schema_invalid`,
 `State and offset read the done rows of a collection`.
 
 From a checkout, the same read through the ledger client:
@@ -2262,9 +2262,9 @@ semgrep --test --config .semgrep-incidents/hub-admission-reads-full-export.yml \
 
 - A `plan` task still reads the whole document; see [The reads](#the-reads).
 - The first selection a process makes reads every task row of the ledger once. Later selections reuse each row no
-  write reached and rebuild only the tasks a write changed. From a workstation on 23 November the first selection
-  on a large ledger took 14.8 seconds and the next two 263 and 107 ms, so the first admission after a hub roll can
-  still log a large `rows`.
+  write reached and rebuild only the tasks a write changed. A probe through the ledger client from a workstation on
+  23 November, made while documenting #13245, timed the first selection on a large ledger at 14.8 seconds and the
+  next two at 263 and 107 ms, so the first admission after a hub roll can still log a large `rows`.
 - The readiness pass, the operator priority preemption pass and the master spoke's own recheck still read the whole
   export.
 - A ledger server on a release before #13245 refuses every selection with `400 schema_invalid`,
@@ -2278,7 +2278,8 @@ semgrep --test --config .semgrep-incidents/hub-admission-reads-full-export.yml \
 | `late:` lines still show a `snapshot=` mark | The hub runs a release from before #13245 | Roll the hub to the newest release. |
 | `late:` lines show a large `parts` | The task is a `plan` task, whose admission reads the whole document | Expected on a large ledger. |
 | An offer is refused `the offer is withdrawn, <reason>` while the task looks open | A local check or the ledger's claim gate holds it, such as a dependency, a freeze, a focus elsewhere or an earlier phase; the reason names it | Read the verdicts with `agentihooks api --slug <slug> get focus`, then clear the hold; see [Freeze and focus](swarm.md#freeze-and-focus). |
-| A selection read answers `400 schema_invalid` with `Only a plain tasks read takes a selection, ...` | It named a filter on a path other than `tasks`, beside a paging parameter or `state`, or with only `fields` | Send `ids`, `states`, `pinned` or `branches` on a plain `tasks` read. |
+| A selection read answers `400 schema_invalid` with `Only a plain tasks read takes a selection, ...` | It named a filter on a path other than `tasks`, beside a paging parameter or `state` on a `tasks` read, or with only `fields` | Send `ids`, `states`, `pinned` or `branches` on a plain `tasks` read. |
+| A selection read answers `400 schema_invalid` with `State and offset read the done rows of a collection` | It sent `state`, `offset` or `q` on a path that is not a ledger collection | Drop that parameter, and send the selection on a plain `tasks` read. |
 | A selection read answers `400 schema_invalid` with `Request does not match the resource schema` | `pinned` carries a value other than `1`, a list passes its length limit, or the ledger server runs a release before #13245 | Send `pinned=1` and split a long list over several reads; otherwise roll the ledger server, or read through the ledger client from a checkout on the newest release. |
 
 ### When a launch fails
