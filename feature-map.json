@@ -14901,14 +14901,7 @@
         "tests/swarm/test_review_affinity_quota.py::test_the_review_share_defaults_to_twenty_and_loads_for_existing_swarms",
         "tests/swarm/test_review_affinity_quota.py::test_a_review_share_outside_zero_to_one_hundred_is_refused",
         "tests/swarm/test_review_affinity_quota.py::test_a_review_share_of_zero_or_one_hundred_is_kept_and_one_more_is_refused",
-        "tests/swarm/test_review_affinity_quota.py::test_swarm_set_takes_the_review_share",
-        "tests/swarm/test_review_affinity_quota.py::test_readings_without_a_review_entry_count_no_reviewer_and_no_waiting_review_task",
-        "tests/swarm/test_review_affinity_quota.py::test_live_reviewers_without_a_review_demand_entry_keep_their_seats_and_name_no_share",
-        "tests/swarm/test_review_affinity_quota.py::test_a_pinned_harness_missing_from_the_free_seats_has_no_free_seat",
-        "tests/swarm/test_review_affinity_quota.py::test_the_review_share_of_the_total_rounds_up_to_whole_seats",
-        "tests/swarm/test_review_affinity_quota.py::test_held_review_seats_never_pass_the_total_when_the_host_has_no_room",
-        "tests/swarm/test_review_affinity_quota.py::test_a_zero_share_still_holds_one_seat_when_the_other_lanes_fill_the_room",
-        "tests/swarm/test_review_affinity_quota.py::test_autoscaled_holds_review_seats_only_on_the_pinned_harness"
+        "tests/swarm/test_review_affinity_quota.py::test_swarm_set_takes_the_review_share"
       ]
     },
     {

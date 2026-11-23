@@ -265,7 +265,6 @@ def test_swarm_set_takes_the_review_share(env: tuple, capsys: pytest.CaptureFixt
     assert saved.config(SLUG).review_share == 35
 
 
-@pytest.mark.feature("swarm-review-affinity-quota")
 def test_readings_without_a_review_entry_count_no_reviewer_and_no_waiting_review_task() -> None:
     decision = autoscale.calculate(
         OLD_LIVE, {"claude": 3, "codex": 2}, 10, OLD_DEMAND, OLD_PREVIOUS, now_ms=0, review=autoscale.Review(20, BOTH)
@@ -276,7 +275,6 @@ def test_readings_without_a_review_entry_count_no_reviewer_and_no_waiting_review
     assert held["ceilings"] == {"plan": 0, "ci": 0, "eng": 7, "review": 3}
 
 
-@pytest.mark.feature("swarm-review-affinity-quota")
 def test_live_reviewers_without_a_review_demand_entry_keep_their_seats_and_name_no_share() -> None:
     live = {"plan": 0, "ci": 0, "eng": 8, "review": 2}
     decision = _decide(live, {"claude": 0, "codex": 4}, 0, {"plan": 0, "ci": 0, "eng": 10}, 20)
@@ -287,35 +285,30 @@ def test_live_reviewers_without_a_review_demand_entry_keep_their_seats_and_name_
     }
 
 
-@pytest.mark.feature("swarm-review-affinity-quota")
 def test_a_pinned_harness_missing_from_the_free_seats_has_no_free_seat() -> None:
     live = {"plan": 0, "ci": 0, "eng": 8, "review": 0}
     decision = _decide(live, {"claude": 4}, 2, {"plan": 0, "ci": 0, "eng": 10, "review": 5}, 30)
     assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 10, "review": 0}
 
 
-@pytest.mark.feature("swarm-review-affinity-quota")
 def test_the_review_share_of_the_total_rounds_up_to_whole_seats() -> None:
     live = {"plan": 0, "ci": 0, "eng": 0, "review": 0}
     decision = _decide(live, {"claude": 0, "codex": 3}, None, {"plan": 0, "ci": 0, "eng": 3, "review": 3}, 67)
     assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 0, "review": 3}
 
 
-@pytest.mark.feature("swarm-review-affinity-quota")
 def test_held_review_seats_never_pass_the_total_when_the_host_has_no_room() -> None:
     live = {"plan": 0, "ci": 0, "eng": 0, "review": 2}
     decision = _decide(live, {"claude": 0, "codex": 4}, 0, {"plan": 0, "ci": 0, "eng": 0, "review": 3}, 20)
     assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 0, "review": 2}
 
 
-@pytest.mark.feature("swarm-review-affinity-quota")
 def test_a_zero_share_still_holds_one_seat_when_the_other_lanes_fill_the_room() -> None:
     live = {"plan": 0, "ci": 0, "eng": 9, "review": 0}
     decision = _decide(live, {"claude": 0, "codex": 1}, None, {"plan": 0, "ci": 0, "eng": 10, "review": 5}, 0)
     assert decision["ceilings"] == {"plan": 0, "ci": 0, "eng": 9, "review": 1}
 
 
-@pytest.mark.feature("swarm-review-affinity-quota")
 def test_autoscaled_holds_review_seats_only_on_the_pinned_harness() -> None:
     config = SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, max_plan=5, lanes={"review": REVIEWER}, review_share=30)
     accounts = [account(cap=6).__dict__, account("cx", harness="codex", cap=1).__dict__]
