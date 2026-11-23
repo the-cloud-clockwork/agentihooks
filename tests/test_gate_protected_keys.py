@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from scripts import gate_protected
-from tests.test_gate_protected import _commit, _git, _workflow
+from tests.test_gate_protected import _ROOT, _commit, _git, _workflow
 from tests.test_gate_protected import repo as repo
 
 pytestmark = pytest.mark.unit
@@ -93,3 +93,10 @@ def test_a_base_repeating_jobs_still_grades_the_head_that_removes_the_repeat(
     _git(repo, "checkout", "-q", "dev")
     assert gate_protected.main(["--root", str(repo), "--head", clean]) == 0
     assert capsys.readouterr().out.endswith(": 0 protected gate problems\n")
+
+
+@pytest.mark.feature("protected-grader-refuses-repeated-and-merge-keys")
+def test_the_repository_workflows_pass_the_strict_head_read() -> None:
+    root = Path(_git(_ROOT, "rev-parse", "--show-toplevel"))
+    assert "test.yml" in gate_protected.load(root, "HEAD", gate_protected.ActionsLoader)[0]
+    assert gate_protected.load(root, "HEAD", gate_protected.ActionsLoader) == gate_protected.load(root, "HEAD")
