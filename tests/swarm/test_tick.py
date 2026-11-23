@@ -89,6 +89,18 @@ class FakeLedger(LedgerItems):
             row.update(fields)
         return dict(row)
 
+    def _call(self, slug: str, ops: list[dict[str, object]] | None = None) -> dict[str, object]:
+        """Apply the task add and task enhancement operations a ledger port mutate sends, as the ledger does."""
+        assert slug == "sw"
+        for op in ops or []:
+            if op["op"] == "task_add":
+                kept = {key: value for key, value in op.items() if key not in ("op", "by", "task", "not_duplicate")}
+                self.rows[str(op["task"])] = {"state": "open", "claimed_by": "", "out_of_scope": False, **kept}
+                self.rows[str(op["task"])]["id"] = op["task"]
+            else:
+                self.rows[str(op["item"]).removeprefix("tasks/")]["enhancement"] = op["enhancement"]
+        return self.state(slug)
+
     def notify(self, slug, text):
         assert slug == "sw"
         self.notes.append(text)
