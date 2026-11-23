@@ -3996,7 +3996,8 @@
         "tests/tick/steps/test_thin_task_pass.py::test_a_title_the_ledger_would_refuse_falls_back_to_a_plain_title",
         "tests/tick/steps/test_thin_task_pass.py::test_two_thin_tasks_are_both_queued_and_named_in_one_master_notice",
         "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_with_no_phase_or_description_gets_an_enhancement_task_with_neither",
-        "tests/tick/steps/test_thin_task_pass.py::test_a_spent_deadline_takes_no_task"
+        "tests/tick/steps/test_thin_task_pass.py::test_a_spent_deadline_takes_no_task",
+        "tests/tick/steps/test_thin_task_pass.py::test_every_write_of_a_pass_is_one_the_ledger_api_accepts"
       ]
     },
     {
