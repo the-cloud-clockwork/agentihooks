@@ -128,6 +128,31 @@ def test_fill_extracts_recon_and_preserves_body(api: ModuleType) -> None:
     assert api.fill(recon_text(), filled) == filled
 
 
+def intent_block() -> str:
+    return "<!-- agentihooks intent -->\n## Parent intent\n\n**Project:** Kept intent.\n<!-- /agentihooks intent -->"
+
+
+@pytest.mark.feature("pull-request-recon-context")
+@pytest.mark.parametrize(
+    "layout,tail",
+    [
+        ("{sections}\n\n{intent}\n", ""),
+        ("{intent}\n\n{sections}\n", ""),
+        ("{sections}\n\n{intent}\n\n## Checklist\n\n- [x] Reviewed.\n", "\n\n## Checklist\n\n- [x] Reviewed."),
+    ],
+)
+def test_fill_keeps_the_intent_block_whole(api: ModuleType, layout: str, tail: str) -> None:
+    original = "## Summary\n\nKeep this evidence.\n\n" + layout.format(sections=body_without(), intent=intent_block())
+    filled = api.fill(recon_text(), original)
+    assert filled == f"## Summary\n\nKeep this evidence.\n\n{api.fill(recon_text())}\n{intent_block()}{tail}\n"
+    assert api.fill(recon_text(), filled) == filled
+
+
+@pytest.mark.feature("pull-request-recon-context")
+def test_fill_before_an_intent_block_alone(api: ModuleType) -> None:
+    assert api.fill(recon_text(), f"{intent_block()}\n") == f"{api.fill(recon_text())}\n{intent_block()}\n"
+
+
 @pytest.mark.feature("pull-request-recon-context")
 def test_fill_refuses_missing_recon_details(api: ModuleType) -> None:
     recon = recon_text().replace("### Resources\n\nRecon evidence for Resources.", "Production data unchanged.")
