@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "node-caps-named-import",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-node-caps-cpu",
+      "behaviour": "Invoking the node caps condition imports its gate without loading unrelated gate implementations, while retaining existing cap decisions and mutable gate registries.",
+      "seam": "scripts.gates.entry.main, _decide and HOST_GATES",
+      "tests": [
+        "tests/gates/test_node_caps_cpu.py::test_node_caps_dispatch_imports_only_its_gate",
+        "tests/gates/test_node_caps_cpu.py::test_lazy_dispatch_preserves_the_default_intent_mode"
+      ]
+    },
+    {
       "id": "hive-member-queue-priority",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-queue-priority-noperm",
@@ -8,6 +19,17 @@
       "seam": "scripts.swarm.queue_priority.automatic",
       "tests": [
         "tests/hive/test_auth.py::test_a_member_queue_applies_priority_or_reports_a_permission_refusal"
+      ]
+    },
+    {
+      "id": "hive-member-expert-complete",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "behaviour": "An expert on a worker hive ends its lineage on a mission proof through the member's restricted Redis grant: a hive member may write the lineage records, the running set, the proofs and the closing set, the four keys expert complete writes, and no other expert key. Without any one of the four Redis refuses the completion.",
+      "seam": "auth._acl_keys over the expert lineage keys; the swarm command expert complete through cli.main with a member credential on a Redis that enforces the member grant",
+      "tests": [
+        "tests/hive/test_auth.py::test_a_member_writes_the_expert_keys_a_completion_writes_and_no_other_expert_key",
+        "tests/hive/test_auth.py::test_a_member_expert_ends_its_lineage_on_a_proof_and_is_refused_without_one_of_its_keys"
       ]
     },
     {
@@ -450,6 +472,20 @@
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_finished_unit_charges_its_slots_times_its_report_seconds_once_and_no_seconds_charges_nothing",
         "tests/ci_lab/test_scheduler.py::test_the_first_pass_after_finished_units_shed_a_class_names_it_with_the_spent_share_once"
+      ]
+    },
+    {
+      "id": "lab-scheduler-grade-demand-cache",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-grade-demand-cache",
+      "behaviour": "Scheduler load builds reuse a live grade demand contribution only while its stored raw bytes match the cached digest, parse changed grades on the next build, evict removed or missing grades, and retain no parsed State. Cached builds equal fresh builds, preserve per slot hit and miss counts and the most urgent tier of shared jobs, and a grade rewritten by Scheduler.save updates demand without changing mutating grade reads.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.load and Scheduler.save over the scheduler lab fixture, counting module level _parse calls and comparing capacity.Load values",
+      "tests": [
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_an_unchanged_load_equals_a_fresh_build_without_parsing_grades",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_saved_grade_is_reparsed_and_changes_the_next_load_demand",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_run_leaving_the_live_set_is_parsed_again_if_it_returns",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_missing_grade_stops_contributing_and_is_parsed_when_restored",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_cached_contributions_preserve_duplicate_slots_and_the_most_urgent_shared_job"
       ]
     },
     {
