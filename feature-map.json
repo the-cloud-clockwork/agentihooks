@@ -5941,6 +5941,31 @@
       ]
     },
     {
+      "id": "flake-budget-lab-source",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "Flake rows read from the lab folder under the reports folder join the history marked source lab, while rows from anywhere else and history lines without a source count as Actions. A budget entry holding a lab run carries a sources map naming each of its runs lab or actions, an Actions only entry keeps its earlier shape, the summary prints the source beside every run, and a lab export alone, even an empty one, is a report that grades green.",
+      "seam": "tests.flake_budget.gather with its source argument, tests.flake_budget.budget and tests.flake_budget.main over the lab folder of the reports folder",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_lab_history_line_names_its_run_lab_and_a_line_without_a_source_counts_as_actions",
+        "tests/test_flake_budget.py::test_a_lab_export_alone_grades_green_and_names_its_run_lab",
+        "tests/test_flake_budget.py::test_the_budget_names_each_runs_source_in_its_json_and_summary"
+      ]
+    },
+    {
+      "id": "flake-budget-job-wiring",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "On a dev push the flake-budget job restores the newest flake history, downloads this run's flake reports with one retry, exports the lab flake records into the lab folder of the reports folder with the lab store settings from Actions secrets, counts every report, publishes flake-budget.json when a history was restored and saves the history or a seed. A missing setting or a failed install or export prints one Lab flakes warning and leaves the step green, so the Actions reports still grade.",
+      "seam": "the flake-budget job of the Tests workflow and the run script of its Export the lab flake records step",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget",
+        "tests/test_flake_budget.py::test_a_restore_that_matched_nothing_saves_a_seed_the_history_prefix_never_restores",
+        "tests/test_flake_budget.py::test_the_job_exports_the_lab_flake_records_before_the_count_with_the_settings_by_secret_reference",
+        "tests/test_flake_budget.py::test_a_lab_export_that_cannot_run_warns_once_and_leaves_the_step_green"
+      ]
+    },
+    {
       "id": "selectors-read-outside-files",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2636",
