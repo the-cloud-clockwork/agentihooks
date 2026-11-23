@@ -1,6 +1,31 @@
 {
   "features": [
     {
+      "id": "sonar-gate-verdict",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-sonar-new-bug-13212",
+      "behaviour": "The Sonar quality gate step ends red with an error line and no step output when the gate or its background task failed, and names the analysis in its step output when the gate passed.",
+      "seam": "the run text of the step SonarQube Quality Gate of the sonar job, run in a shell against a fake curl",
+      "tests": [
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_or_background_task_is_red",
+        "tests/test_ci_sonar_speed.py::test_a_passed_gate_names_the_analysis_that_grades_the_promoted_revision"
+      ]
+    },
+    {
+      "id": "sonar-failed-gate-names-new-bugs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-sonar-new-bug-13212",
+      "behaviour": "A failed Sonar quality gate prints the unresolved new bugs and vulnerabilities of the branch or pull request the scanner's dashboard address names, read once: the first 100 with component, line, rule and message, then a count of the rest. A refused read leaves the error line and the red exit as they are, a read the server does not answer stops once its retry waits reach 30 seconds and shows neither the retry script's outage notice nor its summary line, and a passed or superseded gate reads no issues.",
+      "seam": "the run text of the step SonarQube Quality Gate of the sonar job, run in a shell against a fake curl that answers the issue search",
+      "tests": [
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_names_its_new_bugs",
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_says_how_many_new_bugs_it_left_out",
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_red_when_the_bug_read_is_refused",
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_a_code_verdict_when_the_bug_read_meets_an_outage",
+        "tests/test_ci_sonar_speed.py::test_a_passed_gate_reads_no_issues"
+      ]
+    },
+    {
       "id": "reviewer-worker-gates",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-lane-gates",
@@ -569,6 +594,20 @@
         "tests/ci_lab/test_metrics.py::test_a_failed_first_build_fails_its_read_and_the_next_read_builds_again",
         "tests/ci_lab/test_metrics.py::test_the_load_age_counts_the_seconds_since_the_served_build_started_never_below_zero",
         "tests/ci_lab/test_metrics.py::test_the_served_port_runs_its_actions_between_requests_and_a_port_without_actions_runs_none"
+      ]
+    },
+    {
+      "id": "lab-scheduler-capacity-cached",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-capacity-cached",
+      "behaviour": "The CI lab scheduler port 8800 answers GET /capacity from the same metrics.Latest load snapshot the metrics port 9108 serves instead of building a full load per request: two capacity reads in a row build the load once, a capacity read and a metrics scrape share one build, the capacity document equals a fresh Scheduler.load of the same state, a capacity read after the metrics port's serve loop refreshed the snapshot serves that newer build, and GET /grades/<sha> still reads the grade store on every request.",
+      "seam": "scripts.ci_lab.scheduler.listen over fakeredis read through GET /capacity, GET /grades/<sha> and GET /metrics with a counting Scheduler.load and a movable clock",
+      "tests": [
+        "tests/ci_lab/test_scheduler_snapshot.py::test_two_capacity_reads_in_a_row_build_the_load_once",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_a_capacity_read_and_a_scrape_share_one_load_build",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_the_capacity_document_equals_a_fresh_build_of_the_same_state",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_the_capacity_route_serves_the_build_the_metrics_port_refreshed",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_the_grades_route_reads_every_request_beside_the_cached_capacity"
       ]
     },
     {
@@ -2607,6 +2646,19 @@
       "tests": [
         "tests/hub/test_admission.py::test_an_unlisted_kept_admission_requires_its_current_unlaunched_claimant",
         "tests/hub/test_admission.py::test_another_hive_never_receives_an_unlisted_starting_admission"
+      ]
+    },
+    {
+      "id": "hub-late-admission-retry-launches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-late-admission-kept-offer",
+      "behaviour": "A tick reap pass whose rows were read before the hub's ledger claim write keeps a starting, never launched hive agent that still holds its task's Redis claim, so the hive's next ask for the kept late admission launches it with no withdrawn refusal and no six minute launch check free. A row naming another claimant, a blocked, done or handoff row, a released claim, a launched agent and a suspect agent still end it.",
+      "seam": "The tick reap step judging one agent (_reap_agent), and Admission.admit on the hive's next ask after that reap",
+      "tests": [
+        "tests/tick/steps/test_reap_fresh_admission.py::test_a_fresh_hub_admission_judged_on_a_row_read_before_its_ledger_claim_keeps_its_claim",
+        "tests/tick/steps/test_reap_fresh_admission.py::test_a_fresh_hub_admission_still_ends_on_a_row_another_claimant_or_a_closed_state_holds",
+        "tests/tick/steps/test_reap_fresh_admission.py::test_an_agent_past_its_fresh_admission_still_ends_on_an_unclaimed_row",
+        "tests/hub/test_admission.py::test_a_late_kept_admission_launches_on_the_hives_next_ask_after_a_reap_judged_a_row_read_before_its_claim"
       ]
     },
     {
@@ -5937,6 +5989,25 @@
       ]
     },
     {
+      "id": "lab-flakes-export",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-export",
+      "behaviour": "agentihooks ci lab flakes copies the rows of every lab flakes object written within the window, 168 hours by default, from a local objects folder or the lab object store named by the CI_LAB_MINIO settings, into one lab-flakes.jsonl in the output folder, in path order. The flake budget reads that file and counts a flaky unit's test once however many exports reread it, because the run of a lab row is the unit key. An empty store writes an empty file and exits 0; a missing setting, an object store error, a listing past the page cap or an objects path that is not a folder prints one plain line and exits 1 without writing a file; a missing output folder or a window outside 1 to 168 hours is refused with exit 2.",
+      "seam": "scripts.ci_lab.flakes.declare and command, reached through the ci delegate scripts.ci_lab.evidence.ci, over a local object store or scripts.ci_lab.scheduler.storage, with the written file read by tests.flake_budget.main",
+      "tests": [
+        "tests/ci_lab/test_flakes.py::test_two_exports_of_one_flaky_unit_count_its_test_once_in_the_flake_budget",
+        "tests/ci_lab/test_flakes.py::test_an_empty_store_writes_an_empty_file_and_the_budget_exits_zero",
+        "tests/ci_lab/test_flakes.py::test_the_window_keeps_an_object_written_at_its_start_and_drops_one_a_second_older",
+        "tests/ci_lab/test_flakes.py::test_the_s3_listing_follows_continuation_pages_honours_the_store_prefix_and_keeps_window_objects_in_path_order",
+        "tests/ci_lab/test_flakes.py::test_a_missing_store_setting_exits_one_naming_it",
+        "tests/ci_lab/test_flakes.py::test_an_object_store_error_exits_one_with_one_plain_line",
+        "tests/ci_lab/test_flakes.py::test_an_objects_path_that_is_not_a_folder_exits_one_naming_it",
+        "tests/ci_lab/test_flakes.py::test_ci_lab_flakes_refuses_a_missing_output_folder_and_a_window_outside_the_budget_history",
+        "tests/ci_lab/test_flakes.py::test_ci_lab_flakes_resolves_through_the_ci_delegate_and_prints_the_written_file",
+        "tests/ci_lab/test_flakes.py::test_ci_lab_flakes_reads_the_object_store_named_by_the_environment_and_exits_one_on_its_error"
+      ]
+    },
+    {
       "id": "selectors-read-outside-files",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2636",
@@ -6833,6 +6904,20 @@
       ]
     },
     {
+      "id": "swarm-parser-extraction",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-cli-split-parser",
+      "behaviour": "The swarm parser preserves every recorded command namespace, help page, refusal and current CLI handler binding while its builder lives separately and the CLI stays below 2850 lines.",
+      "seam": "scripts.swarm.cli.build_parser and scripts.swarm.cli_parser.build_parser",
+      "tests": [
+        "tests/swarm/test_parser_equivalence.py::test_recorded_arguments_cover_every_parser_leaf",
+        "tests/swarm/test_parser_equivalence.py::test_namespaces_help_and_refusals_equal_recorded_base",
+        "tests/swarm/test_parser_equivalence.py::test_recorded_invalid_arguments_are_refused",
+        "tests/swarm/test_parser_equivalence.py::test_builder_resolves_current_cli_handlers",
+        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom"
+      ]
+    },
+    {
       "id": "ledger-freeze-controls",
       "origin": "inventory",
       "behaviour": "Every plan, phase, slice and task row carries a freeze button that sends the freeze and disables its rows, and unfreeze sends the clear and restores them.",
@@ -7705,6 +7790,23 @@
       "seam": "the dispatch seat step in scripts.tick.steps.masters",
       "tests": [
         "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
+      ]
+    },
+    {
+      "id": "hooks-brain-shared-tracer-provider",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-otel-one-tracer-provider",
+      "behaviour": "Hook and brain spans share one tracer provider in either call order, preserving exported brain scope, names, attributes and times; telemetry flush drains the shared provider, no span telemetry stays lazy, and missing SDK keeps direct HTTP fallback.",
+      "seam": "hooks.telemetry.emit_span, span_ctx and flush through hooks.observability.otel.get_tracer",
+      "tests": [
+        "tests/observability/test_shared_tracer_provider.py::test_hook_and_brain_spans_share_one_tracer_provider",
+        "tests/observability/test_shared_tracer_provider.py::test_emit_span_preserves_name_attributes_and_times",
+        "tests/observability/test_shared_tracer_provider.py::test_span_ctx_exports_attributes_and_updated_attributes",
+        "tests/observability/test_shared_tracer_provider.py::test_telemetry_without_spans_never_starts_the_sdk",
+        "tests/observability/test_shared_tracer_provider.py::test_telemetry_flush_drains_the_shared_otel_providers",
+        "tests/observability/test_shared_tracer_provider.py::test_sdk_unavailable_keeps_direct_http_span_fallback",
+        "tests/observability/test_shared_tracer_provider.py::test_tracer_acquisition_failure_keeps_direct_http_fallback",
+        "tests/observability/test_shared_tracer_provider.py::test_shared_flush_failure_is_silent"
       ]
     },
     {
@@ -13891,6 +13993,16 @@
       ]
     },
     {
+      "id": "ci-test-and-semgrep-tool-installs-constrained",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-test-workflow",
+      "behaviour": "Each pinned CI tool install in the test and semgrep workflows installs exactly the package names the test's table lists for that step.",
+      "seam": "tests.test_ci_test_dependencies._installed_packages over the named install steps of .github/workflows/test.yml and .github/workflows/semgrep.yml",
+      "tests": [
+        "tests/test_ci_test_dependencies.py::test_the_pinned_ci_tool_installs_keep_their_packages"
+      ]
+    },
+    {
       "id": "execution-put-unchanged-skips-lock",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2797",
@@ -14207,6 +14319,29 @@
         "tests/swarm/test_workstation_units.py::test_distributed_reconciliation_keeps_the_host_writer",
         "tests/deployment/test_worker_hive.py::test_worker_stops_live_children_when_the_hive_ends_or_startup_is_terminated",
         "tests/deployment/test_worker_hive.py::test_worker_restarts_the_writer_with_the_database_env_and_stops_with_the_hive"
+      ]
+    },
+    {
+      "id": "presence-agent-hive-daemon",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-otel-presence-spool",
+      "behaviour": "Every hook event marks its agent session seen in a per session seen record under the agentihooks home. The hive daemon presence pass sends the agent presence gauge for every session seen within the fresh window, with the recorded seen seconds and attributes, removes records seen over a day ago or unreadable, and writes the daemon beat; while that beat is live a hook process never starts the OpenTelemetry worker or SDK for presence. With no live beat a session sends the gauge itself, at most once per interval.",
+      "seam": "presence.mark, presence.agent and hive.daemon.emit_presence",
+      "tests": [
+        "tests/hive/test_daemon_presence.py::test_a_dispatcher_mark_after_a_daemon_pass_never_starts_the_otel_worker_or_sdk",
+        "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_each_fresh_session_seen_gauge_with_its_attributes_and_last_seen_seconds",
+        "tests/hive/test_daemon_presence.py::test_a_daemon_pass_skips_a_stale_session_and_removes_records_seen_over_a_day_ago_or_unreadable",
+        "tests/hive/test_daemon_presence.py::test_a_session_sends_its_own_seen_gauge_only_once_the_daemon_beat_is_older_than_its_live_window",
+        "tests/hive/test_daemon_presence.py::test_a_record_removed_by_another_pass_mid_export_still_lets_the_daemon_beat",
+        "tests/observability/test_presence.py::test_with_no_hive_daemon_a_session_sends_its_seen_gauge_at_most_once_per_interval",
+        "tests/observability/test_presence.py::test_an_unreadable_or_non_numeric_daemon_beat_leaves_the_session_sending_its_own_gauge",
+        "tests/observability/test_presence.py::test_a_seen_record_is_written_beside_itself_even_when_the_system_temp_folder_is_gone",
+        "tests/observability/test_presence.py::test_an_agent_session_is_marked_seen_with_its_swarm_identity_and_hive",
+        "tests/observability/test_presence.py::test_an_agent_session_names_its_harness_from_the_hook_target",
+        "tests/observability/test_presence.py::test_an_event_without_a_session_marks_nothing",
+        "tests/observability/test_presence.py::test_a_hook_payload_marks_its_session_under_the_process_environment",
+        "tests/observability/test_presence.py::test_a_failing_mark_never_raises_into_the_hook",
+        "tests/observability/test_presence.py::test_the_hook_manager_marks_presence_for_every_event"
       ]
     }
   ],

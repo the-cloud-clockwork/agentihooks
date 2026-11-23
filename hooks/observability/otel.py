@@ -287,7 +287,7 @@ def langfuse_exporter():
     )
 
 
-def get_tracer():
+def get_tracer(name: str | None = None) -> Any:
     """Return OTEL tracer, or None if not yet initialized.
 
     Blocks up to 50ms waiting for the worker's first init pass. If the
@@ -296,6 +296,10 @@ def get_tracer():
     """
     init()
     _init_done.wait(timeout=0.05)
+    if name is not None and _tracer is not None:
+        from opentelemetry import trace
+
+        return trace.get_tracer(name)
     return _tracer
 
 

@@ -16,6 +16,9 @@ added the lane;
 carried it through every launch path. See
 [Where reviewers launch](#where-reviewers-launch).
 
+For fleet review rules, platform connections and both target configurations,
+see [Reviewer bundle overlay](reviewer-bundle-overlay.md).
+
 ## Names and seats
 
 An agent on this lane has type `reviewer`, for example

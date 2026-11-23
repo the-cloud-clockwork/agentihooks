@@ -35,12 +35,12 @@ jobs:
           SEMGREP_VERSION: "1.177.0"
         run: |
           if [[ "$(semgrep --version 2>/dev/null)" != "$SEMGREP_VERSION" ]]; then
-            python -m pip install "semgrep==$SEMGREP_VERSION"
+            python -m pip install --constraint .github/ci-tools/semgrep.lock "semgrep==$SEMGREP_VERSION"
           fi
           test "$(semgrep --version)" = "$SEMGREP_VERSION"
 
       - name: Install PyYAML
-        run: python -m pip install pyyaml==6.0.2
+        run: python -m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2
 
       - name: Check out the protected grader
         env:
@@ -215,7 +215,7 @@ jobs:
           SEMGREP_VERSION: "1.177.0"
         run: |
           if [[ "$(semgrep --version 2>/dev/null)" != "$SEMGREP_VERSION" ]]; then
-            python -m pip install "semgrep==$SEMGREP_VERSION"
+            python -m pip install --constraint .github/ci-tools/semgrep.lock "semgrep==$SEMGREP_VERSION"
           fi
           test "$(semgrep --version)" = "$SEMGREP_VERSION"
 
@@ -256,9 +256,9 @@ jobs:
           SEMGREP_VERSION: "1.177.0"
         run: |
           if [[ "$(semgrep --version 2>/dev/null)" == "$SEMGREP_VERSION" ]]; then
-            python -m pip install pyyaml==6.0.2
+            python -m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2
           else
-            python -m pip install pyyaml==6.0.2 "semgrep==$SEMGREP_VERSION"
+            python -m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2 "semgrep==$SEMGREP_VERSION"
           fi
           test "$(semgrep --version)" = "$SEMGREP_VERSION"
 
