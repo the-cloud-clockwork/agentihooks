@@ -8,7 +8,8 @@ from pathlib import Path
 import coverage
 import pytest
 
-from scripts.ci_lab import retry, run_tests, sandbox
+from scripts.ci_lab import open_capture, retry, run_tests, sandbox
+from tests.ci_lab import fail_once
 
 ROOT = Path(__file__).resolve().parents[2]
 VENV = Path(sys.prefix)
@@ -285,3 +286,62 @@ def test_outside_lists_every_unshared_file_a_test_module_the_manifest_lacks_open
 
     assert run_tests.outside(opened, ("t::one", "tests/test_new.py"), tmp_path, manifest) == ("data/b.txt",)
     assert run_tests.outside(opened, ("tests/test_new.py",), tmp_path, manifest) == ("data/a.txt", "data/b.txt")
+
+
+@pytest.mark.feature("lab-fail-once-fixture")
+def test_a_fail_once_plant_is_flaky_inside_one_lab_run_and_green_on_the_next(tmp_path: Path) -> None:
+    [edit] = json.loads((ROOT / "tests/ci_lab/plants/unit.fail-once.json").read_text())["edits"]
+    test = f"{edit['path']}::test_a_planted_test_fails_its_first_lab_attempt_and_passes_the_retry"
+    copies = {
+        path: (ROOT / path).read_text() for path in ("tests/ci_lab/fail_once.py", "scripts/ci_lab/open_capture.py")
+    }
+    packages = {path: "" for path in ("tests/ci_lab/__init__.py", "scripts/__init__.py", "scripts/ci_lab/__init__.py")}
+    tree = _tree(tmp_path / "tree", {**copies, **packages, edit["path"]: edit["after"]})
+    lab = _lab(tmp_path, _manifest({test: []}), {})
+
+    first = run_tests.run((test,), tree, VENV, 1, lab)
+    second = run_tests.run((test,), tree, VENV, 1, lab)
+
+    assert (first.outcome, first.flaky, first.attempts) == ("passed", True, 2)
+    assert (second.outcome, second.flaky, second.attempts) == ("passed", False, 1)
+    rows = [json.loads(line) for line in lab.flakes.read_text().splitlines()]
+    assert [(row["test"], row["outcome"], row["attempts"]) for row in rows] == [(test, "flaky", 2)]
+    assert "fail once" in rows[0]["errors"][0]
+    assert len(list(lab.root.glob("fail-once-*"))) == 1
+
+
+@pytest.mark.feature("lab-fail-once-fixture")
+def test_fail_once_keys_its_lab_marker_by_head_tree_and_node_in_the_runs_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs, node = tmp_path / "runs", "tests/test_plant.py::test_plant"
+
+    def attempt(folder: str, head: str, test: str) -> None:
+        (runs / folder / "tmp").mkdir(parents=True)
+        monkeypatch.setenv("TMPDIR", str(runs / folder / "tmp"))
+        monkeypatch.setenv(open_capture.TREE, str(tmp_path / "trees" / head))
+        fail_once.fail_once(test, tmp_path / "fallback")
+
+    with pytest.raises(pytest.fail.Exception, match="^fail once: "):
+        attempt("first", "head-a", node)
+    attempt("retry", "head-a", node)
+    with pytest.raises(pytest.fail.Exception, match="^fail once: "):
+        attempt("other-head", "head-b", node)
+    with pytest.raises(pytest.fail.Exception, match="^fail once: "):
+        attempt("other-node", "head-a", "tests/test_plant.py::test_other")
+    assert len(list(runs.glob("fail-once-*"))) == 3
+    assert not (tmp_path / "fallback").exists()
+
+
+@pytest.mark.feature("lab-fail-once-fixture")
+def test_fail_once_falls_back_to_the_pytest_temp_root_outside_the_lab(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(open_capture.TREE, raising=False)
+    node = "tests/test_plant.py::test_plant"
+
+    with pytest.raises(pytest.fail.Exception, match="^fail once: "):
+        fail_once.fail_once(node, tmp_path)
+    fail_once.fail_once(node, tmp_path)
+
+    assert len(list(tmp_path.glob("fail-once-*"))) == 1

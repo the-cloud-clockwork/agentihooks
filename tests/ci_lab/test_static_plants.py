@@ -23,7 +23,11 @@ def gates() -> dict[str, StaticGate]:
 
 def plants() -> dict[str, dict[str, Any]]:
     found = {path.stem: json.loads(path.read_text()) for path in sorted(PLANTS.glob("*.json"))}
-    return {name: spec for name, spec in found.items() if spec["gate"] not in STATIC_JOBS}
+    return {
+        name: spec
+        for name, spec in found.items()
+        if spec["gate"] not in STATIC_JOBS and spec["gate"].partition("/")[0] in STATIC_JOBS
+    }
 
 
 def exclusions() -> dict[str, dict[str, Any]]:

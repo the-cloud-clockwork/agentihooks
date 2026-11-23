@@ -12398,6 +12398,18 @@
       ]
     },
     {
+      "id": "lab-fail-once-fixture",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-flake-plant-fixture",
+      "behaviour": "A test that calls the fail once helper fails its first run on a head and passes every later run there: inside the lab its marker sits in the runs folder both attempts of a batch share, the parent of the sandbox folder that holds TMPDIR, keyed by the head tree name and the test node id, so one lab run of the unit.fail-once plant module is green and flaky with one flaky row and the next run on that head is green on its first attempt; outside the lab the marker sits under the pytest temp root it is given.",
+      "seam": "tests.ci_lab.fail_once fail_once and scripts.ci_lab.run_tests run over the module the unit.fail-once plant adds",
+      "tests": [
+        "tests/ci_lab/test_run_tests.py::test_a_fail_once_plant_is_flaky_inside_one_lab_run_and_green_on_the_next",
+        "tests/ci_lab/test_run_tests.py::test_fail_once_keys_its_lab_marker_by_head_tree_and_node_in_the_runs_folder",
+        "tests/ci_lab/test_run_tests.py::test_fail_once_falls_back_to_the_pytest_temp_root_outside_the_lab"
+      ]
+    },
+    {
       "id": "lab-worker-metrics",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-metrics",
@@ -14014,7 +14026,7 @@
       "id": "lab-static-plant-proofs",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs",
-      "behaviour": "Deterministic static plant twins preserve the checkout and index, push to the dedicated proof prefix without a lab secret or receiver request, and report only the protected pull request grade when the twin is green and its planted static gate alone is red with the observed named diagnostic.",
+      "behaviour": "Deterministic static plant twins preserve the checkout and index, push to the dedicated proof prefix without a lab secret or receiver request, and report only the protected pull request grade when the twin is green and its planted static gate alone is red with the observed named diagnostic. A plant edit with an empty before on a path absent at the base adds that file with mode 100644, and the unit.fail-once plant adds exactly one new test module.",
       "seam": "scripts.ci_lab.plant_proofs.prepare over git objects and scripts.ci_lab.plant_grade.prove through GitHub pushes and exact grade check runs",
       "tests": [
         "tests/ci_lab/test_static_plants.py::test_every_discovered_static_gate_has_one_plant_or_one_exclusion",
@@ -14025,6 +14037,8 @@
         "tests/ci_lab/test_plant_proofs.py::test_a_plant_has_reproducible_commits_and_preserves_the_checkout",
         "tests/ci_lab/test_plant_proofs.py::test_the_lint_fixture_turns_only_import_sorting_red",
         "tests/ci_lab/test_plant_proofs.py::test_the_base_comment_grader_refuses_the_heads_invented_directive",
+        "tests/ci_lab/test_plant_proofs.py::test_an_edit_on_an_absent_path_needs_an_empty_before",
+        "tests/ci_lab/test_plant_proofs.py::test_the_fail_once_plant_adds_exactly_one_new_test_module",
         "tests/ci_lab/test_plant_grade.py::test_two_pushes_grade_against_one_protected_base_and_ignore_other_grades",
         "tests/ci_lab/test_plant_grade.py::test_the_command_accepts_a_discovered_catalog_plant",
         "tests/ci_lab/test_plant_grade.py::test_a_step_plant_uses_its_job_check_and_requires_its_diagnostic",
