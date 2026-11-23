@@ -10,7 +10,7 @@ from scripts.events.envelope import Envelope
 from scripts.hub import registry, wait_ends
 from scripts.inbox.store import InboxStore
 from scripts.swarm import idle
-from scripts.swarm.store import AgentRecord, RedisStore
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 ME = "engineer@a1b2c3-0001"
 PEER = "engineer@a1b2c3-0002"
@@ -50,7 +50,7 @@ def rig() -> SimpleNamespace:
 
     def task(slug: str, task_id: str) -> dict | None:
         reads.append(task_id)
-        return rows.get(task_id)
+        return rows.get(task_id) if slug == "sw" else None
 
     react = wait_ends.WaitEnds(store, SimpleNamespace(task=task), lambda url: None, clock=lambda: 5_000)
 
@@ -133,6 +133,14 @@ def test_a_reply_wake_before_its_answered_item_closes_is_redelivered_until_it_cl
 
 
 @pytest.mark.feature("wait-ends-on-task-event")
+def test_a_reply_to_an_item_gone_from_the_inbox_ends_the_reply_wait(rig: SimpleNamespace) -> None:
+    rig.hold({"kind": "reply", "target": "gone"})
+    answer = InboxStore(rig.store.redis).send("helper", ME, "the dev branch", ref="gone")
+    rig.react.replied(_wake(answer.id))
+    assert rig.told() == [_ended("message gone, gone from the inbox")]
+
+
+@pytest.mark.feature("wait-ends-on-task-event")
 def test_a_send_that_answers_nothing_leaves_the_reply_wait_open(rig: SimpleNamespace) -> None:
     inbox = InboxStore(rig.store.redis)
     asked = inbox.send(ME, "helper", "which branch?")
@@ -181,6 +189,21 @@ def test_a_done_dependency_tells_no_holder_that_is_not_live_on_a_claimed_open_de
     rig.store.put_agent("sw", AgentRecord(name=PEER, lane="eng", task="t2", seat="eng-2@sw", state=state))
     rig.react.task_changed(_task_event())
     assert rig.told("eng-2@sw") == []
+
+
+@pytest.mark.feature("dependency-closed-notice")
+def test_a_done_dependency_skips_its_holder_an_idle_agent_and_a_master_and_still_tells_the_dependent(
+    rig: SimpleNamespace,
+) -> None:
+    rig.rows["t2"]["depends_on"] = ["t9"]
+    rig.rows["t3"] = {"id": "t3", "state": "claimed", "claimed_by": "master@a1b2c3", "depends_on": ["t9"]}
+    rig.store.put_agent("sw", AgentRecord(name="ci@a1b2c3-0003", lane="ci", task="t9", seat="ci-1@sw"))
+    rig.store.put_agent("sw", AgentRecord(name="engineer@a1b2c3-0000", lane="eng", task="", seat="eng-3@sw"))
+    rig.store.put_agent("sw", AgentRecord(name="master@a1b2c3", lane=MASTER, task="t3", seat="master@sw"))
+    rig.react.task_changed(_task_event())
+    assert sorted(rig.reads) == ["t1", "t2", "t9"]
+    assert rig.told("eng-2@sw") == ["Task t9, which your task t2 depends on, has closed as done."]
+    assert rig.told("master@sw") == []
 
 
 @pytest.mark.feature("dependency-closed-notice")

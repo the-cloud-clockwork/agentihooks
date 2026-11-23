@@ -66,8 +66,7 @@ class WaitEnds:
         rows = {
             agent.task: row for agent, _ in held if agent.task and (row := self.ledger.task(event.swarm, agent.task))
         }
-        reads = waits.Reads(rows, InboxStore(store.redis), self.github, self.github)
-        _end_each(store, event.swarm, held, reads, self.clock())
+        _end_each(store, event.swarm, held, self._reads(rows, InboxStore(store.redis)), self.clock())
 
     def task_changed(self, event: Envelope) -> None:
         """End every task wait on a task the event turned done or blocked, then tell the live holders of its
@@ -77,7 +76,7 @@ class WaitEnds:
             return
         store = self.store = self.store or store_module.connect()
         row: dict[str, Any] | None = self.ledger.task(event.swarm, event.key)
-        reads = waits.Reads({event.key: row} if row else {}, InboxStore(store.redis), self.github, self.github)
+        reads = self._reads({event.key: row} if row else {}, InboxStore(store.redis))
         _end_each(store, event.swarm, _held(store, event.swarm, event.key, ("task",)), reads, self.clock())
         if row and row.get("state") == "done":
             self._tell_dependents(store, event.swarm, event.key)
@@ -96,8 +95,11 @@ class WaitEnds:
         held = _held(store, event.swarm, answered, ("reply",))
         if held and _still_open(inbox, answered):
             raise AnswerPending(answered)
-        reads = waits.Reads({}, inbox, self.github, self.github)
-        _end_each(store, event.swarm, held, reads, self.clock())
+        _end_each(store, event.swarm, held, self._reads({}, inbox), self.clock())
+
+    def _reads(self, rows: dict[str, dict[str, Any]], inbox: InboxStore) -> waits.Reads:
+        """What ending a wait reads: ``rows`` and ``inbox`` with this reactor's pull request reader."""
+        return waits.Reads(rows, inbox, self.github, self.github)
 
     def _tell_dependents(self, store: Any, slug: str, closed: str) -> None:
         """Send the live holder of every claimed open task whose depends_on names ``closed`` one item naming it."""
