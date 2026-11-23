@@ -7304,7 +7304,8 @@
         "tests/swarm/test_parser_equivalence.py::test_namespaces_help_and_refusals_equal_recorded_base",
         "tests/swarm/test_parser_equivalence.py::test_recorded_invalid_arguments_are_refused",
         "tests/swarm/test_parser_equivalence.py::test_builder_resolves_current_cli_handlers",
-        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom"
+        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom",
+        "tests/swarm/test_parser_equivalence.py::test_headroom_counts_the_tracked_cli_beside_a_mutants_copy"
       ]
     },
     {
