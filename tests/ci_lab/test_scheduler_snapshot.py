@@ -1,6 +1,7 @@
 import json
 import threading
 import time
+import urllib.error
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
@@ -8,7 +9,7 @@ import pytest
 
 from scripts.ci_lab import budget, lease_api, metrics, scheduler
 from scripts.ci_lab.capacity import Load, document
-from tests.ci_lab.test_scheduler import HEAD_A, Run, _read, plan, unit
+from tests.ci_lab.test_scheduler import HEAD_A, Run, _built, _read, plan, unit
 from tests.ci_lab.test_scheduler import lab as _lab
 
 lab = _lab
@@ -53,6 +54,13 @@ def _counted(run: Run, monkeypatch: pytest.MonkeyPatch) -> tuple[list[int], Call
 
 @contextmanager
 def _serving(run: Run, now: list[int]) -> Iterator[tuple[str, str]]:
+    with _listening(run, now) as (api, exposition):
+        _built(api)
+        yield api, exposition
+
+
+@contextmanager
+def _listening(run: Run, now: list[int]) -> Iterator[tuple[str, str]]:
     spending = budget.Budget(run.lab.client, lambda: now[0], POLICY)
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: now[0])
     servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now[0], (0, 0, 0))
@@ -216,4 +224,46 @@ def test_the_grades_route_reads_every_request_beside_the_cached_capacity(
         second = json.loads(_read(f"{api}/grades/{HEAD_A}"))["grades"]
     assert [grade["run"] for grade in first] == [graded]
     assert second == []
+    assert builds == [1000]
+
+
+def _refused(url: str) -> tuple[int, object]:
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        _read(url)
+    return refused.value.code, json.loads(refused.value.read())
+
+
+@pytest.mark.feature("lab-scheduler-first-build-at-bind")
+def test_listen_starts_the_first_build_at_bind_and_no_read_waits_for_it(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _started(lab)
+    assert len(run.lease()) == 1
+    builds, load = _counted(run, monkeypatch)
+    counted = run.engine.load
+    entered, gate = threading.Event(), threading.Event()
+
+    def held(now_ms: int) -> Load:
+        entered.set()
+        assert gate.wait(10)
+        return counted(now_ms)
+
+    monkeypatch.setattr(run.engine, "load", held)
+    unbuilt = (503, {"error": "the load snapshot is not built yet"})
+    with _listening(run, [1000]) as (api, exposition):
+        try:
+            assert entered.wait(10)
+            assert _refused(f"{api}/capacity") == unbuilt
+            assert _refused(exposition.removesuffix("/metrics") + "/capacity") == unbuilt
+            scraped = _samples(_read(exposition).decode())
+        finally:
+            gate.set()
+        capacity = json.loads(_built(api))
+        served = _samples(_read(exposition).decode())
+    fresh = _fresh(run, load, 1000)
+    assert _named(scraped, fresh) == set()
+    assert not any(line.startswith("ci_lab_load_age_seconds") for line in scraped)
+    assert _named(served, fresh) == fresh
+    assert f"{RUNNING} 1.0" in served
+    assert capacity == _document(run, load, 1000)
     assert builds == [1000]

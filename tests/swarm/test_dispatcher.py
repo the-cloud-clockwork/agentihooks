@@ -357,16 +357,16 @@ def test_a_lane_without_focus_holders_keeps_its_first_focus_slot():
 @pytest.mark.parametrize(
     ("plan", "found", "caps"),
     [
-        (3, None, {"eng": 1, "ci": 2, "plan": 3}),
-        (0, doc([task("e"), task("p", lane="plan")]), {"eng": 1, "ci": 2, "plan": 1}),
+        (3, None, {"eng": 1, "ci": 2, "plan": 3, "review": 0}),
+        (0, doc([task("e"), task("p", lane="plan")]), {"eng": 1, "ci": 2, "plan": 1, "review": 0}),
         (
             0,
             doc([task("p", lane="plan", state="claimed"), task("q", lane="plan", state="done")]),
-            {"eng": 1, "ci": 2, "plan": 0},
+            {"eng": 1, "ci": 2, "plan": 0, "review": 0},
         ),
-        (0, doc([task("e")]), {"eng": 1, "ci": 2, "plan": 0}),
-        (0, None, {"eng": 1, "ci": 2, "plan": 0}),
-        (3, doc([task("p", lane="plan")]), {"eng": 1, "ci": 2, "plan": 3}),
+        (0, doc([task("e")]), {"eng": 1, "ci": 2, "plan": 0, "review": 0}),
+        (0, None, {"eng": 1, "ci": 2, "plan": 0, "review": 0}),
+        (3, doc([task("p", lane="plan")]), {"eng": 1, "ci": 2, "plan": 3, "review": 0}),
     ],
     ids=["stored caps", "open plan work", "plan work held or done", "no plan task", "no ledger", "plan cap above one"],
 )
@@ -390,6 +390,18 @@ def test_the_claim_key_yields_focus_when_the_lane_share_is_full(store):
     found = focus_split()
     key = dispatcher.claim_key(config, found)
     known = {t["id"]: t for t in found["tasks"]}
+    assert key(known["a"]) < key(known["h"])
+
+
+@pytest.mark.feature("swarm-review-dispatcher-lane-cap")
+def test_the_claim_key_yields_review_focus_when_the_review_lane_share_is_full(store: RedisStore) -> None:
+    config = store.update(SLUG, autonomy="delegate", max_review=2, focus_weight=50)
+    tasks = [task("c0", phase="", state="claimed", lane="review", kind="hot")]
+    tasks += [task("a", phase="", lane="review"), task("h", phase="", lane="review", kind="hot")]
+    found = doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+    key = dispatcher.claim_key(config, found)
+    known = {t["id"]: t for t in found["tasks"]}
+    assert dispatcher.lane_caps(config, found)["review"] == 2
     assert key(known["a"]) < key(known["h"])
 
 

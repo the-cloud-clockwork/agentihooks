@@ -2,6 +2,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from dataclasses import replace
 from functools import partial
 from typing import Any
 
@@ -42,6 +43,16 @@ def routes(jobs: queue.Queue) -> service.Routes:
 def test_the_scheduler_port_answers_capacity_from_the_load_snapshot(routes: service.Routes) -> None:
     assert routes.respond("GET", "/capacity", b"", None) == (200, document(LOAD))
     assert routes.respond("GET", "/capacity?fresh=1", b"", None) == (200, document(LOAD))
+
+
+@pytest.mark.feature("lab-scheduler-first-build-at-bind")
+def test_the_scheduler_port_answers_capacity_not_built_before_the_first_build(routes: service.Routes) -> None:
+    unbuilt = replace(routes, snapshot=lambda: None)
+    assert unbuilt.respond("GET", "/capacity", b"", None) == (503, {"error": "the load snapshot is not built yet"})
+    assert unbuilt.respond("GET", f"/grades/{HEAD}", b"", None) == (
+        200,
+        {"head": HEAD, "grades": [{"run": f"run-of-{HEAD}"}]},
+    )
 
 
 @pytest.mark.feature("lab-scheduler-service")

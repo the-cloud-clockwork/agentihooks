@@ -1,12 +1,15 @@
+import inspect
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key, write_part
 
 SELECTED = {"hooks/a.py": ({3, 1}, ["tests/test_b.py", "tests/test_a.py"]), "hooks/b.py": (set(), [])}
+RECORDER = (("mutmut", "__main__.py"), "record_trampoline_hit")
 
 
 def test_key_covers_the_head_and_every_selected_path_line_and_test():
@@ -174,6 +177,16 @@ def test_measured_dependencies_keep_only_the_test_modules_a_node_runs(
 def place_flake_ledger(tests: Path) -> None:
     (tests / "__init__.py").touch()
     shutil.copy(Path(__file__).with_name("flake_ledger.py"), tests)
+
+
+def stats_recorder_only() -> SimpleNamespace:
+    """Stand in for mutmut's Config.get: answer its stats recorder, which reads the config on every trampolined call
+    while a mutation run collects stats, and fail every other reader."""
+    frame = inspect.currentframe()
+    caller = frame.f_back.f_code if frame and frame.f_back else None
+    if caller is None or (Path(caller.co_filename).parts[-2:], caller.co_name) != RECORDER:
+        raise AssertionError("mutmut config read")
+    return SimpleNamespace(source_paths=[], max_stack_depth=-1)
 
 
 @pytest.mark.parametrize("inherited", ["before", None])

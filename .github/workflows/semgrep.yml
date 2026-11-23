@@ -57,7 +57,7 @@ jobs:
           copy="$(mktemp -d -p "$RUNNER_TEMP")"
           cp -r "$RULES" "$copy/rules"
           : > "$copy/.semgrepignore"
-          (cd "$copy" && semgrep --metrics off --test --config rules rules)
+          (cd "$copy" && semgrep --metrics off --test --strict --config rules rules)
           semgrep scan --error --strict --timeout 30 --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .
 
       - name: Outage rules for tests hold on every test file
@@ -220,7 +220,7 @@ jobs:
           test "$(semgrep --version)" = "$SEMGREP_VERSION"
 
       - name: Operator feature regressions and passing fixtures
-        run: semgrep --metrics off --test .semgrep/features
+        run: semgrep --metrics off --test --strict .semgrep/features
 
       # Each rule matches a pattern behind an outage; the scan job fails only instances new against the base.
       - name: Outage rules fire on their planted faults and pass their clean cases
@@ -228,7 +228,7 @@ jobs:
           copy="$(mktemp -d -p "$RUNNER_TEMP")"
           cp -r .semgrep-incidents "$copy/rules"
           : > "$copy/.semgrepignore"
-          (cd "$copy" && semgrep --metrics off --test --config rules rules)
+          (cd "$copy" && semgrep --metrics off --test --strict --config rules rules)
 
   charts:
     concurrency:

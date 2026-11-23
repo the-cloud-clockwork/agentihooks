@@ -1,0 +1,19 @@
+rules:
+  - id: tick-slow-lane-fixed-deadline
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Size the slow lane deadline from its current step budgets after budget resolution.
+      Keep the original pass join deadline separate so slow work does not lengthen the cadence.
+    paths:
+      include:
+        - /scripts/tick/pool.py
+        - tick-slow-lane-fixed-deadline.py
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              def $FUNCTION(..., slow_s: $TYPE = SLOW_S, ...):
+                  ...
+          - pattern: Deadline.after(slow_s)
+      - pattern: Deadline.after(SLOW_S)
+      - pattern: Deadline.after(59.0)
