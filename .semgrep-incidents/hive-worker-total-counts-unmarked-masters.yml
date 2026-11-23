@@ -3,10 +3,9 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      The hive worker total placement reads subtracts only sessions carrying the interactive login marker, so a
-      master on the subscription or api route stays counted as a worker and placement refuses a hive the hub still
-      admits, as expert placement on root did on 23 November. Subtract the hive's live unmarked master records with
-      _unmarked_masters inside the worker total.
+      A hive worker total that subtracts only sessions carrying the interactive login marker keeps a master on the
+      subscription or api route counted as a worker, so placement refuses a hive the hub still admits. Subtract the
+      masters the hive lists with _unmarked_masters inside the worker total.
     paths:
       include:
         - /scripts/hive/launch.py

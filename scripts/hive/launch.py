@@ -16,7 +16,6 @@ from scripts.quota_state import CLOSED
 from scripts.routing.reservation import LaunchSlots, master_five_floor, primary_reserve_pct
 from scripts.routing.slots import account_key
 from scripts.swarm import capacity, launch_endings, lease, profile_choice
-from scripts.swarm.probe import ROOT
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import ACK_LATER, Placed
 from scripts.swarm_ledger import ledger_workspace
@@ -101,7 +100,7 @@ def loaded_hives(
             for slot in pending
         }
         hive["agents"] = max(
-            0, sum(reported.values()) - masters - _unmarked_masters(agents, hive["id"], counts, spellings)
+            0, sum(reported.values()) - masters - _unmarked_masters(agents, counts, executions, spellings)
         ) + sum(max(0, count - unclaimed[slot]) for slot, count in pending.items())
         hive["agents"] = max(hive["agents"], recorded)
         from scripts.swarm import local_slots
@@ -129,22 +128,23 @@ def loaded_hives(
     return hives
 
 
-def _unmarked_masters(agents: list[AgentRecord], hive: str, counts: dict[str, Any], spellings: dict[str, str]) -> int:
-    """The hive's live master records on a login route that carries no interactive marker, which its sessions report
-    counts as plain slot sessions, each reported slot at most its unmarked sessions; root also takes masters recorded
-    with no hive."""
-    hosts = {hive, ""} if hive == ROOT else {hive}
+def _unmarked_masters(
+    agents: list[AgentRecord], counts: dict[str, Any], executions: dict[str, list[str]], spellings: dict[str, str]
+) -> int:
+    """The live masters the hive lists by execution on a login route without the interactive marker, each reported slot
+    at most its sessions without the marker; a master record the hive does not list removes nothing."""
+    masters = {
+        agent.execution_id
+        for agent in agents
+        if agent.lane == "master"
+        and agent.state not in ("finished", "ended")
+        and agent.route_kind not in ("interactive", "master-login")
+    }
     found: dict[str, int] = {}
-    for agent in agents:
-        if (
-            agent.lane == "master"
-            and agent.hive in hosts
-            and agent.state not in ("finished", "ended")
-            and agent.route_kind not in ("interactive", "master-login")
-        ):
-            slot = spellings.get(account_key(f"{agent.harness}:{agent.account}"))
-            if slot is not None:
-                found[slot] = found.get(slot, 0) + 1
+    for listed, ids in executions.items():
+        slot = spellings.get(account_key(listed))
+        if slot is not None:
+            found[slot] = found.get(slot, 0) + sum(1 for execution in ids if execution in masters)
     return sum(min(count, max(0, counts[slot] - counts.get(f"interactive:{slot}", 0))) for slot, count in found.items())
 
 
