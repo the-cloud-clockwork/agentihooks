@@ -14138,6 +14138,7 @@
         "tests/hive/test_daemon_presence.py::test_a_record_removed_by_another_pass_mid_export_still_lets_the_daemon_beat",
         "tests/observability/test_presence.py::test_with_no_hive_daemon_a_session_sends_its_seen_gauge_at_most_once_per_interval",
         "tests/observability/test_presence.py::test_an_unreadable_or_non_numeric_daemon_beat_leaves_the_session_sending_its_own_gauge",
+        "tests/observability/test_presence.py::test_a_seen_record_is_written_beside_itself_even_when_the_system_temp_folder_is_gone",
         "tests/observability/test_presence.py::test_an_agent_session_is_marked_seen_with_its_swarm_identity_and_hive",
         "tests/observability/test_presence.py::test_an_agent_session_names_its_harness_from_the_hook_target",
         "tests/observability/test_presence.py::test_an_event_without_a_session_marks_nothing",
