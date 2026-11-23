@@ -564,7 +564,7 @@ def test_github_open_changes_drops_the_batches_not_started_once_a_batch_fails(
         if asked[0] == 1:
             raise subprocess.CalledProcessError(1, ["gh", *args], "", "gh: HTTP 502")
         threading.Event().wait(0.5)
-        return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(_batch(dict.fromkeys(asked))), "")
+        return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(_batch({number: None for number in asked})), "")
 
     monkeypatch.setattr(github.github_reads, "rest", rest)
     provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
