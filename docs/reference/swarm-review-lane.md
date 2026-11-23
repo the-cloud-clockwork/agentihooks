@@ -144,11 +144,14 @@ does not offer review work. A stored review task, a ready-task listing or a
 swarm returning to `running` therefore does not establish that a hive will
 launch a reviewer. See the [event driven engine](../pillars/swarm.md#event-driven-engine).
 
-The reviewer profile implementation, launch paths, worker gates, automatic
-pull request or merge request triggers, merge group and release reviews,
-review verdicts and completion proof belong to separate integrations. Naming a
-profile in a template records the selection; the profile and the launch
-integration must also be installed for it to run.
+The `reviewer` package role exists separately from this lane. Its loop is the
+`swarm-reviewer` skill, and its conditions refuse edits, Serena writes and
+shell writes outside the seat's own folders; see
+[Read only roles](read-only-roles.md). Launching reviewers from offers,
+automatic pull request or merge request triggers, merge group and release
+reviews, and review verdict and completion proof belong to separate
+integrations. Naming the profile in a template records the selection; a
+reviewer runs only after a launch path places one on the lane.
 
 ## Troubleshooting
 
