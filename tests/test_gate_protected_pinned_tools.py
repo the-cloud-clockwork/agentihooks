@@ -1,3 +1,4 @@
+import copy
 from collections.abc import Callable
 from typing import Any
 
@@ -96,6 +97,22 @@ def test_the_protected_durations_provenance_admits_its_parser_install_floating_o
 ) -> None:
     base = _durations(False, False, SINGLE)
     head = _durations(retried, bounded, install)
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
+    admitted = install in {SINGLE, PINNED}
+    assert problems == ([] if admitted else ["The head skips reuse without protected durations provenance."])
+
+
+@pytest.mark.feature("protected-grader-admits-floating-and-pinned-provenance")
+@pytest.mark.parametrize("retried", [False, True])
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.parametrize("install", [SINGLE, PINNED, *NEAR_MISSES])
+def test_a_pinned_provenance_template_admits_a_stale_head_floating_or_under_the_exact_pin_only(
+    monkeypatch: pytest.MonkeyPatch, retried: bool, bounded: bool, install: str
+) -> None:
+    base = _durations(False, False, SINGLE)
+    head = _durations(retried, bounded, install)
+    pinned = _durations(False, False, PINNED)["jobs"]["select"]["steps"]
+    monkeypatch.setattr(ci_reuse, "duration_provenance_steps", lambda: copy.deepcopy(pinned))
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
     admitted = install in {SINGLE, PINNED}
     assert problems == ([] if admitted else ["The head skips reuse without protected durations provenance."])

@@ -8471,6 +8471,16 @@
       ]
     },
     {
+      "id": "protected-grader-admits-floating-and-pinned-provenance",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-provenance-dual-admit",
+      "behaviour": "The protected grader admits a head's durations provenance prefix with its PyYAML install floating or under the exact PyYAML 6.0.3 parser constraint, whichever form the grader's own provenance template holds, so a pull request branched before the template pin keeps Gate Protected green; any other install is refused.",
+      "seam": "gate_protected._duration_problems admitting both install forms of every template variant",
+      "tests": [
+        "tests/test_gate_protected_pinned_tools.py::test_a_pinned_provenance_template_admits_a_stale_head_floating_or_under_the_exact_pin_only"
+      ]
+    },
+    {
       "id": "gate-declarations-never-expire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
