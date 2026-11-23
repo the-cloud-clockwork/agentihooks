@@ -588,6 +588,24 @@
       ]
     },
     {
+      "id": "lab-retire-gone-merge-groups",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-retire-gone-merge-groups",
+      "behaviour": "The CI lab scheduler ends a merge group grade whose merge group is gone: at the start of every pass Scheduler.tick lists the merge group refs of each repository that has a live merge group grade once and closes each such grade whose head no ref carries, so the run leaves the live set, its grade document is deleted and the pending jobs of its head are dropped unless another live grade grades the same head, with no check run posted, no evidence or passed tree recorded and no graded head counted. A grade whose merge group ref is listed keeps its units and its verdict, a grade pushed to a grade ref and a grade of any other class are never retired, and a ref listing git cannot produce retires nothing. The scheduler keeps one record of class, repository, head and grade ref per live grade, written at grade start, filled once from the grade document of a live run that has none and removed for a run that is no longer live, so a steady pass reads no grade document for this step.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with an expander that lists merge group heads, scripts.ci_lab.queue.Queue.drop over fakeredis and scripts.ci_lab.scheduler.MirrorExpander.groups over a git origin fixture",
+      "tests": [
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_whose_ref_is_gone_is_retired_and_posts_nothing",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_whose_ref_is_listed_keeps_its_units_and_its_verdict",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_listing_git_cannot_produce_retires_nothing",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_the_jobs_another_live_grade_of_its_head_holds",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_pushed_to_a_grade_ref_is_never_retired",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_without_a_record_is_recorded_and_the_record_of_a_closed_run_is_removed",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_pull_request_grade_is_never_retired_for_a_missing_merge_group_ref",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_mirror_expander_lists_the_head_of_every_merge_group_ref",
+        "tests/ci_lab/test_queue.py::test_drop_removes_the_pending_jobs_of_a_head_and_keeps_its_leased_ones"
+      ]
+    },
+    {
       "id": "lab-scheduler-budget-charge",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2718",

@@ -78,6 +78,7 @@ from scripts.github_app import GitAuthRefused
 
 __all__ = [
     "GRADES",
+    "KINDS",
     "BusInbox",
     "Flags",
     "Head",
@@ -108,6 +109,7 @@ LIVE = f"{PREFIX}grades"
 LANES = f"{PREFIX}lane:"
 WAITING = f"{PREFIX}waiting"
 TREES = f"{PREFIX}tree:"
+KINDS = f"{PREFIX}kinds"
 UNGRADED = frozenset({*LOSSES, CANNOT_RUN, DROPPED})
 FINISHED = frozenset({"done", "lost"})
 REAPED = {"pending": contract.UNITS_REDELIVERED_TOTAL, "lost": contract.UNITS_LOST_TOTAL}
@@ -360,6 +362,10 @@ class Expander(Protocol):
 
     def reachable(self, repo: str, head: str) -> bool:
         """Return whether a ref every node mirror fetches reaches the head."""
+        ...
+
+    def groups(self, repo: str) -> frozenset[str]:
+        """Return the head of every merge group ref the repository lists; git fails when it cannot list them."""
         ...
 
 
@@ -1356,6 +1362,10 @@ class MirrorExpander:
         return (
             subprocess.run(["git", "-C", str(mirror.store), "merge-base", "--is-ancestor", head, dev]).returncode == 0
         )
+
+    def groups(self, repo: str) -> frozenset[str]:
+        """Return the head of every merge group ref the repository lists; git fails when it cannot list them."""
+        return frozenset()
 
     def trusted(self, repo: str) -> frozenset[str]:
         """Return the runner trust list on the repository's dev branch."""

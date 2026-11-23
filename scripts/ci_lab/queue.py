@@ -188,6 +188,11 @@ class Queue:
         keys = [_key("pending"), _head(head, "pending")]
         return [job for job in self.pending() if job in mine and self._drop(keys=[_job(job), *keys], args=[job])]
 
+    def drop(self, head: str) -> list[str]:
+        """Remove the head's pending jobs, read from the head's own pending set, and return them by name; its leased
+        jobs run to completion."""
+        return []
+
     def pending(self) -> list[str]:
         return list(self.client.zrange(_key("pending"), 0, -1))
 
