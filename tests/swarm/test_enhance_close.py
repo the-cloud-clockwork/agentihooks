@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -424,3 +425,72 @@ def test_the_plan_reader_fetches_a_hosted_ledger_with_its_loader(monkeypatch: py
     doc, load = plan_read.fetched(SLUG, environ)
     assert doc == {"slug": SLUG, "keys": ("tasks", "phases", "artifacts")}
     assert load is not None and load(SLUG, "plan.md") == f"True {SLUG} plan.md".encode()
+
+
+@pytest.mark.feature("task-enhancement-expected-value")
+@pytest.mark.parametrize(
+    "held,expected",
+    [
+        ({}, "needed"),
+        ({"enhancement": None}, ""),
+        ({"enhancement": ""}, None),
+        ({"enhancement": "needed"}, ""),
+        ({"enhancement": "planned"}, None),
+        ({"enhancement": "skipped"}, ""),
+    ],
+)
+def test_a_stale_enhancement_expectation_refuses_without_effects(held: dict[str, Any], expected: str | None) -> None:
+    row = {"id": TARGET, **held}
+    doc = {"tasks": [row]}
+    ctx = Mock()
+    ctx.refused = []
+    operation = {**VALID, "expected": expected}
+    assert ledger_enhancement.apply(doc, operation, ctx) is False
+    assert ctx.refused == [f"task {TARGET} enhancement changed"]
+    assert row == {"id": TARGET, **held}
+    ctx.stamp.assert_not_called()
+    ctx.record.assert_not_called()
+
+
+@pytest.mark.feature("task-enhancement-expected-value")
+@pytest.mark.parametrize(
+    "held",
+    [
+        {},
+        {"enhancement": None},
+        {"enhancement": ""},
+        {"enhancement": "needed"},
+        {"enhancement": "planned"},
+        {"enhancement": "skipped"},
+    ],
+)
+def test_a_matching_enhancement_expectation_passes_the_api_and_writes(held: dict[str, Any]) -> None:
+    row = {"id": TARGET, **held}
+    operation = {**VALID, "expected": held.get("enhancement")}
+    schemas.check_operations({"operation_id": "guarded", "ops": [operation], "guards": {}}, core, (TARGET,))
+    ctx = Mock()
+    ctx.refused = []
+    assert ledger_enhancement.apply({"tasks": [row]}, operation, ctx) is True
+    assert row == {"id": TARGET, "enhancement": "needed"}
+    assert ctx.refused == []
+    ctx.stamp.assert_called_once_with(f"tasks/{TARGET}/enhancement", "swarm")
+    ctx.record.assert_called_once_with("swarm", "enhancement set", f"tasks/{TARGET}", text="needed")
+
+
+@pytest.mark.feature("task-enhancement-expected-value")
+def test_an_omitted_enhancement_expectation_keeps_legacy_writes() -> None:
+    row = {"id": TARGET, "enhancement": "planned"}
+    ctx = Mock()
+    ctx.refused = []
+    ledger_enhancement.check(VALID)
+    assert ledger_enhancement.apply({"tasks": [row]}, VALID, ctx) is True
+    assert row["enhancement"] == "needed"
+    assert ctx.refused == []
+
+
+@pytest.mark.feature("task-enhancement-expected-value")
+@pytest.mark.parametrize("expected", [1, True, [], {}, "other"])
+def test_the_enhancement_expectation_rejects_invalid_values(expected: Any) -> None:
+    with pytest.raises(ValueError) as error:
+        ledger_enhancement.check({**VALID, "expected": expected})
+    assert str(error.value) == ledger_enhancement.SHAPE
