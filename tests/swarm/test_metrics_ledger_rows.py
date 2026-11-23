@@ -103,7 +103,7 @@ def test_a_snapshot_row_identity_hashes_its_sorted_fields():
     }
 
 
-def test_task_counts_cover_every_known_lane_and_add_up_tasks():
+def test_task_counts_cover_every_known_lane_and_add_up_tasks() -> None:
     nodes = [
         {"node": "phases/p", "kind": "phase", "state": "building"},
         {"node": "tasks/a", "kind": "task", "state": "open"},
@@ -116,11 +116,11 @@ def test_task_counts_cover_every_known_lane_and_add_up_tasks():
     }
     rows = metrics_ledger.count_rows("sw", NOW, nodes, known)
     assert {row["item"] for row in rows} == {"", "phases/p"}
-    assert {row["lane"] for row in rows} == {"", "ci", "eng", "plan"}
+    assert {row["lane"] for row in rows} == {"", "ci", "eng", "plan", "review"}
     open_ci = [row["value"] for row in rows if row["lane"] == "ci" and row["state"] == "open"]
     open_all = [row["value"] for row in rows if row["lane"] == "" and row["state"] == "open"]
     assert open_ci == [2.0, 2.0] and open_all == [2.0, 2.0]
-    assert len(rows) == 2 * 4 * len(metrics_ledger.STATES)
+    assert len(rows) == 2 * 5 * len(metrics_ledger.STATES)
 
 
 def test_age_rows_skip_closed_items_and_age_open_ones_from_their_birth():

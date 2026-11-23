@@ -112,7 +112,7 @@ def snapshot_row(slug: str, now_ms: int, measure: str, item: str, path: dict, va
 
 def count_rows(slug: str, now_ms: int, nodes: list, known: dict) -> list:
     groups = {"": Counter(), **{row["node"]: Counter() for row in nodes if row["kind"] != "task"}}
-    lanes = {"", "eng", "ci", "plan"}
+    lanes = {"", "eng", "ci", "plan", "review"}
     for node in nodes:
         if node["kind"] != "task":
             continue

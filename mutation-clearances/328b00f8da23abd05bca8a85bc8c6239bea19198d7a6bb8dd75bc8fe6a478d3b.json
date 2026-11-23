@@ -1,0 +1,6 @@
+{
+  "scripts/pr_body.py:scripts.pr_body.x__body_from_event:f7d019d4f4e179b1087f75c9395cf629787295ac118b02b9fbf7865094bdfab1": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: Python resolves utf-8 and UTF-8 to the same codec, preserving decoded JSON text and decoding errors."
+  }
+}

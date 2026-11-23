@@ -45,13 +45,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install PyYAML
-        run: python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
+      - name: Install grader dependencies
+        run: python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3 markdown-it-py==4.2.0
 
       - name: Fetch the head as data
         env:
           PR: ${{ github.event.pull_request.number }}
         run: git fetch --no-tags origin "refs/pull/$PR/head"
+
+      - name: Grade the pull request body with protected code
+        id: body
+        run: python -m scripts.pr_body check --event "$GITHUB_EVENT_PATH"
 
       - name: Grade the head with the protected gate logic
         id: grade
