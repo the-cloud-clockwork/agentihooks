@@ -2522,6 +2522,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-role-release-floor",
       "behaviour": "A role records the first release that can host it, and a hive that reports an older release does not host that role: the launcher never selects it, the local overflow never takes it and a preferred hive is passed over, pinned or not. A hive whose release cannot be judged still hosts: one that reports no version, a text that is no version, or a development install. A role with no first release is hosted by a hive of any release. A role no live hive is new enough for waits as a role no live hive takes, and a preferred hive passed over for its release is named with both releases.",
       "seam": "hive.placement.hosts, outdated, release, choose, place and unhosted over hive records; hive.launch select for the expert lane over a hive written to the registry with a version; the placement table FIRST_RELEASE",
+      "semgrep_rule": "feature-hive-role-release-floor",
       "tests": [
         "tests/hive/test_release_floor.py::test_an_expert_is_hosted_only_by_a_hive_at_or_past_its_first_release",
         "tests/hive/test_release_floor.py::test_a_hive_whose_release_cannot_be_judged_still_hosts_an_expert",
