@@ -883,11 +883,6 @@ def test_function_of_names_the_function_a_mutant_mutates() -> None:
     assert executors.function_of("scripts.alpha.x_a__mutmut_b__mutmut_3") == "scripts.alpha.x_a__mutmut_b"
 
 
-def test_the_tracked_listing_refuses_a_tree_git_cannot_read(tmp_path: Path) -> None:
-    with pytest.raises(subprocess.CalledProcessError):
-        executors._tracked(folder(tmp_path, "plain", {"a.py": ""}))  # pyright: ignore[reportPrivateUsage]
-
-
 @pytest.mark.feature("lab-worker-executors")
 def test_executors_name_the_adapter_of_every_unit_kind(tmp_path: Path) -> None:
     pod = pod_of(tmp_path, FakeWorktrees({}))

@@ -130,6 +130,7 @@ class Worktrees:
         """Cut a private writable worktree of head for a mutation unit, with base present in the store for the
         comparison the unit makes, and say whether the store fetched head for it."""
         fetched = self.mirror.fetch(head)
+        self.mirror.fetch(base)
         self.root.mkdir(parents=True, exist_ok=True)
         tree = Path(tempfile.mkdtemp(prefix=f"{head}.", dir=self.root))
         _git(self.mirror.store, "worktree", "add", "--quiet", str(tree), head)

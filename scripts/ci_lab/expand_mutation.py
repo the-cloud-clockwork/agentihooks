@@ -22,6 +22,7 @@ from mutmut.mutation.trampoline_templates import mangle_function_name
 from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_lab import digests
+from scripts.ci_lab.expand_tests import is_test_module
 from scripts.ci_lab.units import Unit
 from scripts.ci_mutation.plan import MUTANT_SECONDS
 from scripts.ci_mutation.scope import module_name
@@ -125,12 +126,23 @@ def changed_functions(
     """Parse source once and return its wrapper with the graded mutations of each function mutmut trampolines in path
     whose lines meet changed, applying no ignore pattern and reading no mutmut config. The scheduler names a mutant
     unit's members from it and the worker trampolines from it, so both take the same mutants."""
-    raise NotImplementedError
+    wrapper, graded, _ = created_mutations(path, source, patterns=())
+    starts = wrapper.resolve(WhitespaceInclusivePositionProvider)
+    ends = wrapper.resolve(PositionProvider)
+    return wrapper, {
+        function: mutations
+        for function, mutations in group_by_top_level_node(graded).items()
+        if isinstance(function, cst.FunctionDef)
+        and not changed.isdisjoint(range(starts[function].start.line, ends[function].end.line + 1))
+    }
 
 
 def changed_tests(root: Path, base: str, head: str) -> list[str]:
     """List the test modules under root's test tree that head changes against base and still holds."""
-    raise NotImplementedError
+    names = subprocess.check_output(
+        ["git", "diff", "--name-only", "-z", "--diff-filter=d", f"{base}...{head}", "--", "tests/"], cwd=root
+    )
+    return sorted(path for path in names.decode().split("\0") if is_test_module(path))
 
 
 def function_units(
@@ -146,17 +158,11 @@ def function_units(
     of split_members keyed by the function key with their own members when its mutants price over timeout. It applies
     no ignore pattern and reads no mutmut config, as the worker's trampolining does."""
     source = (root / path).read_text()
-    wrapper, graded, _ = created_mutations(path, source, patterns=())
-    starts = wrapper.resolve(WhitespaceInclusivePositionProvider)
-    ends = wrapper.resolve(PositionProvider)
+    wrapper, functions = changed_functions(path, source, changed)
     parents = wrapper.resolve(ParentNodeProvider)
     module = module_digest(source)
     units: list[Unit] = []
-    for function, mutations in group_by_top_level_node(graded).items():
-        if not isinstance(function, cst.FunctionDef) or not changed.intersection(
-            range(starts[function].start.line, ends[function].end.line + 1)
-        ):
-            continue
+    for function, mutations in functions.items():
         owner = parents.get(parents[function])
         class_name = owner.name.value if isinstance(owner, cst.ClassDef) else None
         name = get_mutant_name(Path(path), mangle_function_name(name=function.name.value, class_name=class_name))

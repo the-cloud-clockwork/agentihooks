@@ -26,7 +26,7 @@ from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_lab.units import Unit
 from scripts.ci_mutation.killers import KillMemory
-from scripts.ci_mutation.selection import LIGHT_MAIN, selected_mutants
+from scripts.ci_mutation.selection import LIGHT_MAIN, plain_copies
 from scripts.ci_mutation.stats_cache import collect_cached_stats  # pyright: ignore[reportUnknownVariableType]
 
 __all__ = ["Recorder", "Row", "WarmLoop", "install", "main", "mutants", "run", "stats", "trampoline"]
@@ -41,7 +41,6 @@ NO_TESTS = "no tests"
 SUSPICIOUS = "suspicious"
 STATUSES = {0: "survived", 1: "killed"}
 CRASHED = 3
-EVERY_LINE = frozenset(range(1, 100_000))
 HITS: set[str] = set()
 
 
@@ -69,8 +68,18 @@ def trampoline(tree: Path, path: str, changed: Set[int]) -> list[str]:
     """Rewrite path under tree with every mutant of each function whose lines meet changed behind trampolines, leave
     its other functions as they stand and return the full names of the mutants written, applying no ignore pattern
     and reading no mutmut config."""
+    from mutmut.mutation.file_mutation import combine_mutations_to_source
+
+    from scripts.ci_lab.expand_mutation import changed_functions
+
     target = tree / path
-    code, names = selected_mutants(path, target.read_text(), set(EVERY_LINE), patterns=())
+    wrapper, functions = changed_functions(path, target.read_text(), changed)
+    if not functions:
+        return []
+    selected = [mutation for mutations in functions.values() for mutation in mutations]
+    code, names = combine_mutations_to_source(wrapper.module, selected)
+    if any(function.decorators for function in functions):
+        code = plain_copies(code)
     target.write_text(code)
     return [get_mutant_name(Path(path), name) for name in names]
 
