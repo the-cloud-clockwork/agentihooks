@@ -164,6 +164,17 @@ def unlaunched(store: Any, slug: str, name: str) -> int:
 def launch_failed(store: Any, slug: str, name: str, agent: str, reason: str, at: int) -> None:
     """Keep the last failed launch of a running lineage: why it failed, the expert that did not start and when. A
     lineage that ended, or that the swarm does not hold, is left as it is."""
+    key = store.key(slug, LINEAGES)
+
+    def write(pipe: Any) -> None:
+        raw = pipe.hget(key, name)
+        found = Lineage(**json.loads(raw)) if raw else None
+        pipe.multi()
+        if found is not None and found.state == RUNNING:
+            failure = {"at": at, "agent": agent, "reason": reason}
+            pipe.hset(key, name, json.dumps(asdict(replace(found, launch_failure=failure))))
+
+    store.redis.transaction(write, key)
 
 
 def closing(store: Any, slug: str) -> list[Lineage]:

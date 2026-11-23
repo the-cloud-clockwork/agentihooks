@@ -13,6 +13,7 @@ from importlib import import_module
 from types import SimpleNamespace
 from typing import Any
 
+from hooks.secrets import redact
 from scripts.handoff import check, envelope, transfers
 from scripts.inbox import exits, outbox
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
@@ -39,6 +40,7 @@ WHAT = "expert of lineage {lineage}"
 SPAWNED = "spawned expert {name} on lineage {lineage} as its expert number {number}"
 WAITS = "lineage {lineage} waits: {error}"
 FAILED = "expert spawn failed on lineage {lineage}: {error}"
+WHY_CHARS = 300
 ENDED = "ended expert {name}: lineage {lineage} is {state}"
 STOPPED = "left when its lineage {lineage} was stopped"
 OFFERED = "offered the handoff of lineage {lineage} again: {name} was lost before it confirmed it"
@@ -227,12 +229,21 @@ def _launch(
         if SEAT.seat_spawn.room_refused(failed.error):
             SEAT.transfers.detach(store, slug, failed.record)
             return [*left, WAITS.format(lineage=lineage.id, error=failed.error)]
-        SEAT.transfers.failed(store, slug, failed.record)
+        why = _why(failed.error)
+        expert_lineage.launch_failed(store, slug, lineage.id, failed.record.name, why, now_ms)
+        SEAT.transfers.failed(store, slug, failed.record, why)
         return [*left, FAILED.format(lineage=lineage.id, error=failed.error)]
     record = tick.placed_record(record, placed)
     store.put_agent(slug, record)
     SEAT.dispatch_seat.move_mail_home(store, record)
     return [*left, SPAWNED.format(name=record.name, lineage=lineage.id, number=number)]
+
+
+def _why(error: BaseException) -> str:
+    """The text a failed launch is kept with: its error with secrets redacted, on one line and cut at WHY_CHARS, or
+    the name of the error's type when it says nothing."""
+    text = " ".join(redact(str(error), mode="strict").split())
+    return text[:WHY_CHARS] or type(error).__name__
 
 
 def _left(slug: str, store: Any, lineage: expert_lineage.Lineage, number: int, now_ms: int) -> list[str]:

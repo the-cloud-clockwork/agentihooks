@@ -159,7 +159,7 @@ def test_a_launch_that_fails_leaves_no_record_and_a_failed_binding_and_the_next_
     assert go(store, FakeRuntime(fail=True), NOW + MINUTE) == ["expert spawn failed on lineage expert-1: herdr down"]
     assert experts(store) == [] and expert_lineage.launches(store, "sw", "expert-1") == 1
     failed, retry = sorted(rows(store), key=lambda found: found["id"] != row["id"])
-    assert (failed["binding"]["state"], failed["binding"]["reason"]) == ("absent", "Launch failed")
+    assert (failed["binding"]["state"], failed["binding"]["reason"]) == ("absent", "herdr down")
     assert (retry["retry_of"], retry["successor"], retry["binding"]) == (row["id"], "", {"state": "pending"})
     second = launched(store, runtime, NOW + 2 * MINUTE)
     task = runtime.tasks[-1]

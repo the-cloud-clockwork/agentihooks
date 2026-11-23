@@ -100,7 +100,7 @@ def failed(store: RedisStore, slug: str, agent: AgentRecord, reason: str = LAUNC
         at = now_ms()
 
         def change(current, at=at):
-            current["binding"] = {"state": "absent", "at": at, "session": agent.name, "reason": LAUNCH_FAILED}
+            current["binding"] = {"state": "absent", "at": at, "session": agent.name, "reason": reason}
 
         _change(store, slug, row["id"], change)
         retry = {

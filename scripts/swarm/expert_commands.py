@@ -112,12 +112,15 @@ def cmd_status(store: Any, args: argparse.Namespace) -> None:
 
 def stands(lineage: expert_lineage.Lineage, expert: str) -> str:
     """Where one lineage stands, in one line: its state, effort and mission, the expert on its seat while it runs,
-    who started it and who ended it."""
-    seat = f", {expert or VACANT}" if lineage.state == expert_lineage.RUNNING else ""
+    who started it and who ended it, and its last failed launch while it runs with no expert on its seat."""
+    running = lineage.state == expert_lineage.RUNNING
+    seat = f", {expert or VACANT}" if running else ""
     ended = f", ended by {lineage.ended_by}: {lineage.note}" if lineage.ended_by else ""
+    failure = lineage.launch_failure if running and not expert else {}
+    failed = f"; last launch as {failure['agent']} failed: {failure['reason']}" if failure else ""
     return (
         f"{lineage.id} {lineage.state} at {lineage.effort}{seat}: {lineage.title} "
-        f"(started by {lineage.started_by}{ended})"
+        f"(started by {lineage.started_by}{ended}{failed})"
     )
 
 
