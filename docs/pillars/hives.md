@@ -2150,11 +2150,11 @@ database, so the read reaches no separate server. The same read is open to any l
 
 | Parameter | Value | A row is kept when |
 |---|---|---|
-| `ids` | Task ids, comma separated | Its `id` is listed |
-| `states` | Task states, comma separated | Its `state` is listed |
-| `pinned` | `1` | It names a `hive` or sets `workstation`. The filter is on whenever the parameter is present. |
-| `branches` | Branch names, comma separated | Its `branch` is listed |
-| `fields` | Field names, comma separated | Not a filter: each kept row carries only its `id` and the named fields it has |
+| `ids` | Task ids, comma separated, at most 8,000 characters | Its `id` is listed |
+| `states` | Task states, comma separated, at most 200 characters | Its `state` is listed |
+| `pinned` | `1`, the only value accepted | It names a `hive` or sets `workstation` |
+| `branches` | Branch names, comma separated, at most 8,000 characters | Its `branch` is listed |
+| `fields` | Field names, comma separated, at most 500 characters | Not a filter: each kept row carries only its `id` and the named fields it has |
 
 A row must pass every filter the query names. Without `fields` each row comes back whole with its `revision`,
 except its comments, which come back as `comments_count`. The reply is one page, `{"data": [...], "revision": "<revision>", "next_cursor": null}`, and a
@@ -2248,6 +2248,10 @@ semgrep --test --config .semgrep-incidents/hub-admission-reads-full-export.yml \
 #### Narrow read limitations
 
 - A `plan` task still reads the whole document; see [The reads](#the-reads).
+- The first selection a process makes reads every task row of the ledger once. Later selections reuse each row no
+  write reached and rebuild only the tasks a write changed. From a workstation on 23 November the first selection
+  on a large ledger took 14.8 seconds and the next two 263 and 107 ms, so the first admission after a hub roll can
+  still log a large `rows`.
 - The readiness pass, the operator priority preemption pass and the master spoke's own recheck still read the whole
   export.
 - A ledger server on a release before #13245 refuses every selection with `400 schema_invalid`,
@@ -2262,7 +2266,7 @@ semgrep --test --config .semgrep-incidents/hub-admission-reads-full-export.yml \
 | `late:` lines show a large `parts` | The task is a `plan` task, whose admission reads the whole document | Expected on a large ledger. |
 | An offer is refused `the offer is withdrawn, <reason>` while the task looks open | A local check or the ledger's claim gate holds it, such as a dependency, a freeze, a focus elsewhere or an earlier phase; the reason names it | Read the verdicts with `agentihooks api --slug <slug> get focus`, then clear the hold; see [Freeze and focus](swarm.md#freeze-and-focus). |
 | A selection read answers `400 schema_invalid` with `Only a plain tasks read takes a selection, ...` | It named a filter on a path other than `tasks`, beside a paging parameter, or with only `fields` | Send `ids`, `states`, `pinned` or `branches` on a plain `tasks` read. |
-| A selection read answers `400 schema_invalid` with `Request does not match the resource schema` | The ledger server runs a release before #13245 | Roll the ledger server, or read through the ledger client from a checkout on the newest release. |
+| A selection read answers `400 schema_invalid` with `Request does not match the resource schema` | `pinned` carries a value other than `1`, a list passes its length limit, or the ledger server runs a release before #13245 | Send `pinned=1` and split a long list over several reads; otherwise roll the ledger server, or read through the ledger client from a checkout on the newest release. |
 
 ### When a launch fails
 
