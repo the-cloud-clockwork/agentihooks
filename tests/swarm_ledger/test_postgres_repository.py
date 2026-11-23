@@ -1,6 +1,7 @@
 import os
 import subprocess
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -66,6 +67,32 @@ def test_an_imported_postgres_ledger_exports_reads_and_snapshots_as_stored(impor
         assert slug in snapshot.slugs()
         assert snapshot.document(slug) == shared.get_document(slug)
         assert snapshot.hierarchy(slug) == stored.hierarchy(slug)
+
+
+def test_the_flags_read_on_postgres_matches_the_sqlite_repository(tmp_path: Path) -> None:
+    slug = fresh("flags")
+    state = {
+        "phases": [
+            {"id": "zeta", "title": "Last by id", "done": True},
+            {"title": "No id"},
+            {"id": "alpha", "out_of_scope": True, "done": False, "extra": {"done": True}},
+        ],
+        "followups": [{"id": "f1", "text": "x", "done": False}],
+        "_meta": {"rev": 1},
+    }
+    shared = postgres.PostgresLedgerRepository(URL)
+    shared.migrate()
+    shared.import_document(slug, state)
+    sqlite.SQLiteLedgerRepository(tmp_path / sqlite.DATABASE).import_document(slug, state)
+    names = ("phases", "followups", "sources")
+    flags = ("done", "out_of_scope")
+    expected = {
+        "phases": [{"done": True}, {}, {"out_of_scope": True, "done": False}],
+        "followups": [{"done": False}],
+        "sources": [],
+    }
+    assert sqlite.read_flags(postgres.Database(URL), slug, names, flags) == expected
+    assert sqlite.read_flags(tmp_path, slug, names, flags) == expected
 
 
 def test_a_postgres_ledger_write_advances_its_revision_and_records_its_events():

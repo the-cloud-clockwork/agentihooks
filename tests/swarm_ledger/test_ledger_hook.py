@@ -190,6 +190,34 @@ def test_dispatch_hands_the_ledger_policy_and_reaches_the_orchestrator_for_a_tas
 
 
 @pytest.mark.feature("ledger-hook-bounded-read")
+def test_dispatch_routes_without_tasks_when_the_ledger_vanishes_before_the_task_read(
+    folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import storage
+
+    reads = []
+    stored = storage.read_ledger
+
+    def vanishing(directory: Path, slug: str, *keys: str) -> dict[str, Any] | None:
+        reads.append(keys)
+        return stored(directory, slug, *keys) if len(reads) == 1 else None
+
+    monkeypatch.setattr(storage, "read_ledger", vanishing)
+    assert gate_decisions(folder, monkeypatch, routed_ledger(), "PostToolUse") == [([5, 7, 8], ledger_gate_defaults())]
+    assert [keys[0] for keys in reads] == ["_meta.members", "tasks/t1"]
+
+
+@pytest.mark.feature("ledger-hook-bounded-read")
+def test_dispatch_skips_the_handler_when_the_flags_read_finds_no_database(
+    folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import storage
+
+    monkeypatch.setattr(storage, "read_flags", lambda directory, slug, collections, names: {})
+    assert gate_decisions(folder, monkeypatch, routed_ledger(), "Stop") == []
+
+
+@pytest.mark.feature("ledger-hook-bounded-read")
 @pytest.mark.parametrize(
     ("phases", "followups", "runs"),
     [
@@ -213,27 +241,37 @@ def test_dispatch_skips_only_a_ledger_whose_phases_and_follow_ups_are_all_done_o
 def test_dispatch_for_a_bound_session_never_reads_the_whole_tasks_phases_or_followups(
     folder: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from scripts.swarm_ledger import storage
     from scripts.swarm_ledger.repository import sqlite
 
     bind(folder, routed_ledger())
     asked = []
+    flagged = []
     partial = sqlite.read_partial
+    flags = storage.read_flags
 
     def spy(connection: Any, slug: str, keys: tuple[Any, ...]) -> dict[str, Any]:
         asked.extend(keys)
         return partial(connection, slug, keys)
 
+    def flag_spy(directory: Path, slug: str, collections: tuple[str, ...], names: tuple[str, ...]) -> Any:
+        flagged.append((collections, names))
+        return flags(directory, slug, collections, names)
+
     def whole(*args: Any) -> None:
-        raise AssertionError("the ledger hook read every row of the ledger")
+        raise AssertionError("the ledger hook read a whole collection or document")
 
     monkeypatch.setattr(sqlite, "read_partial", spy)
-    monkeypatch.setattr(sqlite, "read_rows", whole)
+    monkeypatch.setattr(storage, "read_flags", flag_spy)
+    for name in ("read_rows", "read_document", "read_ledgers", "read_ids"):
+        monkeypatch.setattr(sqlite, name, whole)
     seen = []
     monkeypatch.setitem(ledger_hook.HANDLERS, "PostToolUse", lambda payload, session, state, sfile: seen.append(state))
     ledger_hook.dispatch({"session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Read"})
 
     assert [key for key in asked if key in (["tasks"], ["phases"], ["followups"])] == []
     assert sorted(key[1][1] for key in asked if key[0] == "tasks") == ["t1", "t2", "t3", "t4", "t6"]
+    assert flagged == [(("phases", "followups"), ("done", "out_of_scope"))]
     assert [(sorted(state), [task["id"] for task in state["tasks"]]) for state in seen] == [
         (["_meta", "tasks"], ["t1", "t2", "t3", "t4"])
     ]

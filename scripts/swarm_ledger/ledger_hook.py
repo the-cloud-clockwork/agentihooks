@@ -382,7 +382,8 @@ def gate_state(slug: str, name: str) -> dict[str, Any] | None:
         return None
     if name not in state["_meta"].get("members", {}):
         return None
-    if ledger_gate.closed(read_flags(LEDGER_DIR, slug, ledger_gate.CLOSING, ledger_gate.CLOSED_FLAGS)):
+    flags = read_flags(LEDGER_DIR, slug, ledger_gate.CLOSING, ledger_gate.CLOSED_FLAGS)
+    if not flags or ledger_gate.closed(flags):
         return None
     targets = ledger_gate.task_targets(state["_meta"], name)
     if targets:

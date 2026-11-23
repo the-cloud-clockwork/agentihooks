@@ -280,6 +280,8 @@
         "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_routes_owed_operator_events_to_the_task_claimant_claims_holder_or_orchestrator",
         "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_hands_the_ledger_policy_and_reaches_the_orchestrator_for_a_task_the_ledger_lacks",
         "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_skips_only_a_ledger_whose_phases_and_follow_ups_are_all_done_or_out_of_scope",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_routes_without_tasks_when_the_ledger_vanishes_before_the_task_read",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_skips_the_handler_when_the_flags_read_finds_no_database",
         "tests/swarm_ledger/test_sqlite_reads.py::test_read_flags_reads_only_the_named_flags_of_each_item_in_stored_order",
         "tests/swarm_ledger/test_ledger_gate.py::test_task_targets_name_only_unhandled_operator_task_targets_once_each"
       ]
