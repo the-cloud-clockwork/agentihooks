@@ -34,6 +34,14 @@ PLACED = {
     "eng": TASK_LANE,
     "ci": TASK_LANE,
     "plan": TASK_LANE - {"stall watched lane"},
+    "review": {
+        "default profile",
+        "configurable lane",
+        "lane cap",
+        "capacity lane",
+        "tick task lane",
+        "ledger task lane",
+    },
     "dispatch": {"default profile", "hive placed lane"},
     "expert": {"default profile", "hive placed lane", "moving numbered seat"},
 }

@@ -16,6 +16,7 @@ def test_template_role_defaults_and_master_settings_round_trip(tmp_path):
         "eng": "engineer",
         "ci": "cicd",
         "plan": "planner",
+        "review": "reviewer",
         "master": "master",
     }
     for built_in, _ in templates.available(environ):
@@ -23,6 +24,7 @@ def test_template_role_defaults_and_master_settings_round_trip(tmp_path):
             "eng": "engineer",
             "ci": "cicd",
             "plan": "planner",
+            "review": "reviewer",
             "master": "master",
         }
     config = store.SwarmConfig(
@@ -187,5 +189,5 @@ def test_create_set_and_save_preserve_master_profile(monkeypatch, tmp_path, caps
 
 
 def test_unknown_template_lane_names_the_valid_lanes():
-    with pytest.raises(store.SwarmError, match="template x names lanes.*qa.*eng, ci, plan and master"):
+    with pytest.raises(store.SwarmError, match="template x names lanes.*qa.*eng, ci, plan, review and master"):
         templates.parse({"name": "x", "lanes": {"qa": {}}})

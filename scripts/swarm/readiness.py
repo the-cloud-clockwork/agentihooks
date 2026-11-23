@@ -209,7 +209,7 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
     ready = [
         (task["lane"], task)
         for task in rows.values()
-        if task.get("lane")
+        if task.get("lane") in LANES
         and (not task.get("workstation") or task.get("hive") in (None, "", ROOT))
         and claimable(task, task["lane"], view)
     ]

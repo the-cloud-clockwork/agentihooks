@@ -981,6 +981,7 @@ def create_config(args: argparse.Namespace) -> SwarmConfig:
         caps["eng"] if args.max_eng_agents is None else args.max_eng_agents,
         caps["ci"] if args.max_ci_agents is None else args.max_ci_agents,
         max_plan=caps["plan"] if args.max_plan_agents is None else args.max_plan_agents,
+        max_review=caps["review"],
         state="paused",
         compact_limit=template.compact_limit,
         template=args.template,
