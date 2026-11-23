@@ -285,6 +285,24 @@ def test_unlisted_keys_every_test_module_the_mutant_runner_runs(repository: Path
     assert "tests/inner/test_deep.py" in runs
 
 
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_unlisted_modules_lists_the_test_modules_that_hold_no_manifest_test() -> None:
+    tree = {path: text.encode() for path, text in FILES.items()}
+    assert expand_tests.unlisted_modules(MANIFEST, tree) == []
+    added = ["tests/test_new.py", "tests/inner/test_deep.py", "tests/new_helper.py", "scripts/test_tool.py"]
+    tree.update(dict.fromkeys(added, b""))
+    found = expand_tests.unlisted_modules(MANIFEST, tree)
+    assert found == ["tests/inner/test_deep.py", "tests/test_new.py"]
+    assert set(found) <= set(expand_tests.unlisted_test_hashes(MANIFEST, tree))
+    assert expand_tests.unlisted_modules({"tests": {}}, tree) == [
+        "tests/inner/test_deep.py",
+        "tests/test_alpha.py",
+        "tests/test_beta.py",
+        "tests/test_group.py",
+        "tests/test_new.py",
+    ]
+
+
 def _manifest(*tests: str) -> dict[str, Any]:
     return {"tests": {test: {"units": [], "files": [], "escapes": False} for test in tests}}
 

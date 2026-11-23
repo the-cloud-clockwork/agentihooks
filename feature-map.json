@@ -12571,6 +12571,28 @@
       ]
     },
     {
+      "id": "lab-mutation-units-work-on-the-change",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs-mutation",
+      "behaviour": "A CI lab mutation unit works on the change it grades. In its private tree the worker puts behind trampolines only the functions its head changes against the base on its lease, taken from the one selection the scheduler names mutant units from, and leaves every other file as it stands, so a unit's memory and time follow the size of the change and not of the repository. The scheduler names on every mutant unit the test files it traces: the files of the dependency manifest tests that ran a changed function, each test module the manifest lists no test of and each test module the head changes against its base and still holds, with one stats unit per file and none for a head that changes no function. The lease carries that list and the worker's stats request names only those files. A mutant unit with no list, or with a member its tree holds behind no trampoline, raises before the runner starts, and the base is fetched into the pod's store with the head.",
+      "seam": "scripts.ci_lab.expand_mutation.changed_functions and changed_tests, scripts.ci_lab.run_mutation.trampoline, scripts.ci_lab.expand_tests.unlisted_modules, scripts.ci_lab.executors.mutation over a git fixture tree with a base and a head, scripts.ci_lab.worktrees.Worktrees.own, scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture and scripts.ci_lab.scheduler.stored_manifest",
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_changed_functions_holds_the_graded_mutations_of_each_function_the_changed_lines_meet",
+        "tests/ci_lab/test_expand_mutation.py::test_changed_tests_lists_the_test_modules_the_head_changes_and_still_holds",
+        "tests/ci_lab/test_run_mutation.py::test_trampoline_rewrites_only_the_functions_the_changed_lines_meet",
+        "tests/ci_lab/test_run_mutation.py::test_trampoline_leaves_a_file_no_function_of_which_meets_the_changed_lines_as_it_was",
+        "tests/ci_lab/test_run_mutation.py::test_trampoline_keeps_the_wrappers_of_a_decorated_function_on_its_trampoline_alone",
+        "tests/ci_lab/test_expand_tests.py::test_unlisted_modules_lists_the_test_modules_that_hold_no_manifest_test",
+        "tests/ci_lab/test_executors.py::test_mutation_refuses_a_mutant_unit_with_no_manifest_or_a_member_its_tree_holds_behind_no_trampoline",
+        "tests/ci_lab/test_executors.py::test_the_worker_trampolines_the_mutants_the_scheduler_names_for_a_change",
+        "tests/ci_lab/test_worktrees.py::test_an_own_copy_holds_the_base_its_unit_compares_it_against",
+        "tests/ci_lab/test_scheduler_mutation.py::test_a_promotion_head_names_on_its_mutant_units_the_test_files_they_trace",
+        "tests/ci_lab/test_scheduler_mutation.py::test_every_part_of_a_split_mutant_unit_names_the_test_files_it_traces",
+        "tests/ci_lab/test_scheduler_mutation.py::test_a_promotion_head_that_changes_no_function_plans_no_stats_unit_for_its_test_modules",
+        "tests/ci_lab/test_manifest_records.py::test_a_lease_reads_the_stored_manifest_of_a_mutant_unit"
+      ]
+    },
+    {
       "id": "test-seat-through-admission",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-seat-helper",
