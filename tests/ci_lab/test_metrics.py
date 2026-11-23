@@ -670,6 +670,7 @@ def test_peek_answers_at_once_while_the_first_build_runs_and_then_the_finished_l
     answers: list[tuple[Load, int] | None] = []
     try:
         assert entered.wait(10)
+
         def peek() -> None:
             answers.append(latest.peek())
 
