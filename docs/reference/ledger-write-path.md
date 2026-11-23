@@ -13,7 +13,9 @@ and the public host routes them to the ledger API service. The ledger server onl
 read API and the live event stream, and answers every write method as unsupported.
 
 There is one write path. No setting switches a client back to the ledger server, and no client falls back to it when
-the database is slow. Pull request 11561 delivered it on the operator's order of 16 November 2026.
+the database is slow. Pull request 11561 delivered it on the operator's order of 16 November 2026. A host may run one
+warm ledger writer that runs the same route code for every client on that host; see
+[The warm writer socket](#the-warm-writer-socket).
 
 1. TOC
 {:toc}
@@ -24,18 +26,33 @@ the database is slow. Pull request 11561 delivered it on the operator's order of
 
 | Writer | Path | Judged as |
 |---|---|---|
-| `agentihooks ledger` commands, `LedgerClient`, the stop hook, proof ledgers, uploads, outbox replays | In process: `scripts.swarm_ledger.ledger.client(slug)`, which returns `scripts.tick.adapters.database_ledger.client` | The pinned agent, or the swarm's own service for service writes |
-| The tick pass and the tick ledger port | In process, inside `database_ledger.acting("")` | The swarm's own service |
+| `agentihooks ledger` commands, `LedgerClient`, the stop hook, proof ledgers, uploads, outbox replays | This host's warm writer socket first, else in process: `scripts.swarm_ledger.ledger.client(slug)`, which returns `scripts.tick.adapters.database_ledger.client` | The pinned agent, or the swarm's own service for service writes |
+| The tick pass and the tick ledger port | In process, inside `database_ledger.acting("")`, even when a writer listens | The swarm's own service |
 | The hub admission claim and its release | In process; the hub sets no swarm or agent name | The swarm's own service |
 | The controller's hosted ledger | In process, inside `database_ledger.acting("")` | The swarm's own service |
 | The ledger page in a browser | HTTP `POST`, `PUT` or `PATCH` to the public host, routed to the ledger API service | The operator's page session or ledger token, as [Hosted ledger auth](hosted-ledger-auth.md) describes |
 
-An in-process client builds a `ResourceClient` whose transport is `database_ledger.request`. Each request becomes an
-in-memory exchange handed to the same route functions the ledger API service serves (`routes.ledger_get` for reads,
-`routes.ledger_operation` for writes), so revision guards, operation receipts, gates and derivations apply exactly as
-they do over HTTP. No socket is opened and no ledger server is contacted. A refusal comes back as the HTTP error the
-service would have sent, so callers keep handling `409 revision_conflict`, `404 ledger_missing` and the others the
-same way.
+The in-process transport is `database_ledger.request`. Each request becomes an in-memory exchange handed to the same
+route functions the ledger API service serves (`routes.ledger_get` for reads, `routes.ledger_operation` for writes),
+so revision guards, operation receipts, gates and derivations apply exactly as they do over HTTP. No ledger server is
+contacted. A refusal comes back as the HTTP error the service would have sent, so callers keep handling
+`409 revision_conflict`, `404 ledger_missing` and the others the same way.
+
+### The warm writer socket
+
+`database_ledger.client(base, timeout)` builds a `ResourceClient` whose transport is `database_ledger.routed` bound to
+the client timeout. Each request tries this host's warm writer first, the `agentihooks ledger writer serve` process on
+`ledger-writer.sock` in the agentihooks home, which answers with the same route code as the caller it names:
+
+| Case | What the client does |
+|---|---|
+| The writer answers | Returns its reply; a status of 400 or more raises the same HTTP error the in-process transport raises |
+| No socket file, a refused connection, or any other connect error | Runs the request in process through `database_ledger.request`. Nothing has been sent, so nothing runs twice |
+| Inside a tick pass | Runs the request in process, so every tick ledger call keeps its `swarm_tick_ledger_call` journal line and the tick never waits on the writer |
+| The writer took the request and the reply is lost: it closed with no answer, the read timed out, or the status line is unreadable | Raises `TimeoutError` and never runs the request in process, because the writer may already have applied it. Callers see the error a timed out ledger request raised before: `ledger.call` exits with it and `LedgerClient` treats the ledger as unanswered |
+
+`database_ledger.request` itself never opens the socket, so the controller's hosted ledger and the writer always
+answer in process.
 
 ### The store a write lands in
 
@@ -356,12 +373,13 @@ resolution](deployment-modes.md#client-mode-resolution)).
 | Guard | What it holds |
 |---|---|
 | `tests/swarm_ledger/test_ledger_write_cutover.py` | The hub claim and release land in the store with no ledger server request; a stale hub claim is refused by the route; the ledger server answers `POST`, `PUT`, `PATCH` and `DELETE` with `501`; every write hook of the read only ledger server refuses with `405`; a hosted hub without the shared database refuses to start |
-| Feature map entry `swarm-ledger-api-writes` | The behaviour, its operator words and its tests; its Semgrep rule `feature-ledger-api-writes` holds the in-process `client` and the hub's database check |
+| Feature map entry `swarm-ledger-api-writes` | The behaviour, its operator words and its tests; its Semgrep rule `feature-ledger-api-writes` holds `client` to the warm writer first transport, `partial(routed, timeout)`, and the hub's database check |
+| `tests/tick/test_database_ledger_writer_route.py` | A request goes to a listening writer; an absent or refusing socket runs it in process; a lost reply after send raises `TimeoutError` with the route code never called; a writer refusal raises the in-process HTTP error; a tick pass stays in process and journals while a writer listens |
 | Feature map entry `compose-api-health-and-front-proxy` | The API service answers a health probe sent to its own loopback port (`test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port`); every front config forwards `Host $http_host` and never `$host` (`test_the_front_forwards_the_host_the_client_sent_with_its_port`); both Compose front configs resolve `swarm` and `api` through `127.0.0.11` (`test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time`) |
 | Feature rule `feature-tick-database-ledger` | The tick route acts as `database_ledger.acting("")`, the tick ledger port builds its client with `ledger.client`, and `ledger.client` returns the in-process client with no other path |
 | Rule `ledger-server-reads-only` | No `do_POST`, `do_PUT`, `do_PATCH` or `do_DELETE` in the ledger server module, whether defined, assigned or set with `setattr`, and no `setattr` under a computed name there |
-| Rule `ledger-client-in-process` | No `ResourceClient` anywhere in the tree without an in-process transport, by keyword or position, and none with `transport=None` |
-| Incident rule `ledger-write-switch` | No `database_ledger.serving()` or `database_ledger.scoped(...)` under `scripts/` or `hooks/`: no switch between paths |
+| Rule `ledger-client-in-process` | No `ResourceClient` anywhere in the tree without a transport, by keyword or position, and none with `transport=None`; the warm writer first transport of `database_ledger.client` is the one transport beside the in-process one |
+| Incident rule `ledger-write-switch` | No `database_ledger.serving()` or `database_ledger.scoped(...)` under `scripts/` or `hooks/`: no switch to the ledger server |
 
 `ledger-server-reads-only` and `ledger-client-in-process` run in the whole tree scan from
 `.semgrep/ledger-server-writes.yml`, with red and clean fixtures in `.semgrep/ledger-server-writes.test.py`.

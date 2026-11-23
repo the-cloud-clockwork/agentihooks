@@ -64,7 +64,8 @@ class Attempt:
 @dataclass(frozen=True)
 class Verdict:
     """A batch's verdict: passed or failed, whether a retry passed it, the repository files it opened outside its
-    manifest, the final attempt's durations, log and coverage data, and how many attempts ran."""
+    manifest, the final attempt's durations, log and coverage data, how many attempts ran, and the flake ledger rows
+    of a batch a retry passed."""
 
     outcome: str
     flaky: bool
@@ -73,6 +74,7 @@ class Verdict:
     attempts: int
     log: Path
     coverage: Path
+    flakes: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def broad(self) -> bool:
@@ -157,9 +159,10 @@ def run(batch: Sequence[str], tree: Path, venv: Path, slots: int, lab: Lab) -> V
         attempts.append(_attempt(batch, tree, venv, slots, lab))
     final = attempts[-1]
     flaky = final.code == 0 and len(attempts) == 2
+    rows = flake_rows(attempts[0], batch) if flaky else []
     if flaky:
         with lab.flakes.open("a") as ledger:
-            ledger.writelines(json.dumps(row) + "\n" for row in flake_rows(attempts[0], batch))
+            ledger.writelines(json.dumps(row) + "\n" for row in rows)
     opened = {path for attempt in attempts for path in _opened(attempt)}
     return Verdict(
         outcome=PASSED if final.code == 0 else FAILED,
@@ -169,4 +172,5 @@ def run(batch: Sequence[str], tree: Path, venv: Path, slots: int, lab: Lab) -> V
         attempts=len(attempts),
         log=final.log,
         coverage=final.folder / ".coverage",
+        flakes=tuple(rows),
     )

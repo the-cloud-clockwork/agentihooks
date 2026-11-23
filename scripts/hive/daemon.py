@@ -414,18 +414,28 @@ def install(
     unit_dir: Path | None = None,
     run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run,
 ) -> bool:
+    from scripts.swarm import timer
+
     binary = binary or shutil.which("agentihooks")
     if not binary:
         raise registry.HiveError("agentihooks executable not found")
     unit_dir = unit_dir or Path.home() / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
-    path = unit_dir / UNIT
-    text = unit(binary)
-    if not path.exists() or path.read_text() != text:
-        path.write_text(text)
+    writer = "agentihooks-ledger-writer.service"
+    units = {UNIT: unit(binary), writer: timer.units(binary)[writer]}
+    changed = False
+    for name, text in units.items():
+        path = unit_dir / name
+        if not path.exists() or path.read_text() != text:
+            path.write_text(text)
+            changed = True
+    if changed:
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=True)
-    result = run(["systemctl", "--user", "enable", "--now", UNIT], capture_output=True, text=True, timeout=30)
-    return result.returncode == 0
+    results = [
+        run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
+        for name in units
+    ]
+    return all(result.returncode == 0 for result in results)
 
 
 def restart(run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> bool:
