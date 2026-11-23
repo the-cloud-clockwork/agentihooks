@@ -89,7 +89,7 @@ def test_a_method_that_takes_the_context_is_held_like_a_function() -> None:
 @pytest.mark.feature("ledger-op-context-typed")
 def test_a_function_the_module_imports_from_another_is_left_out() -> None:
     ops = module("ledger_ops", apply=taking("apply", OpContext))
-    ops.borrowed = taking("borrowed")
+    setattr(ops, "borrowed", taking("borrowed"))
     assert check.judged(ops) == ["ledger_ops: 1 functions take the op context, each by the Protocol"]
 
 
@@ -153,7 +153,7 @@ def test_every_registered_op_module_takes_the_context_by_the_protocol(capsys: py
 
 @pytest.mark.feature("ledger-op-context-typed")
 def test_the_ledger_package_folder_joins_the_import_path_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    folder = str(Path(core.__file__).resolve().parent)
+    folder = str(Path(str(core.__file__)).resolve().parent)
     monkeypatch.setattr(sys, "path", [entry for entry in sys.path if entry != folder])
     check.importable()
     check.importable()
@@ -164,5 +164,5 @@ def test_the_ledger_package_folder_joins_the_import_path_once(monkeypatch: pytes
 @pytest.mark.feature("ledger-op-context-typed")
 def test_the_rule_grades_exactly_the_registered_op_modules() -> None:
     rule: dict[str, Any] = yaml.safe_load(RULE.read_text())["rules"][0]
-    registered = {f"/scripts/swarm_ledger/{Path(found.__file__).name}" for found in core.EXTENSION_OPS.values()}
+    registered = {f"/scripts/swarm_ledger/{Path(str(found.__file__)).name}" for found in core.EXTENSION_OPS.values()}
     assert sorted(rule["paths"]["include"]) == sorted({*registered, FIXTURE})
