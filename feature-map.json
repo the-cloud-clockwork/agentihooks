@@ -12893,7 +12893,16 @@
       "behaviour": "A lab unit's process group is killed after every exit, clean, failed or timed out, so a child the unit leaves behind, such as one started by a build hook, is gone when Sandbox.run returns and never outlives its run folder; the unit's exit code is kept and a timeout still returns no code.",
       "seam": "scripts.ci_lab.sandbox Sandbox.run, the sandbox run boundary, through run_process in scripts.ci_mutation.runner",
       "tests": [
-        "tests/ci_lab/test_sandbox.py::test_a_child_left_after_the_unit_exits_is_killed_when_the_run_returns",
+        "tests/ci_lab/test_sandbox.py::test_a_child_left_after_the_unit_exits_is_killed_when_the_run_returns"
+      ]
+    },
+    {
+      "id": "lab-sandbox-gone-probe-reaped-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "The probe the lab sandbox tests ask whether a unit's child is gone counts a child reaped between the open and the read of its stat file as gone, so the tests of the process group kill do not fail on a child that ends at that moment.",
+      "seam": "tests/ci_lab/test_sandbox.py _gone, the gone probe under _gone_within",
+      "tests": [
         "tests/ci_lab/test_sandbox.py::test_a_child_reaped_between_the_open_and_the_read_of_its_stat_counts_as_gone"
       ]
     },

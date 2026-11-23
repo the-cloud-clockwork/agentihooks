@@ -5,13 +5,23 @@ rules:
     message: >-
       A per pid proc file is read inside a try that catches FileNotFoundError alone. The open succeeds while the
       process lives; once the process is reaped the read fails with ESRCH, which Python raises as ProcessLookupError,
-      so the probe raises where it should answer gone. On 23 November a lab sandbox job failed on exactly that in the
-      gone probe of the sandbox tests, the fourth probe to meet it. Catch ProcessLookupError beside FileNotFoundError,
-      or OSError.
+      so a probe raises where it should answer gone. Catch ProcessLookupError beside FileNotFoundError, or OSError.
     patterns:
       - pattern-inside: |
           try:
               ...
           except FileNotFoundError:
               ...
-      - pattern-regex: /proc/\{[^}]+\}/\w+
+      - pattern-either:
+          - pattern-regex: /proc/(\{[^}]+\}|%[ds])/\w+
+          - pattern-regex: /proc/"\s*\+
+          - patterns:
+              - pattern-inside: |
+                  $FILE = $BUILT
+                  ...
+              - metavariable-regex:
+                  metavariable: $BUILT
+                  regex: (?s).*/proc/(\{[^}]+\}|%[ds]|"\s*\+).*
+              - pattern-either:
+                  - pattern: $FILE.$READ(...)
+                  - pattern: open($FILE, ...)
