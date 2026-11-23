@@ -200,6 +200,9 @@ def test_cli_refusal_names_the_secondary_repositorys_branch(
     else:
         root = p.bundle.parent / "bundle-worktree"
         git(p.bundle, "worktree", "add", "-b", checkout_branch, str(root))
+        if recorded_branch != "dev":
+            retained = git(root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Secondary branch work")
+            git(root, "push", "-q", "origin", f"{retained}:refs/heads/{recorded_branch}")
         monkeypatch.chdir(root)
     monkeypatch.setattr(cli, "_worker", lambda store, args: p.agent)
     monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(p.swarm))

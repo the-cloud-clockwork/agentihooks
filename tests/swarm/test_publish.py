@@ -842,6 +842,8 @@ def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publicat
     else:
         publication.task["branch"] = branch
     if branch == "XXXX":
+        registered = git(root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Registered branch work")
+        git(root, "push", "origin", f"{registered}:refs/heads/XXXX")
         with pytest.raises(SwarmError, match="engineer-test.*registered.*XXXX"):
             publish.publish(
                 "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
