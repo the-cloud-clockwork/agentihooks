@@ -1380,9 +1380,12 @@ A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an opt
 
 The `review` entry defaults to cap `1`, profile `reviewer` and kind `review`, also for a swarm created without
 a template. Existing swarm configurations without `max_review` load a review cap of `0`; autoscale preserves that
-cap while sizing the other worker lanes. See
+cap while sizing the other worker lanes, except while review tasks wait or a reviewer is live. See
 [Review lane configuration](../reference/swarm-review-lane.md#configure-a-new-swarm) for a template example, new
-swarm usage, the missing cap controls and the lane's limits.
+swarm usage, the missing cap controls and the lane's limits,
+[Pin the review harness, model and effort](../reference/swarm-review-lane.md#pin-the-review-harness-model-and-effort)
+for a Codex only reviewer, and [Reserved review share](../reference/swarm-review-lane.md#reserved-review-share) for
+the seats autoscale holds for review.
 
 `links` is a list of `{"from", "to", "kind"}`. `from` and `to` name a seat (`eng-1`) or a lane (`eng`,
 `ci`); `kind` is `delegates-to` or `can-observe`. A swarm created from the template keeps them. When it
