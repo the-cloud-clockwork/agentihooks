@@ -2885,6 +2885,23 @@ def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_curren
         assert _git(_ROOT, "rev-parse", f"HEAD:{path}") in accepted, path
 
 
+def test_every_stored_frozen_candidate_is_named_by_its_own_blob_and_announced() -> None:
+    announced = {blob for blobs in json.loads((_ROOT / gate_protected.FROZEN).read_text()).values() for blob in blobs}
+    for candidate in (_ROOT / "tests/registry/FROZEN_CANDIDATES").iterdir():
+        assert _git(_ROOT, "hash-object", "--no-filters", str(candidate)) == candidate.name
+        assert candidate.name in announced, candidate.name
+
+
+def test_the_announced_ci_tool_pin_candidates_are_stored_for_admission() -> None:
+    registry = json.loads((_ROOT / gate_protected.FROZEN).read_text())
+    for path, blob in (
+        ("scripts/gate_protected.py", "086855f1d1e7a0ee44af2c05468b7bc33ee26856"),
+        (".github/workflows/gate-protected.yml", "ceb96c5d549c6766bc317390d4278f1d3644edd0"),
+    ):
+        assert blob in registry[path], path
+        assert (_ROOT / "tests/registry/FROZEN_CANDIDATES" / blob).is_file(), path
+
+
 @pytest.mark.feature("frozen-writer-lock-workflow")
 def test_the_repository_registry_refuses_a_head_dropping_any_writer_lock_job(repo: Path) -> None:
     lock = ".github/workflows/writer-lock.yml"
