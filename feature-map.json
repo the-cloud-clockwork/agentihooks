@@ -153,7 +153,8 @@
         "tests/test_pr_body_boundaries.py::test_utf8_author_evidence_survives_an_ascii_default",
         "tests/test_pr_body_check.py::test_the_checkout_holds_every_part_and_each_is_listed",
         "tests/test_pr_body_check.py::test_a_part_whose_mark_is_gone_fails_by_name",
-        "tests/test_pr_body_check.py::test_a_missing_file_fails_every_part_it_carries"
+        "tests/test_pr_body_check.py::test_a_missing_file_fails_every_part_it_carries",
+        "tests/test_pr_body_check.py::test_a_folder_in_place_of_a_file_fails_every_part_it_carries"
       ]
     },
     {

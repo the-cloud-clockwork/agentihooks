@@ -66,3 +66,17 @@ def test_a_missing_file_fails_every_part_it_carries(copy: Path, capsys: pytest.C
         f"FAIL: the checkout lacks its engineer fill step: {check.SKILL}",
         f"FAIL: the checkout lacks its engineer check step: {check.SKILL}",
     ]
+
+
+@pytest.mark.feature("pull-request-recon-context")
+def test_a_folder_in_place_of_a_file_fails_every_part_it_carries(
+    copy: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (copy / check.SKILL).unlink()
+    (copy / check.SKILL).mkdir()
+    assert check.main(copy) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        *HELD[:10],
+        f"FAIL: the checkout lacks its engineer fill step: {check.SKILL}",
+        f"FAIL: the checkout lacks its engineer check step: {check.SKILL}",
+    ]
