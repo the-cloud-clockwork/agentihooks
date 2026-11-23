@@ -4213,7 +4213,7 @@ folder prints one `ci lab flakes: <reason>` line on standard error, writes no fi
 
 The budget counts a test once per run, and a lab row's run is its unit key, so a cached flaky unit
 that every dev push rereads counts once however many exports carry it. The command refuses `--hours`
-above 168, so a row leaves the export before its history line expires.
+outside 1 to 168 and exits 2, so a row leaves the export before its history line expires.
 
 ### What reaches the policy
 
