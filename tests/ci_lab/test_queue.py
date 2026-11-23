@@ -364,7 +364,7 @@ def test_a_more_urgent_enqueue_leaves_a_finished_job_alone(jobs: queue.Queue) ->
 def test_the_lease_order_is_read_in_pages_that_a_claim_between_them_cannot_shift(
     jobs: queue.Queue, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    jobs.enqueue([unit(str(number)) for number in range(5)], "h1", {}, rank=1)
+    jobs.enqueue([unit(str(number)) for number in range(7)], "h1", {}, rank=1)
     pages: list[tuple[object, ...]] = []
     read = jobs.client.zrangebyscore
 
@@ -373,14 +373,14 @@ def test_the_lease_order_is_read_in_pages_that_a_claim_between_them_cannot_shift
         return read(*arguments, **options)
 
     monkeypatch.setattr(jobs.client, "zrangebyscore", counted)
-    ordered = jobs.ordered(page=2)
+    ordered = jobs.ordered(page=3)
 
     assert next(ordered) == "h1:test:0"
     assert len(pages) == 1
     assert take(jobs, "h1:test:0")
-    assert list(ordered) == [f"h1:test:{number}" for number in range(1, 5)]
+    assert list(ordered) == [f"h1:test:{number}" for number in range(1, 7)]
     assert len(pages) == 3
-    assert list(jobs.ordered(page=5)) == [f"h1:test:{number}" for number in range(1, 5)]
+    assert list(jobs.ordered(page=7)) == [f"h1:test:{number}" for number in range(1, 7)]
 
 
 def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
