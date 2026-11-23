@@ -147,7 +147,8 @@ def test_review_post_requires_a_url_and_swarm(args: list[str], capsys: pytest.Ca
     assert error.value.code == 2
     message = capsys.readouterr().err
     assert message.startswith("usage: agentihooks review ")
-    assert ("action" if not args else "url" if args == ["post"] else "--slug") in message
+    missing = "action" if not args else "url, --slug" if args == ["post"] else "--slug"
+    assert message.endswith(f"error: the following arguments are required: {missing}\n")
 
 
 @pytest.mark.feature("review-record-post")
@@ -159,4 +160,6 @@ def test_post_help_runs_and_names_the_post_arguments(capsys: pytest.CaptureFixtu
     assert help_text.startswith("usage: agentihooks review post ")
     assert "--slug SLUG" in help_text
     assert "--finding FINDING" in help_text
-    assert "post findings on the change request head through the forge" in " ".join(cli.parser().format_help().split())
+    assert " {post} post post findings on the change request head through the forge options: " in " ".join(
+        cli.parser().format_help().split()
+    )
