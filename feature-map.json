@@ -12217,6 +12217,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs-mutation",
       "behaviour": "The CI lab generates mutants without reading mutmut's config: the worker's trampolining and the scheduler's expansion name the same mutants from any working directory, also one that holds no project file, and leave mutmut's process wide config unloaded, so a worker whose working directory mutmut cannot guess a source path from still runs mutation units. The lab applies no do_not_mutate_patterns, and the lines a file's own pragmas mark stay unmutated. The mutant generator takes the patterns as an argument: given patterns keep the same lines from mutation as the same patterns in mutmut's config, and without the argument it reads mutmut's config, as the CI mutation gate does inside mutmut's own run.",
       "seam": "scripts.ci_lab.run_mutation.trampoline and scripts.ci_lab.expand_mutation.mutant_units called from a working directory with no mutmut config and with mutmut's config unloaded, and scripts.ci_mutation.selection.selected_mutants given patterns",
+      "rules": [
+        "lab-mutants-read-mutmut-config"
+      ],
       "tests": [
         "tests/ci_lab/test_run_mutation.py::test_trampoline_reads_no_mutmut_config_from_the_working_directory",
         "tests/ci_lab/test_expand_mutation.py::test_mutant_units_read_no_mutmut_config_from_the_working_directory",

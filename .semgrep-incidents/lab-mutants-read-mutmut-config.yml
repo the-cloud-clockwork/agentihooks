@@ -1,0 +1,19 @@
+rules:
+  - id: lab-mutants-read-mutmut-config
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab generates mutants in the worker's and the scheduler's own processes, where mutmut loads its config
+      from the working directory and raises when that folder holds none. Give the mutant generator its patterns
+      and read no mutmut config under scripts/ci_lab.
+    paths:
+      include:
+        - /scripts/ci_lab/
+        - lab-mutants-read-mutmut-config.py
+    pattern-either:
+      - pattern: created_mutations($FILENAME, $SOURCE)
+      - pattern: changed_mutations($FILENAME, $SOURCE, $CHANGED)
+      - pattern: selected_mutants($FILENAME, $SOURCE, $CHANGED)
+      - pattern: get_ignored_lines(...)
+      - pattern: get_lines_ignored_by_pattern(...)
+      - pattern: mutmut.configuration.Config.get()

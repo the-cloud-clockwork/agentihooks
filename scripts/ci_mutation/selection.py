@@ -44,7 +44,7 @@ IMPORT_GROUPS = {"fakeredis"}
 def changed_mutations(
     filename: str, source: str, changed: set[int], patterns: Sequence[str] | None = None
 ) -> tuple[Module, list[Mutation]]:
-    wrapper, mutations, _ = created_mutations(filename, source)
+    wrapper, mutations, _ = created_mutations(filename, source, patterns)
     return wrapper.module, on_changed_lines(wrapper, mutations, changed)
 
 
@@ -69,10 +69,27 @@ def on_changed_lines(wrapper: MetadataWrapper, mutations: list[Mutation], change
     return selected
 
 
+def ignored_by(filename: str, source: str, wrapper: MetadataWrapper, patterns: Sequence[str]) -> IgnoredCode:
+    """Return the lines the file's pragmas and the given patterns keep from mutation, as mutmut's get_ignored_lines
+    does with its config patterns, without loading that config."""
+    from mutmut.mutation.pragma_handling import IgnoredCode, PragmaVisitor
+
+    pragmas = PragmaVisitor(filename)
+    wrapper.visit(pragmas)
+    matched = {
+        number
+        for number, line in enumerate(source.splitlines(), 1)
+        if any(re.search(pattern, line) for pattern in patterns)
+    }
+    return IgnoredCode(pragmas.no_mutate_lines, pragmas.ignore_node_lines, matched)
+
+
 def created_mutations(
     filename: str, source: str, patterns: Sequence[str] | None = None
 ) -> tuple[MetadataWrapper, list[Mutation], list[Mutation]]:
-    """Parse source once and return its metadata wrapper with the graded and the possible mutations on it."""
+    """Parse source once and return its metadata wrapper with the graded and the possible mutations on it. Lines
+    matching patterns carry no mutation; None takes the patterns from mutmut's config, which mutmut loads from the
+    working directory."""
     import libcst as cst
     from libcst.metadata import MetadataWrapper
     from mutmut.mutation.file_mutation import NEVER_MUTATE_FUNCTION_NAMES, MutationVisitor
@@ -96,7 +113,11 @@ def created_mutations(
             return isinstance(node, cst.FunctionDef) and node.name.value in NEVER_MUTATE_FUNCTION_NAMES
 
     wrapper = MetadataWrapper(cst.parse_module(source), unsafe_skip_copy=True)
-    ignored = get_ignored_lines(filename, source, wrapper)
+    ignored = (
+        get_ignored_lines(filename, source, wrapper)
+        if patterns is None
+        else ignored_by(filename, source, wrapper, patterns)
+    )
     graded = Visitor(
         ignored,
         lambda node: all(map(is_dataclass, node.decorators)) if isinstance(node, cst.ClassDef) else True,
@@ -189,7 +210,7 @@ def selected_mutants(
 ) -> tuple[str, list[str]]:
     from mutmut.mutation.file_mutation import combine_mutations_to_source
 
-    module, selected = changed_mutations(filename, source, changed)
+    module, selected = changed_mutations(filename, source, changed, patterns)
     code, names = combine_mutations_to_source(module, selected)
     if any(getattr(mutation.contained_by_top_level_function, "decorators", None) for mutation in selected):
         code = plain_copies(code)
