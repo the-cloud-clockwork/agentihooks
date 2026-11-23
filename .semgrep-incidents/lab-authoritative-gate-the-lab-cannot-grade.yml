@@ -1,0 +1,16 @@
+rules:
+  - id: lab-authoritative-gate-the-lab-cannot-grade
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      delivery.yaml lists docs, writer-lock or the whole semgrep job as lab authoritative. The lab has no Docker for
+      docs and the writer lock, and it grades only the scan, feature tests and charts parts of semgrep, so the gate
+      posts skipped and Gate Required fails every pull request. Keep these on Actions; list only gates whose every
+      step the lab runs.
+    paths:
+      include:
+        - /delivery.yaml
+        - '**/lab-authoritative-gate-the-lab-cannot-grade.test.yaml'
+    pattern-either:
+      - pattern-regex: '^[ \t]*authoritative:[ \t]*\[[^\]\n]*(?<![\w/-])(?:(?:docs|writer-lock)(?:/[\w-]+)*|semgrep)(?![\w/-])[^\]\n]*\]'
+      - pattern-regex: '^[ \t]*authoritative:[ \t]*\n(?:[ \t]*-[ \t]+[^\n]*\n)*?[ \t]*-[ \t]+["'']?(?:(?:docs|writer-lock)(?:/[\w-]+)*|semgrep)["'']?[ \t]*$'

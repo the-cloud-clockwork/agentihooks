@@ -523,6 +523,21 @@
       ]
     },
     {
+      "id": "lab-authoritative-static-gates",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
+      "behaviour": "The repository's delivery.yaml lists exactly lint, type-gate and test-count as lab authoritative, so on a pull request the Tests workflow skips those three Actions jobs and Gate Required reads the lab's check run for each in their place. Each of the three keeps its authority through the exclusion catalog, the kill switch variable hands all three back to Actions, and the queue list stays empty so merge groups keep the Actions test count. docs, writer-lock and the whole semgrep job are never listed: the lab has no Docker for the first two and grades only parts of the third, so each would post skipped and fail every pull request.",
+      "seam": "delivery.yaml read through scripts.ci_lab.delivery lab, authoritative, cutover and queue_cutover; the Semgrep incident rule lab-authoritative-gate-the-lab-cannot-grade over delivery.yaml; the live check scripts.feature_checks.lab_authority over the checkout's delivery.yaml, exclusion catalog, gate wiring and Tests workflow",
+      "rules": [
+        "lab-authoritative-gate-the-lab-cannot-grade"
+      ],
+      "tests": [
+        "tests/ci_lab/test_delivery.py::test_the_repository_file_lists_lint_type_gate_and_test_count_as_lab_authoritative",
+        "tests/test_lab_authority_check.py::test_the_checkout_holds_every_part_of_the_lab_authority_and_each_is_listed",
+        "tests/test_lab_authority_check.py::test_a_part_the_checkout_lost_fails_by_name"
+      ]
+    },
+    {
       "id": "lab-pull-request-reusable-job-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2722",

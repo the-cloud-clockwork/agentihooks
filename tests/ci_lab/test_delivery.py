@@ -198,8 +198,13 @@ def test_load_runtime_reads_the_mounted_file(tmp_path: Path) -> None:
     assert delivery.load_runtime(path) == RUNTIME
 
 
-def test_repository_file_has_an_empty_authoritative_list() -> None:
-    assert delivery.authoritative(ROOT) == ()
+@pytest.mark.feature("lab-authoritative-static-gates")
+def test_the_repository_file_lists_lint_type_gate_and_test_count_as_lab_authoritative() -> None:
+    listed = ["lint", "type-gate", "test-count"]
+    assert delivery.lab(ROOT)["authoritative"] == listed
+    assert delivery.authoritative(ROOT) == tuple(listed)
+    assert delivery.cutover(ROOT, {}) == listed
+    assert delivery.cutover(ROOT, {delivery.LAB_OFF: "true"}) == []
     assert delivery.queue_cutover(ROOT, {}) == []
     assert delivery.lab(ROOT)["check_prefix"] == "lab"
 
