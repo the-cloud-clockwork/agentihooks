@@ -1,9 +1,11 @@
 import http.client
 import json
+import socket
 import threading
 import urllib.error
 import urllib.request
-from typing import Any
+from http.server import BaseHTTPRequestHandler
+from typing import Any, cast
 
 import pytest
 
@@ -341,6 +343,26 @@ def test_access_logs_omit_upload_query_strings(
     assert "synthetic-lease-value" not in logged
     assert "?job=" not in logged
     assert f'"{method} {logged_path} HTTP/1.1" {status} -\n' in logged
+
+
+@pytest.mark.feature("lab-scheduler-access-log-query-redaction")
+def test_access_logs_keep_default_status_and_size(
+    lab: leases.Leases, signer: Signer, capsys: pytest.CaptureFixture[str]
+) -> None:
+    server = lease_api.serve("127.0.0.1", 0, lab, signer)
+    client, connection = socket.socketpair()
+    try:
+        client.sendall(b"GET /upload-url?token=synthetic-lease-value HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        request = cast(BaseHTTPRequestHandler, server.RequestHandlerClass(connection, ("127.0.0.1", 0), server))
+        capsys.readouterr()
+        request.log_request()
+        logged = capsys.readouterr().err
+        assert '"GET /upload-url HTTP/1.1" - -\n' in logged
+        assert "synthetic-lease-value" not in logged
+    finally:
+        client.close()
+        connection.close()
+        server.server_close()
 
 
 def order(routes: lease_api.ControlRoutes, path: str, body: object, authorization: str = BEARER) -> object:
