@@ -541,6 +541,7 @@ def _request(data: Mapping[str, Any]) -> GradeRequest:
         tier=Priority(data["tier"]),
         actor=str(data["actor"]),
         bypass_negative=bool(data["bypass_negative"]),
+        plant=bool(data.get("plant", False)),
     )
 
 
@@ -1308,11 +1309,13 @@ def frame(
     grader: str,
     gates: Mapping[str, tuple[Unit, ...]],
     authoritative: Sequence[str] = (),
+    plant: bool = False,
 ) -> Plan:
     """Return a tier's plan: the lab's gates its `Gate — Required` rules require, and every other job they require as
     a gate without units, which passes, so only what the lab grades can turn the grade red.
 
-    A pull request or hotfix grade runs with no test scope and no mutation, grades under each required job the units
+    A pull request or hotfix grade runs with no mutation; only a plant pull request runs test units. Each grades
+    under each required job the units
     of every reusable workflow job it calls, which the expander files under the job, a slash and the called job, and
     names each authoritative gate it runs no unit of, which it posts as skipped; a merge group grade runs only the
     queue suite with no lost unit rerun; both keep the authoritative gates, which post as lab/<gate>; a promotion or
@@ -1325,9 +1328,10 @@ def frame(
         required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
         queued = {job: gates.get(job, ()) for job in required}
         return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed)
+    required = (*PULL_REQUIRED, UNIT_JOBS[0]) if tier == Priority.PULL_REQUEST and plant else PULL_REQUIRED
     framed = {
         job: tuple(unit for key, units in gates.items() if key == job or key.startswith(f"{job}/") for unit in units)
-        for job in PULL_REQUIRED
+        for job in required
     }
     idle = frozenset(gate for gate in authoritative if not framed.get(gate))
     return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}}, idle=idle, authoritative=listed)
@@ -1527,7 +1531,7 @@ class MirrorExpander:
     def expand(self, request: GradeRequest) -> Plan:
         """Return one unit per supported static gate outside the protected exclusion catalog, with Actions retaining
         authority for jobs with exclusions, keyed by the files each gate reads at head and base, the unit job's test
-        units of a merge group, promotion or backfill head and the mutation stats and mutant units of a promotion or
+        units of a plant pull request, merge group, promotion or backfill head and the mutation stats and mutant units of a promotion or
         backfill head, framed by the request's tier with the authoritative gates of the grader's delivery.yaml for a
         hotfix or pull request head, with the dev commit of the manifest its test units are keyed on.
         """
@@ -1549,7 +1553,7 @@ class MirrorExpander:
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         commit = ""
-        if request.tier >= Priority.QUEUE:
+        if request.tier >= Priority.QUEUE or request.tier == Priority.PULL_REQUEST and request.plant:
             manifest, contents = self._manifest(mirror, request), self._contents(mirror, head)
             commit = manifest["commit"]
             suite = expand_tests.units(manifest, contents, head, json.loads(contents.get(DURATIONS, b"{}")), toolchain)
@@ -1563,7 +1567,14 @@ class MirrorExpander:
             listed = authoritative_gates(_lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}")), request.tier)
             listed = frozenset(static_exclusions.authority(listed, excluded))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
-        plan = frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()}, sorted(listed))
+        plan = frame(
+            request.tier,
+            tree,
+            grader,
+            {job: tuple(units) for job, units in gates.items()},
+            sorted(listed),
+            request.plant,
+        )
         return replace(plan, manifest=commit)
 
     def _tests(
@@ -1579,6 +1590,8 @@ class MirrorExpander:
         """Return every test batch of the head, or for a merge group head the batches that hold a test its entries
         invalidate, unless the interaction rule sends the group to the whole suite, and one unit per test module its
         entries change that the manifest lists no test of."""
+        if request.tier == Priority.PULL_REQUEST:
+            return self._plant_tests(mirror, request, manifest, suite, contents, toolchain)
         if request.tier != Priority.QUEUE:
             return suite
         group = self._group(mirror, request)
@@ -1590,6 +1603,21 @@ class MirrorExpander:
         if chosen == interaction.FULL:
             return suite + unlisted
         return tuple(unit for unit in suite if chosen.intersection(unit.members)) + unlisted
+
+    def _plant_tests(
+        self,
+        mirror: Mirror,
+        request: GradeRequest,
+        manifest: dict[str, Any],
+        suite: tuple[Unit, ...],
+        contents: Mapping[str, bytes],
+        toolchain: Toolchain,
+    ) -> tuple[Unit, ...]:
+        changed = {
+            path for path, _, _ in dep_manifest.changes(mirror.store, request.base, request.head) if path in contents
+        }
+        listed = tuple(unit for unit in suite if any(test.partition("::")[0] in changed for test in unit.members))
+        return listed + expand_tests.unlisted_units(manifest, contents, changed, toolchain)
 
     def _manifest(self, mirror: Mirror, request: GradeRequest) -> dict[str, Any]:
         """Return the dependency manifest of the nearest commit on the base's first parent chain that has one stored."""
