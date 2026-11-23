@@ -180,6 +180,7 @@ def test_mutant_units_read_no_mutmut_config_from_the_working_directory(
 ) -> None:
     root, elsewhere = repository(tmp_path / "tree", MUTANT_FILES), tmp_path / "elsewhere"
     elsewhere.mkdir()
+    monkeypatch.chdir(Path(__file__).resolve().parents[2])
     expected = expand_mutation.mutant_units(root, EVERY_LINE, {}, {})
     monkeypatch.chdir(elsewhere)
     monkeypatch.setattr(configuration, "_config", None)

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,6 +13,11 @@ import pytest
 
 from scripts.ci_mutation.runner import run_gate
 from tests.test_ci_mutation_stats import place_flake_ledger, stats_recorder_only
+
+PATTERNED = (
+    "def bumped(count):\n    total = count + 1\n    return total * 2\n\n\n"
+    "@opaque\nclass Held:\n    def raised(self, count):\n        lifted = count + 1\n        return lifted * 3\n"
+)
 
 
 def _no_pytest(self, params, **kwargs):
@@ -602,18 +608,34 @@ def test_given_patterns_keep_the_lines_mutmut_config_patterns_keep_from_mutation
 ) -> None:
     from mutmut.configuration import Config
 
-    from scripts.ci_mutation.selection import selected_mutants
+    from scripts.ci_mutation.selection import created_mutations
 
-    source = "def bumped(count):\n    total = count + 1\n    return total * 2\n"
+    def texts(patterns: Sequence[str] | None) -> list[list[tuple[str, str]]]:
+        wrapper, graded, possible = created_mutations("scripts/sample.py", PATTERNED, patterns)
+        render = wrapper.module.code_for_node
+        return [
+            [(render(mutation.original_node), render(mutation.mutated_node)) for mutation in found]
+            for found in (graded, possible)
+        ]
+
     patterns = [r"count \+ 1"]
     monkeypatch.setattr(
         Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=patterns, source_paths=[], max_stack_depth=-1)
     )
-    configured = selected_mutants("scripts/sample.py", source, {2, 3})
+    configured = texts(None)
     monkeypatch.setattr(Config, "get", stats_recorder_only)
-    given = selected_mutants("scripts/sample.py", source, {2, 3}, patterns)
+    graded, possible = texts(patterns)
+    assert [graded, possible] == configured
+    assert 0 < len(graded) < len(possible) < len(texts(())[1])
+
+
+@pytest.mark.feature("lab-mutants-read-no-mutmut-config")
+def test_a_line_a_given_pattern_matches_gets_no_mutant() -> None:
+    from scripts.ci_mutation.selection import selected_mutants
+
+    source = "def bumped(count):\n    total = count + 1\n    return total * 2\n"
+    given = selected_mutants("scripts/sample.py", source, {2, 3}, [r"count \+ 1"])
     every = selected_mutants("scripts/sample.py", source, {2, 3}, ())
-    assert given == configured
     assert "count - 1" in every[0]
     assert "count - 1" not in given[0]
     assert 0 < len(given[1]) < len(every[1])
@@ -623,13 +645,13 @@ def test_given_patterns_keep_the_lines_mutmut_config_patterns_keep_from_mutation
 def test_given_patterns_load_no_mutmut_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from mutmut import configuration
 
-    from scripts.ci_mutation.selection import selected_mutants
+    from scripts.ci_mutation.selection import created_mutations
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(configuration, "_config", None)
     monkeypatch.setattr(configuration.Config, "get", stats_recorder_only)
-    _, names = selected_mutants("scripts/sample.py", "def doubled(value):\n    return value * 2\n", {2}, ())
-    assert names
+    _, graded, _ = created_mutations("scripts/sample.py", "def doubled(value):\n    return value * 2\n", ())
+    assert graded
     assert vars(configuration)["_config"] is None
 
 

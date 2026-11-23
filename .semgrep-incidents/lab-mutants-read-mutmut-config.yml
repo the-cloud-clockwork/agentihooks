@@ -12,8 +12,16 @@ rules:
         - lab-mutants-read-mutmut-config.py
     pattern-either:
       - pattern: created_mutations($FILENAME, $SOURCE)
+      - pattern: created_mutations($FILENAME, $SOURCE, None)
+      - pattern: created_mutations(..., patterns=None)
       - pattern: changed_mutations($FILENAME, $SOURCE, $CHANGED)
+      - pattern: changed_mutations($FILENAME, $SOURCE, $CHANGED, None)
+      - pattern: changed_mutations(..., patterns=None)
       - pattern: selected_mutants($FILENAME, $SOURCE, $CHANGED)
+      - pattern: selected_mutants($FILENAME, $SOURCE, $CHANGED, None)
+      - pattern: selected_mutants(..., patterns=None)
+      - pattern: selected_mutant_names(...)
+      - pattern: mutation_counts(...)
       - pattern: get_ignored_lines(...)
       - pattern: get_lines_ignored_by_pattern(...)
       - pattern: mutmut.configuration.Config.get()

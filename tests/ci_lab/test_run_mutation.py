@@ -112,6 +112,7 @@ def test_trampoline_reads_no_mutmut_config_from_the_working_directory(
     (tree / "scripts").mkdir(parents=True)
     elsewhere.mkdir()
     (tree / path).write_text(SAMPLE)
+    monkeypatch.chdir(REPO)
     expected = [f"scripts.sample.{name}" for name in selected_mutant_names(path, SAMPLE, {1, 2})]
     monkeypatch.chdir(elsewhere)
     monkeypatch.setattr(configuration, "_config", None)

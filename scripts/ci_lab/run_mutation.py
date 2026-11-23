@@ -66,8 +66,8 @@ def install(modules: MutableMapping[str, ModuleType]) -> ModuleType:
 
 
 def trampoline(tree: Path, path: str) -> list[str]:
-    """Rewrite path under tree with every mutant mutmut makes of it behind trampolines and return their full names;
-    no ignore pattern applies, so no mutmut config is read from the working directory."""
+    """Rewrite path under tree with every mutant mutmut makes of it behind trampolines and return their full names,
+    applying no ignore pattern and reading no mutmut config."""
     target = tree / path
     code, names = selected_mutants(path, target.read_text(), set(EVERY_LINE), patterns=())
     target.write_text(code)
