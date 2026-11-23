@@ -324,6 +324,25 @@
       ]
     },
     {
+      "id": "ledger-hook-bounded-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-hook-bounded-read",
+      "behaviour": "The swarm ledger hook of a bound session reads the members, events and policy, only the done and out of scope flags of each phase and follow up, and only the tasks its unhandled operator events target, never a whole tasks, phases or followups collection, while routing owed events, skipping a closed ledger and handing the policy exactly as before.",
+      "seam": "scripts.swarm_ledger.ledger_hook.dispatch for a bound session, storage.read_flags and ledger_gate.task_targets",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_for_a_bound_session_never_reads_the_whole_tasks_phases_or_followups",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_routes_owed_operator_events_to_the_task_claimant_claims_holder_or_orchestrator",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_hands_the_ledger_policy_and_reaches_the_orchestrator_for_a_task_the_ledger_lacks",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_skips_only_a_ledger_whose_phases_and_follow_ups_are_all_done_or_out_of_scope",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_skips_the_handler_when_the_ledger_vanishes_before_the_task_read",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_skips_the_handler_when_the_flags_read_finds_no_database",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_skips_the_handler_when_the_ledger_is_gone_before_the_flags_read",
+        "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_does_not_run_the_handler_for_a_ledger_with_no_member_record",
+        "tests/swarm_ledger/test_sqlite_reads.py::test_read_flags_reads_only_the_named_flags_of_each_item_in_stored_order",
+        "tests/swarm_ledger/test_ledger_gate.py::test_task_targets_name_only_unhandled_operator_task_targets_once_each"
+      ]
+    },
+    {
       "id": "lab-zero-base-push",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-zero-base-push",
@@ -1182,6 +1201,17 @@
       "tests": [
         "tests/swarm/test_metrics_outbox.py::test_a_new_spool_waits_out_another_connections_write_lock_before_it_turns_on_wal",
         "tests/recall/test_store.py::test_a_new_store_waits_out_another_connections_write_lock_before_it_turns_on_wal"
+      ]
+    },
+    {
+      "id": "metrics-spool-drops-shipped-ledger-snapshots",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-ephemeral-disk",
+      "behaviour": "A ledger metrics record drops the ledger snapshot rows the spool has already shipped, so the controller's metrics spool holds the newest snapshot cycle plus any cycle not yet shipped instead of a day of them, while unshipped snapshot rows and shipped rows of every other table stay.",
+      "seam": "metrics_ledger.record against a metrics outbox whose flush shipped or failed to ship earlier snapshot cycles",
+      "tests": [
+        "tests/swarm/test_metrics_ledger.py::test_unshipped_snapshots_and_shipped_ledger_events_survive_the_next_record",
+        "tests/swarm/test_metrics_ledger.py::test_the_spool_keeps_only_the_newest_snapshot_cycle_once_earlier_ones_shipped"
       ]
     },
     {

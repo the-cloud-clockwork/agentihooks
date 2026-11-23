@@ -497,8 +497,8 @@ moved the gate onto the shared client mode rule.
 
 A workstation swarm can run its engineer and CI work on a Kubernetes cluster while its master, planners and
 dispatcher stay on the workstation. The swarm first moves to the hosted ledger, which hands its controller lease to
-the cluster's controller; the chart's controller then serves that swarm and launches only its `eng` and `ci` lanes
-as worker Pods. The Anton deployment runs `rig-grade-swarm` this way; the values and names below are Anton's.
+the cluster's controller; the chart's controller then serves that swarm and launches only its `eng`, `ci` and
+`review` lanes as worker Pods. The Anton deployment runs `rig-grade-swarm` this way; the values and names below are Anton's.
 
 ### Move the swarm to the hosted ledger
 
@@ -601,7 +601,7 @@ The routed runtime places each launch by lane and profile:
 
 | Work | Where it runs |
 |---|---|
-| `eng` and `ci` lanes | A worker Pod on the cluster. |
+| `eng`, `ci` and `review` lanes | A worker Pod on the cluster. |
 | A task whose profile is `frontend`, on any lane | The workstation. |
 | Master seats owned by the controller's own hive | A worker Pod on the cluster. |
 | Master seats owned by the workstation, planners (`plan`) and the dispatcher (`dispatch`) | The workstation. |
@@ -609,7 +609,7 @@ The routed runtime places each launch by lane and profile:
 `controller.workers.cap` is the launch cap per approved account: each account the worker route offers takes at most
 that many live workers. With one approved account and `cap: 1`, as on Anton, one worker runs at a time. The swarm's
 own caps (`max-eng-agents`, `max-ci-agents`) still apply on top. With hive placement on, worker hive Pods take
-`eng`, `ci`, `plan` and `dispatch` as described on the [Hives](../pillars/hives.md#placement) page instead.
+`eng`, `ci`, `review`, `plan` and `dispatch` as described on the [Hives](../pillars/hives.md#placement) page instead.
 
 ### The hive endpoint on Anton and its render checks
 
