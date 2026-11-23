@@ -7,54 +7,26 @@ import logging
 import sys
 import time
 import urllib.error
-from collections.abc import Callable, Generator, Mapping
-from contextlib import contextmanager
-from contextvars import ContextVar
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from email.message import Message
-from functools import partial
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlsplit
 
 from scripts.swarm import timing
 from scripts.swarm_ledger import request_metrics
-from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import resources as api_resources
 from scripts.swarm_ledger.api import routes as api_routes
 from scripts.swarm_ledger.api import task_list
-from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.api.services import Services
 from scripts.swarm_ledger.api_service import Writes
+from scripts.tick.adapters.writer_client import ACTING, acting, client, decoded, principal, routed, written
 
-__all__ = ["acting", "client", "exchanged", "principal", "request", "upload"]
+__all__ = ["ACTING", "acting", "client", "exchanged", "principal", "request", "routed", "upload"]
 
-ACTING: ContextVar[str | None] = ContextVar("ledger_acting", default=None)
 routes: Any = api_routes
 resources: Any = api_resources
-writer_header: Any = cast(Any, api_client).writer_header
-
-
-def principal() -> str:
-    """The caller the route code judges a call by: the name set by ``acting``, else a pinned agent by its name, else
-    the swarm's own service, the empty name."""
-    from scripts.gates import Who
-
-    named = ACTING.get()
-    if named is not None:
-        return named
-    who: Any = cast(Any, Who).from_env()
-    return str(who.name) if who.pinned else ""
-
-
-@contextmanager
-def acting(name: str) -> Generator[None]:
-    """Judge every ledger call inside as ``name``; the empty name is the swarm's own service, as a tick pass."""
-    token = ACTING.set(name)
-    try:
-        yield
-    finally:
-        ACTING.reset(token)
 
 
 def services() -> Services:
@@ -135,13 +107,6 @@ def answer(found: Services, exchange: Exchange, slug: str, path: str) -> tuple[i
     return settled(exchange, path, route)
 
 
-def written(path: str) -> dict[str, str]:
-    """The headers a ledger API request from this process carries beside its body: the writer's worktree on
-    operations."""
-    extra: dict[str, str] = writer_header() if path == "operations" else {}
-    return extra
-
-
 def replied(
     slug: str, path: str, payload: dict[str, Any] | None, extra: Mapping[str, str]
 ) -> tuple[Message, int, bytes]:
@@ -157,15 +122,6 @@ def replied(
     exchange = Exchange("GET" if payload is None else "POST", url, headers, io.BytesIO(encoded))
     status, body = answer(services(), exchange, slug, urlsplit(path).path or "metadata")
     return headers, status, body
-
-
-def decoded(slug: str, path: str, headers: Message, status: int, body: bytes) -> dict[str, Any]:
-    """The reply one ledger API answer carries, a refusal raised as the server's HTTP error."""
-    if status >= 400:
-        url = f"/api/v1/ledgers/{slug}/{path}"
-        raise urllib.error.HTTPError(url, status, "ledger refused", headers, io.BytesIO(body))
-    reply: dict[str, Any] = json.loads(body)
-    return reply
 
 
 def answered(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -208,32 +164,6 @@ def journaled(slug: str, path: str, payload: dict[str, Any] | None = None) -> di
             "wall_s": time.monotonic() - started,
         }
         print(json.dumps(line), file=sys.stderr)
-
-
-def routed(timeout: float, slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Answer one ledger API request through this host's warm writer, or in process as ``request`` does inside a tick
-    pass or when no writer takes the connection; a request the writer took is never answered again here, its lost
-    reply raised as a timeout."""
-    if timing.PASS.get() is not None:
-        return request(slug, path, payload)
-    from scripts.swarm_ledger import warm_writer
-
-    try:
-        sock = warm_writer.connected(timeout)
-    except OSError:
-        return request(slug, path, payload)
-    with sock:
-        try:
-            status, body = warm_writer.ask(sock, slug, path, payload)
-        except (OSError, EOFError, ValueError) as exc:
-            raise TimeoutError(f"the ledger writer took {path} on {slug} and sent no answer") from exc
-    return decoded(slug, path, Message(), status, body)
-
-
-def client(base: str, timeout: float) -> ResourceClient:
-    """A ledger API client whose requests go to this host's warm writer first and otherwise run the ledger server's
-    route code in this process."""
-    return ResourceClient(base, {}, timeout, transport=partial(routed, timeout))
 
 
 def upload(slug: str, route: str, data: bytes, headers: Mapping[str, str]) -> dict[str, Any]:

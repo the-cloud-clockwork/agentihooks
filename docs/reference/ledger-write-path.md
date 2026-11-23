@@ -26,7 +26,7 @@ warm ledger writer that runs the same route code for every client on that host; 
 
 | Writer | Path | Judged as |
 |---|---|---|
-| `agentihooks ledger` commands, `LedgerClient`, the stop hook, proof ledgers, uploads, outbox replays | This host's warm writer socket first, else in process: `scripts.swarm_ledger.ledger.client(slug)`, which returns `scripts.tick.adapters.database_ledger.client` | The pinned agent, or the swarm's own service for service writes |
+| `agentihooks ledger` commands, `LedgerClient`, the stop hook, proof ledgers, uploads, outbox replays | This host's warm writer socket first, else in process: `scripts.swarm_ledger.ledger.client(slug)`, which returns `scripts.tick.adapters.writer_client.client` | The pinned agent, or the swarm's own service for service writes |
 | The tick pass and the tick ledger port | In process, inside `database_ledger.acting("")`, even when a writer listens | The swarm's own service |
 | The hub admission claim and its release | In process; the hub sets no swarm or agent name | The swarm's own service |
 | The controller's hosted ledger | In process, inside `database_ledger.acting("")` | The swarm's own service |
@@ -40,9 +40,10 @@ contacted. A refusal comes back as the HTTP error the service would have sent, s
 
 ### The warm writer socket
 
-`database_ledger.client(base, timeout)` builds a `ResourceClient` whose transport is `database_ledger.routed` bound to
-the client timeout. Each request tries this host's warm writer first, the `agentihooks ledger writer serve` process on
-`ledger-writer.sock` in the agentihooks home, which answers with the same route code as the caller it names:
+`writer_client.client(base, timeout)` builds a `ResourceClient` whose transport is `writer_client.routed` bound to
+the client timeout; `database_ledger` imports both back under the same names. Each request tries this host's warm
+writer first, the `agentihooks ledger writer serve` process on `ledger-writer.sock` in the agentihooks home, which
+answers with the same route code as the caller it names:
 
 | Case | What the client does |
 |---|---|
@@ -53,6 +54,11 @@ the client timeout. Each request tries this host's warm writer first, the `agent
 
 `database_ledger.request` itself never opens the socket, so the controller's hosted ledger and the writer always
 answer in process.
+
+`scripts.tick.adapters.writer_client` imports neither the ledger API service, the ledger server nor
+`database_ledger` at load; `routed` imports `database_ledger` only to run a request in process. A command line write
+that the writer answers therefore loads none of them. jsonschema and jwt still load on that path, through
+`ResourceClient`'s request schemas and the ledger command's authority module.
 
 ### The store a write lands in
 
@@ -375,10 +381,11 @@ resolution](deployment-modes.md#client-mode-resolution)).
 | `tests/swarm_ledger/test_ledger_write_cutover.py` | The hub claim and release land in the store with no ledger server request; a stale hub claim is refused by the route; the ledger server answers `POST`, `PUT`, `PATCH` and `DELETE` with `501`; every write hook of the read only ledger server refuses with `405`; a hosted hub without the shared database refuses to start |
 | Feature map entry `swarm-ledger-api-writes` | The behaviour, its operator words and its tests; its Semgrep rule `feature-ledger-api-writes` holds `client` to the warm writer first transport, `partial(routed, timeout)`, and the hub's database check |
 | `tests/tick/test_database_ledger_writer_route.py` | A request goes to a listening writer; an absent or refusing socket runs it in process; a lost reply after send raises `TimeoutError` with the route code never called; a writer refusal raises the in-process HTTP error; a tick pass stays in process and journals while a writer listens |
+| Feature map entry `ledger-slim-write-client`, `tests/swarm_ledger/test_writer_client.py` | A write through `ledger.client(slug)` goes to a listening writer as the caller with the worktree header and never runs in process; a fresh interpreter that sends one such write leaves the ledger API service, the ledger server and `database_ledger` unloaded |
 | Feature map entry `compose-api-health-and-front-proxy` | The API service answers a health probe sent to its own loopback port (`test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port`); every front config forwards `Host $http_host` and never `$host` (`test_the_front_forwards_the_host_the_client_sent_with_its_port`); both Compose front configs resolve `swarm` and `api` through `127.0.0.11` (`test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time`) |
-| Feature rule `feature-tick-database-ledger` | The tick route acts as `database_ledger.acting("")`, the tick ledger port builds its client with `ledger.client`, and `ledger.client` returns the in-process client with no other path |
+| Feature rule `feature-tick-database-ledger` | The tick route acts as `database_ledger.acting("")`, the tick ledger port builds its client with `ledger.client`, and `ledger.client` returns `writer_client.client` with no other path |
 | Rule `ledger-server-reads-only` | No `do_POST`, `do_PUT`, `do_PATCH` or `do_DELETE` in the ledger server module, whether defined, assigned or set with `setattr`, and no `setattr` under a computed name there |
-| Rule `ledger-client-in-process` | No `ResourceClient` anywhere in the tree without a transport, by keyword or position, and none with `transport=None`; the warm writer first transport of `database_ledger.client` is the one transport beside the in-process one |
+| Rule `ledger-client-in-process` | No `ResourceClient` anywhere in the tree without a transport, by keyword or position, and none with `transport=None`; the warm writer first transport of `writer_client.client` is the one transport beside the in-process one |
 | Incident rule `ledger-write-switch` | No `database_ledger.serving()` or `database_ledger.scoped(...)` under `scripts/` or `hooks/`: no switch to the ledger server |
 
 `ledger-server-reads-only` and `ledger-client-in-process` run in the whole tree scan from

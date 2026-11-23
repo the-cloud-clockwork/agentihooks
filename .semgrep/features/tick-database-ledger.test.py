@@ -51,9 +51,17 @@ def client(slug: str, timeout: float = REQUEST_TIMEOUT) -> Any:
     return ResourceClient(base(slug), credentials(slug), timeout)
 
 
-# ok: feature-tick-database-ledger
+# ruleid: feature-tick-database-ledger
 def client(slug: str, timeout: float = REQUEST_TIMEOUT) -> Any:
     """The ledger API client for slug: the ledger API route code run in this process over the shared database."""
     from scripts.tick.adapters import database_ledger
 
     return database_ledger.client(base(slug), timeout)
+
+
+# ok: feature-tick-database-ledger
+def client(slug: str, timeout: float = REQUEST_TIMEOUT) -> Any:
+    """The ledger API client for slug: this host's warm writer first, else the ledger API route code in process."""
+    from scripts.tick.adapters import writer_client
+
+    return writer_client.client(base(slug), timeout)
