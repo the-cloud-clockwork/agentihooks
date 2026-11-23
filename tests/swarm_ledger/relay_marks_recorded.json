@@ -1,1 +1,12 @@
-[]
+[
+  "{\"id\": \"r-note\", \"by\": \"operator\", \"at\": 0, \"text\": \"Use the queue.\", \"comments\": [{\"id\": \"r-comment\", \"by\": \"operator\", \"at\": 0, \"text\": \"Ship it first.\", \"relayed_by\": \"master@c0ffee-0001\", \"relayed_from\": \"master pane\", \"quote\": \"Build the reviewer seats today\"}], \"relayed_by\": \"master@c0ffee-0001\", \"relayed_from\": \"master pane\", \"quote\": \"Build the reviewer seats today\"}",
+  "{\"id\": \"r-answer\", \"by\": \"operator\", \"at\": 0, \"text\": \"The queue.\", \"relayed_by\": \"master@c0ffee-0001\", \"relayed_from\": \"master pane\", \"quote\": \"Build the reviewer seats today\"}",
+  "{\"at\": 0, \"by\": \"master@c0ffee-0001\", \"request\": \"c-ask\"}",
+  "{\"rev\": 0, \"at\": 0, \"by\": \"operator\", \"kind\": \"note added\", \"target\": \"\", \"id\": \"r-note\", \"text\": \"Use the queue.\", \"relayed_by\": \"master@c0ffee-0001\", \"relayed_from\": \"master pane\", \"quote\": \"Build the reviewer seats today\"}",
+  "{\"rev\": 0, \"at\": 0, \"by\": \"operator\", \"kind\": \"comment added\", \"target\": \"notes/r-note\", \"id\": \"r-comment\", \"text\": \"Ship it first.\", \"relayed_by\": \"master@c0ffee-0001\", \"relayed_from\": \"master pane\", \"quote\": \"Build the reviewer seats today\"}",
+  "{\"rev\": 0, \"at\": 0, \"by\": \"operator\", \"kind\": \"answer added\", \"target\": \"questions/q1\", \"id\": \"r-answer\", \"text\": \"The queue.\", \"relayed_by\": \"master@c0ffee-0001\", \"relayed_from\": \"master pane\", \"quote\": \"Build the reviewer seats today\"}",
+  "{\"rev\": 0, \"at\": 0, \"by\": \"operator\", \"kind\": \"rank set\", \"target\": \"tasks/t1\", \"text\": \"high\", \"relayed_by\": \"master@c0ffee-0001\", \"relayed_from\": \"master pane\", \"quote\": \"seats today at high rank\"}",
+  "{\"rev\": 0, \"at\": 0, \"by\": \"operator\", \"kind\": \"ordered\", \"target\": \"phases/p1\", \"id\": \"o-quote\", \"relayed_by\": \"master@c0ffee-0001\", \"relayed_from\": \"master pane\", \"quote\": \"Build the reviewer seats today\"}",
+  "{\"rev\": 0, \"at\": 0, \"by\": \"operator\", \"kind\": \"ordered\", \"target\": \"tasks/t1\", \"id\": \"o-request\", \"relayed_by\": \"master@c0ffee-0001\", \"relayed_from\": \"master pane\", \"request\": \"c-ask\"}",
+  "{\"rev\": 0, \"at\": 0, \"by\": \"operator\", \"kind\": \"order cleared\", \"target\": \"phases/p1\", \"id\": \"o-clear\", \"relayed_by\": \"master@c0ffee-0001\", \"relayed_from\": \"master pane\", \"quote\": \"Build the reviewer seats today\"}"
+]
