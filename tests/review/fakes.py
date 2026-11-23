@@ -1,8 +1,6 @@
 from types import SimpleNamespace
 from typing import cast
 
-import fakeredis
-
 from scripts.forge.model import ChangeRequest
 from scripts.swarm.store import RedisStore
 
@@ -33,6 +31,8 @@ class FakeForge:
 
 def store() -> RedisStore:
     """Return a swarm store on an in-memory Redis."""
+    import fakeredis
+
     return RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
 

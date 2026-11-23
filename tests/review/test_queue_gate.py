@@ -9,7 +9,7 @@ from scripts.gates import catalog, enforcement, log, modes
 from scripts.review import record
 from scripts.swarm import cli, merge_queue, queue_exit
 from scripts.swarm.store import RedisStore
-from tests.review.fakes import AUTHOR, FEATURE, HEAD, REVIEWER, SLUG, URL, FakeForge, swarm
+from tests.review.fakes import AUTHOR, HEAD, REVIEWER, SLUG, URL, FakeForge, swarm
 
 pytestmark = pytest.mark.unit
 UNREAD = (
@@ -26,6 +26,7 @@ def _queue(monkeypatch: pytest.MonkeyPatch, found: RedisStore) -> tuple[int, lis
     monkeypatch.setattr(cli, "connect", lambda: found)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", AUTHOR)
     monkeypatch.setattr(cli, "_queue_intent", lambda store, args, agent, head: None)
+    monkeypatch.setattr(cli, "_require_target", lambda *args: None)
     monkeypatch.setattr(queue_exit, "require_fresh", lambda url, head: None)
     rows: list[log.Row] = []
     monkeypatch.setattr(log, "append", lambda slug, row, home=None: rows.append(row))
@@ -44,7 +45,7 @@ def _rows(rows: list[log.Row]) -> list[tuple[str, str, str, str, str, str]]:
     return [(row.gate, row.kind, row.agent, row.task, row.tool, row.reason) for row in rows]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_the_review_gate_defaults_to_log_only_and_takes_an_enforce_switch() -> None:
     assert enforcement.ENFORCEMENTS["review"] is enforcement.REVIEW
     assert catalog.defaults()["review"] == "observe"
@@ -52,7 +53,7 @@ def test_the_review_gate_defaults_to_log_only_and_takes_an_enforce_switch() -> N
     assert modes.configured(enforcement.REVIEW, {"review": "enforce"}) == "enforce"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_an_unread_review_logs_a_would_be_refusal_and_queues(monkeypatch: pytest.MonkeyPatch) -> None:
     found = swarm({})
     record.post(found, SLUG, FakeForge(), URL, REVIEWER, "r1", ["First"])
@@ -61,7 +62,7 @@ def test_an_unread_review_logs_a_would_be_refusal_and_queues(monkeypatch: pytest
     assert _rows(rows) == [("review", "observe", AUTHOR, "t1", "queue", UNREAD)]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_an_enforced_gate_refuses_an_unread_review(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -73,7 +74,7 @@ def test_an_enforced_gate_refuses_an_unread_review(
     assert UNREAD in capsys.readouterr().err
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 @pytest.mark.parametrize("mode", ["observe", "enforce"])
 def test_a_review_the_author_read_queues_with_no_gate_row(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     found, forge = swarm({"review": mode}), FakeForge()
@@ -83,7 +84,21 @@ def test_a_review_the_author_read_queues_with_no_gate_row(monkeypatch: pytest.Mo
     assert (code, queued, rows) == (0, [URL], [])
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
+def test_another_agents_read_does_not_satisfy_the_author(monkeypatch: pytest.MonkeyPatch) -> None:
+    found, forge = swarm({"review": "enforce"}), FakeForge()
+    record.post(found, SLUG, forge, URL, REVIEWER, "r1", ["First"])
+    record.mark(found, SLUG, forge, URL, "engineer@a1b2c3-0003", ["f1"], "")
+    code, queued, rows = _queue(monkeypatch, found)
+    assert code == 1
+    assert queued == []
+    assert len(rows) == 1
+    assert "unread" in rows[0].reason
+    record.mark(found, SLUG, forge, URL, AUTHOR, ["f1"], "")
+    assert _queue(monkeypatch, found) == (0, [URL], [])
+
+
+@pytest.mark.feature("review-findings-queue-gate")
 @pytest.mark.parametrize(("by", "task"), [(AUTHOR, "r1"), (REVIEWER, "t1")])
 def test_a_review_posted_by_the_author_or_its_task_is_not_independent(
     monkeypatch: pytest.MonkeyPatch, by: str, task: str
@@ -96,14 +111,14 @@ def test_a_review_posted_by_the_author_or_its_task_is_not_independent(
     assert _rows(rows) == [("review", "deny", AUTHOR, "t1", "queue", MISSING)]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_a_head_without_a_review_logs_a_would_be_refusal_and_queues(monkeypatch: pytest.MonkeyPatch) -> None:
     code, queued, rows = _queue(monkeypatch, swarm({}))
     assert (code, queued) == (0, [URL])
     assert _rows(rows) == [("review", "observe", AUTHOR, "t1", "queue", MISSING)]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_a_skipped_review_gate_neither_logs_nor_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
     code, queued, rows = _queue(monkeypatch, swarm({"review": "off"}))
     assert (code, queued, rows) == (0, [URL], [])

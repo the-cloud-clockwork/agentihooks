@@ -7,16 +7,17 @@ import pytest
 
 from scripts.gates import log
 from scripts.swarm import cli, merge_queue, queue_exit
-from tests.review.fakes import AUTHOR, FEATURE, HEAD, SLUG, URL, swarm
+from tests.review.fakes import AUTHOR, HEAD, SLUG, URL, swarm
 
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_a_default_swarm_queues_a_head_nobody_reviewed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "connect", lambda: swarm({}))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", AUTHOR)
     monkeypatch.setattr(cli, "_queue_intent", lambda store, args, agent, head: None)
+    monkeypatch.setattr(cli, "_require_target", lambda *args: None)
     monkeypatch.setattr(queue_exit, "require_fresh", lambda url, head: None)
     monkeypatch.setattr(log, "append", lambda slug, row, home=None: None)
     admitted: list[str] = []

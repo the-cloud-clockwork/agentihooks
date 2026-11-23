@@ -7,7 +7,7 @@ import pytest
 
 from scripts.review import record
 from scripts.swarm.store import RedisStore, SwarmError
-from tests.review.fakes import AUTHOR, FEATURE, HEAD, REVIEWER, SLUG, URL, FakeForge, store
+from tests.review.fakes import AUTHOR, HEAD, REVIEWER, SLUG, URL, FakeForge, store
 
 pytestmark = pytest.mark.unit
 
@@ -16,7 +16,7 @@ def _posted(found: record.Record) -> list[tuple[str, str, str, str, str, str]]:
     return [(item.id, item.body, item.comment, item.by, item.task, item.state) for item in found.findings]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_a_post_stores_each_finding_with_its_forge_comment_on_the_reported_head() -> None:
     swarm, forge = store(), FakeForge()
     posted = record.post(swarm, SLUG, forge, URL, REVIEWER, "r1", ["Null head is not handled", "No test"])
@@ -30,7 +30,7 @@ def test_a_post_stores_each_finding_with_its_forge_comment_on_the_reported_head(
     assert record.read(swarm, SLUG, URL, "another-head") is None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 @pytest.mark.parametrize("bodies", [[], ["", "   "]])
 def test_a_post_without_a_finding_is_refused_and_posts_nothing(bodies: list[str]) -> None:
     swarm, forge = store(), FakeForge()
@@ -40,7 +40,7 @@ def test_a_post_without_a_finding_is_refused_and_posts_nothing(bodies: list[str]
     assert record.read(swarm, SLUG, URL, HEAD) is None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_a_second_post_on_the_same_head_appends_numbered_findings() -> None:
     swarm, forge = store(), FakeForge()
     record.post(swarm, SLUG, forge, URL, REVIEWER, "r1", ["First"])
@@ -51,7 +51,7 @@ def test_a_second_post_on_the_same_head_appends_numbered_findings() -> None:
     ]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_a_record_expires_thirty_days_after_its_last_write() -> None:
     swarm = store()
     record.post(swarm, SLUG, FakeForge(), URL, REVIEWER, "r1", ["First"])
@@ -60,13 +60,13 @@ def test_a_record_expires_thirty_days_after_its_last_write() -> None:
     assert all(0 < swarm.redis.ttl(key) <= record.TTL_SEC == 30 * 24 * 3600 for key in keys)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_a_change_request_url_without_a_number_is_refused() -> None:
     with pytest.raises(SwarmError, match="^not a change request URL: https://github.com/o/r$"):
         record.post(store(), SLUG, FakeForge(), "https://github.com/o/r", REVIEWER, "r1", ["First"])
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_the_author_marks_findings_read_or_answered_on_the_current_head() -> None:
     swarm, forge = store(), FakeForge()
     record.post(swarm, SLUG, forge, URL, REVIEWER, "r1", ["First", "Second"])
@@ -81,7 +81,7 @@ def test_the_author_marks_findings_read_or_answered_on_the_current_head() -> Non
     assert answered.unread() == ()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_marking_an_unknown_finding_or_a_head_without_review_is_refused() -> None:
     swarm, forge = store(), FakeForge()
     with pytest.raises(SwarmError, match=f"^no review on head {HEAD} of {URL}$"):
@@ -91,7 +91,7 @@ def test_marking_an_unknown_finding_or_a_head_without_review_is_refused() -> Non
         record.mark(swarm, SLUG, forge, URL, AUTHOR, ["f9"], "")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_a_reviewer_cannot_mark_its_own_findings_read() -> None:
     swarm, forge = store(), FakeForge()
     record.post(swarm, SLUG, forge, URL, REVIEWER, "r1", ["First"])
@@ -102,7 +102,7 @@ def test_a_reviewer_cannot_mark_its_own_findings_read() -> None:
     assert [item.state for item in found.findings] == ["open"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_review_done_with_no_findings_is_refused() -> None:
     refused = record.done_refusal(store(), SLUG, "review", "r1")
     assert refused == (
@@ -111,7 +111,7 @@ def test_review_done_with_no_findings_is_refused() -> None:
     )
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_review_done_with_one_finding_passes() -> None:
     swarm = store()
     record.post(swarm, SLUG, FakeForge(), URL, REVIEWER, "r1", ["First"])
@@ -119,7 +119,7 @@ def test_review_done_with_one_finding_passes() -> None:
     assert record.done_refusal(swarm, SLUG, "review", "r2") is not None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 @pytest.mark.parametrize("kind", ["code", "ci", "ops", "plan"])
 def test_other_task_kinds_never_read_review_records(kind: str) -> None:
     unreadable = cast(RedisStore, SimpleNamespace(redis=None, key=None))

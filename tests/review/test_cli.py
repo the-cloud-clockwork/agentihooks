@@ -7,7 +7,7 @@ import pytest
 from scripts import cli_delegates
 from scripts.review import cli, record
 from scripts.swarm.store import RedisStore
-from tests.review.fakes import AUTHOR, FEATURE, HEAD, REVIEWER, SLUG, URL, FakeForge, swarm
+from tests.review.fakes import AUTHOR, HEAD, REVIEWER, SLUG, URL, FakeForge, swarm
 
 pytestmark = pytest.mark.unit
 
@@ -20,13 +20,13 @@ def _wired(monkeypatch: pytest.MonkeyPatch, name: str) -> tuple[RedisStore, Fake
     return found, forge
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_the_command_line_delegates_review_to_this_module() -> None:
     assert cli_delegates.DELEGATED_CLIS["review"] == "scripts.review.cli"
     assert cli_delegates.delegated_cli(["review", "post"]) is cli.main
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_post_records_the_calling_reviewer_and_prints_the_record(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -42,7 +42,7 @@ def test_post_records_the_calling_reviewer_and_prints_the_record(
     assert record.done_refusal(found, SLUG, "review", "r1") is None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_read_marks_the_findings_answered_by_the_calling_author(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -53,7 +53,7 @@ def test_read_marks_the_findings_answered_by_the_calling_author(
     assert [(item["state"], item["answer"]) for item in printed["findings"]] == [("answered", "Fixed")]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_a_refusal_prints_its_reason_and_returns_one(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -62,7 +62,7 @@ def test_a_refusal_prints_its_reason_and_returns_one(
     assert capsys.readouterr() == ("", "review: a review posts at least one finding\n")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("review-findings-queue-gate")
 def test_a_session_outside_the_swarm_is_refused(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
