@@ -35,6 +35,7 @@ UNAFFECTED = {
     ("workflows/test.yml", "flake-budget", "flakes-3.*"),
     ("workflows/test.yml", "coverage-baseline", "executed-lines-3.12-*"),
 }
+REUSED_PLAN = ("workflows/test.yml", "sonar", "{reused-branch,reused}-3.12")
 
 
 def _jobs(path: Path) -> list[tuple[str, list[dict[str, Any]]]]:
@@ -74,6 +75,26 @@ def _matches(name: str, pattern: str) -> bool:
         return fnmatch(name, pattern)
     head, options, tail = braces.groups()
     return any(_matches(name, head + option + tail) for option in options.split(","))
+
+
+def _waits_on(jobs: dict[str, Any], job: str) -> set[str]:
+    """Return every job a job waits on, directly or through the jobs it needs."""
+    needs = jobs[job].get("needs") or []
+    direct = {needs} if isinstance(needs, str) else set(needs)
+    return direct.union(*(_waits_on(jobs, need) for need in direct))
+
+
+def _uploaders(file: str, pattern: str) -> set[str]:
+    """Return the jobs with an upload step whose artifact name, on Python 3.12, a download pattern matches."""
+    found: set[str] = set()
+    for job, steps in _jobs(GITHUB / file):
+        for step in steps:
+            uses = str(step.get("uses", ""))
+            upload = uses.startswith("actions/upload-artifact@") or uses.endswith("/retry-upload")
+            name = str((step.get("with") or {}).get("name", "")).replace("${{ matrix.python-version }}", "3.12")
+            if upload and _matches(name, pattern):
+                found.add(job)
+    return found
 
 
 def _download(
@@ -188,3 +209,13 @@ def test_the_gate_summary_counts_a_lone_report_that_lands_at_the_folder_root(tmp
     folder = shlex.split(_steps("workflows/test.yml", "test-summary")["Summarize this run's tests"]["run"])[2]
     assert (tmp_path / folder / "durations.json").is_file()
     assert ci_gate_summary.counts(tmp_path / folder) == {"ran": 1, "flaky": 0, "failed": 0}
+
+
+@pytest.mark.feature("sonar-reads-the-reused-plan-after-test-count-uploads-it")
+def test_sonar_lists_the_reused_test_plan_only_after_every_job_that_uploads_it_finished() -> None:
+    file, job, pattern = REUSED_PLAN
+    jobs = yaml.safe_load((GITHUB / file).read_text())["jobs"]
+    uploaders = _uploaders(file, pattern)
+    assert REUSED_PLAN in _pattern_downloads()
+    assert uploaders == {"test-count"}
+    assert uploaders <= _waits_on(jobs, job), f"{job} can list {pattern} before {sorted(uploaders)} uploads it"
