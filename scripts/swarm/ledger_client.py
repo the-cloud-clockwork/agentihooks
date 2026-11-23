@@ -238,11 +238,11 @@ class LedgerClient:
         ids: Iterable[str] = (),
         states: Iterable[str] = (),
         pinned: bool = False,
-        branched: bool = False,
+        branches: Iterable[str] = (),
         fields: Iterable[str] = (),
     ) -> list[dict[str, Any]]:
         """The task rows matching every given filter, read by a narrow query instead of the whole ledger."""
-        query = where_query(ids, states, pinned, branched, fields)
+        query = where_query(ids, states, pinned, branches, fields)
         rows: list[dict[str, Any]] = self._resource(slug, f"tasks?{urlencode(query)}")
         return rows
 
@@ -531,7 +531,7 @@ def where_query(
     ids: Iterable[str] = (),
     states: Iterable[str] = (),
     pinned: bool = False,
-    branched: bool = False,
+    branches: Iterable[str] = (),
     fields: Iterable[str] = (),
 ) -> dict[str, str]:
     """The tasks collection query naming only the filters given."""
@@ -539,7 +539,7 @@ def where_query(
         "ids": ",".join(ids),
         "states": ",".join(states),
         "pinned": "1" if pinned else "",
-        "branched": "1" if branched else "",
+        "branches": ",".join(branches),
         "fields": ",".join(fields),
     }
     return {key: value for key, value in query.items() if value}

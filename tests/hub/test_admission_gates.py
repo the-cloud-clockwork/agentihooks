@@ -59,12 +59,13 @@ def test_an_admission_never_reads_the_full_export_when_the_revision_moves(
     ("change", "reason"),
     [
         ({"freezes": [{"verb": "freeze", "target": "tasks/t1"}]}, "holds it"),
+        ({"freezes": [{"verb": "freeze", "target": "phases/p1"}]}, "holds it"),
         ({"freezes": [{"verb": "focus", "target": "tasks/t2"}]}, "a focus elsewhere holds it"),
         ({"phase": "p2"}, "its phase later is waiting on an earlier phase"),
         ({"depends_on": ["t2"]}, "it waits on task t2"),
         ({"enhancement": "needed"}, "it waits for its enhancement plan task"),
     ],
-    ids=["frozen", "unfocused", "phased", "waits", "thin"],
+    ids=["frozen", "frozen-phase", "unfocused", "phased", "waits", "thin"],
 )
 def test_an_admission_refuses_a_task_its_claim_gate_holds_and_claims_nothing(
     gates: SimpleNamespace, change: dict[str, Any], reason: str, capsys: pytest.CaptureFixture[str]

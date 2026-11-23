@@ -111,9 +111,12 @@ class Narrow:
 
         return readiness.root_waiting(replace(snapshot, admits=admitted), capabilities)
 
-    def branched(self, slug: str) -> dict[str, dict[str, Any]]:
-        """Every task with a branch and a pull request, cut to the fields a continuation's forbidden set reads."""
-        rows: list[dict[str, Any]] = self._ledger.tasks_where(slug, branched=True, fields=BRANCH_FIELDS)
+    def branched(self, slug: str, names: Iterable[str]) -> dict[str, dict[str, Any]]:
+        """The tasks on any of the branches a continuation may take, cut to the fields its forbidden set reads."""
+        wanted = sorted(set(names) - {""})
+        if not wanted:
+            return {}
+        rows: list[dict[str, Any]] = self._ledger.tasks_where(slug, branches=wanted, fields=BRANCH_FIELDS)
         return {row["id"]: row for row in rows}
 
     def _related(self, slug: str, found: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:

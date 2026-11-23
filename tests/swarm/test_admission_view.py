@@ -186,7 +186,21 @@ def test_a_swarm_with_no_pinned_task_keeps_no_root_slot(narrow: SimpleNamespace)
 
 @pytest.mark.feature("hub-admission-narrow-read")
 def test_the_branched_rows_carry_only_the_continuation_fields(narrow: SimpleNamespace) -> None:
-    assert narrow.view.branched(SLUG) == {
+    assert narrow.view.branched(SLUG, ["t7-branch", "", "gone"]) == {
         "t7": {"id": "t7", "branch": "t7-branch", "pr_url": "https://example.invalid/pull/7"}
     }
-    assert narrow.ledger.selected == [{"branched": True, "fields": admission_view.BRANCH_FIELDS}]
+    assert narrow.ledger.selected == [{"branches": ["gone", "t7-branch"], "fields": admission_view.BRANCH_FIELDS}]
+
+
+def test_a_continuation_with_no_branch_reads_no_rows(narrow: SimpleNamespace) -> None:
+    assert narrow.view.branched(SLUG, ["", ""]) == {}
+    assert narrow.ledger.selected == []
+
+
+@pytest.mark.feature("hub-admission-narrow-read")
+def test_a_frozen_root_task_keeps_no_root_slot(narrow: SimpleNamespace) -> None:
+    narrow.found["tasks"].append(task("w1", workstation=True))
+    narrow.found["freezes"] = [{"verb": "freeze", "target": "phases/p1"}]
+
+    assert narrow.view.waiting(SLUG, lambda: []) == 0
+    assert narrow.ledger.judged == ["tasks/w1"]

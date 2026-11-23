@@ -1297,7 +1297,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-admit-narrow-read",
       "behaviour": "A hub events admission reads only what its own task needs: the task row, the rows it names, the running rows, the overview and its phase, and the claim gate verdict the ledger judges over its stored state, through a narrow tasks selection of ids, states, pins and branches; it never reads the whole ledger export however often the revision moves, and it refuses a frozen, unfocused, phased, waiting or thin task without claiming it.",
-      "seam": "Admission.admit over a ledger whose revision moves and whose export is counted, the ledger API tasks selection and LedgerClient.where_query",
+      "seam": "Admission.admit over a ledger whose revision moves and whose export is counted, admission_view.Narrow, the ledger API tasks selection and the ledger client where_query function",
       "tests": [
         "tests/hub/test_admission_gates.py::test_an_admission_never_reads_the_full_export_when_the_revision_moves",
         "tests/hub/test_admission_gates.py::test_an_admission_refuses_a_task_its_claim_gate_holds_and_claims_nothing",
@@ -1313,7 +1313,9 @@
         "tests/swarm/test_admission_view.py::test_a_local_refusal_never_asks_the_ledger",
         "tests/swarm/test_admission_view.py::test_the_view_counts_an_unfinished_agent_or_a_claimant_as_claimed",
         "tests/swarm/test_admission_view.py::test_the_root_waiting_count_judges_only_open_tasks_pinned_to_the_root_hive",
-        "tests/swarm/test_admission_view.py::test_the_branched_rows_carry_only_the_continuation_fields"
+        "tests/swarm/test_admission_view.py::test_the_branched_rows_carry_only_the_continuation_fields",
+        "tests/swarm/test_admission_view.py::test_a_frozen_root_task_keeps_no_root_slot",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_only_a_plain_tasks_read_naming_a_filter_is_a_selection"
       ]
     },
     {

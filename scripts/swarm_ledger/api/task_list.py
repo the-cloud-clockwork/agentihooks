@@ -8,9 +8,9 @@ from . import resources
 PAGES_KEPT = 32
 ENCODER = json.JSONEncoder(ensure_ascii=False)
 LEDGERS_KEPT = 4
-SELECTORS = ("ids", "states", "pinned", "branched")
+SELECTORS = ("ids", "states", "pinned", "branches")
 SELECTION = (*SELECTORS, "fields")
-SELECTION_ONLY = "Only a plain tasks read takes a selection, and it names ids, states, pinned or branched"
+SELECTION_ONLY = "Only a plain tasks read takes a selection, and it names ids, states, pinned or branches"
 
 
 class Page(dict):
@@ -85,9 +85,10 @@ def targeting(rows: list[Any], url: str) -> dict[str, Any]:
 
 
 def selecting(rows: Sequence[Mapping[str, Any]], query: dict[str, Any]) -> dict[str, Any]:
-    """The task rows matching every filter the query names: ids, states, a hive or workstation pin and a branch with
-    a pull request, each without its threads or cut to the named fields beside its id, in one reply."""
+    """The task rows matching every filter the query names: ids, states, a hive or workstation pin and branch names,
+    each without its threads or cut to the named fields beside its id, in one reply."""
     ids, states, fields = _listed(query.get("ids")), _listed(query.get("states")), _listed(query.get("fields"))
+    branches = _listed(query.get("branches"))
     found = [
         row
         for row in rows
@@ -95,11 +96,10 @@ def selecting(rows: Sequence[Mapping[str, Any]], query: dict[str, Any]) -> dict[
         and (not ids or row.get("id") in ids)
         and (not states or row.get("state") in states)
         and ("pinned" not in query or bool(row.get("hive") or row.get("workstation")))
-        and ("branched" not in query or bool(row.get("branch") and row.get("pr_url")))
+        and (not branches or row.get("branch") in branches)
     ]
     reply = {"data": [_shown(row, fields) for row in found], "revision": resources.revision(found), "next_cursor": None}
-    bounded: dict[str, Any] = resources.bounded(reply)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    return bounded
+    return resources.bounded(reply)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def selection(path: str, query: dict[str, Any]) -> bool:
@@ -114,8 +114,7 @@ def _listed(value: object) -> frozenset[str]:
 def _shown(row: dict[str, Any], fields: frozenset[str]) -> dict[str, Any]:
     if fields:
         return {key: row[key] for key in ("id", *sorted(fields)) if key in row}
-    shown: dict[str, Any] = resources.project({**row, "revision": resources.revision(row)})  # pyright: ignore[reportAssignmentType]
-    return shown
+    return resources.project({**row, "revision": resources.revision(row)})  # pyright: ignore[reportReturnType]
 
 
 def pull_links(row: dict[str, Any]) -> set[Any]:

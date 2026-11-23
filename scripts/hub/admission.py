@@ -14,7 +14,7 @@ from packaging.version import InvalidVersion, Version
 
 from scripts import updater
 from scripts.events.bus import SERVE_WAITED_MS
-from scripts.handoff import transfers
+from scripts.handoff import envelope, transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
 from scripts.hub import branch_heads, lease
@@ -398,7 +398,7 @@ class Admission:
         config = self.store.config(slug)
         reclaim, origin = branch_heads.reclaimer(config)
         repo = config.repo_origin or config.repo
-        rows = {**self.view.branched(slug), **rows}
+        rows = {**self.view.branched(slug, envelope.candidates(lives, task.get("branch") or "")), **rows}
         if handoff:
             saved: dict[str, Any] = self.store.handoff_envelope(slug, task_id) or {}
             resolved = continuation.resolve(repo, task, rows, lives, saved, reclaim, origin)
