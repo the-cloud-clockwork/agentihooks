@@ -11,6 +11,7 @@ from scripts.ci_lab import budget, scheduler, shadow
 from scripts.ci_lab.digests import Toolchain
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.retry import Policy
+from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.webhooks import HeadEvent, envelope, head_events
 from scripts.dep_manifest import _git
 from scripts.events.envelope import Envelope
@@ -174,5 +175,13 @@ def test_the_mirror_expander_reads_the_static_gate_ids_of_dev_as_the_shadow_repo
     toolchain = Toolchain("3.12", {}, "", "", "", {})
     expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, _no_tests, _unknown)
     gates = expander.static_jobs(f"file://{repo}")
-    assert "lint" in gates
+    assert {"lint", "semgrep"} <= gates
     assert gates == shadow.static_jobs(ROOT)
+
+
+@pytest.mark.feature("lab-completed-check-shadow")
+def test_a_static_gate_id_is_the_first_job_of_its_label() -> None:
+    def gate(job: str) -> StaticGate:
+        return StaticGate("scan", job, "run", (), (), "", (), ())
+
+    assert shadow.gate_ids([gate("semgrep/scan/run"), gate("lint")]) == frozenset({"semgrep", "lint"})

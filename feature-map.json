@@ -11900,7 +11900,8 @@
         "tests/ci_lab/test_scheduler_shadow.py::test_a_bus_inbox_whose_observer_fails_leaves_the_batch_heads_unacknowledged_for_redelivery",
         "tests/ci_lab/test_scheduler_shadow.py::test_the_built_scheduler_counts_a_lab_verdict_that_disagrees_with_actions_on_its_metrics_endpoint",
         "tests/ci_lab/test_scheduler_shadow.py::test_a_scheduler_built_without_the_lab_app_acknowledges_completed_checks_unrecorded",
-        "tests/ci_lab/test_scheduler_shadow.py::test_the_mirror_expander_reads_the_static_gate_ids_of_dev_as_the_shadow_report_reads_a_tree"
+        "tests/ci_lab/test_scheduler_shadow.py::test_the_mirror_expander_reads_the_static_gate_ids_of_dev_as_the_shadow_report_reads_a_tree",
+        "tests/ci_lab/test_scheduler_shadow.py::test_a_static_gate_id_is_the_first_job_of_its_label"
       ]
     },
     {

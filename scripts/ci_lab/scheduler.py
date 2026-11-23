@@ -76,6 +76,7 @@ from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
 from scripts.events.bus import Consumer, Delivery
 from scripts.github_app import GitAuthRefused
+from scripts.swarm import metrics_outbox
 
 __all__ = [
     "GRADES",
@@ -1706,10 +1707,10 @@ class MirrorExpander:
 
 
 class _Unshipped:
-    """The shadow recorder's table sink in the scheduler, which runs no metrics outbox: its rows stay in Redis and the
-    object store."""
+    """The table sink of the scheduler's shadow recorder: the scheduler runs no metrics outbox, so lab_shadow table rows
+    are dropped while each shadow row still lands in Redis and the object store."""
 
-    def append(self, table: object, rows: object) -> None:
+    def append(self, table: metrics_outbox.Table, rows: list[dict[str, object]]) -> None:
         """Drop the rows."""
 
 
