@@ -325,9 +325,10 @@ writer lock, outbox, writer floor, repository and session memory parity scenario
 
 That step, `Run the idle writer lock holder scenario`, then runs `tests/swarm_ledger/test_warm_writer_parity.py` on
 the SQLite test store and on the same Postgres database, and fails with
-`The warm writer parity scenarios on SQLite and Postgres did not all run.` unless the log reports ` 25 passed`. Each case sends the same request over the warm writer socket and in process and
-requires the same answer, rows and write hooks from both: each listed refusal, the revision conflict retry, each listed
-audit effect, and the writer floor refusal above on Postgres. [Parity with the in-process call](ledger-write-path.md#parity-with-the-in-process-call)
+`The warm writer parity scenarios on SQLite and Postgres did not all run.` unless the log reports ` 25 passed`. Each
+case sends the same request over the warm writer socket and in process and requires the same answer, rows and write
+hooks from both: each listed refusal, the revision conflict retry, each listed audit effect, and the writer floor
+refusal above on Postgres. [Parity with the in-process call](ledger-write-path.md#parity-with-the-in-process-call)
 lists the cases.
 
 `tests/swarm_ledger/test_postgres_writer_floor.py` runs the writer floor in the same workflow against real Postgres:
