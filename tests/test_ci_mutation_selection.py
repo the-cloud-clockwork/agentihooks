@@ -626,7 +626,8 @@ def test_given_patterns_keep_the_lines_mutmut_config_patterns_keep_from_mutation
     monkeypatch.setattr(Config, "get", stats_recorder_only)
     graded, possible = texts(patterns)
     assert [graded, possible] == configured
-    assert 0 < len(graded) < len(possible) < len(texts(())[1])
+    assert 0 < len(graded) < len(possible)
+    assert len(possible) < len(texts(())[1])
 
 
 @pytest.mark.feature("lab-mutants-read-no-mutmut-config")
