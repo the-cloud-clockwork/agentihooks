@@ -2086,7 +2086,7 @@ An admission claims the task, starts its execution, occupies a seat and marks th
 hive launches anything. When the launch then fails, the hive gives the admission back with `reopen`, so the task
 returns to `open` and is offered again: on the same poll for most failures, on the next poll for a launch the spoke
 left `launching`, and through the dead letter on the offer's last delivery. An admit ask the hub did not answer and a
-held answer send no `reopen`; the table below lists every case. Every eng, ci and plan spoke does this on every
+held answer send no `reopen`; the table below lists every case. Every eng, ci, review and plan spoke does this on every
 `events` swarm; no setting turns it on or off. A master spoke admits nothing on the hub and is outside this path.
 
 Before pull request [#11051](https://github.com/the-cloud-clockwork/agentihooks/pull/11051) the spoke reset only
@@ -4275,14 +4275,14 @@ pull request #11279, or the daemon cannot read its own epoch because `/proc/sys/
 ## Hive placement for one swarm on a local machine
 
 A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks swarm <id> set hive-placement=on`
-makes that one swarm's tick place like a `hybrid` controller: eng, ci, plan and dispatch work goes to joined hives
+makes that one swarm's tick place like a `hybrid` controller: eng, ci, review, plan and dispatch work goes to joined hives
 with the role and room, and the master goes to a UI hive. Every other swarm on the machine, and every ledger client,
 stays local, because `AGENTIHOOKS_DEPLOYMENT` is unchanged. Before turning it on, run the machine itself as a hive
 (`agentihooks hive install`, then `agentihooks hive set <id> ui=yes max-agents=N`) so local work and the master keep a
 hive to land on. `hive-placement=off` rolls back on the next
 tick. On a machine in any other mode the setting changes nothing.
 
-Hives fill first. When no hive takes an eng, ci, plan or dispatch spawn, the tick runs it in the machine's own herdr
+Hives fill first. When no hive takes an eng, ci, review, plan or dispatch spawn, the tick runs it in the machine's own herdr
 panes while the machine runs fewer worker agents than `agentihooks swarm <id> set local-max-agents=N` (default 15),
 counted across every swarm on the machine, and only while the host room guard finds load and memory room. At the cap
 the spawn waits with the hive's reason and the local count.
@@ -4290,7 +4290,7 @@ Masters, qa and frontend keep the UI host rule, and a task pinned to a hive neve
 
 ### Placement order for a worker spawn
 
-For each eng, ci, plan or dispatch spawn the tick decides in this order:
+For each eng, ci, review, plan or dispatch spawn the tick decides in this order:
 
 1. Hive placement picks a live hive that takes the role, has room and holds the repo, as in
    [Placement](#placement). When one does, the agent launches there. When the chosen hive is the machine itself, the

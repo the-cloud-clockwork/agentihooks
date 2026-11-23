@@ -164,11 +164,11 @@ takes precedence.
 | Opening prompt | The first line names the role: `You are reviewer@a1b2c3-0001, a reviewer in swarm <slug>, working in the repo <repo>.` A lane `role` replaces `a reviewer`. |
 | Hive placement | `review` is a hive lane, so with hive placement on the routed runtime sends a review launch to a hive. A task pinned to the workstation stays there. |
 | Kubernetes backend | The backend's default lanes are `eng`, `ci` and `review`, so a review launch runs as a worker Pod. A task pinned to the workstation, a task with `needs`, or a `frontend` profile stays on the workstation. |
-| Kubernetes proof | In a proof swarm whose slug starts with `proof-` and equals `AGENTIHOOKS_CONTROL_KUBERNETES_PROOF`, the controller keeps `review` launches off hives, as it does `eng`; `ci` still goes to hives. |
+| Kubernetes proof | In a proof swarm whose slug starts with `proof-` and equals the value of `AGENTIHOOKS_CONTROL_KUBERNETES_PROOF`, the controller keeps `review` launches off hives, as it does `eng`; `ci` still goes to hives. |
 | Hive lane spokes | `agentihooks hive run` on a worker hive, and `agentihooks swarm spoke` on a workstation with `AGENTIHOOKS_DEPLOYMENT=distributed`, run a review spoke for every `events` swarm beside the `eng`, `ci` and `plan` spokes. |
 | Ready queue | On the `events` engine the readiness reactor opens `swarm.<slug>.ready.review` with the other lane queues and offers each ready review task on it. |
 | Hive member grant | A member's NATS grant takes from and acknowledges the review queue stream, `QUEUE_review`, like every other lane queue. |
-| Hive orders | An order with profile `reviewer` launches on the `review` lane with role `reviewer`, and the task's launch assignment keeps the `reviewer` profile. Placement maps the `reviewer` profile to the `review` role. |
+| Hive orders | A hive order carries its task's lane and profile. A review task's order launches on the `review` lane with role `reviewer`, and its launch assignment keeps the `reviewer` profile. Placement maps the `reviewer` profile to the `review` role. |
 | Seat spawn | Seat spawn accepts the review lane and launches a `reviewer` agent through the same runtime. |
 
 ### Keep reviewers off a hive
@@ -216,11 +216,13 @@ See [Placement by role](../pillars/hives.md#placement-by-role).
 A hive member's credential keeps the grant it was minted with. A member minted
 before the review queue was added is refused when its review spoke takes from
 `QUEUE_review`, and the spoke logs
-`hive spoke for swarm <slug> lane review poll failed (...)` with a permissions
-violation on each poll. The other lane spokes keep running. On the member run
-`agentihooks hive refresh`, then restart its hive service:
-`systemctl --user restart agentihooks-hive` on a workstation or VM, a pod roll
-on Kubernetes. The workstation root hive mints its stored credential again
+`hive spoke for swarm <slug> lane review poll failed (...)` on each poll, with
+the NATS client's permissions violation in the parentheses. The other lane
+spokes keep running. On a workstation or VM member run
+`agentihooks hive refresh`, then restart its hive service with
+`systemctl --user restart agentihooks-hive`. On Kubernetes a pod roll is
+enough: the worker start step runs `hive join`, which mints the grant again.
+The workstation root hive mints its stored credential again
 when `hive run` starts and finds its grant differs from a fresh mint. See
 [Upgrading to the stop stream](swarm-bus-scope.md#upgrading-to-the-stop-stream)
 for the same steps.
@@ -246,6 +248,6 @@ and autoscale has no reviewer share.
 | Review capacity is below its configured ceiling | Inspect account capacity, host room and claimable review demand. A cap permits capacity but does not reserve an account or force placement. |
 | A review task is listed but no reviewer starts | Check that the review cap is above zero and the reviewer profile is installed where the launch lands. On the `events` engine, check that a hive logs `hive spoke for swarm <slug> lane review takes swarm.<slug>.ready.review`; a hive whose `HIVE_EXCLUDED` names `review` runs no review spoke. |
 | A workstation spawn fails with `needs profile reviewer, which is not installed` | Install the profile with `agentihooks init`, or name an installed profile on the template's `review` lane. |
-| A review spoke logs `poll failed` with a permissions violation | The hive member's credential predates the review queue grant. Run `agentihooks hive refresh` on the member and restart its hive service; see [Upgrade an existing hive](#upgrade-an-existing-hive). |
+| A review spoke logs `poll failed` with a permissions violation | The hive member's credential predates the review queue grant. Run `agentihooks hive refresh` on a workstation or VM member and restart its hive service, or roll the pod on Kubernetes; see [Upgrade an existing hive](#upgrade-an-existing-hive). |
 | Reviewers launch on the workstation although worker lanes run on the pods | The workstation hive's `excluded` list names `eng`, `ci`, `plan` and `dispatch` but not `review`. Add `review` to it with `agentihooks hive set`. |
 | A kubernetes proof swarm launches reviewers off the hives | Expected: in a kubernetes proof the controller keeps `eng` and `review` launches off hives. |
