@@ -885,10 +885,12 @@ def test_a_pass_stops_sending_again_at_the_first_stop_the_bus_still_refuses(
 
 
 @pytest.mark.feature("events-refused-stop-resent")
+@pytest.mark.parametrize("bind", [False, True])
 def test_a_refused_stop_for_an_agent_with_no_execution_is_not_kept(
-    env: tuple[RedisStore, Any, Any], bus: Bus, monkeypatch: pytest.MonkeyPatch
+    env: tuple[RedisStore, Any, Any], bus: Bus, monkeypatch: pytest.MonkeyPatch, bind: bool
 ) -> None:
     store, _, _ = env
+    monkeypatch.setenv(BIND_ENV, "1" if bind else "0")
     monkeypatch.setattr(execution_stop, "stop", refused_stop)
 
     assert reconciler.stop_dropped(store, SLUG, AgentRecord(name="a1", lane="eng", task="t1"), "idle") == REFUSED
@@ -956,11 +958,12 @@ def test_a_member_bind_tick_parks_its_stop_until_the_hub_sends_it(
     assert [seated.name for seated in store.agents(SLUG)] == ([agent.name] if reason == "ended" else [])
     assert sent_stops(bus, agent) == []
 
-    hub = reconciler.Reconciler(bus, store, clock=lambda: NOW + 3)
+    clock = Mock(return_value=NOW + 3)
+    hub = reconciler.Reconciler(bus, store, clock=clock)
     if refuse:
-        with pytest.raises(RuntimeError, match="controller stop refused"):
-            hub.poll()
+        hub.poll()
         assert pending_stops(store) == queued
+        clock.return_value += reconciler.INTERVAL_MS
     hub.poll()
 
     assert sender.call_count == 1 + int(refuse)

@@ -15036,10 +15036,11 @@
       "id": "member-tick-stop-forwarded-by-hub",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2698",
-      "behaviour": "A member bind tick parks execution stops for ended work, idle or mismatched agents and refused, revoked or stuck launches with agent identity and reason in swarm pending stops, without publishing on the member bus. The guarded hub reconciler delivers parked stops using its injected controller bus, including a stop for a seated execution. Failed delivery stays pending for an immediate later poll; successful delivery clears it without duplication.",
+      "behaviour": "A member bind tick parks execution stops for ended work, idle or mismatched agents and refused, revoked or stuck launches with agent identity and reason in swarm pending stops, without publishing on the member bus. The guarded hub reconciler delivers parked stops using its injected controller bus, including a stop for a seated execution. Failed delivery stays pending for the next due poll without blocking lifecycle settlement in other swarms; successful delivery clears it without duplication.",
       "seam": "agents._reap to swarm pending stops to Reconciler.poll and the owning hive stop stream",
       "tests": [
-        "tests/swarm/test_events_claim_refunds.py::test_a_member_bind_tick_parks_its_stop_until_the_hub_sends_it"
+        "tests/swarm/test_events_claim_refunds.py::test_a_member_bind_tick_parks_its_stop_until_the_hub_sends_it",
+        "tests/hub/test_reconciler.py::test_a_refused_stop_does_not_hold_other_swarm_lifecycle_reconciliation"
       ]
     }
   ],

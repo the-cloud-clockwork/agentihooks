@@ -149,8 +149,6 @@ def _resend(
         )
         actions.append(f"sent the {stop['reason']} stop for {agent.name} again: {outcome}")
         if outcome.startswith(execution_stop.FAILED):
-            if bus is not None:
-                raise RuntimeError(outcome)
             break
         store.redis.hdel(pending, execution)
     return actions
