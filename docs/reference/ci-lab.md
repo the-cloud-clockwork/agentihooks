@@ -389,7 +389,7 @@ one JSON object:
 | `grades` | Live grades, the size of the live grade set; a live run whose grade document is gone counts here and is never parsed |
 | `process_seconds`, `wall_seconds` | Each build's `time.process_time` and `time.perf_counter` seconds, one entry per build |
 | `parses` | Calls of the scheduler's grade parser during the builds; a build parses only live grades that have a stored document and no demand record, so it is 0 once every live grade has a record |
-| `documents_fetched` | Grade documents each build read, one entry per build; only a live grade with no demand record is read from its document, on every build until a save records it |
+| `documents_fetched` | Grade documents each build read, one entry per build; only a live grade with no demand record is read from its document, on every build until a save records it, and a read that finds no document counts nothing |
 | `record_bytes_read` | Demand record bytes each build read, one entry per build; the first build reads every live grade's record and later builds read only records whose revision moved |
 | `leaves_out` | What the figures leave out: the offer prune round trip of each build |
 
