@@ -140,8 +140,6 @@ class Inbox:
 class Expander:
     plans: dict[str, scheduler.Plan]
     seen: list[GradeRequest] = field(default_factory=list[GradeRequest])
-    gone: set[str | tuple[str, str]] = field(default_factory=set[str | tuple[str, str]])
-    unlisted: dict[str, subprocess.SubprocessError] = field(default_factory=dict[str, subprocess.SubprocessError])
 
     def expand(self, request: GradeRequest) -> scheduler.Plan:
         self.seen.append(request)
@@ -154,9 +152,7 @@ class Expander:
         return True
 
     def groups(self, repo: str) -> frozenset[str]:
-        if repo in self.unlisted:
-            raise self.unlisted[repo]
-        return frozenset(head for head in self.plans if not {head, (repo, head)} & self.gone)
+        return frozenset(self.plans)
 
 
 @dataclass

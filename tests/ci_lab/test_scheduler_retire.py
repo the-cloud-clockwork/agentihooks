@@ -1,6 +1,7 @@
 import json
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -9,6 +10,8 @@ import pytest
 
 from scripts.ci_lab import evidence, scheduler
 from scripts.ci_lab.digests import Toolchain
+from scripts.ci_lab.objects import LocalObjects
+from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.units import Priority, Unit
 from scripts.ci_lab.webhooks import HeadEvent
 from scripts.dep_manifest import _git
@@ -20,16 +23,45 @@ from tests.ci_lab.test_scheduler import (
     OTHER_TREE,
     REPO,
     TREE,
+    Expander,
+    Inbox,
+    Lab,
     Run,
     _no_tests,
     _unknown,
+    fake_redis,
     pull_plan,
     unit,
 )
-from tests.ci_lab.test_scheduler import lab as lab
 from tests.ci_lab.test_scheduler import origin as origin
 
 OTHER_REPO = f"{REPO}-bundle"
+
+
+@dataclass
+class MergeGroups(Expander):
+    gone: set[str | tuple[str, str]] = field(default_factory=set[str | tuple[str, str]])
+    unlisted: dict[str, subprocess.SubprocessError] = field(default_factory=dict[str, subprocess.SubprocessError])
+
+    def groups(self, repo: str) -> frozenset[str]:
+        if repo in self.unlisted:
+            raise self.unlisted[repo]
+        return frozenset(head for head in self.plans if not {head, (repo, head)} & self.gone)
+
+
+@pytest.fixture
+def lab(tmp_path: Path) -> Callable[..., Run]:
+    def make(plans: dict[str, scheduler.Plan]) -> Run:
+        state = Lab(fake_redis(), LocalObjects(tmp_path / "objects"), Inbox(), MergeGroups(plans))
+        return Run(state, state.build(0, Policy(), None))
+
+    return make
+
+
+def _listing(run: Run) -> MergeGroups:
+    expander = run.lab.expander
+    assert isinstance(expander, MergeGroups)
+    return expander
 
 
 def _origins(run: Run) -> dict[str, dict[str, Any]]:
@@ -66,7 +98,7 @@ def test_a_merge_group_grade_whose_ref_is_gone_leaves_the_live_set_and_loses_its
     run = _queued(lab, first, second)
     live = run.grade(HEAD_A).run
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item) for item in (first, second)]
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     assert run.tick(1100) == [_retired(live, 2)]
     assert run.lab.client.smembers(scheduler.LIVE) == set()
     assert run.lab.client.get(scheduler.GRADES + live) is None
@@ -90,7 +122,7 @@ def test_the_gone_grades_of_one_pass_are_retired_in_run_order(lab: Callable[...,
     run.lab.client.delete(scheduler.ORIGINS)
     for name in sorted(heads, reverse=True):
         run.lab.client.hset(scheduler.ORIGINS, name, recorded[name])
-    run.lab.expander.gone.update({HEAD_A, HEAD_B})
+    _listing(run).gone.update({HEAD_A, HEAD_B})
     assert run.tick(1100) == [_retired(name, 1, REPO, heads[name]) for name in sorted(heads)]
 
 
@@ -98,7 +130,7 @@ def test_the_gone_grades_of_one_pass_are_retired_in_run_order(lab: Callable[...,
 def test_a_retired_merge_group_grade_posts_nothing_and_records_no_verdict(lab: Callable[..., Run]) -> None:
     run = _queued(lab, unit(1))
     posts = len(run.lab.poster.posts)
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     run.tick(1100)
     assert len(run.lab.poster.posts) == posts
     assert list(run.lab.objects.keys(evidence.head_prefix(HEAD_A))) == []
@@ -112,7 +144,7 @@ def test_a_retired_merge_group_grade_leaves_no_revision_and_no_demand_record(lab
     live = run.grade(HEAD_A).run
     assert run.lab.client.hkeys(scheduler.REVISIONS) == [live]
     assert run.lab.client.hkeys(scheduler.RECORDS) == [live]
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     run.tick(1100)
     assert run.lab.client.hkeys(scheduler.REVISIONS) == []
     assert run.lab.client.hkeys(scheduler.RECORDS) == []
@@ -122,7 +154,7 @@ def test_a_retired_merge_group_grade_leaves_no_revision_and_no_demand_record(lab
 def test_a_forget_that_ended_before_the_live_set_exit_is_finished_by_the_next_pass(lab: Callable[..., Run]) -> None:
     run = _queued(lab, unit(1))
     live = run.grade(HEAD_A).run
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     run.engine.queue.drop(HEAD_A)
     run.lab.client.delete(scheduler.GRADES + live)
     run.lab.client.hdel(scheduler.ORIGINS, live)
@@ -139,7 +171,7 @@ def test_a_forget_that_ended_before_the_origin_delete_is_retired_again_by_the_ne
 ) -> None:
     run = _queued(lab, unit(1))
     live = run.grade(HEAD_A).run
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     run.engine.queue.drop(HEAD_A)
     run.lab.client.delete(scheduler.GRADES + live)
     assert run.tick(1100) == [_retired(live, 0)]
@@ -163,7 +195,7 @@ def test_a_merge_group_grade_is_judged_by_the_merge_group_refs_of_its_own_reposi
     _elsewhere(run, HEAD_B, lane=HEAD_B)
     run.tick(1000)
     live = {grade.run for grade in run.grades()}
-    run.lab.expander.gone.update({(REPO, HEAD_B), (OTHER_REPO, HEAD_A)})
+    _listing(run).gone.update({(REPO, HEAD_B), (OTHER_REPO, HEAD_A)})
     assert run.tick(1100) == []
     assert run.lab.client.smembers(scheduler.LIVE) == live
 
@@ -180,7 +212,7 @@ def test_a_merge_group_grade_whose_ref_is_listed_keeps_its_units_and_its_verdict
     run.push(HEAD_A, lane=HEAD_A, event="merge_group", action="checks_requested")
     run.push(HEAD_B, lane=HEAD_B, event="merge_group", action="checks_requested")
     run.tick(1000)
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     run.tick(1100)
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, kept)]
     run.finish(run.lease()[0], "passed", {"seconds": 2.0})
@@ -204,8 +236,8 @@ def test_a_merge_group_listing_git_cannot_produce_retires_nothing(
 ) -> None:
     item = unit(1)
     run = _queued(lab, item)
-    run.lab.expander.gone.add(HEAD_A)
-    run.lab.expander.unlisted[REPO] = error
+    _listing(run).gone.add(HEAD_A)
+    _listing(run).unlisted[REPO] = error
     assert run.tick(1100) == [f"cannot list the merge groups of {REPO}: {error}"]
     assert run.lab.client.smembers(scheduler.LIVE) == {run.grade(HEAD_A).run}
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item)]
@@ -226,8 +258,8 @@ def test_a_listing_git_cannot_produce_for_one_repository_still_retires_the_gone_
     run.tick(1000)
     unlisted, listed = run.grade(HEAD_A).run, run.grade(HEAD_B).run
     error = subprocess.CalledProcessError(128, ["git", "ls-remote", REPO])
-    run.lab.expander.unlisted[REPO] = error
-    run.lab.expander.gone.update({HEAD_A, HEAD_B})
+    _listing(run).unlisted[REPO] = error
+    _listing(run).gone.update({HEAD_A, HEAD_B})
     assert run.tick(1100) == [
         f"cannot list the merge groups of {REPO}: {error}",
         _retired(listed, 1, OTHER_REPO, HEAD_B),
@@ -246,7 +278,7 @@ def test_a_retired_merge_group_grade_leaves_the_jobs_another_live_grade_of_its_h
     run.tick(1000)
     queued, pushed = sorted(run.grades(), key=lambda grade: grade.tier)
     assert (queued.tier, pushed.tier) == (Priority.QUEUE, Priority.PROMOTION)
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     assert run.tick(1100)[0] == _retired(queued.run, 0)
     assert run.lab.client.smembers(scheduler.LIVE) == {pushed.run}
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item)]
@@ -263,7 +295,7 @@ def test_a_retired_merge_group_grade_leaves_the_jobs_a_live_grade_of_its_head_in
     run.tick(1000)
     queued, pushed = sorted(run.grades(), key=lambda grade: grade.tier)
     assert (queued.repo, pushed.repo) == (REPO, OTHER_REPO)
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     assert run.tick(1100)[0] == _retired(queued.run, 0)
     assert run.lab.client.smembers(scheduler.LIVE) == {pushed.run}
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item)]
@@ -275,7 +307,7 @@ def test_a_retired_merge_group_grade_leaves_its_leased_jobs_running(lab: Callabl
     run = _queued(lab, leased, waiting)
     live = run.grade(HEAD_A).run
     [grant] = run.lease()
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     assert run.tick(1100) == [_retired(live, 1)]
     assert run.engine.queue.pending() == []
     assert run.engine.queue.leased() == [grant.job]
@@ -288,7 +320,7 @@ def test_an_expired_lease_of_a_retired_merge_group_grade_is_requeued_once_and_th
     run = _queued(lab, unit(1))
     live = run.grade(HEAD_A).run
     [first] = run.lease(ttl_ms=100)
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     assert run.tick(1050) == [_retired(live, 0)]
     assert run.tick(1100) == [f"reaped {first.job} pending"]
     [second] = run.lease(ttl_ms=100)
@@ -304,7 +336,7 @@ def test_a_merge_group_grade_pushed_to_a_grade_ref_is_never_retired(lab: Callabl
     ref = f"{scheduler.GRADE_REFS}feature"
     run.push(HEAD_A, lane=HEAD_A, event="merge_group", action="checks_requested", ref=ref)
     run.tick(1000)
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     run.tick(1100)
     assert run.lab.client.smembers(scheduler.LIVE) == {run.grade(HEAD_A).run}
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item)]
@@ -316,7 +348,7 @@ def test_a_pull_request_grade_is_never_retired_for_a_missing_merge_group_ref(lab
     run = lab({HEAD_A: pull_plan({"lint": (item,)})})
     run.push(HEAD_A, event="pull_request", action="opened")
     run.tick(1000)
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     run.tick(1100)
     assert run.lab.client.smembers(scheduler.LIVE) == {run.grade(HEAD_A).run}
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item)]
@@ -394,7 +426,7 @@ def test_a_live_grade_with_no_origin_is_retired_in_the_pass_that_records_it(lab:
     run = _queued(lab, unit(1))
     live = run.grade(HEAD_A).run
     run.lab.client.delete(scheduler.ORIGINS)
-    run.lab.expander.gone.add(HEAD_A)
+    _listing(run).gone.add(HEAD_A)
     assert run.tick(1100) == [_retired(live, 1)]
     assert run.lab.client.smembers(scheduler.LIVE) == set()
     assert _origins(run) == {}
