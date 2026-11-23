@@ -1,4 +1,7 @@
+import itertools
+import json
 import threading
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -8,7 +11,7 @@ from scripts.events.bus import Bus, WorkQueue
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.inbox.store import InboxStore
-from scripts.swarm import preempt, readiness
+from scripts.swarm import freeze, preempt, readiness
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -459,6 +462,76 @@ def test_an_ordered_offer_a_focus_lets_through_moves_behind_a_later_offer_of_the
     view = focused(target, outside)
     waited = offer_aged(view, "d")
     assert readiness.behind([waited], [offer_aged(view, "a", 0)], view, LATER) == {waited.id}
+
+
+SELECTED = {"lane": ("lane:eng", {"lane": "ci"}), "kind": ("kind:code", {"kind": "ops"})}
+
+
+@pytest.mark.feature("ready-offer-class-one-decider")
+def test_every_focus_selector_has_a_case_through_both_sites_that_class_an_offer() -> None:
+    assert set(SELECTED) == set(freeze.SELECTORS)
+
+
+@pytest.mark.feature("ready-offer-class-one-decider")
+@pytest.mark.parametrize("selector", sorted(freeze.SELECTORS))
+def test_offers_and_behind_class_a_task_under_a_focus_selector_alike(selector: str) -> None:
+    target, outside = SELECTED[selector]
+    view = focused(target, outside)
+    assert [event.key for event in readiness.offers(view, NOW)] == ["b", "a", "d"]
+    waited = offer_aged(view, "d")
+    assert readiness.behind([waited], [offer_aged(view, "a", 0)], view, LATER) == {waited.id}
+    assert readiness.behind([offer_aged(view, "a")], [offer_aged(view, "d", 0)], view, LATER) == set()
+
+
+RECORDED = Path(__file__).with_name("offer_classes_recorded.json")
+FOCUS_FORMS: tuple[tuple[str, ...], ...] = (
+    (),
+    ("phases/p1",),
+    ("tasks/t5",),
+    ("lane:eng",),
+    ("kind:code",),
+    ("kind:ops", "phases/p2"),
+    ("tasks/t11", "lane:ci"),
+)
+
+
+def generated(targets: tuple[str, ...]) -> readiness.Snapshot:
+    marks = (None, {"at": 3, "by": "operator"}, {"at": 7, "by": "operator"})
+    waits = {1: ["t10"], 9: ["t6"], 0: ["t7"]}
+    tasks = [
+        task(
+            f"t{index}",
+            phase=("p1", "p2")[index % 2],
+            lane=("eng", "ci")[index // 2 % 2],
+            kind=("code", "ops")[index // 4 % 2],
+            depends_on=waits.get(index, []),
+            **({"rank": rank} if rank else {}),
+            **({"ordered": mark} if mark else {}),
+        )
+        for index, (rank, mark) in enumerate(itertools.product((None, "urgent", "high", "low"), marks))
+    ]
+    phases = [{"id": "p1", "title": "build", "depends_on": []}, {"id": "p2", "title": "later", "depends_on": []}]
+    return snapshot(doc(tasks, phases=phases, freezes=[{"verb": "focus", "target": target} for target in targets]))
+
+
+def recorded_run() -> dict[str, dict[str, list[str]]]:
+    found: dict[str, dict[str, list[str]]] = {}
+    for targets in FOCUS_FORMS:
+        view = generated(targets)
+        keys = [event.key for event in readiness.offers(view, NOW)]
+        waiting = [offer_aged(view, key) for key in reversed(keys)]
+        fresh = [offer_aged(view, key, 0) for key in keys[1::2]]
+        found[" ".join(targets) or "no focus"] = {
+            "offers": keys,
+            "behind with every offer waiting": sorted(readiness.behind(waiting, [], view, LATER)),
+            "behind with every second offer new": sorted(readiness.behind(waiting[::2], fresh, view, LATER)),
+        }
+    return found
+
+
+@pytest.mark.feature("ready-offer-class-one-decider")
+def test_a_recorded_run_of_generated_ledgers_keeps_its_offers_and_its_moves() -> None:
+    assert recorded_run() == json.loads(RECORDED.read_text())
 
 
 def test_publish_uses_the_given_queue_policy(bus):

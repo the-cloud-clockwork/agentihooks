@@ -1,0 +1,117 @@
+{
+  "no focus": {
+    "offers": [
+      "t3",
+      "t4",
+      "t5",
+      "t7",
+      "t10",
+      "t8",
+      "t2",
+      "t11",
+      "t6"
+    ],
+    "behind with every offer waiting": [
+      "ready:sw:t10:0",
+      "ready:sw:t11:0",
+      "ready:sw:t2:0",
+      "ready:sw:t6:0",
+      "ready:sw:t7:0",
+      "ready:sw:t8:0"
+    ],
+    "behind with every second offer new": [
+      "ready:sw:t10:0",
+      "ready:sw:t2:0",
+      "ready:sw:t6:0"
+    ]
+  },
+  "phases/p1": {
+    "offers": [
+      "t4",
+      "t6",
+      "t8",
+      "t2",
+      "t10",
+      "t7"
+    ],
+    "behind with every offer waiting": [
+      "ready:sw:t7:0"
+    ],
+    "behind with every second offer new": [
+      "ready:sw:t7:0"
+    ]
+  },
+  "tasks/t5": {
+    "offers": [
+      "t5"
+    ],
+    "behind with every offer waiting": [],
+    "behind with every second offer new": []
+  },
+  "lane:eng": {
+    "offers": [
+      "t4",
+      "t5",
+      "t8",
+      "t7",
+      "t10",
+      "t6"
+    ],
+    "behind with every offer waiting": [
+      "ready:sw:t10:0",
+      "ready:sw:t6:0",
+      "ready:sw:t7:0"
+    ],
+    "behind with every second offer new": [
+      "ready:sw:t6:0",
+      "ready:sw:t7:0"
+    ]
+  },
+  "kind:code": {
+    "offers": [
+      "t3",
+      "t8",
+      "t2",
+      "t10",
+      "t11",
+      "t7",
+      "t6"
+    ],
+    "behind with every offer waiting": [
+      "ready:sw:t6:0",
+      "ready:sw:t7:0"
+    ],
+    "behind with every second offer new": [
+      "ready:sw:t6:0"
+    ]
+  },
+  "kind:ops phases/p2": {
+    "offers": [
+      "t4",
+      "t5",
+      "t3",
+      "t6",
+      "t7",
+      "t11",
+      "t10"
+    ],
+    "behind with every offer waiting": [
+      "ready:sw:t10:0"
+    ],
+    "behind with every second offer new": [
+      "ready:sw:t10:0"
+    ]
+  },
+  "tasks/t11 lane:ci": {
+    "offers": [
+      "t3",
+      "t6",
+      "t7",
+      "t2",
+      "t11",
+      "t10"
+    ],
+    "behind with every offer waiting": [],
+    "behind with every second offer new": []
+  }
+}
