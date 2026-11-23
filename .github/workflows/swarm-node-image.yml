@@ -212,3 +212,37 @@ jobs:
       - name: Publish the hive worker once per release version
         run: |
           bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$GITHUB_SHA"
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.18.6
+      - name: Package the release chart
+        run: |
+          version="${RELEASE#v}"
+          sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
+          helm package deploy/helm/agentihooks-swarm --version "$version" --app-version "$version" --destination "$RUNNER_TEMP/chart"
+      - name: Install kind
+        env:
+          KIND_VERSION: v0.33.0
+        run: |
+          if ! kind version; then
+            curl -fsSLo kind-linux-amd64 "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
+            curl -fsSLo kind.sha256sum "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64.sha256sum"
+            sha256sum -c kind.sha256sum
+            mv kind-linux-amd64 kind
+            sudo install -m 0755 kind /usr/local/bin/kind
+            kind version
+          fi
+          helm version --short
+          kubectl version --client
+      - name: Install the packaged release chart in kind
+        env:
+          KIND_NODE_IMAGE: mirror.gcr.io/kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+          CHART_DIR: ${{ runner.temp }}/chart
+        run: bash deploy/helm/agentihooks-swarm/ci/kind-published.sh "$RELEASE"
+      - name: Publish the release chart that kind installed
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${RELEASE#v}"
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          helm push "$RUNNER_TEMP/chart/agentihooks-swarm-$version.tgz" "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
