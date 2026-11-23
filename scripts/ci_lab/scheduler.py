@@ -804,8 +804,11 @@ class Scheduler:
 
     def save(self, state: State) -> None:
         """Store a grade's state, so the next pass and the relay read it back, with a live grade's next revision and
-        demand record in the same transaction, retried while another writer changes the grade, and keep a live grade's
-        summary at the revision it stored."""
+        demand record in the same transaction, retried while another writer changes the grade."""
+        self.client.transaction(partial(stage_grade, document=asdict(state)), GRADES + state.run)
+
+    def _keep(self, state: State) -> None:
+        """Store a grade the pass changed, as save does, and keep a live grade's summary at the revision it stored."""
         stage = partial(stage_grade, document=asdict(state))
         revision = self.client.transaction(stage, GRADES + state.run, value_from_callable=True)
         if revision is None:
@@ -1099,7 +1102,7 @@ class Scheduler:
                     waiting += DEFAULT.slots
             if admitted:
                 self.queue.enqueue(admitted, state.head, {}, state.base, state.grader, state.tier)
-                self.save(state)
+                self._keep(state)
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions
 
@@ -1143,7 +1146,7 @@ class Scheduler:
             self.registry.inc(contract.HEADS_GRADED_TOTAL, 1.0, graded)
             actions.append(f"completed {run} {state.conclusion}")
         if quiet is None or not quiet.revision or json.dumps(asdict(state)) != raw:
-            self.save(state)
+            self._keep(state)
         return actions
 
     def _collect(self, slot: Slot, tiers: Mapping[str, int], state: State) -> None:

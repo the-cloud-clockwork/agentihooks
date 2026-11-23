@@ -412,6 +412,7 @@ def test_a_quiet_pass_after_a_grade_s_first_unit_was_collected_leaves_it_unread_
     documents = _documents(run)
     sent = _record(run, monkeypatch)
     assert run.tick(1200) == []
+    moved = _moved(sent)
     assert [slot.outcome for slot in run.grade(HEAD_A).units.values()] == ["passed", ""]
-    assert _moved(sent) == []
+    assert moved == []
     assert _documents(run) == documents
