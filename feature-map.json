@@ -5888,6 +5888,59 @@
       ]
     },
     {
+      "id": "flake-ledger-retry-pass-recorded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "A test that fails its first attempt and passes on its rerun leaves the run green and writes one flake ledger line with outcome flaky, the run and run attempt, two attempts and its failure lines, serially and across workers. The line carries the first attempt traceback, and the flake budget publishes the ledger lines unchanged as that test's retry evidence.",
+      "seam": "tests.flake_ledger.FlakeLedger loaded into pytest with reruns and CI_FLAKES, its ledger read by tests.flake_budget.main",
+      "tests": [
+        "tests/test_flake_ledger.py::test_a_test_that_passes_on_retry_passes_and_is_recorded_as_a_flake",
+        "tests/test_flake_ledger.py::test_retry_pass_publishes_the_first_attempt_traceback"
+      ]
+    },
+    {
+      "id": "flake-budget-once-per-run",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "The flake budget keeps one history line per test and run: parameter ids fold into the test function, a flaky report already counted for that test and run adds no line on a later gather, and each distinct report with a traceback is kept once on its line as retry evidence until the line expires.",
+      "seam": "tests.flake_budget.gather and tests.flake_budget.budget",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_flaky_report_joins_the_history_once_per_run",
+        "tests/test_flake_budget.py::test_retry_evidence_survives_history_deduplication_and_expiry"
+      ]
+    },
+    {
+      "id": "flake-budget-seven-day-expiry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "A flake history line exactly seven days old drops out of the budget while one a second younger stays, and a new flaky report for an expired test and run joins again at the current time.",
+      "seam": "tests.flake_budget.gather with tests.flake_budget.WINDOW_S",
+      "tests": [
+        "tests/test_flake_budget.py::test_lines_older_than_seven_days_drop_out"
+      ]
+    },
+    {
+      "id": "flake-budget-over-at-two-runs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "A test flaky in two or more separate runs within the history is over the flake budget with its runs sorted, a test flaky in one run is not, every flaky test is listed under retried with its run count and runs, and an empty history budgets nothing.",
+      "seam": "tests.flake_budget.budget with tests.flake_budget.BUDGET_RUNS",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_test_flaky_in_two_runs_is_over_budget",
+        "tests/test_flake_budget.py::test_every_retry_pass_is_listed_with_its_count_and_runs"
+      ]
+    },
+    {
+      "id": "flake-budget-no-reports-red",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "With no jsonl report at any depth under the reports folder, the flake budget prints the error No flake reports under the folder, exits 1 and writes no budget, so the flake-budget job is red.",
+      "seam": "tests.flake_budget.main as the Count flaky tests over seven days step of the flake-budget job runs it",
+      "tests": [
+        "tests/test_flake_budget.py::test_no_flake_reports_is_red"
+      ]
+    },
+    {
       "id": "selectors-read-outside-files",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2636",

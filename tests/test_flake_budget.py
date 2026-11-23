@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from scripts import ci_budget
@@ -15,12 +16,14 @@ def _report(test=TEST, run="7", outcome="flaky"):
     return {"test": test, "run": run, "run_attempt": "1", "attempts": 2, "outcome": outcome, "errors": ["E boom"]}
 
 
+@pytest.mark.feature("flake-budget-once-per-run")
 def test_a_flaky_report_joins_the_history_once_per_run():
     history = flake_budget.gather([], [_report(), _report(f"{TEST}[250]"), _report(run=8)], NOW)
     assert history == [{"test": TEST, "run": "7", "at": NOW}, {"test": TEST, "run": "8", "at": NOW}]
     assert flake_budget.gather(history, [_report()], NOW + 60) == history
 
 
+@pytest.mark.feature("flake-budget-once-per-run")
 def test_retry_evidence_survives_history_deduplication_and_expiry():
     first = {**_report(f"{TEST}[first]"), "tracebacks": ["first frame\nRuntimeError: first"]}
     second = {**_report(f"{TEST}[second]"), "tracebacks": ["second frame\nRuntimeError: second"]}
@@ -38,6 +41,7 @@ def test_a_failed_report_is_not_a_flake():
     assert flake_budget.gather([], [_report(outcome="failed")], NOW) == []
 
 
+@pytest.mark.feature("flake-budget-seven-day-expiry")
 def test_lines_older_than_seven_days_drop_out():
     edge = {"test": TEST, "run": "1", "at": NOW - 7 * DAY}
     inside = {"test": TEST, "run": "2", "at": NOW - 7 * DAY + 1}
@@ -45,6 +49,7 @@ def test_lines_older_than_seven_days_drop_out():
     assert flake_budget.gather([edge], [_report(run="1")], NOW) == [{"test": TEST, "run": "1", "at": NOW}]
 
 
+@pytest.mark.feature("flake-budget-over-at-two-runs")
 def test_a_test_flaky_in_two_runs_is_over_budget():
     other = "tests/test_x.py::test_once"
     history = [
@@ -57,6 +62,7 @@ def test_a_test_flaky_in_two_runs_is_over_budget():
     assert flake_budget.budget([]) == {"flaky_tests": 0, "over_budget": [], "retried": []}
 
 
+@pytest.mark.feature("flake-budget-over-at-two-runs")
 def test_every_retry_pass_is_listed_with_its_count_and_runs():
     other = "tests/test_x.py::test_once"
     history = [
@@ -124,6 +130,7 @@ def test_the_command_takes_the_clock_when_no_time_is_given(tmp_path, monkeypatch
     assert json.loads(history.read_text()) == {"test": TEST, "run": "7", "at": NOW}
 
 
+@pytest.mark.feature("flake-budget-no-reports-red")
 def test_no_flake_reports_is_red(tmp_path, capsys):
     out = tmp_path / "out.json"
     argv = ["--history", str(tmp_path / "h.jsonl"), "--reports", str(tmp_path), "--out", str(out)]
