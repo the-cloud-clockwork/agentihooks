@@ -4264,6 +4264,41 @@
       ]
     },
     {
+      "id": "tick-thin-task-pass",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-tick-step",
+      "behaviour": "Every 120 seconds the thin task pass checks each open engineer or ci task whose enhancement field is empty; a thin one gets one enhancement plan task in its phase, its enhancement set to needed in the same ledger write, and one master notice, and a second pass queues nothing more.",
+      "seam": "scripts.tick.steps.thin._thin_task_pass registered as tick step thin task pass in group wrapper phases",
+      "tests": [
+        "tests/tick/steps/test_thin_task_pass.py::test_thin_task_pass",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_open_task_gets_one_enhancement_task_on_the_first_pass_and_none_on_the_next",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_task_that_is_not_an_unmarked_thin_open_engineer_task_gets_no_write",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_ci_or_engineer_task_is_queued_whatever_its_lane_field",
+        "tests/tick/steps/test_thin_task_pass.py::test_an_existing_enhancement_task_skips_the_add_and_still_marks_the_task",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_task_with_no_description_field_is_checked_as_an_empty_description",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_refused_write_is_reported_and_the_pass_goes_on_to_the_next_task",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_title_the_ledger_would_refuse_falls_back_to_a_plain_title",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_task_with_no_title_gets_the_plain_title",
+        "tests/tick/steps/test_thin_task_pass.py::test_two_thin_tasks_are_both_queued_and_named_in_one_master_notice",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_with_no_phase_or_description_gets_an_enhancement_task_with_neither",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_spent_deadline_takes_no_task",
+        "tests/tick/steps/test_thin_task_pass.py::test_every_write_of_a_pass_is_one_the_ledger_api_accepts"
+      ]
+    },
+    {
+      "id": "swarm-phase-admits-enhancement",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-tick-step",
+      "behaviour": "An enhancement plan task, a plan kind task carrying enhances, is claimable while its phase is planning or building, so a thin task in a building phase gets a planner instead of draining the swarm, and it is never taken for its phase's own plan task: not by the phase lifecycle, not by the slice check and not by a sent back slice review that reopens the plan task.",
+      "seam": "scripts.swarm.phase_state.admits, scripts.swarm.phase_state.lifecycle, scripts.swarm.slice_check.plan_task and scripts.swarm_ledger.ledger_phases.decided",
+      "tests": [
+        "tests/swarm/test_phase_state.py::test_an_enhancement_task_is_admitted_while_its_phase_plans_or_builds",
+        "tests/swarm/test_phase_state.py::test_an_enhancement_task_is_never_taken_for_its_phase_plan_task",
+        "tests/swarm/test_slice_check.py::test_the_phase_plan_task_is_read_past_an_enhancement_task_queued_ahead_of_it",
+        "tests/swarm_ledger/test_phase_review.py::test_a_send_back_never_reopens_a_task_that_enhances_another"
+      ]
+    },
+    {
       "id": "swarm-claim-dependencies",
       "origin": "inventory",
       "behaviour": "A task stacked on a live dependency is claimable while work parked on it waits.",
