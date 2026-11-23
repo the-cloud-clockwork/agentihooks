@@ -103,3 +103,14 @@ def test_a_plant_unit_job_posts_its_check(tmp_path: Path, lab: Callable[..., fix
     run.push(fixtures.HEAD_A, event="plant")
     run.tick(1000)
     assert run.lab.poster.moves(fixtures.HEAD_A, "unit") == [("queued", None)]
+
+
+@pytest.mark.feature("lab-plant-test-units")
+@pytest.mark.parametrize("tier", [Priority.HOTFIX, Priority.PULL_REQUEST])
+def test_a_plant_frame_keeps_the_unit_job_only_at_the_pull_request_tier(tier: Priority) -> None:
+    batch = (fixtures.unit(1),)
+    found = scheduler.frame(tier, fixtures.TREE, fixtures.BASE, {"unit": batch}, plant=True)
+    if tier == Priority.PULL_REQUEST:
+        assert found.gates["unit"] == batch
+    else:
+        assert "unit" not in found.gates

@@ -14864,7 +14864,8 @@
         "tests/ci_lab/test_plant_test_units.py::test_a_plant_keeps_its_marker_while_held_before_expansion",
         "tests/ci_lab/test_plant_test_units.py::test_a_pull_request_plant_grades_only_its_added_and_changed_test_modules",
         "tests/ci_lab/test_plant_test_units.py::test_a_plant_with_no_added_or_changed_test_module_grades_no_test_unit",
-        "tests/ci_lab/test_plant_test_units.py::test_a_plant_unit_job_posts_its_check"
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_unit_job_posts_its_check",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_frame_keeps_the_unit_job_only_at_the_pull_request_tier"
       ]
     }
   ],
