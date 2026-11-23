@@ -137,7 +137,7 @@ The existing base grading command accepts these environment settings:
 | `TEST_COUNT_BASE_RECORD` | Downloaded record file. Unset, unreadable, malformed or mismatched records fall back to base collection. |
 | `TEST_COUNT_COLLECTION_CACHE` | Directory for the separate exact collection cache, used for sides still needing collection. |
 | `TEST_COUNT_ENVIRONMENT` | Environment key required to enable that cache; CI uses the restored test environment's primary cache key. |
-| `TEST_COUNT_HEAD_COLLECTION` | Optional output file for collected head ids, reused by later CI steps. |
+| `TEST_COUNT_HEAD_COLLECTION` | Optional output file for collected head ids. No step of the Tests workflow sets it; the `collect` job's own `Collect the head's tests` step writes the head ids to its own `COLLECTED` file instead. |
 | `TEST_COUNT_REVIEWED_HEAD`, `TEST_COUNT_REVIEWS` | The pull request head and its reviews; see [Code owner approval](#code-owner-approval). |
 
 For example, the workflow grades from the base checkout with the downloaded record:

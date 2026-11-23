@@ -149,7 +149,7 @@ def _commands(run: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     modules: set[str] = set()
     for match in filter(None, map(PYTHON.match, parts)):
         flags, target = match.group(1).split(), match.group(2)
-        if target not in UNGATED_MODULES:
+        if target not in UNGATED_MODULES and not any("c" in flag for flag in flags):
             modules |= {target} if "-m" in flags else _scripts(run, target)
             tools.add("python")
     return tuple(sorted(tools)), tuple(sorted(modules))

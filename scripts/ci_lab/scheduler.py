@@ -119,8 +119,19 @@ REAPED = {"pending": contract.UNITS_REDELIVERED_TOTAL, "lost": contract.UNITS_LO
 REQUIRED = "required"
 EVENTS = ("pull_request", "pull_request", "merge_group", "push", "workflow_dispatch")
 GRADED_EVENTS = frozenset({"merge_group", "pull_request"})
-QUEUE_REQUIRED = ("select", "split", "shard-check", "test-count")
-PULL_REQUIRED = ("select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock")
+QUEUE_REQUIRED = ("select", "split", "shard-check", "test-count", "collect")
+PULL_REQUIRED = (
+    "select",
+    "collect",
+    "test-count",
+    "lint",
+    "lint-actions",
+    "type-gate",
+    "docs",
+    "semgrep",
+    "sonar",
+    "writer-lock",
+)
 SCOPED = {"full": ("split", "unit", "shard-check"), "selected": ("unit-selected",)}
 SCOPES = frozenset({"full", "selected", "none"})
 UNIT_JOBS = ("unit", "unit-lost", "unit-rerun")
@@ -133,7 +144,7 @@ MUTATION_JOBS = frozenset({"mutation", "mutation-plan", "mutation-stats"})
 STATS_JOB = "mutation-stats"
 MUTANT_JOB = "mutation"
 ALWAYS_SKIPPABLE = frozenset({"unit-lost", "unit-rerun", "queue-baseline", "unit-selected"})
-PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
+PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "lint-actions", "semgrep", "test-count", "collect"})
 HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent))
 STATIC = "static"
 WHOLE_TREE = "."

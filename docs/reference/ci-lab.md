@@ -2597,16 +2597,25 @@ base files under its base paths, the grader revision and the toolchain (see
 [Inputs per kind](#inputs-per-kind)). The plan groups units by label, so each label is one gate
 with its own check run.
 
-On dev, `python -m scripts.ci_lab.static_gates --root .` lists 43 gate steps:
+On dev, `python -m scripts.ci_lab.static_gates --root .` lists 31 gate steps:
 
 | Gate | Steps from | Gate steps |
 |---|---|---|
-| `lint` | The `lint` job of `test.yml` | 28 |
-| `type-gate` | The `type-gate` job of `test.yml` | 2 |
+| `lint` | The `lint` job of `test.yml` | 20 |
+| `type-gate` | The `type-gate` job of `test.yml` | 1 |
 | `semgrep/scan` | The `scan` job of `semgrep.yml` | 4 |
 | `semgrep/feature-tests` | The `feature-tests` job of `semgrep.yml` | 2 |
 | `semgrep/charts` | The `charts` job of `semgrep.yml` | 3 |
-| `test-count` | The `test-count` job of `test.yml` | 4 |
+| `test-count` | The `test-count` job of `test.yml` | 1 |
+
+The eight lint steps that read `github.head_ref`, `github.ref_name`, `github.base_ref`,
+`github.event.before`, `github.event.merge_group.base_sha`, a network, Docker or an earlier
+repository checkout moved to the `lint-actions` job, and `test-count`'s own
+`record-the-head-count-for-the-next-queue-group` step moved to the `collect` job; neither job is
+in `STATIC_JOBS`, so `discover` never walks either one. A step whose only Python command is
+`python -c '...'` is no longer a gate step either: `type-gate`'s `install-dependencies` step and
+`test-count`'s `install-dependencies` and `fetch-the-base-suite-count-recorded-on-dev` steps stay
+in their jobs but drop out of discovery by that rule alone.
 
 Before pull request
 [#11978](https://github.com/the-cloud-clockwork/agentihooks/pull/11978), the expander passed only
@@ -2646,15 +2655,13 @@ The static executor supplies these names:
 Since the event is `pull_request` in every class, a lab unit runs or skips each step as a pull
 request run of Actions does. A merge group, promotion or backfill grade can therefore differ from
 that class's Actions run: a step whose `if` needs another event is skipped, and a step whose `if`
-needs `pull_request` runs. Three lab gradable gates read the event name on dev, and
-`tests/ci_lab/test_static_gates.py` pins that list, so a new one fails the test until someone
-checks the pull request event keeps its verdict:
-
-| Gate | In a lab unit |
-|---|---|
-| `lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one` | Its `self-plant` producer runs, since it needs `pull_request` |
-| `test-count/fetch-the-base-suite-count-recorded-on-dev` | Skipped: it also needs the `app-token` producer, a `uses` step. Every failure path of the step exits 0, so it never changes the job's verdict, and the count floor collects the base suite itself |
-| `test-count/record-the-head-count-for-the-next-queue-group` | Skipped: it runs only on `merge_group`, with `continue-on-error`, so it never changes the job's verdict |
+needs `pull_request` runs. No lab gradable gate reads the event name on dev, and
+`tests/ci_lab/test_static_gates.py` pins that empty list, so a new one fails the test until someone
+checks the pull request event keeps its verdict. The three gates that once read it —
+`lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one` and
+`test-count/fetch-the-base-suite-count-recorded-on-dev` and
+`test-count/record-the-head-count-for-the-next-queue-group` — moved out of `lint` and `test-count`
+into `lint-actions` and `collect`, neither of which `discover` walks.
 
 `scripts.ci_lab.run_static.run` runs the producers before the gate, in job order, in the gate's
 sandbox and run folder, and gives each its own `GITHUB_OUTPUT` file. A `uses` producer, or one
@@ -2671,13 +2678,11 @@ summary the report carries.
 
 A gate with any missing name is not lab gradable. The expander leases no unit for it, so its
 verdict stays with Actions. `python -m scripts.ci_lab.static_gates --root .` prints each gate's
-producers by id, its `reads`, its `matrix` and its `missing`. On dev two `lint` gates are not lab
-gradable:
-
-| Gate | Missing |
-|---|---|
-| `lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading` | `github.head_ref`, `github.ref_name` |
-| `lint/artifact-sanity-checks` | `github.base_ref`, `github.event.before`, `github.event.merge_group.base_sha` |
+producers by id, its `reads`, its `matrix` and its `missing`. On dev no discovered gate is missing
+a name: `lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading`
+(missing `github.head_ref`, `github.ref_name`) and `lint/artifact-sanity-checks` (missing
+`github.base_ref`, `github.event.before`, `github.event.merge_group.base_sha`) moved to the
+`lint-actions` job, which `discover` never walks.
 
 Before pull request
 [#12486](https://github.com/the-cloud-clockwork/agentihooks/pull/12486), the executor supplied

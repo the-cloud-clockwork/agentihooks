@@ -197,18 +197,20 @@ until it passes does not repair it.
 
 ## Checks a dev push skips
 
-`lint` and `semgrep` pass on the pull request head, and `test-count` passes on the pull request head and again on the merged tree in the merge group. A push to `dev` carries a tree whose changes already passed them, so their job `if` in `.github/workflows/test.yml` carries `github.event_name != 'push'` and the promotion run skips them. `Gate — Required` checks each event's set:
+`lint`, `lint-actions` and `semgrep` pass on the pull request head, and `test-count` and `collect` pass on the pull request head and again on the merged tree in the merge group. A push to `dev` carries a tree whose changes already passed them, so their job `if` in `.github/workflows/test.yml` carries `github.event_name != 'push'` and the promotion run skips them. `Gate — Required` checks each event's set:
 
-- **Pull request:** `lint`, `semgrep` and `test-count` must succeed.
-- **Merge group:** `test-count` must succeed; `lint` and `semgrep` must be skipped, like every job outside the queue set.
-- **Dispatched run:** all three must succeed; a skip fails with `Every required gate must succeed.`
-- **Push:** a skipped `lint`, `semgrep` or `test-count` passes.
+- **Pull request:** `lint`, `lint-actions`, `semgrep`, `test-count` and `collect` must succeed.
+- **Merge group:** `test-count` and `collect` must succeed; `lint`, `lint-actions` and `semgrep` must be skipped, like every job outside the queue set.
+- **Dispatched run:** all five must succeed; a skip fails with `Every required gate must succeed.`
+- **Push:** a skipped `lint`, `lint-actions`, `semgrep`, `test-count` or `collect` passes.
 
 | Job | `pull_request` | `merge_group` | `push` to `dev` |
 |---|---|---|---|
 | `lint` | runs | skipped | skipped |
+| `lint-actions` | runs | skipped | skipped |
 | `semgrep` | runs | skipped | skipped |
 | `test-count` (3.12) | runs | runs | skipped |
+| `collect` (3.12) | runs | runs | skipped |
 | `unit` and `shard-check` (3.12) | runs | runs | runs |
 
 The size and complexity limits `lint` holds on the pull request head are graded again on the merge group's combined tree by the unit test `test_the_checked_out_tree_holds_the_size_limits` in `tests/test_size_limits.py`. It measures the checked out tree with `scripts.size_limits` against that tree's own `tests/SIZE_ALLOWLIST.json` and fails on a unit over a limit without an allowance, a unit grown past its allowance, or an allowlist that differs from the measurement. Two pull requests can each keep a file under the cap and still merge it over: on 20 November pull request 12249 passed `lint` with `tests/ci_lab/test_scheduler.py` at 2943 lines, the merge group combined it with eight later merges into 3077 lines, and every branch cut from `dev` then failed its prepush size step. The test starts `git` and `ruff`, so its dependency record escapes, and the queue planner reruns it whenever a `tests/`, `hooks/`, `scripts/` or `.github/workflows/` path or a global input changed ([Slice 5 as delivered](ci-result-cache.md#slice-5-as-delivered)).
@@ -229,8 +231,8 @@ Dev push run [39064628062](https://github.com/the-cloud-clockwork/agentihooks/ac
 
 | Symptom | Cause | Action |
 |---|---|---|
-| `Gate — Required` fails with `Every gate required for this event must succeed and other gates must be skipped.` on a pull request while `lint`, `semgrep` or `test-count` reads `skipped` | A workflow change dropped the job's pull request condition. | Restore the job `if` shown above. |
-| `lint`, `semgrep` or `test-count` runs on a dev push | The `github.event_name != 'push'` clause was removed from its `if`. | Restore it; `tests/contracts/ci_tiers/test_workflow.py` fails on the change. |
+| `Gate — Required` fails with `Every gate required for this event must succeed and other gates must be skipped.` on a pull request while `lint`, `lint-actions`, `semgrep`, `test-count` or `collect` reads `skipped` | A workflow change dropped the job's pull request condition. | Restore the job `if` shown above. |
+| `lint`, `lint-actions`, `semgrep`, `test-count` or `collect` runs on a dev push | The `github.event_name != 'push'` clause was removed from its `if`. | Restore it; `tests/contracts/ci_tiers/test_workflow.py` fails on the change. |
 | `gate-protected.yml` fails with `The head's Gate — Required changes its steps; the protected branch grades with its own.` | The head's gate step matches none of the twelve accepted renderings of `scripts.ci_reuse.gate_steps`. | Render the step from `scripts.ci_reuse.gate_steps` instead of editing it by hand; a new form lands first in its own pull request that teaches `scripts.gate_protected` to accept it. |
 
 ## Suite speed checks on pull requests
@@ -510,7 +512,7 @@ python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inp
 
 | Setting | Value | Where it comes from |
 |---|---|---|
-| `MAX_SHARDS` | 40 | The 48 `maxRunners` of the antoncore `anton-oss-queue` scale set, less `split` and `test-count`, the other merge group jobs on that pool, with six runners spare for an overlapping group's planning jobs |
+| `MAX_SHARDS` | 40 | The 48 `maxRunners` of the antoncore `anton-oss-queue` scale set, less `split`, `test-count` and `collect`, the other merge group jobs on that pool, with five runners spare for an overlapping group's planning jobs |
 | `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import; see [Step timeout limits](#step-timeout-limits) |
 | `TARGET_SECONDS` | 195 | The slowest shard the planner sizes for: 15 s under the 210 s acceptance, because merge group runs [40119907157](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40119907157) and [40119162144](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40119162144) after pull request [6707](https://github.com/the-cloud-clockwork/agentihooks/pull/6707) predicted 240 s and 264 s against a slowest `Run tests` step of 239 s and 242 s |
 | Half step timeout | 360 s | The most a plan may predict before `combine` refuses it; also the sizing target when lower than `TARGET_SECONDS` |
@@ -669,7 +671,7 @@ That night's groups still ran Python 3.11 and 3.12 legs inside the same 30 shard
 
 A group's other shards in flight at its unit start is the number of other groups' unit shards whose `created_at` is before that group's first shard `created_at` and whose `completed_at` is after it. A group whose shards wait over a minute with that number over 10 is sharing the pool with another group; a wait with that number under 10 does not come from another merge group.
 
-The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`; the scale set has since moved to `maxRunners` 48 (antoncore pull request [1245](https://github.com/the-cloud-clockwork/antoncore/pull/1245)), and `MAX_SHARDS` 40 leaves room for `split` and `test-count`, the other merge group jobs on that pool. Compare the two before reading a shard wait against the numbers above.
+The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`; the scale set has since moved to `maxRunners` 48 (antoncore pull request [1245](https://github.com/the-cloud-clockwork/antoncore/pull/1245)), and `MAX_SHARDS` 40 leaves room for `split`, `test-count` and `collect`, the other merge group jobs on that pool. Compare the two before reading a shard wait against the numbers above.
 
 ### Troubleshooting queue shard sizing
 
@@ -996,7 +998,7 @@ A merge group unit shard that loses its runner gets one recovery inside the same
 3. `unit rerun (3.12, <shard>)` replaces each lost original once and overwrites its durations, flake and coverage artifacts. `shard-check (3.12)` grades completeness using the recovered results.
 4. With no lost originals, `unit-lost` and the unexpanded `unit rerun` matrix must be skipped. With lost originals, classification and every matching recovery must succeed. Duplicate, unplanned or extra recovery jobs reject the run; an incomplete inventory waits rather than passing. A failed recovery, including a second runner loss, rejects it. Queue retry refuses a failed `unit rerun` with `failed again on its in-run rerun`.
 
-The early verifier also waits for the other required queue jobs, including `shard-check (3.12)` and `test-count`, and verifies that jobs outside the queue set are skipped. Passing the unit matrix alone cannot make the required check green.
+The early verifier also waits for the other required queue jobs, including `shard-check (3.12)`, `test-count` and `collect`, and verifies that jobs outside the queue set are skipped. Passing the unit matrix alone cannot make the required check green.
 
 ## Lost fail fast watcher
 
@@ -1077,7 +1079,7 @@ The API step conclusions distinguish a silent successful verification from a fai
 |---|---|
 | Early `Gate — Required` lost its runner or was cancelled, later summary passed | Inspect the early gate's annotation and the queue state. A green summary cannot satisfy the required context |
 | Verifier failed, cancel step succeeded and the run ended `cancelled` | Read the verifier error and the named shard or job; cancellation does not mean the run had no failing check |
-| Units passed but the early gate still runs | Check `shard-check`, `test-count`, classification, recovery and required skips. The verifier waits for the complete inventory |
+| Units passed but the early gate still runs | Check `shard-check`, `test-count`, `collect`, classification, recovery and required skips. The verifier waits for the complete inventory |
 | Gate reports a stale queue group | Inspect the queue ref and entry state; this run can no longer merge |
 
 ### Evidence read from merge group runs
