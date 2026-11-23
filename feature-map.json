@@ -14553,8 +14553,8 @@
       "id": "protected-grader-admits-lab-tool-pins",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2867",
-      "behaviour": "The announced protected grader candidate admits only the exact lab verdict dependency install under both parser and lint tool locks from the grader checkout, preserves every other job field, leaves its inputs unchanged, and refuses removal of the constraints once the base is pinned.",
-      "seam": "gate_protected.grade through the announced frozen grader candidate",
+      "behaviour": "The protected grader admits only the exact lab verdict dependency install under both parser and lint tool locks from the grader checkout, preserves every other job field, leaves its inputs unchanged, and refuses removal of the constraints once the base is pinned.",
+      "seam": "gate_protected.grade",
       "tests": [
         "tests/test_gate_protected_lab_tools.py::test_the_lab_tool_pin_candidate_is_stored_under_its_announced_hash",
         "tests/test_gate_protected_lab_tools.py::test_the_candidate_preserves_unchanged_full_and_small_lab_jobs",
@@ -14563,7 +14563,8 @@
         "tests/test_gate_protected_lab_tools.py::test_a_pinned_base_refuses_a_head_that_removes_the_lab_constraints",
         "tests/test_gate_protected_lab_tools.py::test_the_candidate_refuses_a_change_to_any_other_lab_step",
         "tests/test_gate_protected_lab_tools.py::test_the_candidate_refuses_any_other_change_to_the_install_step",
-        "tests/test_gate_protected_lab_tools.py::test_a_base_without_a_lab_job_refuses_a_head_that_adds_one"
+        "tests/test_gate_protected_lab_tools.py::test_a_base_without_a_lab_job_refuses_a_head_that_adds_one",
+        "tests/test_gate_protected_lab_tools.py::test_a_base_with_two_installs_admits_only_both_pinned"
       ]
     },
     {
