@@ -185,10 +185,12 @@ def github_reply(repo: str, args: list[str]) -> dict[str, Any]:
 def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     import fakeredis
 
+    from scripts.inbox import store as inbox_store
     from scripts.swarm import commands, incidents, panic, reboot, timing
     from scripts.swarm.health import merge_stall
 
     monkeypatch.setattr(merge_stall, "request", github_reply)
+    monkeypatch.setattr(inbox_store, "now_ms", lambda: BASE_MS)
 
     monkeypatch.setattr(commands, "hive_id", lambda: "fixture-hive")
     monkeypatch.setattr(incidents.socket, "gethostname", lambda: "fixture-host")
