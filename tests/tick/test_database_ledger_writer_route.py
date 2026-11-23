@@ -7,6 +7,7 @@ import socket
 import threading
 import urllib.error
 from collections.abc import Iterator
+from email.message import Message
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -159,6 +160,7 @@ def test_a_writer_refusal_raises_the_in_process_http_error(home: Path, answers: 
         "ledger refused",
     )
     assert refused.value.read() == body
+    assert isinstance(refused.value.headers, Message)
     assert answers.calls == []
 
 
