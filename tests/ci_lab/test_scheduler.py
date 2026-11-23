@@ -1322,6 +1322,22 @@ def test_backfill_takes_only_the_slots_left_free_after_the_units_waiting_in_othe
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item) for item in (second, third, fourth)]
 
 
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_pull_request_grade_admitted_after_a_merge_group_grade_is_leased_first(lab: Callable[..., Run]) -> None:
+    grouped, checked = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (grouped,)}), HEAD_B: plan({"lint": (checked,)})})
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.tick(1000)
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(2000)
+
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, checked), scheduler.job_id(HEAD_A, grouped)]
+    assert [grant.job for grant in run.lease(slots=1)] == [scheduler.job_id(HEAD_B, checked)]
+    queued = run.engine.queue.job(scheduler.job_id(HEAD_A, grouped))
+    assert queued is not None
+    assert queued.rank == int(Priority.QUEUE)
+
+
 @pytest.mark.feature("lab-scheduler-budget")
 def test_a_newer_backfill_head_drops_the_held_units_of_the_older_one(lab: Callable[..., Run]) -> None:
     older, newer = unit(1), unit(2)

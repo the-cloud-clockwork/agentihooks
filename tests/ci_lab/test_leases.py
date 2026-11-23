@@ -126,6 +126,47 @@ def test_lease_stops_reading_once_slots_run_out(
     assert reads == ["h1:test:a", "h1:test:b"]
 
 
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_lease_grants_the_most_urgent_class_first(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([unit("q1"), unit("q2")], "merge", {}, rank=2)
+    jobs.enqueue([unit("old")], "before", {})
+    jobs.enqueue([unit("p1")], "pull", {}, rank=1)
+
+    assert [grant.job for grant in lab.lease("w1", 2, frozenset(), 0)] == ["pull:test:p1", "merge:test:q1"]
+    assert [grant.job for grant in lab.lease("w1", 2, frozenset(), 0)] == ["merge:test:q2", "before:test:old"]
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_lease_poll_reads_one_page_of_a_long_pending_order(
+    jobs: queue.Queue, lab: leases.Leases, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([unit(f"{number:03}") for number in range(queue.PAGE * 2 + 1)], "h1", {}, rank=1)
+    pages: list[tuple[object, ...]] = []
+    read = jobs.client.zrangebyscore
+
+    def counted(*arguments: object, **options: object) -> object:
+        pages.append(arguments)
+        return read(*arguments, **options)
+
+    def whole(*arguments: object, **options: object) -> object:
+        raise AssertionError("a lease poll read the whole pending set")
+
+    monkeypatch.setattr(jobs.client, "zrangebyscore", counted)
+    monkeypatch.setattr(jobs.client, "zrange", whole)
+
+    assert [grant.job for grant in lab.lease("w1", 2, frozenset(), 0)] == ["h1:test:000", "h1:test:001"]
+    assert len(pages) == 1
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_lease_reads_past_a_page_of_jobs_that_do_not_fit(jobs: queue.Queue, lab: leases.Leases) -> None:
+    wide = {f"{number:03}": queue.Requirement(slots=3) for number in range(queue.PAGE)}
+    jobs.enqueue([unit(key) for key in wide], "h1", wide, rank=1)
+    jobs.enqueue([unit("narrow")], "h2", {}, rank=2)
+
+    assert [grant.job for grant in lab.lease("w1", 1, frozenset(), 0)] == ["h2:test:narrow"]
+
+
 def test_long_poll_waits_until_work_arrives(jobs: queue.Queue, clock: Clock) -> None:
     def arrive(ms: int) -> None:
         clock.sleep(ms)
