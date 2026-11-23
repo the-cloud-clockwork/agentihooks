@@ -843,7 +843,10 @@ def test_the_worker_trampolines_the_mutants_the_scheduler_names_for_a_change(tmp
         "class Meter:\n    def read(self, amount):\n        return amount * 3\n"
     )
     files = {
-        "pyproject.toml": '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/"]\n',
+        "pyproject.toml": (
+            '[project]\nname = "change"\n\n[project.optional-dependencies]\ndev = ["mutmut==3.6.0"]\n\n'
+            '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/"]\n'
+        ),
         "scripts/sample.py": sample,
         "scripts/plain.py": "LIMIT = 1\n",
         "hooks/other.py": kept,
