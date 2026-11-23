@@ -1,6 +1,19 @@
 {
   "features": [
     {
+      "id": "dep-manifest-raw-arrivals",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2790",
+      "behaviour": "Promotion dependency manifest preparation starts beside unit jobs and collects each complete raw shard archive as it arrives, preserving per test contexts, reused coverage, dependency input records and both manifest outputs without scanner flattening.",
+      "seam": "coverage arrivals main and Results.fetch, and the dependency manifest job of the Tests workflow",
+      "tests": [
+        "tests/test_dep_manifest_parallel.py::test_raw_archives_keep_contexts_reused_coverage_and_nested_dependency_inputs",
+        "tests/test_dep_manifest_parallel.py::test_raw_arrival_collection_matches_bulk_inputs_without_flattening",
+        "tests/test_dep_manifest_parallel.py::test_raw_collection_refuses_missing_shards",
+        "tests/test_dep_manifest_parallel.py::test_manifest_preparation_starts_beside_units_and_collects_before_validation"
+      ]
+    },
+    {
       "id": "lab-shadow-reusable-caller-pairing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2804",
