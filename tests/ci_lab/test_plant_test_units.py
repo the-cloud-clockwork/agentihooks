@@ -102,4 +102,4 @@ def test_a_plant_unit_job_posts_its_check(tmp_path: Path, lab: Callable[..., fix
     run = lab({fixtures.HEAD_A: found})
     run.push(fixtures.HEAD_A, event="plant")
     run.tick(1000)
-    assert run.lab.poster.moves(fixtures.HEAD_A, "lab-shadow/unit") == [("queued", None)]
+    assert run.lab.poster.moves(fixtures.HEAD_A, "unit") == [("queued", None)]
