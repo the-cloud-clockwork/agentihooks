@@ -104,8 +104,9 @@ def test_a_fresh_hub_admission_judged_on_a_row_read_before_its_ledger_claim_keep
         {**UNCLAIMED, "state": "claimed", "claimed_by": "engineer@another"},
         {**UNCLAIMED, "state": "blocked"},
         {**UNCLAIMED, "state": "done", "done": True},
+        {**UNCLAIMED, "state": "handoff"},
     ],
-    ids=["another-claimant", "blocked", "done"],
+    ids=["another-claimant", "blocked", "done", "handoff"],
 )
 def test_a_fresh_hub_admission_still_ends_on_a_row_another_claimant_or_a_closed_state_holds(
     store: RedisStore, row: dict[str, Any]
