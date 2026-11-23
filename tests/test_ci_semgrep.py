@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -284,6 +285,27 @@ def test_feature_fixture_command_runs_recursively():
     assert "semgrep --metrics off --test .semgrep/features" in commands
     assert "if" not in job and "continue-on-error" not in job
     assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
+
+
+SEMGREP_CALL = re.compile(r"(?<![\w./-])semgrep\s+([^;&|()\n]*)")
+
+
+@pytest.mark.feature("semgrep-test-mode-strict")
+def test_every_semgrep_test_mode_command_runs_strict() -> None:
+    calls = [
+        (workflow.name, job_name, step.get("name"), arguments.split())
+        for workflow in sorted((_ROOT / ".github/workflows").glob("*.yml"))
+        for job_name, job in yaml.safe_load(workflow.read_text())["jobs"].items()
+        for step in job.get("steps", [])
+        for arguments in SEMGREP_CALL.findall(step.get("run", ""))
+        if "--test" in arguments.split()
+    ]
+    assert {
+        ("semgrep.yml", "scan", "Own rules hold on their fixtures and the code"),
+        ("semgrep.yml", "feature-tests", "Operator feature regressions and passing fixtures"),
+        ("semgrep.yml", "feature-tests", "Outage rules fire on their planted faults and pass their clean cases"),
+    } <= {call[:3] for call in calls}
+    assert [call[:3] for call in calls if "--strict" not in call[3]] == []
 
 
 def test_no_semgrep_job_runs_the_head_feature_map_validator() -> None:
