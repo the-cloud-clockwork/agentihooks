@@ -20,8 +20,14 @@ PLANNED = (
 
 
 def check(op: dict[str, Any]) -> None:
-    shaped = set(op) == KEYS and ITEM_RE.match(str(op["item"])) is not None
-    if not (shaped and isinstance(op["by"], str) and op["by"] and op["enhancement"] in VALUES):
+    shaped = set(op) - {"expected"} == KEYS and ITEM_RE.match(str(op["item"])) is not None
+    if not (
+        shaped
+        and isinstance(op["by"], str)
+        and op["by"]
+        and op["enhancement"] in VALUES
+        and op.get("expected") in (None, *VALUES)
+    ):
         raise ValueError(SHAPE)
 
 
@@ -31,6 +37,9 @@ def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     refusal = UNKNOWN.format(task=task_id) if task is None else refused(doc, op, task_id)
     if task is None or refusal:
         ctx.refused.append(refusal)
+        return False
+    if "expected" in op and task.get("enhancement") != op["expected"]:
+        ctx.refused.append(f"task {task_id} enhancement changed")
         return False
     task["enhancement"] = op["enhancement"]
     ctx.stamp(f"{op['item']}/enhancement", op["by"])
