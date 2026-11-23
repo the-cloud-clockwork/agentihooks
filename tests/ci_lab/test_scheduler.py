@@ -47,7 +47,7 @@ from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest,
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
 from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused, FetchUnanswered
-from scripts.ci_lab.objects import LocalObjects, manifest_folder, unit_path, upload_path
+from scripts.ci_lab.objects import LocalObjects, flakes_path, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CRASH
 from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.static_gates import StaticGate
@@ -2917,14 +2917,14 @@ def flake_rows(item: Unit, *tests: str) -> list[dict[str, Any]]:
 
 
 def flakes_at(run: Run, item: Unit) -> bytes:
-    assert run.lab.objects.keys("lab/flakes/") == [f"lab/flakes/{item.kind}/{item.key[-64:]}.jsonl"]
-    return run.lab.objects.read(f"lab/flakes/{item.kind}/{item.key[-64:]}.jsonl")
+    assert run.lab.objects.keys("lab/flakes/") == [flakes_path(item.kind, item.key)]
+    return run.lab.objects.read(flakes_path(item.kind, item.key))
 
 
 @pytest.mark.feature("lab-flakes-object-once")
 def test_only_a_passed_flaky_unit_with_flake_rows_writes_its_flakes_object(lab: Callable[..., Run]) -> None:
-    flaky, steady, failed, keyless, empty = (unit(number) for number in range(1, 6))
-    run = lab({HEAD_A: plan({"lint": (flaky, steady, failed, keyless, empty)})})
+    flaky, steady, failed, rowless, empty = (unit(number) for number in range(1, 6))
+    run = lab({HEAD_A: plan({"lint": (flaky, steady, failed, rowless, empty)})})
     run.push(HEAD_A)
     run.tick(1000)
     grants = {grant.unit: grant for grant in run.lease(slots=5)}
@@ -2932,7 +2932,7 @@ def test_only_a_passed_flaky_unit_with_flake_rows_writes_its_flakes_object(lab: 
     run.finish(grants[flaky], "passed", {"flaky": True, "seconds": 3.5, "flakes": rows})
     run.finish(grants[steady], "passed", {"flaky": False, "flakes": flake_rows(steady, "t")})
     run.finish(grants[failed], "failed", {"flaky": True, "flakes": flake_rows(failed, "t")})
-    run.finish(grants[keyless], "passed", {"flaky": True})
+    run.finish(grants[rowless], "passed", {"flaky": True})
     run.finish(grants[empty], "passed", {"flaky": True, "flakes": []})
     run.tick(1100)
     assert flakes_at(run, flaky) == "".join(json.dumps(row) + "\n" for row in rows).encode()
