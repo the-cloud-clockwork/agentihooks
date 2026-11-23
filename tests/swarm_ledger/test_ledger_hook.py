@@ -190,7 +190,7 @@ def test_dispatch_hands_the_ledger_policy_and_reaches_the_orchestrator_for_a_tas
 
 
 @pytest.mark.feature("ledger-hook-bounded-read")
-def test_dispatch_routes_without_tasks_when_the_ledger_vanishes_before_the_task_read(
+def test_dispatch_skips_the_handler_when_the_ledger_vanishes_before_the_task_read(
     folder: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts.swarm_ledger import storage
@@ -203,7 +203,7 @@ def test_dispatch_routes_without_tasks_when_the_ledger_vanishes_before_the_task_
         return stored(directory, slug, *keys) if len(reads) == 1 else None
 
     monkeypatch.setattr(storage, "read_ledger", vanishing)
-    assert gate_decisions(folder, monkeypatch, routed_ledger(), "PostToolUse") == [([5, 7, 8], ledger_gate_defaults())]
+    assert gate_decisions(folder, monkeypatch, routed_ledger(), "PostToolUse") == []
     assert [keys[0] for keys in reads] == ["_meta.members", "tasks/t1"]
 
 

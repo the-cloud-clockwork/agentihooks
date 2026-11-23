@@ -387,7 +387,10 @@ def gate_state(slug: str, name: str) -> dict[str, Any] | None:
         return None
     targets = ledger_gate.task_targets(state["_meta"], name)
     if targets:
-        state["tasks"] = (read_ledger(LEDGER_DIR, slug, *targets) or {}).get("tasks", [])
+        found: dict[str, Any] | None = read_ledger(LEDGER_DIR, slug, *targets)
+        if found is None:
+            return None
+        state["tasks"] = found.get("tasks", [])
     return state
 
 
