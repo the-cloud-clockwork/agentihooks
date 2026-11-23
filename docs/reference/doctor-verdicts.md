@@ -196,24 +196,40 @@ every Doctor pass:
 
 - `lab` reads the lab block the tick stores from the lab's `/capacity`
   answer, the same block `agentihooks swarm <slug> status --json` shows.
-- `lab gate` reads the shadow acceptance rule report for each gate that the
+- `lab gate` compares the lab with GitHub Actions for each gate that the
   watched swarm checkout's `delivery.yaml` lists under `lab.authoritative`.
   That checkout is the swarm's primary `dev` checkout, which `wt.sh done`
   fast forwards after every merge, so the list is dev's as last pulled.
-  It makes no GitHub call while that list is empty.
+  It makes no GitHub call while that list is empty. With a gate listed, one
+  pass reads the newest ten distinct heads of completed pull request Tests
+  runs and the check runs of each of those heads once, whatever the number
+  of listed gates: one page of runs and one or two pages of check runs a
+  head, 11 to 21 reads on usual heads.
 
 | Finding id | Raised when | Measure |
 |---|---|---|
 | `lab-unreachable/<swarm>` | The last capacity read failed. No other lab finding is raised from that block. | Minutes since the last good read, or since the failure when no read ever succeeded |
 | `lab-behind/<swarm>` | A reading under ten minutes old predicts pull request grading more than `AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES` (20) minutes behind, the same limit that holds eng claims | Minutes behind |
 | `lab-cache-hit-ratio/<class>` | A reading under ten minutes old gives the class a verdict cache hit ratio below `AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR` (0.6). A class with no lookups has no ratio and is skipped | Hit ratio in percent |
-| `lab-gate-mismatch/<gate>` | An authoritative gate disagrees with GitHub Actions on any of its newest ten pull request heads, counted as `python -m scripts.ci_lab shadow report` counts mismatches | Mismatches |
+| `lab-gate-mismatch/<gate>` | An authoritative gate disagrees with GitHub Actions on any of the newest ten pull request heads that hold both verdicts | Mismatches |
 
 The floor must be a fraction from 0 to 1; any other value falls back to 0.6.
 The `lab gate` detector takes lab verdicts only from the GitHub App that
 `AGENTIHOOKS_LAB_APP` names. While a gate is authoritative and that variable
 is unset, the detector fails, so the mismatch count reads as unknown rather
 than zero.
+
+The lab verdict of a listed gate is the newest check run of that App named
+`lab/<gate>`, the name the lab posts under authority, or `lab-shadow/<gate>`.
+The Actions verdict is the gate's job on the same head. On a pull request the
+Tests workflow skips the Actions job of a listed gate, and a skipped job is
+no verdict, so such a head counts no mismatch: the detector reports the heads
+that still hold both, which are dispatched runs, runs under the kill switch
+and heads from before the gate was listed. The acceptance report command
+`python -m scripts.ci_lab shadow report --gate` is a different read: it walks
+back until its window of heads with an Actions verdict is full and reads only
+`lab-shadow/<gate>`, so do not run it on a listed gate to reproduce this
+finding.
 
 Run the detectors once and print what they find now:
 

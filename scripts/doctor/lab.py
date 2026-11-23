@@ -4,6 +4,7 @@ grading wait above the claim hold limit and a verdict cache hit ratio under its 
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -109,7 +110,8 @@ def gate_findings(counted: Mapping[str, int], heads: int) -> list[Finding]:
             "pull request heads",
             (
                 f"gate {gate} is authoritative in delivery.yaml",
-                f"python -m scripts.ci_lab shadow report --gate {gate} --heads {heads}",
+                f"lab check {shadow_report.LISTED_NAME}{gate} against the github-actions job on the newest {heads} "
+                "pull request heads",
             ),
             "any mismatch on an authoritative gate",
             count,
@@ -119,16 +121,23 @@ def gate_findings(counted: Mapping[str, int], heads: int) -> list[Finding]:
     ]
 
 
+def _differs(sha: str, runs: Sequence[Mapping[str, Any]], gate: str, sources: shadow.Sources) -> bool:
+    """Whether the head holds an Actions verdict and a lab verdict on the listed gate that disagree."""
+    found = shadow_report.head(sha, runs, gate, sources, listed=True)
+    return found is not None and shadow_report.mismatch(found)
+
+
 def mismatches(
     fetch: shadow_report.Fetch, repository: str, gates: Sequence[str], sources: shadow.Sources, heads: int
 ) -> dict[str, int]:
-    """Each gate's mismatches over its newest pull request heads, as the acceptance rule report counts them."""
-    return {
-        gate: shadow_report.tally(
-            shadow_report.collect(fetch, repository, shadow_report.PULL_REQUEST, gate, sources, heads)
-        ).mismatches
-        for gate in gates
-    }
+    """Each listed gate's mismatches over the newest pull request heads. The heads and each head's check runs are
+    read once for every gate, so a pass costs the same reads whatever the gates; a head counts for a gate when its
+    Actions verdict differs from the lab's newest check run under either name the lab posts. No gate, no read."""
+    if not gates:
+        return {}
+    newest = islice(shadow_report.heads_of(fetch, repository, shadow_report.PULL_REQUEST), heads)
+    read = [(sha, shadow_report.check_runs(fetch, repository, sha)) for sha in newest]
+    return {gate: sum(_differs(sha, runs, gate, sources) for sha, runs in read) for gate in gates}
 
 
 def read(store: Any, slug: str, now_ms: int, environ: Mapping[str, str]) -> list[Finding]:
