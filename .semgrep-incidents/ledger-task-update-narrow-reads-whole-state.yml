@@ -10,6 +10,7 @@ rules:
       include:
         - /scripts/swarm_ledger/api/mutations.py
         - /scripts/swarm_ledger/repository/task_write.py
+        - /scripts/swarm_ledger/events/publishing.py
         - ledger-task-update-narrow-reads-whole-state.py
     patterns:
       - pattern-inside: |
@@ -17,7 +18,7 @@ rules:
               ...
       - metavariable-regex:
           metavariable: $FUNCTION
-          regex: ^(apply_claim|hook_state|update|persist|admitted|placed)$
+          regex: ^(apply_claim|apply_task_update|hook_state|update|persist|admitted|placed)$
       - pattern-either:
           - pattern: $REPOSITORY.current(...)
           - pattern: $REPOSITORY.get_document(...)

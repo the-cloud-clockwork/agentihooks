@@ -209,8 +209,11 @@ def assert_falls_back(make: Callable[[str], Any], prepare: Callable[[dict], None
     clock = Clock()
     monkeypatch.setattr(repository.domain, "now_ms", clock)
     slug = f"fallback-{uuid.uuid4().hex[:8]}"
-    created(repository, slug, prepare)
+    created(repository, slug, None)
     settled([(repository, slug)], clock)
+    document = repository.export_document(slug)
+    prepare(document)
+    repository.import_document(slug, document, replace=True)
     before = rows_of(repository, slug)
     assert repository.apply_task_update(slug, claim_op()) is None
     assert rows_of(repository, slug) == before

@@ -136,7 +136,7 @@ def partial_rows(connection: Any, slug: str, keys: tuple[list[Any], ...]) -> dic
     return rows
 
 
-def read_partial(connection, slug: str, keys: tuple) -> dict:
+def read_partial(connection: Any, slug: str, keys: tuple) -> dict:
     """Rows under each key path only, assembled; `_meta.events` is filled from the events table."""
     rows = partial_rows(connection, slug, keys)
     if "[]" not in rows:
@@ -769,7 +769,6 @@ class SQLiteLedgerRepository:
             if state.get("tasks", []) != entry.state.get("tasks", [])
             else previous.get("task_revision", previous["rev"])
         )
-        self.admit(connection, state)
         fragments, writer = written(state, entry.fragments)
         state = fragments.value
         before, after = diff(*(without_events(value) for value in (entry.state, state)))

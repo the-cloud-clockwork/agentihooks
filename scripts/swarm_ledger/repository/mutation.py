@@ -42,7 +42,7 @@ def apply(
     ledger_notifications.derive(doc, ctx)
     del doc["chat"][: -core.CHAT_KEPT]
     size = core.warnings(doc)
-    finish(doc, ctx, core, size, ctx.refused[:unowned], created)
+    finish(doc, ctx, core, meta, size, ctx.refused[:unowned], created)
     state["_meta"] = meta
     return rejected, ctx
 
@@ -68,9 +68,10 @@ def run(
     return raised
 
 
-def finish(doc: dict[str, Any], ctx: Any, core: Any, size: list[str], unowned: list[str], created: bool) -> None:
+def finish(
+    doc: dict[str, Any], ctx: Any, core: Any, meta: dict[str, Any], size: list[str], unowned: list[str], created: bool
+) -> None:
     """Derive the alerts, then stamp the revision, time, warnings and kept events when anything changed."""
-    meta = ctx.meta
     found = size + ctx.refused
     ledger_alerts.derive(
         doc,
@@ -92,7 +93,7 @@ def narrow(slug: str, state: dict[str, Any], core: Any, op: dict[str, Any], gate
     rejected: list[str] = []
     run(doc, ctx, core, gate, [op], rejected)
     stored: list[str] = meta.get("warnings") or []
-    finish(doc, ctx, core, [warning for warning in stored if core.size_warning(warning)], [], False)
+    finish(doc, ctx, core, meta, [warning for warning in stored if core.size_warning(warning)], [], False)
     state["_meta"] = meta
     return rejected, ctx
 

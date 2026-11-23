@@ -129,13 +129,11 @@ def shared_store(name: str) -> postgres.PostgresLedgerRepository:
     return repository
 
 
-@pytest.mark.feature("ledger-task-update-narrow-write")
 @pytest.mark.parametrize("scenario", sorted(narrow_write_cases.SCENARIOS))
 def test_a_narrow_claim_on_postgres_stores_what_the_whole_write_stores(monkeypatch, scenario: str) -> None:
     narrow_write_cases.assert_same_write(shared_store, scenario, monkeypatch)
 
 
-@pytest.mark.feature("ledger-task-update-narrow-write")
 @pytest.mark.parametrize("prepare", narrow_write_cases.FALLBACKS)
 def test_a_claim_the_narrow_write_cannot_prove_on_postgres_writes_nothing(monkeypatch, prepare) -> None:
     narrow_write_cases.assert_falls_back(shared_store, prepare, monkeypatch)

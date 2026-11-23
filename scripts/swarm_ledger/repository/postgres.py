@@ -477,6 +477,10 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
                 text = f"The ledger writer at {address} was refused: {refusal(version, floor)}"
                 ledger_alerts.raise_warning(state, raised, (ledger_alerts.WRITER, text), before)
 
+    def _write(self, connection: sqlite3.Connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
+        self.admit(connection, state)
+        return super()._write(connection, slug, entry, state, events)
+
     @contextmanager
     def snapshot(self) -> Iterator[Snapshot]:
         with self.connect() as connection, connection:

@@ -1,4 +1,5 @@
 import json
+import threading
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -124,7 +125,7 @@ def test_a_refused_hub_claim_raises_its_alert_for_delivery(live: dict, monkeypat
     add_task(live, "t1")
     document = server.repository.export_document(SLUG)
     document["_meta"]["outcomes"] = {"t1": {"state": "done"}}
-    server.repository.import_document(SLUG, document, replace=True)
+    server.repository.import_document(SLUG, document, token=server.repository.token(SLUG), replace=True)
     delivered = []
     monkeypatch.setattr(api_service, "deliver_alerts", lambda slug, state: delivered.append(state))
     status, reply = hub_claim(live, "t1")
@@ -288,10 +289,11 @@ def test_publishing_refreshes_only_a_published_ledger_after_a_narrow_write(publi
     seen = []
     inner = SimpleNamespace(
         apply_task_update=lambda slug, op, gate: written,
-        current=lambda slug: seen.append(slug) or SimpleNamespace(generation=-1),
+        current=lambda slug: seen.append(threading.current_thread().name) or SimpleNamespace(generation=-1),
     )
     wrapper = Publishing(inner)
     if published:
         wrapper.published["demo"] = 0
     assert wrapper.apply_task_update("demo", claim_op()) == written
-    assert seen == ["demo"] * reads
+    wrapper.drain(5)
+    assert seen == ["ledger-publish"] * reads
