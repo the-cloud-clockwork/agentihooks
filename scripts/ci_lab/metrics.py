@@ -371,7 +371,7 @@ class Latest:
     def start(self) -> None:
         """Start the first build in the background unless a build has started or one runs."""
         if self.started_ms is None:
-            self._spawn()
+            self._begin_build()
 
     def refresh(self) -> None:
         """Start one background build once a build has started, the last one started at least ``refresh_ms`` ago and
@@ -379,9 +379,9 @@ class Latest:
         started = self.started_ms
         if started is None or self.clock() - started < self.refresh_ms:
             return
-        self._spawn()
+        self._begin_build()
 
-    def _spawn(self) -> None:
+    def _begin_build(self) -> None:
         if self.building.acquire(blocking=False):
             threading.Thread(target=self._background, name="ci-lab-load-refresh", daemon=True).start()
 
