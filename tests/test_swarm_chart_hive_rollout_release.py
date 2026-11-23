@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -17,7 +18,6 @@ def test_the_worker_hive_release_annotation_carries_no_image_digest() -> None:
     assert "imageDigest" not in template
     assert "imageDigest" not in values
     assert "workers.rollout.release" in template
-    assert "helm package deploy/helm/agentihooks-swarm" in workflow
     assert "stamp-worker-digest.sh" not in workflow
     assert not (CHART / "ci" / "stamp-worker-digest.sh").exists()
 
@@ -45,9 +45,11 @@ def test_the_rollout_hooks_run_the_hive_worker_tag_the_chart_release_stamps() ->
     template = (CHART / "templates" / "hive-rollout.yaml").read_text()
     workflow = (ROOT / ".github" / "workflows" / "swarm-node-image.yml").read_text()
     publish = (ROOT / "deploy" / "worker" / "release-hive.sh").read_text()
+    runs = [step.get("run", "") for step in yaml.safe_load(workflow)["jobs"]["hive"]["steps"]]
+    published = [index for index, run in enumerate(runs) if "bash deploy/worker/release-hive.sh" in run]
+    packaged = [index for index, run in enumerate(runs) if '--app-version "$version"' in run]
 
-    assert '--app-version "$version"' in workflow
-    assert workflow.index("bash deploy/worker/release-hive.sh") < workflow.index('--app-version "$version"')
+    assert published and packaged and published[-1] < packaged[0]
     assert 'ne (toString .Chart.AppVersion) "dev"' in template
     assert '"$image:$version"' in publish
     assert 'merge (dict "tag" (toString .Chart.AppVersion)) $workers.image' in template

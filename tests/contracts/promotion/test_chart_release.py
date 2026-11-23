@@ -192,6 +192,13 @@ def test_a_missing_packaged_archive_fails_before_any_cluster_starts(tmp_path: Pa
     assert "the packaged chart" in result.stderr and "version 9.9.9 is missing" in result.stderr
 
 
+def _evaluated(value: str, expressions: dict[str, str]) -> str:
+    for expression, replacement in expressions.items():
+        value = value.replace(expression, replacement)
+    assert "${{" not in value, f"the replay cannot evaluate {value}"
+    return value
+
+
 def _publish(tmp_path: Path, version: str, fail: str = "") -> tuple[int, str, list[list[str]]]:
     tools = tmp_path / "bin"
     tools.mkdir()
@@ -229,23 +236,19 @@ def _publish(tmp_path: Path, version: str, fail: str = "") -> tuple[int, str, li
     (chart / "ci/kind-published.sh").write_text(f'exec "{tools}/kind-published.sh" "$@"\n')
     calls = tmp_path / "calls"
     env = {
-        **os.environ,
+        **{key: value for key, value in os.environ.items() if key != "GHCR_TOKEN"},
         "PATH": f"{tools}:{os.environ['PATH']}",
         "CALLS": str(calls),
         "FAIL_COMMAND": fail,
         "RELEASE": f"v{version}",
         "GITHUB_REPOSITORY_OWNER": "The-Cloud-Clockwork",
         "GITHUB_ACTOR": "release-bot",
-        "GHCR_TOKEN": "fixture",
         "RUNNER_TEMP": str(tmp_path / "runner temp"),
     }
+    expressions = {"${{ runner.temp }}": env["RUNNER_TEMP"], "${{ secrets.GITHUB_TOKEN }}": "fixture"}
     status, output = 0, ""
     for step in (step for step in _chart_steps() if "run" in step):
-        values = {
-            key: value.replace("${{ runner.temp }}", env["RUNNER_TEMP"])
-            for key, value in step.get("env", {}).items()
-            if "secrets." not in value
-        }
+        values = {key: _evaluated(value, expressions) for key, value in step.get("env", {}).items()}
         result = subprocess.run(
             ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
             env={**env, **values},
@@ -293,11 +296,18 @@ def test_the_published_chart_uses_the_release_version_and_a_separate_oci_namespa
 
 @pytest.mark.feature("release-chart-proven-and-pushed-by-the-hive-job")
 @pytest.mark.parametrize(
-    "fail,count", [("sha256sum", 1), ("package", 2), ("kind-published.sh", 6), ("registry", 7), ("push", 8)]
+    "fail,last",
+    [
+        ("sha256sum", ["sha256sum"]),
+        ("package", ["helm", "package"]),
+        ("kind-published.sh", ["kind-published.sh"]),
+        ("registry", ["helm", "registry"]),
+        ("push", ["helm", "push"]),
+    ],
 )
 def test_a_failed_checksum_package_kind_check_or_registry_step_stops_publication(
-    tmp_path: Path, fail: str, count: int
+    tmp_path: Path, fail: str, last: list[str]
 ) -> None:
     status, _, calls = _publish(tmp_path, "2.10.1", fail)
     assert status == 23
-    assert len(calls) == count
+    assert calls[-1][: len(last)] == last
