@@ -100,6 +100,8 @@ def test_hook_and_brain_spans_share_one_tracer_provider(
     telemetry.flush()
     spans = {span.name: span for span in exporter.get_finished_spans()}
     assert set(spans) == {"hook.dispatch", "brain.delivery"}
+    assert spans["hook.dispatch"].instrumentation_scope is not None
+    assert spans["brain.delivery"].instrumentation_scope is not None
     assert spans["hook.dispatch"].instrumentation_scope.name == "agentihooks"
     assert spans["brain.delivery"].instrumentation_scope.name == "agentihooks.brain"
     assert len(providers) == 1
@@ -121,7 +123,7 @@ def test_emit_span_preserves_name_attributes_and_times(
     telemetry.flush()
     (span,) = sdk[0].get_finished_spans()
     assert span.name == "brain.ingest"
-    assert dict(span.attributes) == {
+    assert span.attributes == {
         "text": "value",
         "count": 2,
         "ratio": 0.5,
@@ -131,6 +133,7 @@ def test_emit_span_preserves_name_attributes_and_times(
     }
     assert span.start_time == 987_500_000
     assert span.end_time == 2_000_000_000
+    assert span.instrumentation_scope is not None
     assert span.instrumentation_scope.name == "agentihooks.brain"
 
 
@@ -145,8 +148,11 @@ def test_span_ctx_exports_attributes_and_updated_attributes(
     telemetry.flush()
     (span,) = sdk[0].get_finished_spans()
     assert span.name == "brain.tick"
-    assert dict(span.attributes) == {"initial": 2, "items": "[3]"}
+    assert span.attributes == {"initial": 2, "items": "[3]"}
+    assert span.instrumentation_scope is not None
     assert span.instrumentation_scope.name == "agentihooks.brain"
+    assert span.start_time is not None
+    assert span.end_time is not None
     assert span.start_time <= span.end_time
 
 
@@ -183,7 +189,7 @@ def test_telemetry_flush_drains_the_shared_otel_providers(
     flush.assert_called_once_with()
     (span,) = sdk[0].get_finished_spans()
     assert span.name == "brain.flush"
-    assert dict(span.attributes) == {"value": 1}
+    assert span.attributes == {"value": 1}
 
 
 @pytest.mark.feature("hooks-brain-shared-tracer-provider")
