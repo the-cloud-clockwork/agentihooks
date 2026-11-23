@@ -5834,6 +5834,19 @@
       ]
     },
     {
+      "id": "lab-flakes-object-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-store",
+      "behaviour": "The lab scheduler stores the flake rows of a passed flaky unit once, as JSON lines in the unit's flakes object lab/flakes/<kind>/<digest>.jsonl, after its verdict. A red verdict, a passed verdict that is not flaky and a report with no flake rows leave no flakes object. A second remember of the same unit keeps the first flakes object and the stored verdict, and the write once refusal never fails the verdict write. Reindex counts only unit reports, so a flakes object adds no verdict.",
+      "seam": "scripts.ci_lab.objects.flakes_path, scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, and scripts.ci_lab.store.Store.reindex",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_only_a_passed_flaky_unit_with_flake_rows_writes_its_flakes_object",
+        "tests/ci_lab/test_scheduler.py::test_a_second_remember_of_a_flaky_unit_keeps_the_first_flakes_object_and_verdict",
+        "tests/ci_lab/test_store.py::test_flakes_path_names_the_unit_flakes_object_and_refuses_a_key_of_another_kind",
+        "tests/ci_lab/test_store.py::test_reindex_counts_only_reports_beside_a_flakes_object"
+      ]
+    },
+    {
       "id": "selectors-read-outside-files",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2636",
