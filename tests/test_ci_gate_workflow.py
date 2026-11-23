@@ -745,7 +745,9 @@ def test_a_superseded_base_falls_back_to_the_newest_dev_baseline_before_the_arti
     assert restored["if"] == (
         "steps.cached.outputs.cache-hit != 'true' && steps.cached.outputs.cache-matched-key != ''"
     )
-    assert hold["env"]["BASE"] == "${{ steps.restored.outputs.commit || steps.base.outputs.commit }}"
+    assert hold["env"]["BASE"] == (
+        "${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}"
+    )
 
 
 @pytest.mark.parametrize("measured", ["ancestor", "unrelated", "unrecorded"])
