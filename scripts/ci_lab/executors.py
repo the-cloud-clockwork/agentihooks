@@ -3,11 +3,11 @@ the pod cuts from its git mirror and answers the worker with the unit's outcome,
 
 A static unit runs the gate it names from the grader tree's workflow over the head, the base and grader trees bound
 read only. A test unit runs its batch on the venv of the head's lockfile digest with the pod's dependency manifest and
-flake ledger. A stats or mutant unit runs the mutation runner in the sandbox from a private tree of the head whose
-mutated sources sit behind trampolines, with the pod's stats cache, kill memory, unit budget and lane cap; a mutant
-unit's tests are the ones the stats records of that tree show reaching its function. `agentihooks ci-lab-worker` builds
-the pod from the worker contract environment and runs the worker until SIGTERM, serving its metrics registry on the
-contract metrics port.
+flake ledger. A stats or mutant unit runs the mutation runner in the sandbox from a private tree of the head in which
+the functions the head changes against the lease's base sit behind trampolines, with the pod's stats cache, kill
+memory, unit budget and lane cap; a mutant unit's tests are the ones the stats records of the test files its manifest
+names show reaching its function. `agentihooks ci-lab-worker` builds the pod from the worker contract environment and
+runs the worker until SIGTERM, serving its metrics registry on the contract metrics port.
 """
 
 import argparse
