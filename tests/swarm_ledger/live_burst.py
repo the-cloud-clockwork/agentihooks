@@ -26,6 +26,7 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "ledger-2026-11-09.json
 WORDS = "agent claim review merge queue shard runner hive tick ledger phase slice freeze focus proof gate lab".split()
 OPEN = ("phases-box", "tasks-box", "questions-box")
 NEXT_STATE = {"open": "claimed", "claimed": "pr", "pr": "open", "blocked": "open"}
+DAYS_MS = 3 * 86_400_000
 
 REPLAY = """async ({initial, patches, gap, open}) => {
   const main = document.querySelector('script[type=module]').src;
@@ -83,7 +84,7 @@ def inflated(task: dict, n: int, rng: random.Random, comments: int) -> dict:
         "rank": rng.choice(["urgent", "high", "normal", "normal", "low"]),
         "claimed_by": rng.choice(agents) if task.get("state") in {"pr", "claimed"} else "",
         "comments": [
-            {"id": f"c{n}-{k}", "by": rng.choice(agents), "at": now - rng.randint(0, 9_000_000), "text": text(rng, 45)}
+            {"id": f"c{n}-{k}", "by": rng.choice(agents), "at": now - rng.randint(0, DAYS_MS), "text": text(rng, 45)}
             for k in range(comments if live else 2)
         ],
         "contract": {"done_when": text(rng, 30)},

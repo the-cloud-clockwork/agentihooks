@@ -9,7 +9,8 @@ import { renderSwarm, swarm } from "./swarm.js";
 import { collapsible, groupOpen, markToggles, rememberGroup } from "./folds.js";
 import { selectTab } from "./layout.js";
 import { render } from "./render.js";
-import { closedMore, firstPage, lazy, moreButton, wanted } from "./pages.js";
+import { closedMore, firstPage, lazy, limit, moreButton, wanted, wantedIn } from "./pages.js";
+import { place } from "./render_cycle.js";
 import { revealFrozenTarget, viewCount, viewItems } from "./frozen_view.js";
 
 let outlinePick = null;
@@ -127,9 +128,10 @@ export function completeList(list) {
 
 function byPhase(items) {
   if (!items.some((i) => i.phase)) return items;
-  const order = doc.phases.map((p) => p.id);
-  const rank = (i) => (order.includes(i.phase) ? order.indexOf(i.phase) : order.length);
-  return [...items].sort((a, b) => rank(a) - rank(b) || (rank(a) === order.length ? a.phase.localeCompare(b.phase) : 0));
+  const order = new Map();
+  for (const [n, p] of doc.phases.entries()) if (!order.has(p.id)) order.set(p.id, n);
+  const rank = (i) => (order.has(i.phase) ? order.get(i.phase) : doc.phases.length);
+  return [...items].sort((a, b) => rank(a) - rank(b) || (rank(a) === doc.phases.length ? a.phase.localeCompare(b.phase) : 0));
 }
 
 function phaseRows(sorted) {
@@ -228,14 +230,40 @@ function outlineRow(i) {
   return i.group ? h("li", { class: "ol-group", text: i.group }) : h("li", {}, outlineLink(i));
 }
 
+const outlineRows = new Map();
+const outlineNow = new Map();
+
+function keptRows(s, rows) {
+  const old = outlineRows.get(s.id) || new Map(), next = new Map();
+  const els = rows.map((i) => {
+    const key = i.group ? `${i.id}\n${i.group}` : JSON.stringify(i);
+    const el = !next.has(key) && old.get(key) || outlineRow(i);
+    next.set(key, el);
+    return el;
+  });
+  outlineRows.set(s.id, next);
+  return els;
+}
+
+function outlineItems(s) {
+  const key = `ol-${s.id}`;
+  return [...keptRows(s, phaseRows(firstPage(key, s.items, (i) => i.id))), remoteMore(s), moreButton(key, s.items.length, "more items", outlineAgain),
+    s.items.length && !filtering() && closedMore(s.id.replace(/^sec-/, ""), "done", () => render())];
+}
+
 function outlineGroup(s) {
   const box = h("details", { class: "fold", id: `ol-${s.id}`, open: filtering() || !s.complete ? "" : false }, h("summary", {}, outlineLink(s)));
   if (box.open) box.dataset.fresh = "";
   if (!filtering()) collapsible(box);
-  const key = `ol-${s.id}`;
-  return h("li", { class: "ol-sec" }, lazy(box, () => h("ul", { class: "ol-items" },
-    ...phaseRows(firstPage(key, s.items, (i) => i.id)).map(outlineRow), remoteMore(s), moreButton(key, s.items.length, "more items", outlineAgain) || "",
-    (s.items.length && !filtering() && closedMore(s.id.replace(/^sec-/, ""), "done", () => render())) || "")));
+  return h("li", { class: "ol-sec" }, lazy(box, () => h("ul", { class: "ol-items" }, ...outlineItems(outlineNow.get(s.id)).filter(Boolean))));
+}
+
+function refill(el, s) {
+  const link = el.querySelector("summary > a");
+  if (link.title !== s.title) link.title = s.title;
+  if (link.textContent !== s.title) link.textContent = s.title;
+  const list = el.querySelector("ul.ol-items");
+  if (list) place(list, outlineItems(s));
 }
 
 export function outlineBoxes() {
@@ -265,19 +293,41 @@ function pageHeads() {
     id: s.id, title: s.querySelector("summary").firstChild.textContent.trim(), list: s.dataset.outline }));
 }
 
+const outlineGroups = new Map();
+
+function keptGroup(s, sig, phases) {
+  const key = `ol-${s.id}`;
+  wantedIn(key, s.items, (i) => i.id);
+  outlineNow.set(s.id, s);
+  const inputs = [sig, limit(key), filtering(), s.id === "sec-tasks" ? phases : ""].join("\n");
+  const shell = [s.complete, filtering()].join();
+  const hit = outlineGroups.get(s.id);
+  if (hit && hit.inputs === inputs) return hit.el;
+  if (hit && hit.shell === shell) {
+    refill(hit.el, s);
+    outlineGroups.set(s.id, { inputs, shell, el: hit.el });
+    return hit.el;
+  }
+  const el = outlineGroup(s);
+  outlineGroups.set(s.id, { inputs, shell, el });
+  return el;
+}
+
 export function renderOutline() {
   const tree = outlineOf(doc, pageHeads());
   const shaped = shapeOutline(tree);
   const nav = $("outline");
-  const sig = JSON.stringify(shaped);
+  const sigs = shaped.map((s) => JSON.stringify(s));
+  const sig = `[${sigs.join(",")}]`;
   if (nav.dataset.sig !== sig) {
     nav.dataset.sig = sig;
     $("jump-to").replaceChildren(h("option", { value: "", text: "Choose a section" }), ...tree.map((s) => h("option", { value: s.id, text: s.title })));
     if (!$("outline-filter")) nav.replaceChildren(outlineTools());
-    const list = h("ul", { id: "outline-list" }, ...shaped.map(outlineGroup));
+    const phases = doc.phases.map((p) => `${p.id} ${p.title}`).join("\n");
+    const groups = shaped.map((s, n) => keptGroup(s, sigs[n], phases));
     const old = $("outline-list");
-    if (old) old.replaceWith(list);
-    else nav.append(list);
+    if (old) place(old, groups);
+    else nav.append(h("ul", { id: "outline-list" }, ...groups));
   }
   scheduleOutline();
   markPending();
