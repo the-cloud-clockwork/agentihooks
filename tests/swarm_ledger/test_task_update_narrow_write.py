@@ -255,6 +255,35 @@ def test_a_claim_the_narrow_write_cannot_prove_falls_back_with_nothing_written(t
 
 
 @pytest.mark.feature(FEATURE)
+def test_the_narrow_write_returns_only_the_touched_row_and_the_new_revision(tmp_path) -> None:
+    repository = large(tmp_path, tasks=50)
+    written = repository.apply_task_update(LARGE, claim_op("t7"))
+    assert written is not None and written.rejected == []
+    assert (written.task["id"], written.task["claimed_by"]) == ("t7", CLAIMANT)
+    assert [task["id"] for task in written.state["tasks"]] == ["t7"]
+    assert "phases" not in written.state and "chat" not in written.state
+    assert written.state["_meta"]["rev"] == repository.read(LARGE, "_meta.rev")["_meta"]["rev"]
+
+
+@pytest.mark.feature(FEATURE)
+def test_only_a_single_guarded_hub_claim_takes_the_narrow_path() -> None:
+    hub = {"operation_id": "o", "ops": [claim_op()], "guards": {}}
+    assert mutations.claim(hub) == claim_op()
+    assert mutations.claim({**hub, "ops": [claim_op(controller_epoch=3)]}) is not None
+    refused = [
+        {**hub, "ops": [claim_op(), claim_op(id="second")]},
+        {**hub, "changes": [{"path": "tasks/t1/done", "value": True}]},
+        {**hub, "ops": [claim_op(worker_claim={"agent": "a"})]},
+        {**hub, "ops": [claim_op(by="engineer@abc123-0001")]},
+        {**hub, "ops": [{key: value for key, value in claim_op().items() if key not in ("if_state", "if_match")}]},
+        {**hub, "ops": [{**claim_op(), "fields": {"state": "claimed", "claimed_by": CLAIMANT, "kind": "code"}}]},
+        {**hub, "ops": [{**claim_op(), "fields": {"state": "done"}}]},
+        {**hub, "ops": [{"op": "task_add", "id": "a", "by": "swarm", "task": "t9", "title": "x", "lane": "eng"}]},
+    ]
+    assert [mutations.claim(payload) for payload in refused] == [None] * len(refused)
+
+
+@pytest.mark.feature(FEATURE)
 @pytest.mark.parametrize(("published", "written", "reads"), [(True, "row", 1), (False, "row", 0), (True, None, 0)])
 def test_publishing_refreshes_only_a_published_ledger_after_a_narrow_write(published, written, reads) -> None:
     seen = []

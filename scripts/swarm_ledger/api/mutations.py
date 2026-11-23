@@ -1,12 +1,22 @@
+from collections.abc import Callable
+from typing import Any, cast
 from urllib.parse import unquote
 
-from scripts.swarm_ledger import ledger_task_duplicates, ports, request_metrics
+from scripts.swarm_ledger import ledger_blockers, ledger_task_duplicates, ports, request_metrics
 
 from . import receipts, resources, schemas
 from .errors import APIError
 from .services import LedgerCore, Services
 
 WRITES = ("add", "edit", "add_item", "retext")
+CLAIM_KEYS = frozenset({"op", "id", "by", "item", "fields", "if_state", "if_match", "controller_epoch", "worktree"})
+CLAIM_FIELDS = frozenset({"state", "claimed_by", "workspace", "branch"})
+CLAIM_STATES = ("open", "claimed", "pr")
+CLAIMANTS = ("swarm",)
+ITEM = ledger_blockers.ITEM_RE
+ITEMS = ("phases", "questions", "followups", "tasks")
+Doc = dict[str, Any]
+Warnings = Callable[[], list[str]]
 
 
 class GuardedOperations:
@@ -93,11 +103,69 @@ def stamped(payload: dict, worktree: str) -> dict:
     return {**payload, "ops": [_stamp(op, worktree) for op in payload["ops"]]}
 
 
-def apply(services: Services, slug: str, principal: str, payload: dict, worktree: str = "") -> dict:
+def apply(services: Services, slug: str, principal: str, payload: Doc, worktree: str = "") -> Doc:
+    if claim(payload) is not None and hasattr(services.repository, "apply_task_update"):
+        reply = apply_claim(services, slug, principal, payload, worktree)
+        if reply is not None:
+            return reply
     with request_metrics.step("guard_read"):
-        doc = services.repository.current(slug).state
-    task_ids = tuple(t["id"] for t in doc.get("tasks", []))
-    operations = [
+        doc: Doc = services.repository.current(slug).state  # pyright: ignore[reportUnknownMemberType]
+    task_ids = tuple(task["id"] for task in doc.get("tasks", []))
+    payload, operations = checked(
+        services, (slug, principal, worktree), payload, task_ids, lambda: doc["_meta"].get("warnings", [])
+    )
+    screen = ledger_task_duplicates.screen(doc, operations)
+    with request_metrics.step("write_gate"):
+        fence, gate = gated(services, slug, payload, screen)
+    state: Doc
+    rejected: list[str]
+    state, rejected = services.repository.apply_ops(slug, ops=operations, gate=gate, copy_state=False)
+    with request_metrics.step("publish"):
+        published(services, slug, (fence, rejected), state)
+    tasks = {op["item"].split("/")[1] for op in operations if op["op"] == "task_update"}
+    rows = [cast(Doc, resources.project(row)) for row in state.get("tasks", []) if row["id"] in tasks]
+    return answer(rows if tasks else None, operations, rejected, state["_meta"], screen)
+
+
+def claim(payload: Doc) -> Doc | None:
+    """The one hub claim shaped task update a payload carries, or None."""
+    ops: Any = payload.get("ops")
+    if payload.get("changes") or not isinstance(ops, list) or len(cast(list[Any], ops)) != 1:
+        return None
+    op: Any = cast(list[Any], ops)[0]
+    if not isinstance(op, dict) or cast(Doc, op).get("op") != "task_update" or set(cast(Doc, op)) - CLAIM_KEYS:
+        return None
+    shaped = cast(Doc, op)
+    fields: Any = shaped.get("fields")
+    if not isinstance(fields, dict) or not fields or set(cast(Doc, fields)) - CLAIM_FIELDS:
+        return None
+    if shaped.get("by") not in CLAIMANTS or not (shaped.get("if_state") or shaped.get("if_match")):
+        return None
+    return shaped if cast(Doc, fields).get("state", "open") in CLAIM_STATES else None
+
+
+def apply_claim(services: Services, slug: str, principal: str, payload: Doc, worktree: str) -> Doc | None:
+    """The reply to a hub claim written on its task's own rows, or None when it needs the whole write."""
+    payload, operations = checked(
+        services, (slug, principal, worktree), payload, (), lambda: stored_warnings(services, slug)
+    )
+    screen = ledger_task_duplicates.screen({}, operations)
+    with request_metrics.step("write_gate"):
+        fence, gate = gated(services, slug, payload, screen)
+    written = services.repository.apply_task_update(slug, operations[0], gate)
+    if written is None:
+        return None
+    with request_metrics.step("publish"):
+        published(services, slug, (fence, written.rejected), hook_state(services, slug, written.state))
+    rows = [cast(Doc, resources.project(written.task))]
+    return answer(rows, operations, written.rejected, written.state["_meta"], screen)
+
+
+def checked(
+    services: Services, caller: tuple[str, str, str], payload: Doc, task_ids: tuple[str, ...], warnings: Warnings
+) -> tuple[Doc, list[Doc]]:
+    slug, principal, worktree = caller
+    operations: list[Doc] = [
         {key: value for key, value in op.items() if key != "worktree"}
         for op in schemas.check_operations(stamped(payload, worktree), services.ledger.core, task_ids)
     ]
@@ -108,38 +176,72 @@ def apply(services: Services, slug: str, principal: str, payload: dict, worktree
     if refusals:
         details = {
             "rejected": [op["id"] for op in operations],
-            "_meta": {"warnings": [*doc["_meta"].get("warnings", [])[:10], *refusals]},
+            "_meta": {"warnings": [*warnings()[:10], *refusals]},
         }
         raise APIError(403, "forbidden", "Caller cannot perform this operation as its author", details)
     services.media.resolve_media(slug, operations)
     services.media.resolve_artifacts(slug, operations)
-    screen = ledger_task_duplicates.screen(doc, operations)
-    with request_metrics.step("write_gate"):
-        fence = services.ledger.write_gate(slug)
-        gate = ledger_task_duplicates.Gate(
-            screen,
-            GuardedOperations(
-                payload, fence, services.ledger.core, lambda epoch: services.ledger.authority.fence(slug, epoch), slug
-            ),
-        )
-    state, rejected = services.repository.apply_ops(slug, ops=operations, gate=gate, copy_state=False)
-    with request_metrics.step("publish"):
-        fence.publish(rejected)
-        services.ledger.relay_to_inbox(slug, state)
-        services.swarm.doctor_phrase(slug, state)
-        services.ledger.deliver_alerts(slug, state)
-    tasks = {op["item"].split("/")[1] for op in operations if op["op"] == "task_update"}
-    rows = [resources.project(row) for row in state.get("tasks", []) if row["id"] in tasks]
-    reply = {
-        **({"tasks": rows} if tasks else {}),
+    return payload, operations
+
+
+def stored_warnings(services: Services, slug: str) -> list[str]:
+    stored: Doc = services.repository.read(slug, "_meta.warnings")
+    return stored.get("_meta", {}).get("warnings", [])
+
+
+def gated(services: Services, slug: str, payload: Doc, screen: ledger_task_duplicates.Screen) -> tuple[Any, Any]:
+    fence: Any = services.ledger.write_gate(slug)
+    gate = ledger_task_duplicates.Gate(
+        screen,
+        GuardedOperations(
+            payload, fence, services.ledger.core, lambda epoch: services.ledger.authority.fence(slug, epoch), slug
+        ),
+    )
+    return fence, gate
+
+
+def published(services: Services, slug: str, decided: tuple[Any, list[str]], state: Doc) -> None:
+    fence, rejected = decided
+    fence.publish(rejected)
+    services.ledger.relay_to_inbox(slug, state)
+    services.swarm.doctor_phrase(slug, state)
+    services.ledger.deliver_alerts(slug, state)
+
+
+def hook_state(services: Services, slug: str, state: Doc) -> Doc:
+    """The written part of the ledger plus the rows the relay and alert delivery name since the oldest held
+    revision."""
+    meta: Doc = state["_meta"]
+    held: dict[str, dict[str, list[int]]] = services.repository.held_revisions()
+    since = min([meta["rev"], *(rev for slugs in held.values() for rev in slugs.get(slug, []))])
+    events: list[Doc] = meta.get("events", [])
+    alerts: list[Doc] = state.get("alerts", [])
+    named = {
+        "/".join(event["target"].split("/")[:2])
+        for event in events
+        if since <= event.get("rev", -1) and event.get("by") == "operator" and event["target"].startswith("tasks/")
+    } | {
+        alert["item"]
+        for alert in alerts
+        if since <= alert.get("rev", -1) and alert.get("state") == "open" and ITEM.match(alert.get("item") or "")
+    }
+    held_rows = {f"{name}/{row['id']}" for name in ITEMS for row in state.get(name, [])}
+    missing = sorted(named - held_rows)
+    if not missing:
+        return state
+    found: Doc = services.repository.read(slug, *missing)
+    return {**state, **{name: [*state.get(name, []), *found[name]] for name in ITEMS if found.get(name)}}
+
+
+def answer(
+    rows: list[Doc] | None, operations: list[Doc], rejected: list[str], meta: Doc, screen: ledger_task_duplicates.Screen
+) -> Doc:
+    warnings: list[str] = [*meta.get("warnings", [])[:20], *screen.warnings.values()]
+    reply: Doc = {
+        **({"tasks": rows} if rows is not None else {}),
         "applied": [op["id"] for op in operations if op["id"] not in rejected],
         "rejected": rejected,
-        "_meta": {
-            "rev": state["_meta"]["rev"],
-            "warnings": [
-                warning[:1000] for warning in [*state["_meta"].get("warnings", [])[:20], *screen.warnings.values()]
-            ],
-        },
+        "_meta": {"rev": meta["rev"], "warnings": [warning[:1000] for warning in warnings]},
     }
     return bounded_ack(reply)
 

@@ -1,0 +1,28 @@
+rules:
+  - id: ledger-task-update-narrow-reads-whole-state
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hub claim is written on its task's own stored rows. Read the named rows
+      with partial_rows, stored_at or the repository read of named keys; a whole
+      ledger read in the narrow claim path brings back the slow claim write.
+    paths:
+      include:
+        - /scripts/swarm_ledger/api/mutations.py
+        - /scripts/swarm_ledger/repository/task_write.py
+        - ledger-task-update-narrow-reads-whole-state.py
+    patterns:
+      - pattern-inside: |
+          def $FUNCTION(...):
+              ...
+      - metavariable-regex:
+          metavariable: $FUNCTION
+          regex: ^(apply_claim|hook_state|update|persist|admitted|placed)$
+      - pattern-either:
+          - pattern: $REPOSITORY.current(...)
+          - pattern: $REPOSITORY.get_document(...)
+          - pattern: $REPOSITORY.export_document(...)
+          - pattern: $REPOSITORY._entry(...)
+          - pattern: $ENTRY.for_write()
+          - pattern: load(...)
+          - pattern: read_rows(...)

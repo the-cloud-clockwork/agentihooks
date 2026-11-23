@@ -1,9 +1,10 @@
 import sys
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from scripts.swarm_ledger.repository.entry import Entry
+    from scripts.swarm_ledger.repository.task_write import Written
 
 
 class Publishing:
@@ -74,6 +75,12 @@ class Publishing:
         state, rejected = self.inner.apply_ops(slug, changes=changes, ops=ops, gate=gate, **options)
         self.current(slug)
         return state, rejected
+
+    def apply_task_update(self, slug: str, op: dict[str, Any], gate: object = None) -> "Written | None":
+        written = cast("Written | None", self.inner.apply_task_update(slug, op, gate))  # pyright: ignore[reportUnknownMemberType]
+        if written is not None and slug in self.published:  # pyright: ignore[reportUnknownMemberType]
+            self.current(slug)
+        return written
 
 
 SHARED = {}

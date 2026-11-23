@@ -9,7 +9,7 @@ import weakref
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm_ledger import request_metrics
 
@@ -20,6 +20,9 @@ from .fragments import document
 from .rows import TABLES, assemble, diff, encode, flatten, load, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
 from .writer_copy import written
+
+if TYPE_CHECKING:
+    from .task_write import Written
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS registry (slug TEXT, path TEXT, value TEXT, PRIMARY KEY(slug,path));
@@ -117,9 +120,9 @@ def scope(parts: list) -> tuple[list, str]:
     return [encode(parts[:depth]) for depth in range(len(parts) + 1)], encode(parts)[:-1] + ","
 
 
-def read_partial(connection, slug: str, keys: tuple) -> dict:
-    """Rows under each key path only, assembled; `_meta.events` is filled from the events table."""
-    rows = {}
+def partial_rows(connection: Any, slug: str, keys: tuple[list[Any], ...]) -> dict[str, tuple[Any, ...]]:
+    """The stored rows under each key path and of every ancestor of it, by path."""
+    rows: dict[str, tuple[Any, ...]] = {}
     for parts in keys:
         exact, prefix = scope(parts)
         marks = ",".join("?" * len(exact))
@@ -130,6 +133,12 @@ def read_partial(connection, slug: str, keys: tuple) -> dict:
                 (slug, *exact, prefix, prefix + PATH_END),
             ):
                 rows[path] = (table, parent, key, position, kind, value)
+    return rows
+
+
+def read_partial(connection, slug: str, keys: tuple) -> dict:
+    """Rows under each key path only, assembled; `_meta.events` is filled from the events table."""
+    rows = partial_rows(connection, slug, keys)
     if "[]" not in rows:
         raise Missing(slug)
     state = assemble(rows)
@@ -760,6 +769,7 @@ class SQLiteLedgerRepository:
             if state.get("tasks", []) != entry.state.get("tasks", [])
             else previous.get("task_revision", previous["rev"])
         )
+        self.admit(connection, state)
         fragments, writer = written(state, entry.fragments)
         state = fragments.value
         before, after = diff(*(without_events(value) for value in (entry.state, state)))
@@ -781,6 +791,23 @@ class SQLiteLedgerRepository:
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),
         )
         return Entry(generation, None, state, fragments, writer)
+
+    def admit(self, connection: sqlite3.Connection, state: dict[str, Any]) -> None:
+        """Refuse or annotate a write before its rows are stored; a SQLite store admits every writer."""
+
+    def apply_task_update(self, slug: str, op: dict[str, Any], gate: Any = None) -> "Written | None":
+        """Apply one guarded claim shaped task update on the task's own stored rows and return the touched row and the
+        new revision; None, with nothing written, when the update needs the whole ledger write."""
+        from . import task_write
+
+        self._adopt(slug)
+        lock: Any = self.domain.LOCK.ledger(slug)  # pyright: ignore[reportUnknownMemberType]
+        with request_metrics.locked(lock), self.connect() as connection:
+            held: Any = connection
+            with held:
+                request_metrics.begin_ledger(held, slug, BEGIN_IMMEDIATE)
+                with request_metrics.step("apply_locked"):
+                    return task_write.update(self, held, slug, op, gate)
 
     def _insert(self, connection, slug: str, state: dict, token: str, seeds: dict | None = None) -> None:
         previous = connection.execute(GENERATION, (slug,)).fetchone()
