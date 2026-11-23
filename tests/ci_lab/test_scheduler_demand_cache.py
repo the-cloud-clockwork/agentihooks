@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -21,16 +21,23 @@ def grades(lab: Callable[..., Run]) -> Run:
     return run
 
 
-def _parses(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+def _reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Return the runs whose demand each build read again, from a stored demand record or a parsed grade document."""
     calls: list[str] = []
-    parse = scheduler._parse
+    parse, fetch = scheduler._parse, scheduler._records
 
     def counted(raw: str | bytes) -> scheduler.State:
         state = parse(raw)
         calls.append(state.run)
         return state
 
+    def fetched(client: Any, runs: Sequence[str]) -> list[str | None]:
+        records = fetch(client, runs)
+        calls.extend(run for run, record in zip(runs, records) if record is not None)
+        return records
+
     monkeypatch.setattr(scheduler, "_parse", counted)
+    monkeypatch.setattr(scheduler, "_records", fetched)
     return calls
 
 
@@ -74,7 +81,7 @@ def test_an_unchanged_load_equals_a_fresh_build_without_parsing_grades(
 ) -> None:
     first = grades.engine.load(1000)
     fresh = grades.lab.build(0, Policy(), None).load(1000)
-    calls = _parses(monkeypatch)
+    calls = _reads(monkeypatch)
 
     assert grades.engine.load(1000) == first == fresh
     assert first.cache_hits == {}
@@ -89,7 +96,7 @@ def test_a_saved_grade_is_reparsed_and_changes_the_next_load_demand(
 ) -> None:
     changed = grades.grade(HEAD_A)
     first = grades.engine.load(1000)
-    calls = _parses(monkeypatch)
+    calls = _reads(monkeypatch)
     changed.tier = 1
     grades.engine.save(changed)
 
@@ -111,7 +118,7 @@ def test_a_run_leaving_the_live_set_is_parsed_again_if_it_returns(
 ) -> None:
     runs = [grades.grade(head).run for head in removed]
     first = grades.engine.load(1000)
-    calls = _parses(monkeypatch)
+    calls = _reads(monkeypatch)
     grades.lab.client.srem(scheduler.LIVE, *runs)
 
     remaining = grades.engine.load(1000)
@@ -132,8 +139,10 @@ def test_a_missing_grade_stops_contributing_and_is_parsed_when_restored(
     states = {state.run: state for state in (grades.grade(HEAD_A), grades.grade(HEAD_B))}
     missing = states[min(states)]
     first = grades.engine.load(1000)
-    calls = _parses(monkeypatch)
+    calls = _reads(monkeypatch)
     grades.lab.client.delete(scheduler.GRADES + missing.run)
+    grades.lab.client.hdel(scheduler.REVISIONS, missing.run)
+    grades.lab.client.hdel(scheduler.RECORDS, missing.run)
 
     remaining = grades.engine.load(1000)
     assert remaining.cache_misses == {"promotion": 1}

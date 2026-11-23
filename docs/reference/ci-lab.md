@@ -24,7 +24,7 @@ worker's PriorityClass is a cluster object outside that module;
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
 | `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain; serves `/metrics` on 9108 from its own registry until the drain ends, and exits at start when it cannot bind 9108 |
-| none | `python -m scripts.ci_lab.load_measure [--builds N]` | Reads only: runs `Scheduler.load` N times, 3 by default, against the Redis that `CI_LAB_REDIS_URL` names and prints each build's processor and wall seconds, the live grade count and the grade parses as JSON (see [Load snapshot](#load-snapshot)) |
+| none | `python -m scripts.ci_lab.load_measure [--builds N]` | Reads only: runs `Scheduler.load` N times, 3 by default, against the Redis that `CI_LAB_REDIS_URL` names and prints each build's processor and wall seconds, grade documents fetched and demand record bytes read, the live grade count and the grade parses as JSON (see [Load snapshot](#load-snapshot)) |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
@@ -385,15 +385,23 @@ one JSON object:
 | `builds` | Load builds run |
 | `grades` | Live grades, the size of the live grade set; a live run whose grade document is gone counts here and is never parsed |
 | `process_seconds`, `wall_seconds` | Each build's `time.process_time` and `time.perf_counter` seconds, one entry per build |
-| `parses` | Calls of the scheduler's grade parser during the builds; one scheduler serves every build, so the first build parses each live grade with a stored document once and later builds parse only grades whose stored document changed |
+| `parses` | Calls of the scheduler's grade parser during the builds; a build parses only live grades that have a stored document and no demand record, so it is 0 once every live grade has a record |
+| `documents_fetched` | Grade documents each build read, one entry per build; only a live grade with no demand record is read from its document, on every build until a save records it |
+| `record_bytes_read` | Demand record bytes each build read, one entry per build; the first build reads every live grade's record and later builds read only records whose revision moved |
 | `leaves_out` | What the figures leave out: the offer prune round trip of each build |
 
 The command reads only. A load prunes stale worker offers through the queue's prune script, its one write, so the
 measured scheduler's queue keeps every offer; the offers read keeps only offers made inside the ready window, so
 each build returns the load the scheduler builds, and the figures leave out that one prune round trip per build.
-Every build reads the whole pending and leased queues and every live grade document. The first build runs on a
-cold demand cache and parses each live grade with a stored document; builds after the first run on the warm demand
-cache, so the first `process_seconds` and `wall_seconds` entries are the cold cost and later entries the warm cost.
+Every build reads the whole pending and leased queues, the live grade set and the whole grade revisions hash. A
+build keeps each live grade's demand contribution while its stored revision equals the revision kept with it; for
+every other live grade it reads the demand record with one `HMGET` per grade in one pipeline that opens no
+transaction, and keeps the contribution under the revision the record carries. A live grade with no demand record,
+saved by a release before demand records, is read from its grade document and parsed on every build until a save
+records it; a live grade with neither counts nowhere. No build reads or hashes a grade document that has a record.
+The first build runs on a cold demand cache and reads every live grade's record; builds after the first run on the
+warm demand cache, so the first `process_seconds` and `wall_seconds` entries are the cold cost and later entries
+the warm cost.
 To measure the live scheduler, run it in the scheduler pod, which carries `CI_LAB_REDIS_URL`, with few builds,
 since it shares the pod's memory limit:
 

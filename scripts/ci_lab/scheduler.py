@@ -15,7 +15,6 @@ commit's grades on the scheduler port, metrics on the metrics port, both from on
 """
 
 import argparse
-import hashlib
 import io
 import json
 import logging
@@ -467,16 +466,37 @@ def _parse(raw: str | bytes) -> State:
 
 @dataclass(frozen=True)
 class _Demand:
-    digest: bytes
+    revision: int
     tier: int
     hits: int
     jobs: tuple[str, ...]
 
 
-def _grade_demand(raw: str | bytes, fingerprint: bytes) -> _Demand:
+def _grade_demand(raw: str | bytes, revision: int) -> _Demand:
     state = _parse(raw)
     jobs = tuple(slot.job for slot in state.units.values() if slot.job)
-    return _Demand(fingerprint, state.tier, len(state.units) - len(jobs), jobs)
+    return _Demand(revision, state.tier, len(state.units) - len(jobs), jobs)
+
+
+def _record_demand(record: str | bytes) -> _Demand:
+    """Read a stored demand record: the revision it was written at, its grade's tier, the units the verdict store
+    answered and the queue jobs of the rest."""
+    data = json.loads(record)
+    return _Demand(data["revision"], data["tier"], data["hits"], tuple(data["jobs"]))
+
+
+def _records(client: Any, runs: Sequence[str]) -> list[str | None]:
+    """Return each run's stored demand record, or None for a run with none, read with one HMGET per run in a pipeline
+    that opens no transaction."""
+    pipe = client.pipeline(transaction=False)
+    for run in runs:
+        pipe.hmget(RECORDS, run)
+    return [record for (record,) in pipe.execute()]
+
+
+def _document(client: Any, run: str) -> str | None:
+    """Return a grade's stored state document, or None for a run with none."""
+    return client.get(GRADES + run)
 
 
 def _evidence(state: State) -> evidence.GradeEvidence:
@@ -665,16 +685,7 @@ class Scheduler:
         tiers: dict[str, int] = {}
         hits: Counter[str] = Counter()
         misses: Counter[str] = Counter()
-        cache: dict[str, _Demand] = {}
-        for run in sorted(self.client.smembers(LIVE)):
-            raw = self.client.get(f"{GRADES}{run}")
-            if raw is None:
-                continue
-            fingerprint = hashlib.sha256(raw.encode() if isinstance(raw, str) else raw).digest()
-            contribution = self._demand_cache.get(run)
-            if contribution is None or contribution.digest != fingerprint:
-                contribution = _grade_demand(raw, fingerprint)
-            cache[run] = contribution
+        for contribution in self._contributions(sorted(self.client.smembers(LIVE))):
             name = CLASSES[contribution.tier]
             if contribution.hits:
                 hits[name] += contribution.hits
@@ -682,8 +693,26 @@ class Scheduler:
                 misses[name] += len(contribution.jobs)
             for job in contribution.jobs:
                 tiers[job] = min(tiers.get(job, contribution.tier), contribution.tier)
-        self._demand_cache = cache
         return tiers, hits, misses
+
+    def _contributions(self, live: list[str]) -> Iterable[_Demand]:
+        """Return each live run's demand contribution and keep them for the next build: the kept one while the stored
+        revision is unchanged, else the run's stored demand record under the revision it carries, else its parsed grade
+        document under revision 0, which no stored revision matches; a run with neither contributes nothing."""
+        revisions = self.client.hgetall(REVISIONS)
+        cache = {
+            run: demand
+            for run in live
+            if (demand := self._demand_cache.get(run)) is not None and revisions.get(run) == str(demand.revision)
+        }
+        moved = [run for run in live if run not in cache]
+        for run, record in zip(moved, _records(self.client, moved)):
+            if record is not None:
+                cache[run] = _record_demand(record)
+            elif (raw := _document(self.client, run)) is not None:
+                cache[run] = _grade_demand(raw, 0)
+        self._demand_cache = cache
+        return cache.values()
 
     def grades_of(self, head: str) -> list[dict[str, Any]]:
         """Return every grade of a commit by run: its live grades and the closed ones its evidence markers name."""

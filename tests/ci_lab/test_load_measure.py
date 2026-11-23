@@ -131,6 +131,7 @@ def test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_pars
     lab: Callable[..., Run],
 ) -> None:
     run = _live(lab)
+    helpers = (scheduler._parse, scheduler._records, scheduler._document)
     parse = scheduler._parse
     engine = load_measure.measured_scheduler(run.lab.client)
     process = iter([1.0, 1.5, 2.0, 2.25]).__next__
@@ -143,3 +144,4 @@ def test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_pars
     with pytest.raises(json.JSONDecodeError):
         load_measure.measure(engine, 1, 1000, time.process_time, time.perf_counter)
     assert scheduler._parse is parse
+    assert (scheduler._parse, scheduler._records, scheduler._document) == helpers
