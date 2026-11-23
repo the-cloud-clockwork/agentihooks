@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__short_flags:55a56faa35239a98fe425791e2c7423000b988c68a962a5b01cc085bc82dc640": {
+    "reader": "standards_reader",
+    "reason": "Its two callers intersect the result with \"clt\" (packers) and \"xcruA\" (tar); neither holds \"X\"."
+  }
+}

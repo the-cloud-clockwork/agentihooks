@@ -2460,7 +2460,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         )
 
 
-def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
+def test_mutation_shards_reuse_stats_collected_once_in_planned_parts() -> None:
     jobs = _mutation_workflow()["jobs"]
     plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation-shard"]
     assert plan["outputs"]["stats_parts"] == "${{ steps.plan.outputs.stats_parts }}"
@@ -2538,7 +2538,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     assert upload["with"]["path"] == ".mutation-stats/"
     assert upload["with"]["include-hidden-files"] is True
     assert upload["with"]["if-no-files-found"] == "error"
-    evidence = stats_steps[len(setup) + 2]
+    evidence = next(step for step in stats_steps if step.get("name") == "Upload stats evidence")
     assert evidence["if"] == "failure()"
     assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
     assert evidence["uses"] == "./.workflow-revision/.github/actions/retry-upload"
