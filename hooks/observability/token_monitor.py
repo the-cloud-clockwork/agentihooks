@@ -165,7 +165,7 @@ def update_context_metrics(payload: dict[str, Any]) -> str:
                 "last_updated": time.time(),
             }
             persist_token_metrics(session_id, metrics)
-            record_tokens(session_id, fill_pct, burn_rate, time.time())
+            record_tokens(session_id, fill_pct, burn_rate, time.time(), os.environ)
 
         return status_line
 
@@ -174,7 +174,9 @@ def update_context_metrics(payload: dict[str, Any]) -> str:
         return "ctx: ?"
 
 
-def record_tokens(session_id: str, fill_pct: float, burn_rate: float | None, now_s: float) -> None:
+def record_tokens(
+    session_id: str, fill_pct: float, burn_rate: float | None, now_s: float, environ: Mapping[str, str]
+) -> None:
     """Writes the session's last fill and burn rate into its presence seen record for the hive daemon to export,
     keeping every presence key and giving a record without one a seen time; a failed disk write never reaches the
     caller."""

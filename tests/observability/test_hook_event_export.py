@@ -79,8 +79,8 @@ def test_hook_event_is_exported_before_the_hook_process_exits(collector, tmp_pat
 @pytest.mark.feature("tokens-gauges-hive-daemon")
 @pytest.mark.parametrize("target", ["claude", "codex"])
 def test_native_token_measurements_stay_in_the_seen_record_and_leave_the_hook_process_unsent(
-    collector: tuple[str, list[object]], tmp_path: Path, target: str
-) -> None:
+    collector, tmp_path, target
+):
     endpoint, paths = collector
     codex_home = tmp_path / "codex"
     sessions = codex_home / "sessions" / "2026" / "10" / "07"
@@ -151,6 +151,10 @@ def test_native_token_measurements_stay_in_the_seen_record_and_leave_the_hook_pr
     record = json.loads((tmp_path / "home" / "telemetry" / "presence" / f"native-{target}.json").read_text())
     assert record["tokens"]["session_id"] == "native-" + target
     assert record["tokens"]["fill_pct"] == 25.0
+    assert record["tokens"]["correlation"] == {
+        "agentihooks.correlation.agent.name": "proof-life",
+        "agentihooks.correlation.profile.resolved": "engineer",
+    }
 
 
 def test_flush_drains_every_provider(monkeypatch):

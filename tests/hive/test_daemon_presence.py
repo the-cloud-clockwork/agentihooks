@@ -164,8 +164,8 @@ def test_a_daemon_pass_sends_the_last_token_fill_and_burn_rate_under_the_session
 ) -> None:
     calls = recorded(monkeypatch)
     presence.agent("sess-1", ENV, 1_000.0)
-    token_monitor.record_tokens("sess-1", 20.0, 900.0, 1_000.0)
-    token_monitor.record_tokens("sess-1", 25.5, 1_200.0, 1_001.0)
+    token_monitor.record_tokens("sess-1", 20.0, 900.0, 1_000.0, {})
+    token_monitor.record_tokens("sess-1", 25.5, 1_200.0, 1_001.0, {})
     calls.clear()
     daemon_pass(monkeypatch, 1_180_000)
     assert calls == [
@@ -178,8 +178,8 @@ def test_a_daemon_pass_sends_the_last_token_fill_and_burn_rate_under_the_session
 @pytest.mark.feature("tokens-gauges-hive-daemon")
 def test_a_daemon_pass_sends_only_the_fill_for_a_record_without_a_burn_rate(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = recorded(monkeypatch)
-    token_monitor.record_tokens("sess-2", 10.0, None, 1_000.0)
-    daemon_pass(monkeypatch, 1_010_000)
+    token_monitor.record_tokens("sess-2", 10.0, None, 1_000.0, {})
+    daemon_pass(monkeypatch, 1_180_000)
     assert calls == [("agentihooks.tokens.fill_pct", 10.0, {"session.id": "sess-2"})]
 
 
@@ -188,6 +188,44 @@ def test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = recorded(monkeypatch)
-    token_monitor.record_tokens("sess-3", 10.0, 5.0, 1_000.0)
+    token_monitor.record_tokens("sess-3", 10.0, 5.0, 1_000.0, {})
     daemon_pass(monkeypatch, 1_181_000)
     assert calls == []
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_the_daemon_token_gauges_carry_the_session_agent_and_profile_from_the_seen_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = recorded(monkeypatch)
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"state": "validated", "validation": {"profile": "engineer"}}))
+    token_monitor.record_tokens("sess-4", 30.0, 700.0, 1_000.0, {**ENV, "AGENTIHOOKS_PROFILE_REPORT": str(report)})
+    daemon_pass(monkeypatch, 1_010_000)
+    session = {
+        "session.id": "sess-4",
+        "agentihooks.correlation.agent.name": "engineer@1-2",
+        "agentihooks.correlation.profile.resolved": "engineer",
+    }
+    assert calls == [
+        ("agentihooks.tokens.fill_pct", 30.0, session),
+        ("agentihooks.tokens.burn_rate", 700.0, session),
+    ]
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_daemon_pass_skips_token_values_it_cannot_read_and_sends_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = recorded(monkeypatch)
+    seen_folder().mkdir(parents=True, exist_ok=True)
+    fresh = {"fill_pct": 5.0, "burn_rate": None, "at_s": 1_000.0}
+    records = {
+        "sess-a": {"seen_s": 1_000.0, "tokens": {"session_id": "sess-a", "at_s": 1_000.0}},
+        "sess-b": {"seen_s": 1_000.0, "tokens": fresh},
+        "sess-c": {"seen_s": 1_000.0, "tokens": [5.0]},
+        "sess-d": {"seen_s": 1_000.0},
+        "sess-e": {"seen_s": 1_000.0, "tokens": {**fresh, "session_id": "sess-e"}},
+    }
+    for name, record in records.items():
+        (seen_folder() / f"{name}.json").write_text(json.dumps(record))
+    daemon_pass(monkeypatch, 1_010_000)
+    assert calls == [("agentihooks.tokens.fill_pct", 5.0, {"session.id": "sess-e"})]

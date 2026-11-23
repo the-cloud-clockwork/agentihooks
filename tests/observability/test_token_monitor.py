@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
 import pytest
@@ -186,7 +187,13 @@ def test_native_statusline_writes_its_fill_into_the_seen_record_without_otel(
         statusline.main()
     gauge.assert_not_called()
     flush.assert_not_called()
-    assert _tokens("native-claude") == {"session_id": "native-claude", "fill_pct": 25.0, "burn_rate": None, "at_s": ANY}
+    assert _tokens("native-claude") == {
+        "session_id": "native-claude",
+        "fill_pct": 25.0,
+        "burn_rate": None,
+        "at_s": ANY,
+        "correlation": {},
+    }
     assert "25%" in capsys.readouterr().out
 
 
@@ -240,12 +247,19 @@ def test_codex_context_growth_and_compaction(monkeypatch, event):
         patch("hooks.observability.token_monitor._get_previous_used", side_effect=[previous, 50000]),
         patch("hooks.observability.token_monitor.persist_token_metrics") as persist,
         patch("hooks.observability.otel.record_gauge") as gauge,
+        patch("hooks.observability.token_monitor.time", SimpleNamespace(time=lambda: 1_234.5)),
     ):
         payload = {"session_id": "growth", "hook_event_name": event}
         record_lifecycle_context(payload)
         record_lifecycle_context(payload)
     gauge.assert_not_called()
-    assert _tokens("growth") == {"session_id": "growth", "fill_pct": 5.0, "burn_rate": 0.0, "at_s": ANY}
+    assert _tokens("growth") == {
+        "session_id": "growth",
+        "fill_pct": 5.0,
+        "burn_rate": 0.0,
+        "at_s": 1_234.5,
+        "correlation": {},
+    }
     assert persist.call_args.args[1]["used"] == 10000
 
 
@@ -320,13 +334,14 @@ def test_the_presence_and_token_writers_keep_each_others_values_in_the_seen_reco
 
     monkeypatch.setattr(otel, "record_gauge", lambda *args: None)
     path = presence.seen_dir() / "sess-merge.json"
-    record_tokens("sess-merge", 40.0, 500.0, 1_000.0)
+    record_tokens("sess-merge", 40.0, 500.0, 1_000.0, {})
     assert json.loads(path.read_text())["seen_s"] == 1_000.0
     presence.agent("sess-merge", {"AGENTIHOOKS_HIVE_ID": "hive-1"}, 1_001.0)
-    assert _tokens("sess-merge") == {"session_id": "sess-merge", "fill_pct": 40.0, "burn_rate": 500.0, "at_s": 1_000.0}
-    record_tokens("sess-merge", 41.0, None, 1_002.0)
+    first = {"session_id": "sess-merge", "fill_pct": 40.0, "burn_rate": 500.0, "at_s": 1_000.0, "correlation": {}}
+    assert _tokens("sess-merge") == first
+    record_tokens("sess-merge", 41.0, None, 1_002.0, {})
     record = json.loads(path.read_text())
-    assert record["tokens"] == {"session_id": "sess-merge", "fill_pct": 41.0, "burn_rate": None, "at_s": 1_002.0}
+    assert record["tokens"] == {**first, "fill_pct": 41.0, "burn_rate": None, "at_s": 1_002.0}
     assert record["seen_s"] == 1_001.0
     assert record["attributes"]["session.id"] == "sess-merge"
     assert record["sent_s"] == 1_001.0
