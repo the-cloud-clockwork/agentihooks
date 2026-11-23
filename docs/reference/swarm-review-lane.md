@@ -12,6 +12,9 @@ seats and capacity ceiling alongside `eng`, `ci` and `plan`.
 [Pull request #12916](https://github.com/the-cloud-clockwork/agentihooks/pull/12916)
 added the lane.
 
+For fleet review rules, platform connections and both target configurations,
+see [Reviewer bundle overlay](reviewer-bundle-overlay.md).
+
 ## Names and seats
 
 An agent on this lane has type `reviewer`, for example
