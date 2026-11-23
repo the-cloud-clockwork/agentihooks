@@ -340,9 +340,10 @@ def record(sink: Sink, units: Iterable[UnitRecord], grades: Iterable[GradeRecord
 
 
 class Latest:
-    """The load snapshot the metrics port serves, with the clock reading its build started at. The first read builds
-    it and reads that meet that build wait for it; every later read answers at once with the last finished build.
-    ``refresh``, which the metrics port's serve loop runs between requests, starts one background build once the last
+    """The load snapshot the scheduler ports serve, with the clock reading its build started at. ``start`` builds the
+    first one in the background and ``peek`` answers at once with the last finished build, or None before the first
+    one finishes. A ``read`` before any build builds it and reads that meet that build wait for it; every later read
+    answers at once with the last finished build. ``refresh``, which the metrics port's serve loop runs between requests, starts one background build once the last
     build started at least ``refresh_ms`` ago and none runs, so a failed build keeps the last snapshot and the next
     starts an interval after it."""
 
@@ -369,6 +370,8 @@ class Latest:
 
     def start(self) -> None:
         """Start the first build in the background unless a build has started or one runs."""
+        if self.started_ms is None:
+            self._spawn()
 
     def refresh(self) -> None:
         """Start one background build once a build has started, the last one started at least ``refresh_ms`` ago and
@@ -376,6 +379,9 @@ class Latest:
         started = self.started_ms
         if started is None or self.clock() - started < self.refresh_ms:
             return
+        self._spawn()
+
+    def _spawn(self) -> None:
         if self.building.acquire(blocking=False):
             threading.Thread(target=self._background, name="ci-lab-load-refresh", daemon=True).start()
 
@@ -392,8 +398,11 @@ class Latest:
             self.building.release()
 
 
-def respond(snapshot: Callable[[], Load], registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:
-    """Answer GET /capacity with the capacity document and GET /metrics with the exposition."""
+def respond(
+    snapshot: Callable[[], Load | None], registry: Registry, method: str, target: str
+) -> tuple[int, str, bytes]:
+    """Answer GET /capacity with the capacity document and GET /metrics with the exposition; before the first load
+    snapshot is built, capacity answers 503 and metrics answers the registry alone."""
     path = urlsplit(target).path
     if path not in ROUTES:
         return 404, JSON, b'{"error": "not found"}'
@@ -401,8 +410,11 @@ def respond(snapshot: Callable[[], Load], registry: Registry, method: str, targe
         return 405, JSON, b'{"error": "method not allowed"}'
     load = snapshot()
     if path == "/capacity":
+        if load is None:
+            return 503, JSON, b'{"error": "the load snapshot is not built yet"}'
         return 200, JSON, json.dumps(document(load)).encode()
-    observe_load(registry, load)
+    if load is not None:
+        observe_load(registry, load)
     return 200, EXPOSITION, registry.render().encode()
 
 
@@ -441,7 +453,7 @@ def _bind(
 
 
 def serve(
-    host: str, port: int, snapshot: Callable[[], Load], registry: Registry, actions: Callable[[], None] = _idle
+    host: str, port: int, snapshot: Callable[[], Load | None], registry: Registry, actions: Callable[[], None] = _idle
 ) -> ThreadingHTTPServer:
     """Bind the capacity and metrics routes on host and port, running actions between requests; the caller runs
     serve_forever."""
