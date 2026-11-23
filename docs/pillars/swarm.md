@@ -1290,7 +1290,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> launches` | Read only: a JSON list with each current agent's `agent`, acknowledged `hive` and `launched_at` in epoch milliseconds, ordered by agent name. Reads the public events interface. Missing acknowledgements and acknowledgements for another execution have null hive and launch time. Reconstructed starts use the event timestamp when no launch timestamp is recorded. A failed read exits nonzero without printing a partial report. |
 | `agentihooks swarm <id> tasks` | Read only: one JSON document, `{"tasks": [...], "freezes": [...]}`, with every task row of the swarm and every freeze and focus record, as the swarm's ledger reads them. A tool outside agentihooks reads tasks and freezes through this command and names only the swarm. An unreachable ledger exits 1 with the reason on stderr and prints nothing on stdout. |
 | `agentihooks swarm <id> merge-path [--hours N] [--json] [--post ITEM]` | The merge path into dev of the swarm's repository over the last N hours (default 24): merges an hour, Tests runs per merge by event, cancelled head runs, reruns, enqueues, queue removals by cause, head failure rate, failed queue runs, queue cycle, standard jobs per queue run, open ready pull requests and lead time. A window GitHub cannot list in full is refused, never undercounted. `--post` writes the plain line as a ledger comment on ITEM. |
-| `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
+| `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N max-review-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set masters=N` | The master seat count: `master@<id>` is the lead and answers the operator, `master-2@<id>` and up each own phases assigned by code. The tick launches a master in every empty seat after the lead. |
 | `agentihooks swarm <id> set focus-weight=N` | Share of a lane, as a whole percent from 0 to 100 (default 50), past which the dispatcher stops sorting focused tasks first. Claims ignore it: focused tasks take every free seat while any is open. |
 | `agentihooks swarm <id> set masters-step=N` | `swarm create` stores 12; a swarm created before the setting loads `0` until it is set. With no `master-per` rule the master count is one plus the unfinished engineer, CI and planner agents divided by N, masters not counted: 0 to 11 agents one master, 12 two, 24 three. The front door seat `master@<id>` never retires by scaling; backend seats are `master-2@<id>`, `master-3@<id>`, launched by the same seat launcher as the first master. A smaller count waits until it stayed lower for ten minutes, and that cool off restarts whenever the wanted count rises; a rise also withdraws the retire request of a seat wanted again. The highest backend seat retires first, as `master-per` describes below. `0` keeps the `masters=N` count, and `set masters=N` sets the step to `0` unless the same command sets it. The ledger page shows it beside the lane caps. |
@@ -1380,9 +1380,9 @@ A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an opt
 
 The `review` entry defaults to cap `1`, profile `reviewer` and kind `review`, also for a swarm created without
 a template. Existing swarm configurations without `max_review` load a review cap of `0`; autoscale preserves that
-cap while sizing the other worker lanes. See
+cap while sizing the other worker lanes, and `swarm <id> set max-review-agents=N` raises it. See
 [Review lane configuration](../reference/swarm-review-lane.md#configure-a-new-swarm) for a template example, new
-swarm usage, the missing cap controls and the lane's limits.
+swarm usage, the review cap setting and the lane's limits.
 
 `links` is a list of `{"from", "to", "kind"}`. `from` and `to` name a seat (`eng-1`) or a lane (`eng`,
 `ci`); `kind` is `delegates-to` or `can-observe`. A swarm created from the template keeps them. When it
