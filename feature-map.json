@@ -3499,6 +3499,19 @@
       ]
     },
     {
+      "id": "swarm-tick-renew-keeps-stored-view",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-pass-offcpu-stall",
+      "behaviour": "A tick pass stores its ledger view once, at the pass start; a renew of the held view after a ledger write makes one delta read and returns the patched view without rewriting the stored view, and stores it only when it had to read the view in full.",
+      "seam": "scripts.tick.view.start and the renew it holds, read through scripts.tick.view.current after scripts.tick.view.wrote",
+      "tests": [
+        "tests/tick/test_view.py::test_a_pass_start_stores_the_view_its_delta_read_moved",
+        "tests/tick/test_view.py::test_a_renew_after_a_ledger_write_holds_the_patched_view",
+        "tests/tick/test_view.py::test_a_renew_after_a_ledger_write_leaves_the_stored_view_at_the_pass_start",
+        "tests/tick/test_view.py::test_a_renew_whose_stored_view_no_longer_fits_stores_the_full_read"
+      ]
+    },
+    {
       "id": "swarm-spawn-claim-before-launch",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-claim-write",
