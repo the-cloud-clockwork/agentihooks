@@ -463,6 +463,19 @@
       ]
     },
     {
+      "id": "lab-scheduler-load-measure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-parse-measure",
+      "behaviour": "python -m scripts.ci_lab.load_measure runs Scheduler.load a fixed number of builds, three unless --builds says otherwise, against the scheduler Redis that CI_LAB_REDIS_URL names, and prints one JSON object with the build count, the live grade count, each build's processor and wall seconds, the grade parses the builds ran and a note that the figures leave out the offer prune round trip; on current code the parses equal the live grades times the builds. It sends only read commands, directly and through pipelines, and no script: the measured scheduler's queue keeps every worker offer, so a stale offer stays stored, and each build returns the load a plain Scheduler.load returns on the same data. The module level scheduler parser is put back after the builds, also when a build raises.",
+      "seam": "scripts.ci_lab.load_measure.main over fakeredis through redis.Redis.from_url, load_measure.measure with injected process and wall clocks, and load_measure.reader against Scheduler.load on the same lab data",
+      "tests": [
+        "tests/ci_lab/test_load_measure.py::test_the_measure_prints_three_builds_their_seconds_and_one_parse_per_live_grade_per_build",
+        "tests/ci_lab/test_load_measure.py::test_the_measure_sends_only_read_commands_directly_and_through_pipelines_and_keeps_the_stale_offer",
+        "tests/ci_lab/test_load_measure.py::test_a_measured_build_returns_the_load_a_plain_build_returns_with_offers_on_both_sides_of_the_ready_cut",
+        "tests/ci_lab/test_load_measure.py::test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_parser_back_even_when_a_build_raises"
+      ]
+    },
+    {
       "id": "lab-scheduler-load-reads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-load-slots-only",
