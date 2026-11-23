@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -684,7 +685,7 @@ def test_peek_answers_at_once_while_the_first_build_runs_and_then_the_finished_l
 def test_before_the_first_build_capacity_answers_not_built_and_metrics_the_registry_alone() -> None:
     calls: list[int] = []
 
-    def unbuilt() -> Load | None:
+    def unbuilt() -> Any:
         calls.append(1)
         return None
 

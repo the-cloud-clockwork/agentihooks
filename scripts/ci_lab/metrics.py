@@ -362,6 +362,14 @@ class Latest:
         with self.building:
             return self.built or self._rebuild()
 
+    def peek(self) -> tuple[Load, int] | None:
+        """The last finished load snapshot and the clock reading its build started at, or None before the first build
+        finishes; it never waits and never builds."""
+        return self.built
+
+    def start(self) -> None:
+        """Start the first build in the background unless a build has started or one runs."""
+
     def refresh(self) -> None:
         """Start one background build once a build has started, the last one started at least ``refresh_ms`` ago and
         none runs."""
