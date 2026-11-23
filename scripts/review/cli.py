@@ -34,6 +34,11 @@ def parser() -> argparse.ArgumentParser:
     post.add_argument("url")
     post.add_argument("--slug", required=True)
     post.add_argument("--finding", action="append", default=[])
+    read = actions.add_parser("read", help="mark findings on the current head read, or answered with --answer")
+    read.add_argument("url")
+    read.add_argument("--slug", required=True)
+    read.add_argument("--finding", action="append", default=[])
+    read.add_argument("--answer", default="")
     return found
 
 

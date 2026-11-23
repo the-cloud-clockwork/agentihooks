@@ -37,5 +37,9 @@ def number_of(url: str) -> int:
     raise NotImplementedError(url)
 
 
+def mark(store: RedisStore, slug: str, forge: Forge, url: str, by: str, ids: Sequence[str], answer: str) -> Record:
+    raise NotImplementedError(store, slug, forge, url, by, ids, answer)
+
+
 def post(store: RedisStore, slug: str, forge: Forge, url: str, by: str, task: str, bodies: Sequence[str]) -> Record:
     raise NotImplementedError(store, slug, forge, url, by, task, bodies)
