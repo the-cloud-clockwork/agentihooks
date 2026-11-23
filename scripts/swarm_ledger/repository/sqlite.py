@@ -215,7 +215,7 @@ def read_flags(
 ) -> dict[str, list[dict[str, object]]]:
     """Each item of the named collections with only its `names` fields, read from those rows alone.
 
-    Every named collection maps to its items in stored order; {} when the folder holds no readable database.
+    Every named collection maps to its items in stored order; {} when the ledger is not stored or unreadable.
     """
     with read_only(directory) as connection:
         if connection is None:
@@ -223,6 +223,8 @@ def read_flags(
         try:
             with connection:
                 connection.execute(BEGIN)
+                if connection.execute(STORED, (slug,)).fetchone() is None:
+                    return {}
                 return {collection: item_fields(connection, slug, collection, names) for collection in collections}
         except sqlite3.OperationalError:
             return {}

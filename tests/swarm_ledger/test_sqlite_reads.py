@@ -218,6 +218,6 @@ def test_read_flags_reads_only_the_named_flags_of_each_item_in_stored_order(tmp_
         "sources": [],
     }
     assert read_flags(folder, "ledger", ("phases",), ("done",)) == {"phases": [{"done": True}, {}, {"done": False}]}
-    assert read_flags(folder, "missing", ("phases",), flags) == {"phases": []}
+    assert read_flags(folder, "missing", ("phases",), flags) == {}
     assert read_flags(tmp_path / "nowhere", "ledger", ("phases",), flags) == {}
     assert read_flags(empty_database(tmp_path), "ledger", ("phases",), flags) == {}

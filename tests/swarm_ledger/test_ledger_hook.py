@@ -225,6 +225,22 @@ def test_dispatch_skips_the_handler_when_the_flags_read_finds_no_database(
 
 
 @pytest.mark.feature("ledger-hook-bounded-read")
+def test_dispatch_skips_the_handler_when_the_ledger_is_gone_before_the_flags_read(
+    folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import storage
+
+    flags = storage.read_flags
+
+    def gone(directory: Path, slug: str, collections: tuple[str, ...], names: tuple[str, ...]) -> Any:
+        return flags(directory, "gone", collections, names)
+
+    monkeypatch.setattr(storage, "read_flags", gone)
+    doc = {"phases": [{"id": "p1", "done": True}], "_meta": {"members": {NAME: {"role": "member"}}}}
+    assert gate_decisions(folder, monkeypatch, doc, "Stop") == []
+
+
+@pytest.mark.feature("ledger-hook-bounded-read")
 @pytest.mark.parametrize(
     ("phases", "followups", "runs"),
     [
