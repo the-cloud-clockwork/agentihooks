@@ -1,22 +1,27 @@
 """The protected grader's acceptance of the Gate Required aggregation that requires the collect and lint-actions jobs."""
 
+import copy
 import json
 import os
 import re
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from scripts import ci_gate_queue, ci_reuse, gate_protected
 from scripts.ci_branch_lanes import GROUP
 
 pytestmark = pytest.mark.unit
 
+ROOT = Path(__file__).resolve().parents[1]
+
 Workflow = dict[Any, Any]
 Needs = dict[str, dict[str, Any]]
-STEPS = "changes its steps"
-TOGETHER = "required together"
+STEPS = "The head's Gate — Required changes its steps; the protected branch grades with its own."
+ALONE = "The head's Gate — Required needs {} without {}; the split jobs are required together."
 
 
 def _workflow(steps: list[dict[str, Any]] | None = None) -> Workflow:
@@ -49,9 +54,9 @@ def _passes(run: str, event: str, needs: Needs) -> bool:
         (("collect", "lint-actions"), True, "unchanged", STEPS),
         (("collect", "lint-actions"), True, "weakened", STEPS),
         (("collect", "lint-actions"), False, "split", STEPS),
-        (("collect",), True, "split", TOGETHER),
-        (("collect",), True, "unchanged", TOGETHER),
-        (("lint-actions",), True, "unchanged", TOGETHER),
+        (("collect",), True, "split", ALONE.format("collect", "lint-actions")),
+        (("collect",), True, "unchanged", ALONE.format("collect", "lint-actions")),
+        (("lint-actions",), True, "unchanged", ALONE.format("lint-actions", "collect")),
     ],
     ids=["canonical", "unchanged", "weakened", "unwired", "one job", "collect alone", "lint-actions alone"],
 )
@@ -75,7 +80,7 @@ def test_split_admission_requires_the_exact_reviewed_aggregation_and_both_jobs(
     if refusal is None:
         assert problems == []
     else:
-        assert any(refusal in problem for problem in problems), problems
+        assert refusal in problems
 
 
 @pytest.mark.parametrize(
@@ -90,7 +95,18 @@ def test_split_admission_refuses_both_jobs_over_an_aggregation_without_the_three
         head["jobs"][job] = {"if": "github.event_name == 'pull_request'", "runs-on": "ubuntu-latest"}
     head["jobs"]["gate-required"]["needs"] += ["collect", "lint-actions"]
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {})
-    assert any(STEPS in problem for problem in problems), problems
+    assert STEPS in problems
+
+
+@pytest.mark.parametrize("job", ["collect", "lint-actions"])
+@pytest.mark.feature("gate-required-split-jobs")
+def test_the_repository_gate_refuses_one_split_job_through_the_early_queue_gate(job: str) -> None:
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
+    head = copy.deepcopy(base)
+    gate = head["test.yml"]["jobs"]["gate-required"]
+    gate["needs"] = sorted(set(gate["needs"]) - ci_gate_queue.SPLIT | {job})
+    problems = gate_protected.grade(base, {}, head, {})
+    assert problems == ["The early queue gate must preserve the reviewed graded inventory"]
 
 
 @pytest.mark.parametrize("job", ["collect", "lint-actions"])
@@ -158,7 +174,9 @@ def test_split_aggregation_refuses_a_rendering_that_does_not_hold_each_job_list_
     form: dict[str, bool], repeat: int
 ) -> None:
     [step] = ci_reuse.gate_steps(**form)
-    with pytest.raises(ValueError, match="job lists"):
+    with pytest.raises(
+        ValueError, match="^The split needs an aggregation that holds each of its three job lists once$"
+    ):
         ci_reuse.split_required([{**step, "run": step["run"] * repeat}])
 
 

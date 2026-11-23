@@ -247,8 +247,15 @@ def ledger_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{**aggregation, "run": aggregation["run"].replace(*LEDGER_REQUIRED)}, *rest]
 
 
+def split_lists(steps: list[dict[str, Any]]) -> bool:
+    """Whether the aggregation holds the pull request, merge group and dev push job lists once each."""
+    return all(steps[0]["run"].count(old) == 1 for old, _ in SPLIT_REQUIRED)
+
+
 def split_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return the aggregation that requires the collect and lint-actions jobs split out of test-count and lint."""
+    if not split_lists(steps):
+        raise ValueError("The split needs an aggregation that holds each of its three job lists once")
     [aggregation, *rest] = steps
     run = aggregation["run"]
     for old, new in SPLIT_REQUIRED:
