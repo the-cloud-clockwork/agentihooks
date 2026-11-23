@@ -3,17 +3,23 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A review record holds only findings the forge received. A finding enters the record only as a Finding built
-      with the comment id that forge.post returned for it, so the rule guards the write at that construction; writes
-      that change stored findings post nothing new, and only _decode rebuilds stored findings.
+      A review record holds only findings the forge received. A finding enters the record only as a Finding whose
+      comment is the id forge.post returned for it, called inline or assigned just before, so the rule guards the
+      write at that construction; writes that change stored findings post nothing new, and only _decode rebuilds
+      stored findings.
     paths:
       include:
         - /scripts/review/
         - review-record-write-skips-forge-post.py
     patterns:
-      - pattern: Finding(...)
+      - pattern-either:
+          - pattern: Finding($ID, $BODY, $COMMENT, ...)
+          - pattern: Finding(..., comment=$COMMENT, ...)
       - pattern-not: Finding($ID, $BODY, $FORGE.post(...), ...)
       - pattern-not: Finding(..., comment=$FORGE.post(...), ...)
+      - pattern-not-inside: |
+          $COMMENT = $FORGE.post(...)
+          ...
       - pattern-not-inside: |
           def _decode(...):
               ...
