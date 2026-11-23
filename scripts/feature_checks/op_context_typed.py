@@ -68,12 +68,23 @@ def lines(modules: Iterable[ModuleType], context: object) -> list[str]:
     return [*(line for module in ordered for line in judged(module)), satisfied(context)]
 
 
+def importable() -> None:
+    """Put the ledger package folder on the import path, once: the ledger core imports its op modules by bare
+    name, as the ledger's own entry points arrange before they import it."""
+    import scripts.swarm_ledger as package
+
+    if str(package.HERE) not in sys.path:
+        sys.path.insert(0, str(package.HERE))
+
+
 def main(modules: Iterable[ModuleType] | None = None, context: object = None) -> int:
     if modules is None:
+        importable()
         from scripts.swarm_ledger import ledger_core
 
+        stamps: dict[str, dict[str, Any]] = {}
         modules = set(ledger_core.EXTENSION_OPS.values())
-        context = ledger_core.Context({"rev": 0, "stamps": {}}, 0)
+        context = ledger_core.Context({"rev": 0, "stamps": stamps}, 0)
     found = lines(modules, context)
     for line in found:
         print(line)

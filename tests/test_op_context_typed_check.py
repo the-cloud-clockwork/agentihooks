@@ -2,6 +2,7 @@
 Semgrep rule that holds the same shape."""
 
 import inspect
+import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -148,6 +149,16 @@ def test_every_registered_op_module_takes_the_context_by_the_protocol(capsys: py
     assert passed == 0
     assert len(printed) == len(set(core.EXTENSION_OPS.values())) + 1
     assert printed[-1] == HELD
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_the_ledger_package_folder_joins_the_import_path_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    folder = str(Path(core.__file__).resolve().parent)
+    monkeypatch.setattr(sys, "path", [entry for entry in sys.path if entry != folder])
+    check.importable()
+    check.importable()
+    assert sys.path.count(folder) == 1
+    assert sys.path[0] == folder
 
 
 @pytest.mark.feature("ledger-op-context-typed")
