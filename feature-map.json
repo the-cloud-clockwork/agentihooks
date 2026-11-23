@@ -6238,6 +6238,95 @@
       ]
     },
     {
+      "id": "flake-ledger-retry-pass-recorded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "A test that fails its first attempt and passes on its rerun leaves the run green and writes one flake ledger line with outcome flaky, the run and run attempt, two attempts and its failure lines, serially and across workers. The line carries the first attempt traceback, and the flake budget publishes the ledger lines unchanged as that test's retry evidence.",
+      "seam": "tests.flake_ledger.FlakeLedger loaded into pytest with reruns and CI_FLAKES, its ledger read by tests.flake_budget.main",
+      "tests": [
+        "tests/test_flake_ledger.py::test_a_test_that_passes_on_retry_passes_and_is_recorded_as_a_flake",
+        "tests/test_flake_ledger.py::test_retry_pass_publishes_the_first_attempt_traceback"
+      ]
+    },
+    {
+      "id": "flake-budget-once-per-run",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "The flake budget keeps one history line per test and run: parameter ids fold into the test function, a flaky report already counted for that test and run adds no line on a later gather, and each distinct report with a traceback is kept once on its line as retry evidence until the line expires.",
+      "seam": "tests.flake_budget.gather and tests.flake_budget.budget",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_flaky_report_joins_the_history_once_per_run",
+        "tests/test_flake_budget.py::test_retry_evidence_survives_history_deduplication_and_expiry"
+      ]
+    },
+    {
+      "id": "flake-budget-seven-day-expiry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "A flake history line exactly seven days old drops out of the budget while one a second younger stays, and a new flaky report for an expired test and run joins again at the current time.",
+      "seam": "tests.flake_budget.gather with tests.flake_budget.WINDOW_S",
+      "tests": [
+        "tests/test_flake_budget.py::test_lines_older_than_seven_days_drop_out"
+      ]
+    },
+    {
+      "id": "flake-budget-over-at-two-runs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "A test flaky in two or more separate runs within the history is over the flake budget with its runs sorted, a test flaky in one run is not, every flaky test is listed under retried with its run count and runs, and an empty history budgets nothing.",
+      "seam": "tests.flake_budget.budget with tests.flake_budget.BUDGET_RUNS",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_test_flaky_in_two_runs_is_over_budget",
+        "tests/test_flake_budget.py::test_every_retry_pass_is_listed_with_its_count_and_runs"
+      ]
+    },
+    {
+      "id": "flake-budget-no-reports-red",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "With no jsonl report at any depth under the reports folder, the flake budget prints the error No flake reports under the folder, exits 1 and writes no budget, so the flake-budget job is red.",
+      "seam": "tests.flake_budget.main as the Count flaky tests over seven days step of the flake-budget job runs it",
+      "tests": [
+        "tests/test_flake_budget.py::test_no_flake_reports_is_red"
+      ]
+    },
+    {
+      "id": "flake-budget-lab-source",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "Flake rows read from the lab folder under the reports folder join the history marked source lab, while rows from anywhere else and history lines without a source count as Actions. A budget entry holding a lab run carries a sources map naming each of its runs lab or actions, an Actions only entry keeps its earlier shape, the summary prints the source beside every run, and a lab export alone, even an empty one, is a report that grades green.",
+      "seam": "tests.flake_budget.gather with its source argument, tests.flake_budget.budget and tests.flake_budget.main over the lab folder of the reports folder",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_lab_history_line_names_its_run_lab_and_a_line_without_a_source_counts_as_actions",
+        "tests/test_flake_budget.py::test_a_lab_export_alone_grades_green_and_names_its_run_lab",
+        "tests/test_flake_budget.py::test_the_budget_names_each_runs_source_in_its_json_and_summary"
+      ]
+    },
+    {
+      "id": "flake-budget-job-wiring",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "On a dev push the flake-budget job restores the newest flake history, downloads this run's flake reports with one retry, exports the lab flake records into the lab folder of the reports folder with the lab store settings from Actions secrets, counts every report, publishes flake-budget.json when a history was restored and saves the history or a seed. A missing setting or a failed install or export prints one Lab flakes warning and leaves the step green, so the Actions reports still grade.",
+      "seam": "the flake-budget job of the Tests workflow and the run script of its Export the lab flake records step",
+      "tests": [
+        "tests/test_flake_budget.py::test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget",
+        "tests/test_flake_budget.py::test_a_restore_that_matched_nothing_saves_a_seed_the_history_prefix_never_restores",
+        "tests/test_flake_budget.py::test_the_job_exports_the_lab_flake_records_before_the_count_with_the_settings_by_secret_reference",
+        "tests/test_flake_budget.py::test_a_lab_export_that_cannot_run_warns_once_and_leaves_the_step_green"
+      ]
+    },
+    {
+      "id": "flake-budget-lab-runs-current",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "The tick's flake budget refresh counts a run the budget names lab as current without asking GitHub for its run, because a lab run is a unit key and no Actions run, and looks up only the Actions runs of an over budget test against its newest merged test change, so the ledger follow up of a test flaky in lab and Actions runs is still filed.",
+      "seam": "scripts.ci_budget.flakes.refresh and scripts.ci_budget.flakes._since_fix reading the sources map of a flake-budget.json over_budget entry",
+      "tests": [
+        "tests/test_ci_budget_flakes.py::test_a_lab_run_counts_as_current_without_a_github_run_lookup",
+        "tests/test_ci_budget_flakes.py::test_a_lab_run_is_returned_among_the_current_runs_by_its_unit_key"
+      ]
+    },
+    {
       "id": "selectors-read-outside-files",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2636",
