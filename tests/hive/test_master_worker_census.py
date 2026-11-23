@@ -20,13 +20,14 @@ _fixtures = (setup,)
 def _record(setup: Any, lane: str, hive: str, route: str = "subscription", account: str = "account") -> AgentRecord:
     slug = setup.config.slug
     name = setup.store.next_name(slug, lane)
+    index = len(setup.store.agents(slug)) + 1
     return setup.store.start_execution(
         slug,
         AgentRecord(
             name,
             lane,
             lane if lane == "master" else "task",
-            seat=f"{lane}-1@{slug}",
+            seat=f"{lane}-{index}@{slug}",
             harness="claude",
             account=account,
             hive=hive,

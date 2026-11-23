@@ -12,8 +12,5 @@ rules:
         - /scripts/hive/launch.py
         - hive-worker-total-counts-unmarked-masters.py
     patterns:
-      - pattern-inside: |
-          def loaded_hives(...):
-              ...
       - pattern: $HIVE["agents"] = max(0, $TOTAL) + $PENDING
       - pattern-not: $HIVE["agents"] = max(0, <... _unmarked_masters(...) ...>) + $PENDING
