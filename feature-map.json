@@ -616,6 +616,7 @@
         "tests/ci_lab/test_scheduler_retire.py::test_a_grade_records_its_origin_when_it_starts",
         "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_gets_one_from_its_grade_document",
         "tests/ci_lab/test_scheduler_retire.py::test_a_grade_document_with_no_ref_gives_an_origin_with_an_empty_ref",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_gets_its_grade_ref_from_its_grade_document",
         "tests/ci_lab/test_scheduler_retire.py::test_a_live_run_with_no_grade_document_holds_no_other_origin_back",
         "tests/ci_lab/test_scheduler_retire.py::test_a_pass_reads_a_grade_document_for_the_origins_only_when_a_live_grade_has_no_origin",
         "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_is_retired_in_the_pass_that_records_it",

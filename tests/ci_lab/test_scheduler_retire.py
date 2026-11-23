@@ -352,6 +352,19 @@ def test_a_grade_document_with_no_ref_gives_an_origin_with_an_empty_ref(lab: Cal
 
 
 @pytest.mark.feature("lab-retire-gone-merge-groups")
+def test_a_live_grade_with_no_origin_gets_its_grade_ref_from_its_grade_document(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: scheduler.frame(Priority.QUEUE, TREE, BASE, {"unit": (unit(1),)})})
+    ref = f"{scheduler.GRADE_REFS}feature"
+    run.push(HEAD_A, lane=HEAD_A, event="merge_group", action="checks_requested", ref=ref)
+    run.tick(1000)
+    recorded = _origins(run)
+    assert [entry["ref"] for entry in recorded.values()] == [ref]
+    run.lab.client.delete(scheduler.ORIGINS)
+    run.tick(1100)
+    assert _origins(run) == recorded
+
+
+@pytest.mark.feature("lab-retire-gone-merge-groups")
 def test_a_live_run_with_no_grade_document_holds_no_other_origin_back(lab: Callable[..., Run]) -> None:
     run = _queued(lab, unit(1))
     recorded = _origins(run)
