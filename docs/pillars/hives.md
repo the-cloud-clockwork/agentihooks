@@ -1007,10 +1007,10 @@ and do not exclude its lane, role or profile. A role that shipped after the firs
 a hive that reports an older release, a pre-release of the first one included, is skipped for that role, and a
 hive that reports no release, a text that is no version, or a development or local build, is not judged. A pin
 does not exempt a hive: the hub lets a pinned hive keep working on its release, but no pin makes an older release
-carry a role it does not have. The expert's first release is 2.17.1181: the role shipped in 2.17.1178, the handoff
-confirmation that takes the handoff off the seat in 2.17.1180 and seat recovery in 2.17.1181, the first release
-that carries a whole lineage on a host. Placement then checks the
-selected account slot, admission room, the
+carry a role it does not have. The expert's first release is 2.17.1181: the role shipped in 2.17.1178 (pull
+request 13164), the pass that keeps a lineage's seat in 2.17.1180 (13187) and the resume of a lost expert in
+2.17.1181 (13199), the first release that carries a whole lineage on a host. Placement then checks the selected
+account slot, admission room, the
 [repository match](#matching-a-repo-across-machines), and any required interactive or master login.
 Each check that empties the candidate list names its reason, and the launch waits with it.
 
