@@ -43,6 +43,7 @@ PLACED = {
         "hive task lane",
         "event scope lane",
         "ledger task lane",
+        "stall watched lane",
         "hive placed lane",
     },
     "dispatch": {"default profile", "hive placed lane"},
