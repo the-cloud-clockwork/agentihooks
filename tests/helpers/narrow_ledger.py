@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 from typing import Any, cast
 
+from scripts.swarm import admission_view
 from scripts.swarm.health import focus_check
 from scripts.swarm_ledger.api import resources
 
@@ -53,6 +54,36 @@ class Reads(NarrowReads):
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)
+
+
+class Viewed(NarrowReads):
+    """The narrow reads of the document in the snapshot an admission's test source hands out for each swarm; every
+    other call reaches ``inner``."""
+
+    def __init__(self, admitter: Any, inner: Any) -> None:
+        super().__init__(lambda slug: admitter.source.snapshot(slug).doc)
+        self.inner = inner
+
+    def state(self, slug: str) -> dict[str, Any]:
+        return self.document(slug)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.inner, name)
+
+
+def viewed(admitter: Any) -> Any:
+    """Points ``admitter``'s narrow view at the snapshots its test source hands out, read when the view judges: the
+    reads answer from each snapshot's document and the claimed and admits checks are the snapshot's own, so a rig that
+    swaps its source keeps steering the admission."""
+    reads = Viewed(admitter, admitter.ledger)
+    admitter.view = admission_view.Narrow(
+        lambda: admitter.store,
+        reads,
+        cast(Any, reads),
+        claims=lambda _store, slug: admitter.source.snapshot(slug).claimed,
+        admitting=lambda _store, slug, _config, _rows: admitter.source.snapshot(slug).admits,
+    )
+    return admitter
 
 
 class DocLedger(NarrowReads):

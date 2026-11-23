@@ -84,7 +84,7 @@ class Admission:
         ledger: LedgerClient | None = None,
         source: readiness.Source | None = None,
         clock: lease.Clock = lease.wall_ms,
-    ):
+    ) -> None:
         self._store, self.ledger, self.clock = store, ledger or LedgerClient(service=True), clock
         self.source = source or readiness.Source(store, self.ledger)
         self.view = admission_view.Narrow(lambda: self.store, self.ledger, self.source)

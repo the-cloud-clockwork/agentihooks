@@ -1115,7 +1115,8 @@ def test_a_late_admission_prints_one_line_naming_the_member_the_task_and_the_wai
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after {admission.ANSWER_MS + 5} ms, "
         f"past the {admission.ANSWER_MS} ms answer budget, claim kept release={admission.ANSWER_MS + 5} held=0 stopped=0 "
-        f"snapshot=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0"
+        f"row=0 rows=0 parts=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0 "
+        f"continuation=0 seeds=0 primed=0 transfer=0"
     ]
 
 
@@ -1135,7 +1136,8 @@ def test_a_late_admission_counts_the_time_its_request_waited_in_the_hub_serve_qu
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after {admission.ANSWER_MS} ms, "
         f"past the {admission.ANSWER_MS} ms answer budget, claim kept release=0 held=0 stopped=0 "
-        f"snapshot=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0"
+        f"row=0 rows=0 parts=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0 "
+        f"continuation=0 seeds=0 primed=0 transfer=0"
     ]
 
 
