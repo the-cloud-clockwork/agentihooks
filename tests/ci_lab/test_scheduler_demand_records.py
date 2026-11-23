@@ -47,6 +47,17 @@ def test_a_save_stores_the_document_with_its_next_revision_and_the_demand_record
 
 
 @pytest.mark.feature("lab-scheduler-grade-demand-records")
+def test_the_first_save_of_a_grade_without_a_revision_records_revision_one(grading: Run) -> None:
+    state = grading.grade(HEAD_A)
+    grading.lab.client.hdel(scheduler.REVISIONS, state.run)
+    grading.engine.save(state)
+    _, revision, record = stored(grading, state.run)
+    assert revision == "1"
+    assert record is not None
+    assert record["revision"] == 1
+
+
+@pytest.mark.feature("lab-scheduler-grade-demand-records")
 def test_a_failed_save_transaction_leaves_the_document_revision_and_record_as_they_were(
     grading: Run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
