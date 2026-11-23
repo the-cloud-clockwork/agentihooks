@@ -1,6 +1,7 @@
 import json
 import re
 import socket
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -9,6 +10,9 @@ from scripts.hive.auth import HiveError
 from scripts.swarm import commands, lease
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.keyspace import installation
+
+if TYPE_CHECKING:
+    from fakeredis import FakeRedis
 
 DEFAULT = {
     "id": "box",
@@ -42,7 +46,13 @@ def _record(client, hive_id: str) -> dict | None:
     return hive_state.read(hive_state.records(client, hive_id), hive_id)
 
 
-def _live(client: object, *hive_ids: str, at: int | None = None) -> None:
+def _shown(client: "FakeRedis", hive_id: str) -> dict[str, object]:
+    record = registry.show(client, hive_id)
+    assert record is not None
+    return record
+
+
+def _live(client: "FakeRedis", *hive_ids: str, at: int | None = None) -> None:
     for hive_id in hive_ids:
         registry.beat(client, hive_id, {"heartbeat_at": registry.wall_ms() if at is None else at})
 
@@ -177,41 +187,41 @@ def test_a_second_seeded_headed_hive_gets_a_unique_name_on_its_next_named_set(re
 
 
 @pytest.mark.feature("hive-registry-name-returns-to-base")
-def test_a_suffixed_master_name_returns_to_its_base_once_no_other_live_hive_holds_it(redis: object) -> None:
+def test_a_suffixed_master_name_returns_to_its_base_once_no_other_live_hive_holds_it(redis: "FakeRedis") -> None:
     registry.update(redis, "root", ["ui=yes"])
     _live(redis, "root")
     assert registry.update(redis, "vm", ["ui=yes"])["name"] == "swarm-master-2"
     _live(redis, "root", at=registry.wall_ms() - registry.LIVE_MS - 1)
     _live(redis, "vm")
-    assert registry.show(redis, "vm")["name"] == "swarm-master"
-    assert "base" not in registry.show(redis, "vm")
+    assert _shown(redis, "vm")["name"] == "swarm-master"
+    assert "base" not in _shown(redis, "vm")
 
 
 @pytest.mark.feature("hive-registry-name-returns-to-base")
-def test_a_suffixed_headless_name_returns_to_its_base_once_its_holder_goes_stale(redis: object) -> None:
+def test_a_suffixed_headless_name_returns_to_its_base_once_its_holder_goes_stale(redis: "FakeRedis") -> None:
     registry.update(redis, "a", ["name=swarm-hive-003"])
     _live(redis, "a")
     assert registry.update(redis, "b", ["name=swarm-hive-003"])["name"] == "swarm-hive-003-2"
     _live(redis, "b")
-    assert registry.show(redis, "b")["name"] == "swarm-hive-003-2"
+    assert _shown(redis, "b")["name"] == "swarm-hive-003-2"
     _live(redis, "a", at=registry.wall_ms() - registry.LIVE_MS - 1)
     _live(redis, "b")
-    assert registry.show(redis, "b")["name"] == "swarm-hive-003"
+    assert _shown(redis, "b")["name"] == "swarm-hive-003"
 
 
 @pytest.mark.feature("hive-registry-name-returns-to-base")
-def test_a_never_beaten_settings_record_holds_no_name(redis: object) -> None:
+def test_a_never_beaten_settings_record_holds_no_name(redis: "FakeRedis") -> None:
     registry.update(redis, "swarm-hive-003", ["draining=yes"])
     assert registry.update(redis, "pod", ["name=swarm-hive-003"])["name"] == "swarm-hive-003"
 
 
 @pytest.mark.feature("hive-registry-name-returns-to-base")
-def test_a_stored_master_suffix_with_no_live_holder_returns_on_the_next_heartbeat(redis: object) -> None:
+def test_a_stored_master_suffix_with_no_live_holder_returns_on_the_next_heartbeat(redis: "FakeRedis") -> None:
     redis.hset(registry.key("root"), mapping={"ui": "yes", "name": "swarm-master-2", "heartbeat_at": "1"})
     hive_state.indexed(redis, "root", True)
-    assert registry.show(redis, "root")["name"] == "swarm-master-2"
+    assert _shown(redis, "root")["name"] == "swarm-master-2"
     _live(redis, "root")
-    assert registry.show(redis, "root")["name"] == "swarm-master"
+    assert _shown(redis, "root")["name"] == "swarm-master"
     assert [hive["name"] for hive in registry.hives(redis)] == ["swarm-master"]
 
 
@@ -252,7 +262,7 @@ def test_a_restarted_registration_with_nothing_new_writes_nothing(redis):
     assert _record(redis, "box") == stored
 
 
-def test_a_restarted_worker_adopts_the_charted_agent_cap(redis: object) -> None:
+def test_a_restarted_worker_adopts_the_charted_agent_cap(redis: "FakeRedis") -> None:
     start = ["ui=no", "ephemeral=yes", "excluded=master", "prefer="]
     registry.update(redis, "box", start, keep=True)
     registry.update(redis, "box", ["max-agents=3"])
