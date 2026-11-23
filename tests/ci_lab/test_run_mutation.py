@@ -11,6 +11,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from mutmut import configuration
 from mutmut.mutation.pragma_handling import PragmaParseError
 
 from scripts.ci_lab import run_mutation
@@ -20,7 +21,7 @@ from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.runner import run_gate
 from scripts.ci_mutation.selection import selected_mutant_names, selected_mutants
 from tests.mutation_self_plant import plant
-from tests.test_ci_mutation_stats import place_flake_ledger
+from tests.test_ci_mutation_stats import place_flake_ledger, stats_recorder_only
 
 REPO = Path(__file__).resolve().parents[2]
 OPTIONS = ["-q", "-p", "no:cacheprovider", "-o", "addopts="]
@@ -100,6 +101,24 @@ def test_trampoline_names_the_file_mutmut_refuses_a_pragma_in(tmp_path: Path) ->
     )
     with pytest.raises(PragmaParseError, match="scripts/sample.py:2"):
         run_mutation.trampoline(tmp_path, path)
+
+
+@pytest.mark.feature("lab-mutants-read-no-mutmut-config")
+def test_trampoline_reads_no_mutmut_config_from_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = "scripts/sample.py"
+    tree, elsewhere = tmp_path / "tree", tmp_path / "elsewhere"
+    (tree / "scripts").mkdir(parents=True)
+    elsewhere.mkdir()
+    (tree / path).write_text(SAMPLE)
+    expected = [f"scripts.sample.{name}" for name in selected_mutant_names(path, SAMPLE, {1, 2})]
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr(configuration, "_config", None)
+    monkeypatch.setattr(configuration.Config, "get", stats_recorder_only)
+    assert run_mutation.trampoline(tree, path) == expected
+    assert len(expected) > 1
+    assert vars(configuration)["_config"] is None
 
 
 @pytest.mark.parametrize("code, status", [(0, "survived"), (1, "killed"), (3, "suspicious"), (-9, "suspicious")])

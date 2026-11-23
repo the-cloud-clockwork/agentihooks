@@ -129,9 +129,10 @@ def function_units(
     timeout: float,
 ) -> list[Unit]:
     """Return the mutant units of each function mutmut trampolines in path whose lines meet changed: one, or the parts
-    of split_members keyed by the function key with their own members when its mutants price over timeout."""
+    of split_members keyed by the function key with their own members when its mutants price over timeout. No ignore
+    pattern applies, as in the worker's trampolining, so no mutmut config is read from the working directory."""
     source = (root / path).read_text()
-    wrapper, graded, _ = created_mutations(path, source)
+    wrapper, graded, _ = created_mutations(path, source, patterns=())
     starts = wrapper.resolve(WhitespaceInclusivePositionProvider)
     ends = wrapper.resolve(PositionProvider)
     parents = wrapper.resolve(ParentNodeProvider)
