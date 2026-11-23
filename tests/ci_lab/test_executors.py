@@ -800,11 +800,16 @@ def test_mutation_drops_its_private_tree_when_the_runner_raises(
 @pytest.mark.parametrize(
     ("members", "manifest", "refusal"),
     [
-        (("scripts.alpha.x_first__mutmut_1",), "", "mutant unit m1 carries no manifest"),
         (
-            ("scripts.alpha.x_first__mutmut_2", "scripts.alpha.x_second__mutmut_1"),
+            ("scripts.alpha.x_first__mutmut_1",),
+            "",
+            "^mutant unit m1 carries no manifest of the test files to trace$",
+        ),
+        (
+            ("scripts.alpha.x_third__mutmut_1", "scripts.alpha.x_first__mutmut_2", "scripts.alpha.x_second__mutmut_1"),
             "[]",
-            "scripts.alpha.x_second__mutmut_1",
+            "^mutant unit m1 names mutants its tree holds behind no trampoline: "
+            r"\['scripts.alpha.x_second__mutmut_1', 'scripts.alpha.x_third__mutmut_1'\]$",
         ),
     ],
 )
