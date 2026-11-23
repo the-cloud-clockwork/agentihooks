@@ -13065,7 +13065,7 @@
         "tests/test_count_floor_approvals.py::test_the_approvals_mode_fails_a_retirement_whose_file_has_no_code_owner_on_the_base",
         "tests/test_count_floor_approvals.py::test_the_approvals_mode_holds_only_new_signed_retirements",
         "tests/test_count_floor_approvals.py::test_the_approvals_mode_passes_without_a_reviewed_head",
-        "tests/test_count_floor_approvals.py::test_the_approvals_mode_passes_a_head_the_floor_refuses_because_it_collects_nothing",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_collects_nothing_and_passes_a_head_the_floor_refuses",
         "tests/test_count_floor_approvals.py::test_the_approvals_mode_is_refused_beside_another_mode"
       ]
     },

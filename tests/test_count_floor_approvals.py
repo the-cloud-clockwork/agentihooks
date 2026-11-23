@@ -37,6 +37,10 @@ def _tree(root: Path, files: dict[str, str]) -> Path:
     return root
 
 
+def _environment() -> dict[str, str]:
+    return {name: value for name, value in os.environ.items() if not name.startswith("TEST_COUNT_")}
+
+
 def _hold(
     tmp_path: Path,
     head: dict[str, str],
@@ -47,7 +51,7 @@ def _hold(
     file = tmp_path / "reviews.jsonl"
     if reviews is not None:
         file.write_text(reviews)
-    env = {name: value for name, value in os.environ.items() if name != "TEST_COUNT_REVIEWED_HEAD"}
+    env = _environment()
     return subprocess.run(
         [
             sys.executable,
@@ -141,7 +145,7 @@ def test_the_approvals_mode_passes_without_a_reviewed_head(tmp_path: Path, revie
 
 
 @pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
-def test_the_approvals_mode_passes_a_head_the_floor_refuses_because_it_collects_nothing(tmp_path: Path) -> None:
+def test_the_approvals_mode_collects_nothing_and_passes_a_head_the_floor_refuses(tmp_path: Path) -> None:
     base = {**OWNERS, "tests/test_mod.py": "def test_kept():\n    assert True\n\ndef test_lost():\n    assert True\n"}
     head = {"tests/test_mod.py": "def test_kept():\n    assert True\n"}
     result = _hold(tmp_path, head, None, base=base)
@@ -150,6 +154,7 @@ def test_the_approvals_mode_passes_a_head_the_floor_refuses_because_it_collects_
     floor = subprocess.run(
         [sys.executable, "-m", "tests.count_floor", "--base", str(tmp_path / "base"), "--head", str(tmp_path / "head")],
         cwd=ROOT,
+        env=_environment(),
         capture_output=True,
         text=True,
     )
