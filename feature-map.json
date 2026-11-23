@@ -2512,6 +2512,19 @@
       ]
     },
     {
+      "id": "hub-late-admission-retry-launches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-late-admission-kept-offer",
+      "behaviour": "A tick reap pass whose rows were read before the hub's ledger claim write keeps a starting, never launched hive agent that still holds its task's Redis claim, so the hive's next ask for the kept late admission launches it with no withdrawn refusal and no six minute launch check free. A row naming another claimant, a blocked or done row, a released claim, a launched agent and a suspect agent still end it.",
+      "seam": "The tick reap step judging one agent (_reap_agent), and Admission.admit on the hive's next ask after that reap",
+      "tests": [
+        "tests/tick/steps/test_reap_fresh_admission.py::test_a_fresh_hub_admission_judged_on_a_row_read_before_its_ledger_claim_keeps_its_claim",
+        "tests/tick/steps/test_reap_fresh_admission.py::test_a_fresh_hub_admission_still_ends_on_a_row_another_claimant_or_a_closed_state_holds",
+        "tests/tick/steps/test_reap_fresh_admission.py::test_an_agent_past_its_fresh_admission_still_ends_on_an_unclaimed_row",
+        "tests/hub/test_admission.py::test_a_late_kept_admission_launches_on_the_hives_next_ask_after_a_reap_judged_a_row_read_before_its_claim"
+      ]
+    },
+    {
       "id": "hub-admission-hive-asks-again",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2542",
