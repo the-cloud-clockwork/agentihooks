@@ -62,7 +62,7 @@ def prepare(root: Path, name: str, base: str) -> Pair:
         _git(root, "read-tree", revision, environ=environ)
         for path, source in sources.items():
             blob = _git(root, "hash-object", "-w", "--stdin", data=source).strip()
-            _git(root, "update-index", "--cacheinfo", f"{modes[path]},{blob},{path}", environ=environ)
+            _git(root, "update-index", "--add", "--cacheinfo", f"{modes[path]},{blob},{path}", environ=environ)
         tree = _git(root, "write-tree", environ=environ).strip()
     original = _git(root, "rev-parse", f"{revision}^{{tree}}").strip()
     green = _git(root, "commit-tree", original, "-p", revision, data=f"CI lab {name} twin\n", environ=IDENTITY).strip()
