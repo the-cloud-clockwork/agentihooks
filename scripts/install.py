@@ -809,22 +809,18 @@ def _bundle_roots(layer: bool = False) -> list[tuple[str, Path]]:
     return bundle_roots({key: {"path": str(path)} for key, path in found if path}, layer)
 
 
-def _codex_native_bundle_skill_layers(subdir: str, label: str, install_target: str) -> list[tuple[str, Path]]:
-    if subdir != "skills" or install_target != "codex":
-        return []
-    return _bundle_feature_layers(subdir, label, _TARGET_SUBDIR["codex"])
-
-
-def _codex_native_profile_skill_layers(
-    subdir: str, install_target: str, pname: str, pdir: Path, chain_len: int
+def _codex_native_skill_layers(
+    subdir: str, install_target: str, content_dirs: list[tuple[str, Path]], chain_len: int
 ) -> list[tuple[str, Path]]:
     if subdir != "skills" or install_target != "codex":
         return []
-    native = pdir / _TARGET_SUBDIR["codex"] / subdir
-    if not native.is_dir():
-        return []
-    label = f"profile({pname}) codex skill" if chain_len > 1 else "profile codex skill"
-    return [(label, native)]
+    native = _TARGET_SUBDIR["codex"]
+    extra = _bundle_feature_layers(subdir, "skill", native)
+    for pname, pdir in content_dirs:
+        root = pdir / native / subdir
+        if root.is_dir():
+            extra.append((f"profile({pname}) codex skill" if chain_len > 1 else "profile codex skill", root))
+    return extra
 
 
 def _bundle_feature_layers(subdir: str, label: str, subdir_root: str = _CLAUDE_SUBDIR) -> list[tuple[str, Path]]:
@@ -2852,12 +2848,11 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     ]:
         layers: list[tuple[str, Path]] = [(label, PACKAGE_FEATURES_DIR / subdir)]
         layers.extend(_bundle_feature_layers(subdir, label))
-        layers.extend(_codex_native_bundle_skill_layers(subdir, label, install_target))
         for pname, pdir in content_dirs:
             if (pdir / _CLAUDE_SUBDIR / subdir).is_dir():
                 chain_label = f"profile({pname}) {label}" if len(profile_chain) > 1 else f"profile {label}"
                 layers.append((chain_label, pdir / _CLAUDE_SUBDIR / subdir))
-            layers.extend(_codex_native_profile_skill_layers(subdir, install_target, pname, pdir, len(profile_chain)))
+        layers.extend(_codex_native_skill_layers(subdir, install_target, content_dirs, len(profile_chain)))
         adapter.install_features(subdir, layers, filter_fn)
 
     # --- 5 + 5a + 5b. Persona install (target-specific writer) ---
