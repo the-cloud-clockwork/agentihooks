@@ -14517,6 +14517,7 @@
       "seam": "hooks.observability.presence.agent and hooks.observability.token_monitor.send_tokens",
       "tests": [
         "tests/observability/test_presence.py::test_with_no_hive_daemon_a_session_sends_its_token_fill_and_burn_rate_once_a_minute_and_none_more_often",
+        "tests/observability/test_presence.py::test_with_a_live_hive_daemon_a_session_with_fresh_tokens_sends_no_gauge_itself",
         "tests/observability/test_hook_event_export.py::test_native_token_measurements_reach_the_seen_record_and_only_the_codex_hook_process_sends_them_with_no_daemon"
       ]
     }

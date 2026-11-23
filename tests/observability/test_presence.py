@@ -83,6 +83,17 @@ def test_with_no_hive_daemon_a_session_sends_its_token_fill_and_burn_rate_once_a
     ]
 
 
+@pytest.mark.feature("tokens-gauges-hook-fallback")
+def test_with_a_live_hive_daemon_a_session_with_fresh_tokens_sends_no_gauge_itself(monkeypatch):
+    from hooks.observability import token_monitor
+
+    calls = recorded(monkeypatch)
+    presence.write_record(presence.seen_dir() / presence.BEAT, {"beat_s": 1_000.0})
+    token_monitor.record_tokens("sess-9", 20.0, 900.0, 1_000.0, {})
+    presence.agent("sess-9", ENV, 1_030.0)
+    assert calls == []
+
+
 @pytest.mark.feature("presence-agent-hive-daemon")
 def test_an_unreadable_or_non_numeric_daemon_beat_leaves_the_session_sending_its_own_gauge(monkeypatch):
     from hooks import config
