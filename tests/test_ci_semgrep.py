@@ -287,7 +287,7 @@ def test_feature_fixture_command_runs_recursively():
     assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
 
 
-SEMGREP_CALL = re.compile(r"(?<![\w./-])semgrep\s+([^;&|()\n]*)")
+SEMGREP_CALL = re.compile(r"(?<![\w-])semgrep\s+([^;&|()\n]*)")
 
 
 @pytest.mark.feature("semgrep-test-mode-strict")
@@ -297,7 +297,7 @@ def test_every_semgrep_test_mode_command_runs_strict() -> None:
         for workflow in sorted((_ROOT / ".github/workflows").glob("*.yml"))
         for job_name, job in yaml.safe_load(workflow.read_text())["jobs"].items()
         for step in job.get("steps", [])
-        for arguments in SEMGREP_CALL.findall(step.get("run", ""))
+        for arguments in SEMGREP_CALL.findall(step.get("run", "").replace("\\\n", " "))
         if "--test" in arguments.split()
     ]
     assert {

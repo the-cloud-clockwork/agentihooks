@@ -4209,7 +4209,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-test-strict",
       "behaviour": "Every Semgrep test mode command in the workflows runs with --strict, so a rule config whose engine run errors fails its fixture step instead of dropping out of the pass count while the step exits 0.",
-      "seam": "The run text of the Semgrep workflow fixture steps Own rules hold on their fixtures and the code, Operator feature regressions and passing fixtures, and Outage rules fire on their planted faults and pass their clean cases",
+      "seam": "the run text of the steps 'Own rules hold on their fixtures and the code' of job scan, 'Operator feature regressions and passing fixtures' and 'Outage rules fire on their planted faults and pass their clean cases' of job feature-tests in the Semgrep workflow, and every other workflow step run text that calls semgrep with --test",
       "tests": [
         "tests/test_ci_semgrep.py::test_every_semgrep_test_mode_command_runs_strict"
       ]
