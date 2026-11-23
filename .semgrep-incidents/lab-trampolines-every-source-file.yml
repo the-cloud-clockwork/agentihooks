@@ -4,10 +4,10 @@ rules:
     severity: ERROR
     message: >-
       A lab mutation unit works on the change it grades: the worker puts behind trampolines only the functions the
-      head changes against the base on its lease. Trampolining a file with no changed lines, with every line, or
-      every file under the mutmut source paths rewrites the whole repository with every mutant in the worker's own
-      process, which grew past the worker's memory limit. Pass the changed lines scope.changes_since names for the
-      file.
+      head changes against the base on its lease. A trampoline call with no changed lines or with every line of
+      the file, and a read of the mutmut source paths to list the files to trampoline, rewrite whole files with
+      every mutant in the worker's own process, whose memory and time then follow the size of the repository. Pass
+      the changed lines scope.changes_since names for the file.
     paths:
       include:
         - /scripts/ci_lab/
@@ -21,4 +21,11 @@ rules:
       - pattern: trampoline($TREE, $PATH, $HOLDER.EVERY_LINE)
       - pattern: $MODULE.trampoline($TREE, $PATH, EVERY_LINE)
       - pattern: $MODULE.trampoline($TREE, $PATH, $HOLDER.EVERY_LINE)
+      - patterns:
+          - pattern-inside: |
+              $LINES = <... range(...) ...>
+              ...
+          - pattern-either:
+              - pattern: trampoline($TREE, $PATH, $LINES)
+              - pattern: $MODULE.trampoline($TREE, $PATH, $LINES)
       - pattern: $SETTINGS["tool"]["mutmut"]["source_paths"]

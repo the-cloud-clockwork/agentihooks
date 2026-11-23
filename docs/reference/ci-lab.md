@@ -3144,7 +3144,11 @@ its manifest, a JSON list:
 The manifest is stored once under the unit's key, like a test unit's, and the lease carries it. It
 is outside the key. One stats unit is planned per traced file, and none for a head that changes no
 function. A test in a listed test module the head leaves as it was, which reaches a changed function
-only at the head and ran no changed function when the manifest was recorded, is not traced.
+only at the head and ran no changed function when the manifest was recorded, is not traced. A listed
+test module the head edits, none of whose manifest tests ran the function, is traced and stays
+outside the mutant key: two heads that share a key share its verdict and the traced list stored
+first. While the head holds a test module with no manifest test, the hashes described below cover
+every file of the test trees, so such an edit rekeys the unit.
 
 The stats units warm the stats cache the worker's mutant runner reads before it runs the mutants.
 The manifest only names the tests of the base, while the mutant runner also runs every test module

@@ -39,6 +39,18 @@ def trampolined_with_another_modules_constant_of_every_line(tree: Path, path: st
     return trampoline(tree, path, run_mutation.EVERY_LINE)
 
 
+def trampolined_with_a_local_name_of_every_line(tree: Path, path: str) -> list[str]:
+    lines = set(range(1, 100_000))
+    # ruleid: lab-trampolines-every-source-file
+    return run_mutation.trampoline(tree, path, lines)
+
+
+def trampolined_by_name_with_a_local_name_of_the_files_lines(tree: Path, path: str) -> list[str]:
+    every = frozenset(range(1, len((tree / path).read_text().splitlines()) + 1))
+    # ruleid: lab-trampolines-every-source-file
+    return trampoline(tree, path, every)
+
+
 def trampolined_under_the_mutmut_source_paths(tree: Path, pyproject: dict[str, Any], tracked: list[str]) -> list[str]:
     # ruleid: lab-trampolines-every-source-file
     roots: list[str] = pyproject["tool"]["mutmut"]["source_paths"]

@@ -1,6 +1,7 @@
 import dataclasses
 import hashlib
 import json
+import math
 import os
 import signal
 import subprocess
@@ -835,12 +836,17 @@ def test_mutation_refuses_a_mutant_unit_with_no_manifest_or_a_member_its_tree_ho
 
 
 @pytest.mark.feature("lab-mutation-units-work-on-the-change")
-def test_the_worker_trampolines_the_mutants_the_scheduler_names_for_a_change(tmp_path: Path) -> None:
+@pytest.mark.parametrize("timeout", [math.inf, expand_mutation.MUTANT_SECONDS])
+def test_the_worker_trampolines_the_mutants_the_scheduler_names_for_a_change(tmp_path: Path, timeout: float) -> None:
     kept = "def keep(amount):\n    return amount + 5\n"
     sample = (
+        "import functools\n\n\n"
         "def first(amount):\n    return amount + 1\n\n\n"
         "def second(amount):\n    return amount - 2\n\n\n"
-        "class Meter:\n    def read(self, amount):\n        return amount * 3\n"
+        "@functools.cache\ndef third(amount):\n    return amount + 3\n\n\n"
+        "if True:\n\n    def guarded(amount):\n        return amount + 4\n\n\n"
+        "class Meter:\n    def read(self, amount):\n        return amount * 3\n\n"
+        "    class Inner:\n        def deep(self, amount):\n            return amount + 6\n"
     )
     files = {
         "pyproject.toml": (
@@ -856,16 +862,20 @@ def test_the_worker_trampolines_the_mutants_the_scheduler_names_for_a_change(tmp
     subprocess.run([*GIT, "-C", str(tree), "add", "."], check=True)
     subprocess.run([*GIT, "-C", str(tree), "commit", "-q", "-m", "base"], check=True)
     subprocess.run([*GIT, "-C", str(tree), "switch", "-q", "-c", "h1"], check=True)
-    edited = sample.replace("amount + 1", "amount + 7").replace("amount * 3", "amount * 9")
+    edited = sample
+    for old, new in (("+ 1", "+ 7"), ("+ 3", "+ 8"), ("+ 4", "+ 9"), ("* 3", "* 9"), ("+ 6", "+ 5")):
+        edited = edited.replace(f"amount {old}", f"amount {new}")
     folder(tmp_path, "change", {"scripts/sample.py": edited, "scripts/plain.py": "LIMIT = 2\n"})
     subprocess.run([*GIT, "-C", str(tree), "commit", "-q", "-a", "-m", "head"], check=True)
-    units = expand_mutation.mutant_units(tree, scope.changes_since(tree, "b1", "h1"), {}, {})
+    units = expand_mutation.mutant_units(tree, scope.changes_since(tree, "b1", "h1"), {}, {}, timeout=timeout)
 
     names = executors._trampolined(tree, "b1", "h1")  # pyright: ignore[reportPrivateUsage]
 
     assert names == [member for unit in units for member in unit.members]
-    assert len(units) == 2
-    assert len(names) > 2
+    assert (len(units) == len(names)) is (timeout != math.inf)
+    assert len(names) > len({executors.function_of(name) for name in names}) > 1
+    assert any("first" in name for name in names) and any("Meter" in name and "read" in name for name in names)
+    assert not any(function in name for name in names for function in ("second", "guarded", "deep"))
     written = (tree / "scripts/sample.py").read_text()
     assert "x_first__mutmut_1" in written
     assert "x_second" not in written

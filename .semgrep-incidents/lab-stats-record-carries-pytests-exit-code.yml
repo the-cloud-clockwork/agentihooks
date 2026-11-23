@@ -6,8 +6,7 @@ rules:
       A lab stats record whose status is pytest's raw exit code fails the whole collection when the traced test
       files hold no test: pytest answers its no tests collected code, the stats cache refuses every status but
       zero and the mutation unit ends failed with no mutant graded. Pass the exit code through
-      run_mutation.collected_status, which reads no tests collected as an empty passing record and keeps every
-      other code.
+      run_mutation.collected_status, which reads no tests collected as zero and keeps every other code.
     paths:
       include:
         - /scripts/ci_lab/
