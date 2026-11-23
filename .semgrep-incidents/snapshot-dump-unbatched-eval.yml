@@ -1,0 +1,26 @@
+rules:
+  - id: snapshot-dump-unbatched-eval
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The swarm snapshot once read every exported key, about three hundred sixty thousand, in one DUMP_KEYS script
+      that held Redis past its five second busy limit. Run DUMP_KEYS only inside _dump_batch, and call _dump_batch
+      only from a loop over _batches, so each script reads at most DUMP_BATCH keys.
+    paths:
+      include:
+        - /scripts/
+        - snapshot-dump-unbatched-eval.py
+    patterns:
+      - pattern-either:
+          - pattern: $R.eval(DUMP_KEYS, ...)
+          - pattern: $R.register_script(DUMP_KEYS)
+          - pattern: _dump_batch(...)
+      - pattern-not-inside: |
+          def _dump_batch(...):
+              ...
+      - pattern-not-inside: |
+          for $KEYS, $SETS in _batches(...):
+              ...
+      - pattern-not-inside: |
+          for $BATCH in _batches(...):
+              ...

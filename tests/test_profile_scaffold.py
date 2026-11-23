@@ -258,10 +258,12 @@ def test_base_roles_are_the_package_roles():
         "dispatcher",
         "documentation",
         "engineer",
+        "expert",
         "judge",
         "master",
         "planner",
         "qa",
+        "reviewer",
     ]
 
 

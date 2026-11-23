@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_lane:62286450a91cf5dbe50e1aafb8fd2f80314b1ea8c3ca4cc4581957e1a47b854b": {
+    "reader": "Standards",
+    "reason": "ENG and eng both compare false to every paired lane (plan, review); the fallback has no other use."
+  }
+}

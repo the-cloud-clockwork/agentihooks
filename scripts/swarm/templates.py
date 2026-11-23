@@ -24,6 +24,7 @@ DEFAULT_PROFILES = {
     "review": "reviewer",
     "master": "master",
     "dispatch": "dispatcher",
+    "expert": "expert",
 }
 AUTO = "auto"
 DEFAULT_KINDS = {"review": "review"}
