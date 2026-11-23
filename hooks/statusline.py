@@ -187,7 +187,6 @@ def main() -> None:
                 from hooks.config import TOKEN_MONITOR_ENABLED
 
                 if TOKEN_MONITOR_ENABLED:
-                    from hooks.observability import otel
                     from hooks.observability.token_monitor import update_context_metrics
 
                     size = cw.get("context_window_size") or 0
@@ -195,7 +194,6 @@ def main() -> None:
                     if size > 0 and percentage is not None:
                         used = int(size * percentage / 100)
                         update_context_metrics({**payload, "context_window": {"used": used, "remaining": size - used}})
-                        otel.flush()
             except Exception:
                 pass
 

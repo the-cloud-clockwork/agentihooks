@@ -522,10 +522,11 @@ def test_own_rules_scan_gives_each_rule_thirty_seconds_on_a_file() -> None:
     assert "semgrep scan --error --strict --timeout 30 --metrics off" in step["run"]
 
 
-def test_scan_and_charts_run_on_the_select_runner_expression():
+def test_scan_runs_on_the_lint_runner_expression_and_charts_on_the_select_expression() -> None:
     jobs = _jobs()
-    select = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["select"]
-    assert jobs["scan"]["runs-on"] == jobs["charts"]["runs-on"] == select["runs-on"]
+    caller = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert jobs["scan"]["runs-on"] == caller["lint"]["runs-on"]
+    assert jobs["charts"]["runs-on"] == caller["select"]["runs-on"]
 
 
 def test_charts_run_the_chart_timer_guard() -> None:
