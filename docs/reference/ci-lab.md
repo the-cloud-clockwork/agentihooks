@@ -2688,7 +2688,7 @@ before its step ran, so its unit was requeued once and then lost.
 
 | Class | Static gates with units |
 |---|---|
-| Pull request, hotfix | `lint`, `type-gate` and `test-count`. `semgrep` is framed as a gate without units, which passes. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), while its units sit under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels |
+| Pull request, hotfix | `lint`, `type-gate`, `test-count` and `semgrep`. The pull request rules name the job `semgrep` (`scheduler.PULL_REQUIRED`), and its frame takes the units filed under the `semgrep/scan`, `semgrep/feature-tests` and `semgrep/charts` labels, in that mapping's order: each required job grades its own units and those of every label that starts with the job and a slash |
 | Merge group | `test-count`, the one static job the queue rules require (`scheduler.QUEUE_REQUIRED`) |
 | Promotion, backfill | All six |
 
@@ -4926,8 +4926,11 @@ an import sorting fault. Use `--plant gate-script` to prove that a head cannot t
 own comment grader to accept a new directive. Test and mutation plants are separate proofs.
 
 The command also accepts every JSON plant name in the catalog, including dotted names such as
-`lint.lint-check`. A plant keeps its full discovered step in `gate`; grading reads that step's job
-check and requires its named diagnostic. The JSON result and summary row include `green_run` and
+`lint.lint-check`. A plant keeps its full discovered step in `gate`; grading reads the check of the
+job the pull request rules require, the first path segment of the gate, and requires its named
+diagnostic. A step of a reusable workflow job, such as `semgrep/scan/rule-exceptions-only-shrink`,
+is therefore read from the `semgrep` check, where a pull request grade posts the units of every
+job that workflow holds. The JSON result and summary row include `green_run` and
 `red_run`, the exact grade identifiers for the two check links. `lint.threshold-pins` is the shorter
 alias for the threshold pin plant; its full gate identity is unchanged.
 
