@@ -2122,8 +2122,8 @@ steps (`admission_view.withdrawal`):
 1. The local checks of `readiness.withdrawal` on the narrow rows: the task is gone; it is claimed, because an
    unfinished agent of the swarm holds it or the swarm store names a claimant; it is not `open`; it is at another
    claim generation or moved to another lane; it is out of scope or merged into another task; a dependency is not
-   done; a claim hold holds it, such as a thin task or one waiting for its post merge proof window; or a release,
-   apply, fleet red or lab wait holds it.
+   done; a claim hold holds it, such as a thin task or one waiting for its post merge proof window; the swarm is not
+   `running`; or a release, apply, fleet red or lab wait holds it.
 2. Only when the local checks pass, the claim gate verdict the ledger judges over its stored state, freezes, focus
    records and phases included, so no gate is judged on a partial document. `claimable` admits the offer. Any other
    verdict withdraws it with that text, the same reasons `swarm focus` prints (see
@@ -2179,7 +2179,7 @@ GET /api/v1/ledgers/<slug>/tasks?branches=engineer-1&fields=branch,branch_repo,p
 
 The ledger refuses a selection anywhere else with `400 schema_invalid`,
 `Only a plain tasks read takes a selection, and it names ids, states, pinned or branches`: on any path other than
-`tasks`, with `cursor`, `limit`, `offset`, `q` or `targets` beside it, or with no non empty `ids`, `states`, `pinned`
+`tasks`, with `cursor`, `limit`, `offset`, `q`, `state` or `targets` beside it, or with no non empty `ids`, `states`, `pinned`
 or `branches`, so `fields` alone is refused.
 
 From a checkout, the same read through the ledger client:
@@ -2207,7 +2207,7 @@ logs no `late:` line, however long it took. Each timing is the milliseconds sinc
 | `placement` | Whether the asking hive may run the task |
 | `cap` | The task's claim cap |
 | `turn` | The root slot count, then waiting for the hive's admission turn |
-| `full` | The admission kept for a repeat ask, then whether the hive has room |
+| `full` | The admission kept for a repeat ask, then whether the hive has room beside its kept root slots and, on a hive that takes experts, one slot for each running expert lineage with no live expert |
 | `claim` | Naming the agent and claiming the task in the swarm store |
 | `seat` | Choosing the seat |
 | `execution` | Starting the execution |
@@ -2275,7 +2275,7 @@ semgrep --test --config .semgrep-incidents/hub-admission-reads-full-export.yml \
 | `late:` lines still show a `snapshot=` mark | The hub runs a release from before #13245 | Roll the hub to the newest release. |
 | `late:` lines show a large `parts` | The task is a `plan` task, whose admission reads the whole document | Expected on a large ledger. |
 | An offer is refused `the offer is withdrawn, <reason>` while the task looks open | A local check or the ledger's claim gate holds it, such as a dependency, a freeze, a focus elsewhere or an earlier phase; the reason names it | Read the verdicts with `agentihooks api --slug <slug> get focus`, then clear the hold; see [Freeze and focus](swarm.md#freeze-and-focus). |
-| A selection read answers `400 schema_invalid` with `Only a plain tasks read takes a selection, ...` | It named a filter on a path other than `tasks`, beside a paging parameter, or with only `fields` | Send `ids`, `states`, `pinned` or `branches` on a plain `tasks` read. |
+| A selection read answers `400 schema_invalid` with `Only a plain tasks read takes a selection, ...` | It named a filter on a path other than `tasks`, beside a paging parameter or `state`, or with only `fields` | Send `ids`, `states`, `pinned` or `branches` on a plain `tasks` read. |
 | A selection read answers `400 schema_invalid` with `Request does not match the resource schema` | `pinned` carries a value other than `1`, a list passes its length limit, or the ledger server runs a release before #13245 | Send `pinned=1` and split a long list over several reads; otherwise roll the ledger server, or read through the ledger client from a checkout on the newest release. |
 
 ### When a launch fails
