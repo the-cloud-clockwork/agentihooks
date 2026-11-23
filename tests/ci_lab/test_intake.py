@@ -268,7 +268,7 @@ def test_a_grade_request_carries_the_head_its_tier_and_whether_it_bypasses_a_neg
 def test_a_plant_head_asks_for_a_pull_request_grade_before_its_base_is_resolved() -> None:
     request = intake.request_from(head("plant", "nestorcolt", "pushed", base=""))
     assert request == GradeRequest(
-        repo=REPO, head=HEAD, base="", tier=Priority.PULL_REQUEST, actor="nestorcolt", bypass_negative=False
+        repo=REPO, head=HEAD, base="", tier=Priority.PULL_REQUEST, actor="nestorcolt", bypass_negative=False, plant=True
     )
 
 

@@ -33,6 +33,8 @@ def repository(tmp_path: Path) -> Path:
     shutil.copytree(SOURCE / catalog, root / catalog)
     for fixture in (root / catalog).glob("*.json"):
         for edit in json.loads(fixture.read_text())["edits"]:
+            if not edit["before"]:
+                continue
             target = root / edit["path"]
             target.parent.mkdir(parents=True, exist_ok=True)
             content = subprocess.run(
@@ -110,6 +112,37 @@ def test_an_edit_with_zero_or_two_matches_is_refused(repository: Path, source: s
     )
     with pytest.raises(ValueError, match="^lint: sample.py must match its edit exactly once$"):
         plant_proofs.prepare(repository, "lint", "HEAD")
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_an_edit_on_an_absent_path_needs_an_empty_before(repository: Path) -> None:
+    fixture = repository / "tests/ci_lab/plants/lint.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "gate": "lint",
+                "reason": "exact edit",
+                "edits": [{"path": "absent.py", "before": "before", "after": "after"}],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="^lint: absent.py must match its edit exactly once$"):
+        plant_proofs.prepare(repository, "lint", "HEAD")
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_the_fail_once_plant_adds_exactly_one_new_test_module(repository: Path) -> None:
+    [edit] = json.loads((repository / "tests/ci_lab/plants/unit.fail-once.json").read_text())["edits"]
+    base = git(repository, "rev-parse", "HEAD")
+    pair = plant_proofs.prepare(repository, "unit.fail-once", base)
+    assert (pair.gate, pair.reason.partition(":")[0]) == ("unit/fail-once", "fail once")
+    assert git(repository, "rev-parse", f"{pair.green}^{{tree}}") == git(repository, "rev-parse", f"{base}^{{tree}}")
+    assert git(repository, "diff", "--name-status", pair.green, pair.red) == f"A\t{edit['path']}"
+    assert git(repository, "ls-tree", pair.red, "--", edit["path"]).startswith("100644 blob ")
+    assert git(repository, "show", f"{pair.red}:{edit['path']}") == edit["after"].strip()
+    assert Path(edit["path"]).name.startswith("test_")
+    assert "fail_once(request.node.nodeid, tmp_path_factory.getbasetemp())" in edit["after"]
+    assert not (SOURCE / edit["path"]).exists()
 
 
 @pytest.mark.parametrize("path", ["sample.py", "-sample.py"])
