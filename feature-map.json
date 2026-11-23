@@ -12645,6 +12645,19 @@
       ]
     },
     {
+      "id": "mutation-stats-flake-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stats-flake-ledger",
+      "behaviour": "Mutation stats collection records why a rerun test failed its first attempt: each stats bucket run loads the flake ledger plugin and points CI_FLAKES at a flakes file beside its output, so a test that fails once and passes its rerun leaves one flaky row with its first failure message and traceback and prints under Retry failure reports, a bucket with no rerun leaves no row, the caller's CI_FLAKES comes back afterwards, and the collected part folder holds its buckets' rows in a part numbered flakes file the part loader skips while the stats cache still reads the runner's own options.",
+      "seam": "scripts.ci_mutation.selection.collect_shard_stats and scripts.ci_mutation.selection.load_or_collect_stats",
+      "tests": [
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_records_a_test_that_fails_once_then_passes_its_rerun_in_the_flake_ledger",
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_with_no_rerun_points_the_flake_ledger_beside_its_output_and_writes_no_row",
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_gives_the_caller_back_its_flake_ledger_setting",
+        "tests/test_ci_mutation_stats.py::test_a_collected_stats_part_keeps_its_bucket_flake_rows_beside_the_part_and_out_of_the_stats_cache"
+      ]
+    },
+    {
       "id": "test-wait-bound-ratchet",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-wait-bound-ratchet",
