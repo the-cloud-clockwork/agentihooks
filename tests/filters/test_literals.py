@@ -22,9 +22,9 @@ def test_capacity_explanation_literal_keeps_source_offsets():
 def test_web_literals_and_text_nodes_keep_offsets(extension):
     from hooks.filters.finders.string_literals import find
 
-    source = 'const name = "hello"; const message = `welcome ${name}`; <p>changed 9m ago</p>'
+    source = 'const name = "hello there"; const message = `welcome ${name}`; <p>changed 9m ago</p>'
     findings = find(source, f"page.{extension}", "Write")
-    assert [item["text"] for item in findings] == ["hello", "welcome ${name}", "changed 9m ago"]
+    assert [item["text"] for item in findings] == ["hello there", "welcome ${name}", "changed 9m ago"]
     assert all(source[item["start"] : item["end"]] == item["text"] for item in findings)
     assert all(item["reason"] == "user-facing literal" for item in findings)
 
@@ -115,3 +115,17 @@ def test_web_escaped_quotes_empty_literals_and_blank_nodes():
 
     source = 'const a = "say \\"hello\\""; const b = ""; <p> </p><p>hello</p>'
     assert [item["text"] for item in find(source, "page.tsx", "Write")] == ['say \\"hello\\"', "hello"]
+
+
+@pytest.mark.feature("filter-web-single-token-literals")
+def test_web_literals_without_whitespace_are_skipped_while_sentences_and_text_nodes_stay() -> None:
+    from hooks.filters.finders.string_literals import find
+
+    source = (
+        'h("section", { "data-outline": "orders" }, h("li", { class: "item" }, h("span"), '
+        'h("span", { id: "orders-count" }))); throw new Error(`server answered ${resp.status}`); '
+        "const label = 'Operator orders '; const path = `${base}/orders`; <h2>Orders</h2>"
+    )
+    findings = find(source, "scripts/swarm_ledger/static/js/orders.js", "Write")
+    assert [item["text"] for item in findings] == ["server answered ${resp.status}", "Operator orders ", "Orders"]
+    assert all(source[item["start"] : item["end"]] == item["text"] for item in findings)

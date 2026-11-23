@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "filter-web-single-token-literals",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-filter-identifier-literals",
+      "behaviour": "The string literal finder skips a quoted literal in a web file that holds no whitespace, such as a tag name, class, id, data attribute key or path segment, while literals with whitespace, template text included, and text nodes stay findings, so the ledger page filter lets the saved orders panel file through when the judge scores its identifiers above the threshold.",
+      "seam": "hooks.filters.finders.string_literals.find for web paths, and conditions.pre_effect running the shipped ledger page filter",
+      "tests": [
+        "tests/filters/test_literals.py::test_web_literals_without_whitespace_are_skipped_while_sentences_and_text_nodes_stay",
+        "tests/filters/test_ui_slop.py::test_saved_orders_panel_passes_the_ledger_filter_when_its_identifiers_score_above_the_threshold"
+      ]
+    },
+    {
       "id": "sonar-gate-verdict",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-sonar-new-bug-13212",
