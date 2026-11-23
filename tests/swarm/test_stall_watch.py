@@ -55,7 +55,13 @@ class Ledger(FakeLedger):
 
 
 class Swarm:
-    def __init__(self, pull=GREEN, task=None, live=True, environ=None):
+    def __init__(
+        self,
+        pull: PullRequest = GREEN,
+        task: dict | None = None,
+        live: bool = True,
+        environ: dict[str, str] | None = None,
+    ) -> None:
         import fakeredis
 
         self.store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -65,7 +71,7 @@ class Swarm:
         )
         self.pulls = {URL: pull}
         self.retired, self.posted, self.envs, self.refusal = [], [], [], ""
-        self.ready = {"eng": [], "ci": []}
+        self.ready = {"eng": [], "ci": [], "review": []}
         self.live = {OWNER} if live else set()
         self.environ = {stall_watch.NTFY: "https://ntfy.example/alerts", **(environ or {})}
         self.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", seat="eng-1@sw"))
@@ -1661,7 +1667,7 @@ def test_a_full_lane_whose_only_open_task_the_watched_focus_holds_raises_no_uncl
     swarm.store.redis.set(swarm.store.key(SLUG, "quota-capacity"), json.dumps(decision))
     doc = ledger.state(SLUG)
     ready_tasks = stall_watch.ready_lanes(SLUG, swarm.store, ledger, doc, START)
-    swarm.ready = {"eng": ready_tasks("eng"), "ci": ready_tasks("ci")}
+    swarm.ready = {"eng": ready_tasks("eng"), "ci": ready_tasks("ci"), "review": ready_tasks("review")}
     swarm.tick(START, doc)
     assert swarm.tick(START + 30 * MINUTE, doc) == [] and swarm.inbox() == []
 

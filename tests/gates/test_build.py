@@ -622,3 +622,10 @@ class TestCommitParsing:
         assert not staged.decide(tool="Bash", command="cd && git commit -m y").allowed
         assert not staged.decide(tool="Bash", command="cd ~ && git commit -m y").allowed
         assert staged.decide(tool="Bash", command="git commit -m y").allowed
+
+
+@pytest.mark.feature("reviewer-worker-gates")
+@pytest.mark.parametrize("lane", ["eng", "ci", "review"])
+def test_worker_lanes_cannot_edit_outside_their_plan(world: Any, monkeypatch: pytest.MonkeyPatch, lane: str) -> None:
+    monkeypatch.setattr("scripts.gates.build.naming.lane_of", lambda name: lane)
+    assert not world.decide(file_path=str(world.repo / "x.py")).allowed

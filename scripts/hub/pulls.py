@@ -5,6 +5,8 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
+from typing import Any
 
 from scripts.events.bus import Bus, StateConflict, StateStore
 from scripts.events.envelope import Envelope
@@ -48,6 +50,17 @@ class Observation:
 
 def key(url: str) -> str:
     return "pull." + hashlib.sha256(url.lower().encode()).hexdigest()
+
+
+def repository_key(repository: str) -> str:
+    """Return the state key of the swarms tracking a pull request in ``repository``."""
+    return "repo." + hashlib.sha256(repository.lower().encode()).hexdigest()
+
+
+def _joined(swarm: str, swarms: Any) -> list[str] | None:
+    """Return ``swarms`` with ``swarm`` added in order, or None when it is already there."""
+    swarms = swarms or []
+    return None if swarm in swarms else sorted([*swarms, swarm])
 
 
 def suite_result(app: dict | None, conclusion: str) -> dict:
@@ -166,6 +179,7 @@ class Pulls:
             return {**snapshot, "swarms": sorted([*snapshot["swarms"], swarm])}
 
         _update(self._state, key(url), add)
+        _update(self._state, repository_key(url.rsplit("/pull/", 1)[0]), partial(_joined, swarm))
         stored = self._snapshot(url)
         if stored["state"] not in TERMINAL:
             self._index(stored["url"], True)
@@ -186,6 +200,18 @@ class Pulls:
         self._publish(seen.url, created)
         if written is not None:
             self._index(written["url"], written["state"] not in TERMINAL)
+
+    def announce(self, repository: str, kind: str, ident: str, data: dict[str, object]) -> None:
+        """Publish event ``kind`` about change ``ident`` of ``repository`` to every swarm tracking a pull request in
+        it, under one id per swarm and change so a redelivery is the same event."""
+        entry = self._state.get(repository_key(repository))
+        now = self._clock()
+        swarms: list[str] = json.loads(entry.value) if entry else []
+        for swarm in swarms:
+            digest = hashlib.sha256(json.dumps([swarm, kind, repository.lower(), ident]).encode()).hexdigest()
+            entity = kind.split(".")[0]
+            event = Envelope(digest, kind, swarm, entity, ident, 1, now, AUTHOR, {"repository": repository, **data})
+            self._events.publish(subject(swarm, *kind.split(".")), event)
 
     def _snapshot(self, url: str) -> dict | None:
         entry = self._state.get(key(url))

@@ -1,0 +1,6 @@
+{
+  "scripts/tick/steps/review.py:scripts.tick.steps.review.x__queue:f999f9bf042adb708e9f0adb436ade2e36942e1dd93a39f4fc493ce43b2bd9b1": {
+    "reader": "standards_reader",
+    "reason": "typing.cast is a runtime identity function that returns its second argument and ignores the type. The mutant only changes the type argument from dict[str, Any] to None, so review_task receives the same delivery event data object, and neither version raises or has side effects."
+  }
+}
