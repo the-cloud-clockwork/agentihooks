@@ -143,6 +143,13 @@ Changing only an interval means editing the floor row in `FLOORS`.
 - The stub is a `CallStep`: a function of the tick module and a pass state
   reader, `(tick, get)`, returning the step's action lines. Fill `needs`,
   `reads` and `writes` with what the body uses.
+- A health check may keep its own value between passes, only through
+  `scripts/swarm/health/kept.py` and under a key named for that check. That
+  value is private to its step and is not declared in `writes`: the focus
+  unclaimed and order waiting steps register no write for theirs. The moment
+  another step reads such a value, it is a declared domain written through a
+  port. A Semgrep feature rule refuses a health check that reads or writes a
+  key of the swarm on its own.
 - A step written as a `WriteStep` or a `Step` dataclass acts only through
   `ctx.tools`, the view of the ports declared in `effects`, reads the pass view
   with `ctx.view.read(domain, key)` (never `ledger.state`), finishes under

@@ -1,11 +1,10 @@
 """Focused tasks the claim gate passes that no agent claims: each tick counts them, and a count past three ticks is
 a focus unclaimed health finding for the master."""
 
-import json
 from typing import Any
 
 from scripts.swarm import freeze
-from scripts.swarm.health import focus_check
+from scripts.swarm.health import focus_check, kept
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import RedisStore
 
@@ -15,9 +14,7 @@ TICKS = 3
 
 
 def read(store: RedisStore, slug: str) -> dict[str, Any]:
-    client: Any = store
-    raw: str | None = client.redis.get(store.key(slug, KEY))
-    return json.loads(raw) if raw else {}
+    return kept.read(store, slug, KEY)
 
 
 def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[str, Any]:
@@ -39,8 +36,7 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
                 "title": task.get("title") or task["id"],
                 "focus": record["target"],
             }
-    client: Any = store
-    client.redis.set(store.key(slug, KEY), json.dumps({"at": at, "tasks": counted}))
+    kept.write(store, slug, KEY, at, tasks=counted)
     return counted
 
 

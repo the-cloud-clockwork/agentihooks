@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm.health import focus_unclaimed, order_waiting
+from scripts.swarm.health import focus_unclaimed, kept, order_waiting
 from tests.swarm.test_freeze import doc, record, task
 from tests.swarm.test_order_check import ORDER, ledger_doc
 from tests.tick.steps.test_focus_unclaimed import store
@@ -15,39 +15,39 @@ START = 1_800_000_000_000
 _fixtures = (store,)
 
 
-def kept(found: Any, key: str) -> str | None:
+def stored(found: Any, key: str) -> str | None:
     text: str | None = found.redis.get(found.key(SLUG, key))
     return text
 
 
 @pytest.mark.feature("health-kept-state-one-helper")
 def test_the_focus_check_keeps_its_counts_as_one_text_under_its_key(store: Any) -> None:
-    assert kept(store, "focus-unclaimed") is None
+    assert stored(store, "focus-unclaimed") is None
     assert focus_unclaimed.read(store, SLUG) == {}
     ledger = doc(record("phases/p1", "focus"), tasks=[task("t1", title="Ship the fix")])
     focus_unclaimed.observe(store, SLUG, ledger, 1000)
     focus_unclaimed.observe(store, SLUG, ledger, 1001)
-    assert kept(store, "focus-unclaimed") == (
+    assert stored(store, "focus-unclaimed") == (
         '{"at": 1001, "tasks": {"t1": {"ticks": 2, "since": 1000, "title": "Ship the fix", "focus": "phases/p1"}}}'
     )
     focus_unclaimed.observe(store, SLUG, doc(tasks=[task("t1")]), 1002)
-    assert kept(store, "focus-unclaimed") == '{"at": 1002, "tasks": {}}'
+    assert stored(store, "focus-unclaimed") == '{"at": 1002, "tasks": {}}'
     assert focus_unclaimed.read(store, SLUG) == {"at": 1002, "tasks": {}}
 
 
 @pytest.mark.feature("health-kept-state-one-helper")
 def test_the_order_check_keeps_its_waits_as_one_text_under_its_key(store: Any) -> None:
-    assert kept(store, "order-waiting") is None
+    assert stored(store, "order-waiting") is None
     assert order_waiting.read(store, SLUG) == {}
     ledger = ledger_doc([task("t1"), task("t2", depends_on=["t9"]), task("t9", phase="p2")], p1=ORDER)
     order_waiting.observe(store, SLUG, ledger, START)
     order_waiting.observe(store, SLUG, ledger, START + 60_000)
-    assert kept(store, "order-waiting") == (
+    assert stored(store, "order-waiting") == (
         '{"at": 1800000060000, "orders": {"phases/p1": {"since": 1800000000000, "title": "Build", '
         '"unfinished": 2, "claimable": 1, "reasons": ["it waits on task t9"]}}}'
     )
     order_waiting.observe(store, SLUG, ledger_doc([task("t1")]), START + 120_000)
-    assert kept(store, "order-waiting") == '{"at": 1800000120000, "orders": {}}'
+    assert stored(store, "order-waiting") == '{"at": 1800000120000, "orders": {}}'
     assert order_waiting.read(store, SLUG) == {"at": START + 120_000, "orders": {}}
 
 
@@ -57,5 +57,16 @@ def test_each_check_keeps_its_state_apart_from_the_other_and_from_another_swarm(
 
     store.create(SwarmConfig("other", "/repo", max_eng=2, max_ci=1))
     focus_unclaimed.observe(store, SLUG, doc(tasks=[task("t1")]), 7)
-    assert (kept(store, "focus-unclaimed"), kept(store, "order-waiting")) == ('{"at": 7, "tasks": {}}', None)
+    assert (stored(store, "focus-unclaimed"), stored(store, "order-waiting")) == ('{"at": 7, "tasks": {}}', None)
     assert focus_unclaimed.read(store, "other") == order_waiting.read(store, "other") == {}
+
+
+@pytest.mark.feature("health-kept-state-one-helper")
+def test_the_helper_reads_empty_then_what_it_wrote_under_the_key_of_that_swarm(store: Any) -> None:
+    assert kept.read(store, SLUG, "any-check") == {}
+    kept.write(store, SLUG, "any-check", 9, rows={"a": 1}, more=[2])
+    assert stored(store, "any-check") == '{"at": 9, "rows": {"a": 1}, "more": [2]}'
+    assert kept.read(store, SLUG, "any-check") == {"at": 9, "rows": {"a": 1}, "more": [2]}
+    assert kept.read(store, SLUG, "other-check") == {}
+    kept.write(store, SLUG, "any-check", 10)
+    assert stored(store, "any-check") == '{"at": 10}'

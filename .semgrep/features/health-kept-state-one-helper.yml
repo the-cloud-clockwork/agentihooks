@@ -1,0 +1,27 @@
+rules:
+  - id: feature-health-kept-state-one-helper
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A health check keeps its state between tick passes through scripts/swarm/health/kept.py, under a key named
+      for the check, never with its own Redis read or write on a key of the swarm. The modules excluded below did
+      so before the helper existed; the list only shrinks.
+    pattern-either:
+      - pattern: $CLIENT.redis.get($STORE.key(...))
+      - pattern: $CLIENT.redis.set($STORE.key(...), ...)
+    paths:
+      include:
+        - /scripts/swarm/health/
+        - '*.test.py'
+      exclude:
+        - /scripts/swarm/health/kept.py
+        - /scripts/swarm/health/early_ends.py
+        - /scripts/swarm/health/merge_stall.py
+        - /scripts/swarm/health/night_watch.py
+        - /scripts/swarm/health/ordering_dependencies.py
+        - /scripts/swarm/health/panic_call.py
+        - /scripts/swarm/health/prompt_backlog.py
+        - /scripts/swarm/health/spawn_stall.py
+        - /scripts/swarm/health/stall_blockers.py
+        - /scripts/swarm/health/step_starvation.py
+        - /scripts/swarm/health/urgent_hold.py
