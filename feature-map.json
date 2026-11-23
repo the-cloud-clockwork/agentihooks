@@ -2571,6 +2571,8 @@
         "tests/review/test_record_boundaries.py::test_trailing_slashes_do_not_change_the_forge_target",
         "tests/review/test_record_boundaries.py::test_both_spellings_of_a_change_request_url_share_one_record",
         "tests/review/test_record_boundaries.py::test_a_forge_url_with_a_suffix_is_a_different_request",
+        "tests/review/test_record_boundaries.py::test_a_forge_url_missing_the_last_character_of_the_request_is_a_different_request",
+        "tests/review/test_record_boundaries.py::test_urls_that_differ_only_in_a_last_character_keep_separate_records",
         "tests/review/test_record_boundaries.py::test_the_change_request_number_is_the_last_path_part",
         "tests/review/test_cli.py::test_the_command_line_delegates_review_to_this_module",
         "tests/review/test_cli.py::test_post_records_the_calling_agent_and_prints_the_record",

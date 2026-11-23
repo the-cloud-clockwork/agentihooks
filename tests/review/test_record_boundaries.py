@@ -83,6 +83,28 @@ def test_a_forge_url_with_a_suffix_is_a_different_request() -> None:
 
 
 @pytest.mark.feature("review-record-post")
+def test_a_forge_url_missing_the_last_character_of_the_request_is_a_different_request() -> None:
+    requested = URL + "?view=X"
+    forge = FakeForge(url=URL + "?view=")
+    with pytest.raises(SwarmError) as error:
+        record.post(store(), SLUG, forge, requested, REVIEWER, "r1", ["First"])
+    assert str(error.value) == f"change request {requested} does not match forge target {URL}?view="
+    assert (forge.reads, forge.posts) == ([7], [])
+
+
+@pytest.mark.feature("review-record-post")
+def test_urls_that_differ_only_in_a_last_character_keep_separate_records() -> None:
+    found = store()
+    for url in (URL + "?view=X", URL + "?view="):
+        record.post(found, SLUG, FakeForge(url=url), url, REVIEWER, "r1", [url])
+    assert len([key for key in found.redis.keys("*") if ":review:" in key]) == 2
+    for url in (URL + "?view=X", URL + "?view="):
+        saved = record.read(found, SLUG, url, HEAD)
+        assert saved is not None
+        assert [item.body for item in saved.findings] == [url]
+
+
+@pytest.mark.feature("review-record-post")
 def test_the_change_request_number_is_the_last_path_part() -> None:
     assert record.number_of("7") == 7
     assert record.number_of(URL + "/") == 7
