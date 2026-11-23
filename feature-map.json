@@ -7610,7 +7610,9 @@
         "tests/observability/test_shared_tracer_provider.py::test_span_ctx_exports_attributes_and_updated_attributes",
         "tests/observability/test_shared_tracer_provider.py::test_telemetry_without_spans_never_starts_the_sdk",
         "tests/observability/test_shared_tracer_provider.py::test_telemetry_flush_drains_the_shared_otel_providers",
-        "tests/observability/test_shared_tracer_provider.py::test_sdk_unavailable_keeps_direct_http_span_fallback"
+        "tests/observability/test_shared_tracer_provider.py::test_sdk_unavailable_keeps_direct_http_span_fallback",
+        "tests/observability/test_shared_tracer_provider.py::test_tracer_acquisition_failure_keeps_direct_http_fallback",
+        "tests/observability/test_shared_tracer_provider.py::test_shared_flush_failure_is_silent"
       ]
     },
     {

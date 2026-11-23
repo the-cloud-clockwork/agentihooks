@@ -221,3 +221,45 @@ def test_sdk_unavailable_keeps_direct_http_span_fallback(
         {"key": "extra", "value": {"stringValue": "[1]"}},
     ]
     assert sdk[1] == []
+
+
+@pytest.mark.feature("hooks-brain-shared-tracer-provider")
+def test_tracer_acquisition_failure_keeps_direct_http_fallback(
+    sdk: tuple[InMemorySpanExporter, list[TracerProvider], Mock], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hooks import telemetry
+    from hooks.observability import otel
+
+    acquire = Mock(side_effect=RuntimeError("tracer unavailable"))
+    post = Mock()
+    monkeypatch.setattr(otel, "get_tracer", acquire)
+    monkeypatch.setattr(telemetry.urllib.request, "urlopen", post)
+    telemetry.emit_span("brain.acquire.error", {"value": "kept"})
+    with telemetry.span_ctx("brain.context.error", {"initial": "kept"}) as handle:
+        handle.set_attrs({"extra": "kept"})
+    assert acquire.call_count == 2
+    assert post.call_count == 2
+    spans = [
+        json.loads(call.args[0].data)["resourceSpans"][0]["scopeSpans"][0]["spans"][0] for call in post.call_args_list
+    ]
+    assert [span["name"] for span in spans] == ["brain.acquire.error", "brain.context.error"]
+    assert spans[0]["attributes"] == [{"key": "value", "value": {"stringValue": "kept"}}]
+    assert spans[1]["attributes"] == [
+        {"key": "initial", "value": {"stringValue": "kept"}},
+        {"key": "extra", "value": {"stringValue": "kept"}},
+    ]
+    assert sdk[1] == []
+
+
+@pytest.mark.feature("hooks-brain-shared-tracer-provider")
+def test_shared_flush_failure_is_silent(
+    sdk: tuple[InMemorySpanExporter, list[TracerProvider], Mock], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hooks import telemetry
+    from hooks.observability import otel
+
+    flush = Mock(side_effect=RuntimeError("flush unavailable"))
+    monkeypatch.setattr(otel, "flush", flush)
+    telemetry.flush()
+    flush.assert_called_once_with()
+    assert sdk[1] == []
