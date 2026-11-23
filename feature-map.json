@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "hive-member-queue-priority",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-queue-priority-noperm",
+      "behaviour": "A hive member queue call applies automatic priority through its restricted Redis ACL, preserves running groups and waiting order, and reports a denied priority write plainly after enqueue.",
+      "seam": "scripts.swarm.queue_priority.automatic",
+      "tests": [
+        "tests/hive/test_auth.py::test_a_member_queue_applies_priority_or_reports_a_permission_refusal"
+      ]
+    },
+    {
       "id": "lab-remote-repository-owner",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2713",
@@ -8370,6 +8380,20 @@
       ]
     },
     {
+      "id": "type-gate-cpu-workers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-gate-workers-cpu",
+      "behaviour": "The type gate sizes its checker pool from process allowed CPUs minus one minute load, bounded to one through four workers. AGENTIHOOKS_TYPE_WORKERS overrides that selection within the same bounds.",
+      "seam": "scripts.type_gate.measure through the checker executor worker count",
+      "tests": [
+        "tests/test_type_gate_workers.py::test_measure_sizes_workers_from_allowed_cpus_and_load",
+        "tests/test_type_gate_workers.py::test_measure_honors_a_bounded_worker_override",
+        "tests/test_type_gate_workers.py::test_measure_refuses_an_invalid_worker_override",
+        "tests/test_type_gate_workers.py::test_measure_uses_cpu_count_when_affinity_is_unavailable",
+        "tests/test_type_gate_workers.py::test_measure_uses_one_worker_when_load_is_unavailable"
+      ]
+    },
+    {
       "id": "type-gate-repeatable-counts",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-strict-type-gate-flake",
@@ -13457,7 +13481,7 @@
       "id": "type-gate-one-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-type-gate-cross-file-baseline",
-      "behaviour": "The strict type gate counts each source in its run of the head's every source layout, checked from the run's first source through its last graded one with four runs checked at once, so a pull request, prepush and a baseline refresh count a file the same type errors at one commit whichever other files they grade.",
+      "behaviour": "The strict type gate counts each source in its run of the head's every source layout, checked from the run's first source through its last graded one with up to four runs checked at once according to CPU availability and load, so a pull request, prepush and a baseline refresh count a file the same type errors at one commit whichever other files they grade.",
       "seam": "scripts.type_gate.measure through the source lists of its basedpyright runs",
       "tests": [
         "tests/test_type_gate.py::test_a_file_counts_the_same_errors_whichever_other_files_the_gate_checks",
@@ -13732,6 +13756,27 @@
         "tests/test_ci_changelog_fragments.py::test_a_run_outside_a_pull_request_that_adds_no_fragment_stays_green",
         "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_its_branch_fragment_is_green",
         "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_only_a_misnamed_fragment_is_red_naming_both"
+      ]
+    },
+    {
+      "id": "master-hive-drain-item",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-hive-items",
+      "behaviour": "When a hive starts draining through the tick hive sweep, hive remove, the hive stop settle or hive set draining, the master seat of each swarm with a live agent on it gets one fyi inbox item naming the hive, the drain reason and that swarm's agents; a repeat drain of a draining hive sends none and an undrain then drain sends a new one; a member stop while another member serves sends none, and a process talking Redis as a hive member sends none because the inbox relay would refuse it. When the hub hive loss pass ends the executions of a lost hive, the master of each swarm it ran gets one item naming the hive, the reason, the executions and the agents, and later polls send none. Agent hand off orders and the hub loss log line are unchanged, and every loss line is logged before any master item is sent, a master send the store refuses is logged and the other swarms still get theirs. Each item id is the sha256 of the change kind, the hive, the swarm and the drain entry or exited ids, cut to twelve hex, so it stays the same across releases.",
+      "seam": "scripts.hive.master_notice.drained called by scripts.hive.sweep.sweep, scripts.hive.remove.drain, scripts.hive.remove.settle and the hive set command; scripts.hive.master_notice.lost called by scripts.hub.hive_loss.HiveLoss.poll through HiveLoss._report after every loss line is logged; items read through scripts.inbox.store.InboxStore.inbox at master@<slug>",
+      "tests": [
+        "tests/hive/test_master_hive_items.py::test_a_sweep_drain_leaves_one_item_at_the_master_of_each_swarm_with_a_live_agent_on_the_hive",
+        "tests/hive/test_master_hive_items.py::test_a_second_sweep_of_the_draining_hive_sends_no_second_item",
+        "tests/hive/test_master_hive_items.py::test_hive_set_draining_tells_each_master_once_and_again_after_an_undrain",
+        "tests/hive/test_master_hive_items.py::test_a_hive_remove_drain_tells_each_master_once_and_keeps_the_agent_orders",
+        "tests/hive/test_master_hive_items.py::test_a_hive_stop_settle_tells_each_master_once_and_keeps_the_roll_orders",
+        "tests/hive/test_master_hive_items.py::test_a_member_stop_while_another_member_serves_the_hive_sends_no_master_item",
+        "tests/hive/test_master_hive_items.py::test_a_drain_run_as_the_hive_member_writes_no_master_item_the_relay_would_refuse",
+        "tests/hive/test_master_hive_items.py::test_a_lost_hive_tells_the_master_of_each_swarm_it_ran_once_and_keeps_the_hub_log",
+        "tests/hive/test_master_hive_items.py::test_a_failed_master_send_logs_every_loss_and_still_sends_the_other_masters_items",
+        "tests/hive/test_master_hive_items.py::test_each_master_item_id_names_its_hive_swarm_and_change_so_a_later_release_never_resends_it",
+        "tests/hive/test_master_hive_items.py::test_a_drain_tells_the_masters_only_when_the_hive_flag_and_its_newest_drain_entry_both_read_draining",
+        "tests/hive/test_master_hive_items.py::test_a_lost_hive_whose_exits_name_no_agent_tells_the_master_none_named"
       ]
     }
   ],
