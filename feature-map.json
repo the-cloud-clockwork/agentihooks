@@ -1623,6 +1623,41 @@
       ]
     },
     {
+      "id": "hub-admission-narrow-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-admit-narrow-read",
+      "behaviour": "A hub events admission reads only what its own task needs: the task row, the rows it names, the running rows, the overview and its phase, and the claim gate verdict the ledger judges over its stored state, through a narrow tasks selection of ids, states, pins and branches; it never reads the whole ledger export however often the revision moves, and it refuses a frozen, unfocused, phased, waiting or thin task without claiming it.",
+      "seam": "Admission.admit over a ledger whose revision moves and whose export is counted, admission_view.Narrow, the ledger API tasks selection and the ledger client where_query function",
+      "tests": [
+        "tests/hub/test_admission_gates.py::test_an_admission_never_reads_the_full_export_when_the_revision_moves",
+        "tests/hub/test_admission_gates.py::test_an_admission_refuses_a_task_its_claim_gate_holds_and_claims_nothing",
+        "tests/hub/test_admission_gates.py::test_an_admission_claims_the_task_its_dependency_left_open_once_the_dependency_is_done",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_returns_the_rows_matching_every_filter_it_names",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_projects_rows_without_threads_and_keeps_only_the_named_fields",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_client_query_names_only_the_filters_given",
+        "tests/swarm/test_admission_view.py::test_the_view_reads_the_task_the_rows_it_names_and_the_running_rows_only",
+        "tests/swarm/test_admission_view.py::test_a_task_with_nothing_named_reads_only_the_running_rows",
+        "tests/swarm/test_admission_view.py::test_a_gone_task_leaves_no_row_and_withdraws_its_offer",
+        "tests/swarm/test_admission_view.py::test_a_plan_task_keeps_the_whole_document_for_its_steering",
+        "tests/swarm/test_admission_view.py::test_the_withdrawal_asks_the_ledger_claim_gate_once_the_local_checks_pass",
+        "tests/swarm/test_admission_view.py::test_a_local_refusal_never_asks_the_ledger",
+        "tests/swarm/test_admission_view.py::test_the_view_counts_an_unfinished_agent_or_a_claimant_as_claimed",
+        "tests/swarm/test_admission_view.py::test_the_root_waiting_count_judges_only_open_tasks_pinned_to_the_root_hive",
+        "tests/swarm/test_admission_view.py::test_the_branched_rows_carry_only_the_continuation_fields",
+        "tests/swarm/test_admission_view.py::test_a_frozen_root_task_keeps_no_root_slot",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_only_a_plain_tasks_read_naming_a_filter_is_a_selection",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_tasks_route_serves_every_selection_the_client_asks_for",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_route_refuses_a_selection_outside_a_plain_tasks_read",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_reply_carries_the_revision_of_its_rows_and_no_cursor",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_client_reads_a_selection_through_the_tasks_resource",
+        "tests/swarm/test_admission_view.py::test_every_read_the_view_makes_names_its_own_swarm",
+        "tests/swarm/test_admission_view.py::test_the_snapshot_holds_the_rows_the_view_read_under_its_swarm_and_fix_phase",
+        "tests/hub/test_admission_gates.py::test_an_admission_hands_the_continuation_the_rows_on_its_task_branch",
+        "tests/hub/test_admission_gates.py::test_an_admission_reads_a_plan_task_steering_through_its_readiness_source",
+        "tests/swarm/test_admission_view.py::test_the_admits_gate_needs_a_running_swarm_and_every_wait_clear"
+      ]
+    },
+    {
       "id": "hub-admission-claim-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-workspace",
@@ -4419,6 +4454,18 @@
       ]
     },
     {
+      "id": "thin-task-enhancement-snapshot",
+      "behaviour": "The thin task pass sends the enhancement value from its task snapshot with its needed mark. A refreshed resource revision retains that expectation and cannot overwrite a concurrent planned or skipped decision or emit a success notice.",
+      "seam": "scripts.tick.steps.thin.enhance and _marking through ClientLedger and ResourceClient",
+      "rules": ["thin-enhancement-without-expected"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2885",
+      "tests": [
+        "tests/tick/steps/test_thin_task_pass.py::test_the_thin_mark_carries_the_enhancement_value_read",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_revision_retry_preserves_the_thin_snapshot_and_refuses_a_concurrent_decision"
+      ]
+    },
+    {
       "id": "tick-thin-task-pass",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-tick-step",
@@ -6617,6 +6664,17 @@
       ]
     },
     {
+      "id": "ledger-relay-marks-one-helper",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "An entry the orchestrator relays for the operator carries who relayed it, from where and the proof it rests on, his quoted words or the entry he wrote, in that order in the stored entry and in its event. A recorded run of a relayed note, comment and answer, a rank set by his words, an order set by his words and by an entry he wrote and an order cleared keeps the stored text of each. One helper builds the marks, and no other module writes who relayed an entry and from where side by side.",
+      "seam": "ledger_core.sync over the relay, task_update, order_set and order_clear ops, and every module under scripts and hooks against scripts.swarm_ledger.ledger_relay.marks_of",
+      "semgrep_rule": "feature-ledger-relay-marks-one-helper",
+      "tests": [
+        "tests/swarm_ledger/test_relay_marks_recorded.py::test_a_recorded_run_of_the_relaying_ops_keeps_the_text_of_every_entry_and_event"
+      ]
+    },
+    {
       "id": "ledger-followup-duplicates",
       "origin": "inventory",
       "behaviour": "A follow up repeating an open follow up or task is refused naming it, unless a plain words not duplicate reason is given and stored.",
@@ -7201,6 +7259,19 @@
       "seam": "scripts.size_limits.measure and scripts.size_limits.grade, called by the unit suite on the merge group head",
       "tests": [
         "tests/test_size_limits.py::test_the_checked_out_tree_holds_the_size_limits"
+      ]
+    },
+    {
+      "id": "task-enhancement-expected-value",
+      "behaviour": "The task enhancement operation compares an optional expected value with the current enhancement and refuses mismatches before assignment, stamping or events. Null matches an absent enhancement, empty remains distinct, and omission preserves legacy callers.",
+      "seam": "scripts.swarm_ledger.ledger_enhancement.check and apply through the versioned operation schema",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2885",
+      "tests": [
+        "tests/swarm/test_enhance_close.py::test_a_stale_enhancement_expectation_refuses_without_effects",
+        "tests/swarm/test_enhance_close.py::test_a_matching_enhancement_expectation_passes_the_api_and_writes",
+        "tests/swarm/test_enhance_close.py::test_an_omitted_enhancement_expectation_keeps_legacy_writes",
+        "tests/swarm/test_enhance_close.py::test_the_enhancement_expectation_rejects_invalid_values"
       ]
     },
     {

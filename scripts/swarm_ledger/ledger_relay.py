@@ -104,6 +104,12 @@ def orchestrator_words(op: dict[str, Any], ctx: Any, what: str = "relay") -> str
     return words
 
 
+def marks_of(op: dict[str, Any], proof: dict[str, str]) -> dict[str, str]:
+    """The marks an entry relayed for the operator carries, in the order they are stored: who relayed it, from where,
+    then the proof it rests on, his quoted words or the entry he wrote."""
+    return {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, **proof}
+
+
 def add_note(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     """A new operator note carrying the orchestrator's relayed text and the operator's verified words."""
     if any(n["id"] == op["id"] for n in doc["notes"]):
@@ -111,7 +117,7 @@ def add_note(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     words = orchestrator_words(op, ctx)
     if not words:
         return False
-    marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
+    marks = marks_of(op, {"quote": words})
     text = op["text"].strip()
     doc["notes"].append({"id": op["id"], "by": "operator", "at": ctx.at, "text": text, "comments": [], **marks})
     ctx.record("operator", "note added", "", id=op["id"], text=text, **marks)
@@ -133,7 +139,7 @@ def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     words = orchestrator_words(op, ctx)
     if not words:
         return False
-    marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
+    marks = marks_of(op, {"quote": words})
     text = op["text"].strip()
     item[thread].append({"id": op["id"], "by": "operator", "at": ctx.at, "text": text, **marks})
     noun = "answer" if thread == "answers" else "comment"

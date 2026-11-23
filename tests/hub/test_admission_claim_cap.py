@@ -183,6 +183,7 @@ def test_a_claim_cap_block_leaves_the_shared_ledger_copy_as_the_ledger_exported_
     rig.ledger.metadata = lambda slug: {"_meta": {"rev": 1}}
     rig.ledger.state = lambda slug: {**rig.found, "tasks": [dict(row) for row in rig.rows.values()]}
     shared = readiness.Source(rig.store, rig.ledger)
+    shared.state(SLUG)
     admitter = admission.Admission(rig.store, rig.ledger, shared, clock=lambda: 7_000)
     assert admitter.admit(SLUG, ask()) is None
     assert rig.rows["t1"]["state"] == "blocked"
