@@ -572,6 +572,44 @@ def test_a_filing_the_outbox_holds_prints_what_it_filed(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["title"] == "Reviewer seats"
 
 
+@pytest.mark.feature("ledger-task-add-queued")
+@pytest.mark.parametrize(
+    ("words", "sent_as"),
+    [
+        ((), [("task_add", None)]),
+        (HIS, [("task_add", None), ("order_set", "tasks/t7")]),
+    ],
+)
+def test_a_task_add_the_outbox_holds_says_it_is_queued(monkeypatch, capsys, words, sent_as):
+    sent = []
+    monkeypatch.setattr(ledger, "call", lambda slug, ops: sent.extend(ops) or {"queued": ops[0]["id"]})
+    argv = ["--slug", SLUG, "--as", MASTER, "task", "add", "t7", "Fix the writer", "--phase", "p1", *words]
+    ledger.cmd_task(ledger.build_parser().parse_args(argv))
+    assert [(op["op"], op.get("item")) for op in sent] == sent_as
+    assert json.loads(capsys.readouterr().out) == {"task": "t7", "added": "Fix the writer", "queued": True}
+
+
+@pytest.mark.feature("ledger-task-add-queued")
+def test_a_scaffolded_task_add_the_outbox_holds_still_gets_its_work_folder(monkeypatch, capsys):
+    made = []
+    monkeypatch.setattr(ledger, "call", lambda slug, ops: {"queued": ops[0]["id"]})
+    monkeypatch.setattr(ledger.ledger_workspace, "scaffold", lambda slug, task, doc: made.append(task["id"]))
+    argv = ["--slug", SLUG, "--as", MASTER, "task", "add", "t7", "Fix the writer", "--phase", "p1", "--scaffold"]
+    ledger.cmd_task(ledger.build_parser().parse_args(argv))
+    assert made == ["t7"]
+    assert json.loads(capsys.readouterr().out) == {"task": "t7", "added": "Fix the writer", "queued": True}
+
+
+@pytest.mark.feature("ledger-task-add-queued")
+@pytest.mark.parametrize("words", [(), HIS])
+def test_a_phase_add_the_outbox_holds_says_it_is_queued(monkeypatch, capsys, words):
+    monkeypatch.setattr(ledger, "call", lambda slug, ops: {"queued": ops[0]["id"]})
+    argv = ["--slug", SLUG, "--as", MASTER, "phase", "add", "p7", "Reviewer seats", *words]
+    ledger.cmd_phase(ledger.build_parser().parse_args(argv))
+    printed = json.loads(capsys.readouterr().out)
+    assert (printed["title"], printed["queued"]) == ("Reviewer seats", True)
+
+
 @pytest.mark.feature("ledger-order-at-filing")
 @pytest.mark.parametrize(
     ("command", "text"),

@@ -6285,6 +6285,18 @@
       ]
     },
     {
+      "id": "ledger-task-add-queued",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "A task or a phase added while the ledger database does not answer is held in the outbox, and the command prints what it filed with queued, exits 0 and, for a scaffolded task, makes its work folder. With the operator's quoted words the add and its order are held together.",
+      "seam": "agentihooks api task add and agentihooks api phase add while the outbox holds the add",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_task_add_the_outbox_holds_says_it_is_queued",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_scaffolded_task_add_the_outbox_holds_still_gets_its_work_folder",
+        "tests/swarm_ledger/test_ledger_orders.py::test_a_phase_add_the_outbox_holds_says_it_is_queued"
+      ]
+    },
+    {
       "id": "ledger-operator-chat",
       "origin": "inventory",
       "behaviour": "Ledger chat refuses an agent line addressed to nobody or written to the operator unprompted, shows an agent answer to an operator line, and puts notices in the notifications panel.",
