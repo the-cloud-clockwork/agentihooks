@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import subprocess
@@ -277,6 +278,12 @@ def test_an_added_element_the_contract_does_not_name_still_fails(browser: Any) -
 
 
 @pytest.mark.feature("page-equivalence-reviewed-additions")
+def test_naming_an_element_the_base_also_shows_cannot_hide_a_change_to_it(browser: Any) -> None:
+    changed = ADDED.replace("<summary>Notes</summary>", "<summary>Changed</summary>")
+    assert capture(browser, changed, {"#sec-orders": 1, "#notes-box": 1})[1] != capture(browser, SHOWN)[1]
+
+
+@pytest.mark.feature("page-equivalence-reviewed-additions")
 def test_added_counts_the_head_page_does_not_match_fail_naming_the_head(browser: Any) -> None:
     named = {"#sec-orders": 1, "#never": 1, "details": 1}
     seen, _ = capture(browser, ADDED, named)
@@ -302,6 +309,8 @@ def test_named_requests_are_dropped_and_counted_while_the_planted_chat_fault_sti
     assert page_replay.unnamed(others, NAMED, made) == others
     assert made == Counter({"GET /api/v1/ledgers/replay/orders": 2})
     assert page_replay.miscounted(NAMED, made, "head") == []
+    saves = {**NAMED, "PUT /api/v1/ledgers/replay/saves": 1}
+    assert page_replay.unnamed([ORDERS, chat], saves, Counter()) != [chat]
 
 
 @pytest.mark.feature("page-equivalence-reviewed-additions")
@@ -367,15 +376,19 @@ def test_main_hides_the_list_its_flag_names_in_that_replay(
     side: str,
 ) -> None:
     path = contract(tmp_path, {**VALID, "added": [PANEL, CALL]})
-    calls: list[tuple[object, ...]] = []
+    signature = inspect.signature(page_replay.record)
+    calls: list[dict[str, object]] = []
 
-    def record(*args: object) -> list[object]:
-        calls.append(args)
+    def record(*args: object, **kwargs: object) -> list[object]:
+        bound = signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        calls.append(dict(bound.arguments))
         return []
 
     monkeypatch.setattr(page_replay, "record", record)
     output = tmp_path / "page.json"
     monkeypatch.setattr(sys, "argv", ["page_replay.py", str(tmp_path), "ledger", str(output), flag, str(path)])
     page_replay.main()
-    assert calls == [(tmp_path.resolve(), Path("ledger"), hidden, named, side)]
+    expected = {"root": tmp_path.resolve(), "folder": Path("ledger"), "hidden": hidden, "named": named, "side": side}
+    assert calls == [expected]
     assert output.read_text() == "[]\n"
