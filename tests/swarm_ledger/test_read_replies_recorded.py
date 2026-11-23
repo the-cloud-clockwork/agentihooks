@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import yaml
 
 from scripts.swarm_ledger.api import routes
 from scripts.swarm_ledger.api.errors import APIError
@@ -18,6 +19,10 @@ pytestmark = pytest.mark.unit
 RECORDED = Path(__file__).with_name("read_replies_recorded.json")
 READS = ("orders", "focus", "focus/phases/p1", "focus/tasks/t2")
 NOW_S = 600.0
+ROOT = Path(__file__).resolve().parents[2]
+RULE = ROOT / ".semgrep" / "features" / "api-reply-bound-one-helper.yml"
+API = ROOT / "scripts" / "swarm_ledger" / "api"
+EXCUSED = frozenset({"resources", "errors", "mutations"})
 
 
 def rows() -> list[dict[str, Any]]:
@@ -68,3 +73,11 @@ def test_a_recorded_run_of_the_orders_and_focus_reads_keeps_the_text_of_every_re
     monkeypatch.setattr(routes, "fix_phase", no_fix)
     found = read_run(services, monkeypatch)
     assert found == json.loads(RECORDED.read_text()), f"the run now leaves: {json.dumps(found)}"
+
+
+@pytest.mark.feature("ledger-verdict-reads-one-reply")
+def test_the_rule_excuses_only_the_modules_that_measure_a_reply_before_it_is_bounded() -> None:
+    rule: dict[str, Any] = yaml.safe_load(RULE.read_text())["rules"][0]
+    excused = {Path(path).stem for path in rule["paths"]["exclude"]}
+    assert excused <= EXCUSED
+    assert [name for name in sorted(excused) if "reply_size(" not in (API / f"{name}.py").read_text()] == []
