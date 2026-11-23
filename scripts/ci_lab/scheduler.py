@@ -892,15 +892,11 @@ class Scheduler:
         return origins
 
     def _forget(self, run: str) -> None:
-        """Take a run out of the live set and delete its grade document, its revision, its demand record and its
-        origin in one transaction."""
-        with self.client.pipeline() as pipe:
-            pipe.srem(LIVE, run)
-            pipe.delete(GRADES + run)
-            pipe.hdel(REVISIONS, run)
-            pipe.hdel(RECORDS, run)
-            pipe.hdel(ORIGINS, run)
-            pipe.execute()
+        """Delete a run's grade document and origin, then take it out of the live set with its revision and demand
+        record; a pass that ends in between leaves a live run with no document, which the next pass forgets."""
+        self.client.delete(GRADES + run)
+        self.client.hdel(ORIGINS, run)
+        self._drop(run)
 
     def _retire_groups(self) -> list[str]:
         """Close every live merge group grade whose head no merge group ref of its repository carries, listing the

@@ -75,6 +75,26 @@ def test_a_merge_group_grade_whose_ref_is_gone_leaves_the_live_set_and_loses_its
 
 
 @pytest.mark.feature("lab-retire-gone-merge-groups")
+def test_the_gone_grades_of_one_pass_are_retired_in_run_order(lab: Callable[..., Run]) -> None:
+    run = lab(
+        {
+            HEAD_A: scheduler.frame(Priority.QUEUE, TREE, BASE, {"unit": (unit(1),)}),
+            HEAD_B: scheduler.frame(Priority.QUEUE, OTHER_TREE, BASE, {"unit": (unit(2),)}),
+        }
+    )
+    run.push(HEAD_A, lane=HEAD_A, event="merge_group", action="checks_requested")
+    run.push(HEAD_B, lane=HEAD_B, event="merge_group", action="checks_requested")
+    run.tick(1000)
+    heads = {grade.run: grade.head for grade in run.grades()}
+    recorded = run.lab.client.hgetall(scheduler.ORIGINS)
+    run.lab.client.delete(scheduler.ORIGINS)
+    for name in sorted(heads, reverse=True):
+        run.lab.client.hset(scheduler.ORIGINS, name, recorded[name])
+    run.lab.expander.gone.update({HEAD_A, HEAD_B})
+    assert run.tick(1100) == [_retired(name, 1, REPO, heads[name]) for name in sorted(heads)]
+
+
+@pytest.mark.feature("lab-retire-gone-merge-groups")
 def test_a_retired_merge_group_grade_posts_nothing_and_records_no_verdict(lab: Callable[..., Run]) -> None:
     run = _queued(lab, unit(1))
     posts = len(run.lab.poster.posts)
@@ -292,15 +312,18 @@ def test_a_live_run_with_no_grade_document_holds_no_other_origin_back(lab: Calla
 
 
 @pytest.mark.feature("lab-retire-gone-merge-groups")
-def test_a_steady_pass_reads_no_grade_document_for_the_origins(
+def test_a_pass_reads_a_grade_document_for_the_origins_only_when_a_live_grade_has_no_origin(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = _queued(lab, unit(1))
-    recorded = _origins(run)
     read = Mock(wraps=run.lab.client.get)
     monkeypatch.setattr(run.lab.client, "get", read)
-    assert run.engine._origins() == recorded
-    read.assert_not_called()
+    run.tick(1100)
+    steady = read.call_count
+    run.lab.client.delete(scheduler.ORIGINS)
+    read.reset_mock()
+    run.tick(1200)
+    assert read.call_count == steady + 1
 
 
 @pytest.mark.feature("lab-retire-gone-merge-groups")
@@ -352,4 +375,4 @@ def test_the_mirror_expander_bounds_the_merge_group_listing_by_its_timeout(
     listing = Mock(return_value=listed)
     monkeypatch.setattr(subprocess, "run", listing)
     assert expander.groups(REPO) == frozenset({HEAD_A})
-    assert listing.call_args.kwargs["timeout"] == scheduler.GROUPS_TIMEOUT_S
+    assert listing.call_args.kwargs["timeout"] == 30.0

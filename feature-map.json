@@ -591,13 +591,14 @@
       "id": "lab-retire-gone-merge-groups",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-retire-gone-merge-groups",
-      "behaviour": "The CI lab scheduler ends a merge group grade whose merge group is gone: at the start of every pass Scheduler.tick lists the merge group refs of each repository that has a live merge group grade once and closes each such grade whose head no ref carries, so the run leaves the live set, its grade document, its revision, its demand record and its origin are deleted in one transaction and the pending jobs of its head are dropped unless another live grade of any repository grades the same head, while its leased jobs keep their leases, each running to completion or, once its lease expires, requeued and lost as the lost retries allow, with no check run posted, no evidence or passed tree recorded and no graded head counted. A grade whose merge group ref is listed keeps its units and its verdict, a grade pushed to a grade ref and a grade of any other class are never retired, and a ref listing git cannot produce within its timeout retires nothing of that repository while the gone grades of every other repository are retired. The scheduler keeps the origin of each live grade, its class, repository, head and grade ref, written at grade start, filled once from the grade document of a live run that has none and removed for a run that is no longer live, so a steady pass reads no grade document for this step.",
+      "behaviour": "The CI lab scheduler ends a merge group grade whose merge group is gone: at the start of every pass Scheduler.tick lists the merge group refs of each repository that has a live merge group grade once and closes each such grade whose head no ref carries, so its grade document and its origin are deleted, the run leaves the live set with its revision and its demand record and the pending jobs of its head are dropped unless another live grade of any repository grades the same head, while its leased jobs keep their leases, each running to completion or, once its lease expires, requeued and lost as the lost retries allow, with no check run posted, no evidence or passed tree recorded and no graded head counted. A grade whose merge group ref is listed keeps its units and its verdict, a grade pushed to a grade ref and a grade of any other class are never retired, and a ref listing git cannot produce within its timeout retires nothing of that repository while the gone grades of every other repository are retired. The scheduler keeps the origin of each live grade, its class, repository, head and grade ref, written at grade start, filled once from the grade document of a live run that has none and removed for a run that is no longer live, so a steady pass reads no grade document for this step.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with an expander that lists merge group heads, scripts.ci_lab.queue.Queue.drop over fakeredis and scripts.ci_lab.scheduler.MirrorExpander.groups over a git origin fixture",
       "rules": [
         "lab-pass-skips-merge-group-retire"
       ],
       "tests": [
         "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_whose_ref_is_gone_leaves_the_live_set_and_loses_its_pending_jobs",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_gone_grades_of_one_pass_are_retired_in_run_order",
         "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_posts_nothing_and_records_no_verdict",
         "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_no_revision_and_no_demand_record",
         "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_whose_ref_is_listed_keeps_its_units_and_its_verdict",
@@ -613,7 +614,7 @@
         "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_gets_one_from_its_grade_document",
         "tests/ci_lab/test_scheduler_retire.py::test_a_grade_document_with_no_ref_gives_an_origin_with_an_empty_ref",
         "tests/ci_lab/test_scheduler_retire.py::test_a_live_run_with_no_grade_document_holds_no_other_origin_back",
-        "tests/ci_lab/test_scheduler_retire.py::test_a_steady_pass_reads_no_grade_document_for_the_origins",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_pass_reads_a_grade_document_for_the_origins_only_when_a_live_grade_has_no_origin",
         "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_is_retired_in_the_pass_that_records_it",
         "tests/ci_lab/test_scheduler_retire.py::test_the_origin_of_a_run_that_is_no_longer_live_is_removed",
         "tests/ci_lab/test_scheduler_retire.py::test_the_mirror_expander_lists_the_head_of_every_merge_group_ref",

@@ -190,8 +190,7 @@ class Queue:
 
     def drop(self, head: str) -> list[str]:
         """Remove the head's pending jobs and return them by name; its leased jobs run to completion. The jobs are
-        read from the head's own pending set and dropped in one transaction, so the whole pending order is never
-        read."""
+        read from the head's own pending set and dropped in one pipeline, so the whole pending order is never read."""
         jobs = sorted(self.members(head, "pending"))
         keys = [_key("pending"), _head(head, "pending")]
         pipe = self.client.pipeline()
