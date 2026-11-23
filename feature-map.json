@@ -11041,6 +11041,29 @@
       ]
     },
     {
+      "id": "ledger-task-update-narrow-write",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-claim-write-no-state",
+      "behaviour": "A hub claim, one guarded task update by the swarm that sets only the claim fields of an open, claimed or pull request task, is guarded, applied and written on that task's own stored rows under the ledger lock and answers with the touched row and the new revision, storing the same rows, events, outbox rows, change record and summary the whole ledger write stores; the relay, doctor phrase and alert delivery still run on it, and any other write, or a claim on a blocked or done task, takes the whole ledger write.",
+      "seam": "mutations.apply claim branch and the repository apply_task_update narrow write",
+      "tests": [
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_through_the_api_bumps_the_claim_generation_and_records_the_claim",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_whose_guard_misses_leaves_the_task_as_it_was",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_on_a_task_with_an_open_dependency_keeps_it_open",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_relays_doctors_and_delivers_alerts_at_its_revision",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_refused_hub_claim_raises_its_alert_for_delivery",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_reply_carries_the_projected_row_and_the_new_revision",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_on_a_large_ledger_never_reads_or_returns_the_whole_ledger",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_stores_what_the_whole_write_stores",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_guarded_narrow_claim_and_its_replay_then_a_whole_write_match_the_whole_path",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_the_narrow_write_cannot_prove_falls_back_with_nothing_written",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_publishing_refreshes_only_a_published_ledger_after_a_narrow_write",
+        "tests/swarm_ledger/test_postgres_repository.py::test_a_narrow_claim_on_postgres_stores_what_the_whole_write_stores",
+        "tests/swarm_ledger/test_postgres_repository.py::test_a_claim_the_narrow_write_cannot_prove_on_postgres_writes_nothing",
+        "tests/swarm/test_ledger_client_task_guard.py::test_a_narrow_claim_reply_holding_only_the_claimed_row_returns_that_row"
+      ]
+    },
+    {
       "id": "ci-select-reuse-download-failure",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-select-artifact-timeout",

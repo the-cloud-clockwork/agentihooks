@@ -70,3 +70,14 @@ def test_an_update_of_a_task_the_ledger_lacks_returns_an_empty_row(sent):
 def test_an_update_answered_without_tasks_returns_an_empty_row(monkeypatch):
     monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, batch: {"rejected": []}))
     assert ledger_client.LedgerClient().update_task("demo", "t1", {"state": "open"}) == {}
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_a_narrow_claim_reply_holding_only_the_claimed_row_returns_that_row(monkeypatch):
+    claimed = {"id": "t1", "state": "claimed", "claimed_by": "engineer@a1b2c3-0001", "claim_generation": 3}
+    reply = {"tasks": [claimed], "applied": ["claim"], "rejected": [], "_meta": {"rev": 9, "warnings": []}}
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=lambda slug, batch: reply))
+    expected = {"claimed_by": "", "claim_generation": 2}
+    fields = {"state": "claimed", "claimed_by": "engineer@a1b2c3-0001"}
+    live = ledger_client.LedgerClient().update_task("demo", "t1", fields, if_state=("open",), if_match=expected)
+    assert live == claimed
