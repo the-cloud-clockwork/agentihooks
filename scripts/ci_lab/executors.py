@@ -265,12 +265,15 @@ def _tracked(tree: Path) -> list[str]:
     return [path for path in os.fsdecode(listing.stdout).split("\0") if path.endswith(PYTHON)]
 
 
-def _trampolined(tree: Path) -> None:
-    """Rewrite every Python file under the tree's mutmut source paths behind its trampolines."""
+def _trampolined(tree: Path, base: str, head: str) -> list[str]:
+    """Put the functions head changes against base behind their trampolines in the tree and return the names of the
+    mutants written."""
     roots: list[str] = tomllib.loads((tree / PYPROJECT).read_text())["tool"]["mutmut"]["source_paths"]
+    names: list[str] = []
     for path in _tracked(tree):
         if any(Path(path).is_relative_to(root) for root in roots):
-            run_mutation.trampoline(tree, path)
+            names.extend(run_mutation.trampoline(tree, path, run_mutation.EVERY_LINE))
+    return names
 
 
 def _test_files(tree: Path) -> list[str]:
@@ -307,7 +310,7 @@ def mutation(pod: Pod, settings: Mutation, lease: Lease) -> Finished:
     named = {"kind": unit.kind, "key": unit.key, "options": list(OPTIONS)}
     with pod.trees.owned(lease.head, lease.base) as (tree, fetched):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
-        _trampolined(tree)
+        _trampolined(tree, lease.base, lease.head)
         started = pod.clock()
         stats = {**named, "kind": STATS, "root": str(tree), "cache": str(settings.cache)}
         files = list(unit.members) if unit.kind == STATS else _test_files(tree)

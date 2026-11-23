@@ -133,6 +133,11 @@ def fingerprints(
     return keys
 
 
+def unlisted_modules(manifest: Mapping[str, Any], tree: Mapping[str, bytes]) -> list[str]:
+    """List the test modules of the tree that hold no manifest test."""
+    raise NotImplementedError
+
+
 def unlisted_test_hashes(manifest: Mapping[str, Any], tree: Mapping[str, bytes]) -> dict[str, str]:
     """Return the sha256 of every test module of the tree that holds no manifest test, of each conftest pytest loads
     for such a module and of each test tree module either imports, and while there is such a module, of every file
