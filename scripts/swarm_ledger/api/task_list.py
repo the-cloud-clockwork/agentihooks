@@ -73,7 +73,7 @@ def read(repository: object, slug: str, query: dict[str, Any]) -> dict[str, Any]
         if "targets" in query:
             return targeting(held.stored[2], query["targets"])
         if query.keys() & set(SELECTION):
-            return selecting(held.stored[2], query)
+            return selecting(held.stored[2], query)  # pyright: ignore[reportUnknownMemberType, reportOptionalSubscript, reportUnknownArgumentType]
         return held.page(query)
 
 

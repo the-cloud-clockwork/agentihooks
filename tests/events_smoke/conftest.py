@@ -209,7 +209,8 @@ def smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Smoke]:
         }
     )
     served: Any = ledger
-    admitter = admission.Admission(store, narrow_ledger.Reads(served), readiness.Source(store, served))
+    reads: Any = narrow_ledger.Reads(served)
+    admitter = admission.Admission(store, reads, readiness.Source(store, served))
     with nats_server.running(tmp_path / "nats") as nats_url:
         bus = connect(nats_url)
         opened = [bus]
