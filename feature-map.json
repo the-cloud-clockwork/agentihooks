@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "lab-shadow-reusable-caller-pairing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2804",
+      "behaviour": "Shadow discovery groups reusable static jobs by their calling job, so a bare semgrep lab verdict pairs with all three Actions children in the report and recorder. Any failed child fails the report group, a running or cancelled child excludes the head, and the latest child completion determines the Actions completion time. Explicit labelled mapping collections retain their existing behavior.",
+      "seam": "scripts.ci_lab.shadow.static_jobs and Shadow.observe, and scripts.ci_lab.shadow_report.head using the discovered workflow jobs",
+      "tests": [
+        "tests/ci_lab/test_shadow_report.py::test_bare_semgrep_pairs_with_all_reusable_actions_jobs",
+        "tests/ci_lab/test_shadow_report.py::test_an_unfinished_reusable_child_excludes_the_semgrep_head",
+        "tests/ci_lab/test_shadow.py::test_the_recorder_pairs_bare_semgrep_with_every_reusable_actions_job"
+      ]
+    },
+    {
       "id": "filter-web-single-token-literals",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-filter-identifier-literals",
