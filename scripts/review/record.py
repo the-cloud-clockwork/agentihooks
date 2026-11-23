@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
-from typing import Any, NamedTuple, Protocol, cast
+from typing import Any, NamedTuple, Protocol
 from urllib.parse import urlsplit
 
 from scripts.forge.model import Forge
@@ -49,7 +49,7 @@ class _Redis(Protocol):
 
 
 def _redis(store: RedisStore) -> _Redis:
-    return cast(_Redis, cast(Any, store).redis)  # pragma: no mutate
+    return store.redis  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def document(found: Record) -> dict[str, Any]:
