@@ -133,4 +133,5 @@ def test_builder_resolves_current_cli_handlers(monkeypatch: pytest.MonkeyPatch, 
 @pytest.mark.feature("swarm-parser-extraction")
 def test_parser_is_separate_and_cli_has_size_headroom() -> None:
     assert cli.build_parser.__module__ == "scripts.swarm.cli_parser"
-    assert len(Path(cli.__file__).read_text().splitlines()) < 2850
+    source = (ROOT.parent if ROOT.name == "mutants" else ROOT) / "scripts" / "swarm" / "cli.py"
+    assert len(source.read_text().splitlines()) < 2850
