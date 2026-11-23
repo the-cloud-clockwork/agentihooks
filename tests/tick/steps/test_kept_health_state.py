@@ -95,8 +95,9 @@ def test_the_helper_reads_empty_then_what_it_wrote_under_the_key_of_that_swarm(s
 
 @pytest.mark.feature("health-kept-state-one-helper")
 def test_the_helper_refuses_rows_kept_under_the_name_of_the_time_of_the_pass(store: Any) -> None:
-    with pytest.raises(ValueError, match="a name other than at"):
+    with pytest.raises(ValueError) as refused:
         kept.write(store, SLUG, "any-check", 9, "at", {"a": 1})
+    assert str(refused.value) == "a check keeps its rows under a name other than at, the time of its pass"
     assert stored(store, "any-check") is None
 
 
