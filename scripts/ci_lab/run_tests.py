@@ -159,9 +159,10 @@ def run(batch: Sequence[str], tree: Path, venv: Path, slots: int, lab: Lab) -> V
         attempts.append(_attempt(batch, tree, venv, slots, lab))
     final = attempts[-1]
     flaky = final.code == 0 and len(attempts) == 2
+    rows = flake_rows(attempts[0], batch) if flaky else []
     if flaky:
         with lab.flakes.open("a") as ledger:
-            ledger.writelines(json.dumps(row) + "\n" for row in flake_rows(attempts[0], batch))
+            ledger.writelines(json.dumps(row) + "\n" for row in rows)
     opened = {path for attempt in attempts for path in _opened(attempt)}
     return Verdict(
         outcome=PASSED if final.code == 0 else FAILED,
@@ -171,4 +172,5 @@ def run(batch: Sequence[str], tree: Path, venv: Path, slots: int, lab: Lab) -> V
         attempts=len(attempts),
         log=final.log,
         coverage=final.folder / ".coverage",
+        flakes=tuple(rows),
     )
