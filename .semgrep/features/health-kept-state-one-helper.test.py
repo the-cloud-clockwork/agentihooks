@@ -23,3 +23,17 @@ def observe(store, slug, at, rows):
 def cached(store, key):
     # ok: feature-health-kept-state-one-helper
     return store.redis.get(key)
+
+
+def stalled(store, slug):
+    key = store.key(slug, "merge-stall")
+    # ruleid: feature-health-kept-state-one-helper
+    raw = store.redis.get(key)
+    state = json.loads(raw) if raw else {}
+    # ruleid: feature-health-kept-state-one-helper
+    store.redis.set(key, json.dumps(state))
+
+
+def expired(store, key):
+    # ok: feature-health-kept-state-one-helper
+    store.redis.set(key, "1", ex=60)

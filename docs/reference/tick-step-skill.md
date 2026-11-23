@@ -50,7 +50,9 @@ task loads `tick-step` first, and that a tick step is:
    `budgets.FLOORS` at an interval of 60, 120 or 600 seconds.
 2. A body declaring what it reads and writes, reaching other systems only
    through the ports in `effects`, with no new function in
-   `scripts/swarm/tick.py`.
+   `scripts/swarm/tick.py`. One exception: a health check keeps its own value
+   between passes through `scripts/swarm/health/kept.py`, undeclared until
+   another step reads it.
 3. A scenario row in `tests/swarm/tick_scenarios/steps.json`, a feature test
    in `tests/tick/steps/` and a `feature-map.json` entry.
 4. A catalogue entry: `python -m scripts.tick.catalogue check` holds the

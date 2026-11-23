@@ -13880,7 +13880,7 @@
       "id": "health-kept-state-one-helper",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/phases/p139",
-      "behaviour": "A health check that keeps state between tick passes stores it as one JSON text under its own key of the swarm, the time of the pass first and its rows after it. One helper reads and writes it; the focus unclaimed and order waiting checks call it and keep the same text they always kept, apart from each other and from another swarm, and an absent value reads as empty. A health check that reads or writes a key of the swarm on its own is refused.",
+      "behaviour": "A health check that keeps state between tick passes stores it as one JSON text under its own key of the swarm, the time of the pass first and its rows after it. One helper reads and writes it; the focus unclaimed and order waiting checks call it and keep the same text they always kept, apart from each other and from another swarm, and an absent value reads as empty. A health check that gets or sets a key of the swarm on its own, inline or through a name, is refused.",
       "seam": "scripts.swarm.health.kept read and write, and focus_unclaimed and order_waiting observe and read over a Redis store",
       "semgrep_rule": "feature-health-kept-state-one-helper",
       "tests": [

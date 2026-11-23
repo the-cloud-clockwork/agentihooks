@@ -4,11 +4,18 @@ rules:
     severity: ERROR
     message: >-
       A health check keeps its state between tick passes through scripts/swarm/health/kept.py, under a key named
-      for the check, never with its own Redis read or write on a key of the swarm. The modules excluded below did
-      so before the helper existed; the list only shrinks.
+      for the check, never with its own get or set of a key of the swarm, written inline or through a name. The
+      modules excluded below did so before the helper existed; the list only shrinks.
     pattern-either:
       - pattern: $CLIENT.redis.get($STORE.key(...))
       - pattern: $CLIENT.redis.set($STORE.key(...), ...)
+      - patterns:
+          - pattern-inside: |
+              $KEY = $STORE.key(...)
+              ...
+          - pattern-either:
+              - pattern: $CLIENT.redis.get($KEY)
+              - pattern: $CLIENT.redis.set($KEY, ...)
     paths:
       include:
         - /scripts/swarm/health/
