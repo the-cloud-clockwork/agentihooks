@@ -4434,6 +4434,18 @@
       ]
     },
     {
+      "id": "thin-task-enhancement-snapshot",
+      "behaviour": "The thin task pass sends the enhancement value from its task snapshot with its needed mark. A refreshed resource revision retains that expectation and cannot overwrite a concurrent planned or skipped decision or emit a success notice.",
+      "seam": "scripts.tick.steps.thin.enhance and _marking through ClientLedger and ResourceClient",
+      "rules": ["thin-enhancement-without-expected"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2885",
+      "tests": [
+        "tests/tick/steps/test_thin_task_pass.py::test_the_thin_mark_carries_the_enhancement_value_read",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_revision_retry_preserves_the_thin_snapshot_and_refuses_a_concurrent_decision"
+      ]
+    },
+    {
       "id": "tick-thin-task-pass",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-tick-step",
@@ -7227,6 +7239,19 @@
       "seam": "scripts.size_limits.measure and scripts.size_limits.grade, called by the unit suite on the merge group head",
       "tests": [
         "tests/test_size_limits.py::test_the_checked_out_tree_holds_the_size_limits"
+      ]
+    },
+    {
+      "id": "task-enhancement-expected-value",
+      "behaviour": "The task enhancement operation compares an optional expected value with the current enhancement and refuses mismatches before assignment, stamping or events. Null matches an absent enhancement, empty remains distinct, and omission preserves legacy callers.",
+      "seam": "scripts.swarm_ledger.ledger_enhancement.check and apply through the versioned operation schema",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2885",
+      "tests": [
+        "tests/swarm/test_enhance_close.py::test_a_stale_enhancement_expectation_refuses_without_effects",
+        "tests/swarm/test_enhance_close.py::test_a_matching_enhancement_expectation_passes_the_api_and_writes",
+        "tests/swarm/test_enhance_close.py::test_an_omitted_enhancement_expectation_keeps_legacy_writes",
+        "tests/swarm/test_enhance_close.py::test_the_enhancement_expectation_rejects_invalid_values"
       ]
     },
     {
