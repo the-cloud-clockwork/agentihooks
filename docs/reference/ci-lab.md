@@ -19,6 +19,7 @@ worker's PriorityClass is a cluster object outside that module;
 
 | Command | Module form | What it does today |
 |---|---|---|
+| `agentihooks ci lab flakes --out FOLDER [--hours N] [--objects ROOT]` | none | Copies the flake rows the lab stored in the window into `FOLDER/lab-flakes.jsonl` for the flake budget (see [Export the lab flake rows](#export-the-lab-flake-rows)) |
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
@@ -4211,6 +4212,34 @@ unit run:
 `lab.retry.failed` does not control that rerun. `run_tests.Verdict.attempts` counts attempts inside
 the run, `1` or `2`, while `UnitResult.attempts` counts reruns of the unit; with the default
 `failed: 0` every failure is final whichever number is passed.
+
+### Export the lab flake rows
+
+The scheduler stores the flake rows of a passed flaky unit once, in `lab/flakes/<kind>/<digest>.jsonl`.
+Each row is a flake ledger line whose `run` is the unit key. `agentihooks ci lab flakes` copies the
+rows of every such object written within a window into one file that `tests.flake_budget` reads:
+
+```bash
+agentihooks ci lab flakes \
+  --out reports/lab \
+  --hours 168
+```
+
+| Setting | Default | What it sets |
+|---|---|---|
+| `--out FOLDER` | required | The folder that receives `lab-flakes.jsonl`, created when missing |
+| `--hours N` | `168` | The window: objects written in the last N hours, 1 to 168, at most the seven days the flake budget keeps |
+| `--objects ROOT` | the lab object store | A local objects folder to read instead of the object store |
+| `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | none | The object store it lists and reads without `--objects`; a read only key is enough |
+
+The rows land in path order, unchanged. On success the command prints the file path and exits 0;
+an empty store writes an empty file, which the budget still reads. A missing setting, an object
+store error, a listing longer than the store backend's page cap or an `--objects` path that is not a
+folder prints one `ci lab flakes: <reason>` line on standard error, writes no file and exits 1.
+
+The budget counts a test once per run, and a lab row's run is its unit key, so a cached flaky unit
+that every dev push rereads counts once however many exports carry it. The command refuses `--hours`
+outside 1 to 168 and exits 2, so a row leaves the export before its history line expires.
 
 ### What reaches the policy
 
