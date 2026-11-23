@@ -1,3 +1,4 @@
+import itertools
 import re
 import shlex
 from pathlib import Path
@@ -156,6 +157,22 @@ def _workflow() -> dict:
     return yaml.safe_load((_ROOT / ".github/workflows/coverage-stability.yml").read_text())
 
 
+def _installs_locked_coverage(run: str) -> bool:
+    for line in run.splitlines():
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        words = list(lexer)
+        for at, word in enumerate(words):
+            command = list(itertools.takewhile(lambda part: part.strip("();<>|&"), words[at + 1 :]))
+            if (
+                word in {"pip", "pip3"}
+                and command[:3] == ["install", "--constraint", ".github/test-requirements.lock"]
+                and any(re.fullmatch(r"coverage(?:[=<>!~].*)?", part) for part in command[3:])
+            ):
+                return True
+    return False
+
+
 def test_the_scheduled_job_compares_the_newest_dev_runs_and_fails_on_any_difference():
     workflow = _workflow()
     triggers = workflow[True]
@@ -180,14 +197,7 @@ def test_the_scheduled_job_compares_the_newest_dev_runs_and_fails_on_any_differe
 @pytest.mark.feature("coverage-stability-installs-locked-coverage-first")
 def test_the_compare_job_installs_locked_coverage_before_it_compares() -> None:
     steps = _workflow()["jobs"]["compare"]["steps"]
-    lock = ["pip", "install", "--constraint", ".github/test-requirements.lock"]
-    runs = [shlex.split(str(step.get("run", "")), comments=True) for step in steps]
-    installs = [
-        index
-        for index, words in enumerate(runs)
-        if any(words[at : at + len(lock)] == lock for at in range(len(words)))
-        and any(re.fullmatch(r"coverage(?:[=<>!~].*)?", word) for word in words)
-    ]
+    installs = [index for index, step in enumerate(steps) if _installs_locked_coverage(str(step.get("run", "")))]
     compares = [index for index, step in enumerate(steps) if step.get("id") == "compare"]
     assert installs and compares and installs[0] < compares[0], (
         f"coverage installs at {installs}, compare at {compares}"
