@@ -1,21 +1,21 @@
 {
   "features": [
     {
-      "id": "swarm-review-lane-reporting",
+      "id": "reviewer-worker-gates",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-lane-status",
-      "behaviour": "Reviewer seats keep their review lane in status and ledger roles, receive worker activity and health accounting, contribute to Doctor rates, and have zero and populated task metrics and swarm owned event queues.",
-      "seam": "Swarm status talk and text rows, ledger metric rows, health ceremony, Doctor ceremony and monitoring, event queue scope and ledger role rendering",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-lane-gates",
+      "behaviour": "The review lane receives the existing build, push stop, one push, claim stop, quiet, watch and talk worker checks. Stall watch reports stale reviewer pull request claims and ready unclaimed review work in a full lane, while existing workers keep their checks.",
+      "seam": "The seven worker gate decisions, quiet_pass and stall_watch.stall_pass with worker lane records",
       "tests": [
-        "tests/swarm/test_review_lane_status_cli.py::test_status_text_prints_a_published_reviewer_lane",
-        "tests/swarm/test_review_lane_reporting.py::test_status_counts_reviewer_talk_after_an_outcome",
-        "tests/swarm/test_review_lane_reporting.py::test_ledger_metrics_include_zero_and_populated_review_counts",
-        "tests/swarm/test_review_lane_reporting.py::test_health_uses_reviewer_worker_budget_and_names_its_findings",
-        "tests/doctor/test_review_lane_rates.py::test_doctor_counts_reviewer_talk_and_monitoring",
-        "tests/events/test_review_lane_scope.py::test_review_queue_is_owned_by_its_swarm",
-        "tests/events/test_review_lane_scope.py::test_review_queue_preserves_owner_and_lane_validation",
-        "tests/swarm_ledger/test_review_lane_roles.py::test_page_lists_the_review_lane_and_counts_only_live_reviewers",
-        "tests/swarm_ledger/test_review_lane_roles.py::test_page_keeps_review_roles_compatible_with_published_status"
+        "tests/gates/test_build.py::test_worker_lanes_cannot_edit_outside_their_plan",
+        "tests/gates/test_claim_stop.py::test_worker_lanes_cannot_stop_with_an_unfinished_claim",
+        "tests/gates/test_one_push.py::test_worker_lanes_cannot_push_while_checks_run",
+        "tests/gates/test_push_stop.py::test_worker_lanes_cannot_stop_with_uncommitted_work",
+        "tests/gates/test_quiet.py::test_worker_lanes_raise_the_quiet_claim_flag",
+        "tests/gates/test_watch.py::test_worker_lanes_cannot_exceed_the_watch_budget",
+        "tests/gates/test_talk_review.py::test_worker_lanes_cannot_talk_past_the_budget",
+        "tests/gates/test_stall_watch_review.py::test_full_worker_lanes_report_unclaimed_work",
+        "tests/gates/test_stall_watch_review.py::test_a_stale_review_claim_with_a_pull_request_is_reported"
       ]
     },
     {
@@ -492,6 +492,20 @@
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_finished_unit_charges_its_slots_times_its_report_seconds_once_and_no_seconds_charges_nothing",
         "tests/ci_lab/test_scheduler.py::test_the_first_pass_after_finished_units_shed_a_class_names_it_with_the_spent_share_once"
+      ]
+    },
+    {
+      "id": "lab-scheduler-grade-demand-cache",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-grade-demand-cache",
+      "behaviour": "Scheduler load builds reuse a live grade demand contribution only while its stored raw bytes match the cached digest, parse changed grades on the next build, evict removed or missing grades, and retain no parsed State. Cached builds equal fresh builds, preserve per slot hit and miss counts and the most urgent tier of shared jobs, and a grade rewritten by Scheduler.save updates demand without changing mutating grade reads.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.load and Scheduler.save over the scheduler lab fixture, counting module level _parse calls and comparing capacity.Load values",
+      "tests": [
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_an_unchanged_load_equals_a_fresh_build_without_parsing_grades",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_saved_grade_is_reparsed_and_changes_the_next_load_demand",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_run_leaving_the_live_set_is_parsed_again_if_it_returns",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_a_missing_grade_stops_contributing_and_is_parsed_when_restored",
+        "tests/ci_lab/test_scheduler_demand_cache.py::test_cached_contributions_preserve_duplicate_slots_and_the_most_urgent_shared_job"
       ]
     },
     {
@@ -5860,6 +5874,19 @@
       ]
     },
     {
+      "id": "lab-flakes-object-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-store",
+      "behaviour": "The lab scheduler stores the flake rows of a passed flaky unit once, as JSON lines in the unit's flakes object lab/flakes/<kind>/<digest>.jsonl, after its verdict. A red verdict, a passed verdict that is not flaky and a report with no flake rows leave no flakes object. A second remember of the same unit keeps the first flakes object and the stored verdict, and the write once refusal never fails the verdict write. Reindex counts only unit reports, so a flakes object adds no verdict.",
+      "seam": "scripts.ci_lab.objects.flakes_path, scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, and scripts.ci_lab.store.Store.reindex",
+      "tests": [
+        "tests/ci_lab/test_scheduler.py::test_only_a_passed_flaky_unit_with_flake_rows_writes_its_flakes_object",
+        "tests/ci_lab/test_scheduler.py::test_a_second_remember_of_a_flaky_unit_keeps_the_first_flakes_object_and_verdict",
+        "tests/ci_lab/test_store.py::test_flakes_path_names_the_unit_flakes_object_and_refuses_a_key_of_another_kind",
+        "tests/ci_lab/test_store.py::test_reindex_counts_only_reports_beside_a_flakes_object"
+      ]
+    },
+    {
       "id": "selectors-read-outside-files",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2636",
@@ -7719,8 +7746,15 @@
         "tests/tick/test_database_ledger_routes.py::test_an_empty_path_reads_the_metadata",
         "tests/tick/test_database_ledger_routes.py::test_a_refused_request_raises_the_server_http_error",
         "tests/tick/test_database_ledger_routes.py::test_a_reply_below_400_is_returned",
-        "tests/tick/test_database_ledger_routes.py::test_the_database_client_carries_the_base_timeout_and_in_process_transport",
-        "tests/tick/test_database_ledger_routes.py::test_the_port_bounds_each_built_clients_timeout_by_the_deadline_left"
+        "tests/tick/test_database_ledger_routes.py::test_the_database_client_carries_the_base_timeout_and_the_writer_first_transport",
+        "tests/tick/test_database_ledger_routes.py::test_the_port_bounds_each_built_clients_timeout_by_the_deadline_left",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_request_goes_to_the_host_writer_when_one_listens",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_request_runs_in_process_when_no_writer_takes_the_connection",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_lost_reply_after_send_raises_a_timeout_and_never_runs_in_process",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_writer_that_holds_the_reply_past_the_client_timeout_is_never_run_in_process",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_writer_refusal_raises_the_in_process_http_error",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_reply_just_below_400_from_the_writer_is_returned",
+        "tests/tick/test_database_ledger_writer_route.py::test_a_tick_pass_stays_in_process_and_journals_while_a_writer_listens"
       ]
     },
     {
@@ -8279,7 +8313,7 @@
       "seam": "gate_protected._pinned_tool_form over reuse_jobs, _duration_problems and _preflight_problems",
       "tests": [
         "tests/test_gate_protected_pinned_tools.py::test_the_pinned_tool_form_pins_each_floating_parser_install_and_keeps_every_other_value",
-        "tests/test_gate_protected_pinned_tools.py::test_the_protected_reuse_job_admits_its_parser_install_floating_or_under_the_exact_pin_only",
+        "tests/test_gate_protected_pinned_tools.py::test_the_protected_reuse_job_admits_its_parser_install_only_under_the_exact_pin",
         "tests/test_gate_protected_pinned_tools.py::test_the_protected_durations_provenance_admits_its_parser_install_floating_or_under_the_exact_pin_only",
         "tests/test_gate_protected_pinned_tools.py::test_the_branch_lane_preflight_admits_its_parser_install_floating_or_under_the_exact_pin_only"
       ]
@@ -11771,6 +11805,22 @@
       ]
     },
     {
+      "id": "lab-report-flake-rows",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-report",
+      "behaviour": "A CI lab test unit whose retry passes appends its flake rows to the pod flake ledger and returns the same rows on its verdict, and the tests executor writes them into the unit report under flakes in the flake ledger line format with run set to the unit key and run_attempt to the lab attempt count; a green first attempt and a red retry return no rows and report an empty flakes list.",
+      "seam": "scripts.ci_lab.run_tests run and Verdict flakes, and the report.json scripts.ci_lab.executors tests returns",
+      "tests": [
+        "tests/ci_lab/test_run_tests.py::test_a_planted_failure_is_red_on_both_attempts_and_final",
+        "tests/ci_lab/test_run_tests.py::test_a_seeded_flake_is_green_flaky_and_written_to_the_flake_ledger",
+        "tests/ci_lab/test_run_tests.py::test_a_seeded_flaky_batch_returns_the_rows_it_writes_to_the_flake_ledger",
+        "tests/ci_lab/test_run_tests.py::test_a_red_retry_returns_no_flake_rows",
+        "tests/ci_lab/test_run_tests.py::test_a_green_first_attempt_returns_no_flake_rows",
+        "tests/ci_lab/test_executors.py::test_tests_reports_a_flaky_batchs_rows_with_the_unit_key_as_run_and_its_attempts_as_run_attempt",
+        "tests/ci_lab/test_executors.py::test_tests_reports_no_flake_rows_for_a_red_retry"
+      ]
+    },
+    {
       "id": "lab-worker-metrics",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-metrics",
@@ -13780,6 +13830,17 @@
       ]
     },
     {
+      "id": "ci-reuse-templates-install-pinned-tools",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-templates",
+      "behaviour": "The reuse job template installs PyYAML at the exact pin under the parser constraint file, in the one pinned form the protected grader admits, and the reuse and select jobs of the test workflow run exactly the install lines of the reuse job and duration provenance templates.",
+      "seam": "scripts.ci_reuse.reuse_job and scripts.ci_reuse.duration_provenance_steps install steps against the reuse and select jobs of .github/workflows/test.yml",
+      "tests": [
+        "tests/test_ci_reuse.py::test_the_rendered_reuse_and_provenance_installs_run_their_template_lines",
+        "tests/test_ci_reuse.py::test_the_reuse_template_installs_pyyaml_at_the_parser_pin"
+      ]
+    },
+    {
       "id": "execution-put-unchanged-skips-lock",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2797",
@@ -13967,6 +14028,24 @@
       ]
     },
     {
+      "id": "swarm-review-lane-reporting",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-lane-status",
+      "behaviour": "Reviewer seats keep their review lane in status and ledger roles, receive worker activity and health accounting, contribute to Doctor rates, and have zero and populated task metrics and swarm owned event queues.",
+      "seam": "Swarm status talk and text rows, ledger metric rows, health ceremony, Doctor ceremony and monitoring, event queue scope and ledger role rendering",
+      "tests": [
+        "tests/swarm/test_review_lane_status_cli.py::test_status_text_prints_a_published_reviewer_lane",
+        "tests/swarm/test_review_lane_reporting.py::test_status_counts_reviewer_talk_after_an_outcome",
+        "tests/swarm/test_review_lane_reporting.py::test_ledger_metrics_include_zero_and_populated_review_counts",
+        "tests/swarm/test_review_lane_reporting.py::test_health_uses_reviewer_worker_budget_and_names_its_findings",
+        "tests/doctor/test_review_lane_rates.py::test_doctor_counts_reviewer_talk_and_monitoring",
+        "tests/events/test_review_lane_scope.py::test_review_queue_is_owned_by_its_swarm",
+        "tests/events/test_review_lane_scope.py::test_review_queue_preserves_owner_and_lane_validation",
+        "tests/swarm_ledger/test_review_lane_roles.py::test_page_lists_the_review_lane_and_counts_only_live_reviewers",
+        "tests/swarm_ledger/test_review_lane_roles.py::test_page_keeps_review_roles_compatible_with_published_status"
+      ]
+    },
+    {
       "id": "swarm-review-lane",
       "origin": "regression",
       "ordered_at": "2026-11-21",
@@ -14045,6 +14124,22 @@
         "tests/hive/test_master_hive_items.py::test_each_master_item_id_names_its_hive_swarm_and_change_so_a_later_release_never_resends_it",
         "tests/hive/test_master_hive_items.py::test_a_drain_tells_the_masters_only_when_the_hive_flag_and_its_newest_drain_entry_both_read_draining",
         "tests/hive/test_master_hive_items.py::test_a_lost_hive_whose_exits_name_no_agent_tells_the_master_none_named"
+      ]
+    },
+    {
+      "id": "ledger-writer-hosts",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-hosts",
+      "behaviour": "Workstation hive installation and shared systemd units keep the warm ledger writer running after clean or failed termination. Worker startup restarts the writer beside hive run with inherited database settings and stops it when the hive ends.",
+      "seam": "timer.units, hive.daemon.install and deploy worker startup",
+      "tests": [
+        "tests/hive/test_daemon.py::test_writer_unit_uses_the_installed_binary_and_restarts_after_every_exit",
+        "tests/hive/test_daemon.py::test_hive_install_enables_the_shared_writer_unit",
+        "tests/hive/test_daemon.py::test_hive_install_reports_writer_enable_failure",
+        "tests/hive/test_daemon.py::test_hive_install_reloads_a_changed_writer_unit",
+        "tests/swarm/test_workstation_units.py::test_distributed_reconciliation_keeps_the_host_writer",
+        "tests/deployment/test_worker_hive.py::test_worker_stops_live_children_when_the_hive_ends_or_startup_is_terminated",
+        "tests/deployment/test_worker_hive.py::test_worker_restarts_the_writer_with_the_database_env_and_stops_with_the_hive"
       ]
     }
   ],

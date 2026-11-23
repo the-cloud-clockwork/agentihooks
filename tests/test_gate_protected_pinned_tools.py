@@ -21,9 +21,9 @@ REUSE_IF = "github.event_name != 'merge_group' && github.event_name != 'pull_req
 Form = Callable[[dict[Any, Any]], dict[Any, Any]]
 
 
-def _install(step: dict[str, Any], floating: str, install: str) -> dict[str, Any]:
-    assert floating in step["run"], "the template no longer installs the floating parser"
-    step["run"] = step["run"].replace(floating, install)
+def _install(step: dict[str, Any], template: str, install: str) -> dict[str, Any]:
+    assert template in step["run"], "the template no longer carries this parser install"
+    step["run"] = step["run"].replace(template, install)
     return step
 
 
@@ -78,13 +78,13 @@ def test_the_pinned_tool_form_pins_each_floating_parser_install_and_keeps_every_
 @pytest.mark.feature("protected-grader-admits-pinned-tool-forms")
 @pytest.mark.parametrize("factory", [ci_reuse.reuse_job, ci_reuse.paged_reuse_job, ci_reuse.retried_reuse_job])
 @pytest.mark.parametrize("install", [DOUBLE, PINNED, *NEAR_MISSES])
-def test_the_protected_reuse_job_admits_its_parser_install_floating_or_under_the_exact_pin_only(
+def test_the_protected_reuse_job_admits_its_parser_install_only_under_the_exact_pin(
     factory: Callable[[], dict[str, Any]], install: str
 ) -> None:
     job = factory()
     [step] = [step for step in job["steps"] if step.get("name") == "Install metadata dependencies"]
-    _install(step, DOUBLE, install)
-    assert (job in gate_protected.reuse_jobs()) is (install in {DOUBLE, PINNED})
+    _install(step, PINNED, install)
+    assert (job in gate_protected.reuse_jobs()) is (install == PINNED)
 
 
 @pytest.mark.feature("protected-grader-admits-pinned-tool-forms")

@@ -238,7 +238,8 @@ def static(pod: Pod, lease: Lease) -> Finished:
 
 def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
     """Run the lease's test batch on its head with the venv of the head's lockfile digest, the manifest and the flake
-    ledger, on as many workers as its slots; the report counts the git and uv cache lookups it made."""
+    ledger, on as many workers as its slots; the report counts the git and uv cache lookups it made and carries the
+    flake ledger rows of a batch its retry passed, with the unit key as run and the attempt count as run_attempt."""
     with pod.trees.shared(lease.head) as ((tree,), fetched):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
         manifest = json.loads(lease.unit.manifest)
@@ -253,6 +254,7 @@ def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
         "attempts": verdict.attempts,
         "seconds": seconds,
         caches.KEY: caches.report(fetched, [built]),
+        "flakes": [{**row, "run": lease.unit.key, "run_attempt": verdict.attempts} for row in verdict.flakes],
     }
     return Finished(verdict.outcome, _report(pod, record), verdict.log)
 
