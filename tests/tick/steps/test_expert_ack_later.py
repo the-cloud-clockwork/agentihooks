@@ -8,11 +8,12 @@ import pytest
 
 from scripts.hive import admission, launch, orders
 from scripts.hive.orders import Ack
-from scripts.swarm import expert_lineage, expert_seat, lease, seat_spawn, tick
+from scripts.swarm import expert_launch, expert_lineage, expert_seat, lease, seat_spawn, tick
 from scripts.swarm.controller import FencedRuntime
 from scripts.swarm.profile_choice import ProfileDecision
 from scripts.swarm_v2.runtime.base import RuntimeRouter
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
+from scripts.tick.steps import observe
 from tests.hive.test_controller_launch import setup as hive_setup
 from tests.swarm.test_expert_mission import GOOD
 from tests.swarm.test_tick import FakeRuntime
@@ -137,6 +138,7 @@ def test_next_expert_pass_records_the_live_acknowledgement_on_the_original_execu
         "xhigh",
         "account",
     )
+    assert expert_launch.on_pin(live.harness, live.model, live.effort)
     assert live.profile_decision["validation"] == {"pid": 31}
     assert expert_lineage.launches(context.store, context.config.slug, context.lineage.id) == 1
     assert admission.pending(context.store.redis, agent.hive) == 0
@@ -185,9 +187,9 @@ def test_expired_expert_order_is_retired_without_launching_again_under_the_same_
 @pytest.mark.feature("expert-seat-step")
 def test_reap_keeps_a_pending_expert_until_its_order_is_collected(context: SimpleNamespace) -> None:
     agent = pending(context)
-    assert tick._acknowledging(context.config.slug, context.store, agent)
-    assert not tick._acknowledging(context.config.slug, context.store, replace(agent, lane="eng"))
-    assert not tick._acknowledging(context.config.slug, context.store, replace(agent, state="working"))
+    assert observe._acknowledging(context.config.slug, context.store, agent)
+    assert not observe._acknowledging(context.config.slug, context.store, replace(agent, lane="eng"))
+    assert not observe._acknowledging(context.config.slug, context.store, replace(agent, state="working"))
 
 
 @pytest.mark.feature("expert-seat-step")
@@ -254,7 +256,7 @@ def test_a_launching_record_without_a_hive_runtime_keeps_its_existing_seat(conte
 def test_collection_with_no_order_never_invents_an_expert_acknowledgement(context: SimpleNamespace) -> None:
     agent = pending(context)
     context.store.redis.hdel(context.store.key(context.config.slug, launch.ORDERS), context.lineage.id)
-    assert not tick._acknowledging(context.config.slug, context.store, agent)
+    assert not observe._acknowledging(context.config.slug, context.store, agent)
     assert run(context) == []
     assert context.store.execution_registry.get(context.config.slug, agent.execution_id).state == "launching"
     assert len(context.store.execution_registry.records(context.config.slug)) == 1
@@ -270,7 +272,7 @@ def test_another_execution_cannot_be_collected_for_a_pending_expert(context: Sim
         context.lineage.id,
         json.dumps(asdict(replace(order, execution_id="another execution"))),
     )
-    assert not tick._acknowledging(context.config.slug, context.store, agent)
+    assert not observe._acknowledging(context.config.slug, context.store, agent)
     assert run(context) == []
     assert context.store.execution_registry.get(context.config.slug, agent.execution_id).state == "launching"
     assert len(context.store.execution_registry.records(context.config.slug)) == 1
