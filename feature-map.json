@@ -11110,6 +11110,29 @@
       ]
     },
     {
+      "id": "hive-registry-name-returns-to-base",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "Only a live hive holds a name, so a never beaten settings record or a stale hive leaves its name free, and a hive carrying a derived numeric suffix returns to its base name at its next heartbeat once no other live hive holds that base; the root hive reads swarm-master again instead of keeping swarm-master-2 forever.",
+      "seam": "scripts.hive.registry.update and scripts.hive.registry.beat through _held, _base, _named and _healed",
+      "tests": [
+        "tests/hive/test_registry.py::test_a_suffixed_master_name_returns_to_its_base_once_no_other_live_hive_holds_it",
+        "tests/hive/test_registry.py::test_a_suffixed_headless_name_returns_to_its_base_once_its_holder_goes_stale",
+        "tests/hive/test_registry.py::test_a_never_beaten_settings_record_holds_no_name",
+        "tests/hive/test_registry.py::test_a_stored_master_suffix_with_no_live_holder_returns_on_the_next_heartbeat"
+      ]
+    },
+    {
+      "id": "monitor-hive-names-match-registry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "The home resource monitor names each live hive row by the name the hive registry holds, the same name hive list prints, so an interface hive with a derived name is never shown as plain swarm-master, and the swarm-master row still sorts first.",
+      "seam": "scripts.swarm_ledger.api.monitor.labels and tally behind the monitor route",
+      "tests": [
+        "tests/swarm_ledger/test_api_monitor.py::test_each_live_hive_row_reads_the_registry_name_hive_list_prints"
+      ]
+    },
+    {
       "id": "automated-gc-resolves-inbox-store-at-call-time",
       "origin": "inventory",
       "behaviour": "Automated agent collection resolves the inbox store module at call time inside run() instead of binding InboxStore at import time, so a worker whose first import happened under a patched InboxStore still sweeps with the real store on a later import of the module.",

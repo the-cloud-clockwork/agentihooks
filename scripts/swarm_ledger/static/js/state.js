@@ -9,31 +9,29 @@ export const app = {
 
 };
 
-const rowSources = new WeakMap();
-
 export function sourceOf(item) {
-  return rowSources.has(item) ? rowSources.get(item) : item;
+  return (withDefaults.sources && withDefaults.sources.get(item)) || item;
 }
-
-const listEntries = new WeakMap();
 
 function entries(list) {
   if (!Array.isArray(list)) return [];
-  if (!listEntries.has(list)) listEntries.set(list, list.filter((e) => e && typeof e === "object" && typeof e.id === "string"));
-  return listEntries.get(list);
+  const kept = (entries.kept ||= new WeakMap());
+  if (!kept.has(list)) kept.set(list, list.filter((e) => e && typeof e === "object" && typeof e.id === "string"));
+  return kept.get(list);
 }
 
 export function withDefaults(d) {
   d = d && typeof d === "object" ? d : {};
+  const sources = (withDefaults.sources ||= new WeakMap());
   const list = (name, fields, threads) => (Array.isArray(d[name]) ? d[name] : []).map((i) => {
     const item = { ...i };
     for (const f of fields) if (item[f] === undefined && !["depends_on", "planning", "release"].includes(f)) item[f] = f === "done" || f === "out_of_scope" ? false : "";
     for (const t of threads) item[t] = entries(item[t]);
-    rowSources.set(item, i);
+    sources.set(item, i);
     return item;
   });
   const notes = entries(d.notes).map((n) => ({ ...n, comments: entries(n.comments) }));
-  rowSources.set(notes, d.notes);
+  sources.set(notes, d.notes);
   return {
     title: d.title || "", overview: d.overview || "", orchestrator: d.orchestrator || "", notes, chat: entries(d.chat),
     sources: Array.isArray(d.sources) ? d.sources : [],
@@ -222,12 +220,11 @@ export function itemState(list, i) {
   return done ? "done" : "open";
 }
 
-const blockerIndexes = new WeakMap();
-
 export function taskBlockers(task, tasks) {
   if ((task.state || "open") !== "open") return "";
-  let byId = blockerIndexes.get(tasks);
-  if (!byId) blockerIndexes.set(tasks, (byId = new Map(tasks.map((t) => [t.id, t]))));
+  const indexes = (taskBlockers.indexes ||= new WeakMap());
+  let byId = indexes.get(tasks);
+  if (!byId) indexes.set(tasks, (byId = new Map(tasks.map((t) => [t.id, t]))));
   const title = (id) => (byId.has(id) ? byId.get(id).title : `task ${id}`);
   const unfinished = (ids) => (ids || []).filter((id) => (byId.get(id) || {}).state !== "done");
   const done = (ids) => ids.map((id) => `${title(id)} is done`).join(", and ");

@@ -231,7 +231,6 @@ function outlineRow(i) {
 }
 
 const outlineRows = new Map();
-const outlineNow = new Map();
 
 function keptRows(s, rows) {
   const old = outlineRows.get(s.id) || new Map(), next = new Map();
@@ -255,10 +254,18 @@ function outlineGroup(s) {
   const box = h("details", { class: "fold", id: `ol-${s.id}`, open: filtering() || !s.complete ? "" : false }, h("summary", {}, outlineLink(s)));
   if (box.open) box.dataset.fresh = "";
   if (!filtering()) collapsible(box);
-  return h("li", { class: "ol-sec" }, lazy(box, () => h("ul", { class: "ol-items" }, ...outlineItems(outlineNow.get(s.id)).filter(Boolean))));
+  box.section = s;
+  const key = `ol-${s.id}`;
+  return h("li", { class: "ol-sec" }, lazy(box, () => {
+    const t = box.section;
+    return h("ul", { class: "ol-items" },
+      ...phaseRows(firstPage(key, t.items, (i) => i.id)).map(outlineRow), remoteMore(t), moreButton(key, t.items.length, "more items", outlineAgain) || "",
+      (t.items.length && !filtering() && closedMore(t.id.replace(/^sec-/, ""), "done", () => render())) || "");
+  }));
 }
 
 function refill(el, s) {
+  el.querySelector("details").section = s;
   const link = el.querySelector("summary > a");
   if (link.title !== s.title) link.title = s.title;
   if (link.textContent !== s.title) link.textContent = s.title;
@@ -298,7 +305,6 @@ const outlineGroups = new Map();
 function keptGroup(s, sig, phases) {
   const key = `ol-${s.id}`;
   wantedIn(key, s.items, (i) => i.id);
-  outlineNow.set(s.id, s);
   const inputs = [sig, limit(key), filtering(), s.id === "sec-tasks" ? phases : ""].join("\n");
   const shell = [s.complete, filtering()].join();
   const hit = outlineGroups.get(s.id);
