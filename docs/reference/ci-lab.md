@@ -23,6 +23,7 @@ worker's PriorityClass is a cluster object outside that module;
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
 | `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain; serves `/metrics` on 9108 from its own registry until the drain ends, and exits at start when it cannot bind 9108 |
+| none | `python -m scripts.ci_lab.load_measure [--builds N]` | Reads only: runs `Scheduler.load` N times, 3 by default, against the Redis that `CI_LAB_REDIS_URL` names and prints each build's processor and wall seconds, the live grade count and the grade parses as JSON (see [Load snapshot](#load-snapshot)) |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
@@ -158,9 +159,11 @@ curl -fsS http://lab:9108/metrics \
   | grep --line-buffered -E '^ci_lab_(slots_total|slots_busy|queue_wait_seconds|budget_fraction|class_shed)'
 ```
 
-`/capacity` returns the [capacity document](#capacity-document). Each capacity request and
-metrics scrape builds a fresh load from queue, lease, live grade, recent worker offer and
-daily budget state; separate requests can observe different instants. Without recent worker
+`/capacity` returns the [capacity document](#capacity-document). Each capacity request on 8800
+builds a fresh load from queue, lease, live grade, recent worker offer and daily budget state;
+separate requests can observe different instants. Port 9108 answers `/metrics` and `/capacity`
+from the last load its own serve loop built, and `ci_lab_load_age_seconds` gives that load's age.
+Without recent worker
 offers and leased jobs, a running scheduler can report zero total slots. Offers expire after
 60 seconds, and unit estimates remain fixed at 60 seconds per slot.
 
@@ -271,10 +274,11 @@ the token from `CI_LAB_CONTROL_TOKEN` on its host.
 | `ci_lab_workers_ready` | | `WORKERS_READY` |
 | `ci_lab_github_rate_remaining` | | `GITHUB_RATE_REMAINING` |
 | `ci_lab_verdict_mismatch_total` | `gate` | `VERDICT_MISMATCH_TOTAL` |
+| `ci_lab_load_age_seconds` | | `LOAD_AGE_SECONDS` |
 
-The scheduler sets every metric its queue, lease and worker state answers, the node mirror's age
-and the GitHub calls left, on one `scripts.ci_lab.metrics.Registry` the `Scheduler` builds and
-`listen` serves on 9108:
+The scheduler sets every metric its queue, lease and worker state answers, the node mirror's age,
+the served load's age and the GitHub calls left, on one `scripts.ci_lab.metrics.Registry` the
+`Scheduler` builds and `listen` serves on 9108:
 
 | Metric | Set from |
 |---|---|
@@ -287,6 +291,7 @@ and the GitHub calls left, on one `scripts.ci_lab.metrics.Registry` the `Schedul
 | `ci_lab_heads_graded_total` | Each grade a pass closes, by class and conclusion |
 | `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | Each expired lease a pass requeues or marks lost |
 | `ci_lab_mirror_age_seconds` | `metrics.observe_mirror` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the epoch second in the `fetched-at` stamp under `CI_LAB_GIT_MIRROR`, never below zero; no sample while the stamp is missing or holds no whole number. The node cache writes that stamp; the scheduler's own fetch writes none |
+| `ci_lab_load_age_seconds` | `metrics.observe_age` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the build of the load snapshot the port serves started, never below zero; see [Capacity document](#capacity-document) |
 | `ci_lab_github_rate_remaining` | `metrics.observe_rate` on every check runs answer the scheduler's and the relay's `Checks` posters get, retries and refusals included: its `x-ratelimit-remaining` header when that holds a whole number; an answer without one keeps the last value |
 
 A worker unit's report carries `caches` from `scripts.ci_lab.caches.report`: per revision it
@@ -314,9 +319,22 @@ snapshot sets the queue, slot and `ci_lab_queue_wait_seconds` gauges through
 `scripts.ci_lab.metrics.observe_load`. The swarm tick reads the document to decide the
 [lab behind claim hold](swarm-thresholds.md#lab-behind-claim-hold).
 
-The scheduler service builds the snapshot on every request with
-`scripts.ci_lab.scheduler.Scheduler.load` and serves `/capacity` on port 8800 and `/metrics` on
-9108 from it, through `scripts.ci_lab.scheduler.listen`:
+The scheduler service builds the snapshot with `scripts.ci_lab.scheduler.Scheduler.load` and
+serves it through `scripts.ci_lab.scheduler.listen`. Port 8800 builds one on every `/capacity`
+request. Port 9108 serves `/metrics` and `/capacity` from the last snapshot a
+`scripts.ci_lab.metrics.Latest` holds. The port's first read after a start builds the snapshot once,
+however many reads meet that build, so the lab series stay without samples until that build
+finishes. A failed first build fails its own read, and each read that waited on it builds again in
+turn. Every later read of the port answers at once with the last finished build and sets
+`ci_lab_load_age_seconds` to the seconds since that build started. Between requests the port's serve loop runs `Latest.refresh`,
+which starts one background build, a daemon thread named `ci-lab-load-refresh`, once the last
+build started `REFRESH_MS` (15 seconds) ago and no build runs. The serve loop checks after each
+request and at least every half second, and builds run one at a time, back to back while one takes
+longer than 15 seconds, so the served snapshot is at most one build plus the longer of 15 seconds
+and one build, plus that half second, old. A failed build keeps the last snapshot, and the next
+waits until 15 seconds have passed since the failed one started.
+
+`Scheduler.load` builds each field from:
 
 | Field | Built from |
 |---|---|
@@ -356,6 +374,31 @@ Until the lab records measured unit durations, every estimate is the fixed `UNIT
 | `running_slots`, `pending_slots` | `{}` | Slots running and pending units take, keyed by class; `scripts.ci_lab.budget.slots_wanted` reads them for `ci_lab_slots_wanted` |
 | `workers_ready` | `0` | Workers that offered slots within the ready window |
 | `overdue` | `0` | Leased units past their estimate |
+
+`python -m scripts.ci_lab.load_measure [--builds N]` measures what one load build costs. It runs
+`Scheduler.load` N times, 3 by default, on a scheduler over the Redis that `CI_LAB_REDIS_URL` names and prints
+one JSON object:
+
+| Field | Meaning |
+|---|---|
+| `builds` | Load builds run |
+| `grades` | Live grades, the size of the live grade set; a live run whose grade document is gone counts here and is never parsed |
+| `process_seconds`, `wall_seconds` | Each build's `time.process_time` and `time.perf_counter` seconds, one entry per build |
+| `parses` | Calls of the scheduler's grade parser during the builds; one scheduler serves every build, so the first build parses each live grade with a stored document once and later builds parse only grades whose stored document changed |
+| `leaves_out` | What the figures leave out: the offer prune round trip of each build |
+
+The command reads only. A load prunes stale worker offers through the queue's prune script, its one write, so the
+measured scheduler's queue keeps every offer; the offers read keeps only offers made inside the ready window, so
+each build returns the load the scheduler builds, and the figures leave out that one prune round trip per build.
+Every build reads the whole pending and leased queues and every live grade document. The first build runs on a
+cold demand cache and parses each live grade with a stored document; builds after the first run on the warm demand
+cache, so the first `process_seconds` and `wall_seconds` entries are the cold cost and later entries the warm cost.
+To measure the live scheduler, run it in the scheduler pod, which carries `CI_LAB_REDIS_URL`, with few builds,
+since it shares the pod's memory limit:
+
+```bash
+kubectl -n ci-lab exec deploy/ci-lab-scheduler -- python -m scripts.ci_lab.load_measure --builds 3
+```
 
 ### Document fields
 
@@ -619,7 +662,8 @@ the `HELP` and `TYPE` lines and no sample: a worker scrape target reads up witho
 scheduler's series, which already count every unit from its report. `scripts.ci_lab.scheduler.listen`
 serves the `Scheduler`'s own `metrics.Registry` on the metrics port, so one exposition carries the
 gauges each scrape sets and the counters the scheduler's passes keep. Every `GET /metrics` sets
-these from the scheduler's load snapshot through `metrics.observe_load`:
+these through `metrics.observe_load` from the last load snapshot the port holds, which its serve
+loop rebuilds on its own cadence (see [Capacity document](#capacity-document)):
 
 - `ci_lab_units_queued`, `ci_lab_units_running`, `ci_lab_class_shed` and
   `ci_lab_queue_wait_seconds`, once for each of the five classes
@@ -633,7 +677,7 @@ lines of a metric with no sample, so Prometheus stores no series for it until th
 
 | Series | Read by | Set by |
 |---|---|---|
-| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `metrics.observe_load`, from `scripts.ci_lab.budget.slots_wanted` on every scrape, so `CILabSchedulerBlind` fires only while Prometheus scrapes no running scheduler |
+| `ci_lab_slots_wanted` | `CILabSchedulerBlind`, the slots panels, the worker ScaledObject | `metrics.observe_load`, from `scripts.ci_lab.budget.slots_wanted` of the served load snapshot on every scrape, so it lags the queue by that snapshot's age and `CILabSchedulerBlind` fires only while Prometheus scrapes no running scheduler; a stale series never fires it, and `ci_lab_load_age_seconds` shows a refresh that stopped |
 | `ci_lab_units_overdue` | `CILabUnitsOverdue` | `metrics.observe_load`, on every scrape |
 | `ci_lab_workers_ready` | Workers ready against desired, as its `heartbeat` line | `metrics.observe_load`, on every scrape |
 | `ci_lab_core_seconds_total` | Core minutes per merged pull request | `metrics.observe_unit`, which `Scheduler._finished` calls once for each finished attempt whose worker uploaded a report |
@@ -643,6 +687,7 @@ lines of a metric with no sample, so Prometheus stores no series for it until th
 | `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | No alert or panel; the [Worker loss drill](#worker-loss-drill) reads them | `Scheduler._reap`, one for each expired lease it requeues or marks lost |
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | No service. `shadow.Shadow` counts it on the registry its caller passes, and no service builds a `Shadow`, so the alert cannot fire and the panel stays empty |
 | `ci_lab_mirror_age_seconds` | No alert or panel | `metrics.observe_mirror`, on every scheduler scrape, from its local mirror's `fetched-at` stamp. A missing or invalid stamp removes the sample |
+| `ci_lab_load_age_seconds` | No alert or panel | `metrics.observe_age`, on every scheduler scrape, from the start of the build of the load snapshot the port serves |
 | `ci_lab_github_rate_remaining` | No alert or panel | `metrics.observe_rate`, called by `Checks._request` with each check runs response. A valid `x-ratelimit-remaining` header sets the sample; a missing or invalid header leaves the previous sample unchanged |
 
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the

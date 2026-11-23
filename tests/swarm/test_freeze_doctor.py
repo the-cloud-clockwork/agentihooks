@@ -104,7 +104,7 @@ def test_watched_keeps_the_own_document_when_the_watched_ledger_is_gone(store: R
 def test_autoscale_demand_for_the_doctor_counts_no_task_the_watched_focus_holds(store, monkeypatch):
     ledger = doctor(store, [record("plans/a", "focus")])
     monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [])
-    assert capacity.live_inputs("sw", store, ledger, {}, 5_000).demand == {"eng": 1, "ci": 0, "plan": 0}
+    assert capacity.live_inputs("sw", store, ledger, {}, 5_000).demand == {"eng": 1, "ci": 0, "plan": 0, "review": 0}
 
 
 class DemandRuntime:
@@ -120,7 +120,7 @@ class DemandRuntime:
 def test_the_capacity_pass_for_the_doctor_counts_no_task_the_watched_focus_holds(store):
     ledger, runtime = doctor(store, [record("plans/a", "focus")]), DemandRuntime()
     capacity.apply("sw", store.config("sw"), store, ledger, runtime, 1_000)
-    assert runtime.demand == [{"eng": 1, "ci": 0, "plan": 0}]
+    assert runtime.demand == [{"eng": 1, "ci": 0, "plan": 0, "review": 0}]
 
 
 def test_the_held_spawns_gauge_counts_no_doctor_task_the_watched_focus_holds(store, monkeypatch, tmp_path):

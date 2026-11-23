@@ -1,0 +1,6 @@
+{
+  "scripts/handoff/check.py:scripts.handoff.check.x__body:0e1aa7b57bffb8d419a4521a2ce055c85d6073df734902c262d81043c8388b50": {
+    "reader": "standards_reader",
+    "reason": "_body uses the default only when there is no non-blank line; closed checks last >= 0 and is False for -1 and -2, so _body returns the lines unchanged."
+  }
+}

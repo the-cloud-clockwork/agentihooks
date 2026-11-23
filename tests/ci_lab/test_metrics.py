@@ -2,6 +2,7 @@ import hashlib
 import json
 import re
 import threading
+import time
 import urllib.error
 import urllib.request
 from dataclasses import replace
@@ -35,6 +36,7 @@ CONTRACT_NAMES = (
     "ci_lab_workers_ready",
     "ci_lab_github_rate_remaining",
     "ci_lab_verdict_mismatch_total",
+    "ci_lab_load_age_seconds",
 )
 COUNTERS = {
     "ci_lab_cache_hits_total",
@@ -458,3 +460,167 @@ def test_a_registry_server_answers_only_the_metrics_route_over_http() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.feature("lab-scheduler-cached-snapshot")
+def test_concurrent_first_reads_of_the_latest_load_build_it_once() -> None:
+    builds: list[int] = []
+    entered, gate = threading.Event(), threading.Event()
+
+    def build(now_ms: int) -> Load:
+        builds.append(now_ms)
+        entered.set()
+        assert gate.wait(10)
+        return replace(LOAD, slots_busy=len(builds))
+
+    latest = metrics.Latest(build, lambda: 1000, 15_000)
+    answers: list[tuple[Load, int]] = []
+
+    def reader() -> None:
+        answers.append(latest.read())
+
+    readers = [threading.Thread(target=reader, daemon=True) for _ in range(3)]
+    for thread in readers:
+        thread.start()
+    try:
+        assert entered.wait(10)
+        time.sleep(0.1)
+    finally:
+        gate.set()
+    for thread in readers:
+        thread.join(10)
+    assert builds == [1000]
+    assert answers == [(replace(LOAD, slots_busy=1), 1000)] * 3
+
+
+@pytest.mark.feature("lab-scheduler-cached-snapshot")
+def test_refresh_starts_one_daemon_build_at_the_interval_while_reads_keep_the_last_load() -> None:
+    now = [10**9]
+    builds: list[int] = []
+    workers: list[threading.Thread] = []
+    entered, gate = threading.Event(), threading.Event()
+
+    def build(now_ms: int) -> Load:
+        builds.append(now_ms)
+        if len(builds) > 1:
+            workers.append(threading.current_thread())
+            entered.set()
+            assert gate.wait(10)
+        return replace(LOAD, slots_busy=len(builds))
+
+    latest = metrics.Latest(build, lambda: now[0], 15_000)
+    latest.refresh()
+    assert builds == []
+    now[0] = 1000
+    first = latest.read()
+    assert first == (replace(LOAD, slots_busy=1), 1000)
+    now[0] = 15_999
+    latest.refresh()
+    now[0] = 16_000
+    with latest.building:
+        caller = threading.Thread(target=latest.refresh, daemon=True)
+        caller.start()
+        caller.join(10)
+        assert not caller.is_alive()
+    assert builds == [1000]
+    answers: list[tuple[Load, int]] = []
+
+    def reader() -> None:
+        answers.append(latest.read())
+
+    try:
+        latest.refresh()
+        assert entered.wait(10)
+        reading = threading.Thread(target=reader, daemon=True)
+        reading.start()
+        reading.join(10)
+        assert answers == [first]
+        assert [(worker.name, worker.daemon) for worker in workers] == [("ci-lab-load-refresh", True)]
+    finally:
+        gate.set()
+    for worker in workers:
+        worker.join(10)
+        assert not worker.is_alive()
+    assert latest.building.acquire(timeout=10)
+    latest.building.release()
+    assert builds == [1000, 16_000]
+    assert latest.read() == (replace(LOAD, slots_busy=2), 16_000)
+
+
+@pytest.mark.feature("lab-scheduler-cached-snapshot")
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_failed_refresh_keeps_the_last_load_and_the_next_waits_an_interval() -> None:
+    now = [1000]
+    builds: list[int] = []
+    workers: list[threading.Thread] = []
+
+    def build(now_ms: int) -> Load:
+        builds.append(now_ms)
+        if len(builds) > 1:
+            workers.append(threading.current_thread())
+        if len(builds) == 2:
+            raise ConnectionError("the queue store went away")
+        return replace(LOAD, slots_busy=len(builds))
+
+    latest = metrics.Latest(build, lambda: now[0], 15_000)
+    first = latest.read()
+    now[0] = 16_000
+    latest.refresh()
+    assert latest.building.acquire(timeout=10)
+    latest.building.release()
+    workers[0].join(10)
+    assert not workers[0].is_alive()
+    assert latest.read() == first
+    now[0] = 30_999
+    latest.refresh()
+    assert builds == [1000, 16_000]
+    now[0] = 31_000
+    latest.refresh()
+    assert latest.building.acquire(timeout=10)
+    latest.building.release()
+    workers[1].join(10)
+    assert not workers[1].is_alive()
+    assert builds == [1000, 16_000, 31_000]
+    assert latest.read() == (replace(LOAD, slots_busy=3), 31_000)
+
+
+@pytest.mark.feature("lab-scheduler-cached-snapshot")
+def test_a_failed_first_build_fails_its_read_and_the_next_read_builds_again() -> None:
+    builds: list[int] = []
+
+    def build(now_ms: int) -> Load:
+        builds.append(now_ms)
+        if len(builds) == 1:
+            raise ConnectionError("the queue store went away")
+        return replace(LOAD, slots_busy=len(builds))
+
+    latest = metrics.Latest(build, lambda: 1000, 15_000)
+    with pytest.raises(ConnectionError):
+        latest.read()
+    assert latest.read() == (replace(LOAD, slots_busy=2), 1000)
+    assert latest.read() == (replace(LOAD, slots_busy=2), 1000)
+    assert builds == [1000, 1000]
+
+
+@pytest.mark.feature("lab-scheduler-cached-snapshot")
+def test_the_load_age_counts_the_seconds_since_the_served_build_started_never_below_zero() -> None:
+    registry = metrics.Registry()
+    metrics.observe_age(registry, 1000, 3500)
+    assert "\nci_lab_load_age_seconds 2.5\n" in registry.render()
+    metrics.observe_age(registry, 4000, 3500)
+    assert "\nci_lab_load_age_seconds 0.0\n" in registry.render()
+
+
+@pytest.mark.feature("lab-scheduler-cached-snapshot")
+def test_the_served_port_runs_its_actions_between_requests_and_a_port_without_actions_runs_none() -> None:
+    ran: list[int] = []
+    acting = metrics.serve("127.0.0.1", 0, lambda: LOAD, metrics.Registry(), lambda: ran.append(1))
+    plain = metrics.serve("127.0.0.1", 0, lambda: LOAD, metrics.Registry())
+    try:
+        acting.service_actions()
+        acting.service_actions()
+        plain.service_actions()
+        assert ran == [1, 1]
+    finally:
+        acting.server_close()
+        plain.server_close()

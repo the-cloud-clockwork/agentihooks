@@ -187,6 +187,24 @@ def _waits(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> Callable[[dict[s
     return waits_on
 
 
+def waits(doc: dict[str, Any]) -> Callable[[dict[str, Any]], list[str]]:
+    """What a task of the ledger waits on, as the focus queue reads it."""
+    return _waits(doc, doc.get("tasks") or [])
+
+
+def reached(
+    seeds: Iterable[str],
+    rows: dict[str, dict[str, Any]],
+    cold: set[str],
+    next_of: Callable[[dict[str, Any]], list[str]],
+) -> set[str]:
+    """Every id a walk from the seeds meets along next_of, the seeds included, short of the cold ones."""
+    seen: set[str] = set()
+    for seed in seeds:
+        _reach(seed, rows, cold, next_of, seen)
+    return seen
+
+
 def _stuck(
     task_id: str,
     rows: dict[str, dict[str, Any]],

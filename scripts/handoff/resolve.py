@@ -23,7 +23,7 @@ class Resolver:
     def __init__(self, slug, redis, ledger_item=_ledger_item, run=subprocess.run):
         self.slug, self.redis, self.ledger_item, self.run = slug, redis, ledger_item, run
 
-    def __call__(self, address):
+    def __call__(self, address: str) -> bool:
         scheme, _, rest = address.partition(":")
         check = {
             "https": lambda: self._github(address),
@@ -31,6 +31,7 @@ class Resolver:
             "workspace": lambda: self._workspace(rest),
             "recap": lambda: self.redis is not None and bool(SeatMemory(self.redis).recaps(rest)),
             "inbox": lambda: self.redis is not None and self._inbox(rest),
+            "mission": lambda: self.redis is not None and self._mission(rest),
         }.get(scheme)
         return bool(check and check())
 
@@ -75,3 +76,10 @@ class Resolver:
         except InboxError:
             return False
         return True
+
+    def _mission(self, rest: str) -> bool:
+        from scripts.swarm import expert_lineage
+        from scripts.swarm.store import RedisStore
+
+        slug, _, digest = rest.partition("/")
+        return expert_lineage.saved(RedisStore(self.redis), slug, digest)
