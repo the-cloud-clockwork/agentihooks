@@ -1,0 +1,16 @@
+rules:
+  - id: ledger-host-copy-inside-entry
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Entry loading runs inside a ledger transaction. Queue the host copy through the repository copy boundary
+      so Postgres commits before the disk write.
+    paths:
+      include:
+        - /scripts/swarm_ledger/repository/
+        - ledger-host-copy-inside-entry.py
+    patterns:
+      - pattern-inside: |
+          def _entry(...):
+              ...
+      - pattern: $SELF.copies.keep(...)

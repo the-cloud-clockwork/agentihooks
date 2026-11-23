@@ -10,8 +10,12 @@ import pytest
 
 from scripts.swarm import thin_task
 from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm_ledger import ledger_core
+from scripts.swarm_ledger.api import schemas
+from scripts.swarm_ledger.api.errors import APIError
 from scripts.tick import registry
 from scripts.tick.adapters.fakes import FakeLedger, fake_tools
+from scripts.tick.adapters.ledger import ClientLedger
 from scripts.tick.deadline import Deadline
 from scripts.tick.steps import CallStep, hook_domains
 
@@ -53,6 +57,23 @@ class RefusingLedger(FakeLedger):
         if any(operation.get("enhances") == self.refused for operation in operations):
             raise LedgerRefused("task_add refused")
         return super().mutate(operations, deadline=deadline)
+
+
+@dataclass
+class Accepting:
+    """A ledger API client that grades every batch it is sent with the ledger API's own operation check."""
+
+    sent: list[list[dict[str, Any]]] = field(default_factory=list[list[dict[str, Any]]])
+    refused: list[str] = field(default_factory=list[str])
+
+    def mutate(self, slug: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
+        self.sent.append(operations)
+        try:
+            schemas.check_operations({"operation_id": slug, "ops": operations, "guards": {}}, ledger_core, ("t1",))
+        except APIError as error:
+            self.refused.append(str(error))
+            return {"rejected": ["refused"]}
+        return {}
 
 
 @dataclass
@@ -236,3 +257,14 @@ def test_a_spent_deadline_takes_no_task() -> None:
     """A pass whose deadline is already spent takes no task and writes nothing."""
     found = _run([THIN], deadline=Deadline(0.0, clock=lambda: 1.0))
     assert (found.lines, found.calls(), found.inbox.sent) == ([], [], [])
+
+
+@pytest.mark.feature("tick-thin-task-pass")
+def test_every_write_of_a_pass_is_one_the_ledger_api_accepts() -> None:
+    """Through the real ledger adapter the first pass over a thin task sends one batch, the enhancement task add and
+    the enhancement mark, and the ledger API's own operation check accepts every operation in it."""
+    client = Accepting()
+    found = _run([THIN], cast(FakeLedger, ClientLedger(SLUG, lambda remaining: cast(Any, client))))
+    assert client.refused == []
+    assert [[operation["op"] for operation in batch] for batch in client.sent] == [["task_add", "task_enhancement"]]
+    assert found.lines == ["queued enhance-t1 for thin task t1"]

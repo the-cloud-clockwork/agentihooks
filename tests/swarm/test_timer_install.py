@@ -1041,6 +1041,7 @@ def test_a_foreign_supervisor_is_recycled_and_the_timer_and_finding_clear_on_its
     assert order == ["drain 4242", "supervise", "supervise", "supervise"]
 
 
+@pytest.mark.feature("scheduler-credential-refusal-stop")
 def test_the_scheduler_is_its_own_restarting_user_service_apart_from_the_units_that_start_it(monkeypatch):
     monkeypatch.setattr(timer.sys, "executable", "/installed/bin/python")
     text = timer.units("/installed/bin/agentihooks")["agentihooks-scheduler.service"]
@@ -1051,7 +1052,7 @@ def test_the_scheduler_is_its_own_restarting_user_service_apart_from_the_units_t
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         'ExecStart="/installed/bin/python" -m scripts.scheduler.service supervise\n'
-        "Restart=always\nRestartSec=5\nRestartPreventExitStatus=2\nKillMode=process\n\n"
+        "Restart=always\nRestartSec=5\nRestartPreventExitStatus=2 4\nKillMode=process\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
 

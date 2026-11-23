@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__paren_end:d81d7780bf808cc458b2ed14dab7faa8eb2cba21f9ea41f5a0f7cc709c6b00ed": {
+    "reader": "standards_reader",
+    "reason": "resume starts at start, so every index before start is skipped by the existing check."
+  }
+}

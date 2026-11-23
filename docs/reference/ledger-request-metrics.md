@@ -20,6 +20,209 @@ it. When the server cannot account for a span, the reply names it.
 Delivered by [pull request 4331](https://github.com/the-cloud-clockwork/agentihooks/pull/4331).
 Timing does not change what a write does.
 
+## Command-line write baselines
+
+`agentihooks ledger time-writes` measures the comment writes an agent makes from
+the command line. Each write runs in a fresh process, one after another, using
+the timer's Python interpreter and `python -m scripts.install api`. It includes
+process startup and the ledger copy work a fresh agent command pays for.
+Pull request [13144](https://github.com/the-cloud-clockwork/agentihooks/pull/13144)
+added this command and command-line request timing.
+
+These are real writes to an existing task, using the fixed comment text
+`Timing one agent ledger write`. Choose an existing scratch ledger and task,
+and an identity permitted to comment there. The command creates neither the
+ledger nor the task, and leaves its comments in place. It applies the same
+identity checks, revision guards and write gates as an ordinary comment.
+
+```bash
+agentihooks ledger time-writes \
+  --slug "$TIMING_SLUG" \
+  --as "$TIMING_AGENT" \
+  --count 5 \
+  "$TIMING_TASK"
+```
+
+Set `TIMING_SLUG`, `TIMING_AGENT` and `TIMING_TASK` to the scratch ledger slug,
+your agent name and the task id before running the examples. Pass the task id
+alone: the command adds `tasks/` itself.
+
+| Argument | Default | Meaning |
+|----------|---------|---------|
+| `--slug` | required | Existing ledger slug |
+| `--as` | required | Identity making every comment write |
+| `--count` | `5` | Integer number of sequential writes; use a positive count for a baseline |
+| `task` | required | Bare task id within that ledger |
+
+The comment text is fixed; there is no text option. A count of zero or less
+performs no writes and prints empty `writes` and `summary` values.
+
+### Store configuration and saved results
+
+The child processes inherit the timer's environment and use the configured
+store directly. With `AGENTIHOOKS_SWARM_DATABASE_URL` set they use Postgres;
+otherwise they use SQLite under `LEDGER_DIR` (default
+`~/development-ledger`). A ledger server is unnecessary, and this command has
+no server URL option. See [Ledger write path](ledger-write-path.md#the-store-a-write-lands-in)
+and [Shared ledger database sessions](shared-ledger-database.md).
+
+For an existing scratch ledger in Postgres, pass its database setting by
+environment reference and save the report:
+
+```bash
+TIMING_OUTPUT_DIR="$HOME/scratchpad/ledger-timing"
+mkdir -p "$TIMING_OUTPUT_DIR"
+export AGENTIHOOKS_SWARM_DATABASE_URL="$SCRATCH_LEDGER_DATABASE_URL"
+
+agentihooks api \
+  --slug "$TIMING_SLUG" \
+  --as "$TIMING_AGENT" \
+  join
+
+agentihooks ledger time-writes \
+  --slug "$TIMING_SLUG" \
+  --as "$TIMING_AGENT" \
+  --count 5 \
+  "$TIMING_TASK" > "$TIMING_OUTPUT_DIR/baseline.json"
+```
+
+Here `SCRATCH_LEDGER_DATABASE_URL` must already hold the scratch database
+setting. Joining uses the identity that will make the comments; a pinned agent
+must use its own name. For an existing SQLite scratch store, explicitly clear
+the database URL for the command and point it at that store's folder:
+
+```bash
+AGENTIHOOKS_SWARM_DATABASE_URL="" \
+LEDGER_DIR="$SCRATCH_LEDGER_DIR" \
+agentihooks ledger time-writes \
+  --slug "$TIMING_SLUG" \
+  --as "$TIMING_AGENT" \
+  --count 5 \
+  "$TIMING_TASK" > "$TIMING_OUTPUT_DIR/sqlite-baseline.json"
+```
+
+Set `SCRATCH_LEDGER_DIR` to the existing scratch store, and join there with the
+same store settings if needed. Keep the report with the UTC measurement date,
+code revision, host and store used. Compare runs with the same count and
+comparable ledger sizes and host load; a small scratch ledger does not measure
+the copy cost of a much larger ledger.
+
+### Read the baseline report
+
+A successful run prints one indented JSON object. Child comment replies are
+suppressed; child errors remain on stderr. Duration figures are seconds.
+
+| Field | Meaning |
+|-------|---------|
+| `slug`, `task`, `count` | Target and requested write count |
+| `load_before`, `load_after` | Host load averages over one, five and fifteen minutes, before and after the run |
+| `writes` | One measurement object per successful child process, in execution order |
+| `writes[].process_wall`, `process_cpu` | Entire child elapsed time and combined child user and system CPU time |
+| `writes[].requests` | Number of measured in-process requests made by that child |
+| `writes[].request_wall`, `request_cpu` | Sum of all its request wall and thread CPU times |
+| `writes[].write_wall`, `write_cpu` | Sum of its `POST` request wall and thread CPU times |
+| `writes[].lock_wait`, `postgres_wait` | Sum of the recorded ledger lock and Postgres waits across its requests |
+| `writes[].<step>_wall`, `<step>_cpu` | Sum of wall and thread CPU time for each observed substep |
+| `summary.<figure>.median`, `.max` | Median and maximum across writes for each observed figure, including the request count |
+
+A substep absent from one write counts as zero in that write's summary. A
+substep absent from every write has no summary entry. Raw request records also
+carry `client_wait`; the baseline report does not aggregate that field.
+
+For example, extract the process figures from a saved run:
+
+```bash
+jq '{count, process_wall: .summary.process_wall,
+     process_cpu: .summary.process_cpu}' "$TIMING_OUTPUT_DIR/baseline.json"
+```
+
+Illustrative output only; these numbers are not a measured current baseline:
+
+```json
+{
+  "count": 5,
+  "process_wall": {"median": 1.2, "max": 1.8},
+  "process_cpu": {"median": 0.8, "max": 0.9}
+}
+```
+
+### Interpret the substeps
+
+Each observed name appears with both `_wall` and `_cpu` suffixes:
+
+| Substep | Work measured |
+|---------|---------------|
+| `copy_adopt` | Attempt to adopt the host's saved ledger copy |
+| `copy_refresh` | Refresh the copy to the stored generation |
+| `copy_load` | Load the whole ledger when a refreshed copy is unavailable |
+| `copy_document` | Build the document fragments, remember the entry and keep its copy |
+| `guard_read` | Read the current document before checking and applying operations |
+| `write_gate` | Obtain the write fence and construct its guarded operations |
+| `apply_locked` | Read the entry, apply the mutation and write it while holding the ledger lock |
+| `publish` | Publish the fence result, relay inbox events, process the Doctor phrase and deliver alerts |
+| `hierarchy_sync`, `outbox_write`, `refresh_record`, `event_append` | The four transaction substeps described in the server writes view below |
+
+These spans nest. `apply_locked` contains the four transaction substeps and can
+also contain copy work on a cold entry; copy work otherwise occurs inside
+`guard_read`. Adding enclosing and enclosed times double-counts the same work.
+Lock acquisition precedes `apply_locked`; use the wait figures to inspect it.
+
+Process CPU and request CPU have different scopes: the former includes process
+user and system usage, while request and substep CPU measure the executing
+thread. Process wall time also includes startup and work outside the measured
+requests. Fresh processes can still adopt saved host copies, so a fresh process
+does not guarantee a whole-ledger rebuild. This command measures sequential
+comment writes, without a latency threshold or a concurrent-load scenario.
+
+### Raw command-line request timings
+
+For an ordinary command, set `AGENTIHOOKS_LEDGER_TIMING_FILE` to a writable file
+to append one JSON object per in-process ledger request:
+
+```bash
+AGENTIHOOKS_LEDGER_TIMING_FILE="$TIMING_OUTPUT_DIR/requests.jsonl" \
+agentihooks api \
+  --slug "$TIMING_SLUG" \
+  --as "$TIMING_AGENT" \
+  comment "tasks/$TIMING_TASK" "Timing one agent ledger write"
+
+jq '{method, route, wall, cpu, lock_wait, client_wait,
+     postgres_wait, steps}' "$TIMING_OUTPUT_DIR/requests.jsonl"
+```
+
+Create the parent directory first. Records append to the named file; an
+ordinary comment can make multiple requests, each leaving its own line. Each
+record contains `method`, normalized `route`, diagnostic `detail`, `wall`,
+`cpu`, `lock_wait`, `client_wait`, `postgres_wait` and `steps`. The `steps`
+object maps each observed name to `{"wall": seconds, "cpu": seconds}`. All
+times are seconds, and request and substep CPU use the thread clock.
+
+With the variable unset or empty, command-line requests write no timing file.
+Inside an already measured server request, their substeps join that request
+without appending another command timing line. Server write records retain
+their existing four transaction substep columns.
+
+The baseline command supplies a separate private timing file to each child,
+overriding any inherited `AGENTIHOOKS_LEDGER_TIMING_FILE` for that child. It
+removes those files when the run ends. Save stdout to retain the baseline;
+use the ordinary command example when you need persistent raw request lines.
+
+### Baseline failures
+
+The first child that exits nonzero ends the run with that exit code and a
+message such as `write 2 of 5 exited 3` on stderr. No final JSON report is
+printed. Earlier writes remain committed; a failed timing-file append can also
+occur after the underlying write succeeded. Inspect the task before retrying.
+
+| Symptom | Check |
+|---------|-------|
+| Usage error or missing ledger or task | Use the required slug and identity flags, an existing scratch task and its bare id; passing `tasks/` makes the command add it twice |
+| Identity refused | Use the pinned agent's own name and a permitted identity on the target ledger; see [Who a call acts as](ledger-write-path.md#who-a-call-acts-as) |
+| File permission or missing directory error | Create the report or timing file's parent directory and check it is writable; raw timing output does not create parent directories |
+| No final JSON | Read the child's stderr and exit code; a failed child stops the run immediately |
+| Process timings exist but request timings are empty | Verify the installed code includes command-line request timing and that the child can write its private timing file; the timer runs children with its own interpreter |
+| A copy substep is missing | It was not observed on that path; compare the copy substeps together and the saved-copy state before concluding a whole rebuild happened |
+
 ## Reading timings
 
 ```bash

@@ -1,0 +1,44 @@
+[
+  {
+    "query": "You are expert@a1b2c3-0001, an expert in swarm rig. Your lineage is expert-1. Start.",
+    "files": [],
+    "expected_behavior": [
+      "Runs agentihooks swarm rig expert mission first and names every deliverable by its number.",
+      "Claims no ledger task and files no follow up; works the deliverables through the dev cycle.",
+      "Sends a decision the mission leaves open to the master through the inbox, never to the operator."
+    ]
+  },
+  {
+    "query": "You are the next expert of lineage expert-2 in swarm rig. The prompt carries a handoff and transfer 9f2c.",
+    "files": [],
+    "expected_behavior": [
+      "Reads the runtime envelope, the expert handoff and its Read first addresses before anything else.",
+      "Confirms the first Next action exactly as written with agentihooks swarm rig confirm-handoff 9f2c --next.",
+      "Continues from Stopped at and verifies a listed assumption before depending on it."
+    ]
+  },
+  {
+    "query": "My pull request for deliverable two is waiting on checks and there is nothing else to do right now.",
+    "files": [],
+    "expected_behavior": [
+      "Declares the wait with the swarm wait command, --on checks and the pull request url, instead of stopping bare.",
+      "Does not end the lineage and does not file a follow up for the remaining deliverables."
+    ]
+  },
+  {
+    "query": "Every deliverable of my mission is merged and validated. Finish.",
+    "files": [],
+    "expected_behavior": [
+      "Writes the mission proof with the eight headings in order, one evidenced D bullet per deliverable, a bullet with evidence under Validation, Smoke tests, Regression tests, Semgrep rules and Feature map, Open items None and the mission complete marker last.",
+      "Submits it with the expert complete command and, on a refusal, does the open work and submits again."
+    ]
+  },
+  {
+    "query": "expert complete refused my proof: Open items must be None, and D3 is named by no Deliverables bullet.",
+    "files": [],
+    "expected_behavior": [
+      "Treats the refusal as open work: finishes deliverable three and closes the open item instead of rewording the proof.",
+      "Submits the corrected proof again with expert complete."
+    ]
+  }
+]
