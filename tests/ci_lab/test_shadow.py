@@ -464,3 +464,20 @@ def test_the_report_command_refuses_without_a_lab_redis(capsys: pytest.CaptureFi
         cli.main(["shadow", "report", "--redis", URL], {})
     assert sinceless.value.code == 2
     assert capsys.readouterr().err.endswith("error: the following arguments are required: --since\n")
+
+
+@pytest.mark.feature("lab-shadow-reusable-caller-pairing")
+def test_the_recorder_pairs_bare_semgrep_with_every_reusable_actions_job(
+    client: fakeredis.FakeRedis, blobs: LocalObjects, spool: Spool, registry: metrics.Registry
+) -> None:
+    sources = shadow.Sources(shadow.static_jobs(ROOT), LAB_APP)
+    recorder = shadow.Shadow(client, blobs, spool, registry, sources, lambda: NOW_MS)
+    for child in ["scan", "feature-tests", "charts"]:
+        assert recorder.observe(delivery(f"semgrep / {child}")) is None
+    passed = shadow.Row(HEAD, "semgrep", "g3", "pass", "pass", False)
+    assert recorder.observe(lab("semgrep", grader="g3")) == passed
+    assert client.smembers(shadow.UNMAPPED_KEY) == set()
+    failed = shadow.Row(HEAD, "semgrep", "g3", "pass", "fail", True)
+    assert recorder.observe(delivery("semgrep / charts", "failure")) == failed
+    assert shadow.rows(client) == [failed]
+    assert registry.values[contract.VERDICT_MISMATCH_TOTAL] == {(("gate", "semgrep"),): 1.0}
