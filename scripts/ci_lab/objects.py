@@ -1,5 +1,5 @@
-"""The lab object layout, lab/<kind>/<digest>/{report.json,log.txt,manifest.json} and lab/grades/<run>/, on local or S3
-storage."""
+"""The lab object layout, lab/<kind>/<digest>/{report.json,log.txt,manifest.json}, lab/flakes/<kind>/<digest>.jsonl and
+lab/grades/<run>/, on local or S3 storage."""
 
 import os
 import re
@@ -17,6 +17,7 @@ __all__ = [
     "Objects",
     "S3Objects",
     "Uploads",
+    "flakes_path",
     "grade_prefix",
     "is_report",
     "manifest_folder",
@@ -49,6 +50,14 @@ def unit_path(kind: str, key: str, name: str) -> str:
     if match is None or match["kind"] != kind:
         raise ValueError(f"not a {kind} unit key: {key}")
     return f"{ROOT}{kind}/{match['digest']}/{FILES[name]}"
+
+
+def flakes_path(kind: str, key: str) -> str:
+    """Return the path of a unit's flake rows, lab/flakes/<kind>/<digest>.jsonl, refusing a key of another kind."""
+    match = KEY.fullmatch(key)
+    if match is None or match["kind"] != kind:
+        raise ValueError(f"not a {kind} unit key: {key}")
+    return f"{ROOT}flakes/{kind}/{match['digest']}.jsonl"
 
 
 def grade_prefix(run: str) -> str:

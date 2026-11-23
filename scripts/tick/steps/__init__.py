@@ -312,6 +312,7 @@ MODULES = (
     "scripts.tick.steps.view_wait",
     "scripts.tick.steps.orders",
     "scripts.tick.steps.experts",
+    "scripts.tick.steps.review",
 )
 
 for _module in MODULES:
