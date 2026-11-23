@@ -4507,13 +4507,12 @@ turns `planned`, at once at `full` autonomy with a clean slice check, otherwise 
 On a plan task whose record carries `enhances`, `swarm done` runs the enhancement close
 (`scripts.swarm.enhance_review.close`) after the proof and feature gates and before it writes the done state. The
 ledger checks the `--slice` ids on that write, so a close refusal comes before any slice refusal, and either one
-leaves the plan task open with its claim. The close
-reads the ledger through the plan reader, the hosted ledger when one is linked and the local store otherwise, and
-refuses in two cases:
+leaves the plan task open with its claim. The close reads the ledger through the plan reader, the hosted ledger
+when one is linked and the local store otherwise, and refuses in two cases:
 
 | Check | Refusal |
 |---|---|
-| The ledger holds the target and the target carries `plan_lines` | `plan task <task> enhances task <target>, but target <target> carries no plan slice: link its section with`, then the ledger's `task set <target> plan_url=<link> plan_slice=<anchor>` command and `then run swarm done again` |
+| The ledger holds the target and the target carries `plan_lines` | A refusal that opens with `plan task <task> enhances task <target>, but target <target> carries no plan slice`, names the `task set` command that sets the target's `plan_url` and `plan_slice`, and tells the planner to run `swarm done` again |
 | The text of the target's `plan_lines` is a complete section (`scripts.swarm.thin_task.section_complete`) | `the plan section of task <target> is incomplete: <problems>` |
 
 `<problems>` is the problem sentences for the missing parts joined with spaces, in this order:
@@ -4653,7 +4652,7 @@ new value as its text.
 | Step 4 refused with `plan task sections need a slice marker above each heading` | The section's parts sit at the plan's task level. Add one title above the section, as in the example, and publish again. |
 | Step 5 refused with `slice anchor <anchor> is missing or repeated in its phase` | The anchor is not in the published plan, or appears twice. Fix the anchor line in `plan.md`, publish again, then repeat step 5. |
 | Step 5 refused with `plan slice <anchor> already belongs to open task <task>` | Another open task already holds that anchor. Give the target its own anchor in `plan.md`, publish again, then repeat step 5. |
-| `swarm done` refused with `plan task <task> enhances task <target>, but target <target> carries no plan slice` | The ledger does not hold the target, or the target has no `plan_lines` because step 5 did not land. Run steps 4 and 5, then `done` again. When the target is not on the ledger at all, block the task as its Enhancement target block says. |
+| `swarm done` refused with a message opening `plan task <task> enhances task <target>, but target <target> carries no plan slice` | The ledger does not hold the target, or the target has no `plan_lines` because step 5 did not land. Run steps 4 and 5, then `done` again. When the target is not on the ledger at all, block the task as its Enhancement target block says. |
 | `swarm done` refused with `the plan section of task <target> is incomplete:` and problem lines | Add each part the lines name to the section in `plan.md`, publish it again into the phase, run step 5 again so the target's `plan_lines` cover the new text, then `done` again. |
 | The plan task is done but the target is still held with `it waits for its enhancement plan task enhance-<target>` | The target's enhancement is still `needed`: the master inbox holds the review or relay ask, because autonomy is not `full` or the slice check found something, or the release write failed after the done write. The master runs `plan approve --task <plan task>` or `plan send-back --task <plan task> --note "<what to change>"`; at `manual` and `assist` the operator decides. |
 | `plan approve` or `plan send-back` refused with `name exactly one of a phase or --task <enhancement task id>` | The command named both a phase and `--task`, or neither. Name the phase for a phase slice, or `--task <plan task>` for an enhancement. |
