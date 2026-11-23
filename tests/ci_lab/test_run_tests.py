@@ -88,6 +88,7 @@ def _lab(tmp_path: Path, manifest: dict[str, object], whitelist: dict[str, str])
     )
 
 
+@pytest.mark.feature("lab-report-flake-rows")
 def test_a_planted_failure_is_red_on_both_attempts_and_final(tmp_path: Path) -> None:
     test = "tests/test_plant.py::test_one_is_two"
     tree = _tree(tmp_path / "tree", {"tests/test_plant.py": "def test_one_is_two():\n    assert 1 == 2\n"})
@@ -101,6 +102,7 @@ def test_a_planted_failure_is_red_on_both_attempts_and_final(tmp_path: Path) -> 
     assert not lab.flakes.exists()
 
 
+@pytest.mark.feature("lab-report-flake-rows")
 def test_a_seeded_flake_is_green_flaky_and_written_to_the_flake_ledger(tmp_path: Path) -> None:
     test = "tests/test_flake.py::test_flake"
     tree = _tree(tmp_path / "tree", {"tests/test_flake.py": FLAKE})
@@ -113,6 +115,41 @@ def test_a_seeded_flake_is_green_flaky_and_written_to_the_flake_ledger(tmp_path:
     rows = [json.loads(line) for line in lab.flakes.read_text().splitlines()]
     assert [(row["test"], row["outcome"], row["attempts"]) for row in rows] == [(test, "flaky", 2)]
     assert "first attempt fails" in rows[0]["errors"][0]
+
+
+@pytest.mark.feature("lab-report-flake-rows")
+def test_a_seeded_flaky_batch_returns_the_rows_it_writes_to_the_flake_ledger(tmp_path: Path) -> None:
+    test = "tests/test_flake.py::test_flake"
+    tree = _tree(tmp_path / "tree", {"tests/test_flake.py": FLAKE})
+    lab = _lab(tmp_path, _manifest({test: []}), {"FLAKE_MARK": str(tmp_path / "mark")})
+
+    verdict = run_tests.run((test,), tree, VENV, 1, lab)
+
+    rows = [json.loads(line) for line in lab.flakes.read_text().splitlines()]
+    assert [(row["test"], row["outcome"], row["attempts"]) for row in verdict.flakes] == [(test, "flaky", 2)]
+    assert list(verdict.flakes) == rows
+
+
+@pytest.mark.feature("lab-report-flake-rows")
+def test_a_red_retry_returns_no_flake_rows(tmp_path: Path) -> None:
+    test = "tests/test_plant.py::test_one_is_two"
+    tree = _tree(tmp_path / "tree", {"tests/test_plant.py": "def test_one_is_two():\n    assert 1 == 2\n"})
+    lab = _lab(tmp_path, _manifest({test: []}), {})
+
+    verdict = run_tests.run((test,), tree, VENV, 1, lab)
+
+    assert (verdict.outcome, verdict.attempts, verdict.flakes) == ("failed", 2, ())
+
+
+@pytest.mark.feature("lab-report-flake-rows")
+def test_a_green_first_attempt_returns_no_flake_rows(tmp_path: Path) -> None:
+    test = "tests/test_green.py::test_one_is_one"
+    tree = _tree(tmp_path / "tree", {"tests/test_green.py": "def test_one_is_one():\n    assert 1 == 1\n"})
+    lab = _lab(tmp_path, _manifest({test: []}), {})
+
+    verdict = run_tests.run((test,), tree, VENV, 1, lab)
+
+    assert (verdict.outcome, verdict.attempts, verdict.flakes) == ("passed", 1, ())
 
 
 def test_a_green_batch_stores_durations_coverage_and_files_opened_outside_its_manifest(tmp_path: Path) -> None:

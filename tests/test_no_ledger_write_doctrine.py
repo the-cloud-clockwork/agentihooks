@@ -1,4 +1,5 @@
-"""Tests for the gate that refuses new prose teaching an agent to write to the ledger."""
+"""Tests for the gate that refuses new prose teaching an agent to write to the ledger. The one write path stays the
+ledger API route code, run in process or on the host warm writer socket that runs the same route code."""
 
 import json
 import subprocess

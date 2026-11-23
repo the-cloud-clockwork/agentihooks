@@ -2,7 +2,7 @@
 
 import re
 
-KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research", "plan", "workflow")
+KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research", "plan", "workflow", "review")
 BRANCHED = ("code", "ci")
 WORKFLOW_FIELDS = ("workflow", "case")
 WORKFLOW_PROOF = {"workflow": "passed", "verdict": "pass"}

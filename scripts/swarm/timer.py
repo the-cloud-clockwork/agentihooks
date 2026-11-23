@@ -30,7 +30,7 @@ LOCKS_FILE = Path("/proc/locks")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 
-def units(binary):
+def units(binary: str) -> dict[str, str]:
     waker = (
         "[Unit]\nDescription=agentihooks inbox waker for Codex panes\n\n"
         "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
@@ -78,7 +78,17 @@ def units(binary):
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         f'ExecStart="{sys.executable}" -m scripts.scheduler.service supervise\n'
-        "Restart=always\nRestartSec=5\nRestartPreventExitStatus=2\nKillMode=process\n\n"
+        "Restart=always\nRestartSec=5\nRestartPreventExitStatus=2 4\nKillMode=process\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+    writer = (
+        "[Unit]\nDescription=agentihooks warm ledger writer\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        "EnvironmentFile=-%h/.agentihooks/hive.env\n"
+        f'ExecStart="{binary}" ledger writer serve\n'
+        "Restart=always\nRestartSec=5\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
     return {
@@ -88,6 +98,7 @@ def units(binary):
         f"{WAKER}.service": waker,
         f"{PROBER}.service": prober,
         f"{TICK_WATCH}.service": watch,
+        "agentihooks-ledger-writer.service": writer,
     }
 
 
@@ -128,7 +139,7 @@ def spoke_units(binary):
     return {f"{SPOKE}.service": spoke}
 
 
-ENGINE = (*units(""), *tick_units(), *DROPPED)
+ENGINE = (*(name for name in units("") if name != "agentihooks-ledger-writer.service"), *tick_units(), *DROPPED)
 SYSTEMCTL = {"capture_output": True, "text": True, "timeout": 30}
 UNCHECKED = {**SYSTEMCTL, "check": False}
 SPOKE_ENABLE = ["systemctl", "--user", "enable", "--now", f"{SPOKE}.service"]

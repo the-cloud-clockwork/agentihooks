@@ -9,13 +9,6 @@ class ForgeError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class ChangedFile:
-    path: str
-    additions: int
-    deletions: int
-
-
-@dataclass(frozen=True)
 class Check:
     name: str
     state: str
@@ -29,7 +22,7 @@ class ChangeRequest:
     body: str
     head: str
     diff: str
-    files: tuple[ChangedFile, ...]
+    files: tuple[str, ...]
     checks: tuple[Check, ...]
 
     def as_dict(self) -> dict[str, Any]:

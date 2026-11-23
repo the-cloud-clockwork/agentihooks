@@ -20,7 +20,7 @@ from scripts.swarm_ledger import ledger_workspace
 if TYPE_CHECKING:
     from scripts.gates.verdicts import Verdicts
 
-LANES = frozenset({"eng", "ci"})
+LANES = frozenset({"eng", "ci", "review"})
 EDIT_TOOLS = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path"}
 SERENA = "mcp__serena__"
 SERENA_EDITS = frozenset(
@@ -49,14 +49,14 @@ def _area(entry):
 
 
 def within(path: str, areas: list[str], repo: str) -> bool:
-    """True when path, inside repository repo, falls under an area written plain or with repo as its first part."""
+    """True when path, inside repository repo, falls under an area written plain or as repo/area or repo:area."""
     forms = [form for area in map(_area, areas) if area for form in _forms(area, repo)]
     return any(path == form or path.startswith(form + "/") for form in forms)
 
 
 def _forms(area: str, repo: str) -> tuple[str, ...]:
-    """The area as written, and the area inside repo when its first part names repo."""
-    return (area, area.removeprefix(f"{repo}/")) if repo else (area,)
+    """The area as written, and the area inside repo when it opens with repo and a slash or a colon."""
+    return (area, area.removeprefix(f"{repo}/"), _area(area.removeprefix(f"{repo}:"))) if repo else (area,)
 
 
 def git_root(path):

@@ -13,7 +13,9 @@ and the public host routes them to the ledger API service. The ledger server onl
 read API and the live event stream, and answers every write method as unsupported.
 
 There is one write path. No setting switches a client back to the ledger server, and no client falls back to it when
-the database is slow. Pull request 11561 delivered it on the operator's order of 16 November 2026.
+the database is slow. Pull request 11561 delivered it on the operator's order of 16 November 2026. A host may run one
+warm ledger writer that runs the same route code for every client on that host; see
+[The warm writer socket](#the-warm-writer-socket).
 
 1. TOC
 {:toc}
@@ -24,18 +26,33 @@ the database is slow. Pull request 11561 delivered it on the operator's order of
 
 | Writer | Path | Judged as |
 |---|---|---|
-| `agentihooks ledger` commands, `LedgerClient`, the stop hook, proof ledgers, uploads, outbox replays | In process: `scripts.swarm_ledger.ledger.client(slug)`, which returns `scripts.tick.adapters.database_ledger.client` | The pinned agent, or the swarm's own service for service writes |
-| The tick pass and the tick ledger port | In process, inside `database_ledger.acting("")` | The swarm's own service |
+| `agentihooks ledger` commands, `LedgerClient`, the stop hook, proof ledgers, uploads, outbox replays | This host's warm writer socket first, else in process: `scripts.swarm_ledger.ledger.client(slug)`, which returns `scripts.tick.adapters.database_ledger.client` | The pinned agent, or the swarm's own service for service writes |
+| The tick pass and the tick ledger port | In process, inside `database_ledger.acting("")`, even when a writer listens | The swarm's own service |
 | The hub admission claim and its release | In process; the hub sets no swarm or agent name | The swarm's own service |
 | The controller's hosted ledger | In process, inside `database_ledger.acting("")` | The swarm's own service |
 | The ledger page in a browser | HTTP `POST`, `PUT` or `PATCH` to the public host, routed to the ledger API service | The operator's page session or ledger token, as [Hosted ledger auth](hosted-ledger-auth.md) describes |
 
-An in-process client builds a `ResourceClient` whose transport is `database_ledger.request`. Each request becomes an
-in-memory exchange handed to the same route functions the ledger API service serves (`routes.ledger_get` for reads,
-`routes.ledger_operation` for writes), so revision guards, operation receipts, gates and derivations apply exactly as
-they do over HTTP. No socket is opened and no ledger server is contacted. A refusal comes back as the HTTP error the
-service would have sent, so callers keep handling `409 revision_conflict`, `404 ledger_missing` and the others the
-same way.
+The in-process transport is `database_ledger.request`. Each request becomes an in-memory exchange handed to the same
+route functions the ledger API service serves (`routes.ledger_get` for reads, `routes.ledger_operation` for writes),
+so revision guards, operation receipts, gates and derivations apply exactly as they do over HTTP. No ledger server is
+contacted. A refusal comes back as the HTTP error the service would have sent, so callers keep handling
+`409 revision_conflict`, `404 ledger_missing` and the others the same way.
+
+### The warm writer socket
+
+`database_ledger.client(base, timeout)` builds a `ResourceClient` whose transport is `database_ledger.routed` bound to
+the client timeout. Each request tries this host's warm writer first, the `agentihooks ledger writer serve` process on
+`ledger-writer.sock` in the agentihooks home, which answers with the same route code as the caller it names:
+
+| Case | What the client does |
+|---|---|
+| The writer answers | Returns its reply; a status of 400 or more raises the same HTTP error the in-process transport raises |
+| No socket file, a refused connection, or any other connect error | Runs the request in process through `database_ledger.request`. Nothing has been sent, so nothing runs twice |
+| Inside a tick pass | Runs the request in process, so every tick ledger call keeps its `swarm_tick_ledger_call` journal line and the tick never waits on the writer |
+| The writer took the request and the reply is lost: it closed with no answer, the read timed out, or the status line is unreadable | Raises `TimeoutError` and never runs the request in process, because the writer may already have applied it. Callers see the error a timed out ledger request raised before: `ledger.call` exits with it and `LedgerClient` treats the ledger as unanswered |
+
+`database_ledger.request` itself never opens the socket, so the controller's hosted ledger and the writer always
+answer in process.
 
 ### The store a write lands in
 
@@ -138,6 +155,23 @@ defines no `DELETE` handler; no ledger write uses that method, so a `DELETE` get
 
 The service reads the same Redis and bus settings as the ledger server for the swarm controls and relays it runs.
 
+### Host check
+
+Every request is refused unless its `Host` header equals an allowed value exactly, port included. The service starts
+from the ledger server's list, `ledger_link.allowed_hosts()`: `LEDGER_HOST`, `127.0.0.1` and `localhost` on
+`LEDGER_PORT` (default 8765, and always 8765 for the shared ledger folder), the host and port of `SWARM_PUBLIC_URL`
+and each comma separated `SWARM_ALLOWED_HOSTS` entry. That list names the ledger server's port, so before it listens
+`serve()` adds `127.0.0.1` and `localhost` on `LEDGER_API_PORT`. A health probe sent to the service's own loopback
+port, such as the Compose health check's `http://127.0.0.1:8766/healthz`, is answered with `200`.
+
+With the Compose `api` settings the list is `api:8766`, `127.0.0.1:8765`, `localhost:8765`, `127.0.0.1:8766` and
+`localhost:8766`, plus the `SWARM_PUBLIC_URL` host and port and any `SWARM_ALLOWED_HOSTS` entries. Before
+[pull request 11667](https://github.com/the-cloud-clockwork/agentihooks/pull/11667) the two `8766` loopback entries
+were missing, so the Compose health check got `403`, `api` never turned healthy and `front` never started.
+
+A refused request gets `403` with the text `host not allowed`; under `/api/v1/` it gets `403` with error code
+`forbidden` and the message `Host not allowed`.
+
 ### Start and stop
 
 At start the service:
@@ -215,16 +249,32 @@ one SQLite folder, and the `api` service holds its writer lease. With `AGENTIHOO
       - ./deploy/compose/ledger-front.conf:/etc/nginx/templates/default.conf.template:ro
 ```
 
-The front's routing rule, from `deploy/compose/ledger-front.conf`:
+The front's routing, from `deploy/compose/ledger-front.conf`:
 
 ```nginx
-set $upstream ${SWARM_LEDGER_SCHEME}://swarm:8765;
-if ($request_method !~ ^(GET|HEAD)$) {
-    set $upstream http://api:8766;
+resolver 127.0.0.11 valid=1s;
+location / {
+    set $upstream ${SWARM_LEDGER_SCHEME}://swarm:8765;
+    if ($request_method !~ ^(GET|HEAD)$) {
+        set $upstream http://api:8766;
+    }
+    proxy_pass $upstream;
+    proxy_set_header Host $http_host;
 }
 ```
 
-The repository root `compose.yaml` has the same services for a source build.
+- `proxy_set_header Host $http_host` forwards the `Host` the client sent, port included. Both services compare it
+  exactly with their allowed values ([Host check](#host-check)). For a client using a non-default port, nginx's
+  `$host` drops that port and fails to match the corresponding `host:port` entry.
+- `proxy_pass` names a variable, so nginx resolves `swarm` and `api` at request time. The `resolver` line sends those
+  lookups to Docker's embedded DNS server and caches each answer for one second. Requests after cache expiry resolve
+  the name again, allowing nginx to discover a recreated container's new address without restarting the front.
+  Cache validity does not set a recovery deadline. Without the resolver every request answers `502` and the front logs
+  `no resolver defined to resolve swarm`.
+
+The packaged stack, `scripts/swarm/stack/deploy/compose/ledger-front.conf`, is the same file byte for byte, and the
+repository root `compose.yaml` has the same services for a source build. The host names a browser may use are listed
+in the [Compose quick start](../getting-started/compose-quick-start.md#host-names-the-services-answer).
 
 ### Local ledger Compose file
 
@@ -233,6 +283,11 @@ The repository root `compose.yaml` has the same services for a source build.
 8765), which keeps the address clients and the browser already use. The front renders
 `deploy/compose/ledger-local-front.conf.template` with only the three port settings, and waits until `ledger` and
 `api` are healthy.
+
+This front forwards `Host $http_host` as well, so the services see `127.0.0.1:8765` when the browser uses the
+default address. For the shared ledger folder the ledger server's own address is port 8765 whatever its listen port,
+so both services admit that value. Its upstreams are loopback addresses rather than names, so it needs no
+`resolver` line.
 
 ## Helm chart configuration
 
@@ -318,11 +373,13 @@ resolution](deployment-modes.md#client-mode-resolution)).
 | Guard | What it holds |
 |---|---|
 | `tests/swarm_ledger/test_ledger_write_cutover.py` | The hub claim and release land in the store with no ledger server request; a stale hub claim is refused by the route; the ledger server answers `POST`, `PUT`, `PATCH` and `DELETE` with `501`; every write hook of the read only ledger server refuses with `405`; a hosted hub without the shared database refuses to start |
-| Feature map entry `swarm-ledger-api-writes` | The behaviour, its operator words and its tests; its Semgrep rule `feature-ledger-api-writes` holds the in-process `client` and the hub's database check |
+| Feature map entry `swarm-ledger-api-writes` | The behaviour, its operator words and its tests; its Semgrep rule `feature-ledger-api-writes` holds `client` to the warm writer first transport, `partial(routed, timeout)`, and the hub's database check |
+| `tests/tick/test_database_ledger_writer_route.py` | A request goes to a listening writer; an absent or refusing socket runs it in process; a lost reply after send raises `TimeoutError` with the route code never called; a writer refusal raises the in-process HTTP error; a tick pass stays in process and journals while a writer listens |
+| Feature map entry `compose-api-health-and-front-proxy` | The API service answers a health probe sent to its own loopback port (`test_the_api_service_answers_a_health_probe_sent_to_its_own_loopback_port`); every front config forwards `Host $http_host` and never `$host` (`test_the_front_forwards_the_host_the_client_sent_with_its_port`); both Compose front configs resolve `swarm` and `api` through `127.0.0.11` (`test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time`) |
 | Feature rule `feature-tick-database-ledger` | The tick route acts as `database_ledger.acting("")`, the tick ledger port builds its client with `ledger.client`, and `ledger.client` returns the in-process client with no other path |
 | Rule `ledger-server-reads-only` | No `do_POST`, `do_PUT`, `do_PATCH` or `do_DELETE` in the ledger server module, whether defined, assigned or set with `setattr`, and no `setattr` under a computed name there |
-| Rule `ledger-client-in-process` | No `ResourceClient` anywhere in the tree without an in-process transport, by keyword or position, and none with `transport=None` |
-| Incident rule `ledger-write-switch` | No `database_ledger.serving()` or `database_ledger.scoped(...)` under `scripts/` or `hooks/`: no switch between paths |
+| Rule `ledger-client-in-process` | No `ResourceClient` anywhere in the tree without a transport, by keyword or position, and none with `transport=None`; the warm writer first transport of `database_ledger.client` is the one transport beside the in-process one |
+| Incident rule `ledger-write-switch` | No `database_ledger.serving()` or `database_ledger.scoped(...)` under `scripts/` or `hooks/`: no switch to the ledger server |
 
 `ledger-server-reads-only` and `ledger-client-in-process` run in the whole tree scan from
 `.semgrep/ledger-server-writes.yml`, with red and clean fixtures in `.semgrep/ledger-server-writes.test.py`.
@@ -353,7 +410,9 @@ These no longer exist; an older page or note that names them describes the previ
 | The API service exits at start with `already has an active writer` | Another process holds the SQLite folder's writer lease. Stop that writer by its process id, or move both onto the shared database |
 | A controller, hub or worker gets `404 ledger_missing` (`No such ledger`) for a ledger the page shows | Its process writes a different store: it has no database URL and opens an empty SQLite folder of its own, or the shared schema was never migrated. Give it the shared URL and start the API service against that database first, since only the API service creates the schema |
 | `server refused: 500` with `storage_error` and `Resource could not be read or written` | The route code could not read or write the store. Check that the process's database URL or `LEDGER_DIR` names the shared store and that the database answers |
-| Compose `swarm init` stops with `api is <state>` | Read `docker compose --project-name agentihooks-swarm logs api`; the API service starts once Redis and NATS are healthy |
+| Compose `swarm init` stops with `api is <state>` | Read `docker compose --project-name agentihooks-swarm logs api`; the API service starts once Redis and NATS are healthy. Log lines `"GET /healthz HTTP/1.1" 403` mean the image predates the [Host check](#host-check) entries for the service's own port: run an image built after pull request 11667 |
+| Every request through a front answers `403 host not allowed`, or under `/api/v1/` `403 forbidden` with `Host not allowed` | The `Host` the client sent is not listed: add the `host:port` to `SWARM_ALLOWED_HOSTS` or set `SWARM_PUBLIC_URL`. When the address is listed, the front forwards `$host` and drops the port; forward `$http_host` |
+| A Compose front answers `502` and logs `no resolver defined to resolve swarm` | The front config has no `resolver` line, so nginx cannot resolve the variable upstream. Add `resolver 127.0.0.11 valid=1s;` and restart the front |
 
 ## Related pages
 

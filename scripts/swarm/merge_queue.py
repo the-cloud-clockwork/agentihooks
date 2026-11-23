@@ -8,7 +8,6 @@ from typing import Any
 
 from scripts.swarm import github_reads, ledger_events, run_wait, staged_compatibility
 from scripts.swarm.store import SwarmError
-from scripts.tick import pool
 from scripts.tick.adapters.github import GitHubSourceControl
 from scripts.tick.deadline import Deadline
 
@@ -64,7 +63,7 @@ def graphql(
     query: str, variables: dict[str, str], run: Callable[..., Any] = subprocess.run, timeout: float = TIMEOUT
 ) -> dict[str, Any]:
     try:
-        with pool.limit("github"), github_reads.calling(github_reads.CALLER.get()):
+        with github_reads.calling(github_reads.CALLER.get()):
             response = _port(run).graph(query, variables, deadline=Deadline.after(timeout))
         if response.get("errors"):
             raise SwarmError("; ".join(error["message"] for error in response["errors"]))

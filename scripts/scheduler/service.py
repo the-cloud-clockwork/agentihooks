@@ -22,6 +22,9 @@ RECORD = "supervisor.json"
 DRAIN_S = 30
 UNREACHABLE_S = 300
 UNREACHABLE = 3
+REFUSED = 4
+REFUSAL = "refused"
+STOPS = {UNREACHABLE: "its state store did not answer", REFUSED: "its state store refused its credential"}
 PASS_S = 1
 STARTER = "AGENTIHOOKS_SCHEDULER_STARTER"
 UNIT = "agentihooks-scheduler.service"
@@ -30,6 +33,10 @@ UNIT_ENV = "AGENTIHOOKS_SCHEDULER_UNIT"
 
 class AlreadyRunning(RuntimeError):
     pass
+
+
+class Refused(RuntimeError):
+    """The state store refused the runner's credential, which no later pass can clear."""
 
 
 def runtime_dir(environ: Mapping[str, str] | None = None) -> Path:
@@ -82,13 +89,15 @@ def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iter
 async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> bool:
     """Dispatch due work every second until stopped; a pass that loses or cannot take the dispatch lock ends alone.
 
-    Returns True when a proof swarm's runner stopped because its state store stayed silent for UNREACHABLE_S seconds.
+    Returns True when a proof swarm's runner stopped because its state store stayed silent for UNREACHABLE_S seconds,
+    and raises Refused on the first pass the state store refuses the runner's credential.
     """
     from scripts.events import state
     from scripts.scheduler.lease import Busy, LostLock
     from scripts.swarm.naming import PROOF_RE
 
     transient = state.unavailable()
+    refused = state.refused()
     silence = state.unanswered()
     stopped = stop if stop is not None else _on_signals()
     silent_since: float | None = None
@@ -102,6 +111,10 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> bool:
             except (LostLock, Busy) as exc:
                 silent_since = None
                 print(f"scheduler pass ended: {exc}", file=sys.stderr)
+            except refused as exc:
+                reason = f"{type(exc).__name__}: {exc}"
+                print(f"scheduler stops: the state store refused its credential ({reason})", file=sys.stderr)
+                raise Refused(reason) from exc
             except silence:
                 now = time.monotonic()
                 silent_since = now if silent_since is None else silent_since
@@ -133,7 +146,7 @@ def _command(mode: str) -> list[str]:
     return [sys.executable, "-m", "scripts.scheduler.service", mode]
 
 
-def supervise(stop: Event | None = None) -> None:
+def supervise(stop: Event | None = None) -> int:
     stopped = stop if stop is not None else Event()
     loaded = revision(ROOT)
     starter = int(os.environ.get(STARTER) or 0)
@@ -141,13 +154,14 @@ def supervise(stop: Event | None = None) -> None:
     _take_over()
     with machine_lock("supervisor"):
         _identify(loaded)
+        (runtime_dir() / REFUSAL).unlink(missing_ok=True)
         while not stopped.is_set():
             child = subprocess.Popen(_command("run"), cwd=Path(__file__).resolve().parents[2])
             while child.poll() is None:
                 if _ends(stopped, starter):
                     child.terminate()
                     child.wait()
-                    return
+                    return 0
                 current = revision(ROOT)
                 if current and current != loaded:
                     print(
@@ -160,12 +174,15 @@ def supervise(stop: Event | None = None) -> None:
                     loaded = current
                     _identify(loaded)
             print(f"the scheduler runner {child.pid} exited with code {child.returncode}", file=sys.stderr)
-            if child.returncode == UNREACHABLE:
-                print(f"the scheduler supervisor {os.getpid()} stops: its state store did not answer", file=sys.stderr)
-                return
+            if child.returncode == REFUSED:
+                (runtime_dir() / REFUSAL).touch()
+            if child.returncode in STOPS:
+                print(f"the scheduler supervisor {os.getpid()} stops: {STOPS[child.returncode]}", file=sys.stderr)
+                return child.returncode
             if _ends(stopped, starter):
-                return
+                return 0
             print(f"the scheduler supervisor {os.getpid()} starts its runner again", file=sys.stderr)
+    return 0
 
 
 def _ends(stopped: Event, starter: int) -> bool:
@@ -277,6 +294,33 @@ def _spawn_env(active: Mapping[str, str]) -> dict[str, str]:
     return spawned
 
 
+def _refusal_cleared(refusal: Path, active: Mapping[str, str]) -> bool:
+    """True when no refusal stands or a probe read with this environment is accepted, which removes the refusal."""
+    if not refusal.is_file():
+        return True
+    try:
+        probed = subprocess.run(
+            _command("probe"), cwd=ROOT, env=active, stdin=subprocess.DEVNULL, capture_output=True, timeout=30
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if probed.returncode:
+        return False
+    refusal.unlink()
+    return True
+
+
+def probe(scheduler: Scheduler) -> int:
+    """Read the scheduler entries once through the runner's own store: REFUSED when it refuses the credential."""
+    from scripts.events import state
+
+    try:
+        scheduler.state.get(scheduler.name("entries"))
+    except state.refused():
+        return REFUSED
+    return 0
+
+
 def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
     from scripts.events.state import backend
 
@@ -289,6 +333,8 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
         with machine_lock("startup", environ=active):
             with machine_lock("supervisor", environ=active):
                 pass
+            if not _refusal_cleared(runtime_dir(active) / REFUSAL, active):
+                return False
             if _unit_owns(runtime_dir(active)) and _start_unit():
                 return True
             with (runtime_dir(active) / "scheduler.log").open("ab") as log:
@@ -306,7 +352,7 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
         return False
 
 
-def _supervised() -> None:
+def _supervised() -> int:
     stop = Event()
     previous = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
 
@@ -318,7 +364,7 @@ def _supervised() -> None:
     try:
         for sig in previous:
             signal.signal(sig, stopping)
-        supervise(stop)
+        return supervise(stop)
     except AlreadyRunning:
         raise
     except BaseException as exc:
@@ -331,17 +377,21 @@ def _supervised() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks scheduler service")
-    parser.add_argument("mode", choices=("run", "supervise"))
+    parser.add_argument("mode", choices=("run", "supervise", "probe"))
     args = parser.parse_args(argv)
     try:
+        if args.mode == "probe":
+            return probe(Scheduler())
         if args.mode == "run":
             if asyncio.run(run(Scheduler())):
                 return UNREACHABLE
         else:
-            _supervised()
+            return _supervised()
     except AlreadyRunning as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    except Refused:
+        return REFUSED
     return 0
 
 

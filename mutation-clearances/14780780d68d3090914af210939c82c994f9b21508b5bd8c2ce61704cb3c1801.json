@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_update_refusal:0d92304a8066b45957c0476ccd1f26f000b76c20b4a1808a2d6cf67f07c61fc3": {
+    "reader": "standards_reader",
+    "reason": "In update_refusal the default only applies when op has no \"by\" key, and expert_refusal returns \"\" for both \"\" and \"XXXX\" because lane_of gives '', which is not the expert lane."
+  }
+}
