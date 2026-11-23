@@ -410,15 +410,19 @@ def test_stats_collection_traces_one_session_and_returns_one_result(monkeypatch:
         (pytest.ExitCode.NO_TESTS_COLLECTED, 0),
     ],
 )
-def test_a_stats_collection_that_collects_no_test_is_an_empty_record_and_every_other_code_stays(
-    code: pytest.ExitCode, status: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_only_the_no_tests_collected_code_reads_as_a_passing_stats_status(code: pytest.ExitCode, status: int) -> None:
+    assert run_mutation.collected_status(int(code)) == status
+
+
+@pytest.mark.feature("lab-stats-of-a-test-file-with-no-test")
+def test_a_stats_collection_that_collects_no_test_is_an_empty_record(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(run_mutation.SWITCH, run_mutation.environ.get(run_mutation.SWITCH, ""))
-    monkeypatch.setattr(run_mutation, "pytest", SimpleNamespace(main=lambda args, plugins: code))  # pyright: ignore[reportUnknownLambdaType]
+    empty = SimpleNamespace(main=lambda args, plugins: pytest.ExitCode.NO_TESTS_COLLECTED)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(run_mutation, "pytest", empty)
 
     [result] = run_mutation.collect(OPTIONS, [HOLDS_NO_TEST])
 
-    assert (result["status"], result["tests"], result["durations"]) == (status, {}, {})
+    assert (result["status"], result["tests"], result["durations"]) == (0, {}, {})
 
 
 def test_stats_read_the_content_keyed_cache_and_collect_its_misses_here(monkeypatch: pytest.MonkeyPatch) -> None:
