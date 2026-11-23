@@ -499,9 +499,10 @@ def _document(client: Any, run: str) -> str | None:
     return client.get(GRADES + run)
 
 
-def stage_grade(pipe: Any, document: dict[str, Any]) -> None:
+def stage_grade(pipe: Any, document: dict[str, Any]) -> int | None:
     """Queue, on a pipeline watching the grade's key, one transaction storing the grade document and, while the grade
-    is live, its next revision and the demand record of that revision, or for a closed grade the removal of both."""
+    is live, its next revision and the demand record of that revision, or for a closed grade the removal of both, and
+    return the revision it stores, None for a closed grade."""
     run = document["run"]
     revision = None if document.get("conclusion") else int(pipe.hget(REVISIONS, run) or 0) + 1
     pipe.multi()
@@ -514,6 +515,7 @@ def stage_grade(pipe: Any, document: dict[str, Any]) -> None:
     hits = len(document["units"]) - len(jobs)
     pipe.hincrby(REVISIONS, run)
     pipe.hset(RECORDS, run, json.dumps({"revision": revision, "tier": document["tier"], "hits": hits, "jobs": jobs}))
+    return revision
 
 
 def _evidence(state: State) -> evidence.GradeEvidence:
@@ -688,10 +690,12 @@ class Scheduler:
         self._quiets: dict[str, _Quiet] = {}
 
     def tick(self, now_ms: int) -> list[str]:
-        """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
-        then advance every live grade, counting each finished job in the most urgent tier of the live grades holding
-        it."""
-        actions = [*self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms), *self._admit(now_ms)]
+        """Run one pass: intake, release quiet lanes, reap expired leases, refresh the live grade summaries, enqueue the
+        held units the budget admits, then advance every live grade, counting each finished job in the most urgent tier
+        of the live grades holding it."""
+        actions = [*self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms)]
+        self._survey()
+        actions.extend(self._admit(now_ms))
         tiers, _, _ = self._demand()
         for run in sorted(self.client.smembers(LIVE)):
             actions.extend(self._advance(run, tiers, now_ms))
@@ -802,11 +806,12 @@ class Scheduler:
         """Store a grade's state, so the next pass and the relay read it back, with a live grade's next revision and
         demand record in the same transaction, retried while another writer changes the grade, and keep a live grade's
         summary at the revision it stored."""
-        stored = self.client.transaction(partial(stage_grade, document=asdict(state)), GRADES + state.run)
-        if state.conclusion:
+        stage = partial(stage_grade, document=asdict(state))
+        revision = self.client.transaction(stage, GRADES + state.run, value_from_callable=True)
+        if revision is None:
             self._quiets.pop(state.run, None)
         else:
-            self._quiets[state.run] = _quiet(state, int(stored[1]))
+            self._quiets[state.run] = _quiet(state, revision)
 
     def _drop(self, run: str) -> None:
         """Take a grade out of the live set and remove its revision and demand record in one transaction."""
@@ -816,8 +821,8 @@ class Scheduler:
             pipe.hdel(RECORDS, run)
             pipe.execute()
 
-    def _survey(self) -> dict[str, _Quiet]:
-        """Return the summary of every live grade that has a document, reading only a grade whose stored revision is
+    def _survey(self) -> None:
+        """Refresh the summary of every live grade that has a document, reading only a grade whose stored revision is
         not the one its summary was taken at, a missing revision reading as 0, and forget the summaries of grades no
         longer live."""
         runs = sorted(self.client.smembers(LIVE))
@@ -834,7 +839,6 @@ class Scheduler:
             elif (state := self.grade(run)) is not None:
                 quiets[run] = _quiet(state, revision)
         self._quiets = quiets
-        return quiets
 
     def _settled(self, quiet: _Quiet, now_ms: int) -> bool:
         """Return whether a summarised grade's open jobs, check runs and slots leave nothing to advance now."""
@@ -1076,7 +1080,7 @@ class Scheduler:
         when the budget admits its class at its turn, so the pass holds one at a time and reads none it would admit
         nothing of."""
         actions = self._shedding()
-        held = sorted((quiet.tier, run) for run, quiet in self._survey().items() if quiet.held)
+        held = sorted((quiet.tier, run) for run, quiet in self._quiets.items() if quiet.held)
         if not held:
             return actions
         load = self.load(now_ms)

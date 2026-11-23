@@ -326,7 +326,37 @@ def test_a_warm_scheduler_grades_every_pass_like_one_rebuilt_from_redis(tmp_path
 
 
 @pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
-def test_a_restarted_scheduler_reads_each_live_grade_once_through_plain_pipelines_and_writes_none(
+def test_a_warm_scheduler_reaps_supersedes_and_relays_like_one_rebuilt_from_redis(tmp_path: Path) -> None:
+    first, second, third, fourth = (unit(number) for number in range(1, 5))
+    plans = {
+        HEAD_A: plan({"lint": (first, second)}),
+        HEAD_C: plan({"lint": (third,)}),
+        HEAD_D: plan({"lint": (fourth,)}),
+    }
+    warm, rebuilt = _pair(tmp_path, plans)
+    both = (warm, rebuilt)
+    for run in both:
+        run.push(HEAD_A, lane="pr-1", event="pull_request", action="synchronize")
+    _tick(warm, rebuilt, 1000)
+    for run in both:
+        assert len(run.lease(ttl_ms=50)) == 1
+    _tick(warm, rebuilt, 1040)
+    _tick(warm, rebuilt, 1100)
+    for run in both:
+        assert len(run.lease(ttl_ms=50)) == 1
+    _tick(warm, rebuilt, 1200)
+    _tick(warm, rebuilt, 1300)
+    for run in both:
+        run.push(HEAD_C, lane="pr-1", event="pull_request", action="synchronize")
+        run.push(HEAD_D, lane="grade", ref="refs/grade/t1")
+    actions = _tick(warm, rebuilt, 1400)
+    assert f"left lint queued on {HEAD_D} to the relay" in actions
+    assert warm.grade(HEAD_A).superseded
+    _tick(warm, rebuilt, 1200 + HOLD_MS)
+    _tick(warm, rebuilt, 1300 + HOLD_MS)
+
+
+def test_a_restarted_scheduler_reads_each_quiet_live_grade_once_through_plain_pipelines_and_writes_none(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1), unit(2))}), HEAD_B: plan({"lint": (unit(3),)})})
@@ -371,8 +401,7 @@ def test_a_live_grade_stored_without_a_revision_is_written_once_to_take_one_and_
     assert _moved(sent) == []
 
 
-@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
-def test_a_pass_reads_no_grade_whose_finished_unit_is_collected_while_its_other_unit_waits(
+def test_a_quiet_pass_after_a_grade_s_first_unit_was_collected_leaves_it_unread_while_its_other_unit_waits(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1), unit(2))})})
