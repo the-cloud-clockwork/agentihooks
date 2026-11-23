@@ -22,6 +22,7 @@ from typing import Any, cast
 
 import scripts.ci_budget.rate_limit
 from scripts.ci_lab import shadow
+from scripts.ci_lab.webhooks import CHECK_PREFIX
 
 __all__ = [
     "Head",
@@ -49,6 +50,7 @@ gh_api = cast("Callable[..., subprocess.CompletedProcess[str]]", scripts.ci_budg
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = "the-cloud-clockwork/agentihooks"
 LAB_APP = "AGENTIHOOKS_LAB_APP"
+LISTED_NAME = f"{CHECK_PREFIX}/"
 WORKFLOW = "test.yml"
 PULL_REQUEST = "pull_request"
 MERGE_GROUP = "merge_group"
@@ -138,8 +140,10 @@ def actions(runs: Sequence[Mapping[str, Any]], gate: str, static: Collection[str
     return Verdict(shadow.FAIL if shadow.FAIL in outcomes else shadow.PASS, max(map(completed, graded)))
 
 
-def lab(runs: Sequence[Mapping[str, Any]], gate: str, app: str) -> Verdict | None:
-    """Return the lab App's newest lab-shadow verdict on the gate, or None when it posted no completed pass or fail."""
+def lab(runs: Sequence[Mapping[str, Any]], gate: str, app: str, listed: bool = False) -> Verdict | None:
+    """Return the lab App's newest lab-shadow verdict on the gate, or None when it posted no completed pass or fail;
+    listed is accepted and not read yet."""
+    del listed
     name = f"{shadow.LAB_NAME}{gate}"
     posted = [run for run in runs if run["name"] == name and run["app"]["slug"] == app]
     if not posted:
@@ -149,10 +153,12 @@ def lab(runs: Sequence[Mapping[str, Any]], gate: str, app: str) -> Verdict | Non
     return None if outcome is None else Verdict(outcome, completed(newest))
 
 
-def head(sha: str, runs: Sequence[Mapping[str, Any]], gate: str, sources: shadow.Sources) -> Head | None:
+def head(
+    sha: str, runs: Sequence[Mapping[str, Any]], gate: str, sources: shadow.Sources, listed: bool = False
+) -> Head | None:
     """Return the head's verdicts on the gate, or None when it holds no Actions verdict."""
     found = actions(runs, gate, sources.static)
-    return None if found is None else Head(sha, found, lab(runs, gate, sources.lab_app))
+    return None if found is None else Head(sha, found, lab(runs, gate, sources.lab_app, listed))
 
 
 def mismatch(found: Head) -> bool:

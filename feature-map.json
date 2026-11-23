@@ -924,6 +924,8 @@
         "tests/doctor/test_lab.py::test_an_authoritative_gate_with_a_mismatch_is_a_finding",
         "tests/doctor/test_lab.py::test_mismatches_count_each_authoritative_gate_through_the_acceptance_rule_report",
         "tests/doctor/test_lab.py::test_the_gate_reader_asks_github_only_for_authoritative_gates",
+        "tests/doctor/test_lab.py::test_a_pass_reads_the_newest_ten_heads_once_for_every_listed_gate",
+        "tests/doctor/test_lab.py::test_a_listed_gate_is_compared_under_the_name_the_lab_posts",
         "tests/doctor/test_lab.py::test_the_doctor_reads_the_stored_lab_block_and_registers_both_readers",
         "tests/doctor/test_lab.py::test_doctor_findings_prints_a_faked_lab_reading_as_json"
       ]
@@ -12339,6 +12341,8 @@
       "tests": [
         "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_rule",
         "tests/ci_lab/test_shadow_report.py::test_a_head_without_a_lab_verdict_counts_against_presence",
+        "tests/ci_lab/test_shadow_report.py::test_the_acceptance_report_reads_the_lab_verdict_only_under_the_shadow_name",
+        "tests/ci_lab/test_shadow_report.py::test_a_listed_gate_reads_the_newest_lab_verdict_under_either_name",
         "tests/ci_lab/test_shadow_report.py::test_a_cancelled_actions_job_takes_its_head_out_of_the_window",
         "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_completing_after_the_actions_jobs_is_late",
         "tests/ci_lab/test_shadow_report.py::test_a_lost_runners_unit_job_counts_by_its_rerun",
