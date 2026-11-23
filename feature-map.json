@@ -8508,7 +8508,8 @@
       "seam": "gate_protected._duration_problems admitting both install forms of every template variant through gate_protected._floating_tool_form",
       "tests": [
         "tests/test_gate_protected_pinned_tools.py::test_the_floating_tool_form_restores_each_pinned_parser_install_and_keeps_every_other_value",
-        "tests/test_gate_protected_pinned_tools.py::test_a_pinned_provenance_template_admits_a_stale_head_floating_or_under_the_exact_pin_only"
+        "tests/test_gate_protected_pinned_tools.py::test_a_pinned_provenance_template_admits_a_stale_head_floating_or_under_the_exact_pin_only",
+        "tests/test_gate_protected_pinned_tools.py::test_the_protected_durations_provenance_admits_its_own_template_when_it_mixes_both_install_forms"
       ]
     },
     {

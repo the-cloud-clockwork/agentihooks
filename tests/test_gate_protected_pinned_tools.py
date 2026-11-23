@@ -140,6 +140,20 @@ def test_a_pinned_provenance_template_admits_a_stale_head_floating_or_under_the_
     assert problems == ([] if admitted else ["The head skips reuse without protected durations provenance."])
 
 
+@pytest.mark.feature("protected-grader-admits-floating-and-pinned-provenance")
+@pytest.mark.parametrize("retried", [False, True])
+@pytest.mark.parametrize("bounded", [False, True])
+def test_the_protected_durations_provenance_admits_its_own_template_when_it_mixes_both_install_forms(
+    monkeypatch: pytest.MonkeyPatch, retried: bool, bounded: bool
+) -> None:
+    mixed = f"{SINGLE} && {PINNED}"
+    base = _durations(False, False, SINGLE)
+    head = _durations(retried, bounded, mixed)
+    template = _durations(False, False, mixed)["jobs"]["select"]["steps"]
+    monkeypatch.setattr(ci_reuse, "duration_provenance_steps", lambda: copy.deepcopy(template))
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}) == []
+
+
 @pytest.mark.feature("protected-grader-admits-pinned-tool-forms")
 @pytest.mark.parametrize(
     ("form", "install", "sparse", "admitted"),
