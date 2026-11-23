@@ -193,7 +193,7 @@ supervise_writer() {
   while true; do
     agentihooks ledger writer serve &
     wait "$!" || true
-    sleep 5 &
+    python3 -c 'from scripts.swarm_ledger.ledger_server import scheduled_wait; scheduled_wait(5, timeout=5)' &
     wait "$!" || true
   done
 }
