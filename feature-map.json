@@ -8,6 +8,8 @@
       "seam": "loaded_hives agents, room and refusal per hive, and HiveLaunch.select for the expert lane",
       "tests": [
         "tests/hive/test_master_worker_census.py::test_a_master_on_any_login_route_is_no_worker_and_the_real_worker_still_counts",
+        "tests/hive/test_master_worker_census.py::test_masters_listed_under_both_spellings_of_one_account_all_leave_its_worker_total",
+        "tests/hive/test_master_worker_census.py::test_a_listed_master_never_removes_more_than_its_slot_holds_without_the_marker",
         "tests/hive/test_master_worker_census.py::test_a_root_master_with_no_hive_name_leaves_only_the_root_worker_total",
         "tests/hive/test_master_worker_census.py::test_a_master_record_the_hive_does_not_list_removes_no_real_worker",
         "tests/hive/test_master_worker_census.py::test_zero_cpu_room_still_refuses_once_the_master_leaves_the_worker_total",

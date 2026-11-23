@@ -136,9 +136,7 @@ def _unmarked_masters(
     masters = {
         agent.execution_id
         for agent in agents
-        if agent.lane == "master"
-        and agent.state not in ("finished", "ended")
-        and agent.route_kind not in ("interactive", "master-login")
+        if agent.lane == "master" and agent.route_kind not in ("interactive", "master-login")
     }
     found: dict[str, int] = {}
     for listed, ids in executions.items():

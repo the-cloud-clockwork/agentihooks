@@ -59,20 +59,47 @@ def remote(setup: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
 @pytest.mark.feature("hive-worker-total-excludes-masters-by-role")
 @pytest.mark.parametrize(
     ("route", "marked"),
-    [("interactive", 1), ("master-login", 1), ("subscription", 0), ("api", 0)],
+    [("interactive", 2), ("master-login", 2), ("subscription", 0), ("api", 0)],
     ids=["claude-ai-login", "master-login", "subscription", "api"],
 )
 def test_a_master_on_any_login_route_is_no_worker_and_the_real_worker_still_counts(
     remote: Any, route: str, marked: int
 ) -> None:
+    write_hive(remote, max_agents=3)
     worker = _record(remote, "eng", "remote")
-    master = _record(remote, "master", "remote", route)
-    report = _listed(2, worker, master)
+    masters = [_record(remote, "master", "remote", route) for _ in range(2)]
+    report = _listed(4, worker, *masters)
     if marked:
         report["interactive:claude:account"] = marked
     _report(remote, "remote", report)
     hive = _loaded(remote, "remote")
-    assert (hive["agents"], hive["room"], hive["refusal"]) == (1, 1, "")
+    assert (hive["agents"], hive["room"], hive["refusal"]) == (2, 1, "")
+
+
+@pytest.mark.feature("hive-worker-total-excludes-masters-by-role")
+def test_masters_listed_under_both_spellings_of_one_account_all_leave_its_worker_total(remote: Any) -> None:
+    write_hive(remote, max_agents=3)
+    masters = [_record(remote, "master", "remote", account=account) for account in ("my_acct", "my-acct")]
+    executions = {"claude:my_acct": [masters[0].execution_id], "claude:my-acct": [masters[1].execution_id]}
+    _report(remote, "remote", {"claude:my_acct": 3, "_executions": executions})
+    assert _loaded(remote, "remote")["agents"] == 1
+
+
+@pytest.mark.feature("hive-worker-total-excludes-masters-by-role")
+@pytest.mark.parametrize(
+    "report",
+    [
+        {"claude:account": 1, "interactive:claude:account": 1, "claude:other": 1},
+        {"claude:account": 1, "claude:other": 1},
+    ],
+    ids=["slot-all-marked", "slot-unmarked"],
+)
+def test_a_listed_master_never_removes_more_than_its_slot_holds_without_the_marker(
+    remote: Any, report: dict[str, int]
+) -> None:
+    master = _record(remote, "master", "remote")
+    _report(remote, "remote", {**report, "_executions": {"claude:account": [master.execution_id]}})
+    assert _loaded(remote, "remote")["agents"] == 1
 
 
 @pytest.mark.feature("hive-worker-total-excludes-masters-by-role")
