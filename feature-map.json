@@ -14049,6 +14049,18 @@
       ]
     },
     {
+      "id": "ledger-verdict-reads-one-reply",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "The orders read and the focus read serve the data they work out from the ledger state under the swarm's fix phase, the revision of that data, an empty cursor on a read that lists and nothing past the reply limit, each refusing with its own message. A recorded run of the orders read, the focus list and two focus targets, of each one byte past the limit and of a target that does not exist keeps the text of every reply. One helper builds both replies, and no module outside the resources module measures a reply to bound it by hand, apart from the error envelope and the mutation acknowledgement, which shrink a reply before it is bounded.",
+      "seam": "scripts.swarm_ledger.api.routes.ledger_read at orders, focus and focus/<target>, and every module under scripts and hooks against resources.reply_size",
+      "semgrep_rule": "feature-api-reply-bound-one-helper",
+      "tests": [
+        "tests/swarm_ledger/test_read_replies_recorded.py::test_a_recorded_run_of_the_orders_and_focus_reads_keeps_the_text_of_every_reply",
+        "tests/swarm_ledger/test_read_replies_recorded.py::test_the_rule_excuses_only_the_modules_that_measure_a_reply_before_it_is_bounded"
+      ]
+    },
+    {
       "id": "master-handoff-carries-orders",
       "origin": "regression",
       "ordered_at": "2026-11-21",
