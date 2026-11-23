@@ -69,7 +69,7 @@ def git_root(path):
 def _serena_repository(call: Call) -> str:
     from hooks.context.serena_binding import root_for
 
-    directory = root_for(call.session, "") or call.cwd
+    directory = root_for(call.session, call.agent) or call.cwd
     root = git_root(Path(directory).resolve()) if directory else None
     return naming.repo_name(root) if root else NO_VALUE
 
