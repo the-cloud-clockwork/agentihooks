@@ -2462,7 +2462,15 @@ key; the builders are pure and read no file, clock or network.
    Every unit of a class the day's core budget does not shed is enqueued; a shed class enqueues nothing
    until the budget resets the next UTC day, though its units already in the queue still run. Backfill
    takes only the slots workers offered free on a lease poll within the ready window after the units
-   already waiting in the queue. A newer head of the lane drops the older head's held units.
+   already waiting in the queue. A newer head of the lane drops the older head's held units. Each
+   unit is enqueued under the class of its grade, and workers lease the most urgent class first, in
+   the order of `delivery.CLASSES` (hotfix, pull request, queue, promotion, backfill), and first in
+   first out inside a class. A unit that a more urgent grade enqueues again while it is still pending
+   moves to that class and keeps its place there by its sequence number; a leased or finished job is
+   left alone. A job enqueued with no class, as every job enqueued before the classes ordered the
+   queue was, leases after every job that has one. A lease poll reads the pending order
+   `queue.PAGE` (64) jobs at a time, so a poll that fills its free slots from the first page reads
+   one page.
 6. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
    default); the next loss is `lost`.
 7. Finished jobs are collected. A job whose outcome `retry.decide` allows another run under
@@ -4264,7 +4272,8 @@ table, and the `lab-scheduler-test-units` feature tests cover the scheduler's re
 
 `queue.Queue.retry` moves only a job whose state is `done`: it adds one to `attempts`, clears the
 job's worker and outcome and adds it back to the pending set under the same job id with a new
-sequence number; a job in any other state is left as it is and the call returns `False`. A job
+sequence number in the class it was enqueued under, as `queue.Queue.reap` does for an expired
+lease; a job in any other state is left as it is and the call returns `False`. A job
 reaping marked `lost` never reaches it, since reaping marks a job `lost` only once its `attempts`
 reached `lab.retry.lost`, where `decide` is `final`.
 

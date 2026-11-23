@@ -958,8 +958,9 @@ class Scheduler:
     def _admit(self, now_ms: int) -> list[str]:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
         and backfill only into the slots workers offered free after every unit already waiting in the queue, backfill
-        and those admitted in this pass included, since the queue leases in order. A class the budget newly sheds is
-        named first. Each grade with held units is read again as it is admitted, so the pass holds one at a time."""
+        and those admitted in this pass included, since the queue leases the most urgent class first and in order
+        inside a class, which each unit is enqueued under by its grade's tier. A class the budget newly sheds is named
+        first. Each grade with held units is read again as it is admitted, so the pass holds one at a time."""
         actions = self._shedding()
         held = sorted(
             (state.tier, state.run) for state in self._live() if any(slot.held for slot in state.units.values())
@@ -976,7 +977,7 @@ class Scheduler:
                     admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
                     waiting += DEFAULT.slots
             if admitted:
-                self.queue.enqueue(admitted, state.head, {}, state.base, state.grader)
+                self.queue.enqueue(admitted, state.head, {}, state.base, state.grader, state.tier)
                 self.save(state)
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions

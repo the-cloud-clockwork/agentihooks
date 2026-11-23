@@ -609,6 +609,27 @@
       ]
     },
     {
+      "id": "lab-lease-class-order",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "CI lab workers lease the most urgent class first, in the order hotfix, pull request, queue, promotion, backfill, and first in first out inside a class: Queue.enqueue stores the class rank of the grade that enqueues and scores the pending entry by it, a job enqueued with no rank sorts after every ranked one, a reaped or retried job keeps its rank, a more urgent enqueue of a pending job moves it up and leaves a leased one, Scheduler.tick enqueues a grade's units with its tier, and a lease poll reads the pending order one page at a time by score.",
+      "seam": "scripts.ci_lab.queue.Queue.enqueue, ordered, reap and retry and scripts.ci_lab.leases.Leases.lease over fakeredis, and scripts.ci_lab.scheduler.Scheduler.tick admitting grades of two tiers",
+      "tests": [
+        "tests/ci_lab/test_queue.py::test_a_more_urgent_rank_sorts_ahead_of_work_enqueued_earlier",
+        "tests/ci_lab/test_queue.py::test_an_unranked_job_keeps_its_counter_score_and_sorts_after_every_ranked_one",
+        "tests/ci_lab/test_queue.py::test_a_job_enqueued_before_ranks_existed_sorts_after_ranked_work_and_moves_under_a_rank",
+        "tests/ci_lab/test_queue.py::test_a_reaped_or_retried_job_keeps_its_rank",
+        "tests/ci_lab/test_queue.py::test_a_more_urgent_enqueue_moves_a_pending_job_and_leaves_a_leased_one",
+        "tests/ci_lab/test_queue.py::test_a_more_urgent_enqueue_leaves_a_finished_job_alone",
+        "tests/ci_lab/test_queue.py::test_the_lease_order_is_read_in_pages_that_a_claim_between_them_cannot_shift",
+        "tests/ci_lab/test_leases.py::test_a_lease_grants_the_most_urgent_class_first",
+        "tests/ci_lab/test_leases.py::test_a_lease_poll_reads_one_page_of_a_long_pending_order",
+        "tests/ci_lab/test_leases.py::test_a_lease_reads_no_page_once_its_slots_are_full",
+        "tests/ci_lab/test_leases.py::test_a_lease_reads_past_a_page_of_jobs_that_do_not_fit",
+        "tests/ci_lab/test_scheduler.py::test_a_pull_request_grade_admitted_after_a_merge_group_grade_is_leased_first"
+      ]
+    },
+    {
       "id": "lab-scheduler-budget-charge",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2718",
