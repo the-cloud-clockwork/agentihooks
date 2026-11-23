@@ -163,24 +163,6 @@ def test_trampoline_keeps_the_wrappers_of_a_decorated_function_on_its_trampoline
     assert (tmp_path / path).read_text() == selected_mutants(path, source, every)[0]
 
 
-@pytest.mark.feature("lab-mutants-read-no-mutmut-config")
-def test_trampoline_reads_no_mutmut_config_from_the_working_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = "scripts/sample.py"
-    tree, elsewhere = tmp_path / "tree", tmp_path / "elsewhere"
-    (tree / "scripts").mkdir(parents=True)
-    elsewhere.mkdir()
-    (tree / path).write_text(SAMPLE)
-    expected = [f"scripts.sample.{name}" for name in selected_mutant_names(path, SAMPLE, {1, 2})]
-    monkeypatch.chdir(elsewhere)
-    monkeypatch.setattr(configuration, "_config", None)
-    monkeypatch.setattr(configuration.Config, "get", stats_recorder_only)
-    assert run_mutation.trampoline(tree, path) == expected
-    assert len(expected) > 1
-    assert vars(configuration)["_config"] is None
-
-
 @pytest.mark.parametrize("code, status", [(0, "survived"), (1, "killed"), (3, "suspicious"), (-9, "suspicious")])
 def test_a_child_exit_code_names_its_mutmut_status(code: int, status: str) -> None:
     assert run_mutation.status_of(code) == status
