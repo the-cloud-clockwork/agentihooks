@@ -12,7 +12,7 @@ class Publishing:
     """A LedgerRepository that hands each stored generation it reads or writes to every publisher(slug, state) once,
     on its own thread, newest generation per ledger, so no reader or writer waits for a publication."""
 
-    def __init__(self, inner: Any, *publishers: Callable[[str, dict[str, Any]], None]) -> None:
+    def __init__(self, inner: Any, *publishers: Callable[[str, dict[str, Any]], object]) -> None:
         self.inner = inner
         self.publishers = list(publishers)
         self.published: dict[str, int] = {}
