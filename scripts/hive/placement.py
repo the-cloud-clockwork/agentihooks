@@ -63,8 +63,9 @@ class Choice:
 
 
 def release(text: object) -> Version | None:
-    """The release a hive reports, as one that can be compared. None when it reports none, a text that is no
-    version, or a development install, which carries no release number of its own."""
+    """The release a hive reports, as one that can be compared; a pre-release sorts before its release. None when it
+    reports none, a text that is no version, or a development or local build, which carries no release number of
+    its own."""
     try:
         found = Version(str(text))
     except InvalidVersion:
@@ -231,10 +232,10 @@ def unhosted(role: str, hives: list[dict[str, Any]], now: int, aliases: tuple[st
         return Spill(preferred["id"], f"its heartbeat is older than {LIVE_MS // 1000} seconds")
     if preferred.get("draining") == YES:
         return Spill(preferred["id"], "it is draining")
-    if not hosts(role, preferred, aliases):
-        floor = "" if {role, *aliases} & set(preferred["excluded"]) else outdated(role, preferred, aliases)
-        passed = OUTDATED.format(release=preferred.get("version"), floor=floor, role=role)
-        return Spill(preferred["id"], passed if floor else f"it excludes {role}")
+    if {role, *aliases} & set(preferred["excluded"]):
+        return Spill(preferred["id"], f"it excludes {role}")
+    if floor := outdated(role, preferred, aliases):
+        return Spill(preferred["id"], OUTDATED.format(release=preferred.get("version"), floor=floor, role=role))
     return None
 
 

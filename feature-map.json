@@ -2582,6 +2582,7 @@
         "tests/hive/test_release_floor.py::test_a_role_no_live_hive_is_new_enough_for_waits_as_a_role_no_live_hive_takes",
         "tests/hive/test_release_floor.py::test_a_preferred_hive_passed_over_for_its_release_is_named_with_both_releases",
         "tests/hive/test_release_floor.py::test_the_launcher_never_selects_a_hive_older_than_the_first_release_of_the_expert",
+        "tests/hive/test_release_floor.py::test_the_local_machine_takes_an_expert_no_hive_has_room_for_only_at_or_past_its_first_release",
         "tests/hive/test_release_floor.py::test_every_first_release_names_a_role_the_swarm_launches_and_a_release"
       ]
     },

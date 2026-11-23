@@ -1004,8 +1004,12 @@ any hive differs or published nothing.
 
 Every launch places its agent on one hive. For a worker role, placement keeps the live hives that are not draining
 and do not exclude its lane, role or profile. A role that shipped after the first hives carries its first release:
-a hive that reports an older release is skipped for that role, pinned or not, and a hive that reports no release,
-or runs a development install, is not judged. The expert's first release is 2.17.1181. Placement then checks the
+a hive that reports an older release, a pre-release of the first one included, is skipped for that role, and a
+hive that reports no release, a text that is no version, or a development or local build, is not judged. A pin
+does not exempt a hive: the hub lets a pinned hive keep working on its release, but no pin makes an older release
+carry a role it does not have. The expert's first release is 2.17.1181: the role shipped in 2.17.1178, the handoff
+confirmation that takes the handoff off the seat in 2.17.1180 and seat recovery in 2.17.1181, the first release
+that carries a whole lineage on a host. Placement then checks the
 selected account slot, admission room, the
 [repository match](#matching-a-repo-across-machines), and any required interactive or master login.
 Each check that empties the candidate list names its reason, and the launch waits with it.
@@ -1255,7 +1259,7 @@ follows [Workstation fallback](#workstation-fallback).
 | A frontend or qa task waits with `no live swarm-master takes frontend` | No live UI hive takes the role: none is live, or each live one is draining or excludes it, while a headless hive takes it. | Start the UI hive, end its drain, or remove the role from its `excluded` list; `agentihooks hive list` shows heartbeat and exclusions. |
 | An engineer or planner runs on the workstation while pods have room | The workstation does not exclude the role and has the smaller share of its ceiling in use. | `agentihooks hive set <workstation> excluded=eng,ci,plan,dispatch`, or rank the pods first in `prefer`. |
 | A worker task waits with `no live hive takes eng` | No hive is live, or every live hive excludes `eng` or is draining. | Check `agentihooks hive list` for heartbeats, remove `eng` from a hive's `excluded` list, or wait for the drain to end. |
-| An expert lineage waits with `no live hive takes expert` while live hives do not exclude it | Every such hive reports a release older than 2.17.1181, the first release that hosts an expert. | Read `release=` in `agentihooks hive list` and bring a hive to that release or newer; a pinned hive needs its pin raised. |
+| An expert lineage waits with `no live hive takes expert` | No hive has a fresh heartbeat, or every live hive is draining, excludes `expert`, or reports a release older than 2.17.1181, the first release that hosts an expert. | Read `live` or `stale`, `excluded=` and `release=` in `agentihooks hive list`. For an old release, bring a hive to 2.17.1181 or newer; a pinned hive needs its pin raised. |
 | A worker launch waits on the hives' reason although the local machine is under `local-max-agents` | The machine's herdr server does not answer, its hive record excludes the role, the task is pinned to a hive, the local hive does not declare every capability in the task's `needs`, or the controller is not `hybrid` and the machine is not `local` with `hive-placement=on` set on the swarm. | Start herdr on the machine, or check `agentihooks hive show <machine>` and the swarm's `hive-placement` setting. |
 | A master runs on a pod | That pod's `excluded` list does not name `master`, or `master-swarms` lists the swarm, and no UI hive was live with the repo and a slot or login for the harness. | `agentihooks hive set <pod> excluded=master master-swarms=`; the next master launch returns to the UI hive. |
 
