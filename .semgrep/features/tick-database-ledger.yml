@@ -40,15 +40,9 @@ rules:
               - pattern-not: |
                   def client(...):
                     "..."
-                    from scripts.tick.adapters import database_ledger
+                    from scripts.tick.adapters import $ADAPTER
 
-                    return database_ledger.client(...)
-              - pattern-not: |
-                  def client(...):
-                    "..."
-                    from scripts.tick.adapters import writer_client
-
-                    return writer_client.client(...)
+                    return $ADAPTER.client(...)
     paths:
       include:
         - /scripts/swarm_ledger/ledger_route.py
