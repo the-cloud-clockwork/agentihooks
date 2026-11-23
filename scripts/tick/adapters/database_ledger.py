@@ -21,9 +21,9 @@ from scripts.swarm_ledger.api import task_list
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.api.services import Services
 from scripts.swarm_ledger.api_service import Writes
-from scripts.tick.adapters.writer_client import ACTING, acting, client, decoded, principal, routed, written
+from scripts.tick.adapters.writer_client import ACTING, acting, client, decoded, principal, written
 
-__all__ = ["ACTING", "acting", "client", "exchanged", "principal", "request", "routed", "upload"]
+__all__ = ["ACTING", "acting", "client", "exchanged", "principal", "request", "upload"]
 
 routes: Any = api_routes
 resources: Any = api_resources

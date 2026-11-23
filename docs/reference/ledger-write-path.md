@@ -41,7 +41,7 @@ contacted. A refusal comes back as the HTTP error the service would have sent, s
 ### The warm writer socket
 
 `writer_client.client(base, timeout)` builds a `ResourceClient` whose transport is `writer_client.routed` bound to
-the client timeout; `database_ledger` imports both back under the same names. Each request tries this host's warm
+the client timeout; `database_ledger` imports the client back under the same name. Each request tries this host's warm
 writer first, the `agentihooks ledger writer serve` process on `ledger-writer.sock` in the agentihooks home, which
 answers with the same route code as the caller it names:
 
