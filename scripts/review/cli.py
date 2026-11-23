@@ -38,4 +38,4 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str]) -> int:
-    raise NotImplementedError(argv)
+    raise NotImplementedError(argv, _forge, _agent)
