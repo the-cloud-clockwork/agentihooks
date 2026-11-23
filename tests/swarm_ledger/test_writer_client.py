@@ -13,7 +13,7 @@ import pytest
 from hooks import config
 from scripts.swarm_ledger import ledger, warm_writer
 from scripts.tick.adapters import database_ledger
-from tests.tick.test_database_ledger_writer_route import Answers, asked, writer
+from tests.tick.test_database_ledger_writer_route import IN_PROCESS, Answers, asked, writer
 
 pytestmark = [pytest.mark.unit]
 
@@ -55,6 +55,17 @@ def test_a_command_line_client_write_goes_to_the_host_writer_socket(
     assert answers.calls == []
     worktree = {"X-Ledger-Worktree": quote(os.getcwd())}
     assert heard == [asked("sw", "operations", {"ops": []}, "eng@ab-1", worktree)]
+
+
+@pytest.mark.feature("ledger-slim-write-client")
+def test_a_command_line_client_write_runs_in_process_when_no_writer_listens(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answers = Answers()
+    monkeypatch.setattr(database_ledger, "answered", answers)
+    reply = ledger.client("sw", 5.0).request("sw", "operations", {"ops": []})
+    assert reply == IN_PROCESS
+    assert answers.calls == [("sw", "operations", {"ops": []})]
 
 
 @pytest.mark.feature("ledger-slim-write-client")
