@@ -4069,6 +4069,18 @@
       ]
     },
     {
+      "id": "swarm-tick-scan-closes-in-its-own-context",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-slow-lane-reaper-reset",
+      "behaviour": "A tick pass's process scan ends only in the context that opened it: a close from another context, such as the slow lane thread opening the wrapper relay hook, leaves that context as it is and raises nothing, so the slow lane keeps running its steps and hands their records back, and the pass that opened the scan puts back the value it replaced when it closes.",
+      "seam": "scripts.tick.sites.TickSites start hook and close, through scripts.tick.engine.run_graph with a SiteGate whose hooks run on the slow lane thread",
+      "rules": ["contextvar-token-kept-on-object"],
+      "tests": [
+        "tests/tick/test_scan_close_context.py::test_a_scan_closed_from_the_slow_lane_context_stays_open_until_the_pass_that_opened_it_closes",
+        "tests/tick/test_scan_close_context.py::test_the_slow_lane_survives_opening_the_relay_hook_that_closes_the_pass_scan"
+      ]
+    },
+    {
       "id": "swarm-tick-left-pass-value",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2329",
