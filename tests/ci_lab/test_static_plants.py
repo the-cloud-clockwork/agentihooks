@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from scripts import ci_wiring
+from scripts.ci_lab.scheduler import UNIT_JOBS
 from scripts.ci_lab.static_gates import REGISTRY, STATIC_JOBS, WORKFLOW, StaticGate, discover
 
 pytestmark = pytest.mark.unit
@@ -51,6 +52,15 @@ def test_a_gate_plant_is_named_after_its_gate() -> None:
     expected = {name: name.replace(".", "/") for name in plants()}
     expected["lint.threshold-pins"] = "lint/pin-thresholds-floors-and-allowlists-against-the-base"
     assert {name: spec["gate"] for name, spec in plants().items()} == expected
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_a_catalog_plant_outside_the_static_gates_is_a_unit_plant_named_after_its_gate() -> None:
+    found = {path.stem: json.loads(path.read_text())["gate"] for path in sorted(PLANTS.glob("*.json"))}
+    others = {name: gate for name, gate in found.items() if name not in plants() and gate not in STATIC_JOBS}
+    assert others
+    assert {name: gate.partition("/")[0] for name, gate in others.items()} == dict.fromkeys(others, UNIT_JOBS[0])
+    assert {name: name.replace(".", "/") for name in others} == others
 
 
 @pytest.mark.parametrize("name", sorted(plants()))

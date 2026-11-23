@@ -14031,6 +14031,7 @@
       "tests": [
         "tests/ci_lab/test_static_plants.py::test_every_discovered_static_gate_has_one_plant_or_one_exclusion",
         "tests/ci_lab/test_static_plants.py::test_a_gate_plant_is_named_after_its_gate",
+        "tests/ci_lab/test_static_plants.py::test_a_catalog_plant_outside_the_static_gates_is_a_unit_plant_named_after_its_gate",
         "tests/ci_lab/test_static_plants.py::test_a_gate_plant_edits_this_tree_once_per_edit",
         "tests/ci_lab/test_static_plants.py::test_a_planted_gate_reads_only_the_lab_context",
         "tests/ci_lab/test_static_plants.py::test_an_exclusion_names_what_the_lab_lacks",
