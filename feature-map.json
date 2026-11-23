@@ -11,6 +11,17 @@
       ]
     },
     {
+      "id": "hive-member-expert-complete",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p130",
+      "behaviour": "An expert on a worker hive ends its lineage on a mission proof through the member's restricted Redis grant: a hive member may write the lineage records, the running set, the proofs and the closing set, the four keys expert complete writes, and no other expert key. Without any one of the four Redis refuses the completion.",
+      "seam": "auth._acl_keys over the expert lineage keys; the swarm command expert complete through cli.main with a member credential on a Redis that enforces the member grant",
+      "tests": [
+        "tests/hive/test_auth.py::test_a_member_writes_the_expert_keys_a_completion_writes_and_no_other_expert_key",
+        "tests/hive/test_auth.py::test_a_member_expert_ends_its_lineage_on_a_proof_and_is_refused_without_one_of_its_keys"
+      ]
+    },
+    {
       "id": "lab-remote-repository-owner",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2713",

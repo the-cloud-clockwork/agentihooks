@@ -9,6 +9,7 @@ import subprocess
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -855,3 +856,86 @@ def test_a_member_queue_applies_priority_or_reports_a_permission_refusal(
         assert admin.get(swarm.key("proof", queue_priority.ORDER)) == "2"
         assert not admin.exists(swarm.key("proof", queue_priority.DISPLACED))
     assert not admin.exists(swarm.key("proof", queue_priority.ACTIVE))
+
+
+@pytest.mark.feature("hive-member-expert-complete")
+def test_a_member_writes_the_expert_keys_a_completion_writes_and_no_other_expert_key() -> None:
+    from fnmatch import fnmatchcase
+
+    from scripts.swarm import expert_lineage
+
+    patterns = [pattern[1:] for pattern in auth._acl_keys("m1") if pattern.startswith("~")]
+
+    def writable(part: str) -> bool:
+        return any(fnmatchcase(f"{store.PREFIX}:proof:{part}", pattern) for pattern in patterns)
+
+    completion = (expert_lineage.LINEAGES, expert_lineage.ACTIVE, expert_lineage.PROOFS, expert_lineage.CLOSING)
+    others = (expert_lineage.SEQUENCE, expert_lineage.MISSIONS, expert_lineage.LAUNCHES)
+
+    assert [part for part in completion if not writable(part)] == []
+    assert [part for part in others if writable(part)] == []
+
+
+@pytest.mark.feature("hive-member-expert-complete")
+@pytest.mark.parametrize("denied", ["", "expert-lineages", "expert-running", "expert-proofs", "expert-closing"])
+def test_a_member_expert_ends_its_lineage_on_a_proof_and_is_refused_without_one_of_its_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, denied: str
+) -> None:
+    from typing import Any
+
+    import fakeredis
+    from redis.exceptions import NoPermissionError
+
+    from scripts.swarm import cli as swarm_cli
+    from scripts.swarm import expert_lineage, ledger_events
+    from tests.handoff.test_mission_proof import VALID
+    from tests.swarm.test_expert_mission import GOOD
+
+    expert = "expert@a1b2c3-0001"
+    fake_server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=fake_server, decode_responses=True)
+    patterns = [pattern for pattern in auth._acl_keys("m1") if not denied or not pattern.endswith(f":{denied}")]
+    admin.acl_setuser(
+        "hive-m1", enabled=True, nopass=True, categories=auth.ACL_CATEGORIES, keys=patterns, channels=auth.ACL_PATTERNS
+    )
+    reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "HVALS", "HMGET"}
+
+    class Member(fakeredis.FakeRedis):
+        """The member's client: fakeredis drops the read only grant, so the reads it allows go through the admin."""
+
+        def execute_command(self, *args: Any, **options: Any) -> Any:
+            if str(args[0]).upper() in reads:
+                return admin.execute_command(*args, **options)
+            return super().execute_command(*args, **options)
+
+    member = Member(server=fake_server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://hive.example:6380/2")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", expert)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
+    host = store.RedisStore(admin)
+    host.create(store.SwarmConfig("sw", "/repo", 1, 0, "running"))
+    lineage = expert_lineage.start(host, "sw", GOOD, "/missions/batch.md", "xhigh", "master@a1b2c3-0001", 1_000)
+    host.put_agent("sw", store.AgentRecord(expert, "expert", lineage.id, seat=lineage.seat))
+    swarm = store.RedisStore(member)
+    swarm.agents = host.agents
+    monkeypatch.setattr(swarm_cli, "connect", lambda: swarm)
+    monkeypatch.setattr(ledger_events, "view", lambda url: ledger_events.PullRequest("MERGED", 5, 1, False, True))
+    proof = tmp_path / "proof.md"
+    proof.write_text(VALID, encoding="utf-8")
+    complete = ["sw", "expert", "complete", str(proof)]
+
+    if denied:
+        with pytest.raises(NoPermissionError):
+            swarm_cli.main(complete)
+    else:
+        assert swarm_cli.main(complete) == 0
+        ended = expert_lineage.get(host, "sw", lineage.id)
+        assert (ended.state, ended.ended_by) == (expert_lineage.COMPLETE, expert)
+        assert expert_lineage.proof(host, "sw", lineage.id) == VALID
+        assert expert_lineage.running(host, "sw") == [] and expert_lineage.closing(host, "sw") == []
+        assert [agent.state for agent in host.agents("sw") if agent.name == expert] == ["finished"]
