@@ -14123,6 +14123,26 @@
         "tests/deployment/test_worker_hive.py::test_worker_stops_live_children_when_the_hive_ends_or_startup_is_terminated",
         "tests/deployment/test_worker_hive.py::test_worker_restarts_the_writer_with_the_database_env_and_stops_with_the_hive"
       ]
+    },
+    {
+      "id": "presence-agent-hive-daemon",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-otel-presence-spool",
+      "behaviour": "Every hook event marks its agent session seen in a per session seen record under the agentihooks home. The hive daemon presence pass sends the agent presence gauge for every session seen within the fresh window, with the recorded seen seconds and attributes, removes records seen over a day ago or unreadable and beats; while that beat is live a hook process never starts the OpenTelemetry worker or SDK for presence. With no live beat a session sends the gauge itself, at most once per interval.",
+      "seam": "presence.mark, presence.agent and hive.daemon.emit_presence",
+      "tests": [
+        "tests/hive/test_daemon_presence.py::test_a_dispatcher_mark_after_a_daemon_pass_never_starts_the_otel_worker_or_sdk",
+        "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_each_fresh_session_seen_gauge_with_its_attributes_and_last_seen_seconds",
+        "tests/hive/test_daemon_presence.py::test_a_daemon_pass_skips_a_stale_session_and_removes_records_seen_over_a_day_ago_or_unreadable",
+        "tests/hive/test_daemon_presence.py::test_a_session_sends_its_own_seen_gauge_only_once_the_daemon_beat_is_older_than_its_live_window",
+        "tests/observability/test_presence.py::test_with_no_hive_daemon_a_session_sends_its_seen_gauge_at_most_once_per_interval",
+        "tests/observability/test_presence.py::test_an_agent_session_is_marked_seen_with_its_swarm_identity_and_hive",
+        "tests/observability/test_presence.py::test_an_agent_session_names_its_harness_from_the_hook_target",
+        "tests/observability/test_presence.py::test_an_event_without_a_session_marks_nothing",
+        "tests/observability/test_presence.py::test_a_hook_payload_marks_its_session_under_the_process_environment",
+        "tests/observability/test_presence.py::test_a_failing_mark_never_raises_into_the_hook",
+        "tests/observability/test_presence.py::test_the_hook_manager_marks_presence_for_every_event"
+      ]
     }
   ],
   "unmapped_rules": [

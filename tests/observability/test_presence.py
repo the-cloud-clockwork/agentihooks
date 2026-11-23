@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from hooks.observability import otel, presence
 
 ENV = {
@@ -18,6 +20,7 @@ def recorded(monkeypatch):
     return calls
 
 
+@pytest.mark.feature("presence-agent-hive-daemon")
 def test_an_agent_session_is_marked_seen_with_its_swarm_identity_and_hive(monkeypatch):
     calls = recorded(monkeypatch)
     presence.agent("sess-1", ENV, 1_700_000_000.5)
@@ -39,18 +42,29 @@ def test_an_agent_session_is_marked_seen_with_its_swarm_identity_and_hive(monkey
     ]
 
 
+@pytest.mark.feature("presence-agent-hive-daemon")
 def test_an_agent_session_names_its_harness_from_the_hook_target(monkeypatch):
     calls = recorded(monkeypatch)
     presence.agent("sess-2", {**ENV, "AGENTIHOOKS_TARGET": " Codex "}, 5.0)
     assert calls[0][2]["harness"] == "codex"
 
 
+@pytest.mark.feature("presence-agent-hive-daemon")
 def test_an_event_without_a_session_marks_nothing(monkeypatch):
     calls = recorded(monkeypatch)
     presence.agent("", ENV, 5.0)
     assert calls == []
 
 
+@pytest.mark.feature("presence-agent-hive-daemon")
+def test_with_no_hive_daemon_a_session_sends_its_seen_gauge_at_most_once_per_interval(monkeypatch):
+    calls = recorded(monkeypatch)
+    for now_s in (1_000.0, 1_001.0, 1_059.0, 1_060.0, 4_600.0):
+        presence.agent("sess-5", ENV, now_s)
+    assert [value for _, value, _ in calls] == [1_000.0, 1_060.0, 4_600.0]
+
+
+@pytest.mark.feature("presence-agent-hive-daemon")
 def test_a_hook_payload_marks_its_session_under_the_process_environment(monkeypatch):
     calls = []
     monkeypatch.setattr(presence, "time", SimpleNamespace(time=lambda: 9.5))
@@ -60,6 +74,7 @@ def test_a_hook_payload_marks_its_session_under_the_process_environment(monkeypa
     assert calls == [("sess-3", presence.os.environ, 9.5), ("", presence.os.environ, 9.5)]
 
 
+@pytest.mark.feature("presence-agent-hive-daemon")
 def test_a_failing_mark_never_raises_into_the_hook(monkeypatch):
     def fail(*args):
         raise OSError("seat unreadable")
@@ -68,6 +83,7 @@ def test_a_failing_mark_never_raises_into_the_hook(monkeypatch):
     assert presence.mark({"session_id": "sess-4"}) is None
 
 
+@pytest.mark.feature("presence-agent-hive-daemon")
 def test_the_hook_manager_marks_presence_for_every_event():
     import inspect
 
