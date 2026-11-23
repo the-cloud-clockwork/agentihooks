@@ -11100,7 +11100,7 @@
     {
       "id": "hive-registry-unique-name-suffix",
       "origin": "inventory",
-      "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another registered hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it, and a headless hive renamed to a held name takes the next free suffix.",
+      "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another live hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it while its base stays held, and a headless hive renamed to a held name takes the next free suffix.",
       "seam": "scripts.hive.registry.update through _settle, _read_name, _held and _unique",
       "tests": [
         "tests/hive/test_registry.py::test_two_headed_hives_joining_take_unique_names",
