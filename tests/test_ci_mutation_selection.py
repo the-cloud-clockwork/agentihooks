@@ -596,6 +596,45 @@ def test_mutant_creation_wraps_its_parse_and_visits_again_only_for_a_refused_cla
     assert possible
 
 
+@pytest.mark.feature("lab-mutants-read-no-mutmut-config")
+def test_given_patterns_keep_the_lines_mutmut_config_patterns_keep_from_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import selected_mutants
+
+    def refuse() -> SimpleNamespace:
+        raise AssertionError("mutmut config read")
+
+    source = "def bumped(count):\n    total = count + 1\n    return total * 2\n"
+    patterns = [r"count \+ 1"]
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=patterns, source_paths=[], max_stack_depth=-1)
+    )
+    configured = selected_mutants("scripts/sample.py", source, {2, 3})
+    monkeypatch.setattr(Config, "get", refuse)
+    given = selected_mutants("scripts/sample.py", source, {2, 3}, patterns)
+    every = selected_mutants("scripts/sample.py", source, {2, 3}, ())
+    assert given == configured
+    assert "count - 1" in every[0]
+    assert "count - 1" not in given[0]
+    assert 0 < len(given[1]) < len(every[1])
+
+
+@pytest.mark.feature("lab-mutants-read-no-mutmut-config")
+def test_given_patterns_load_no_mutmut_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mutmut import configuration
+
+    from scripts.ci_mutation.selection import selected_mutants
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(configuration, "_config", None)
+    _, names = selected_mutants("scripts/sample.py", "def doubled(value):\n    return value * 2\n", {2}, ())
+    assert names
+    assert vars(configuration)["_config"] is None
+
+
 def test_changed_module_constants_and_dataclass_fields_beside_a_decorated_class_select_without_error(monkeypatch):
     from mutmut.configuration import Config
 

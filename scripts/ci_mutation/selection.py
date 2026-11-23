@@ -29,7 +29,7 @@ from scripts.ci_mutation.stats_dependencies import records_within
 from scripts.ci_mutation.timeouts import retry_timeouts
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from libcst import Module
     from libcst.metadata import MetadataWrapper
@@ -41,7 +41,9 @@ GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 IMPORT_GROUPS = {"fakeredis"}
 
 
-def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[Module, list[Mutation]]:
+def changed_mutations(
+    filename: str, source: str, changed: set[int], patterns: Sequence[str] | None = None
+) -> tuple[Module, list[Mutation]]:
     wrapper, mutations, _ = created_mutations(filename, source)
     return wrapper.module, on_changed_lines(wrapper, mutations, changed)
 
@@ -67,7 +69,9 @@ def on_changed_lines(wrapper: MetadataWrapper, mutations: list[Mutation], change
     return selected
 
 
-def created_mutations(filename: str, source: str) -> tuple[MetadataWrapper, list[Mutation], list[Mutation]]:
+def created_mutations(
+    filename: str, source: str, patterns: Sequence[str] | None = None
+) -> tuple[MetadataWrapper, list[Mutation], list[Mutation]]:
     """Parse source once and return its metadata wrapper with the graded and the possible mutations on it."""
     import libcst as cst
     from libcst.metadata import MetadataWrapper
@@ -180,7 +184,9 @@ def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int,
     return len(found), [function.name.value for function in ungraded]
 
 
-def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:
+def selected_mutants(
+    filename: str, source: str, changed: set[int], patterns: Sequence[str] | None = None
+) -> tuple[str, list[str]]:
     from mutmut.mutation.file_mutation import combine_mutations_to_source
 
     module, selected = changed_mutations(filename, source, changed)

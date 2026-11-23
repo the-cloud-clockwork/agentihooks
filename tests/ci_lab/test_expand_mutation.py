@@ -5,6 +5,7 @@ from importlib import metadata
 from pathlib import Path
 
 import pytest
+from mutmut import configuration
 from mutmut.mutation.pragma_handling import PragmaParseError
 
 from scripts.ci_lab import digests, expand_mutation, store
@@ -170,6 +171,20 @@ def test_mutant_names_and_keys_are_stable_across_runs_and_checkouts(tmp_path: Pa
     assert first == again == other
     assert first
     assert len({unit.key for unit in first}) == len(first)
+
+
+@pytest.mark.feature("lab-mutants-read-no-mutmut-config")
+def test_mutant_units_read_no_mutmut_config_from_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, elsewhere = repository(tmp_path / "tree", MUTANT_FILES), tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    expected = expand_mutation.mutant_units(root, EVERY_LINE, {}, {})
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr(configuration, "_config", None)
+    assert expand_mutation.mutant_units(root, EVERY_LINE, {}, {}) == expected
+    assert expected
+    assert vars(configuration)["_config"] is None
 
 
 @pytest.mark.feature("lab-mutant-unit-split")
