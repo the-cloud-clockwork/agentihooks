@@ -536,7 +536,26 @@ def test_tests_reports_a_flaky_batchs_rows_with_the_unit_key_as_run_and_its_atte
 
     flakes = report_of_tests(monkeypatch, tmp_path, verdict)["flakes"]
 
-    assert flakes == [{**row, "run": "unit-key", "run_attempt": 2} for row in rows]
+    assert flakes == [
+        {
+            "test": "tests/a.py::t",
+            "run": "unit-key",
+            "run_attempt": 2,
+            "attempts": 2,
+            "outcome": "flaky",
+            "errors": ["first attempt fails"],
+            "tracebacks": ["Traceback"],
+        },
+        {
+            "test": "tests/a.py::u",
+            "errors": ["pytest exited with code 2"],
+            "tracebacks": [],
+            "attempts": 2,
+            "outcome": "flaky",
+            "run": "unit-key",
+            "run_attempt": 2,
+        },
+    ]
 
 
 @pytest.mark.feature("lab-report-flake-rows")
