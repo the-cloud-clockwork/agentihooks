@@ -1,6 +1,7 @@
 import json
 import shlex
 import time
+from typing import Any
 from uuid import uuid4
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
@@ -99,7 +100,7 @@ def failed(store: RedisStore, slug: str, agent: AgentRecord, reason: str = LAUNC
             continue
         at = now_ms()
 
-        def change(current, at=at):
+        def change(current: dict[str, Any], at: int = at) -> None:
             current["binding"] = {"state": "absent", "at": at, "session": agent.name, "reason": reason}
 
         _change(store, slug, row["id"], change)
