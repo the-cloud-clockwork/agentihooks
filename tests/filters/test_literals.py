@@ -124,8 +124,14 @@ def test_web_literals_without_whitespace_are_skipped_while_sentences_and_text_no
     source = (
         'h("section", { "data-outline": "orders" }, h("li", { class: "item" }, h("span"), '
         'h("span", { id: "orders-count" }))); throw new Error(`server answered ${resp.status}`); '
-        "const label = 'Operator orders '; const path = `${base}/orders`; <h2>Orders</h2>"
+        "const label = 'Operator orders '; const path = `${base}/orders`; "
+        'const blank = "   "; const lines = `first\nsecond`; <h2>Orders</h2>'
     )
     findings = find(source, "scripts/swarm_ledger/static/js/orders.js", "Write")
-    assert [item["text"] for item in findings] == ["server answered ${resp.status}", "Operator orders ", "Orders"]
+    assert [item["text"] for item in findings] == [
+        "server answered ${resp.status}",
+        "Operator orders ",
+        "first\nsecond",
+        "Orders",
+    ]
     assert all(source[item["start"] : item["end"]] == item["text"] for item in findings)
