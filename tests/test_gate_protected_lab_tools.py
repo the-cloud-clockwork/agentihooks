@@ -13,7 +13,7 @@ from scripts import ci_frozen, ci_runner_trust, ci_wiring, gate_protected
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
-CANDIDATE = "086855f1d1e7a0ee44af2c05468b7bc33ee26856"
+CANDIDATE = "bdc22bf5e70728f9e9fb93f94067e2a109bf567e"
 FLOATING = "python -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1"
 PINNED = (
     "python -m pip install --quiet --constraint grader/.github/ci-tools/parser.lock "

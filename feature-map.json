@@ -14182,6 +14182,20 @@
         "tests/deployment/test_worker_hive.py::test_worker_stops_live_children_when_the_hive_ends_or_startup_is_terminated",
         "tests/deployment/test_worker_hive.py::test_worker_restarts_the_writer_with_the_database_env_and_stops_with_the_hive"
       ]
+    },
+    {
+      "id": "protected-grader-admits-lab-tool-pins",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2867",
+      "behaviour": "The announced protected grader candidate admits only the exact lab verdict dependency install under both parser and lint tool locks from the grader checkout, preserves every other job field, leaves its inputs unchanged, and refuses removal of the constraints once the base is pinned.",
+      "seam": "gate_protected.grade through the announced frozen grader candidate",
+      "tests": [
+        "tests/test_gate_protected_lab_tools.py::test_the_lab_tool_pin_candidate_is_stored_under_its_announced_hash",
+        "tests/test_gate_protected_lab_tools.py::test_the_candidate_preserves_unchanged_full_and_small_lab_jobs",
+        "tests/test_gate_protected_lab_tools.py::test_the_candidate_refuses_changes_to_the_reviewed_lab_job",
+        "tests/test_gate_protected_lab_tools.py::test_the_candidate_admits_only_the_exact_paired_grader_locks",
+        "tests/test_gate_protected_lab_tools.py::test_a_pinned_base_refuses_a_head_that_removes_the_lab_constraints"
+      ]
     }
   ],
   "unmapped_rules": [
