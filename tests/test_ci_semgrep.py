@@ -56,7 +56,10 @@ def test_scan_keeps_the_reusable_workflow_steps() -> None:
         "Fail on findings new against the base",
     ]
     assert steps[2]["env"] == {"SEMGREP_VERSION": "1.177.0"}
-    assert steps[3] == {"name": "Install PyYAML", "run": "python -m pip install pyyaml==6.0.2"}
+    assert steps[3] == {
+        "name": "Install PyYAML",
+        "run": "python -m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2",
+    }
     assert _jobs()["scan"]["timeout-minutes"] == 5
 
 
@@ -593,17 +596,26 @@ def _run_install(
     return done.returncode, calls.read_text().splitlines() if calls.exists() else []
 
 
-def test_charts_use_the_runner_semgrep_when_it_matches_the_pin(tmp_path):
-    assert _run_install(tmp_path, "1.177.0") == (0, ["-m pip install pyyaml==6.0.2"])
+def test_charts_use_the_runner_semgrep_when_it_matches_the_pin(tmp_path: Path) -> None:
+    assert _run_install(tmp_path, "1.177.0") == (
+        0,
+        ["-m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2"],
+    )
 
 
 @pytest.mark.parametrize("installed", ["", "1.176.0"])
-def test_charts_install_the_pinned_semgrep_without_a_matching_runner_copy(tmp_path, installed):
-    assert _run_install(tmp_path, installed) == (0, ["-m pip install pyyaml==6.0.2 semgrep==1.177.0"])
+def test_charts_install_the_pinned_semgrep_without_a_matching_runner_copy(tmp_path: Path, installed: str) -> None:
+    assert _run_install(tmp_path, installed) == (
+        0,
+        ["-m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2 semgrep==1.177.0"],
+    )
 
 
-def test_charts_fail_when_the_install_leaves_another_semgrep(tmp_path):
-    assert _run_install(tmp_path, "", pip_gives="1.176.0") == (1, ["-m pip install pyyaml==6.0.2 semgrep==1.177.0"])
+def test_charts_fail_when_the_install_leaves_another_semgrep(tmp_path: Path) -> None:
+    assert _run_install(tmp_path, "", pip_gives="1.176.0") == (
+        1,
+        ["-m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2 semgrep==1.177.0"],
+    )
 
 
 def test_feature_tests_use_the_runner_semgrep_when_it_matches_the_pin(tmp_path: Path) -> None:
@@ -615,12 +627,12 @@ def test_feature_tests_install_the_pinned_semgrep_without_a_matching_runner_copy
     tmp_path: Path, installed: str
 ) -> None:
     install = _run_install(tmp_path, installed, job="feature-tests", name="Install Semgrep")
-    assert install == (0, ["-m pip install semgrep==1.177.0"])
+    assert install == (0, ["-m pip install --constraint .github/ci-tools/semgrep.lock semgrep==1.177.0"])
 
 
 def test_feature_tests_fail_when_the_install_leaves_another_semgrep(tmp_path: Path) -> None:
     install = _run_install(tmp_path, "", pip_gives="1.176.0", job="feature-tests", name="Install Semgrep")
-    assert install == (1, ["-m pip install semgrep==1.177.0"])
+    assert install == (1, ["-m pip install --constraint .github/ci-tools/semgrep.lock semgrep==1.177.0"])
 
 
 def test_feature_tests_bound_the_semgrep_install_below_the_job_timeout() -> None:
