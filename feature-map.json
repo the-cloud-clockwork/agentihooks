@@ -6274,6 +6274,17 @@
       ]
     },
     {
+      "id": "ledger-write-doctrine-order-verb",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "The ledger write doctrine gate counts prose that teaches an order through the ledger command, agentihooks ledger order, as a ledger write line, as it does for every other write verb. The same order through agentihooks api is no write line, and reading the orders is none either.",
+      "seam": "scripts.no_ledger_write_doctrine.hits over one line, and its main grading a head tree against a base tree",
+      "tests": [
+        "tests/test_no_ledger_write_doctrine.py::test_an_order_through_the_ledger_command_is_a_write_line_and_through_the_api_is_not",
+        "tests/test_no_ledger_write_doctrine.py::test_a_new_line_teaching_an_order_through_the_ledger_command_is_red_and_the_api_form_is_green"
+      ]
+    },
+    {
       "id": "ledger-followup-duplicates",
       "origin": "inventory",
       "behaviour": "A follow up repeating an open follow up or task is refused naming it, unless a plain words not duplicate reason is given and stored.",
