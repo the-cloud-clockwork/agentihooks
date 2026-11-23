@@ -75,10 +75,8 @@ def test_the_first_release_a_hive_misses_is_named_and_none_when_it_carries_it() 
 
 
 @pytest.mark.feature("hive-role-release-floor")
-def test_no_live_hive_taking_a_role_names_the_release_hosting_it_needs() -> None:
-    assert chosen([headless(heartbeat_at=NOW, version=OLD)]) == placement.Wait(
-        f"no live hive takes expert; hosting it needs release {FLOOR} or newer"
-    )
+def test_a_role_no_live_hive_is_new_enough_for_waits_as_a_role_no_live_hive_takes() -> None:
+    assert chosen([headless(heartbeat_at=NOW, version=OLD)]) == placement.Wait("no live hive takes expert")
     assert chosen([headless(heartbeat_at=NOW, excluded=["ci"])], "ci") == placement.Wait("no live hive takes ci")
     current = [headless(heartbeat_at=NOW, version=OLD), headless("current", heartbeat_at=NOW, version=FLOOR)]
     assert placement.place("expert", "claude", "acct", "subscription", REPO, current, NOW) == "current"
