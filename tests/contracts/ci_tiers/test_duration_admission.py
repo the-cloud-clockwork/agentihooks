@@ -42,7 +42,7 @@ def legacy(workflows: dict[str, dict]) -> dict[str, dict]:
     return base
 
 
-def combined(base: dict[str, dict]) -> dict[str, dict]:
+def combined(base: dict[str, dict], promotion: bool = True) -> dict[str, dict]:
     head = copy.deepcopy(base)
     jobs = head["test.yml"]["jobs"]
     durations = jobs.pop("durations")
@@ -54,9 +54,8 @@ def combined(base: dict[str, dict]) -> dict[str, dict]:
         if isinstance(job.get("needs"), list):
             job["needs"] = list(dict.fromkeys("select" if name == "durations" else name for name in job["needs"]))
     head["test.yml"]["jobs"] = json.loads(json.dumps(jobs).replace("needs.durations.outputs.", "needs.select.outputs."))
-    head["test.yml"]["jobs"]["gate-required"]["steps"] = ci_reuse.split_required(
-        ci_reuse.gate_steps(queue_tier=True, promotion=True, docs="docs" in jobs["gate-required"]["needs"])
-    )
+    steps = ci_reuse.gate_steps(queue_tier=True, promotion=promotion, docs="docs" in jobs["gate-required"]["needs"])
+    head["test.yml"]["jobs"]["gate-required"]["steps"] = ci_reuse.split_required(steps) if promotion else steps
     step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
     step["run"] = (
         step["run"]
@@ -84,6 +83,16 @@ def test_protected_grading_accepts_combined_duration_admission(already_combined:
     if already_combined:
         base = copy.deepcopy(head)
     assert grade(base, head) == []
+
+
+def test_protected_grading_refuses_combined_duration_admission_without_the_dev_push_job_list() -> None:
+    base = legacy(ci_wiring.load(ROOT))
+    gate = base["test.yml"]["jobs"]["gate-required"]
+    with pytest.raises(ValueError, match="each of its three job lists once"):
+        ci_reuse.split_required(ci_reuse.gate_steps(queue_tier=True, promotion=False, docs="docs" in gate["needs"]))
+    assert list(map(str, grade(base, combined(base, promotion=False)))) == [
+        "The head's Gate — Required changes its steps; the protected branch grades with its own."
+    ]
 
 
 @pytest.mark.parametrize(

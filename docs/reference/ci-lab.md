@@ -2612,10 +2612,15 @@ The eight lint steps that read `github.head_ref`, `github.ref_name`, `github.bas
 `github.event.before`, `github.event.merge_group.base_sha`, a network, Docker or an earlier
 repository checkout moved to the `lint-actions` job, and `test-count`'s own
 `record-the-head-count-for-the-next-queue-group` step moved to the `collect` job; neither job is
-in `STATIC_JOBS`, so `discover` never walks either one. A step whose only Python command is
-`python -c '...'` is no longer a gate step either: `type-gate`'s `install-dependencies` step and
-`test-count`'s `install-dependencies` and `fetch-the-base-suite-count-recorded-on-dev` steps stay
-in their jobs but drop out of discovery by that rule alone.
+in `STATIC_JOBS`, so `discover` never walks either one. A Python command that passes inline code,
+`python -c '...'` or a combined form such as `python -Ic '...'`, makes no gate, whatever that code
+imports, repository modules included; a step stays a gate only through its other commands. So
+`type-gate`'s `install-dependencies` step and `test-count`'s `install-dependencies` and
+`fetch-the-base-suite-count-recorded-on-dev` steps stay in their jobs but drop out of discovery
+by that rule alone. A step whose verdict the lab must grade runs a module (`python -m`), a script
+file or a script on standard input (`python -`), and
+`test_the_real_static_jobs_pass_inline_python_only_in_their_install_and_record_fetch_steps` names
+the three steps of the static jobs that pass inline code today, so a new one is a decision.
 
 Before pull request
 [#11978](https://github.com/the-cloud-clockwork/agentihooks/pull/11978), the expander passed only

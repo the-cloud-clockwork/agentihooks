@@ -144,6 +144,13 @@ def _scripts(text: str, target: str) -> set[str]:
 
 
 def _commands(run: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return the gate tools and the Python modules a step's run text names, each sorted.
+
+    A Python command makes its step a gate through its target: a module after -m, a script file, or a script on
+    standard input. A command whose flags hold c, alone or combined as in -Ic, passes inline code and makes no gate,
+    whatever that code imports; a step the lab must grade runs a module, a script file or standard input. Setup
+    commands and the ungated modules make no gate either.
+    """
     parts = [part for part in COMMAND.split(run.replace("\\\n", " ")) if not SETUP_COMMAND.search(part)]
     tools = {tool for tool, pattern in TOOLS.items() if any(pattern.search(part) for part in parts)}
     modules: set[str] = set()

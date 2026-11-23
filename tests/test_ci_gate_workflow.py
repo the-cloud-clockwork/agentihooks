@@ -190,7 +190,7 @@ def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_re
     assert max(names.index(name) for name in setup) < names.index(control)
 
 
-def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
+def test_lint_actions_grades_dashboard_columns_with_the_antoncore_dev_checker() -> None:
     steps = _workflow()["jobs"]["lint-actions"]["steps"]
     token = next((s for s in steps if s.get("id") == "app-token"), None)
     assert token is not None
@@ -273,7 +273,7 @@ def test_rest_checkout_reads_selected_files_from_one_revision_and_fails_closed(t
         assert output.read_text() == "revision=source-revision\n"
 
 
-def test_lint_prepares_the_dashboard_checker_in_the_background_before_the_other_lint_steps():
+def test_lint_actions_prepares_the_dashboard_checker_in_the_background_before_its_other_steps() -> None:
     steps = _workflow()["jobs"]["lint-actions"]["steps"]
     names = [step.get("name") for step in steps]
     prepare = steps[names.index("Prepare the dashboard query checker in the background")]

@@ -374,9 +374,13 @@ def test_a_python_dash_c_probe_adds_no_gate_while_module_script_and_stdin_forms_
         {"name": "A script file", "run": "python scripts/read_the_run.py"},
         {"name": "A heredoc script", "run": "python - <<'EOF'\nprint(1)\nEOF"},
         {"name": "A module beside a probe", "run": "python -m scripts.read_the_run && python -c 'print(1)'"},
+        {"name": "A probe importing repository code", "run": "python -c 'from tests.count_floor import main; main()'"},
+        {"name": "A probe with combined flags", "run": "python -Ic 'print(1)'"},
     ]
     gates = {gate.step: gate for gate in static_gates.discover(_edited(WORKFLOW, "lint", probed), REGISTRY, REUSABLE)}
     assert "Only a -c probe" not in gates
+    assert "A probe importing repository code" not in gates
+    assert "A probe with combined flags" not in gates
     assert gates["A module"].modules == ("scripts.read_the_run",)
     assert gates["A script file"].modules == ("scripts.read_the_run",)
     assert gates["A heredoc script"].modules == ()
@@ -408,6 +412,23 @@ def test_the_real_lint_type_gate_and_test_count_jobs_hold_no_excluded_step() -> 
     excluded = static_exclusions.read((ROOT / static_exclusions.PATH).read_text())
     assert not names & excluded.keys()
     assert not any(key.startswith(("lint/", "type-gate/", "test-count/")) for key in excluded)
+
+
+@pytest.mark.feature("lab-static-jobs-hold-lab-steps")
+def test_the_real_static_jobs_pass_inline_python_only_in_their_install_and_record_fetch_steps() -> None:
+    jobs = yaml.safe_load((ROOT / static_gates.WORKFLOW).read_text())["jobs"]
+    inline = {
+        f"{job}/{step['name']}"
+        for job in ("lint", "type-gate", "test-count")
+        for step in jobs[job]["steps"]
+        for command in static_gates.COMMAND.split(step.get("run", "").replace("\\\n", " "))
+        if (match := static_gates.PYTHON.match(command)) and any("c" in flag for flag in match.group(1).split())
+    }
+    assert inline == {
+        "type-gate/Install dependencies",
+        "test-count/Install dependencies",
+        "test-count/Fetch the base suite count recorded on dev",
+    }
 
 
 def test_the_command_prints_one_json_line_per_gate(

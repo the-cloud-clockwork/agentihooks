@@ -1212,7 +1212,7 @@ def test_the_collection_wait_downloads_once_the_artifact_lands_and_stays_red_whe
 
 
 @pytest.mark.parametrize("floor", [0, 1], ids=["success", "failure"])
-def test_collection_and_count_floor_both_have_to_succeed(tmp_path: Path, floor: int) -> None:
+def test_the_count_floor_step_ends_with_the_exit_code_of_the_floor(tmp_path: Path, floor: int) -> None:
     base = tmp_path / "base" / "tests"
     base.mkdir(parents=True)
     (base / "count_floor.py").touch()

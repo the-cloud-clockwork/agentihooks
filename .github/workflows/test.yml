@@ -940,7 +940,8 @@ jobs:
       matrix:
         python-version: ["3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - &count-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -1005,7 +1006,8 @@ jobs:
         name: Use the test environment
         run: echo "$(readlink -f "$HOME/venv")/bin" >> "$GITHUB_PATH"
 
-      - name: Check out the base revision
+      - &count-base
+        name: Check out the base revision
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         # swarm merge queue reads the graded base from this log line.
@@ -1024,7 +1026,8 @@ jobs:
           key: ${{ steps.day.outputs.key }}-counts-v1-${{ github.sha }}
           restore-keys: ${{ steps.day.outputs.key }}-counts-v1-
 
-      - name: Mint the token that reads the dev count record
+      - &count-token
+        name: Mint the token that reads the dev count record
         id: app-token
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/create-github-app-token@v3.2.0
@@ -1100,10 +1103,7 @@ jobs:
       matrix:
         python-version: ["3.12"]
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
+      - *count-checkout
 
       - *python
       - *day
@@ -1112,25 +1112,9 @@ jobs:
       - *install
       - *use-venv
 
-      - name: Check out the base revision
-        env:
-          BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
-        # swarm merge queue reads the graded base from this log line.
-        run: |
-          BASE="$(git merge-base "$BASE" HEAD)"
-          echo "BASE: $BASE"
-          git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+      - *count-base
 
-      - name: Mint the token that reads the dev count record
-        id: app-token
-        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
-        uses: actions/create-github-app-token@v3.2.0
-        with:
-          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
-          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: read
-          permission-pull-requests: read
+      - *count-token
 
       # The protected grader plans, so a queued change cannot widen what it reuses.
       - name: Plan the tests whose inputs did not change
@@ -3047,13 +3031,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - &lint-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
       # A failed cache download leaves the segment timer holding the step open until it fires.
-      - name: Set up Python
+      - &lint-python
+        name: Set up Python
         uses: actions/setup-python@v5
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
@@ -3065,7 +3051,8 @@ jobs:
       - name: Install ruff
         run: python -m pip install --constraint .github/ci-tools/lint-tools.lock ruff==0.15.12
 
-      - name: Install PyYAML
+      - &lint-pyyaml
+        name: Install PyYAML
         run: python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
 
       - name: Install vulture
@@ -3074,12 +3061,14 @@ jobs:
       - name: Install the comment gate grammars
         run: python -m pip install --constraint .github/test-requirements.lock tree-sitter==0.26.0 tree-sitter-bash==0.25.1 tree-sitter-javascript==0.25.0 tree-sitter-css==0.25.0
 
-      - name: Check out the base revision
+      - &lint-base
+        name: Check out the base revision
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
         run: git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"
 
-      - name: Check out the protected grader
+      - &lint-grader
+        name: Check out the protected grader
         env:
           GRADER: ${{ github.event.pull_request.base.sha || needs.reuse.outputs.grader }}
         run: |
@@ -3295,20 +3284,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
+      - *lint-checkout
 
       # A failed cache download leaves the segment timer holding the step open until it fires.
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        env:
-          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: pyproject.toml
+      - *lint-python
 
       # The dashboard query step waits on both status files, so its setup overlaps the lint steps before it.
       - name: Prepare the dashboard query checker in the background
@@ -3320,8 +3299,7 @@ jobs:
           (python -m venv "$RUNNER_TEMP/columns" && "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet --constraint .github/ci-tools/parser.lock --constraint .github/ci-tools/lint-tools.lock PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0 packaging==26.3; echo $? > "$RUNNER_TEMP/columns-venv.status") > "$RUNNER_TEMP/columns-venv.log" 2>&1 < /dev/null &
           (docker run -d --rm --name "$CLICKHOUSE" clickhouse/clickhouse-server:24.1-alpine; echo $? > "$RUNNER_TEMP/clickhouse.status") > "$RUNNER_TEMP/clickhouse.log" 2>&1 < /dev/null &
 
-      - name: Install PyYAML
-        run: python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
+      - *lint-pyyaml
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
@@ -3330,17 +3308,9 @@ jobs:
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
-      - name: Check out the base revision
-        env:
-          BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
-        run: git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"
+      - *lint-base
 
-      - name: Check out the protected grader
-        env:
-          GRADER: ${{ github.event.pull_request.base.sha || needs.reuse.outputs.grader }}
-        run: |
-          git fetch --no-tags origin "$GRADER"
-          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+      - *lint-grader
 
       - name: Check out kernel marker vector authority
         if: ${{ !cancelled() }}
