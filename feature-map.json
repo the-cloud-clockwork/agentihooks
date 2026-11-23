@@ -8145,7 +8145,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-sweep-spares-chart-release",
-      "behaviour": "The panic cancel sweep, from the panic button and from the tick pass, leaves the release workflow runs on main running: the Helm chart release workflow run, the PyPI publish and Release dispatches and a push run on main such as Pages. It still cancels the runs on the panicking swarm's agent branches and the workflow run event runs whose title names one of those branches.",
+      "behaviour": "The panic cancel sweep, from the panic button and from the tick pass, leaves the release workflow runs on main running: workflow run event runs on main, the PyPI publish and Release dispatches and a push run on main such as Pages. It still cancels the runs on the panicking swarm's agent branches and the workflow run event runs whose title names one of those branches.",
       "seam": "swarm panic on and the tick pass panic sweep",
       "tests": [
         "tests/swarm/test_panic_scope.py::test_the_panic_button_leaves_release_runs_on_main_running",
@@ -8917,6 +8917,18 @@
       "seam": "hive-rollout.yaml hook Job container image and the chart release package appVersion",
       "tests": [
         "tests/test_swarm_chart_hive_rollout_release.py::test_the_rollout_hooks_run_the_hive_worker_tag_the_chart_release_stamps"
+      ]
+    },
+    {
+      "id": "release-chart-proven-and-pushed-by-the-hive-job",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-chart-proof-same-runner",
+      "behaviour": "A published release packages its Helm chart, installs that archive in kind and pushes the same archive to the registry from the hive job of the worker image release, on the runner that job already holds after the hive worker publish, and pushes nothing when the checksum, packaging or kind check fails.",
+      "seam": "swarm-node-image.yml hive job chart steps after the hive worker publish and the archive folder they share",
+      "tests": [
+        "tests/contracts/promotion/test_chart_release.py::test_the_hive_job_proves_and_pushes_the_release_chart_on_its_own_runner",
+        "tests/contracts/promotion/test_chart_release.py::test_the_chart_publishes_only_after_kind_installs_the_packaged_archive",
+        "tests/contracts/promotion/test_chart_release.py::test_a_failed_checksum_package_kind_check_or_registry_step_stops_publication"
       ]
     },
     {
