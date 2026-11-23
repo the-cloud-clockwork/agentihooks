@@ -705,7 +705,7 @@ def gone(pid):
         try:
             if "State:\tZ" in status.read_text():
                 return True
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return True
         time.sleep(0.05)
     return False
