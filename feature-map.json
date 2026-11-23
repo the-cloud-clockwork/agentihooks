@@ -101,6 +101,7 @@
         "tests/swarm/test_expert_seat.py::test_a_successor_launch_that_fails_keeps_its_error_on_the_binding_and_beside_the_lineage",
         "tests/swarm/test_expert_seat.py::test_a_first_launch_that_fails_keeps_its_error_with_no_transfer_to_carry_it_until_a_launch_succeeds",
         "tests/swarm/test_expert_seat.py::test_the_kept_reason_and_the_line_of_the_pass_hold_no_secret_and_no_login_of_an_address",
+        "tests/swarm/test_expert_seat.py::test_the_login_dropped_from_a_word_runs_from_its_first_address_mark_to_the_last_at_sign_after_it",
         "tests/swarm/test_expert_seat.py::test_a_launch_refused_for_room_records_no_failed_launch",
         "tests/swarm/test_expert_seat.py::test_the_kept_reason_is_redacted_put_on_one_line_and_cut_at_three_hundred_characters",
         "tests/swarm/test_expert_seat.py::test_an_error_with_no_text_is_kept_as_the_name_of_its_type",
