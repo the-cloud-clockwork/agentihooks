@@ -215,9 +215,9 @@ def test_the_held_tick_view_patches_slice_and_plan_rows_in_order(tmp_path: Path)
         "plans": [{"id": "plan-kept"}, {"id": "plan-one", "title": "New"}, {"id": "plan-added"}],
     }
     paths = {
-        json.dumps(["slices", '["id","slice-one",0]', "phase"]),
-        json.dumps(["plans", '["id","plan-one",0]', "title"]),
-        json.dumps(["plans", '["id","plan-added",0]']),
+        json.dumps(["slices", ["id", "slice-one", 0], "phase"]),
+        json.dumps(["plans", ["id", "plan-one", 0], "title"]),
+        json.dumps(["plans", ["id", "plan-added", 0]]),
     }
     calls: list[int] = []
 
