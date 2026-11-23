@@ -310,6 +310,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/swarm_ledger/test_postgres_writer_floor.py",
         "tests/swarm_ledger/test_postgres_repository.py",
         "tests/test_memory_postgres_parity.py",
+        "tests/swarm_ledger/test_warm_writer_parity.py",
         "tests/ci_lab/test_sandbox.py",
         "tests/ci_lab/test_run_static.py",
         "tests/ci_lab/test_run_tests.py",

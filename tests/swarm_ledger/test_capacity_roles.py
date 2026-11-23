@@ -1,3 +1,5 @@
+from playwright.sync_api import Page
+
 from tests.swarm_ledger.ledger_page import fulfill_events, is_events
 from tests.swarm_ledger.test_tabs import SWARM, browser, tab
 
@@ -7,6 +9,7 @@ ROLES = {
     "eng": ["engineer", "frontend", "qa", "documentation"],
     "ci": ["cicd"],
     "plan": ["planner"],
+    "review": ["reviewer"],
     "seats": ["dispatcher", "master"],
 }
 
@@ -18,7 +21,7 @@ def roles(tab):
     )
 
 
-def test_a_status_with_agents_of_every_role_renders_one_row_per_role_with_its_live_count(tab):
+def test_a_status_with_agents_of_every_role_renders_one_row_per_role_with_its_live_count(tab: Page) -> None:
     agents = [
         {"name": "m", "lane": "master"},
         {"name": "d", "lane": "dispatch"},
@@ -33,13 +36,13 @@ def test_a_status_with_agents_of_every_role_renders_one_row_per_role_with_its_li
         {"name": "c1", "lane": "ci"},
         {"name": "p1", "lane": "plan", "profile": "planner"},
     ]
-    status = {**SWARM, "config": {**SWARM["config"], "max_plan": 1}, "agents": agents}
+    status = {**SWARM, "config": {**SWARM["config"], "max_plan": 1, "max_review": 0}, "agents": agents}
     tab.route("**/api/v1/**", lambda route: fulfill_events(route, swarm=status))
     tab.reload()
     tab.get_by_role("tab", name="Swarm", exact=False).click()
     tab.locator("#capacity-roles [data-role]").first.wait_for(state="visible", timeout=1500)
     counts = {"engineer": "2", "frontend": "1", "qa": "3", "documentation": "1", "cicd": "1", "planner": "1"}
-    counts |= {"dispatcher": "1", "master": "1"}
+    counts |= {"reviewer": "0", "dispatcher": "1", "master": "1"}
     assert roles(tab) == [[lane, [[role, counts[role]] for role in names]] for lane, names in ROLES.items()]
     assert tab.locator("#cap-eng").input_value() == "3"
     assert tab.locator("#capacity-unavailable").is_hidden()

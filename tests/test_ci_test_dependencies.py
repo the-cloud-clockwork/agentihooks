@@ -149,7 +149,11 @@ def test_the_ci_tool_generator_writes_each_checked_in_file(tmp_path: Path) -> No
 
 @pytest.mark.feature("ci-tool-constraint-files")
 def test_the_parser_constraint_pins_the_announced_pyyaml() -> None:
-    assert (ROOT / CI_TOOLS / "parser.lock").read_text().splitlines()[2:] == ["pyyaml==6.0.3"]
+    assert (ROOT / CI_TOOLS / "parser.lock").read_text().splitlines()[2:] == [
+        "markdown-it-py==4.2.0",
+        "mdurl==0.1.2",
+        "pyyaml==6.0.3",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -369,7 +373,6 @@ INTENTIONAL_SMOKES = {
     ),
 }
 FLOATING_INSTALLS: tuple[str, ...] = (
-    ".github/workflows/coverage-stability.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
     ".github/workflows/test.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/test.yml: pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1",
     "scripts/ci_duration_provenance.yml: pip install 'pyyaml>=6.0'",

@@ -516,6 +516,23 @@ def stage_grade(pipe: Any, document: dict[str, Any]) -> None:
     pipe.hset(RECORDS, run, json.dumps({"revision": revision, "tier": document["tier"], "hits": hits, "jobs": jobs}))
 
 
+def stage_grade(pipe: Any, document: dict[str, Any]) -> None:
+    """Queue, on a pipeline watching the grade's key, one transaction storing the grade document and, while the grade
+    is live, its next revision and the demand record of that revision, or for a closed grade the removal of both."""
+    run = document["run"]
+    revision = None if document.get("conclusion") else int(pipe.hget(REVISIONS, run) or 0) + 1
+    pipe.multi()
+    pipe.set(GRADES + run, json.dumps(document))
+    if revision is None:
+        pipe.hdel(REVISIONS, run)
+        pipe.hdel(RECORDS, run)
+        return
+    jobs = [slot["job"] for slot in document["units"].values() if slot.get("job")]
+    hits = len(document["units"]) - len(jobs)
+    pipe.hincrby(REVISIONS, run)
+    pipe.hset(RECORDS, run, json.dumps({"revision": revision, "tier": document["tier"], "hits": hits, "jobs": jobs}))
+
+
 def _evidence(state: State) -> evidence.GradeEvidence:
     """Return a closed grade's evidence: its inputs and each of its units with the grade run that used its verdict."""
     inputs = GradeInputs(state.repo, state.head, state.base, CLASSES[state.tier], state.grader)
@@ -1631,10 +1648,11 @@ def listen(
     ports: tuple[int, int, int],
     mirror: Path | None = None,
 ) -> tuple[ThreadingHTTPServer, ThreadingHTTPServer, ThreadingHTTPServer]:
-    """Bind the lease, capacity, grades, control and metrics routes.
+    """Bind the lease, capacity, grades, control and metrics routes, then start the first load build.
     Both capacity ports serve the same cached budgeted load, refreshed by the metrics
-    serve loop after REFRESH_MS. Grade lookups remain per request. Each scrape observes
-    load and mirror ages. The caller runs each serve_forever.
+    serve loop after REFRESH_MS; no read waits for a build, so before the first one
+    finishes capacity answers 503 and a scrape the registry alone. Grade lookups remain
+    per request. Each scrape observes load and mirror ages. The caller runs each serve_forever.
     """
 
     def snapshot(now_ms: int) -> Load:
@@ -1642,21 +1660,30 @@ def listen(
 
     latest = metrics.Latest(snapshot, clock, REFRESH_MS)
 
-    def scrape() -> Load:
+    def scrape() -> Load | None:
         if mirror is not None:
             metrics.observe_mirror(scheduler.registry, mirror, clock())
-        load, built_ms = latest.read()
+        built = latest.peek()
+        if built is None:
+            return None
+        load, built_ms = built
         metrics.observe_age(scheduler.registry, built_ms, clock())
         return load
 
+    def capacity() -> Load | None:
+        built = latest.peek()
+        return None if built is None else built[0]
+
     api, steering, exposition = ports
     lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
-    port = service.Routes(lease, lambda: latest.read()[0], scheduler.grades_of)
-    return (
+    port = service.Routes(lease, capacity, scheduler.grades_of)
+    servers = (
         service.serve("", api, port),
         lease_api.serve_control("", steering, routes),
         metrics.serve("", exposition, scrape, scheduler.registry, latest.refresh),
     )
+    latest.start()
+    return servers
 
 
 def _now_ms() -> int:

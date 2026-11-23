@@ -106,6 +106,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | planning after phase | wrapper phases | tick | 12 | 60 | planning and phase pass | none | none |
 | planning and phase pass | wrapper phases | tick | 12 | 60 | none | none | none |
 | review pass | wrapper phases | tick | 2 | 60 | none | ledger | swarm-review-trigger |
+| thin task pass | wrapper phases | tick | 2 | 120 | none | inbox, ledger | tick-thin-task-pass |
 | urgent hold | wrapper phases | tick | 2 | 60 | none | none | none |
 | workflow runner | wrapper phases | slow | 2 | 60 | drained resume, ledger state, planning and phase pass | host | swarm-workflow-runner |
 | hive ledger | wrapper probes | slow | 2 | 120 | none | none | none |

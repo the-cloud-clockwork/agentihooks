@@ -42,6 +42,10 @@
   "step starvation": [
    "running"
   ],
+  "thin task pass": [
+   "running",
+   "thin-accepted"
+  ],
   "tick master": [
    "running"
   ],
