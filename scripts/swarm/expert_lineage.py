@@ -182,11 +182,11 @@ def launch_recovered(store: Any, slug: str, name: str) -> None:
 
 
 def launch_failures(store: Any, slug: str) -> dict[str, dict[str, Any]]:
-    """The last failed launch of each running lineage that has had none succeed since, by lineage id. One kept
-    before its lineage ended is no longer read."""
-    raws: dict[str, str] = store.redis.hgetall(store.key(slug, FAILURES))
-    running: set[str] = store.redis.smembers(store.key(slug, ACTIVE))
-    return {name: json.loads(raw) for name, raw in raws.items() if name in running}
+    """The last failed launch of each running lineage that has had none succeed since, by lineage id. The set of
+    the running ids bounds the read, so one kept before its lineage ended is no longer read."""
+    names: list[str] = sorted(store.redis.smembers(store.key(slug, ACTIVE)))
+    raws: list[str | None] = store.redis.hmget(store.key(slug, FAILURES), names) if names else []
+    return {name: json.loads(raw) for name, raw in zip(names, raws) if raw}
 
 
 def closing(store: Any, slug: str) -> list[Lineage]:
