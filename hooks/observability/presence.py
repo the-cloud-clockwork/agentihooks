@@ -71,7 +71,10 @@ def agent(session_id: str, environ: Mapping[str, str], now_s: float) -> None:
     sent_s = record.get("sent_s")
     due = not isinstance(sent_s, int | float) or now_s - sent_s >= INTERVAL_S
     if due and not daemon_live(now_s):
+        from hooks.observability import token_monitor
+
         otel.record_gauge(AGENT, now_s, attributes)
+        token_monitor.send_tokens(record, now_s)
         sent_s = now_s
     write_record(path, {**record, "attributes": attributes, "seen_s": now_s, "sent_s": sent_s})
 
