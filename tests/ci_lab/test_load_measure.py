@@ -1,6 +1,6 @@
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +31,13 @@ def _live(lab: Callable[..., Run]) -> Run:
     return run
 
 
+def _unrecorded(run: Run, head: str) -> None:
+    """Drop a head's grade revision and demand record, as a grade an older release saved has neither."""
+    grade = run.grade(head).run
+    run.lab.client.hdel(scheduler.REVISIONS, grade)
+    run.lab.client.hdel(scheduler.RECORDS, grade)
+
+
 def _opened(run: Run, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     """Answer redis.Redis.from_url for the lab URL with decoded responses with the run's Redis and return the
     environment naming that URL."""
@@ -40,17 +47,30 @@ def _opened(run: Run, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
 
 
 @pytest.mark.feature("lab-scheduler-load-measure")
-def test_the_measure_prints_three_builds_and_parses_each_stored_live_grade_once_on_its_cold_build(
+def test_the_measure_prints_three_builds_with_the_documents_fetched_and_record_bytes_read_by_each(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     run = _live(lab)
+    _unrecorded(run, HEADS[0])
     run.lab.client.sadd(scheduler.LIVE, "gone")
+    recorded = sum(len(record.encode()) for record in run.lab.client.hgetall(scheduler.RECORDS).values())
     parse = scheduler._parse
     assert load_measure.main([], _opened(run, monkeypatch)) == 0
     assert scheduler._parse is parse
     figures = json.loads(capsys.readouterr().out)
-    assert sorted(figures) == ["builds", "grades", "leaves_out", "parses", "process_seconds", "wall_seconds"]
-    assert (figures["builds"], figures["grades"], figures["parses"]) == (3, len(HEADS) + 1, len(HEADS))
+    assert sorted(figures) == [
+        "builds",
+        "documents_fetched",
+        "grades",
+        "leaves_out",
+        "parses",
+        "process_seconds",
+        "record_bytes_read",
+        "wall_seconds",
+    ]
+    assert (figures["builds"], figures["grades"], figures["parses"]) == (3, len(HEADS) + 1, 3)
+    assert (figures["documents_fetched"], figures["record_bytes_read"]) == ([1, 1, 1], [recorded, 0, 0])
+    assert recorded > 0
     assert len(figures["process_seconds"]) == len(figures["wall_seconds"]) == 3
     assert min(figures["process_seconds"] + figures["wall_seconds"]) >= 0
     assert figures["leaves_out"] == "the offer prune round trip of each build"
@@ -62,6 +82,7 @@ def test_the_measure_sends_only_read_commands_directly_and_through_pipelines_and
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     run = _live(lab)
+    _unrecorded(run, HEADS[0])
     environ = _opened(run, monkeypatch)
     client = run.lab.client
     sent: list[str] = []
@@ -87,7 +108,8 @@ def test_the_measure_sends_only_read_commands_directly_and_through_pipelines_and
     assert load_measure.main(["--builds", "2"], environ) == 0
     assert {"SMEMBERS", "GET", "HMGET", "HGETALL"} <= set(sent) <= READS
     assert set(run.engine.queue.offers(0)) == {"fresh", "stale"}
-    assert json.loads(capsys.readouterr().out)["parses"] == len(HEADS)
+    figures = json.loads(capsys.readouterr().out)
+    assert (figures["parses"], figures["documents_fetched"]) == (2, [1, 1])
 
 
 @pytest.mark.feature("lab-scheduler-load-measure")
@@ -110,6 +132,7 @@ def test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_pars
     lab: Callable[..., Run],
 ) -> None:
     run = _live(lab)
+    helpers = (scheduler._parse, scheduler._records, scheduler._document)
     parse = scheduler._parse
     engine = load_measure.measured_scheduler(run.lab.client)
     process = iter([1.0, 1.5, 2.0, 2.25]).__next__
@@ -122,3 +145,25 @@ def test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_pars
     with pytest.raises(json.JSONDecodeError):
         load_measure.measure(engine, 1, 1000, time.process_time, time.perf_counter)
     assert scheduler._parse is parse
+    assert (scheduler._parse, scheduler._records, scheduler._document) == helpers
+
+
+@pytest.mark.feature("lab-scheduler-load-measure")
+def test_the_read_counter_adds_every_fetch_of_a_build_to_that_build_alone() -> None:
+    records: dict[str, str | None] = {"a": '{"r": 1}', "b": None, "c": "{}"}
+    documents: dict[str, str | None] = {"a": "doc", "b": None}
+
+    def stored(client: Any, runs: Sequence[str]) -> list[str | None]:
+        return [records[run] for run in runs]
+
+    def document(client: Any, run: str) -> str | None:
+        return documents[run]
+
+    reads = load_measure.Reads(stored, document)
+    reads.build()
+    assert reads.fetch_records(None, ["a", "b"]) == ['{"r": 1}', None]
+    assert reads.fetch_records(None, ["c"]) == ["{}"]
+    assert [reads.fetch_document(None, run) for run in ("a", "b", "a")] == ["doc", None, "doc"]
+    reads.build()
+    assert reads.fetch_document(None, "b") is None
+    assert (reads.documents, reads.record_bytes) == ([2, 0], [10, 0])

@@ -734,7 +734,7 @@ def test_a_step_plant_uses_its_job_check_and_requires_its_diagnostic(repository:
         result = lab.fetch(path, timeout_s)
         for row in result["check_runs"]:
             if row["name"] == "lab-shadow/lint":
-                row["name"] = "lab-shadow/semgrep/scan"
+                row["name"] = "lab-shadow/semgrep"
         return result
 
     ports = plant_grade.Ports(fetch, lab.sleep, lab.clock, lab.push)

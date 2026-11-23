@@ -48,7 +48,7 @@ Starting and stopping belong to the master of the swarm and the operator.
 | Command | What it does |
 |---|---|
 | `agentihooks swarm <id> expert start <mission file> [--effort xhigh\|max] [--handoff <doc>] [--from <session>]` | Saves the mission and opens a running lineage. Its id, `expert-<n>`, is also its seat label. The swarm launches its first expert on the next pass. With `--handoff`, the first expert continues a session that was not an expert: see Starting from a handoff. |
-| `agentihooks swarm <id> expert status [<lineage>] [--json]` | One line per running lineage, or the one named: state, effort, the expert on its seat while it runs, mission title, who started it and who ended it. |
+| `agentihooks swarm <id> expert status [<lineage>] [--json]` | One line per running lineage, or the one named: state, effort, the expert on its seat while it runs, mission title, who started it and who ended it. While a running lineage has no expert on its seat, the line also names its last failed launch and why it failed. With `--json` every lineage carries `launch_failure`: the time, the expert that did not start and the reason, or an empty object when its last launch did not fail or the lineage ended. |
 | `agentihooks swarm <id> expert mission [<lineage>]` | Prints the mission line and the saved text. An expert reads its own mission and no other. |
 | `agentihooks swarm <id> expert stop <lineage> --note "<why>"` | Ends a running lineage by order. The note is kept, and a handoff that waited on its seat is cleared. |
 | `agentihooks swarm <id> expert proof <lineage>` | Prints the mission proof a completed lineage ended on. |
@@ -135,7 +135,14 @@ running lineage and keeps its seat:
 | A lineage whose part of the pass is refused by the swarm store or the inbox | Says so in one line that names the lineage and goes on with the others; a completed lineage keeps owing its closing steps until they finish. |
 
 A launch waits, and says why, while the swarm has no session slot, the host is
-full or the lineage is placed elsewhere. Nothing launches while the swarm is
+full or the lineage is placed elsewhere. A launch that fails for another reason
+is tried again on the next pass, and its error is kept: beside the lineage, as
+its last failed launch until a launch succeeds, and on the binding of the
+transfer when the expert followed a handoff. The kept text is one line of at
+most 300 characters with secrets redacted and the login of any address dropped
+(everything up to the last at sign of the address, so an address that holds a
+later at sign loses the text before it); the line the pass prints carries the
+same text. Nothing launches while the swarm is
 paused, stopping, stopped or in panic. A sleeping swarm still keeps its expert
 seats: a lineage waits for no ledger work. The handoff an expert was given stays on
 the seat until that expert confirms it. When a lineage is stopped or completes,
@@ -178,5 +185,6 @@ Each part has a live check the Doctor runs on its timer:
 | `mission proof refused` on complete | Work is still open or not shown | Do the work each fault names, then submit again. |
 | An expert's turn does not end | Its lineage runs and it holds no wait | It is working as designed. Stop the lineage with `expert stop` to end it by order. |
 | `expert status` shows `no expert yet` | The swarm is paused, or the launch waits on a session slot, the host or a hive | Read the tick's line for the lineage; it names what it waits on. |
+| `expert status` shows `last launch as <name> failed: <reason>` | The last launch of the lineage failed for that reason; the swarm tries again on its next pass | Fix what the reason names when it keeps failing. `expert status --json` holds the time under `launch_failure`. |
 | `handoff refused` on start | The document given with `--handoff` breaks Handoff v2 | Fix each fault the command lists and start again. |
 | `<name> is an expert; an expert works its mission and claims no task` | An expert ran a worker verb | Do the work inside the mission, or ask the master. |

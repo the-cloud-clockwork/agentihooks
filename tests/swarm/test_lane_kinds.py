@@ -34,19 +34,7 @@ PLACED = {
     "eng": TASK_LANE,
     "ci": TASK_LANE,
     "plan": TASK_LANE - {"stall watched lane"},
-    "review": {
-        "event scope lane",
-        "default profile",
-        "configurable lane",
-        "lane cap",
-        "capacity lane",
-        "tick task lane",
-        "hive task lane",
-        "event scope lane",
-        "ledger task lane",
-        "stall watched lane",
-        "hive placed lane",
-    },
+    "review": TASK_LANE,
     "dispatch": {"default profile", "hive placed lane"},
     "expert": {"default profile", "hive placed lane", "moving numbered seat"},
 }
@@ -99,6 +87,17 @@ def test_lane_and_dispatcher_seat_mail_moves_with_its_occupant_and_master_seat_m
     seat: str, moves: bool
 ) -> None:
     assert bool(exits.MOVING_SEAT.fullmatch(seat)) is moves
+
+
+@pytest.mark.feature("swarm-review-seat-mail")
+def test_a_reviewer_seat_moves_its_mail_and_is_capped_like_an_engineer_seat() -> None:
+    seat = f"{naming.seat_label('review', 2)}@sw"
+    capped = exits.LANE_SEAT.fullmatch(seat)
+    assert exits.MOVING_SEAT.fullmatch(seat)
+    assert capped is not None
+    assert capped.groups() == ("review", "2")
+    config = SwarmConfig("sw", "/repo", 2, 2, max_plan=2, max_review=1)
+    assert exits.no_successor(seat, config) == "the review lane cap is 1"
 
 
 def test_every_kind_sits_in_each_lane_table_on_purpose() -> None:

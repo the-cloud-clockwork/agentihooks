@@ -1,0 +1,21 @@
+rules:
+  - id: feature-api-reply-bound-one-helper
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A reply of the ledger API is held to the reply limit by scripts/swarm_ledger/api/resources.py: a read with
+      its own message calls resources.bounded(reply, message). No other module measures a reply with reply_size
+      to bound it by hand. The error envelope and the mutation acknowledgement are excused: they shrink a reply
+      before it is bounded.
+    pattern-either:
+      - pattern: reply_size(...)
+      - pattern: $MODULE.reply_size(...)
+    paths:
+      include:
+        - /scripts/
+        - /hooks/
+        - '*.test.py'
+      exclude:
+        - /scripts/swarm_ledger/api/resources.py
+        - /scripts/swarm_ledger/api/errors.py
+        - /scripts/swarm_ledger/api/mutations.py

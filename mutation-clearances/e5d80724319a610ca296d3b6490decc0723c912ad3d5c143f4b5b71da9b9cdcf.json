@@ -1,0 +1,6 @@
+{
+  "scripts/pr_body.py:scripts.pr_body.x_fill:a0eb4ae93f95896bedfbaddc83f4433fe23ab5463f38d87ccd45170d082f9b4e": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: before its first assignment, cursor is used only as a positive-step string slice start. None and 0 select the identical prefix or whole string. After assignment, both versions use the same integer end offset."
+  }
+}

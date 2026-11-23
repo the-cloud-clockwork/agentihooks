@@ -71,6 +71,8 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
         raise APIError(400, "schema_invalid", resources.DONE_ONLY)
     if "targets" in query and (path != "tasks" or query.keys() & {"state", "offset", "q", "cursor", "limit"}):
         raise APIError(400, "schema_invalid", "Only a plain tasks read takes targets")
+    if query.keys() & set(task_list.SELECTION) and not task_list.selection(path, query):  # pyright: ignore[reportUnknownArgumentType]
+        raise APIError(400, "schema_invalid", task_list.SELECTION_ONLY)
     if path == "events" and handler.headers.get("Accept") == "text/event-stream":
         return events(handler, services, slug)
     if path == "swarm/models":
@@ -107,20 +109,32 @@ def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
 
 def focus_read(services: Services, slug: str, path: str) -> dict[str, Any]:
     """Every focus record, or one target, with the claim gate verdict on each task under it."""
-    state = services.repository.current(slug).state
-    found = ports.swarm().focus_check.read(state, path, fix_phase(services, slug), int(time.time() * 1000))
-    if found is None:
-        raise APIError(404, "resource_missing", "No such target")
-    reply: dict[str, Any] = {"data": found, "revision": resources.revision(found)}
-    return resources.bounded({**reply, "next_cursor": None} if path == "focus" else reply)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+    def read(state: dict[str, Any], fix: str) -> Any:
+        return ports.swarm().focus_check.read(state, path, fix, int(time.time() * 1000))
+
+    return judged_reply(services, slug, read, path == "focus")
 
 
 def orders_read(services: Services, slug: str) -> dict[str, Any]:
     """Every open operator order with the claim gate verdict on each unfinished task under it."""
-    state = services.repository.current(slug).state
-    found: list[dict[str, Any]] = ports.swarm().order_check.read(state, fix_phase(services, slug))
-    reply = {"data": found, "revision": resources.revision(found), "next_cursor": None}
-    return resources.bounded(reply, ORDERS_TOO_LARGE)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return judged_reply(services, slug, ports.swarm().order_check.read, True, ORDERS_TOO_LARGE)
+
+
+def judged_reply(
+    services: Services, slug: str, read: Callable[[dict[str, Any], str], Any], listed: bool, too_large: str = ""
+) -> dict[str, Any]:
+    """The reply of a read that judges the ledger state under the swarm's fix phase: its data and their revision,
+    an empty cursor when it lists, held to the reply limit under the read's own message when it has one. A read
+    that finds no target answers 404."""
+    state: dict[str, Any] = services.repository.current(slug).state
+    found = read(state, fix_phase(services, slug))
+    if found is None:
+        raise APIError(404, "resource_missing", "No such target")
+    reply: dict[str, Any] = {"data": found, "revision": resources.revision(found)}
+    if listed:
+        reply["next_cursor"] = None
+    return resources.bounded(reply, too_large) if too_large else resources.bounded(reply)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def fix_phase(services: Services, slug: str) -> str:
