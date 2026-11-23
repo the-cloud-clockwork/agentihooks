@@ -1506,7 +1506,7 @@ class MirrorExpander:
         """Return every test batch of the head, or for a merge group head the batches that hold a test its entries
         invalidate, unless the interaction rule sends the group to the whole suite, and one unit per test module its
         entries change that the manifest lists no test of."""
-        if request.tier == Priority.PULL_REQUEST and request.plant:
+        if request.tier == Priority.PULL_REQUEST:
             return self._plant_tests(mirror, request, manifest, suite, contents, toolchain)
         if request.tier != Priority.QUEUE:
             return suite

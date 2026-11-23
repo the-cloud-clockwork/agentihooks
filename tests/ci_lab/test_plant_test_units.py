@@ -114,3 +114,24 @@ def test_a_plant_frame_keeps_the_unit_job_only_at_the_pull_request_tier(tier: Pr
         assert found.gates["unit"] == batch
     else:
         assert "unit" not in found.gates
+
+
+@pytest.mark.feature("lab-plant-test-units")
+@pytest.mark.usefixtures("staticless")
+def test_a_plant_selects_changed_test_modules_whose_tests_are_class_methods(tmp_path: Path) -> None:
+    suite = fixtures._suite(tmp_path, fixtures.DELIVERY["lab"])
+    fixtures._git(suite.repo, "switch", "-q", "-c", "plant", suite.base)
+    commit = fixtures._commit(
+        suite.repo, {"tests/test_alpha.py": "class TestGroup:\n    def test_first(self):\n        assert True\n"}
+    )
+    method = "tests/test_alpha.py::TestGroup::test_first"
+    manifest = {
+        **fixtures.SUITE_MANIFEST,
+        "tests": {
+            method: fixtures.SUITE_MANIFEST["tests"][fixtures.FIRST_TEST],
+            fixtures.SECOND_TEST: fixtures.SUITE_MANIFEST["tests"][fixtures.SECOND_TEST],
+        },
+    }
+    request = replace(suite.request(Priority.PULL_REQUEST, commit), plant=True)
+    found = fixtures.Port(manifest).expander(tmp_path).expand(request)
+    assert [unit.members for unit in found.gates["unit"]] == [(method,)]
