@@ -157,12 +157,23 @@ def _decide(gate: Gate, call: Call, who: Who, home: Path | str | None, mode: str
             from scripts.gates.intent import IntentGate
 
             if isinstance(gate, IntentGate):
-                return gate.decide(call, who, state, mode)
+                return _decide_in_mode(gate, call, who, state, mode)
         return gate.decide(call, who, state)
     except Exception as exc:
         detail = "gate evaluation failed" if gate.name == "brain" else f"{type(exc).__name__}: {exc}"
         _record(who, log.Row.of(gate.name, "fail-open", who, call.tool, detail), home)
         return FAILED_OPEN
+
+
+class ModeGate(Protocol):
+    """A gate whose decision also takes the mode of its swarm."""
+
+    def decide(self, call: Call, who: Who, state: object, mode: str) -> Decision: ...
+
+
+def _decide_in_mode(gate: ModeGate, call: Call, who: Who, state: Verdicts, mode: str) -> Decision:
+    """Ask the intent gate, the one gate whose decision takes the mode of its swarm."""
+    return gate.decide(call, who, state, mode)
 
 
 def _record(who, row, home):
