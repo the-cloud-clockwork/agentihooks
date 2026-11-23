@@ -139,6 +139,14 @@ the reviewer skill and inherited doctrine remain present in either case.
 Selecting the overlay alone does not create a swarm or give the session a
 review task.
 
+Before a managed launch, provide both brain credentials through the fleet's
+secret configuration. Their default environment names are
+`SWARM_BRAIN_API_TOKEN` for the API and `SWARM_BRAIN_MCP_KEY` for MCP. The
+binding records credential references and the launcher checks both in its
+actual shell. If either is missing, it refuses the brain, removes `agentibrain`
+and disables brain reading and writing. Restore the missing launch credential
+through the normal secret configuration before starting a new reviewer.
+
 ## Render and launch
 
 Use an installed package version that includes `package:reviewer` and a bundle
@@ -216,6 +224,7 @@ service connectivity still needs evidence from the launched target.
 | The rendered instructions lack fleet review rules | Confirm the selected profile is the bundle's `reviewer`, the base and `package:reviewer` are in its chain, and the manifestos include `reviewer` in their role lists. |
 | `swarm-brain` is rejected | Check both reviewer `allowedOverlays` and the overlay's `wears` list. |
 | Shared brain is absent after a scratch render | A scratch render without swarm identity retains the ordinary brain. Check the binding of the actual swarm launch before judging its connection. |
+| A managed launch has no brain connection | Check that both the API and MCP credential references are available in the actual launch shell. A missing credential refuses the brain and disables its reader and writer. Restore the reference through the fleet's secret configuration and start a new reviewer. |
 | Gateway or brain calls are refused | Check the selected toolset, routing and presence of the referenced environment variables without printing values. Preserve the configured approval mode for Codex. |
 | An edit, commit or local test is refused | Send the finding to the author and read CI or lab evidence. The reviewer guards and local test policy apply with or without the brain overlay. |
 | A configured reviewer never launches | Follow the review lane's placement and trigger limits. Rendering a profile does not prove a reviewer has been scheduled. |
