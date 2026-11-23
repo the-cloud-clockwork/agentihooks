@@ -52,7 +52,7 @@ open("unit.txt", "w").close()
 def _gone(pid: int) -> bool:
     try:
         state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return True
     return state == "Z"
 
