@@ -1,0 +1,6 @@
+{
+  "scripts/review/record.py:scripts.review.record.x_mark:75fa65b2e06ca802cf2ab4ea584c3d285ba4047a7e542fc1f4e120bd545cac1d": {
+    "reader": "standards-reader",
+    "reason": "The final _write task argument is used only as the condition of if task and as the HINCRBY field inside that conditional. Empty string and None are both false, so both suppress the task counter increment while performing the identical watched record update and expirations."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/review/record.py:scripts.review.record.x__head:4e142add7b6d512369376be90b6e675b119a54c4d8706bb93c5a7f8e948007d1": {
+    "reader": "standards-reader",
+    "reason": "_head first calls number_of on the requested URL. Every supported request URL has a numeric final path component, optionally followed by slash characters, so its right edge contains digits or slashes and never X. Stripping the character set X plus slash removes exactly the same suffix as stripping slash alone. Thus the target match check, refusal and returned head remain identical; a path ending in X is rejected by number_of before this comparison."
+  }
+}

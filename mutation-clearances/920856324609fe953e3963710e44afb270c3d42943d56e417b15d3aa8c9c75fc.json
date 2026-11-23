@@ -1,0 +1,6 @@
+{
+  "scripts/review/record.py:scripts.review.record.x_number_of:6e12e16351c58aa3b43a0fe234d0176299eba01fe454d370c825afb2f26f9fb5": {
+    "reader": "standards-reader",
+    "reason": "Increasing the slash rsplit maximum from one to two cannot change its final element. Both versions pass precisely the same last path component to int for every string path, including empty or invalid components."
+  }
+}

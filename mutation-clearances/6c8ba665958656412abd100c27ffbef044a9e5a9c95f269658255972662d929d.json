@@ -1,0 +1,6 @@
+{
+  "scripts/review/record.py:scripts.review.record.x_number_of:eb6fbba01ab4b3ee3602a973800c31907338f37930c15ef859d0cb5921753737": {
+    "reader": "standards-reader",
+    "reason": "For every string path, rsplit with the explicit slash delimiter and any positive maximum split count or no limit has the same final element. Both versions pass that final element to int and retain identical conversion or refusal behavior."
+  }
+}

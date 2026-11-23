@@ -1,0 +1,6 @@
+{
+  "scripts/review/record.py:scripts.review.record.x__write:d2c40a743a7561ad20f069f8d5a37550b7bcfbaea10e7d816fa6731393675499": {
+    "reader": "standards-reader",
+    "reason": "Redis HashCommands.hincrby defines amount=1. Omitting the explicit 1 therefore enqueues the same HINCRBY increment on every valid Redis transaction, preserves the same task count and expiration calls, and returns the same Record."
+  }
+}

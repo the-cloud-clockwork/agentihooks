@@ -1,0 +1,6 @@
+{
+  "scripts/review/record.py:scripts.review.record.x__post_one:106cd961661ce532e05b29de5bfdc5e8b111c42ec7cbfbf79d9998b3413a74c1": {
+    "reader": "standards-reader",
+    "reason": "Finding is a frozen dataclass with no validation hook or side effects. Before the temporary Finding can be persisted, returned, or serialized, append replaces its id with f followed by the next finding count. The initial None is never observed and the same stored and returned Finding results on every supported post, including transaction retries."
+  }
+}

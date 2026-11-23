@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from scripts.gates import catalog, enforcement, log, modes
-from scripts.review import record
+from scripts.review import gate, record
 from scripts.swarm import cli, merge_queue, queue_exit
 from scripts.swarm.store import RedisStore
 from tests.review.fakes import AUTHOR, HEAD, REVIEWER, SLUG, URL, FakeForge, swarm
@@ -124,3 +124,23 @@ def test_a_head_without_a_review_logs_a_would_be_refusal_and_queues(monkeypatch:
 def test_a_skipped_review_gate_neither_logs_nor_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
     code, queued, rows = _queue(monkeypatch, swarm({"review": "off"}))
     assert (code, queued, rows) == (0, [URL], [])
+
+
+@pytest.mark.feature("review-findings-queue-gate")
+def test_refusal_names_the_author_task_full_head_and_all_unread_findings() -> None:
+    from scripts.gates.base import Who
+
+    head = "a" * 40
+    author = Who(name=AUTHOR, swarm=SLUG, task="t1")
+    assert gate.refusal(None, SLUG, URL, head, Who(task="t1")) == (
+        f"no author recorded for task t1 on head {head[:12]} of {URL}"
+    )
+    assert gate.refusal(None, SLUG, URL, head, author) == (
+        f"no independent review on head {head[:12]} of {URL}: a reviewer other than {AUTHOR} "
+        "posts its findings with agentihooks review post before this pull request queues"
+    )
+    findings = tuple(record.Finding(f"f{i}", "First", URL, REVIEWER, "r1") for i in (1, 2))
+    assert gate.refusal(record.Record(URL, head, findings), SLUG, URL, head, author) == (
+        f"2 review findings on head {head[:12]} of {URL} are unread: f1, f2; "
+        f"read each and mark it with agentihooks review read {URL} --slug {SLUG}"
+    )

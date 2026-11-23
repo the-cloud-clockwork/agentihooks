@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.review import record
+from scripts.review import gate, record
 from scripts.swarm import cli
 from scripts.swarm import ledger_client as client
 from scripts.swarm.store import RedisStore
@@ -95,3 +95,17 @@ def test_a_missing_author_never_falls_back_to_the_queuing_master(
     assert actual_code == code
     assert queued == ([URL] if code == 0 else [])
     assert [(row.gate, row.kind) for row in rows] == [("review", kind)]
+
+
+@pytest.mark.feature("review-findings-queue-gate")
+@pytest.mark.parametrize("owner", [AUTHOR, None])
+def test_delegated_author_identity_keeps_the_target_swarm_and_task(
+    monkeypatch: pytest.MonkeyPatch, owner: str | None
+) -> None:
+    from scripts.gates.base import Who
+    from scripts.swarm.store import AgentRecord
+
+    _delegated(monkeypatch, "enforce", owner)
+    caller = AgentRecord(name=MASTER, lane="master", task="master")
+    assert gate._author(SLUG, caller, {"task": "t1"}) == Who(name=owner or "", swarm=SLUG, task="t1")
+    assert gate._author(SLUG, caller, None) == Who(name=MASTER, swarm=SLUG, task="master")

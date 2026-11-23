@@ -1,0 +1,6 @@
+{
+  "scripts/review/record.py:scripts.review.record.x_read:8a044222e71876eb86f941369bc91c81edaaa4da0a8a13d53f59849a718958fb": {
+    "reader": "standards-reader",
+    "reason": "read returns before calling _decode when raw is None. In its remaining branch raw is not None, and _decode reads the URL and head exclusively from the JSON payload; its fallback url parameter is never read. Supplying None for that unused parameter preserves the Record and every JSON decoding error."
+  }
+}
