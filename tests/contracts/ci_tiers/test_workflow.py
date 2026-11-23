@@ -17,7 +17,7 @@ DURATION_JOB = (
     if "durations" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     else "select"
 )
-UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"} | (
+UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "collect", "gate-required"} | (
     {"test-summary"}
     if "test-summary" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     else set()
@@ -28,6 +28,7 @@ PULL_REQUEST = (
     | {
         "select",
         "lint",
+        "lint-actions",
         "semgrep",
         "sonar",
         "mutation-plan",
@@ -54,8 +55,10 @@ PROMOTION = (
         "mutation-shard",
         "mutation",
         "lint",
+        "lint-actions",
         "semgrep",
         "test-count",
+        "collect",
         "lab-verdict",
     }
 ) | {
@@ -277,12 +280,14 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
                                 ci_reuse.inline_mutation(
                                     ci_reuse.postgres_required(
                                         lab(
-                                            ci_reuse.gate_steps(
-                                                queue_tier=True,
-                                                promotion=True,
-                                                **options,
-                                                summary=summary,
-                                                watcher_loss=True,
+                                            ci_reuse.split_required(
+                                                ci_reuse.gate_steps(
+                                                    queue_tier=True,
+                                                    promotion=True,
+                                                    **options,
+                                                    summary=summary,
+                                                    watcher_loss=True,
+                                                )
                                             )
                                         )
                                     )

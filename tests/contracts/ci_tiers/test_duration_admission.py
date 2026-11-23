@@ -36,13 +36,13 @@ def legacy(workflows: dict[str, dict]) -> dict[str, dict]:
             job.update(json.loads(encoded))
             job["needs"] = list(dict.fromkeys(job["needs"] + ["durations"]))
     jobs["gate-required"]["needs"].append("durations")
-    jobs["gate-required"]["steps"] = ci_reuse.gate_steps(
-        queue_tier=True, promotion=True, docs="docs" in jobs["gate-required"]["needs"]
+    jobs["gate-required"]["steps"] = ci_reuse.split_required(
+        ci_reuse.gate_steps(queue_tier=True, promotion=True, docs="docs" in jobs["gate-required"]["needs"])
     )
     return base
 
 
-def combined(base, promotion=True):
+def combined(base: dict[str, dict]) -> dict[str, dict]:
     head = copy.deepcopy(base)
     jobs = head["test.yml"]["jobs"]
     durations = jobs.pop("durations")
@@ -54,8 +54,8 @@ def combined(base, promotion=True):
         if isinstance(job.get("needs"), list):
             job["needs"] = list(dict.fromkeys("select" if name == "durations" else name for name in job["needs"]))
     head["test.yml"]["jobs"] = json.loads(json.dumps(jobs).replace("needs.durations.outputs.", "needs.select.outputs."))
-    head["test.yml"]["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(
-        queue_tier=True, promotion=promotion, docs="docs" in jobs["gate-required"]["needs"]
+    head["test.yml"]["jobs"]["gate-required"]["steps"] = ci_reuse.split_required(
+        ci_reuse.gate_steps(queue_tier=True, promotion=True, docs="docs" in jobs["gate-required"]["needs"])
     )
     step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
     step["run"] = (
@@ -77,11 +77,10 @@ def test_protected_grading_accepts_separate_duration_admission():
     assert grade(base, copy.deepcopy(base)) == []
 
 
-@pytest.mark.parametrize("already_combined", [False, True])
-@pytest.mark.parametrize("promotion", [False, True])
-def test_protected_grading_accepts_combined_duration_admission(already_combined, promotion):
+@pytest.mark.parametrize("already_combined", [False, True], ids=["separate base", "combined base"])
+def test_protected_grading_accepts_combined_duration_admission(already_combined: bool) -> None:
     base = legacy(ci_wiring.load(ROOT))
-    head = combined(base, promotion)
+    head = combined(base)
     if already_combined:
         base = copy.deepcopy(head)
     assert grade(base, head) == []

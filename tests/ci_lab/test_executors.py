@@ -65,12 +65,7 @@ LEASE_CONTEXT = {
     "github.run_attempt": "1",
     "github.run_number": "1",
 }
-REFUSED = {
-    "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": (
-        "no value for 'github.head_ref' in the context"
-    ),
-    "lint/artifact-sanity-checks": "no value for 'github.base_ref' in the context",
-}
+REFUSED: dict[str, str] = {}
 SECRET_WORKFLOW = r"""
 jobs:
   lint:
@@ -386,16 +381,8 @@ def test_static_grades_every_test_count_gate_of_the_real_workflow_on_a_clean_tre
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
 ) -> None:
     graded, skipped = _graded_on_a_clean_tree(monkeypatch, tmp_path, "test-count")
-    assert graded == {
-        "test-count/install-dependencies": PASSED,
-        "test-count/fetch-the-base-suite-count-recorded-on-dev": PASSED,
-        "test-count/hold-the-base-revision-s-test-count": PASSED,
-        "test-count/record-the-head-count-for-the-next-queue-group": PASSED,
-    }
-    assert skipped == {
-        "test-count/fetch-the-base-suite-count-recorded-on-dev",
-        "test-count/record-the-head-count-for-the-next-queue-group",
-    }
+    assert graded == {"test-count/hold-the-base-revision-s-test-count": PASSED}
+    assert skipped == set()
 
 
 @pytest.mark.feature("lab-static-step-env")

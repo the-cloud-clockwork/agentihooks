@@ -83,6 +83,8 @@ CHECK_RUNS = {
     "mutation-plan": "mutation",
     "lab-verdict": "unmapped",
     "Gate — Protected": "unmapped",
+    "collect (3.12)": "unmapped",
+    "lint-actions": "unmapped",
 }
 
 

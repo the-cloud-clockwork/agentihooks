@@ -568,7 +568,7 @@ def test_the_reused_tests_step_deselects_against_the_single_collection(tmp_path)
     import yaml
 
     root = Path(__file__).resolve().parents[1]
-    steps = yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]["test-count"]["steps"]
+    steps = yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]["collect"]["steps"]
     runner = tmp_path / "runner"
     (runner / "planner/scripts").mkdir(parents=True)
     (runner / "planner/scripts/__init__.py").write_text("")
@@ -676,7 +676,7 @@ def test_queue_sizing_consumes_reuse_after_deselection():
         step.get("name")
         for step in yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())[
             "jobs"
-        ]["test-count"]["steps"]
+        ]["collect"]["steps"]
     ]
     assert count.index("Deselect the reused tests") < count.index("Upload the early collection")
     sizing = next(step for step in steps if step.get("name") == "Size queue shards from median durations")

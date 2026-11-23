@@ -494,6 +494,19 @@
       ]
     },
     {
+      "id": "lab-static-jobs-hold-lab-steps",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
+      "behaviour": "The Tests workflow jobs lint, type-gate and test-count hold only steps the CI lab grades: the lint steps only Actions can run sit in the lint-actions job and the test plan, the early collection and the queue count record in the collect job, both needs of Gate Required. An inline python -c probe makes no lab gate, so no step of the three jobs is in the static exclusion catalog and delivery authority keeps all three when a tree lists them.",
+      "seam": "scripts.ci_lab.static_gates.discover over the Tests workflow, scripts.ci_lab.delivery.authoritative with the repository exclusion catalog, and the collect and lint-actions jobs of the Tests workflow read through the workflow tests",
+      "tests": [
+        "tests/ci_lab/test_delivery.py::test_the_exclusion_catalog_keeps_lab_authority_for_the_split_static_gates",
+        "tests/ci_lab/test_static_gates.py::test_a_python_dash_c_probe_adds_no_gate_while_module_script_and_stdin_forms_do",
+        "tests/ci_lab/test_static_gates.py::test_the_real_lint_type_gate_and_test_count_jobs_hold_no_excluded_step",
+        "tests/test_ci_workflow_collect.py::test_the_collection_step_propagates_its_exit_code"
+      ]
+    },
+    {
       "id": "lab-pull-request-reusable-job-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2722",
@@ -13192,7 +13205,7 @@
       "id": "lab-static-test-count-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-units-missing",
-      "behaviour": "The CI lab grades the Tests workflow's test-count job with static units: the static executor supplies runner.temp as the unit's run folder, github.event_name as pull_request and each matrix value the gate's job holds at one value, so the four test-count gate steps discover with nothing missing; static gate discovery names the docs and writer-lock jobs CI only with the reason the lab sandbox cannot run them, names CI only each job of a static job's reusable workflow that calls another reusable workflow instead of raising on it, and the discovery command prints those jobs with their reasons under --ci-only.",
+      "behaviour": "The CI lab grades the Tests workflow's test-count job with static units: the static executor supplies runner.temp as the unit's run folder, github.event_name as pull_request and each matrix value the gate's job holds at one value, so the test-count floor step discovers with nothing missing; static gate discovery names the docs and writer-lock jobs CI only with the reason the lab sandbox cannot run them, names CI only each job of a static job's reusable workflow that calls another reusable workflow instead of raising on it, and the discovery command prints those jobs with their reasons under --ci-only.",
       "seam": "scripts.ci_lab.static_gates discover, ci_only and main with the StaticGate matrix and missing, scripts.ci_lab.run_static run with its run folder and the gate's matrix in the context, and scripts.ci_lab.executors static with the event name in the lease context",
       "tests": [
         "tests/ci_lab/test_static_gates.py::test_a_gate_misses_no_run_folder_event_name_or_matrix_value_its_job_holds_at_one_value",

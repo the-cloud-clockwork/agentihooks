@@ -115,7 +115,7 @@ def test_a_tier_frame_requires_the_jobs_its_rules_name_and_keeps_only_the_lab_ga
         scheduler.Flags(),
     )
     queued = scheduler.frame(Priority.QUEUE, TREE, BASE, {**gates, "unit": other})
-    required = ("select", "split", "shard-check", "test-count", "queue-fail-fast", "unit")
+    required = ("select", "split", "shard-check", "test-count", "collect", "queue-fail-fast", "unit")
     assert queued.gates == {job: other if job == "unit" else () for job in required}
     assert (queued.tree, queued.grader, queued.skipped, queued.outputs) == (
         TREE,
@@ -1958,10 +1958,7 @@ def test_the_mirror_expander_expands_the_real_tests_workflow_with_its_reusable_w
             expected.setdefault(gate.job, []).append(gate.name)
     assert {job: [name for item in units for name in item.members] for job, units in found.gates.items()} == expected
     assert {"semgrep/scan", "semgrep/feature-tests", "semgrep/charts"} <= set(found.gates)
-    assert ungraded == [
-        "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading",
-        "lint/artifact-sanity-checks",
-    ]
+    assert ungraded == []
 
 
 ALPHA = "def first():\n    return 1\n\n\ndef second():\n    return 2\n"

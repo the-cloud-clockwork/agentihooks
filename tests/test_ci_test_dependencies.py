@@ -1133,14 +1133,17 @@ PINNED_TOOL_STEPS = {
         "tree-sitter-css",
         "tree-sitter-javascript",
     ),
-    (".github/workflows/test.yml", "lint", "Hold the hive member NATS grants equal to the antoncore hive user"): (
-        "cryptography",
-    ),
-    (".github/workflows/test.yml", "lint", "Install Playwright for artifact checks"): ("orjson", "playwright"),
+    (
+        ".github/workflows/test.yml",
+        "lint-actions",
+        "Hold the hive member NATS grants equal to the antoncore hive user",
+    ): ("cryptography",),
+    (".github/workflows/test.yml", "lint-actions", "Install Playwright for artifact checks"): ("orjson", "playwright"),
     (".github/workflows/test.yml", "lint", "Install PyYAML"): ("pyyaml",),
+    (".github/workflows/test.yml", "lint-actions", "Install PyYAML"): ("pyyaml",),
     (".github/workflows/test.yml", "lint", "Install ruff"): ("ruff",),
     (".github/workflows/test.yml", "lint", "Install vulture"): ("vulture",),
-    (".github/workflows/test.yml", "lint", "Prepare the dashboard query checker in the background"): (
+    (".github/workflows/test.yml", "lint-actions", "Prepare the dashboard query checker in the background"): (
         "jsonschema",
         "orjson",
         "packaging",

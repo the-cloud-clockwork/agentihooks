@@ -40,6 +40,10 @@ def _lint(name: str) -> str:
     return _steps("test.yml", "lint")[name]["run"]
 
 
+def _lint_actions(name: str) -> str:
+    return _steps("test.yml", "lint-actions")[name]["run"]
+
+
 def _run(command: str, head: Path, runner: Path, grader: Path = ROOT) -> subprocess.CompletedProcess[str]:
     tools = runner / "bin"
     if not tools.exists():
@@ -156,7 +160,7 @@ def test_a_head_marker_check_that_passes_itself_stays_red_under_the_grader_copy(
     (head / VECTORS).write_text('{"head": 1}\n')
     (head / ".marker-kernel" / VECTORS).write_text('{"kernel": 1}\n')
     _planted_module(head, "ci_marker_vectors")
-    step = _lint("Refuse marker key vector drift from kernel dev")
+    step = _lint_actions("Refuse marker key vector drift from kernel dev")
     own = _run(f"python -m scripts.ci_marker_vectors .marker-kernel/{VECTORS}", head, tmp_path / "runner")
     graded = _run(step, head, tmp_path / "runner")
     assert own.returncode == 0, own.stdout + own.stderr
@@ -180,7 +184,7 @@ def test_the_marker_check_reads_the_vectors_under_the_root_it_names(tmp_path: Pa
 
 @pytest.mark.feature("lint-gates-grade-from-grader")
 def test_the_marker_check_runs_after_the_grader_checkout() -> None:
-    names = list(_steps("test.yml", "lint"))
+    names = list(_steps("test.yml", "lint-actions"))
     assert names.index(GRADER_CHECKOUT) < names.index("Refuse marker key vector drift from kernel dev")
 
 
@@ -219,7 +223,7 @@ def test_a_stale_base_fails_the_marker_check_closed_and_a_planted_head_copy_neve
     (head / "scripts/__init__.py").write_text("")
     (head / "scripts/ci_marker_vectors.py").write_text(PLANTED)
     grader = _stale_grader(tmp_path, "scripts/ci_marker_vectors.py")
-    graded = _run(_lint("Refuse marker key vector drift from kernel dev"), head, tmp_path / "runner", grader)
+    graded = _run(_lint_actions("Refuse marker key vector drift from kernel dev"), head, tmp_path / "runner", grader)
     assert graded.returncode == 2, graded.stdout + graded.stderr
     assert "unrecognized arguments: --root" in graded.stderr
     assert "planted head copy ran" not in graded.stdout

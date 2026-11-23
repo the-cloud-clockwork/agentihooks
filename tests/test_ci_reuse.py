@@ -277,7 +277,13 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
                             rerun(
                                 ci_reuse.inline_mutation(
                                     ci_reuse.postgres_required(
-                                        lab(ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss))
+                                        lab(
+                                            ci_reuse.split_required(
+                                                ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+                                            )
+                                            if form.get("promotion")
+                                            else ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+                                        )
                                     )
                                 )
                             )
@@ -1265,7 +1271,7 @@ def test_the_workflow_gate_distinguishes_watcher_loss_from_reported_failures(wat
     jobs = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
     assert SELF in jobs
     assert SELF in jobs["gate-required"]["needs"]
-    required = {"select", "split", "unit", "shard-check", "test-count"}
+    required = {"select", "split", "unit", "shard-check", "test-count", "collect"}
     needs = {name: {"result": "success" if name in required else "skipped"} for name in jobs["gate-required"]["needs"]}
     if watcher is None:
         del needs[SELF]
