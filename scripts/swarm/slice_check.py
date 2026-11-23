@@ -33,8 +33,9 @@ def slice_ids(plan):
     return [item.strip() for item in plan["proof"]["slice"].split(",") if item.strip()]
 
 
-def plan_task(phase, doc):
-    return next(t for t in doc["tasks"] if t.get("phase") == phase["id"] and ledger_kinds.kind(t) == "plan")
+def plan_task(phase: dict[str, Any], doc: dict[str, Any]) -> dict[str, Any]:
+    owned = (t for t in doc["tasks"] if t.get("phase") == phase["id"] and ledger_kinds.kind(t) == "plan")
+    return next(t for t in owned if not t.get("enhances"))
 
 
 def short(text: str, words: int = MIN_WORDS) -> bool:
