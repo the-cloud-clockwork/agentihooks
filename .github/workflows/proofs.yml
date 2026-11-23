@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: tests
-        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts, lab-mutation-plant]
+        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts, lab-mutation-plant, lab-closure-reach]
       base:
         description: Base revision for mutation or Semgrep scope
         required: true
@@ -57,6 +57,32 @@ jobs:
   mutation-deadlines:
     if: inputs.proof == 'mutation-deadlines'
     uses: ./.github/workflows/mutation-deadline-proof.yml
+
+  lab-closure-reach:
+    if: inputs.proof == 'lab-closure-reach'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+
+      - name: Count the test modules whose stats cache closure holds each probe file
+        shell: bash
+        run: |
+          proof="$RUNNER_TEMP/lab-closure-reach"
+          mkdir -p "$proof/driver"
+          uv venv "$proof/venv" --python 3.12
+          uv pip install --python "$proof/venv/bin/python" --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -r pyproject.toml --extra dev --extra all
+          cp .github/proofs/lab_closure_reach.py "$proof/driver/"
+          cd "$proof/driver"
+          "$proof/venv/bin/python" -I lab_closure_reach.py --repo "$GITHUB_WORKSPACE"
 
   lab-mutation-plant:
     if: inputs.proof == 'lab-mutation-plant'
