@@ -15,7 +15,7 @@ Usage::
 import os
 import time
 from collections.abc import Mapping
-from typing import Optional, Tuple, cast
+from typing import Any, Optional, Tuple, cast
 
 from hooks._redis import get_redis, redis_key
 from hooks.common import log
@@ -113,7 +113,7 @@ def should_warn_context(fill_pct: float, session_id: str) -> Tuple[bool, str]:
         return True, level
 
 
-def update_context_metrics(payload: dict) -> str:
+def update_context_metrics(payload: dict[str, Any]) -> str:
     """Compute and persist context metrics; return StatusLine string.
 
     Always returns a non-empty string.  On any error returns a minimal
