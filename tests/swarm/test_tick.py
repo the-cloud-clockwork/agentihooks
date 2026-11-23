@@ -3,6 +3,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.swarm.commands import hive_id
+from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
 from tests.helpers.seat import Launched, seat_launched, seat_owner
@@ -90,16 +91,9 @@ class FakeLedger(LedgerItems):
         return dict(row)
 
     def _call(self, slug: str, ops: list[dict[str, object]] | None = None) -> dict[str, object]:
-        """Apply the task add and task enhancement operations a ledger port mutate sends, as the ledger does."""
-        assert slug == "sw"
-        for op in ops or []:
-            if op["op"] == "task_add":
-                kept = {key: value for key, value in op.items() if key not in ("op", "by", "task", "not_duplicate")}
-                self.rows[str(op["task"])] = {"state": "open", "claimed_by": "", "out_of_scope": False, **kept}
-                self.rows[str(op["task"])]["id"] = op["task"]
-            else:
-                self.rows[str(op["item"]).removeprefix("tasks/")]["enhancement"] = op["enhancement"]
-        return self.state(slug)
+        """Refuse an operation batch from the ledger port's mutate, as a ledger refuses a write this fake does not
+        model, so a step that writes through mutate reports the refusal and the pass goes on."""
+        raise LedgerRefused(f"ledger {slug} refused: the tick test ledger takes no operation batches")
 
     def notify(self, slug, text):
         assert slug == "sw"
