@@ -183,7 +183,7 @@ def current() -> LedgerView | None:
 def view_file(base: str, slug: str, directory: Path, scope: live_rows.Scope | None = None) -> Path:
     """The file holding the view of ledger ``slug`` on the server at ``base`` read with ``scope``."""
     scope = TICK_SCOPE if scope is None else scope
-    key = f"{base} {slug} live closed={scope.closed} frozen={scope.frozen}"
+    key = f"{base} {slug} {PARTS} live closed={scope.closed} frozen={scope.frozen}"
     return directory / "ledger-views" / f"{hashlib.sha256(key.encode()).hexdigest()[:32]}.json"
 
 

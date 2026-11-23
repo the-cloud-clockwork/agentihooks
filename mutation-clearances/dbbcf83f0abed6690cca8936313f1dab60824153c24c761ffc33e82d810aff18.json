@@ -1,0 +1,6 @@
+{
+  "scripts/tick/pool.py:scripts.tick.pool.x_running:96764296306cfd0b3590bf18988054f5691cabd79f92fb4ce9735b2a3ca6d59f": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: uppercasing the cleanup thread name changes only its diagnostic label. No tick consumer reads this name; the target, arguments, daemon state, scheduling, records and executor cleanup remain identical."
+  }
+}

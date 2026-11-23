@@ -636,6 +636,9 @@ def test_the_gate_checks_a_run_of_the_every_source_layout_through_its_last_grade
 
 @pytest.mark.feature("type-gate-one-context")
 def test_the_gate_checks_four_runs_at_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_TYPE_WORKERS", raising=False)
+    monkeypatch.setattr(type_gate.os, "sched_getaffinity", lambda _pid: set(range(16)), raising=False)
+    monkeypatch.setattr(type_gate.os, "getloadavg", lambda: (0.0, 0.0, 0.0), raising=False)
     _test_sources(tmp_path, 800)
     barrier = threading.Barrier(4, timeout=5)
     lock = threading.Lock()

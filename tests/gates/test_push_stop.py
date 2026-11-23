@@ -3,7 +3,7 @@ import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import pytest
 
@@ -705,7 +705,7 @@ def gone(pid):
         try:
             if "State:\tZ" in status.read_text():
                 return True
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return True
         time.sleep(0.05)
     return False
@@ -1291,3 +1291,13 @@ def test_running_checks_on_a_pull_request_in_another_repo_still_demand_the_push(
     rig.ledger.task["pr_url"] = "https://github.com/o/elsewhere/pull/3"
     rig.gate._github = lambda url: running_pull()
     assert rig.stop().reason == TEMPLATE
+
+
+@pytest.mark.feature("reviewer-worker-gates")
+@pytest.mark.parametrize("lane", ["eng", "ci", "review"])
+def test_worker_lanes_cannot_stop_with_uncommitted_work(rig: Any, monkeypatch: pytest.MonkeyPatch, lane: str) -> None:
+    monkeypatch.setattr("scripts.gates.push_stop.lane_of", lambda name: lane)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    (rig.tree / "readme").write_text("changed\n")
+    decision = rig.stop(Who(name=ME, swarm=SLUG, lane=lane, task="t1"))
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)

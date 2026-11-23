@@ -3,13 +3,15 @@ window automatically and injects a once-a-minute notice naming each sustained ca
 troubleshooting mode with every tool it needs. A swarm's panic opens the same window for its master and denies the
 pushes, reruns, dispatches and deploys of every other session bound to that swarm; sessions bound to another swarm
 and unbound sessions are never held. A push or dispatch whose every ref is a registered fix branch, or the head branch
-of a registered fix pull request, is spared, and so is a rerun from a checkout whose branch or upstream is one. Swarm
-publish, which pushes from its own process, asks the same panic rule through held_push before it pushes.
+of a registered fix pull request, is spared, and so is a rerun of one run or job whose head branch, read from GitHub,
+is the checkout's branch or upstream and one. Swarm publish, which pushes from its own process, asks the same panic
+rule through held_push before it pushes.
 Fails open on a store error."""
 
 import os
 import re
 import subprocess
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -50,6 +52,10 @@ FROZEN = (
     "BLOCKED: panic mode holds swarm {slug} ({reason}). Its sessions' pushes, reruns, dispatches and deploys wait "
     "until the master's fix brings it back to business as usual; agentihooks swarm {slug} panic status shows the level."
 )
+_RERUN_JOB_FLAGS = frozenset({"--job", "-j"})
+_RERUN_FLAGS = frozenset({"--failed", "-d", "--debug"})
+_RERUN_JOB = re.compile(r"(?:--job=|-j=?)(.+)")
+_RERUN_ID = re.compile(r"(?:runs|jobs)/[0-9]+")
 _GIT_ENVIRONMENT = re.compile(r"\bGIT_(DIR|WORK_TREE|COMMON_DIR|NAMESPACE|CONFIG\w*)=")
 _ROUTED = re.compile(
     r"remote\.origin\.(push|pushurl|mirror)=.*"
@@ -189,16 +195,16 @@ def _directory(cwd: str, folders: list[str]) -> str:
 
 def _spared(tokens: list[str], cwd: str, fixes: tuple[str, ...]) -> bool:
     """Return whether a frozen command writes only registered fix branches of the checkout where it runs: a push or
-    dispatch whose every ref is one, or a rerun from a checkout whose branch or upstream on origin is one; git -C moves
-    that directory, and any other git global option, or a git config that may route the push elsewhere, keeps it
-    frozen."""
+    dispatch whose every ref is one, or a rerun of one run or job whose head is the checkout's branch or its upstream
+    on origin and one; git -C moves that directory, and any other git global option, or a git config that may route
+    the push elsewhere, keeps it frozen."""
     words, options = _command(tokens)
     targets = _targets(words)
     if targets is None or any(option != "-C" for option, _ in options):
         return False
     here = _directory(cwd, [value for _, value in options])
     if words[:3] == ["gh", "run", "rerun"]:
-        return _works_on_fix(here, fixes)
+        return _works_on_fix(here, fixes, words)
     return _on_fix_branch(here, fixes, targets) and not (words[:2] == ["git", "push"] and _routed(here))
 
 
@@ -243,13 +249,44 @@ def _on_fix_branch(cwd: str, fixes: tuple[str, ...], targets: tuple[str, ...]) -
     return all(_registered(cwd, fixes, branch) for branch in named)
 
 
-def _works_on_fix(cwd: str, fixes: tuple[str, ...]) -> bool:
-    """Return whether the checked out branch at cwd, or the branch it tracks on origin, is a registered fix of the
-    repository origin names there."""
-    if not (cwd and fixes):
+def _works_on_fix(cwd: str, fixes: tuple[str, ...], words: list[str]) -> bool:
+    """Return whether the one run or job a rerun's words name has its head on the checked out branch at cwd, or on the
+    branch it tracks on origin, and that branch is a registered fix of the repository origin names there; the head is
+    read only for such a branch, from that repository, and a run that cannot be read stays frozen."""
+    from scripts.swarm import panic
+    from scripts.swarm.stack import repo_key
+    from scripts.swarm.store import SwarmError
+
+    resource = _rerun(words)
+    if not (cwd and fixes and resource):
         return False
     branch = _git(cwd, "branch", "--show-current")
-    return _registered(cwd, fixes, branch) or _registered(cwd, fixes, _tracked(cwd, branch))
+    kept = {name for name in (branch, _tracked(cwd, branch)) if _registered(cwd, fixes, name)}
+    if not kept:
+        return False
+    repository = repo_key(_git(cwd, "remote", "get-url", "origin")).removeprefix("github.com/")
+    try:
+        return panic.run_branch(repository, resource) in kept
+    except SwarmError:
+        return False
+
+
+def _rerun(words: list[str]) -> str:
+    """Return the Actions resource of the one run or job a gh run rerun's words name: runs/ID for a run id, jobs/ID for
+    a --job or -j id; an empty string when they name none, more than one, an id that is not a number, or an option
+    other than --failed, -d and --debug."""
+    named: list[str] = []
+    for before, word in pairwise(words[2:]):
+        job = _RERUN_JOB.fullmatch(word)
+        if before in _RERUN_JOB_FLAGS:
+            named[-1] += word
+        elif word in _RERUN_JOB_FLAGS:
+            named.append("jobs/")
+        elif job is not None:
+            named.append(f"jobs/{job[1]}")
+        elif word not in _RERUN_FLAGS:
+            named.append(f"runs/{word}")
+    return named[0] if len(named) == 1 and _RERUN_ID.fullmatch(named[0]) else ""
 
 
 def _tracked(cwd: str, branch: str) -> str:

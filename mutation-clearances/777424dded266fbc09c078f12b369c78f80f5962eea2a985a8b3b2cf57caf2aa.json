@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/expert_seat.py:scripts.swarm.expert_seat.x__left:825f02e4fd9bce62078762003a96beffb8c617c467f7cc0a3101eb4797f4491c": {
+    "reader": "standards-reader-6a-move",
+    "reason": "The lost record reaches only transfers.record, which reads no lane, and keep_handoff, whose envelope.build reads the lane only through == MASTER and != MASTER; LANE and None answer the same there. _recovery takes the name, not the record."
+  }
+}

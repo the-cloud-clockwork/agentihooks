@@ -387,20 +387,74 @@ The master or the operator moves a green critical pull request ahead of the wait
 agentihooks swarm <slug> merge priority https://github.com/<owner>/<repo>/pull/<number>
 ```
 
-The priority applies when the command runs, also while a merge group's Tests run is building. The swarm stores no deferred priority and replays none.
+The priority applies when the command runs, also while a merge group's Tests run is building. Without `--lift` it moves only the entries still waiting, so the groups already under test finish and no Tests run is cancelled; the pull request joins the next group. This deferred priority is the default. The swarm stores no priority for later and replays none. A pull request of an urgent or focused task gets the same priority by code when it enters the queue ([Automatic priority on queue entry](#automatic-priority-on-queue-entry)).
 
 The command:
 
 1. Refuses every caller but the swarm's master seat and the operator with `only the master or the operator prioritizes the merge queue`.
 2. Takes the swarm's priority lock, the `queue-priority-active` key, for at most an hour. A holder on the same hive whose process has ended is cleared first. While another priority or the refresh requeue holds the lock, the command fails with `another merge queue priority is running; try again when it ends`.
 3. Reads the pull request and refuses, in this order: `queue priority requires an open pull request into dev`, `queue priority requires a ready pull request`, `queue priority requires a dev merge queue`, `staged compatibility: <reason>`, and `required checks on the current pull request head must pass before queueing`. A refused priority moves nothing and writes no journal record.
-4. Dequeues, tail first, every waiting (`QUEUED`) entry ahead of the pull request, and every waiting entry behind it when it is already queued. Entries whose merge group is building stay in place.
+4. Dequeues, tail first, every waiting (`QUEUED`) entry ahead of the pull request, and every waiting entry behind it when it is already queued. Each entry is read again just before its dequeue, and one that started building since stays in place. Entries whose merge group is building stay in place unless the operator passed `--lift`.
 5. Queues the pull request at its head when it is not in the queue. After a failed dequeue it does so only for a pull request that was queued when the command started and that the queue ejected during the pass. It then queues each displaced entry again at the head it had, in its original order, after that entry's own staged compatibility check. Restoring stops at the first refused entry.
 6. Marks the pull request head hotfix in the swarm's [CI lab](ci-lab.md#control-routes), even when a queue step failed, and writes the `priority` record with the queue steps and the lab's reply to the [queue journal](#the-queue-journal).
 7. Sends an information only inbox notice to the owner of each restored entry still working its task ([Merge priority owner notices](../pillars/swarm.md#merge-priority-owner-notices)).
 8. When a step failed, requeues the entries still left out at once, as below, and fails with the step errors joined by `; `.
 
-`--lift` is the operator's only; any other caller gets `only the operator lifts a running merge group priority hold`. It writes a `priority-lift` journal record before taking the lock, so a busy or refused priority can still leave one, then runs the same steps. The reorder is the same as without it: no building group leaves the queue.
+`--lift` is the operator's only; any other caller gets `only the operator lifts a running merge group priority hold`. It writes a `priority-lift` journal record before taking the lock, so a busy or refused priority can still leave one, then runs the same steps with one difference: step 4 also dequeues every entry ahead of the pull request that is under test, and behind it when it is already queued. Step 5 restores those entries with the waiting ones, behind the pull request and in their original order. Their merge groups are discarded, so the Tests runs already spent on them are lost, and each restored entry is tested again in a new group behind the pull request ([Queue rebuild records](#queue-rebuild-records)). The queue builds up to five entries at a time, each with its own unit suite run, so one lift can lose up to five of those runs. Use it only for a blocker that has agents stopped:
+
+```bash
+agentihooks swarm <slug> merge priority https://github.com/<owner>/<repo>/pull/<number> --lift
+```
+
+For a queue holding a group under test A, then the waiting entries B and C, then the critical pull request P, the two forms send:
+
+| Command | Dequeued, tail first | Queue after the pass |
+|---|---|---|
+| `merge priority <P>` | C, B | A (still testing), P, B, C |
+| `merge priority <P> --lift` | C, B, A | P, A, B, C |
+
+The `priority` journal record lists those dequeues and the `restore` steps in the order sent.
+
+#### Automatic priority on queue entry
+
+A pull request of an urgent or focused task gets the priority by code when it enters the `dev` merge queue, with nobody running `merge priority`. Three paths queue a pull request and then apply it:
+
+- `agentihooks swarm <slug> merge queue <url>`, for every caller the command admits.
+- The `ready` merge pass, when it queues the green head of a released task.
+- The `ready` merge pass requeue after a transient unmergeable exit.
+
+It runs only after a new enqueue into a repository with a `dev` merge queue. A pull request already in the queue, a repository with no merge queue (which takes the squash merge), `merge dequeue` and `merge state` skip it.
+
+The swarm reads the tasks that name the pull request and applies the priority when one of them:
+
+- has rank `urgent`, whether or not it is frozen, or
+- sits under a focus record, unless a freeze on a node nearer the task holds it, the same precedence claims follow ([Freeze and focus](../pillars/swarm.md#freeze-and-focus)).
+
+Any other pull request keeps its first in, first out place.
+
+The move is the reorder above without `--lift`, so the groups under test keep running and the pull request joins the next group. It takes the same lock as step 2, runs the pull request refusals of step 3, moves the waiting entries ahead of the new entry behind it, marks the head hotfix in the CI lab, writes the `priority` journal record and sends the owner notices with the sender `swarm`. It never writes `priority-lift`.
+
+The pull request stays queued whatever the priority does. The `merge queue` output reports the outcome under `priority`:
+
+```bash
+agentihooks swarm <slug> merge queue https://github.com/<owner>/<repo>/pull/<number> \
+  | jq -c 'with_entries(select(.key == "queued" or .key == "priority"))'
+```
+
+| `priority` | Meaning |
+|---|---|
+| absent | No priority was tried: the pull request was already queued, or the repository has no merge queue |
+| `null` | No task naming the pull request is urgent or focused |
+| `{"url", "displaced", "errors", "lab"}` | The priority ran; `displaced` lists the entries it moved behind the pull request |
+| `{"url", "errors"}` | The priority was refused or a step failed, for example `another merge queue priority is running; try again when it ends`. Entries it left out are requeued as below |
+
+The merge watcher does not read that outcome and never retries a refused priority, because its next pass finds the pull request already queued. The master or the operator can then run `merge priority <url>`.
+
+| Symptom | Check and response |
+|---|---|
+| A focused task's pull request entered the queue and did not move | Read `priority` in the `merge queue` output, or the last `priority` journal record for the pull request. `null` means no task naming it was urgent or focused, or a nearer freeze holds it |
+| `priority.errors` names the busy lock | Another priority held the lock. Run `merge priority <url>` once it ends |
+| Groups under test were cancelled | Only `--lift` dequeues them. Look for a `priority-lift` record in the queue journal |
 
 #### Entries an interrupted priority left out
 
@@ -415,7 +469,7 @@ An entry the priority dequeued and could not queue again stays in the swarm's di
 
 While a priority holds the lock, the refresh job reports `merge queue priority waits: another merge queue priority is running; try again when it ends` and retries on its next run.
 
-`tests/swarm/test_merge_queue_priority.py` and `tests/swarm/test_queue_priority.py` pin this behaviour. [Pull request 11818](https://github.com/the-cloud-clockwork/agentihooks/pull/11818) made the priority move the waiting entries at once, and [pull request 12065](https://github.com/the-cloud-clockwork/agentihooks/pull/12065) retired the replay of deferred priorities from the refresh.
+`tests/swarm/test_merge_queue_priority.py`, `tests/swarm/test_queue_priority.py` and `tests/swarm/test_queue_entry_priority.py` pin this behaviour, under the feature map entries `merge-priority-moves-waiting-entries-at-once`, `merge-priority-operator-lift` and `merge-priority-automatic-entry`. [Pull request 11818](https://github.com/the-cloud-clockwork/agentihooks/pull/11818) made the priority move the waiting entries at once, and [pull request 12065](https://github.com/the-cloud-clockwork/agentihooks/pull/12065) retired the replay of deferred priorities from the refresh. [Pull request 12346](https://github.com/the-cloud-clockwork/agentihooks/pull/12346) made `--lift` remove the groups under test and added the automatic priority on queue entry. Before it, Tests run [44454738193](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44454738193) failed `test_operator_lift_is_journaled` because the entry under test was never dequeued, and Proofs run [44641100197](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44641100197) failed the queue entry tests; Proofs run [44655372293](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44655372293) passed the focused set.
 
 ## Lab merge group interaction rule
 
@@ -1456,8 +1510,8 @@ Every record is one JSON line appended to `merge-queue-events.jsonl` in the Agen
 |---|---|---|
 | `queue` | `agentihooks swarm <slug> merge queue <url>`, the `ready` merge pass and the requeue sweep `python -m scripts.ci_requeue` | yes |
 | `dequeue` | `agentihooks swarm <slug> merge dequeue <url>` and the `ready` merge pass | yes |
-| `priority` | `agentihooks swarm <slug> merge priority <url>` once the pull request passes every [refusal](#merge-priority), even when a queue step then fails | yes |
-| `priority-lift` | `merge priority --lift`, before the same reorder, which writes its own `priority` record | no |
+| `priority` | `agentihooks swarm <slug> merge priority <url>` once the pull request passes every [refusal](#merge-priority), even when a queue step then fails, and the [automatic priority](#automatic-priority-on-queue-entry) a new queue entry of an urgent or focused task gets | yes |
+| `priority-lift` | `merge priority --lift`, before the reorder that also dequeues the groups under test, which writes its own `priority` record | no |
 | `priority-requeue` | `merge priority` after a failed step, and the swarm refresh job the tick starts, requeuing an entry an interrupted priority left out | no |
 | `priority-requeue-skipped` | The same two writers leaving such an entry out because it became a draft, its head moved or it conflicts with `dev` | no |
 
@@ -1691,7 +1745,8 @@ The coverage ratchet fails a run when a line the base tree ran is no longer run 
 - **Grading on a dev push.** The ratchet takes the push's `before` commit as its base and resolves its baseline in this order:
   1. the cache entry for the base tree, `coverage-baseline-<tree>`;
   2. the newest `coverage-baseline-` cache entry, used only when the commit recorded in its `baseline.json` is an ancestor of the pushed head. This covers a base whose own push run was cancelled by a newer push before it published. The log line reads `Grading from the newest dev baseline at <commit>`, and the ratchet checks out that commit as its base;
-  3. the live `coverage-baseline` artifact of a dev push run on the base commit whose unit shards and baseline publishing steps passed, even if another gate of that run was red, found through the API with the `tcc main ci` App token, when the cache has no usable entry.
+  3. the live `coverage-baseline` artifact of a dev push run on the base commit whose unit shards and baseline publishing steps passed, even if another gate of that run was red, found through the API with the `tcc main ci` App token, when the cache has no usable entry;
+  4. the live `coverage-baseline` artifact of the base's nearest first parent ancestor whose dev push run passed the same checks, read from one page of the repository's newest `coverage-baseline` artifacts, when no run of the base kept one. This covers a base whose own push run was replaced before it published while the cache holds no usable entry. The log line reads `Restoring the coverage baseline of base <sha> from measured run <id> of its nearest measured first parent ancestor <commit>`, and the ratchet checks out that ancestor as its base. The hold then covers the lines that ancestor ran, so a line first run by the unmeasured commits after it is not held for this push. A base older than the newest hundred published baselines, such as a rerun of an old dev push, finds no ancestor this way.
 - **Grading on a dispatch.** The `durations` job finds the measured dev push run of the dispatched base and republishes its baseline as `queue-coverage-baseline`; the ratchet grades against that.
 
 The ratchet always runs `tests/coverage_ratchet.py` from the base checkout, never from the head under test, and uploads its findings as the `coverage-ratchet` artifact (`report.txt`, kept 7 days).
@@ -1702,7 +1757,7 @@ The disabled `queue-baseline` job is gone: pull request [3517](https://github.co
 
 | Message in the `coverage-ratchet` log | Cause | Action |
 |---|---|---|
-| `No measured Tests run on base <sha> kept a live coverage-baseline artifact with successful measuring and publishing jobs.` | No cache entry fit and no dev push run of the base kept a live artifact with passed unit shards and publishing steps. | Rerun the failed jobs once the next dev push publishes a baseline, or dispatch the Tests workflow against a measured base. |
+| `No measured Tests run on base <sha> kept a live coverage-baseline artifact with successful measuring and publishing jobs.` | No cache entry fit, no dev push run of the base kept a live artifact with passed unit shards and publishing steps, and no first parent ancestor on the newest page of live `coverage-baseline` artifacts had such a run. | Rerun the failed jobs once the next dev push publishes a baseline, or dispatch the Tests workflow against a measured base. |
 | `Base <sha> is outside dev history.` | The base commit is not on `dev`. | Dispatch the Tests workflow with a `base` on `dev`. |
 | `The base carries no tests/coverage_ratchet.py, so nothing trusted can grade.` | The base predates the ratchet. | Dispatch the Tests workflow with a newer `base` input. |
 | `<n> lines the base ran are no longer run by any head test; see the coverage-ratchet report.` | A merged change removed or rerouted the only test reaching those lines, listed by file and line in `report.txt`, so promotion is red while the queue keeps merging. | Follow [Clearing a lost line](#clearing-a-lost-line); never lower the ratchet or exclude the line. |
