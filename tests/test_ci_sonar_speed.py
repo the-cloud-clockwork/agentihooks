@@ -44,14 +44,26 @@ def _run(step, cwd, bin_dir, **env):
     )
 
 
-def _gate(tmp_path, statuses, gate="OK", message="", event="push"):
+def _gate(
+    tmp_path: Path,
+    statuses: list[str],
+    gate: str = "OK",
+    message: str = "",
+    event: str = "push",
+    issues: dict[str, object] | None = None,
+    dashboard: str = "http://sonar/dash",
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (tmp_path / ".scannerwork").mkdir()
-    (tmp_path / ".scannerwork/report-task.txt").write_text("ceTaskId=T1\ndashboardUrl=http://sonar/dash\n")
+    (tmp_path / ".scannerwork/report-task.txt").write_text(f"ceTaskId=T1\ndashboardUrl={dashboard}\n")
     (tmp_path / "statuses").write_text("\n".join(statuses) + "\n")
     task = {"status": "STATUS", "analysisId": "A1", **({"errorMessage": message} if message else {})}
     (tmp_path / "task.json").write_text(json.dumps({"task": task}))
+    found = ""
+    if issues is not None:
+        (tmp_path / "issues.json").write_text(json.dumps(issues))
+        found = f'  */issues/search?*) cat "{tmp_path}/issues.json" ;;\n'
     _tool(
         bin_dir,
         "curl",
@@ -60,6 +72,7 @@ def _gate(tmp_path, statuses, gate="OK", message="", event="push"):
         f'  */ce/task?id=T1) s=$(head -n1 "{tmp_path}/statuses"); sed -i 1d "{tmp_path}/statuses"\n'
         f'    sed "s/STATUS/$s/" "{tmp_path}/task.json" ;;\n'
         f'  */qualitygates/project_status?analysisId=A1) echo \'{{"projectStatus":{{"status":"{gate}"}}}}\' ;;\n'
+        f"{found}"
         "  *) exit 22 ;;\n"
         "esac",
     )
@@ -103,6 +116,7 @@ _OLDER = (
         (["FAILED"], "OK", _OLDER, "pull_request"),
     ],
 )
+@pytest.mark.feature("sonar-gate-verdict")
 def test_a_failed_gate_or_background_task_is_red(tmp_path, statuses, gate, message, event):
     result, _ = _gate(tmp_path, statuses, gate, message, event)
     assert result.returncode != 0
@@ -110,10 +124,57 @@ def test_a_failed_gate_or_background_task_is_red(tmp_path, statuses, gate, messa
     assert (tmp_path / "output").read_text() == ""
 
 
+@pytest.mark.feature("sonar-gate-verdict")
 def test_a_passed_gate_names_the_analysis_that_grades_the_promoted_revision(tmp_path):
     result, _ = _gate(tmp_path, ["SUCCESS"])
     assert result.returncode == 0, result.stdout + result.stderr
     assert (tmp_path / "output").read_text() == "analysis=A1\n"
+
+
+_BRANCH = "http://sonar/dashboard?id=agentihooks&branch=dev"
+_BUG: dict[str, object] = {
+    "total": 1,
+    "issues": [
+        {
+            "component": "agentihooks:scripts/example.py",
+            "line": 7,
+            "rule": "python:S905",
+            "message": "Remove or refactor this statement; it has no side effects.",
+        }
+    ],
+}
+
+
+def _searches(tmp_path: Path) -> list[str]:
+    return [url for url in (tmp_path / "urls").read_text().splitlines() if "issues/search" in url]
+
+
+@pytest.mark.feature("sonar-failed-gate-names-new-bugs")
+def test_a_failed_gate_names_its_new_bugs(tmp_path: Path) -> None:
+    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", issues=_BUG, dashboard=_BRANCH)
+    assert result.returncode != 0
+    assert "::error::" in result.stdout
+    named = "agentihooks:scripts/example.py:7 python:S905 Remove or refactor this statement; it has no side effects."
+    assert named in result.stdout
+    searched = _searches(tmp_path)
+    assert len(searched) == 1
+    assert "componentKeys=agentihooks&branch=dev" in searched[0]
+    assert (tmp_path / "output").read_text() == ""
+
+
+@pytest.mark.feature("sonar-failed-gate-names-new-bugs")
+def test_a_failed_gate_stays_red_when_the_bug_read_is_refused(tmp_path: Path) -> None:
+    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH)
+    assert result.returncode != 0
+    assert "::error::" in result.stdout
+    assert (tmp_path / "output").read_text() == ""
+
+
+@pytest.mark.feature("sonar-failed-gate-names-new-bugs")
+def test_a_passed_gate_reads_no_issues(tmp_path: Path) -> None:
+    result, _ = _gate(tmp_path, ["SUCCESS"], issues=_BUG, dashboard=_BRANCH)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _searches(tmp_path) == []
 
 
 def test_a_dev_push_analysis_sonar_refuses_as_older_ends_superseded_and_ungraded(tmp_path):

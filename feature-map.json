@@ -1,6 +1,29 @@
 {
   "features": [
     {
+      "id": "sonar-gate-verdict",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-sonar-new-bug-13212",
+      "behaviour": "The Sonar quality gate step ends red with an error line and no step output when the gate or its background task failed, and names the analysis in its step output when the gate passed.",
+      "seam": "the run text of the step SonarQube Quality Gate of the sonar job, run in a shell against a fake curl",
+      "tests": [
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_or_background_task_is_red",
+        "tests/test_ci_sonar_speed.py::test_a_passed_gate_names_the_analysis_that_grades_the_promoted_revision"
+      ]
+    },
+    {
+      "id": "sonar-failed-gate-names-new-bugs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-sonar-new-bug-13212",
+      "behaviour": "A failed Sonar quality gate prints each unresolved new bug and vulnerability of the analysis it graded with its component, line, rule and message, read once from the branch or pull request the scanner's dashboard address names. A refused read leaves the error line and the red exit as they are, and a passed gate reads no issues.",
+      "seam": "the run text of the step SonarQube Quality Gate of the sonar job, run in a shell against a fake curl that answers the issue search",
+      "tests": [
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_names_its_new_bugs",
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_red_when_the_bug_read_is_refused",
+        "tests/test_ci_sonar_speed.py::test_a_passed_gate_reads_no_issues"
+      ]
+    },
+    {
       "id": "node-caps-named-import",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-node-caps-cpu",

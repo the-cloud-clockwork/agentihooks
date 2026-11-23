@@ -2760,6 +2760,11 @@ jobs:
           [[ "${SONAR_TEST_ONLY:-false}" != true ]] || exit 0
           set -o pipefail
           api() { bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" "Sonar $1" -- curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
+          echo "probe server: $(api server/version || echo refused)"
+          for flag in inNewCodePeriod sinceLeakPeriod; do
+            api "issues/search?componentKeys=agentihooks&branch=dev&types=BUG&$flag=true&resolved=false&ps=100" | jq -r --arg flag "$flag" '"probe \($flag): total \(.total)", (.issues[] | "probe \($flag): \(.component):\(.line // 0) \(.rule) \(.status) \(.creationDate) \(.message)")' || echo "probe $flag: refused"
+          done
+          api "issues/search?componentKeys=agentihooks&branch=dev&types=BUG&resolved=false&s=CREATION_DATE&asc=false&ps=5" | jq -r '"probe newest: total \(.total)", (.issues[] | "probe newest: \(.component):\(.line // 0) \(.rule) \(.status) \(.creationDate) \(.message)")' || echo "probe newest: refused"
           task=$(sed -n 's/^ceTaskId=//p' .scannerwork/report-task.txt)
           [[ -n "$task" ]] || { echo "::error::No Sonar task id in report-task.txt."; exit 1; }
           while true; do
