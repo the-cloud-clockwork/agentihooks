@@ -3,15 +3,18 @@ ledger server nor the database ledger adapter when the writer answers."""
 
 import json
 import os
+import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from urllib.parse import quote
 
 import pytest
 
 from hooks import config
-from scripts.swarm_ledger import ledger, warm_writer
+from scripts.swarm import timing
+from scripts.swarm_ledger import hosted_probe, ledger, warm_writer
 from scripts.tick.adapters import database_ledger
 from tests.tick.test_database_ledger_writer_route import IN_PROCESS, Answers, asked, writer
 
@@ -66,6 +69,58 @@ def test_a_command_line_client_write_runs_in_process_when_no_writer_listens(
     reply = ledger.client("sw", 5.0).request("sw", "operations", {"ops": []})
     assert reply == IN_PROCESS
     assert answers.calls == [("sw", "operations", {"ops": []})]
+
+
+@pytest.mark.feature("ledger-slim-write-client")
+def test_a_command_line_client_write_inside_a_tick_pass_runs_in_process_while_a_writer_listens(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answers = Answers()
+    monkeypatch.setattr(database_ledger, "answered", answers)
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(warm_writer.socket_path()))
+    listener.listen(1)
+    token = timing.PASS.set({"pass_id": "p1", "failed_steps": []})
+    try:
+        with timing.tick("sw"):
+            reply = ledger.client("sw", 5.0).request("sw", "operations", {"ops": []})
+    finally:
+        timing.PASS.reset(token)
+    assert reply == IN_PROCESS
+    assert answers.calls == [("sw", "operations", {"ops": []})]
+    listener.setblocking(False)
+    with listener, pytest.raises(BlockingIOError):
+        listener.accept()
+
+
+@pytest.mark.feature("ledger-slim-write-client")
+def test_a_command_line_client_write_the_writer_holds_past_the_client_timeout_raises_a_timeout(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answers = Answers()
+    monkeypatch.setattr(database_ledger, "answered", answers)
+    released = threading.Event()
+    thread, heard = writer(warm_writer.socket_path(), b"", released)
+    try:
+        with pytest.raises(TimeoutError) as lost:
+            ledger.client("sw", 0.2).request("sw", "tasks")
+    finally:
+        released.set()
+    thread.join(10.0)
+    assert type(lost.value.__cause__) is TimeoutError
+    assert answers.calls == []
+    assert [json.loads(sent)["path"] for sent in heard] == ["tasks"]
+
+
+@pytest.mark.feature("ledger-slim-write-client")
+def test_a_command_line_client_addresses_the_ledger_server_its_slug_selects(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ledger, "BASE", "")
+    monkeypatch.delenv(hosted_probe.HOSTED_ENV, raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "other")
+    monkeypatch.setenv("SWARM_URL", "https://hosted.example")
+    assert ledger.base("sw") != "https://hosted.example"
+    assert ledger.client("sw", 5.0).base == ledger.base("sw")
 
 
 @pytest.mark.feature("ledger-slim-write-client")

@@ -8319,11 +8319,14 @@
       "id": "ledger-slim-write-client",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-write-slim-client",
-      "behaviour": "A command line ledger write through the ledger command client goes to this host's warm writer socket as the caller, with the worktree header, and is never run in process when the writer answers; with no writer listening it runs in process through the database ledger request with its slug, path and payload; a fresh interpreter that sends such a write loads neither the ledger API service, the ledger server nor the database ledger adapter.",
+      "behaviour": "A command line ledger write through the ledger command client goes to this host's warm writer socket as the caller, with the worktree header, and is never run in process when the writer answers; with no writer listening, or inside a tick pass, it runs in process through the database ledger request with its slug, path and payload; a writer that holds the reply past the client timeout raises a timeout; the client addresses the ledger server its own slug selects; a fresh interpreter that sends such a write loads neither the ledger API service, the ledger server nor the database ledger adapter.",
       "seam": "scripts.swarm_ledger.ledger.client, the client every command line ledger write builds, over the host writer socket, and the modules a fresh interpreter holds after one write",
       "tests": [
         "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_goes_to_the_host_writer_socket",
         "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_runs_in_process_when_no_writer_listens",
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_inside_a_tick_pass_runs_in_process_while_a_writer_listens",
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_the_writer_holds_past_the_client_timeout_raises_a_timeout",
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_addresses_the_ledger_server_its_slug_selects",
         "tests/swarm_ledger/test_writer_client.py::test_a_fresh_interpreter_write_through_a_live_writer_leaves_the_api_service_and_ledger_server_unloaded"
       ]
     },
