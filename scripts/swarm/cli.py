@@ -42,6 +42,7 @@ from urllib.parse import urlsplit
 import scripts.tick.steps.report  # noqa: F401
 from hooks.classifier import settings as classifier_settings
 from hooks.context import injection_trace, quarantine
+from scripts import review
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, quiet
 from scripts.gates import feature as feature_gate
@@ -58,8 +59,6 @@ from scripts.inbox import relay as relay
 from scripts.inbox import wake as wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.review import gate as review_gate
-from scripts.review import record as review_record
 from scripts.swarm import (
     affinity,
     agent_up,
@@ -2193,7 +2192,7 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: review_gate.queue_admit(store, args, agent, _me(store, args), head, _queue_intent),
+                admit=lambda head: review.admit(store, args, agent, _me(store, args), head, _queue_intent, stalled),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
                 priority=lambda: queue_priority.automatic(store, args.slug, args.url, LedgerClient()),
@@ -2216,7 +2215,7 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
             return
         proof.update(found)
     proven = {**row, "proof": {**(row.get("proof") or {}), **proof}}
-    review_record.require_done(store, args.slug, ledger_kinds.kind(row), agent.task)
+    review.require_done(store, args.slug, ledger_kinds.kind(row), agent.task)
     missing = ledger_kinds.unmet(proven)
     if missing:
         raise SwarmError(_unproven(ledger_kinds.kind(row), missing))

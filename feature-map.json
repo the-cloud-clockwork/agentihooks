@@ -52,7 +52,9 @@
         "tests/review/test_queue_gate.py::test_another_agents_read_does_not_satisfy_the_author",
         "tests/review/test_done.py::test_swarm_done_refuses_a_review_that_posted_no_finding",
         "tests/review/test_identity.py::test_a_forge_for_another_request_cannot_write_the_record",
-        "tests/review/test_queue_callers.py::test_every_queue_caller_requires_the_independent_review"
+        "tests/review/test_queue_callers.py::test_every_queue_caller_requires_the_independent_review",
+        "tests/review/test_queue_callers.py::test_a_master_queue_requires_the_actual_authors_review_read",
+        "tests/review/test_queue_callers.py::test_a_missing_author_never_falls_back_to_the_queuing_master"
       ],
       "rules": [
         "merge-queue-admit-skips-review"
