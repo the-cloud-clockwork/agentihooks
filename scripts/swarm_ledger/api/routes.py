@@ -91,7 +91,7 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
     return ledger_read(services, slug, path, query)
 
 
-def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
+def ledger_read(services: Services, slug: str, path: str, query: dict[str, Any]) -> dict:
     if path.split("/")[0] == "hierarchy":
         return resources.hierarchy_read(services.repository, slug, path, query)
     if path.split("/")[0] == "focus":
@@ -134,8 +134,8 @@ def focus_tasks(services: Services, slug: str, path: str, query: dict[str, Any])
     rows: list[dict[str, Any]] | None = focus_check.task_rows(state, path, fix_phase(services, slug))
     if rows is None:
         return None
-    paged: dict[str, Any] = resources.page(rows, resources.revision(rows), query)
-    return paged
+    revision = resources.revision(rows)
+    return resources.page(rows, revision, query)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def orders_read(services: Services, slug: str) -> dict[str, Any]:

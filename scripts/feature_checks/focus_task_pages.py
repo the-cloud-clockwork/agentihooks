@@ -54,6 +54,11 @@ def _target(slug: str, target: str, read: Read) -> str:
     return FAIL + DIFFERENT.format(slug=slug, target=target, paged=len(paged), whole=len(whole))
 
 
+def _running(store: Swarms) -> list[str]:
+    """The swarms that are not stopped, in name order."""
+    return [slug for slug in sorted(store.slugs()) if store.config(slug).state != "stopped"]
+
+
 def main(store: Swarms | None = None, read: Read | None = None) -> int:
     if store is None:
         from scripts.swarm.store import RedisStore, redis_client  # pyright: ignore[reportUnknownVariableType]
@@ -63,8 +68,7 @@ def main(store: Swarms | None = None, read: Read | None = None) -> int:
         from scripts.swarm_ledger import ledger
 
         read = ledger.resource
-    running = [slug for slug in sorted(store.slugs()) if store.config(slug).state != "stopped"]
-    found = [line for slug in running for line in lines(slug, read)]
+    found = [line for slug in _running(store) for line in lines(slug, read)]
     for line in found:
         print(line)
     return int(any(line.startswith(FAIL) for line in found))
