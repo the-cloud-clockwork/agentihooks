@@ -779,7 +779,9 @@ def test_the_newest_dev_baseline_grades_only_from_an_ancestor_of_the_head(tmp_pa
 
 
 @pytest.mark.parametrize(("kept", "found"), [("0 1", "id=run-2\n"), ("0 0", None)])
-def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(tmp_path, kept, found):
+def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(
+    tmp_path: Path, kept: str, found: str | None
+) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     first, second = kept.split()
@@ -791,6 +793,7 @@ def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(tmp_pa
         '  */runs\\?*) if [[ $2 == *"status=success"* ]]; then printf "run-1\\nrun-2\\n"; else printf "run-1 push\\nrun-2 push\\n"; fi ;;\n'
         f"  */run-1/*) echo {first} ;;\n"
         f"  */run-2/*) echo {second} ;;\n"
+        "  */actions/artifacts\\?*) echo '[]' ;;\n"
         "esac\n"
     )
     (bin_dir / "gh").chmod(0o755)
@@ -802,6 +805,8 @@ def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(tmp_pa
     result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
     assert (result.returncode == 0) == (found is not None)
     assert output.read_text() == (found or "")
+    error = "::error::No measured Tests run on base base kept a live coverage-baseline artifact"
+    assert (error in result.stdout) == (found is None), result.stdout + result.stderr
 
 
 def _dev_push_jobs(publish: str) -> dict[str, object]:
@@ -818,18 +823,38 @@ def _dev_push_jobs(publish: str) -> dict[str, object]:
 
 @pytest.mark.feature("coverage-ratchet-grades-from-the-nearest-measured-ancestor")
 @pytest.mark.parametrize(
-    ("nearest", "listed", "restored"),
+    ("published", "restored"),
     [
-        ("success", ("newer", "side", "nearest", "older"), "nearest"),
-        ("failure", ("newer", "side", "nearest", "older"), "older"),
-        ("expired", ("newer", "side", "nearest", "older"), "older"),
-        ("success", ("newer", "side"), None),
-        ("failure", ("newer", "side", "nearest"), None),
+        (
+            (("newer", 104, "measured"), ("nearest", 102, "measured"), ("older", 101, "measured")),
+            (102, "nearest"),
+        ),
+        (
+            (("newer", 104, "measured"), ("nearest", 102, "unmeasured"), ("older", 101, "measured")),
+            (101, "older"),
+        ),
+        (
+            (("newer", 104, "measured"), ("nearest", 102, "expired"), ("older", 101, "measured")),
+            (101, "older"),
+        ),
+        (
+            (("nearest", 106, "unmeasured"), ("nearest", 102, "measured"), ("older", 101, "measured")),
+            (102, "nearest"),
+        ),
+        ((("newer", 104, "measured"), ("side", 105, "measured")), None),
+        ((("newer", 104, "measured"), ("side", 105, "measured"), ("nearest", 102, "unmeasured")), None),
     ],
-    ids=["nearest-measured", "nearest-unmeasured", "nearest-expired", "outside-history-only", "no-measured-ancestor"],
+    ids=[
+        "nearest-measured",
+        "nearest-unmeasured",
+        "nearest-expired",
+        "nearest-rerun-unmeasured",
+        "outside-history-only",
+        "no-measured-ancestor",
+    ],
 )
 def test_a_base_whose_run_published_no_baseline_grades_from_its_nearest_measured_ancestor(
-    tmp_path: Path, nearest: str, listed: tuple[str, ...], restored: str | None
+    tmp_path: Path, published: tuple[tuple[str, int, str], ...], restored: tuple[int, str] | None
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -838,7 +863,6 @@ def test_a_base_whose_run_published_no_baseline_grades_from_its_nearest_measured
     _git(repo, "checkout", "-q", "-b", "side", commits["older"])
     commits["side"] = _commit(repo, {"b": "side"})
     _git(repo, "checkout", "-q", "--detach", commits["newer"])
-    runs = {name: 101 + index for index, name in enumerate(commits)}
     fake = tmp_path / "fake"
     fake.mkdir()
     base_runs = [{"id": 7, "event": "push", "head_branch": "dev", "head_sha": commits["base"]}]
@@ -846,14 +870,14 @@ def test_a_base_whose_run_published_no_baseline_grades_from_its_nearest_measured
     artifacts = [
         {
             "name": "coverage-baseline",
-            "expired": name == "nearest" and nearest == "expired",
-            "workflow_run": {"id": runs[name], "head_branch": "dev", "head_sha": commits[name]},
+            "expired": state == "expired",
+            "workflow_run": {"id": run, "head_branch": "dev", "head_sha": commits[name]},
         }
-        for name in listed
+        for name, run, state in published
     ]
     (fake / "artifacts.json").write_text(json.dumps({"total_count": len(artifacts), "artifacts": artifacts}))
-    for name, run in runs.items():
-        publish = "failure" if name == "nearest" and nearest == "failure" else "success"
+    for _, run, state in published:
+        publish = "failure" if state == "unmeasured" else "success"
         (fake / f"jobs-{run}.json").write_text(json.dumps(_dev_push_jobs(publish)))
     (fake / "gh").write_text(
         "#!/usr/bin/env bash\n"
@@ -882,11 +906,11 @@ def test_a_base_whose_run_published_no_baseline_grades_from_its_nearest_measured
         GITHUB_OUTPUT=str(output),
     )
     step = _step("coverage-ratchet", "Find the run that published the base baseline")
-    result = subprocess.run(
-        ["bash", "-e", "-o", "pipefail", "-c", step["run"]], cwd=repo, env=env, capture_output=True, text=True
-    )
-    expected = f"id={runs[restored]}\ncommit={commits[restored]}\n" if restored else ""
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, capture_output=True, text=True)
+    expected = f"id={restored[0]}\ncommit={commits[restored[1]]}\n" if restored else ""
     assert (result.returncode, output.read_text()) == (0 if restored else 1, expected), result.stdout + result.stderr
+    error = f"::error::No measured Tests run on base {commits['base']} kept a live coverage-baseline artifact"
+    assert (error in result.stdout) == (restored is None)
 
 
 @pytest.mark.feature("coverage-ratchet-grades-from-the-nearest-measured-ancestor")

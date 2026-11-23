@@ -3618,8 +3618,8 @@ jobs:
             echo "id=$run" >> "$GITHUB_OUTPUT"
             exit 0
           done <<< "$runs"
-          published=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=coverage-baseline&per_page=100" --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "dev") | {key: .workflow_run.head_sha, value: .workflow_run.id}] | reverse | from_entries')
-          candidates=$(git rev-list --first-parent --skip=1 --max-count=1000 "$BASE" -- | jq -R -r --argjson published "$published" 'select($published[.]) | "\(.) \($published[.])"')
+          published=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=coverage-baseline&per_page=100" --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "dev") | [.workflow_run.head_sha, .workflow_run.id]]')
+          candidates=$(git rev-list --first-parent --skip=1 --max-count=1000 "$BASE" -- | jq -R -r --argjson published "$published" '. as $commit | $published[] | select(.[0] == $commit) | "\(.[0]) \(.[1])"')
           while read -r commit run; do
             [[ -n "$run" ]] || continue
             jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
