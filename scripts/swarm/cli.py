@@ -128,6 +128,9 @@ from scripts.swarm import (
     waits,
 )
 from scripts.swarm import ledger_client as ledger_client
+from scripts.swarm import (
+    queue_exit as queue_exit,
+)
 from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.cli_parser import build_parser

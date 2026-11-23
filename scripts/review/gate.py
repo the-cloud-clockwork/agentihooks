@@ -1,5 +1,6 @@
 import argparse
 from collections.abc import Callable, Mapping
+from typing import cast
 
 from scripts.gates.base import Who
 from scripts.gates.enforcement import REVIEW
@@ -39,7 +40,8 @@ def _author(slug: str, url: str, caller: AgentRecord, context: Mapping[str, str]
 
     if context is not None:
         task = context["task"]
-        row = LedgerClient().task(slug, task) or {}
+        read_task = cast(Callable[[str, str], Mapping[str, str | None] | None], LedgerClient().task)
+        row: Mapping[str, str | None] = read_task(slug, task) or {}
         return Who(name=row.get("claimed_by") or "", swarm=slug, task=task)
     if caller.lane == MASTER:
         rows = LedgerClient().tasks_targeting(slug, url)
@@ -61,4 +63,5 @@ def queue_admit(
     if agent is not None:
         intent(store, args, agent, head)
     admit(store, args.slug, caller, args.url, head, _author(args.slug, args.url, caller, context))
-    return queue_exit.require_fresh(args.url, head)
+    require_fresh = cast(Callable[[str, str], None], queue_exit.require_fresh)
+    return require_fresh(args.url, head)
