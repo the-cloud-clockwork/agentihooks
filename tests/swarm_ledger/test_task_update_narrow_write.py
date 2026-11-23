@@ -5,7 +5,7 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
-import ledger_alerts
+import ledger_alerts  # pyright: ignore[reportMissingImports]
 import pytest
 
 from scripts.swarm_ledger import api_service, request_metrics
@@ -564,7 +564,7 @@ def test_the_narrow_fold_names_a_refused_claim_and_keeps_only_the_stored_size_wa
     core = SimpleNamespace(
         Context=Folding,
         now_ms=lambda: 50,
-        gated=lambda gate, doc, op, ctx: False,
+        gated=lambda gate, doc, op, ctx: gate(op),
         size_warning=lambda text: text.startswith("size"),
         EVENTS_KEPT=2,
         EVENTS_CEILING=10,
@@ -572,7 +572,7 @@ def test_the_narrow_fold_names_a_refused_claim_and_keeps_only_the_stored_size_wa
     )
     meta = {"rev": 4, "events": [], "warnings": stored}
     state: dict = {"_meta": meta}
-    rejected, ctx = mutation.narrow("demo", state, core, {"op": "task_update", "id": "claim"}, None)
+    rejected, ctx = mutation.narrow("demo", state, core, {"op": "task_update", "id": "claim"}, lambda op: False)
     assert (rejected, ctx.changed, meta["rev"], meta["warnings"]) == (["claim"], rev == 5, rev, ["size-1"])
     assert state["_meta"] is meta
     assert derived == [([(ledger_alerts.SIZE, "size-1")], stored)]
