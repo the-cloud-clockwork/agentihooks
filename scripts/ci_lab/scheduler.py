@@ -493,7 +493,7 @@ def stage_grade(pipe: Any, document: dict[str, Any]) -> None:
         return
     jobs = [slot["job"] for slot in document["units"].values() if slot.get("job")]
     hits = len(document["units"]) - len(jobs)
-    pipe.hincrby(REVISIONS, run, 1)
+    pipe.hincrby(REVISIONS, run)
     pipe.hset(RECORDS, run, json.dumps({"revision": revision, "tier": document["tier"], "hits": hits, "jobs": jobs}))
 
 
