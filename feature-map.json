@@ -6086,6 +6086,16 @@
       ]
     },
     {
+      "id": "flake-budget-lab-runs-current",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-budget",
+      "behaviour": "The tick's flake budget refresh counts a run the budget names lab as current without asking GitHub for its run, because a lab run is a unit key and no Actions run, and looks up only the Actions runs of an over budget test against its newest merged test change, so the ledger follow up of a test flaky in lab and Actions runs is still filed.",
+      "seam": "scripts.ci_budget.flakes.refresh and scripts.ci_budget.flakes._since_fix reading the sources map of a flake-budget.json over_budget entry",
+      "tests": [
+        "tests/test_ci_budget_flakes.py::test_a_lab_run_counts_as_current_without_a_github_run_lookup"
+      ]
+    },
+    {
       "id": "selectors-read-outside-files",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2636",

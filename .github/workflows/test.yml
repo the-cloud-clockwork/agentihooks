@@ -4135,13 +4135,14 @@ jobs:
           [[ -n "$CI_LAB_MINIO_ENDPOINT" && -n "$CI_LAB_MINIO_BUCKET" && -n "$CI_LAB_MINIO_ACCESS_KEY" && -n "$CI_LAB_MINIO_SECRET_KEY" ]] || warn "The lab store settings are not set"
           python -m venv "$RUNNER_TEMP/lab-flakes" || warn "Creating the lab export environment failed"
           export PATH="$RUNNER_TEMP/lab-flakes/bin:$PATH"
-          timeout 120 python -m pip install --quiet --constraint .github/test-requirements.lock -e . || warn "Installing the lab export failed"
+          timeout 120 env -u CI_LAB_MINIO_ENDPOINT -u CI_LAB_MINIO_BUCKET -u CI_LAB_MINIO_ACCESS_KEY -u CI_LAB_MINIO_SECRET_KEY python -m pip install --quiet --constraint .github/test-requirements.lock -e . || warn "Installing the lab export failed"
           status=0
           timeout 45 agentihooks ci lab flakes --out ~/flake-reports/lab 2> "$RUNNER_TEMP/lab-flakes.err" || status=$?
           if [[ $status != 0 ]]; then
             cat "$RUNNER_TEMP/lab-flakes.err" >&2
             warn "The lab export exited $status: $(tail -n 1 "$RUNNER_TEMP/lab-flakes.err")"
           fi
+          [[ -f ~/flake-reports/lab/lab-flakes.jsonl ]] || warn "The lab export wrote no lab-flakes.jsonl"
           echo "Lab flake rows: $(wc -l < ~/flake-reports/lab/lab-flakes.jsonl)"
 
       - name: Count flaky tests over seven days

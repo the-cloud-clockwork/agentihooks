@@ -15,7 +15,7 @@ TEST = "tests/test_page.py::test_the_fold_survives_a_reload"
 UNIT = "test-v1-" + "a" * 64
 SETTINGS = ("CI_LAB_MINIO_ENDPOINT", "CI_LAB_MINIO_BUCKET", "CI_LAB_MINIO_ACCESS_KEY", "CI_LAB_MINIO_SECRET_KEY")
 FAKE_PYTHON = """#!/usr/bin/env bash
-echo "python $*" >> "$CALLS"
+echo "python $* settings=${CI_LAB_MINIO_SECRET_KEY:-none}" >> "$CALLS"
 if [[ "$1 $2" == "-m venv" ]]; then
   [[ "$FAIL" != venv ]] || exit 1
   mkdir -p "$3/bin"
@@ -24,11 +24,12 @@ fi
 [[ "$FAIL" != pip ]]
 """
 FAKE_AGENTIHOOKS = """#!/usr/bin/env bash
-echo "agentihooks $*" >> "$CALLS"
+echo "agentihooks $* settings=${CI_LAB_MINIO_SECRET_KEY:-none}" >> "$CALLS"
 if [[ "$FAIL" == agentihooks ]]; then
   echo "ci lab flakes: Could not connect to the endpoint URL" >&2
   exit 1
 fi
+[[ "$FAIL" != nofile ]] || exit 0
 mkdir -p "$5"
 printf '{}\\n{}\\n' > "$5/lab-flakes.jsonl"
 """
@@ -39,14 +40,14 @@ def _report(test=TEST, run="7", outcome="flaky"):
 
 
 @pytest.mark.feature("flake-budget-once-per-run")
-def test_a_flaky_report_joins_the_history_once_per_run():
+def test_a_flaky_report_joins_the_history_once_per_run() -> None:
     history = flake_budget.gather([], [_report(), _report(f"{TEST}[250]"), _report(run=8)], NOW)
     assert history == [{"test": TEST, "run": "7", "at": NOW}, {"test": TEST, "run": "8", "at": NOW}]
     assert flake_budget.gather(history, [_report()], NOW + 60) == history
 
 
 @pytest.mark.feature("flake-budget-once-per-run")
-def test_retry_evidence_survives_history_deduplication_and_expiry():
+def test_retry_evidence_survives_history_deduplication_and_expiry() -> None:
     first = {**_report(f"{TEST}[first]"), "tracebacks": ["first frame\nRuntimeError: first"]}
     second = {**_report(f"{TEST}[second]"), "tracebacks": ["second frame\nRuntimeError: second"]}
     third = {**_report(run="8"), "tracebacks": ["third frame\nRuntimeError: third"]}
@@ -64,7 +65,7 @@ def test_a_failed_report_is_not_a_flake():
 
 
 @pytest.mark.feature("flake-budget-seven-day-expiry")
-def test_lines_older_than_seven_days_drop_out():
+def test_lines_older_than_seven_days_drop_out() -> None:
     edge = {"test": TEST, "run": "1", "at": NOW - 7 * DAY}
     inside = {"test": TEST, "run": "2", "at": NOW - 7 * DAY + 1}
     assert flake_budget.gather([edge, inside], [], NOW) == [inside]
@@ -72,7 +73,7 @@ def test_lines_older_than_seven_days_drop_out():
 
 
 @pytest.mark.feature("flake-budget-over-at-two-runs")
-def test_a_test_flaky_in_two_runs_is_over_budget():
+def test_a_test_flaky_in_two_runs_is_over_budget() -> None:
     other = "tests/test_x.py::test_once"
     history = [
         {"test": TEST, "run": "9", "at": NOW},
@@ -85,7 +86,7 @@ def test_a_test_flaky_in_two_runs_is_over_budget():
 
 
 @pytest.mark.feature("flake-budget-over-at-two-runs")
-def test_every_retry_pass_is_listed_with_its_count_and_runs():
+def test_every_retry_pass_is_listed_with_its_count_and_runs() -> None:
     other = "tests/test_x.py::test_once"
     history = [
         {"test": TEST, "run": "9", "at": NOW},
@@ -107,7 +108,9 @@ def test_every_retry_pass_is_listed_with_its_count_and_runs():
     }
 
 
-def test_the_command_keeps_the_history_and_writes_the_budget(tmp_path, capsys):
+def test_the_command_keeps_the_history_and_writes_the_budget(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     reports = tmp_path / "reports"
     (reports / "flakes-3.12-1").mkdir(parents=True)
     (reports / "flakes-3.12-1" / "flakes.jsonl").write_text(json.dumps(_report(run="20")) + "\n\n")
@@ -153,7 +156,7 @@ def test_the_command_takes_the_clock_when_no_time_is_given(tmp_path, monkeypatch
 
 
 @pytest.mark.feature("flake-budget-no-reports-red")
-def test_no_flake_reports_is_red(tmp_path, capsys):
+def test_no_flake_reports_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     out = tmp_path / "out.json"
     argv = ["--history", str(tmp_path / "h.jsonl"), "--reports", str(tmp_path), "--out", str(out)]
     assert flake_budget.main(argv) == 1
@@ -162,7 +165,7 @@ def test_no_flake_reports_is_red(tmp_path, capsys):
 
 
 @pytest.mark.feature("flake-budget-job-wiring")
-def test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget():
+def test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget() -> None:
     workflow = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())
     job = workflow["jobs"]["flake-budget"]
     assert job["needs"] == ["unit"]
@@ -217,7 +220,7 @@ def test_a_dev_push_keeps_the_flake_history_and_publishes_the_budget():
 
 
 @pytest.mark.feature("flake-budget-job-wiring")
-def test_a_restore_that_matched_nothing_saves_a_seed_the_history_prefix_never_restores():
+def test_a_restore_that_matched_nothing_saves_a_seed_the_history_prefix_never_restores() -> None:
     workflow = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())
     steps = {step.get("name"): step for step in workflow["jobs"]["flake-budget"]["steps"]}
     prefixes = steps["Restore the flake history"]["with"]["restore-keys"].split()
@@ -309,8 +312,10 @@ def test_the_job_exports_the_lab_flake_records_before_the_count_with_the_setting
         "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS": "0.dev${{ github.run_number }}",
     }
     assert "true" not in step["run"].split()
-    assert "timeout 120 python -m pip install --quiet --constraint .github/test-requirements.lock -e ." in step["run"]
-    assert "timeout 45 agentihooks ci lab flakes --out ~/flake-reports/lab" in step["run"]
+    unset = " ".join(f"-u {name}" for name in SETTINGS)
+    install = f"timeout 120 env {unset} python -m pip install --quiet --constraint .github/test-requirements.lock -e ."
+    assert install in step["run"]
+    assert f"timeout 45 agentihooks ci lab flakes --out ~/flake-reports/{flake_budget.LAB}" in step["run"]
     assert job["timeout-minutes"] == 8
 
 
@@ -322,6 +327,7 @@ def test_the_job_exports_the_lab_flake_records_before_the_count_with_the_setting
         ("", "venv", "Creating the lab export environment failed", 1),
         ("", "pip", "Installing the lab export failed", 2),
         ("", "agentihooks", "The lab export exited 1: ci lab flakes: Could not connect to the endpoint URL", 3),
+        ("", "nofile", "The lab export wrote no lab-flakes.jsonl", 3),
         ("", "", "", 3),
     ],
 )
@@ -369,8 +375,8 @@ def test_a_lab_export_that_cannot_run_warns_once_and_leaves_the_step_green(
     assert (
         called
         == [
-            f"python -m venv {tmp_path}/temp/lab-flakes",
-            "python -m pip install --quiet --constraint .github/test-requirements.lock -e .",
-            f"agentihooks ci lab flakes --out {tmp_path}/home/flake-reports/lab",
+            f"python -m venv {tmp_path}/temp/lab-flakes settings=set",
+            "python -m pip install --quiet --constraint .github/test-requirements.lock -e . settings=none",
+            f"agentihooks ci lab flakes --out {tmp_path}/home/flake-reports/{flake_budget.LAB} settings=set",
         ][:made]
     )
