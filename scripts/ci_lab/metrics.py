@@ -412,7 +412,8 @@ class _Port(ThreadingHTTPServer):
         super().__init__(address, handler)
 
     def service_actions(self) -> None:
-        """Run the port's actions."""
+        """Run the base server's actions, then the port's actions."""
+        super().service_actions()
         self.actions()
 
 
