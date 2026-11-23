@@ -40,6 +40,15 @@ def joined_text(pid: int) -> str:
         return ""
 
 
+def joined_name(name: str) -> str:
+    try:
+        # ok: proc-read-gone-on-missing-file-alone
+        with open("/proc/" + name) as handle:
+            return handle.read()
+    except FileNotFoundError:
+        return ""
+
+
 def reaped_too(pid: int) -> bool:
     try:
         # ok: proc-read-gone-on-missing-file-alone

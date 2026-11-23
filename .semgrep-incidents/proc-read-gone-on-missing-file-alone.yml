@@ -14,14 +14,14 @@ rules:
               ...
       - pattern-either:
           - pattern-regex: /proc/(\{[^}]+\}|%[ds])/\w+
-          - pattern-regex: /proc/"\s*\+
+          - pattern-regex: /proc/"\s*\+\s*str\(
           - patterns:
               - pattern-inside: |
                   $FILE = $BUILT
                   ...
               - metavariable-regex:
                   metavariable: $BUILT
-                  regex: (?s).*/proc/(\{[^}]+\}|%[ds]|"\s*\+).*
+                  regex: (?s).*/proc/(\{[^}]+\}|%[ds]|"\s*\+\s*str\().*
               - pattern-either:
                   - pattern: $FILE.$READ(...)
                   - pattern: open($FILE, ...)
