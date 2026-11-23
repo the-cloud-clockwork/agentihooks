@@ -176,6 +176,10 @@ def update_context_metrics(payload: dict) -> str:
         return "ctx: ?"
 
 
+def record_tokens(session_id: str, fill_pct: float, burn_rate: float | None, now_s: float) -> None:
+    """Writes the session's last fill and burn rate into its presence seen record for the hive daemon to export."""
+
+
 def record_lifecycle_context(payload: dict) -> None:
     from hooks.config import TOKEN_MONITOR_ENABLED
     from hooks.targets import is_codex

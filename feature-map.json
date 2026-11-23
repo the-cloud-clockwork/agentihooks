@@ -14143,6 +14143,25 @@
         "tests/observability/test_presence.py::test_a_failing_mark_never_raises_into_the_hook",
         "tests/observability/test_presence.py::test_the_hook_manager_marks_presence_for_every_event"
       ]
+    },
+    {
+      "id": "tokens-gauges-hive-daemon",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-otel-token-gauges-spool",
+      "behaviour": "A status line run and a Codex lifecycle record write the session's last context fill and burn rate into its presence seen record, keeping the presence keys, and never start the OpenTelemetry worker or SDK. The hive daemon presence pass sends the tokens fill and burn rate gauges under the session id with the last written values for every record whose tokens were written within the fresh window, and only the fill when the burn rate is unknown. The Redis token metrics write stays.",
+      "seam": "token_monitor.update_context_metrics, token_monitor.export_tokens and hive.daemon.emit_presence",
+      "tests": [
+        "tests/observability/test_token_monitor.py::test_native_statusline_writes_its_fill_into_the_seen_record_without_otel",
+        "tests/observability/test_token_monitor.py::test_codex_context_growth_and_compaction",
+        "tests/observability/test_token_monitor.py::test_lifecycle_reads_the_current_session_rollout",
+        "tests/observability/test_token_monitor.py::test_a_status_line_run_never_starts_the_otel_worker_or_sdk",
+        "tests/observability/test_token_monitor.py::test_a_codex_lifecycle_record_never_starts_the_otel_worker_or_sdk",
+        "tests/observability/test_token_monitor.py::test_the_presence_and_token_writers_keep_each_others_values_in_the_seen_record",
+        "tests/observability/test_hook_event_export.py::test_native_token_measurements_stay_in_the_seen_record_and_leave_the_hook_process_unsent",
+        "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_the_last_token_fill_and_burn_rate_under_the_session_id",
+        "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_only_the_fill_for_a_record_without_a_burn_rate",
+        "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_window"
+      ]
     }
   ],
   "unmapped_rules": [

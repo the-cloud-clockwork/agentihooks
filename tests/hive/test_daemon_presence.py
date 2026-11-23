@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from hooks import config
-from hooks.observability import otel, presence
+from hooks.observability import otel, presence, token_monitor
 from scripts.hive import daemon
 
 ENV = {
@@ -137,3 +137,34 @@ def test_a_dispatcher_mark_after_a_daemon_pass_never_starts_the_otel_worker_or_s
     assert json.loads(done.stdout.splitlines()[-1]) == {"initialized": False, "worker": False}
     assert (seen_folder() / "daemon.beat").exists()
     assert (seen_folder() / "sess-hook.json").exists()
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_daemon_pass_sends_the_last_token_fill_and_burn_rate_under_the_session_id(monkeypatch):
+    calls = recorded(monkeypatch)
+    presence.agent("sess-1", ENV, 1_000.0)
+    token_monitor.record_tokens("sess-1", 20.0, 900.0, 1_000.0)
+    token_monitor.record_tokens("sess-1", 25.5, 1_200.0, 1_001.0)
+    calls.clear()
+    daemon_pass(monkeypatch, 1_180_000)
+    assert calls == [
+        ("agentihooks.presence.agent", 1_000.0, ATTRS),
+        ("agentihooks.tokens.fill_pct", 25.5, {"session.id": "sess-1"}),
+        ("agentihooks.tokens.burn_rate", 1_200.0, {"session.id": "sess-1"}),
+    ]
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_daemon_pass_sends_only_the_fill_for_a_record_without_a_burn_rate(monkeypatch):
+    calls = recorded(monkeypatch)
+    token_monitor.record_tokens("sess-2", 10.0, None, 1_000.0)
+    daemon_pass(monkeypatch, 1_010_000)
+    assert calls == [("agentihooks.tokens.fill_pct", 10.0, {"session.id": "sess-2"})]
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_window(monkeypatch):
+    calls = recorded(monkeypatch)
+    token_monitor.record_tokens("sess-3", 10.0, 5.0, 1_000.0)
+    daemon_pass(monkeypatch, 1_181_000)
+    assert calls == []
