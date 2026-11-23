@@ -11,6 +11,7 @@ from scripts.hive.orders import Ack
 from scripts.swarm import expert_launch, expert_lineage, expert_seat, lease, seat_spawn, tick
 from scripts.swarm.controller import FencedRuntime
 from scripts.swarm.profile_choice import ProfileDecision
+from scripts.swarm.store import AgentRecord
 from scripts.swarm_v2.runtime.base import RuntimeRouter
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from scripts.tick.steps import observe
@@ -276,3 +277,14 @@ def test_another_execution_cannot_be_collected_for_a_pending_expert(context: Sim
     assert run(context) == []
     assert context.store.execution_registry.get(context.config.slug, agent.execution_id).state == "launching"
     assert len(context.store.execution_registry.records(context.config.slug)) == 1
+
+
+@pytest.mark.feature("expert-seat-step")
+def test_legacy_expert_acknowledgement_remains_protected(context: SimpleNamespace) -> None:
+    agent = AgentRecord(
+        context.store.next_name(context.config.slug, "expert"), "expert", context.lineage.id, state="launching"
+    )
+    context.store.redis.hset(
+        context.store.key(context.config.slug, "launches"), agent.name, json.dumps({"state": tick.ACKNOWLEDGING})
+    )
+    assert observe._acknowledging(context.config.slug, context.store, agent)

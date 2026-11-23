@@ -13599,7 +13599,8 @@
         "tests/tick/steps/test_expert_ack_later.py::test_controller_takeover_retires_the_original_expert_order_without_relaunch",
         "tests/tick/steps/test_expert_ack_later.py::test_a_launching_record_without_a_hive_runtime_keeps_its_existing_seat",
         "tests/tick/steps/test_expert_ack_later.py::test_collection_with_no_order_never_invents_an_expert_acknowledgement",
-        "tests/tick/steps/test_expert_ack_later.py::test_another_execution_cannot_be_collected_for_a_pending_expert"
+        "tests/tick/steps/test_expert_ack_later.py::test_another_execution_cannot_be_collected_for_a_pending_expert",
+        "tests/tick/steps/test_expert_ack_later.py::test_legacy_expert_acknowledgement_remains_protected"
       ],
       "live_check": [
         "python",
