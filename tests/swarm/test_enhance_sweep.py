@@ -50,9 +50,10 @@ TASKS = [
     _task("t8"),
     _task("enhance-t8", lane="plan", kind="plan", enhances="t8"),
     {key: value for key, value in _task("t9").items() if key != "lane"},
+    {key: value for key, value in _task("t10").items() if key != "description"},
 ]
-LANES = {"eng": ["t1", "t8", "t9"], "ci": ["t2"]}
-REPORT = {"eng": {"count": 3, "ids": ["t1", "t8", "t9"]}, "ci": {"count": 1, "ids": ["t2"]}}
+LANES = {"eng": ["t1", "t8", "t9", "t10"], "ci": ["t2"]}
+REPORT = {"eng": {"count": 4, "ids": ["t1", "t8", "t9", "t10"]}, "ci": {"count": 1, "ids": ["t2"]}}
 
 
 @dataclass
@@ -119,7 +120,7 @@ def test_each_thin_task_writes_under_its_own_thirty_second_deadline() -> None:
     ledger = FakeLedger(dict(ANSWERS))
     enhance_sweep.sweep(TASKS, ledger, pause=lambda _: None)
     deadlines = {id(call.deadline): call.deadline for call in ledger.calls}
-    assert len(deadlines) == 4
+    assert len(deadlines) == 5
     assert all(29 < deadline.remaining <= 30 for deadline in deadlines.values())
 
 
@@ -127,7 +128,7 @@ def test_each_thin_task_writes_under_its_own_thirty_second_deadline() -> None:
 def test_the_sweep_pauses_three_seconds_between_thin_tasks_and_never_before_the_first() -> None:
     pauses: list[float] = []
     enhance_sweep.sweep(TASKS, FakeLedger(dict(ANSWERS)), pause=pauses.append)
-    assert pauses == [3.0, 3.0, 3.0]
+    assert pauses == [3.0, 3.0, 3.0, 3.0]
 
 
 @pytest.mark.feature("swarm-enhance-sweep")
@@ -158,8 +159,8 @@ def test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_wri
     assert json.loads(capsys.readouterr().out) == {
         "dry_run": False,
         "lanes": REPORT,
-        "actions": [f"queued enhance-{tid} for thin task {tid}" for tid in ("t1", "t2", "t8", "t9")],
+        "actions": [f"queued enhance-{tid} for thin task {tid}" for tid in ("t1", "t2", "t8", "t9", "t10")],
     }
     assert built == [("sw", "clients of sw")]
-    assert swarm == [3.0, 3.0, 3.0]
+    assert swarm == [3.0, 3.0, 3.0, 3.0]
     assert _calls(ledger) == _tick_calls(TASKS)

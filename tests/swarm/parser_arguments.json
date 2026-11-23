@@ -902,6 +902,10 @@
       "target",
       "--top",
       "--bottom"
+    ],
+    [
+      "sample",
+      "enhance"
     ]
   ]
 }
