@@ -14,11 +14,11 @@ from packaging.version import InvalidVersion, Version
 
 from scripts import updater
 from scripts.events.bus import SERVE_WAITED_MS
-from scripts.handoff import transfers
+from scripts.handoff import envelope, transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
 from scripts.hub import branch_heads, lease
-from scripts.swarm import readiness, run_window, successor_fill
+from scripts.swarm import admission_view, readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
@@ -84,9 +84,10 @@ class Admission:
         ledger: LedgerClient | None = None,
         source: readiness.Source | None = None,
         clock: lease.Clock = lease.wall_ms,
-    ):
+    ) -> None:
         self._store, self.ledger, self.clock = store, ledger or LedgerClient(service=True), clock
         self.source = source or readiness.Source(store, self.ledger)
+        self.view = admission_view.Narrow(lambda: self.store, self.ledger, self.source)
 
     @property
     def store(self) -> RedisStore:
@@ -120,9 +121,8 @@ class Admission:
             return None
         timer.mark("stopped")
         task_id, lane, generation = request["task"], request["lane"], request["generation"]
-        view = self.source.snapshot(slug)
-        timer.mark("snapshot")
-        if withdrawn := readiness.withdrawal(
+        view = self.view.task(slug, task_id, timer.mark)
+        if withdrawn := admission_view.withdrawal(
             SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view
         ):
             return self._withdrawn(slug, request, offer, withdrawn)
@@ -142,7 +142,7 @@ class Admission:
             )
             return None
         timer.mark("cap")
-        reserved = self._reserved(view, view.rows[task_id], request["hive"])
+        reserved = self._reserved(slug, view.rows[task_id], request["hive"])
         with self._turn(request["hive"], offer) as busy:
             timer.mark("turn")
             if not busy and (kept := self._kept(slug, request, offer)):
@@ -240,15 +240,15 @@ class Admission:
             return "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
         return ""
 
-    def _reserved(self, view: readiness.Snapshot, row: dict[str, Any], hive: str) -> int:
-        """The root slots kept for the waiting tasks only the root hive takes of every events swarm, the asking swarm
-        read from its own view, when this task could run on any hive; none for another hive or a task only the root
-        hive takes."""
+    def _reserved(self, slug: str, row: dict[str, Any], hive: str) -> int:
+        """The root slots kept for the waiting tasks only the root hive takes of every events swarm, each read through
+        its open pinned tasks, when this task could run on any hive; none for another hive or a task only the root hive
+        takes."""
         if hive != readiness.ROOT or readiness.root_only(row):
             return 0
         capabilities = readiness.declared(self.store, hive)
-        views = [view, *(self.source.snapshot(slug) for slug in self.source.slugs() if slug != view.slug)]
-        return sum(readiness.root_waiting(each, capabilities) for each in views)
+        slugs = [slug, *(each for each in self.source.slugs() if each != slug)]
+        return sum(self.view.waiting(each, capabilities) for each in slugs)
 
     @contextmanager
     def _turn(self, hive: str, offer: str) -> Iterator[str]:
@@ -291,8 +291,12 @@ class Admission:
 
     def _full(self, hive: str, reserved: int) -> str:
         """The hive's live worker executions across every swarm, with the slots it keeps for waiting tasks only it
-        takes, against its registry max agents; empty below the cap or when none is set."""
-        from scripts.hive import registry
+        takes and, on a hive that takes experts, one for each running expert lineage of every swarm with no live
+        expert, against its registry max agents; empty below the cap or when none is set. The tick places an expert
+        successor, never this admission, so the slot kept for it holds lane offers until the expert seats step seats
+        it."""
+        from scripts.hive import placement, registry
+        from scripts.swarm import expert_launch, expert_lineage
 
         record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
         cap = record.get("max_agents")
@@ -300,14 +304,19 @@ class Admission:
             return ""
         slugs = cast(list[str], self.store.slugs())  # pragma: no mutate
         hosts = {hive, ""} if hive == readiness.ROOT else {hive}
-        live = sum(
-            1
-            for slug in slugs
-            for agent in self.store.execution_registry.agents(slug)
-            if agent.hive in hosts and agent.lane != "master" and agent.state not in TERMINAL_STATES
-        )
+        experts = placement.hosts(expert_launch.LANE, record)
+        live = waiting = 0
+        for slug in slugs:
+            agents = self.store.execution_registry.agents(slug)
+            live += sum(
+                1
+                for agent in agents
+                if agent.hive in hosts and agent.lane != "master" and agent.state not in TERMINAL_STATES
+            )
+            waiting += expert_lineage.waiting(self.store, slug, agents) if experts else 0
         kept = f" with {reserved} kept for tasks only the root hive takes" if reserved else ""
-        return f"{live} of {cap} agents on the hive{kept}" if live + reserved >= cap else ""
+        kept += f" with {waiting} kept for expert lineages waiting for an expert" if waiting else ""
+        return f"{live} of {cap} agents on the hive{kept}" if live + reserved + waiting >= cap else ""
 
     def _claim(
         self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], timer: _StepTimer
@@ -342,14 +351,17 @@ class Admission:
         self.store.seats.occupy(seat, name, now)
         claimed: dict[str, Any] = {**row, **live}
         claimed.update(self._continuation(slug, name, claimed, rows))
+        timer.mark("continuation")
         claimed["overlaps"] = tick._sharing(claimed, rows, self.store.agents(slug))
         members: list[str] = claimed.get("group_members") or []
         claimed["group"] = [
             {key: rows[member][key] for key in ("id", "title", "description")} for member in members if member in rows
         ]
         claimed[orders.SEEDS] = self._seeds(slug, claimed, doc, name)
+        timer.mark("seeds")
         primed = tick.primed(self.store, slug, seat, claimed)
         task = successor_fill.task(primed, self.store.config(slug), record.lane)
+        timer.mark("primed")
         task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {
             "execution_id": agent.execution_id,
@@ -363,6 +375,7 @@ class Admission:
         except Exception:
             self._release(slug, task_id, name)
             raise
+        timer.mark("transfer")
         admitted = {
             "hive": request["hive"],
             "name": name,
@@ -394,6 +407,7 @@ class Admission:
         config = self.store.config(slug)
         reclaim, origin = branch_heads.reclaimer(config)
         repo = config.repo_origin or config.repo
+        rows = {**self.view.branched(slug, envelope.candidates(lives, task.get("branch") or "")), **rows}
         if handoff:
             saved: dict[str, Any] = self.store.handoff_envelope(slug, task_id) or {}
             resolved = continuation.resolve(repo, task, rows, lives, saved, reclaim, origin)

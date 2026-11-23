@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/queue.py:scripts.ci_lab.queue.x\u01c1Queue\u01c1ordered:7a0f8965e5982fbf3b1946aa8dcf00b3aa669037b4cb92d7c38b0f22495ed2c2": {
+    "reader": "standards_reader",
+    "reason": "fakeredis converts \"+INF\" with float() to the same infinity as \"+inf\", and Redis parses it with strtod, which ignores case, so the range is unchanged."
+  }
+}
