@@ -113,7 +113,7 @@ def test_the_repository_gate_refuses_one_split_job_through_the_early_queue_gate(
 @pytest.mark.parametrize("status", ["success", "failure", "cancelled", "skipped", "missing"])
 @pytest.mark.feature("gate-required-split-jobs")
 def test_split_aggregation_requires_both_jobs_to_succeed_on_pull_requests(job: str, status: str) -> None:
-    [step] = ci_reuse.split_required(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
+    [step] = ci_reuse.split_required(ci_reuse.gate_steps(queue_tier=True, consolidated=True, promotion=True))
     required = ["select", "collect", "test-count", "lint", "lint-actions", "semgrep", "sonar"]
     needs: Needs = {name: {"result": "success"} for name in required}
     needs["select"]["outputs"] = {"scope": "none"}
