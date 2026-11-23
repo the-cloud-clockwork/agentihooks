@@ -1895,7 +1895,7 @@ def test_successor_publishes_past_a_settled_pull_request_only(
     assert len(viewed) == 1
 
 
-def _pull_request(monkeypatch: pytest.MonkeyPatch, state: str) -> list[str]:
+def _stub_pull_request(monkeypatch: pytest.MonkeyPatch, state: str) -> list[str]:
     from scripts.swarm import publish
     from scripts.tick.ports.source_control import ChangeRef, ChangeState
 
@@ -1921,7 +1921,7 @@ def test_publish_refuses_a_fresh_branch_while_the_recorded_branch_holds_commits_
     retained = git(p.root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Retained predecessor work")
     git(p.root, "push", "origin", f"{retained}:refs/heads/predecessor")
     p.task.update(branch="predecessor")
-    _pull_request(monkeypatch, "closed")
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "")
     monkeypatch.chdir(p.root)
     before = git(p.root, "rev-parse", "HEAD")
     with pytest.raises(publish.SwarmError, match="differs from registered branch predecessor"):
@@ -1940,7 +1940,7 @@ def test_publish_refuses_a_fresh_branch_over_a_never_pushed_branch_while_its_pul
 
     p = publication
     p.task.update(branch="never-pushed", pr_url="https://github.com/example/repo/pull/7")
-    _pull_request(monkeypatch, "open")
+    _stub_pull_request(monkeypatch, "open")
     monkeypatch.chdir(p.root)
     with pytest.raises(publish.SwarmError, match="differs from registered branch never-pushed"):
         publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Wait for the open pull request", ["chosen.txt"])
@@ -1958,7 +1958,7 @@ def test_publish_records_a_fresh_branch_over_a_never_pushed_recorded_branch(
 
     p = publication
     p.task.update(branch="never-pushed", pr_url=url)
-    viewed = _pull_request(monkeypatch, "closed")
+    viewed = _stub_pull_request(monkeypatch, "closed")
     monkeypatch.chdir(p.root)
     result = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue on a fresh branch", ["chosen.txt"])
     head = git(p.root, "rev-parse", "HEAD")
