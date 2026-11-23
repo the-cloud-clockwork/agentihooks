@@ -41,12 +41,13 @@ def _hold(
     tmp_path: Path,
     head: dict[str, str],
     reviews: str | None,
-    reviewed: str = REVIEWED,
+    reviewed: str | None = REVIEWED,
     base: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     file = tmp_path / "reviews.jsonl"
     if reviews is not None:
         file.write_text(reviews)
+    env = {name: value for name, value in os.environ.items() if name != "TEST_COUNT_REVIEWED_HEAD"}
     return subprocess.run(
         [
             sys.executable,
@@ -59,7 +60,8 @@ def _hold(
             str(_tree(tmp_path / "head", head)),
         ],
         cwd=ROOT,
-        env={**os.environ, "TEST_COUNT_REVIEWS": str(file), "TEST_COUNT_REVIEWED_HEAD": reviewed},
+        env={**env, "TEST_COUNT_REVIEWS": str(file)}
+        | ({} if reviewed is None else {"TEST_COUNT_REVIEWED_HEAD": reviewed}),
         capture_output=True,
         text=True,
     )
@@ -129,19 +131,41 @@ def test_the_approvals_mode_holds_only_new_signed_retirements(
     assert UNREAD not in result.stdout
 
 
+@pytest.mark.parametrize("reviewed", ["", None], ids=["empty", "unset"])
 @pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
-def test_the_approvals_mode_passes_without_a_reviewed_head(tmp_path: Path) -> None:
-    result = _hold(tmp_path, _retirement(NODE, SIGNED), None, reviewed="")
+def test_the_approvals_mode_passes_without_a_reviewed_head(tmp_path: Path, reviewed: str | None) -> None:
+    result = _hold(tmp_path, _retirement(NODE, SIGNED), None, reviewed=reviewed)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "::error::" not in result.stdout
     assert UNREAD not in result.stdout
 
 
 @pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
-def test_the_approvals_mode_grades_without_collecting_either_tree(tmp_path: Path) -> None:
-    result = _hold(tmp_path, _retirement(NODE, SIGNED), _review("retirement-owner", "APPROVED"))
+def test_the_approvals_mode_passes_a_head_the_floor_refuses_because_it_collects_nothing(tmp_path: Path) -> None:
+    base = {**OWNERS, "tests/test_mod.py": "def test_kept():\n    assert True\n\ndef test_lost():\n    assert True\n"}
+    head = {"tests/test_mod.py": "def test_kept():\n    assert True\n"}
+    result = _hold(tmp_path, head, None, base=base)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert not (tmp_path / "base" / "tests").exists()
-    assert not (tmp_path / "head" / "tests").exists()
-    assert "head collects" not in result.stdout
-    assert "Collecting" not in result.stdout
+    assert result.stdout == ""
+    floor = subprocess.run(
+        [sys.executable, "-m", "tests.count_floor", "--base", str(tmp_path / "base"), "--head", str(tmp_path / "head")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert floor.returncode == 1, floor.stdout + floor.stderr
+    assert "head collects 1 tests, base floor 2" in floor.stdout
+
+
+@pytest.mark.parametrize("side", [["--record", "record.json"], ["--retire", NODE]], ids=["record", "retire"])
+@pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
+def test_the_approvals_mode_is_refused_beside_another_mode(tmp_path: Path, side: list[str]) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.count_floor", "--approvals", *side, "--head", str(tmp_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "--approvals grades a head against a base, so it needs --base" in result.stderr
+    assert list(tmp_path.iterdir()) == []
