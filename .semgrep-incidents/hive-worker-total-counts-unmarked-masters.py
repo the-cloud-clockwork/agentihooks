@@ -1,7 +1,9 @@
 from typing import Any
 
 
-def _unmarked_masters(agents: list[Any], hive: str, counts: dict[str, Any], spellings: dict[str, str]) -> int:
+def _unmarked_masters(
+    agents: list[Any], counts: dict[str, Any], executions: dict[str, list[str]], spellings: dict[str, str]
+) -> int:
     return 0
 
 
@@ -17,9 +19,7 @@ def unsubtracted(hive: dict[str, Any], reported: dict[str, int], pending: int) -
 
 def by_role(hive: dict[str, Any], reported: dict[str, int], masters: int, pending: int, agents: list[Any]) -> None:
     # ok: hive-worker-total-counts-unmarked-masters
-    hive["agents"] = max(0, sum(reported.values()) - masters - _unmarked_masters(agents, hive["id"], {}, {})) + (
-        pending
-    )
+    hive["agents"] = max(0, sum(reported.values()) - masters - _unmarked_masters(agents, {}, {}, {})) + (pending)
 
 
 def floor(hive: dict[str, Any], recorded: int) -> None:

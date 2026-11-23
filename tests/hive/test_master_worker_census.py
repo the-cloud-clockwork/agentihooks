@@ -86,7 +86,7 @@ def test_a_root_master_with_no_hive_name_leaves_only_the_root_worker_total(remot
 
 
 @pytest.mark.feature("hive-worker-total-excludes-masters-by-role")
-def test_a_master_record_the_hive_does_not_list_under_a_reported_slot_removes_no_real_worker(remote: Any) -> None:
+def test_a_master_record_the_hive_does_not_list_removes_no_real_worker(remote: Any) -> None:
     _record(remote, "master", "remote")
     gone = _record(remote, "master", "remote", account="gone")
     _report(remote, "remote", {"claude:account": 2, "_executions": {"claude:gone": [gone.execution_id]}})

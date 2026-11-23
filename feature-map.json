@@ -9,7 +9,7 @@
       "tests": [
         "tests/hive/test_master_worker_census.py::test_a_master_on_any_login_route_is_no_worker_and_the_real_worker_still_counts",
         "tests/hive/test_master_worker_census.py::test_a_root_master_with_no_hive_name_leaves_only_the_root_worker_total",
-        "tests/hive/test_master_worker_census.py::test_a_master_record_the_hive_does_not_list_under_a_reported_slot_removes_no_real_worker",
+        "tests/hive/test_master_worker_census.py::test_a_master_record_the_hive_does_not_list_removes_no_real_worker",
         "tests/hive/test_master_worker_census.py::test_zero_cpu_room_still_refuses_once_the_master_leaves_the_worker_total",
         "tests/hive/test_master_worker_census.py::test_an_expert_takes_the_root_hive_whose_count_only_a_subscription_master_fills"
       ],
