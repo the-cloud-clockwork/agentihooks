@@ -431,6 +431,20 @@ def test_the_real_static_jobs_pass_inline_python_only_in_their_install_and_recor
     }
 
 
+@pytest.mark.feature("lab-static-jobs-hold-lab-steps")
+def test_the_real_count_floor_gate_reads_no_pull_request_head_and_no_reviews_file() -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+    floor = next(gate for gate in gates if gate.name == "test-count/hold-the-base-revision-s-test-count")
+    assert floor.reads == ("runner.temp", "steps.day.outputs.key")
+    assert dict(floor.env) == {
+        "TEST_COUNT_COLLECTION_CACHE": "${{ runner.temp }}/count-collections",
+        "TEST_COUNT_ENVIRONMENT": "${{ steps.day.outputs.key }}",
+        "TEST_COUNT_BASE_RECORD": "${{ runner.temp }}/base-record.json",
+    }
+
+
 def test_the_command_prints_one_json_line_per_gate(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

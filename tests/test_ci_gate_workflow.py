@@ -495,12 +495,13 @@ def test_fetching_the_dev_count_record_never_fails_and_writes_only_a_dev_record(
 def test_a_pull_request_count_floor_reads_its_reviews_on_the_app_token(tmp_path: Path, answer: str) -> None:
     from tests.test_ci_hosted_lanes import _evaluate
 
-    count = _workflow()["jobs"]["test-count"]["steps"]
-    names = [step.get("name") for step in count]
-    mint = count[names.index("Mint the token that reads the dev count record")]
-    fetch = count[names.index("Read the pull request reviews")]
-    floor = count[names.index("Hold the base revision's test count")]
-    assert names.index(mint["name"]) < names.index(fetch["name"]) < names.index(floor["name"])
+    jobs = _workflow()["jobs"]
+    collect = jobs["collect"]["steps"]
+    names = [step.get("name") for step in collect]
+    mint = collect[names.index("Mint the token that reads the dev count record")]
+    fetch = collect[names.index("Read the pull request reviews")]
+    hold = collect[names.index("Hold each new retirement to a code owner's approval")]
+    assert names.index(mint["name"]) < names.index(fetch["name"]) < names.index(hold["name"])
     assert mint["with"]["permission-pull-requests"] == "read"
     assert fetch["env"] == {
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
@@ -510,8 +511,17 @@ def test_a_pull_request_count_floor_reads_its_reviews_on_the_app_token(tmp_path:
     assert _evaluate(condition, event_name="pull_request") is True
     assert _evaluate(condition, event_name="merge_group") is False
     assert _evaluate(condition, event_name="workflow_dispatch") is False
-    assert floor["env"]["TEST_COUNT_REVIEWS"] == "${{ runner.temp }}/pull-reviews.jsonl"
-    assert floor["env"]["TEST_COUNT_REVIEWED_HEAD"] == "${{ github.event.pull_request.head.sha }}"
+    assert hold["if"] == "github.event_name == 'pull_request'"
+    assert hold["env"] == {
+        "TEST_COUNT_REVIEWS": "${{ runner.temp }}/pull-reviews.jsonl",
+        "TEST_COUNT_REVIEWED_HEAD": "${{ github.event.pull_request.head.sha }}",
+    }
+    count = {step.get("name"): step for step in jobs["test-count"]["steps"]}
+    assert "Read the pull request reviews" not in count
+    assert (
+        not {"TEST_COUNT_REVIEWS", "TEST_COUNT_REVIEWED_HEAD"}
+        & count["Hold the base revision's test count"]["env"].keys()
+    )
     runner = tmp_path / "runner"
     runner.mkdir()
     bin_dir = tmp_path / "bin"
