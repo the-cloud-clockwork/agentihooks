@@ -8018,7 +8018,7 @@
       "id": "ledger-warm-writer",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-daemon",
-      "behaviour": "One warm ledger writer per host answers each ledger API request on an owner only unix socket in the agentihooks home with the in process answer, as the caller and with the headers the request names, so a socket write, read or refusal returns the same status, body and rows as the in process call. A second writer refuses a live socket, a stale socket file is replaced, and the writer returns once the checkout moves after finishing requests in flight. A writer that cannot open its store, or whose socket file was removed, still closes and leaves no socket behind.",
+      "behaviour": "One warm ledger writer per host answers each ledger API request on an owner only unix socket in the agentihooks home with the in process answer, as the caller and with the headers the request names, so a socket write, read or refusal returns the same status, body and rows as the in process call. A second writer refuses a live socket, a stale socket file is replaced, and the writer returns once the checkout moves after finishing requests in flight. A writer that cannot open its store, or whose socket file was removed, still closes and leaves no socket behind. Every refusal, the revision conflict retry and every audit effect answer and leave rows alike over the socket and in process, on the SQLite store and on shared Postgres.",
       "seam": "scripts.swarm_ledger.warm_writer.serve and ask over scripts.tick.adapters.database_ledger.replied, the answer the in process transport uses",
       "tests": [
         "tests/swarm_ledger/test_warm_writer.py::test_a_socket_write_returns_the_in_process_reply_and_leaves_the_same_rows",
@@ -8046,7 +8046,10 @@
         "tests/swarm_ledger/test_warm_writer.py::test_the_checkout_moves_only_to_a_new_revision",
         "tests/swarm_ledger/test_warm_writer.py::test_the_writer_command_serves_the_home_socket_until_sigterm",
         "tests/swarm_ledger/test_warm_writer.py::test_the_writer_command_names_itself_and_takes_only_serve",
-        "tests/swarm_ledger/test_warm_writer.py::test_a_new_writer_probes_its_own_socket_within_the_probe_window"
+        "tests/swarm_ledger/test_warm_writer.py::test_a_new_writer_probes_its_own_socket_within_the_probe_window",
+        "tests/swarm_ledger/test_warm_writer_parity.py::test_each_refusal_answers_alike_over_the_socket_and_in_process",
+        "tests/swarm_ledger/test_warm_writer_parity.py::test_a_conflicting_write_retries_once_and_lands_alike_over_the_socket_and_in_process",
+        "tests/swarm_ledger/test_warm_writer_parity.py::test_each_audit_effect_is_left_alike_over_the_socket_and_in_process"
       ]
     },
     {
