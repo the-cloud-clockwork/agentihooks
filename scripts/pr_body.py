@@ -53,14 +53,10 @@ def missing_sections(text: str, level: int = 2) -> list[str]:
 
 def _without_sections(text: str) -> str:
     names = {section.casefold() for section in SECTIONS}
-    retained: list[str] = []
-    cursor = 0
-    for name, start, end, _ in _blocks(text, 2):
+    for name, start, end, _ in reversed(_blocks(text, 2)):
         if name in names:
-            retained.append(text[cursor:start])
-            cursor = end
-    retained.append(text[cursor:])
-    return "".join(retained).rstrip()
+            text = text[:start] + text[end:]
+    return text.rstrip()
 
 
 def fill(recon: str, body: str = "") -> str:
