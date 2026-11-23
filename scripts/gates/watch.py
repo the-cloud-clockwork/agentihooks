@@ -9,7 +9,7 @@ from scripts.swarm import naming
 from scripts.swarm.health import activity, findings
 from scripts.swarm_ledger.ledger_gate import WATCH_STALE_SECONDS
 
-LANES = frozenset({"eng", "ci", "master"})
+LANES = frozenset({"eng", "ci", "master", "review"})
 
 
 def watcher_alive(who, ledger_dir, now=None):

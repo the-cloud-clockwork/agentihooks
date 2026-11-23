@@ -1130,7 +1130,9 @@ def test_timer_ensure_retires_the_alert_intake_service(tmp_path):
     assert [argv for argv, _ in calls if argv[2] in ("disable", "daemon-reload")] == []
 
 
-def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units_alone(tmp_path, monkeypatch):
+def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(timer, "reconcile", real_reconcile)
     calls, failing = [], set()
 
@@ -1144,19 +1146,19 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     calls.clear()
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
     names = [f"agentihooks-{name}" for name in ("scheduler.service", "inbox-waker.service", "quota-prober.service")]
-    names += ["agentihooks-tick-watch.service", "agentihooks-swarm-waits.timer"]
+    names += ["agentihooks-tick-watch.service", "agentihooks-ledger-writer.service", "agentihooks-swarm-waits.timer"]
     assert calls == [(["systemctl", "--user", "is-enabled", "--quiet", name], kw) for name in names]
 
     calls.clear()
     failing.add("is-enabled")
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    assert [call[0][2] for call in calls] == ["is-enabled", *["enable"] * 5]
+    assert [call[0][2] for call in calls] == ["is-enabled", *["enable"] * 6]
 
     calls.clear()
     failing.clear()
     failing.add(names[2])
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run) is False
-    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", "is-enabled", *["enable"] * 5]
+    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", "is-enabled", *["enable"] * 6]
     failing.clear()
 
     calls.clear()
@@ -1184,10 +1186,7 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     assert (tmp_path / "agentihooks-new-intake.service").read_text() == added
     assert calls == [
         (["systemctl", "--user", "daemon-reload"], {**kw, "check": False}),
-        enable("agentihooks-scheduler.service"),
-        enable("agentihooks-inbox-waker.service"),
-        enable("agentihooks-quota-prober.service"),
-        enable("agentihooks-tick-watch.service"),
+        *[enable(name) for name in names[:-1]],
         enable("agentihooks-new-intake.service"),
         enable("agentihooks-swarm-waits.timer"),
     ]
