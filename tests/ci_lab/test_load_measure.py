@@ -31,6 +31,13 @@ def _live(lab: Callable[..., Run]) -> Run:
     return run
 
 
+def _unrecorded(run: Run, head: str) -> None:
+    """Drop a head's grade revision and demand record, as a grade an older release saved has neither."""
+    grade = run.grade(head).run
+    run.lab.client.hdel(scheduler.REVISIONS, grade)
+    run.lab.client.hdel(scheduler.RECORDS, grade)
+
+
 def _opened(run: Run, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     """Answer redis.Redis.from_url for the lab URL with decoded responses with the run's Redis and return the
     environment naming that URL."""
@@ -40,17 +47,30 @@ def _opened(run: Run, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
 
 
 @pytest.mark.feature("lab-scheduler-load-measure")
-def test_the_measure_prints_three_builds_and_parses_each_stored_live_grade_once_on_its_cold_build(
+def test_the_measure_prints_three_builds_with_the_documents_fetched_and_record_bytes_read_by_each(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     run = _live(lab)
+    _unrecorded(run, HEADS[0])
     run.lab.client.sadd(scheduler.LIVE, "gone")
+    recorded = sum(len(record.encode()) for record in run.lab.client.hgetall(scheduler.RECORDS).values())
     parse = scheduler._parse
     assert load_measure.main([], _opened(run, monkeypatch)) == 0
     assert scheduler._parse is parse
     figures = json.loads(capsys.readouterr().out)
-    assert sorted(figures) == ["builds", "grades", "leaves_out", "parses", "process_seconds", "wall_seconds"]
-    assert (figures["builds"], figures["grades"], figures["parses"]) == (3, len(HEADS) + 1, len(HEADS))
+    assert sorted(figures) == [
+        "builds",
+        "documents_fetched",
+        "grades",
+        "leaves_out",
+        "parses",
+        "process_seconds",
+        "record_bytes_read",
+        "wall_seconds",
+    ]
+    assert (figures["builds"], figures["grades"], figures["parses"]) == (3, len(HEADS) + 1, 3)
+    assert (figures["documents_fetched"], figures["record_bytes_read"]) == ([1, 1, 1], [recorded, 0, 0])
+    assert recorded > 0
     assert len(figures["process_seconds"]) == len(figures["wall_seconds"]) == 3
     assert min(figures["process_seconds"] + figures["wall_seconds"]) >= 0
     assert figures["leaves_out"] == "the offer prune round trip of each build"
@@ -62,6 +82,7 @@ def test_the_measure_sends_only_read_commands_directly_and_through_pipelines_and
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     run = _live(lab)
+    _unrecorded(run, HEADS[0])
     environ = _opened(run, monkeypatch)
     client = run.lab.client
     sent: list[str] = []
@@ -87,7 +108,7 @@ def test_the_measure_sends_only_read_commands_directly_and_through_pipelines_and
     assert load_measure.main(["--builds", "2"], environ) == 0
     assert {"SMEMBERS", "GET", "HMGET", "HGETALL"} <= set(sent) <= READS
     assert set(run.engine.queue.offers(0)) == {"fresh", "stale"}
-    assert json.loads(capsys.readouterr().out)["parses"] == len(HEADS)
+    assert json.loads(capsys.readouterr().out)["parses"] == 2
 
 
 @pytest.mark.feature("lab-scheduler-load-measure")
