@@ -382,9 +382,9 @@ one JSON object:
 | Field | Meaning |
 |---|---|
 | `builds` | Load builds run |
-| `grades` | Live grades, the size of the live grade set |
+| `grades` | Live grades, the size of the live grade set; a live run whose grade document is gone counts here and is never parsed |
 | `process_seconds`, `wall_seconds` | Each build's `time.process_time` and `time.perf_counter` seconds, one entry per build |
-| `parses` | Calls of the scheduler's grade parser during the builds; one per live grade per build on current code |
+| `parses` | Calls of the scheduler's grade parser during the builds; one scheduler serves every build, so the first build parses each live grade with a stored document once and later builds parse only grades whose stored document changed |
 | `leaves_out` | What the figures leave out: the offer prune round trip of each build |
 
 The command reads only. A load prunes stale worker offers through the queue's prune script, its one write, so the

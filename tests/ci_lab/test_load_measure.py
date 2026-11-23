@@ -1,6 +1,8 @@
 import json
+import os
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,6 +17,8 @@ lab = _lab
 HEADS = tuple(f"{number:x}" * 40 for number in range(1, 4))
 READS = frozenset({"SCARD", "SMEMBERS", "GET", "ZRANGE", "HMGET", "HGETALL"})
 URL = "redis://lab"
+ROOT = Path(__file__).resolve().parents[2]
+REFERENCE = ROOT / "docs" / "reference" / "ci-lab.md"
 
 
 def _live(lab: Callable[..., Run]) -> Run:
@@ -37,17 +41,23 @@ def _opened(run: Run, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
 
 
 @pytest.mark.feature("lab-scheduler-load-measure")
-def test_the_measure_prints_three_builds_their_seconds_and_one_parse_per_live_grade_per_build(
-    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_the_measure_prints_three_builds_and_parses_each_stored_live_grade_once_on_its_cold_build(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     run = _live(lab)
+    run.lab.client.sadd(scheduler.LIVE, "gone")
     assert load_measure.main([], _opened(run, monkeypatch)) == 0
-    figures = json.loads(capsys.readouterr().out)
+    printed = capsys.readouterr().out
+    reports = Path(os.environ.get("PROOF_REPORT_DIR") or tmp_path)
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / "load-measure.json").write_text(printed)
+    figures = json.loads(printed)
     assert sorted(figures) == ["builds", "grades", "leaves_out", "parses", "process_seconds", "wall_seconds"]
-    assert (figures["builds"], figures["grades"], figures["parses"]) == (3, len(HEADS), 3 * len(HEADS))
+    assert (figures["builds"], figures["grades"], figures["parses"]) == (3, len(HEADS) + 1, len(HEADS))
     assert len(figures["process_seconds"]) == len(figures["wall_seconds"]) == 3
     assert min(figures["process_seconds"] + figures["wall_seconds"]) >= 0
     assert figures["leaves_out"] == "the offer prune round trip of each build"
+    assert [key for key in figures if f"`{key}`" not in REFERENCE.read_text()] == []
 
 
 @pytest.mark.feature("lab-scheduler-load-measure")
@@ -78,9 +88,9 @@ def test_the_measure_sends_only_read_commands_directly_and_through_pipelines_and
     monkeypatch.setattr(client, "execute_command", direct)
     monkeypatch.setattr(client, "pipeline", piped)
     assert load_measure.main(["--builds", "2"], environ) == 0
-    assert json.loads(capsys.readouterr().out)["parses"] == 2 * len(HEADS)
     assert {"SMEMBERS", "GET", "HMGET", "HGETALL"} <= set(sent) <= READS
     assert set(run.engine.queue.offers(0)) == {"fresh", "stale"}
+    assert json.loads(capsys.readouterr().out)["parses"] == len(HEADS)
 
 
 @pytest.mark.feature("lab-scheduler-load-measure")
@@ -89,7 +99,7 @@ def test_a_measured_build_returns_the_load_a_plain_build_returns_with_offers_on_
 ) -> None:
     run = _live(lab)
     now_ms = 1000 + scheduler.READY_MS
-    kept = load_measure.reader(run.lab.client)
+    kept = load_measure.measured_scheduler(run.lab.client)
     measured = kept.load(now_ms)
     assert kept.queue.prune(now_ms) == 0
     assert set(run.engine.queue.offers(0)) == {"fresh", "stale"}
@@ -104,7 +114,7 @@ def test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_pars
 ) -> None:
     run = _live(lab)
     parse = scheduler._parse
-    engine = load_measure.reader(run.lab.client)
+    engine = load_measure.measured_scheduler(run.lab.client)
     process = iter([1.0, 1.5, 2.0, 2.25]).__next__
     wall = iter([10.0, 12.0, 20.0, 21.0]).__next__
     figures = load_measure.measure(engine, 2, 1000, process, wall)
@@ -115,3 +125,14 @@ def test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_pars
     with pytest.raises(json.JSONDecodeError):
         load_measure.measure(engine, 1, 1000, time.process_time, time.perf_counter)
     assert scheduler._parse is parse
+
+
+@pytest.mark.feature("lab-scheduler-load-measure")
+def test_no_module_under_scripts_but_the_measure_itself_names_the_measure_module() -> None:
+    package = ROOT / "scripts"
+    naming = [
+        path.relative_to(package).as_posix()
+        for path in sorted(package.rglob("*.py"))
+        if "load_measure" in path.read_text()
+    ]
+    assert naming == ["ci_lab/load_measure.py"]

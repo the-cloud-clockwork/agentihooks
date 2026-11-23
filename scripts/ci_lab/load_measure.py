@@ -26,7 +26,7 @@ LEAVES_OUT = "the offer prune round trip of each build"
 Clock = Callable[[], float]
 
 
-def keep(since_ms: int) -> int:
+def prune_nothing(since_ms: int) -> int:
     """Stand in for the queue's offer prune on a measured scheduler: delete no offer and report none dropped."""
     return 0
 
@@ -44,11 +44,11 @@ class Parses:
         return self.parse(raw)
 
 
-def reader(client: Any) -> scheduler.Scheduler:
+def measured_scheduler(client: Any) -> scheduler.Scheduler:
     """Return a scheduler over client for load builds: its queue's offer prune deletes nothing, and it holds no
     object store, ports or settings, which a load never reads."""
     engine = scheduler.Scheduler(client, None, None, None)  # pyright: ignore[reportArgumentType]
-    setattr(engine.queue, "prune", keep)
+    engine.queue.prune = prune_nothing
     return engine
 
 
@@ -56,11 +56,11 @@ def measure(engine: scheduler.Scheduler, builds: int, now_ms: int, process: Cloc
     """Run builds loads at now_ms and return the build count, the live grade count, each build's seconds on the
     process and wall clocks, the grade parses the builds ran and what the figures leave out."""
     grades = engine.client.scard(scheduler.LIVE)
-    parse = getattr(scheduler, "_parse")
+    parse = scheduler._parse  # pyright: ignore[reportPrivateUsage]
     parses = Parses(parse)
     spent: list[float] = []
     took: list[float] = []
-    setattr(scheduler, "_parse", parses)
+    scheduler._parse = parses  # pyright: ignore[reportPrivateUsage]
     try:
         for _ in range(builds):
             started, clock = process(), wall()
@@ -68,7 +68,7 @@ def measure(engine: scheduler.Scheduler, builds: int, now_ms: int, process: Cloc
             spent.append(process() - started)
             took.append(wall() - clock)
     finally:
-        setattr(scheduler, "_parse", parse)
+        scheduler._parse = parse  # pyright: ignore[reportPrivateUsage]
     return {
         "builds": builds,
         "grades": grades,
@@ -86,7 +86,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     args = parser.parse_args(argv)
     client: Any = redis.Redis.from_url(environ[contract.REDIS_URL], decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
     now_ms = scheduler._now_ms()  # pyright: ignore[reportPrivateUsage]
-    print(json.dumps(measure(reader(client), args.builds, now_ms, time.process_time, time.perf_counter)))
+    print(json.dumps(measure(measured_scheduler(client), args.builds, now_ms, time.process_time, time.perf_counter)))
     return 0
 
 
