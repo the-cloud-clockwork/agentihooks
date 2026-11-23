@@ -468,7 +468,7 @@ SELECTED = {"lane": ("lane:eng", {"lane": "ci"}), "kind": ("kind:code", {"kind":
 
 
 @pytest.mark.feature("ready-offer-class-one-decider")
-def test_every_focus_selector_has_a_case_through_both_sites_that_class_an_offer() -> None:
+def test_the_selector_cases_name_exactly_the_focus_selectors_that_exist() -> None:
     assert set(SELECTED) == set(freeze.SELECTORS)
 
 
@@ -492,10 +492,18 @@ FOCUS_FORMS: tuple[tuple[str, ...], ...] = (
     ("kind:code",),
     ("kind:ops", "phases/p2"),
     ("tasks/t11", "lane:ci"),
+    ("lane:",),
+    ("phase:p1",),
+    ("tasks/t4", "tasks/t4", "kind:ops"),
+    ("phases/p1", "freeze tasks/t4"),
+    ("freeze phases/p2",),
 )
 
 
-def generated(targets: tuple[str, ...]) -> readiness.Snapshot:
+def generated(forms: tuple[str, ...], plain: bool = False) -> readiness.Snapshot:
+    """A ledger of twelve tasks that vary lane, kind, phase, rank and order mark, three of them waiting on another,
+    under the given freeze records: a form is a focus target, or `freeze` and a target. Plain, the tasks carry no
+    rank and no order mark."""
     marks = (None, {"at": 3, "by": "operator"}, {"at": 7, "by": "operator"})
     waits = {1: ["t10"], 9: ["t6"], 0: ["t7"]}
     tasks = [
@@ -505,26 +513,41 @@ def generated(targets: tuple[str, ...]) -> readiness.Snapshot:
             lane=("eng", "ci")[index // 2 % 2],
             kind=("code", "ops")[index // 4 % 2],
             depends_on=waits.get(index, []),
-            **({"rank": rank} if rank else {}),
-            **({"ordered": mark} if mark else {}),
+            **({"rank": rank} if rank and not plain else {}),
+            **({"ordered": mark} if mark and not plain else {}),
         )
         for index, (rank, mark) in enumerate(itertools.product((None, "urgent", "high", "low"), marks))
     ]
+    records = [
+        {"verb": "freeze", "target": form.removeprefix("freeze ")}
+        if form.startswith("freeze ")
+        else {"verb": "focus", "target": form}
+        for form in forms
+    ]
     phases = [{"id": "p1", "title": "build", "depends_on": []}, {"id": "p2", "title": "later", "depends_on": []}]
-    return snapshot(doc(tasks, phases=phases, freezes=[{"verb": "focus", "target": target} for target in targets]))
+    return snapshot(doc(tasks, phases=phases, freezes=records))
 
 
 def recorded_run() -> dict[str, dict[str, list[str]]]:
+    """For each set of freeze records: the offers in order, the waiting offers `behind` moves, and what one pass
+    places and leaves queued in each lane after an earlier pass queued the same tasks plain."""
     found: dict[str, dict[str, list[str]]] = {}
-    for targets in FOCUS_FORMS:
-        view = generated(targets)
+    for forms in FOCUS_FORMS:
+        view = generated(forms)
         keys = [event.key for event in readiness.offers(view, NOW)]
         waiting = [offer_aged(view, key) for key in reversed(keys)]
         fresh = [offer_aged(view, key, 0) for key in keys[1::2]]
-        found[" ".join(targets) or "no focus"] = {
+        clock = Clock()
+        bus = cast(Bus, memory.open_bus(BusConfig(), clock=clock))
+        readiness.publish(bus, generated((), plain=True), clock.now)
+        clock.now += WINDOW
+        found[" ".join(forms) or "no focus"] = {
             "offers": keys,
             "behind with every offer waiting": sorted(readiness.behind(waiting, [], view, LATER)),
             "behind with every second offer new": sorted(readiness.behind(waiting[::2], fresh, view, LATER)),
+            "placed after a plain pass": readiness.publish(bus, view, clock.now),
+            "queued in eng": queued(bus, "eng", view),
+            "queued in ci": queued(bus, "ci", view),
         }
     return found
 
