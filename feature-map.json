@@ -8196,6 +8196,19 @@
       ]
     },
     {
+      "id": "protected-grader-admits-pinned-tool-forms",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-admit",
+      "behaviour": "The protected grader admits the reuse job, the durations provenance prefix and the branch lane preflight as dev holds them or with their floating PyYAML install replaced by the exact PyYAML 6.0.3 install under the parser constraint file, the shallow preflight sparse checkout then also taking the CI tools folder, and refuses any other version, any other constraint file, an unconstrained pin, and a pinned preflight install without that sparse checkout.",
+      "seam": "gate_protected._pinned_tool_form over reuse_jobs, _duration_problems and _preflight_problems",
+      "tests": [
+        "tests/test_gate_protected_pinned_tools.py::test_the_pinned_tool_form_pins_each_floating_parser_install_and_keeps_every_other_value",
+        "tests/test_gate_protected_pinned_tools.py::test_the_protected_reuse_job_admits_its_parser_install_floating_or_under_the_exact_pin_only",
+        "tests/test_gate_protected_pinned_tools.py::test_the_protected_durations_provenance_admits_its_parser_install_floating_or_under_the_exact_pin_only",
+        "tests/test_gate_protected_pinned_tools.py::test_the_branch_lane_preflight_admits_its_parser_install_floating_or_under_the_exact_pin_only"
+      ]
+    },
+    {
       "id": "gate-declarations-never-expire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
@@ -8647,6 +8660,26 @@
       ],
       "rules": [
         "hive-guard-reads-node-cpu-used"
+      ]
+    },
+    {
+      "id": "hive-admission-measured-agent-cpu",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hivecpu-measured-agent-cpu",
+      "behaviour": "Hive admission sizes each agent at the CPU its hive measures: the pod load over the agents the headroom reading counts, rounded up to the next 0.05 and never below 0.5, falling back to 0.5 when no agent runs or the reading has no pod load, overridden by AGENTIHOOKS_HIVE_AGENT_CPU, and every CPU detail names the figure and its source.",
+      "seam": "admission.room over a headroom reading with pod_load and agents, and admission.agent_cpu",
+      "tests": [
+        "tests/hive/test_admission.py::test_a_pod_reading_with_pod_load_and_no_agents_keeps_the_half_cpu_room",
+        "tests/hive/test_admission.py::test_a_workstation_reading_with_agents_and_no_pod_load_keeps_the_half_cpu_room",
+        "tests/hive/test_admission.py::test_a_pod_reading_of_six_point_seven_cores_over_nine_agents_admits_at_three_quarters_of_a_cpu_each",
+        "tests/hive/test_admission.py::test_a_pod_reading_with_no_agents_admits_at_half_a_cpu_by_default",
+        "tests/hive/test_admission.py::test_a_reading_without_running_agents_or_pod_load_takes_the_default_figure",
+        "tests/hive/test_admission.py::test_the_measured_figure_rounds_up_to_the_next_twentieth_and_never_drops_below_half_a_cpu",
+        "tests/hive/test_admission.py::test_the_agent_cpu_setting_overrides_the_measured_figure",
+        "tests/hive/test_admission.py::test_an_agent_cpu_setting_that_names_no_cpu_leaves_the_measured_figure",
+        "tests/hive/test_admission.py::test_a_reading_taken_after_a_stale_one_has_no_pod_load_and_takes_the_default_figure",
+        "tests/hive/test_admission.py::test_the_swarm_share_counts_swarm_agents_at_the_measured_figure",
+        "tests/hive/test_admission.py::test_each_host_cpu_line_names_the_measured_figure_and_its_source"
       ]
     },
     {
