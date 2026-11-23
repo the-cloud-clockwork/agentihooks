@@ -311,7 +311,7 @@ def _pass_processes() -> PassProcesses | None:
 
 
 def _hive_lane(lane: str, task: dict, kubernetes_proof: bool) -> bool:
-    if kubernetes_proof and lane == "eng":
+    if kubernetes_proof and lane in ("eng", "review"):
         return False
     return lane in HIVE_LANES or lane == "master" or bool(task.get("hive"))
 

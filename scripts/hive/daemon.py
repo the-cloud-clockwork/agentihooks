@@ -256,8 +256,9 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
 
 
 def emit_presence(redis: "Redis", local_id: str, now_ms: int) -> None:
-    """Marks this hive seen over OpenTelemetry with its name, headed flag, release and agent processes by harness."""
-    from hooks.observability import presence
+    """Marks this hive seen over OpenTelemetry with its name, headed flag, release and agent processes by harness, then
+    exports the agent sessions seen on this home and their last token fill and burn rate."""
+    from hooks.observability import presence, token_monitor
 
     shown = registry.show(redis, local_id) or {}
     agents = {harness: len(pids) for harness, pids in account_sessions.local_processes().items()}
@@ -269,6 +270,8 @@ def emit_presence(redis: "Redis", local_id: str, now_ms: int) -> None:
         agents,
         now_ms / 1000,
     )
+    presence.export_agents(now_ms / 1000)
+    token_monitor.export_tokens(now_ms / 1000)
 
 
 def _headroom_wait_failed(exc: Exception, stop: threading.Event) -> None:
