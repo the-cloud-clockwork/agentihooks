@@ -1,8 +1,10 @@
+import ast
 import json
 import subprocess
 import sys
 import warnings
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -119,3 +121,53 @@ def test_lazy_dispatch_preserves_the_default_intent_mode(tmp_path: Path, monkeyp
     gate = intent.IntentGate()
     monkeypatch.setattr(gate, "decide", decide)
     assert entry._decide(gate, Call("Bash", {}), Who(), tmp_path).reason == "enforce"
+
+
+@pytest.mark.feature("gate-entry-mode-dispatch")
+def test_the_entry_hands_the_mode_to_the_intent_gate_and_three_arguments_to_any_other(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.gates import entry, intent
+    from scripts.gates.base import Call, Decision, Who
+    from scripts.gates.verdicts import Verdicts
+
+    seen: list[tuple[object, ...]] = []
+
+    def recording(*given: object) -> Decision:
+        seen.append(given)
+        return Decision.deny("held")
+
+    moded = intent.IntentGate()
+    monkeypatch.setattr(moded, "decide", recording)
+    call, who = Call("Bash", {}), Who()
+    assert entry._decide(moded, call, who, tmp_path, "coach").reason == "held"
+    [(got_call, got_who, state, mode)] = seen
+    assert got_call is call and got_who is who and mode == "coach" and isinstance(state, Verdicts)
+    seen.clear()
+    plain = SimpleNamespace(name="plain", decide=recording)
+    assert entry._decide(plain, call, who, tmp_path, "coach").reason == "held"
+    [(got_call, got_who, state)] = seen
+    assert got_call is call and got_who is who and isinstance(state, Verdicts)
+
+
+@pytest.mark.feature("gate-entry-mode-dispatch")
+def test_no_gate_typed_as_the_gate_type_is_called_with_more_than_its_three_arguments() -> None:
+    from scripts.gates import entry
+
+    tree = ast.parse(Path(entry.__file__).read_text(encoding="utf-8"))
+    calls: list[tuple[int, int, int]] = []
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef):
+            continue
+        typed = {
+            arg.arg
+            for arg in function.args.args
+            if isinstance(arg.annotation, ast.Name) and arg.annotation.id == "Gate"
+        }
+        for node in ast.walk(function):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            receiver = node.func.value
+            if node.func.attr == "decide" and isinstance(receiver, ast.Name) and receiver.id in typed:
+                calls.append((node.lineno, len(node.args), len(node.keywords)))
+    assert calls and [found for found in calls if found[1:] != (3, 0)] == []
