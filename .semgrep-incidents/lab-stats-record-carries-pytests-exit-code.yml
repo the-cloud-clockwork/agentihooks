@@ -1,0 +1,24 @@
+rules:
+  - id: lab-stats-record-carries-pytests-exit-code
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A lab stats record whose status is pytest's raw exit code fails the whole collection when the traced test
+      files hold no test: pytest answers its no tests collected code, the stats cache refuses every status but
+      zero and the mutation unit ends failed with no mutant graded. Pass the exit code through
+      run_mutation.collected_status, which reads no tests collected as an empty passing record and keeps every
+      other code.
+    paths:
+      include:
+        - /scripts/ci_lab/
+        - lab-stats-record-carries-pytests-exit-code.py
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              $CODE = pytest.main(...)
+              ...
+          - pattern-either:
+              - pattern: '{..., "status": int($CODE), ...}'
+              - pattern: '{..., "status": $CODE, ...}'
+      - pattern: '{..., "status": int(pytest.main(...)), ...}'
+      - pattern: '{..., "status": pytest.main(...), ...}'

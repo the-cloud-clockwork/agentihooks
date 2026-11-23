@@ -454,3 +454,76 @@ def test_generated_mutation_unit_keys_can_be_stored(
         assert verdicts.put(verdict, {"members": list(unit.members)}, b"completed")
         assert verdicts.get(unit.kind, unit.key) == verdict
         assert unit.key.startswith(f"{kind}-v{digests.SCHEMAS[kind]}-")
+
+
+def committed(root: Path, files: dict[str, str], message: str) -> str:
+    """Write files under root, commit every change of the tree and return the commit."""
+    for name, text in files.items():
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    author = ["-c", "user.name=lab", "-c", "user.email=lab@example.invalid"]
+    subprocess.run(["git", *author, "commit", "-q", "-m", message], cwd=root, check=True)
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+@pytest.mark.parametrize(
+    ("lines", "functions"),
+    [
+        ({7}, ["first"]),
+        ({8}, ["second"]),
+        ({12, 28}, ["second", "grow"]),
+        ({16}, []),
+        ({19}, ["third"]),
+        ({37}, []),
+        (set[int](), []),
+    ],
+)
+def test_changed_functions_holds_the_graded_mutations_of_each_function_the_changed_lines_meet(
+    tmp_path: Path, lines: set[int], functions: list[str]
+) -> None:
+    wrapper, found = expand_mutation.changed_functions(PATH, SAMPLE, lines)
+    assert wrapper.module.code == SAMPLE
+    assert [function.name.value for function in found] == functions
+    for function, mutations in found.items():
+        assert [mutation.contained_by_top_level_function for mutation in mutations] == [function] * len(mutations)
+    units = expand_mutation.mutant_units(repository(tmp_path, MUTANT_FILES), {PATH: lines}, {}, {})
+    assert [len(mutations) for mutations in found.values()] == [len(unit.members) for unit in units]
+    assert all(found.values())
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_changed_tests_lists_the_test_modules_the_head_changes_and_still_holds(tmp_path: Path) -> None:
+    passing = "def test_it():\n    assert True\n"
+    files = {
+        "scripts/sample.py": "A = 1\n",
+        "hooks/test_hook.py": "HOOK = 1\n",
+        "tests/helper.py": "HELP = 1\n",
+        "tests/test_a.py": passing,
+        "tests/test_gone.py": passing,
+        "tests/test_same.py": passing,
+        "tests/unit/test_data.json": "{}\n",
+        "tests/unit/test_deep.py": passing,
+    }
+    root = repository(tmp_path, files)
+    base = committed(root, {}, "base")
+    (root / "tests/test_gone.py").unlink()
+    later = "def test_it():\n    assert 1\n"
+    edits = {
+        "scripts/sample.py": "A = 2\n",
+        "hooks/test_hook.py": "HOOK = 2\n",
+        "tests/helper.py": "HELP = 2\n",
+        "tests/test_a.py": later,
+        "tests/unit/test_data.json": "[]\n",
+        "tests/unit/test_deep.py": later,
+        "tests/unit/test_new.py": passing,
+    }
+    head = committed(root, edits, "head")
+    changed = ["tests/test_a.py", "tests/unit/test_deep.py", "tests/unit/test_new.py"]
+    assert expand_mutation.changed_tests(root, base, head) == changed
+    assert expand_mutation.changed_tests(root, head, head) == []
+    subprocess.run(["git", "switch", "-q", "-c", "side", base], cwd=root, check=True)
+    side = committed(root, {"tests/test_same.py": later}, "side")
+    assert expand_mutation.changed_tests(root, side, head) == changed

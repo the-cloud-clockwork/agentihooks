@@ -27,7 +27,9 @@ REPO = Path(__file__).resolve().parents[2]
 OPTIONS = ["-q", "-p", "no:cacheprovider", "-o", "addopts="]
 FUNCTION = "scripts.mutation_self_plant_sample.x_fee"
 SAMPLE = "def fee(amount, rate):\n    return amount * rate + 1\n"
+BOTH = SAMPLE + "\n\ndef tax(amount):\n    return amount - 2\n"
 FIXED_COST_RATIO = 0.25
+HOLDS_NO_TEST = "tests/test_holds_no_test.py"
 
 
 class Exited(Exception):
@@ -87,7 +89,7 @@ def test_trampoline_writes_every_mutant_of_the_file_and_names_them_as_mutmut_doe
     path = "scripts/sample.py"
     (tmp_path / "scripts").mkdir()
     (tmp_path / path).write_text(SAMPLE)
-    names = run_mutation.trampoline(tmp_path, path)
+    names = run_mutation.trampoline(tmp_path, path, {1, 2})
     assert names == [f"scripts.sample.{name}" for name in selected_mutant_names(path, SAMPLE, {1, 2})]
     assert len(names) > 1
     assert (tmp_path / path).read_text() == selected_mutants(path, SAMPLE, {1, 2})[0]
@@ -100,7 +102,7 @@ def test_trampoline_names_the_file_mutmut_refuses_a_pragma_in(tmp_path: Path) ->
         "def fee(amount, rate):\n    # pragma: no mutate start\n    return amount * rate + 1\n"
     )
     with pytest.raises(PragmaParseError, match="scripts/sample.py:2"):
-        run_mutation.trampoline(tmp_path, path)
+        run_mutation.trampoline(tmp_path, path, {1, 2, 3})
 
 
 @pytest.mark.feature("lab-mutants-read-no-mutmut-config")
@@ -117,9 +119,49 @@ def test_trampoline_reads_no_mutmut_config_from_the_working_directory(
     monkeypatch.chdir(elsewhere)
     monkeypatch.setattr(configuration, "_config", None)
     monkeypatch.setattr(configuration.Config, "get", stats_recorder_only)
-    assert run_mutation.trampoline(tree, path) == expected
+    assert run_mutation.trampoline(tree, path, {1, 2}) == expected
     assert len(expected) > 1
     assert vars(configuration)["_config"] is None
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_trampoline_rewrites_only_the_functions_the_changed_lines_meet(tmp_path: Path) -> None:
+    path = "scripts/sample.py"
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / path).write_text(BOTH)
+    names = run_mutation.trampoline(tmp_path, path, {6})
+    assert names == [f"scripts.sample.{name}" for name in selected_mutant_names(path, BOTH, {5, 6})]
+    assert len(names) > 1
+    assert {name.rpartition("__mutmut_")[0] for name in names} == {"scripts.sample.x_tax"}
+    written = (tmp_path / path).read_text()
+    assert written == selected_mutants(path, BOTH, {5, 6})[0]
+    assert SAMPLE in written
+    assert "x_fee" not in written
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_trampoline_leaves_a_file_no_function_of_which_meets_the_changed_lines_as_it_was(tmp_path: Path) -> None:
+    path = "scripts/sample.py"
+    source = "LIMIT = 1\n\n\n" + SAMPLE
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / path).write_text(source)
+    assert run_mutation.trampoline(tmp_path, path, {1}) == []
+    assert (tmp_path / path).read_text() == source
+    assert run_mutation.trampoline(tmp_path, path, set()) == []
+    assert (tmp_path / path).read_text() == source
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_trampoline_keeps_the_wrappers_of_a_decorated_function_on_its_trampoline_alone(tmp_path: Path) -> None:
+    path = "scripts/sample.py"
+    source = "import functools\n\n\n" + SAMPLE + "\n\n@functools.cache\ndef tax(amount):\n    return amount - 2\n"
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / path).write_text(source)
+    every = set(range(1, 11))
+    names = run_mutation.trampoline(tmp_path, path, every)
+    assert names == [f"scripts.sample.{name}" for name in selected_mutant_names(path, source, every)]
+    assert {name.rpartition("__mutmut_")[0] for name in names} == {"scripts.sample.x_fee", "scripts.sample.x_tax"}
+    assert (tmp_path / path).read_text() == selected_mutants(path, source, every)[0]
 
 
 @pytest.mark.parametrize("code, status", [(0, "survived"), (1, "killed"), (3, "suspicious"), (-9, "suspicious")])
@@ -356,6 +398,29 @@ def test_stats_collection_traces_one_session_and_returns_one_result(monkeypatch:
     }
 
 
+@pytest.mark.feature("lab-stats-of-a-test-file-with-no-test")
+@pytest.mark.parametrize(
+    "code, status",
+    [
+        (pytest.ExitCode.OK, 0),
+        (pytest.ExitCode.TESTS_FAILED, 1),
+        (pytest.ExitCode.INTERRUPTED, 2),
+        (pytest.ExitCode.INTERNAL_ERROR, 3),
+        (pytest.ExitCode.USAGE_ERROR, 4),
+        (pytest.ExitCode.NO_TESTS_COLLECTED, 0),
+    ],
+)
+def test_a_stats_collection_that_collects_no_test_is_an_empty_record_and_every_other_code_stays(
+    code: pytest.ExitCode, status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(run_mutation.SWITCH, run_mutation.environ.get(run_mutation.SWITCH, ""))
+    monkeypatch.setattr(run_mutation, "pytest", SimpleNamespace(main=lambda args, plugins: code))  # pyright: ignore[reportUnknownLambdaType]
+
+    [result] = run_mutation.collect(OPTIONS, [HOLDS_NO_TEST])
+
+    assert (result["status"], result["tests"], result["durations"]) == (status, {}, {})
+
+
 def test_stats_read_the_content_keyed_cache_and_collect_its_misses_here(monkeypatch: pytest.MonkeyPatch) -> None:
     collected: list[tuple[Any, ...]] = []
     monkeypatch.setattr(run_mutation, "collect", lambda *args: collected.append(args) or [{"status": 0}])
@@ -467,6 +532,30 @@ def statuses(rows: list[dict[str, Any]]) -> dict[str, str]:
     return {row["name"]: row["status"] for row in rows}
 
 
+@pytest.mark.feature("lab-stats-of-a-test-file-with-no-test")
+def test_the_runner_answers_a_stats_request_over_a_test_file_that_holds_no_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    tree = corpus(tmp_path / "tree", "kill")
+    (tree / HOLDS_NO_TEST).write_text("LIMIT = 1\n")
+    subprocess.run(["git", "init", "-q"], cwd=tree, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tree, check=True)
+    run_mutation.trampoline(tree, plant.SAMPLE, {1, 2})
+    alone = subprocess.run([sys.executable, "-m", "pytest", *OPTIONS, HOLDS_NO_TEST], cwd=tree, timeout=50)
+    assert alone.returncode == pytest.ExitCode.NO_TESTS_COLLECTED
+    request = {"kind": "stats", "key": "lab", "options": OPTIONS, "root": str(tree)}
+    cold, warm = str(tmp_path / "cold"), str(tmp_path / "warm")
+
+    empty = lab(tree, {**request, "members": [HOLDS_NO_TEST], "cache": cold})["stats"]
+    lab(tree, {**request, "members": [plant.TEST], "cache": warm})
+    both = lab(tree, {**request, "members": [plant.TEST, HOLDS_NO_TEST], "cache": warm})["stats"]
+
+    assert [(record["status"], record["tests"], record["durations"]) for record in empty] == [(0, {}, {})]
+    assert {record["status"] for record in both} == {0}
+    assert {test for record in both for test in record["tests"].get(FUNCTION, [])}
+
+
 @pytest.fixture(scope="module", params=["kill", "survive"])
 def corpus_run(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     mode = str(request.param)
@@ -479,7 +568,7 @@ def corpus_run(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPath
         subprocess.run(["git", "init", "-q"], cwd=root, check=True)
         subprocess.run(["git", "add", "-A"], cwd=root, check=True)
         tree = corpus(work / "tree", mode)
-        names = run_mutation.trampoline(tree, plant.SAMPLE)
+        names = run_mutation.trampoline(tree, plant.SAMPLE, {1, 2})
         stats_request = {
             "kind": "stats",
             "key": "lab",
