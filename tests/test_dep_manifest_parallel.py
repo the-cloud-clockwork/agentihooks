@@ -195,7 +195,11 @@ def test_manifest_preparation_starts_beside_units_and_collects_before_validation
     names = [step.get("name") for step in steps]
     assert names.index("Install coverage") < names.index("Take raw shard coverage as it lands")
     assert names.index("Take raw shard coverage as it lands") < names.index("Check the shard coverage downloads")
-    assert names.index("Check the shard coverage downloads") < names.index("Build the test dependency manifest")
+    assert names.index("Check the shard coverage downloads") < names.index("Require every raw shard before the build")
+    assert names.index("Require every raw shard before the build") < names.index("Build the test dependency manifest")
+    complete = next(step for step in steps if step.get("name") == "Require every raw shard before the build")
+    assert str(complete["env"]["SHARDS"]) == "20"
+    assert '[[ -s ".coverage-shards/coverage-3.12-$shard/.coverage" ]]' in complete["run"]
     collect = next(step for step in steps if step.get("name") == "Take raw shard coverage as it lands")
     assert collect["uses"] == "actions/github-script@v7"
     assert collect["env"]["COVERAGE_RAW"] == "true"
