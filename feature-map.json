@@ -14358,7 +14358,8 @@
         "tests/test_gate_protected_lab_tools.py::test_a_pinned_base_refuses_a_head_that_removes_the_lab_constraints",
         "tests/test_gate_protected_lab_tools.py::test_the_candidate_refuses_a_change_to_any_other_lab_step",
         "tests/test_gate_protected_lab_tools.py::test_the_candidate_refuses_any_other_change_to_the_install_step",
-        "tests/test_gate_protected_lab_tools.py::test_a_base_without_a_lab_job_refuses_a_head_that_adds_one"
+        "tests/test_gate_protected_lab_tools.py::test_a_base_without_a_lab_job_refuses_a_head_that_adds_one",
+        "tests/test_gate_protected_lab_tools.py::test_a_base_with_two_installs_admits_only_both_pinned"
       ]
     }
   ],

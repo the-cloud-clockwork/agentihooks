@@ -204,3 +204,20 @@ def test_a_base_without_a_lab_job_refuses_a_head_that_adds_one(grader: Grade, fo
     _install(head, install)
     base["test.yml"]["jobs"].pop("lab-verdict")
     assert REFUSED in _grade(grader, base, head, config, actors)
+
+
+@pytest.mark.feature("protected-grader-admits-lab-tool-pins")
+@pytest.mark.parametrize("pinned", [(True, True), (True, False), (False, True)], ids=["both", "first", "second"])
+def test_a_base_with_two_installs_admits_only_both_pinned(
+    grader: Grade, forms: Forms, pinned: tuple[bool, bool]
+) -> None:
+    base, config, actors = forms
+    steps = base["test.yml"]["jobs"]["lab-verdict"]["steps"]
+    [install] = [step for step in steps if step.get("name") == STEP]
+    steps.insert(steps.index(install), copy.deepcopy(install))
+    head = copy.deepcopy(base)
+    installs = [step for step in head["test.yml"]["jobs"]["lab-verdict"]["steps"] if step.get("name") == STEP]
+    for step, pin in zip(installs, pinned, strict=True):
+        if pin:
+            step["run"] = PINNED
+    assert _grade(grader, base, head, config, actors) == ([] if all(pinned) else [REFUSED])
