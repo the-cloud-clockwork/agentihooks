@@ -5,6 +5,7 @@ from pathlib import Path
 
 from markdown_it import MarkdownIt
 
+from scripts.gates.intent import SECTION as INTENT
 from scripts.gates.recon import problem
 
 SECTIONS = (
@@ -50,6 +51,18 @@ def missing_sections(text: str, level: int = 2) -> list[str]:
     return [name for name in SECTIONS if not _visible(contents.get(name.casefold(), "")).strip()]
 
 
+def _without_sections(text: str) -> str:
+    names = {section.casefold() for section in SECTIONS}
+    retained: list[str] = []
+    cursor = 0
+    for name, start, end, _ in _blocks(text, 2):
+        if name in names:
+            retained.append(text[cursor:start])
+            cursor = end
+    retained.append(text[cursor:])
+    return "".join(retained).rstrip()
+
+
 def fill(recon: str, body: str = "") -> str:
     invalid = problem(recon)
     if invalid:
@@ -58,17 +71,13 @@ def fill(recon: str, body: str = "") -> str:
     if missing:
         raise ValueError(f"Recon review details missing or empty: {', '.join(missing)}")
     contents = {name: content.strip() for name, _, _, content in _blocks(recon, 3)}
-    retained: list[str] = []
-    names = {section.casefold() for section in SECTIONS}
-    cursor = 0
-    for name, start, end, _ in _blocks(body, 2):
-        if name in names:
-            retained.append(body[cursor:start])
-            cursor = end
-    retained.append(body[cursor:])
-    original = "".join(retained).rstrip()
     rendered = "\n\n".join(f"## {name}\n\n{contents[name.casefold()]}" for name in SECTIONS)
-    return f"{original}\n\n{rendered}\n" if original else f"{rendered}\n"
+    intent = INTENT.search(body)
+    original = _without_sections(body[: intent.start()] if intent else body)
+    lead = f"{original}\n\n" if original else ""
+    if intent is None:
+        return f"{lead}{rendered}\n"
+    return f"{lead}{rendered}\n\n{intent.group()}{_without_sections(body[intent.end() :])}\n"
 
 
 def _body_from_event(path: Path) -> str:
