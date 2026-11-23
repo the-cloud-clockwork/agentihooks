@@ -1,4 +1,5 @@
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +10,7 @@ from scripts.swarm_ledger.repository.sqlite import (
     Missing,
     SQLiteLedgerRepository,
     key_parts,
+    read_flags,
     read_ids,
     read_ledger,
     read_only,
@@ -197,3 +199,25 @@ def test_read_ids_lists_a_collection_in_stored_order(tmp_path):
     assert read_ids(folder, "missing", "tasks") == ()
     assert read_ids(tmp_path / "nowhere", "ledger", "tasks") == ()
     assert read_ids(empty_database(tmp_path), "ledger", "tasks") == ()
+
+
+@pytest.mark.feature("ledger-hook-bounded-read")
+def test_read_flags_reads_only_the_named_flags_of_each_item_in_stored_order(tmp_path: Path) -> None:
+    state = document()
+    state["phases"] = [
+        {"id": "zeta", "title": "Last by id", "done": True},
+        {"title": "No id"},
+        {"id": "alpha", "out_of_scope": True, "done": False, "extra": {"done": True}},
+    ]
+    state["followups"] = [{"id": "f1", "text": "x", "done": False, "out_of_scope": None}]
+    folder = stored(tmp_path, state)
+    flags = ("done", "out_of_scope")
+    assert read_flags(folder, "ledger", ("phases", "followups", "sources"), flags) == {
+        "phases": [{"done": True}, {}, {"out_of_scope": True, "done": False}],
+        "followups": [{"done": False, "out_of_scope": None}],
+        "sources": [],
+    }
+    assert read_flags(folder, "ledger", ("phases",), ("done",)) == {"phases": [{"done": True}, {}, {"done": False}]}
+    assert read_flags(folder, "missing", ("phases",), flags) == {}
+    assert read_flags(tmp_path / "nowhere", "ledger", ("phases",), flags) == {}
+    assert read_flags(empty_database(tmp_path), "ledger", ("phases",), flags) == {}
