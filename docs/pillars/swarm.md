@@ -114,7 +114,8 @@ agentihooks swarm <slug> set engine=events
    window. Each work queue is its own stream on `agentihooks.queue.<name>`.
 3. **Pull.** A hive's spoke takes an offer only when it has room. Before it acts, the offer is checked against a
    fresh ledger read: by a master spoke itself, and by the hub when it admits an eng, ci or plan offer. The hub reads
-   only the task, the rows it names, the running rows and the ledger's claim gate verdict for it (see
+   only the task, the rows it names, the running rows, its phase and the ledger overview (the whole document for a
+   `plan` task) and the ledger's claim gate verdict for it (see
    [What an admission reads](hives.md#what-an-admission-reads)). A stale offer is terminated: the task is gone, claimed, no longer open, on a different
    generation or lane, or held.
 4. **Claim and launch.** The spoke records its claim in the hive buckets and launches the agent. It publishes
