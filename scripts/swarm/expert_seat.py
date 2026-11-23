@@ -7,7 +7,6 @@ finishes the expert of a lineage that ended. The expert verb of the command line
 """
 
 import contextlib
-import re
 from collections.abc import Callable
 from dataclasses import replace
 from importlib import import_module
@@ -42,7 +41,6 @@ SPAWNED = "spawned expert {name} on lineage {lineage} as its expert number {numb
 WAITS = "lineage {lineage} waits: {error}"
 FAILED = "expert spawn failed on lineage {lineage}: {error}"
 WHY_CHARS = 300
-ADDRESS_LOGIN = re.compile(r"(?<=://)\S*@")
 ENDED = "ended expert {name}: lineage {lineage} is {state}"
 STOPPED = "left when its lineage {lineage} was stopped"
 OFFERED = "offered the handoff of lineage {lineage} again: {name} was lost before it confirmed it"
@@ -245,8 +243,14 @@ def _launch(
 def _why(error: BaseException) -> str:
     """The text a failed launch is kept and printed with: its error with secrets redacted and the login of any
     address dropped, on one line and cut at WHY_CHARS, or the name of the error's type when it says nothing."""
-    text = " ".join(ADDRESS_LOGIN.sub("", redact(str(error), mode="strict")).split())
+    text = " ".join(_without_login(word) for word in redact(str(error), mode="strict").split())
     return text[:WHY_CHARS] or type(error).__name__
+
+
+def _without_login(word: str) -> str:
+    """The word with the login of an address dropped: all between its first :// and the last @ after it."""
+    scheme, mark, rest = word.partition("://")
+    return f"{scheme}{mark}{rest.rpartition('@')[2]}" if "@" in rest else word
 
 
 def _left(slug: str, store: Any, lineage: expert_lineage.Lineage, number: int, now_ms: int) -> list[str]:

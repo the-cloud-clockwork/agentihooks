@@ -246,6 +246,27 @@ def test_the_kept_reason_and_the_line_of_the_pass_hold_no_secret_and_no_login_of
 
 
 @pytest.mark.feature("expert-launch-failure-reason")
+@pytest.mark.parametrize(
+    ("word", "kept"),
+    [
+        ("http://deploy:word@gate.example/https://git.example/repo", "http://gate.example/https://git.example/repo"),
+        ("http://gate.example/https://deploy:word@git.example/repo", "http://git.example/repo"),
+        ("deploy@git.example://repo", "deploy@git.example://repo"),
+        ("deploy@git.example", "deploy@git.example"),
+        ("://@", "://"),
+    ],
+)
+def test_the_login_dropped_from_a_word_runs_from_its_first_address_mark_to_the_last_at_sign_after_it(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, word: str, kept: str
+) -> None:
+    started(store)
+    monkeypatch.setattr(expert_seat, "redact", lambda text, *, mode: text)
+    assert go(store, failing(f"clone of {word} failed")) == [
+        f"expert spawn failed on lineage expert-1: clone of {kept} failed"
+    ]
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
 def test_a_launch_refused_for_room_records_no_failed_launch(store: RedisStore) -> None:
     started(store)
     full = FakeRuntime(crash=tick_module.SpawnError(ROOM, "unavailable"))
