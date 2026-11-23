@@ -6,6 +6,7 @@ import sys
 import tarfile
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -14,80 +15,70 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def _workflow():
-    path = ROOT / ".github/workflows/chart-release.yml"
-    assert path.is_file(), "Releases must publish the Helm chart to GHCR"
-    return yaml.safe_load(path.read_text())
+WORKFLOWS = ROOT / ".github/workflows"
+HIVE_PUBLISH = "Publish the hive worker once per release version"
 
 
-def test_the_chart_publishes_only_after_the_release_image_workflow_succeeds() -> None:
+def _workflow() -> dict[str, Any]:
+    return yaml.safe_load((WORKFLOWS / "swarm-node-image.yml").read_text())
+
+
+def _chart_steps() -> list[dict[str, Any]]:
+    steps = _workflow()["jobs"]["hive"]["steps"]
+    names = [step.get("name") for step in steps]
+    assert HIVE_PUBLISH in names, "Releases must publish the hive worker before the chart"
+    return steps[names.index(HIVE_PUBLISH) + 1 :]
+
+
+@pytest.mark.feature("release-chart-proven-and-pushed-by-the-hive-job")
+def test_the_hive_job_proves_and_pushes_the_release_chart_on_its_own_runner() -> None:
     workflow = _workflow()
-    assert workflow.get("on", workflow.get(True)) == {
-        "workflow_run": {"workflows": ["Swarm worker image"], "types": ["completed"]}
-    }
-    image = yaml.safe_load((ROOT / ".github/workflows/swarm-node-image.yml").read_text())
-    assert image["name"] == "Swarm worker image"
-    assert image["jobs"]["hive"]["needs"] == "image"
-    assert workflow["permissions"] == {"contents": "read"}
-    job = workflow["jobs"]["package"]
-    assert not job.get("needs")
-    assert job["if"] == (
-        "github.event.workflow_run.event == 'release' && github.event.workflow_run.conclusion == 'success'"
-    )
-    assert job["permissions"] == {"contents": "read"}
-    assert not job.get("continue-on-error")
-    steps = job["steps"]
-    checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
-    assert checkout["with"] == {
-        "ref": "${{ github.event.workflow_run.head_sha }}",
-        "fetch-depth": 0,
-        "persist-credentials": False,
-    }
-    assert any(step.get("uses", "").startswith("azure/setup-helm@") for step in steps)
-    package = next(step for step in steps if "helm package" in step.get("run", ""))
-    assert package["env"]["RELEASE"] == "${{ github.event.workflow_run.head_branch }}"
-    upload = steps[-1]
-    assert upload["uses"] == "./.github/actions/retry-upload"
-    assert upload["with"]["name"] == "release-chart"
-    assert upload["with"]["if-no-files-found"] == "error"
+    assert workflow["name"] == "Swarm worker image"
+    hive = workflow["jobs"]["hive"]
+    assert hive["if"] == "github.event_name == 'release'"
+    assert hive["needs"] == "image"
+    assert hive["permissions"] == {"contents": "read", "packages": "write"}
+    assert not hive.get("continue-on-error")
+    published = yaml.safe_load((WORKFLOWS / "helm-kind-published.yml").read_text())
+    assert hive["runs-on"] == published["jobs"]["kind"]["runs-on"]
+    steps = _chart_steps()
+    assert [step.get("name", step.get("uses")) for step in steps] == [
+        "azure/setup-helm@v4",
+        "Package the release chart",
+        "Install kind",
+        "Install the packaged release chart in kind",
+        "Publish the release chart that kind installed",
+    ]
+    assert steps[0]["with"] == {"version": "v3.18.6"}
     assert all(not step.get("continue-on-error") and "if" not in step for step in steps)
-    publish = workflow["jobs"]["publish"]
-    assert publish["permissions"] == {"contents": "read", "packages": "write"}
-    assert not publish.get("continue-on-error")
-    push = next(step for step in publish["steps"] if "helm push" in step.get("run", ""))
-    assert push["env"]["RELEASE"] == "${{ github.event.workflow_run.head_branch }}"
-    assert push["env"]["GHCR_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
-    assert "helm package" not in "\n".join(step.get("run", "") for step in publish["steps"])
-    assert all(not step.get("continue-on-error") and "if" not in step for step in publish["steps"])
-    promote = yaml.safe_load((ROOT / ".github/workflows/promote.yml").read_text())
+    assert steps[-1]["env"] == {"GHCR_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
+    texts = {path.name: path.read_text() for path in sorted(WORKFLOWS.glob("*.y*ml"))}
+    assert [name for name, text in texts.items() if "helm package" in text or "helm push" in text] == [
+        "swarm-node-image.yml"
+    ]
+    promote = yaml.safe_load((WORKFLOWS / "promote.yml").read_text())
     release = next(step for step in promote["jobs"]["promote"]["steps"] if "gh release create" in step.get("run", ""))
     assert release["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
 
 
+@pytest.mark.feature("release-chart-proven-and-pushed-by-the-hive-job")
 def test_the_chart_publishes_only_after_kind_installs_the_packaged_archive() -> None:
-    jobs = _workflow()["jobs"]
-    job = jobs["kind"]
-    assert job["needs"] == "package"
-    assert jobs["publish"]["needs"] == "kind"
-    assert not jobs["publish"].get("if")
-    assert job["uses"] == "./.github/workflows/helm-kind-published.yml"
-    assert job["with"] == {
-        "version": "${{ github.event.workflow_run.head_branch }}",
-        "chart-artifact": "release-chart",
-    }
-    assert not job.get("if") and not job.get("continue-on-error")
-    download = next(
-        step for step in jobs["publish"]["steps"] if step.get("uses", "").startswith("actions/download-artifact@")
-    )
-    assert download["with"] == {"name": "release-chart", "path": "${{ runner.temp }}/chart"}
-    called = yaml.safe_load((ROOT / ".github/workflows/helm-kind-published.yml").read_text())
+    _, package, install, kind, publish = _chart_steps()
+    called = yaml.safe_load((WORKFLOWS / "helm-kind-published.yml").read_text())
+    job = called["jobs"]["kind"]
+    assert install["env"] == {"KIND_VERSION": job["env"]["KIND_VERSION"]}
+    assert install["run"] == next(step["run"] for step in job["steps"] if step.get("name") == "Install kind")
+    assert kind["env"] == {"KIND_NODE_IMAGE": job["env"]["KIND_NODE_IMAGE"], "CHART_DIR": "${{ runner.temp }}/chart"}
+    assert kind["run"] == 'bash deploy/helm/agentihooks-swarm/ci/kind-published.sh "$RELEASE"'
+    assert '--destination "$RUNNER_TEMP/chart"' in package["run"]
+    assert 'helm push "$RUNNER_TEMP/chart/agentihooks-swarm-$version.tgz"' in publish["run"]
     assert called[True]["workflow_call"] == {
         "inputs": {
             "version": {"type": "string", "required": True},
             "chart-artifact": {"type": "string", "default": ""},
         }
     }
-    fetched, step = called["jobs"]["kind"]["steps"][-2:]
+    fetched, step = job["steps"][-2:]
     assert fetched["uses"].startswith("actions/download-artifact@")
     assert fetched["if"] == "inputs.chart-artifact != ''"
     assert fetched["with"] == {"name": "${{ inputs.chart-artifact }}", "path": "${{ runner.temp }}/packaged"}
@@ -201,19 +192,24 @@ def test_a_missing_packaged_archive_fails_before_any_cluster_starts(tmp_path: Pa
     assert "the packaged chart" in result.stderr and "version 9.9.9 is missing" in result.stderr
 
 
-def _publish(tmp_path: Path, version: str, fail: str = "") -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
-    stub = tmp_path / "helm"
+def _publish(tmp_path: Path, version: str, fail: str = "") -> tuple[int, str, list[list[str]]]:
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    stub = tools / "helm"
     stub.write_text(
         f"#!{sys.executable}\n"
         "import json, os, sys\n"
         "from pathlib import Path\n"
         "tool = Path(sys.argv[0]).name\n"
         "args = sys.argv[1:]\n"
+        "chart = os.environ.get('CHART_DIR', '')\n"
         "with Path(os.environ['CALLS']).open('a') as stream:\n"
-        "    stream.write(json.dumps([tool, *args]) + '\\n')\n"
+        "    stream.write(json.dumps([tool, *args, chart] if tool == 'kind-published.sh' else [tool, *args]) + '\\n')\n"
         "if tool == 'helm' and args[:2] == ['registry', 'login']:\n"
         "    assert sys.stdin.read() == os.environ['GHCR_TOKEN']\n"
-        "if os.environ['FAIL_COMMAND'] == (tool if tool in ('git', 'sha256sum') else args[0]):\n"
+        "if tool == 'kind-published.sh':\n"
+        "    assert Path(chart, f\"agentihooks-swarm-{args[0].removeprefix('v')}.tgz\").is_file()\n"
+        "if os.environ['FAIL_COMMAND'] == (tool if tool in ('sha256sum', 'kind-published.sh') else args[0]):\n"
         "    sys.exit(23)\n"
         "if tool == 'helm' and args[0] == 'package':\n"
         "    destination = Path(args[args.index('--destination') + 1])\n"
@@ -224,43 +220,55 @@ def _publish(tmp_path: Path, version: str, fail: str = "") -> tuple[subprocess.C
         "    assert Path(args[1]).is_file()\n"
     )
     stub.chmod(0o755)
-    (tmp_path / "git").symlink_to(stub)
-    (tmp_path / "sha256sum").symlink_to(stub)
+    for tool in ("sha256sum", "kind", "kubectl", "kind-published.sh"):
+        (tools / tool).symlink_to(stub)
     chart = tmp_path / "tree/deploy/helm/agentihooks-swarm"
-    chart.mkdir(parents=True)
+    (chart / "ci").mkdir(parents=True)
     source = ROOT / "deploy/helm/agentihooks-swarm"
     (chart / "values.yaml").write_text((source / "values.yaml").read_text())
+    (chart / "ci/kind-published.sh").write_text(f'exec "{tools}/kind-published.sh" "$@"\n')
     calls = tmp_path / "calls"
     env = {
         **os.environ,
-        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "PATH": f"{tools}:{os.environ['PATH']}",
         "CALLS": str(calls),
         "FAIL_COMMAND": fail,
         "RELEASE": f"v{version}",
-        "GITHUB_SHA": "default-branch-head",
-        "RELEASE_SHA": "promoted-release-commit",
         "GITHUB_REPOSITORY_OWNER": "The-Cloud-Clockwork",
         "GITHUB_ACTOR": "release-bot",
         "GHCR_TOKEN": "fixture",
         "RUNNER_TEMP": str(tmp_path / "runner temp"),
     }
-    jobs = _workflow()["jobs"]
-    steps = [*jobs["package"]["steps"], *jobs["publish"]["steps"]]
-    script = "\n".join(step["run"] for step in steps if "run" in step)
-    result = subprocess.run(
-        ["bash", "-e", "-o", "pipefail", "-c", script], env=env, capture_output=True, text=True, cwd=tmp_path / "tree"
-    )
-    return result, [json.loads(line) for line in calls.read_text().splitlines()]
+    status, output = 0, ""
+    for step in (step for step in _chart_steps() if "run" in step):
+        values = {
+            key: value.replace("${{ runner.temp }}", env["RUNNER_TEMP"])
+            for key, value in step.get("env", {}).items()
+            if "secrets." not in value
+        }
+        result = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+            env={**env, **values},
+            capture_output=True,
+            text=True,
+            cwd=tmp_path / "tree",
+        )
+        output += result.stdout + result.stderr
+        if result.returncode:
+            status = result.returncode
+            break
+    lines = calls.read_text().splitlines() if calls.exists() else []
+    return status, output, [json.loads(line) for line in lines]
 
 
 @pytest.mark.parametrize("version", ["2.9.0", "2.10.1"])
 def test_the_published_chart_uses_the_release_version_and_a_separate_oci_namespace(
     tmp_path: Path, version: str
 ) -> None:
-    result, calls = _publish(tmp_path, version)
-    assert result.returncode == 0, result.stderr
+    status, output, calls = _publish(tmp_path, version)
+    assert status == 0, output
+    packaged = str(tmp_path / "runner temp/chart")
     assert calls == [
-        ["git", "merge-base", "--is-ancestor", "promoted-release-commit", "origin/main"],
         ["sha256sum", "-c", "deploy/helm/agentihooks-swarm-deps.sha256"],
         [
             "helm",
@@ -271,23 +279,25 @@ def test_the_published_chart_uses_the_release_version_and_a_separate_oci_namespa
             "--app-version",
             version,
             "--destination",
-            str(tmp_path / "runner temp/chart"),
+            packaged,
         ],
+        ["kind", "version"],
+        ["helm", "version", "--short"],
+        ["kubectl", "version", "--client"],
+        ["kind-published.sh", f"v{version}", packaged],
         ["helm", "registry", "login", "ghcr.io", "--username", "release-bot", "--password-stdin"],
-        [
-            "helm",
-            "push",
-            str(tmp_path / f"runner temp/chart/agentihooks-swarm-{version}.tgz"),
-            "oci://ghcr.io/the-cloud-clockwork/charts",
-        ],
+        ["helm", "push", f"{packaged}/agentihooks-swarm-{version}.tgz", "oci://ghcr.io/the-cloud-clockwork/charts"],
     ]
-    assert "fixture" not in result.stdout + result.stderr
+    assert "fixture" not in output
 
 
-@pytest.mark.parametrize("fail,count", [("git", 1), ("sha256sum", 2), ("package", 3), ("registry", 4), ("push", 5)])
-def test_off_main_releases_and_registry_or_packaging_failures_stop_publication(
+@pytest.mark.feature("release-chart-proven-and-pushed-by-the-hive-job")
+@pytest.mark.parametrize(
+    "fail,count", [("sha256sum", 1), ("package", 2), ("kind-published.sh", 6), ("registry", 7), ("push", 8)]
+)
+def test_a_failed_checksum_package_kind_check_or_registry_step_stops_publication(
     tmp_path: Path, fail: str, count: int
 ) -> None:
-    result, calls = _publish(tmp_path, "2.10.1", fail)
-    assert result.returncode == 23
+    status, _, calls = _publish(tmp_path, "2.10.1", fail)
+    assert status == 23
     assert len(calls) == count

@@ -8438,6 +8438,18 @@
       ]
     },
     {
+      "id": "release-chart-proven-and-pushed-by-the-hive-job",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-chart-proof-same-runner",
+      "behaviour": "A published release packages its Helm chart, installs that archive in kind and pushes the same archive to the registry from the hive job of the worker image release, on the runner that job already holds after the hive worker publish, and pushes nothing when the checksum, packaging or kind check fails.",
+      "seam": "swarm-node-image.yml hive job chart steps after the hive worker publish and the archive folder they share",
+      "tests": [
+        "tests/contracts/promotion/test_chart_release.py::test_the_hive_job_proves_and_pushes_the_release_chart_on_its_own_runner",
+        "tests/contracts/promotion/test_chart_release.py::test_the_chart_publishes_only_after_kind_installs_the_packaged_archive",
+        "tests/contracts/promotion/test_chart_release.py::test_a_failed_checksum_package_kind_check_or_registry_step_stops_publication"
+      ]
+    },
+    {
       "id": "hive-worker-release-tag-moves-on-every-release",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-worker-release-tag-stuck",
