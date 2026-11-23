@@ -5,13 +5,14 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
+import ledger_alerts
 import pytest
 
 from scripts.swarm_ledger import api_service, request_metrics
 from scripts.swarm_ledger.api import mutations, resources
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.events.publishing import Publishing
-from scripts.swarm_ledger.repository import legacy, task_write
+from scripts.swarm_ledger.repository import legacy, mutation, task_write
 from scripts.swarm_ledger.repository.entry import Entry
 from scripts.swarm_ledger.repository.rows import encode
 from scripts.swarm_ledger.repository.sqlite import Missing, SQLiteLedgerRepository
@@ -534,6 +535,47 @@ def test_hook_state_leaves_the_written_state_alone_when_nothing_it_names_is_miss
     state = {"_meta": {"rev": 3, "events": []}, "alerts": [{"state": "open", "item": "tasks/t11"}], "tasks": []}
     found, reads = hooked(state, {"inbox": {"demo": [0]}})
     assert reads == [] and found is state
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+def test_hook_state_adds_a_named_phase_to_a_written_state_without_phases() -> None:
+    state = {
+        "_meta": {"rev": 4, "events": []},
+        "alerts": [{"rev": 4, "state": "open", "item": "phases/p2"}],
+        "tasks": [],
+    }
+    found = {"phases": [{"id": "p2"}], "tasks": []}
+    hooks: Any = SimpleNamespace(repository=SimpleNamespace(held_revisions=dict, read=lambda slug, *paths: found))
+    assert mutations.hook_state(hooks, "demo", state) == {**state, "phases": [{"id": "p2"}]}
+
+
+class Folding:
+    def __init__(self, meta: dict, at: int, slug: str) -> None:
+        self.at, self.rev, self.slug, self.events, self.dirty, self.refused = at, meta["rev"] + 1, slug, [], False, []
+
+
+@pytest.mark.feature("ledger-task-update-narrow-write")
+@pytest.mark.parametrize(("stored", "rev"), [(["size-1", "sync-1"], 5), (["size-1"], 4)])
+def test_the_narrow_fold_names_a_refused_claim_and_keeps_only_the_stored_size_warnings(
+    monkeypatch: pytest.MonkeyPatch, stored: list[str], rev: int
+) -> None:
+    derived: list = []
+    monkeypatch.setattr(ledger_alerts, "derive", lambda doc, ctx, found, kept: derived.append((list(found), kept)))
+    core = SimpleNamespace(
+        Context=Folding,
+        now_ms=lambda: 50,
+        gated=lambda gate, doc, op, ctx: False,
+        size_warning=lambda text: text.startswith("size"),
+        EVENTS_KEPT=2,
+        EVENTS_CEILING=10,
+        EVENTS_WINDOW_MS=0,
+    )
+    meta = {"rev": 4, "events": [], "warnings": stored}
+    state: dict = {"_meta": meta}
+    rejected, ctx = mutation.narrow("demo", state, core, {"op": "task_update", "id": "claim"}, None)
+    assert (rejected, ctx.changed, meta["rev"], meta["warnings"]) == (["claim"], rev == 5, rev, ["size-1"])
+    assert state["_meta"] is meta
+    assert derived == [([(ledger_alerts.SIZE, "size-1")], stored)]
 
 
 @pytest.mark.feature("ledger-task-update-narrow-write")

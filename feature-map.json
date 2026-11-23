@@ -11369,6 +11369,8 @@
       "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_row_written_outside_the_read_keeps_its_stored_key_and_position",
       "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_reads_the_rows_operator_events_and_open_alerts_name_since_the_oldest_held_revision",
       "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_leaves_the_written_state_alone_when_nothing_it_names_is_missing",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_adds_a_named_phase_to_a_written_state_without_phases",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_the_narrow_fold_names_a_refused_claim_and_keeps_only_the_stored_size_warnings",
       "tests/swarm_ledger/test_task_update_narrow_write.py::test_stored_warnings_reads_only_the_stored_warning_list",
       "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_refused_hub_claim_answers_with_the_stored_warnings_and_the_refusal",
       "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_with_a_stale_guard_is_refused_by_its_write_gate",
