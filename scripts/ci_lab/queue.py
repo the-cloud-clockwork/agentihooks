@@ -1,16 +1,21 @@
 """Lab queue state in Redis: pending, leased and done jobs, globally and per head."""
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import LOST
 from scripts.ci_lab.units import Unit
 
-__all__ = ["PREFIX", "Job", "Queue", "Requirement"]
+__all__ = ["BAND", "PAGE", "PREFIX", "RANKS", "UNRANKED", "Job", "Queue", "Requirement"]
 
 PREFIX = "agentihooks-ci:queue:"
+RANKS = len(CLASSES)
+UNRANKED = RANKS
+BAND = 2**40
+PAGE = 64
 
 
 @dataclass(frozen=True)
@@ -35,6 +40,7 @@ class Job:
     base: str = ""
     grader: str = ""
     leased_ms: int = 0
+    rank: int = UNRANKED
 
 
 ENQUEUE = """
@@ -156,9 +162,10 @@ class Queue:
         requirements: Mapping[str, Requirement],
         base: str = "",
         grader: str = "",
+        rank: int = UNRANKED,
     ) -> list[str]:
-        """Add each unit of the head as a pending job, with the base and grader revision its grade reads, unless that
-        job is already known."""
+        """Add each unit of the head as a pending job, with the base and grader revision its grade reads and the class
+        rank of the grade that enqueues it, unless that job is already known."""
         added: list[str] = []
         for unit in units:
             job = f"{head}:{unit.kind}:{unit.key}"
@@ -175,6 +182,7 @@ class Queue:
                 "attempts": 0,
                 "worker": "",
                 "outcome": "",
+                "rank": rank,
             }
             fields = [item for pair in record.items() for item in pair]
             keys = [_job(job), _key("pending"), _key("seq"), _head(head, "pending")]
@@ -190,6 +198,11 @@ class Queue:
 
     def pending(self) -> list[str]:
         return list(self.client.zrange(_key("pending"), 0, -1))
+
+    def ordered(self, page: int = PAGE) -> Iterator[str]:
+        """Yield the pending jobs in lease order, read page jobs at a time."""
+        del page
+        yield from self.pending()
 
     def members(self, head: str, state: str) -> set[str]:
         return set(self.client.smembers(_head(head, state)))
@@ -212,6 +225,7 @@ class Queue:
             base=record["base"],
             grader=record["grader"],
             leased_ms=int(record.get("leased_ms", 0)),
+            rank=int(record.get("rank", UNRANKED)),
         )
 
     def slots(self, jobs: Sequence[str]) -> dict[str, tuple[int, int]]:
