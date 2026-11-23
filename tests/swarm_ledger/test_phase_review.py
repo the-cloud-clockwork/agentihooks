@@ -1,3 +1,5 @@
+from unittest.mock import Mock
+
 import pytest
 
 from scripts.swarm_ledger import ledger_core as core
@@ -117,6 +119,26 @@ def test_send_back_without_a_plan_task_writes_only_the_record():
     state, rejected = sync(review("sent_back", note="Nothing planned yet"))
     assert rejected == []
     assert state["phases"][0]["review"]["rounds"] == 1 and state["tasks"] == []
+
+
+ENHANCEMENT = {"id": "enhance-t1", "phase": "p1", "lane": "plan", "kind": "plan", "enhances": "t1", "state": "done"}
+PHASE_PLAN = {"id": "plan-p1", "phase": "p1", "lane": "plan", "kind": "plan", "state": "done"}
+
+
+@pytest.mark.feature("swarm-phase-admits-enhancement")
+@pytest.mark.parametrize(
+    "tasks, reopened",
+    [([ENHANCEMENT, PHASE_PLAN], ["plan-p1"]), ([ENHANCEMENT], [])],
+    ids=["ahead-of-the-phase-plan", "without-a-phase-plan"],
+)
+def test_a_send_back_never_reopens_a_task_that_enhances_another(
+    tasks: list[dict[str, str]], reopened: list[str]
+) -> None:
+    """A sent back slice review reopens the phase's own plan task, never an enhancement plan task of the same phase
+    queued ahead of it or standing alone."""
+    doc = {"priorities": [], "tasks": [dict(task) for task in tasks]}
+    ledger_phases.decided(doc, "p1", {"state": "sent_back", "escalated": False}, "master", Mock())
+    assert [task["id"] for task in doc["tasks"] if task["state"] == "open"] == reopened
 
 
 @pytest.mark.parametrize(

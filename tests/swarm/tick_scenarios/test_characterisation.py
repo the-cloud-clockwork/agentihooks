@@ -43,10 +43,12 @@ SCENARIOS = (
     "interval",
     "interval-slow",
     "hive-roll",
+    "thin-accepted",
 )
 PASSES = {"hive-roll": (2, 60_000), "second-pass": (2, 1000), "interval": (2, 60_000), "interval-slow": (3, 60_000)}
 CADENCES = {"interval-slow": "3"}
 LEDGER_WRITES = ("update_task", "notify", "mark_swarm", "rank_task", "comment", "join", "notice")
+CLIENT_CALLS = {"thin-accepted": ("_call",)}
 RUNTIME_WRITES = ("spawn", "retire", "reap_name", "nudge", "name_pane", "close_space", "close_pane")
 
 
@@ -141,6 +143,11 @@ def prepare_hive_roll(store: RedisStore, ledger: FakeLedger) -> None:
     store.redis.set(reports.key("rolled-hive"), json.dumps({"names": [], "started_at": BASE_MS - 1}))
 
 
+def accepted(slug: str, ops: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Accept an operation batch as a ledger that applies it would, answering with an empty state."""
+    return {}
+
+
 def prepare(scenario: str, store: RedisStore, ledger: FakeLedger, runtime: FakeRuntime) -> None:
     if scenario in {"paused", "stopping", "stopped", "drained"}:
         store.update("sw", state=scenario)
@@ -150,6 +157,8 @@ def prepare(scenario: str, store: RedisStore, ledger: FakeLedger, runtime: FakeR
         runtime.fail = True
     if scenario == "full-capacity":
         runtime.full = True
+    if scenario == "thin-accepted":
+        ledger._call = accepted
     if scenario == "orphan":
         ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0099")
     if scenario == "dependency":
@@ -213,7 +222,7 @@ def replay(scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path:
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
     runtime, messenger = FakeRuntime(), FakeHerdr({})
     prepare(scenario, store, ledger, runtime)
-    ledger_calls = spy(ledger, LEDGER_WRITES, monkeypatch)
+    ledger_calls = spy(ledger, LEDGER_WRITES + CLIENT_CALLS.get(scenario, ()), monkeypatch)
     runtime_calls = spy(runtime, RUNTIME_WRITES, monkeypatch)
     actions = []
     passes, gap_ms = PASSES.get(scenario, (1, 1000))

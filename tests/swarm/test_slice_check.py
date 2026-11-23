@@ -141,6 +141,16 @@ def test_the_plan_task_of_this_phase_is_read_even_after_another_phases_plan():
     assert check(document) == []
 
 
+@pytest.mark.feature("swarm-phase-admits-enhancement")
+def test_the_phase_plan_task_is_read_past_an_enhancement_task_queued_ahead_of_it() -> None:
+    """The slice check reads the phase's own plan task, never an enhancement plan task of the same phase that the
+    thin task pass queued before the phase plan task existed."""
+    document = doc(task("a"))
+    enhancement = {"id": "enhance-a", "phase": "p1", "lane": "plan", "kind": "plan", "state": "open", "enhances": "a"}
+    document["tasks"].insert(0, enhancement)
+    assert check(document) == []
+
+
 def test_an_unknown_slice_id_does_not_stop_the_check_of_later_tasks():
     assert check(doc(task("a", description="short"), slice_ids="ghost,a")) == [
         "Task ghost is not in this phase.",
