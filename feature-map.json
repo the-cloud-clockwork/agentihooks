@@ -2625,7 +2625,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-20",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-seat-durable-crons",
-      "behaviour": "Swarm start and the front door master's orchestrator join keep one code owned list of standing master seat crons on the host agentihooks scheduler, aimed at the front door seat inbox so they outlive every master recycle: the master loop, the drift check and the safety nudge always, the progress sheet while its master seat script exists and the progress email due check while its state is enabled. A rerun adds nothing, a live cron already aimed at the seat on a listed schedule is adopted and its duplicates cancelled, a backend master's join adds none, a stopping or stopped swarm keeps none, swarm stop, stop now and close cancel every cron aimed at the front door seat, and a scheduler or store this host cannot reach leaves a warning without failing the command.",
+      "behaviour": "Swarm start and the front door master's orchestrator join keep one code owned list of standing master seat crons on the host agentihooks scheduler, aimed at the front door seat inbox so they outlive every master recycle: the master loop and the safety nudge always, the progress sheet while its master seat script exists and the progress email due check while its state is enabled. A rerun adds nothing, a live cron already aimed at the seat on a listed schedule is adopted and its duplicates cancelled, a retired drift check cron aimed at the seat is cancelled because release, green promotion and hive drain seat items carry its rollout checks, while crons on other schedules or at other seats stay, a backend master's join adds none, a stopping or stopped swarm keeps none, swarm stop, stop now and close cancel every cron aimed at the front door seat, and a scheduler or store this host cannot reach leaves a warning without failing the command.",
       "seam": "agentihooks swarm <slug> start|stop|close and agentihooks api join --role orchestrator, observed through the open crons agentihooks cron list shows aimed at master@<slug>",
       "tests": [
         "tests/swarm/test_seat_crons.py::test_start_puts_the_standing_seat_crons_on_the_scheduler",
@@ -2633,6 +2633,8 @@
         "tests/swarm/test_seat_crons.py::test_the_front_door_master_join_ensures_one_set",
         "tests/swarm/test_seat_crons.py::test_only_the_front_door_master_join_puts_seat_crons",
         "tests/swarm/test_seat_crons.py::test_hand_made_seat_crons_are_adopted_and_their_duplicates_cancelled",
+        "tests/swarm/test_seat_crons.py::test_a_start_or_join_on_a_swarm_holding_old_drift_check_crons_cancels_them",
+        "tests/swarm/test_seat_crons.py::test_a_fresh_swarm_gets_no_drift_check_cron",
         "tests/swarm/test_seat_crons.py::test_the_progress_sheet_cron_follows_the_master_seat_script",
         "tests/swarm/test_seat_crons.py::test_the_progress_email_cron_follows_its_enabled_state",
         "tests/swarm/test_seat_crons.py::test_an_unreadable_or_unset_email_state_wants_no_email_cron",
