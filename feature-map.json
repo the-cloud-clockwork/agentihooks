@@ -1315,7 +1315,15 @@
         "tests/swarm/test_admission_view.py::test_the_root_waiting_count_judges_only_open_tasks_pinned_to_the_root_hive",
         "tests/swarm/test_admission_view.py::test_the_branched_rows_carry_only_the_continuation_fields",
         "tests/swarm/test_admission_view.py::test_a_frozen_root_task_keeps_no_root_slot",
-        "tests/swarm_ledger/test_task_list_selecting.py::test_only_a_plain_tasks_read_naming_a_filter_is_a_selection"
+        "tests/swarm_ledger/test_task_list_selecting.py::test_only_a_plain_tasks_read_naming_a_filter_is_a_selection",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_tasks_route_serves_every_selection_the_client_asks_for",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_route_refuses_a_selection_outside_a_plain_tasks_read",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_reply_carries_the_revision_of_its_rows_and_no_cursor",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_client_reads_a_selection_through_the_tasks_resource",
+        "tests/swarm/test_admission_view.py::test_every_read_the_view_makes_names_its_own_swarm",
+        "tests/swarm/test_admission_view.py::test_the_snapshot_holds_the_rows_the_view_read_under_its_swarm_and_fix_phase",
+        "tests/hub/test_admission_gates.py::test_an_admission_hands_the_continuation_the_rows_on_its_task_branch",
+        "tests/hub/test_admission_gates.py::test_an_admission_reads_a_plan_task_steering_through_its_readiness_source"
       ]
     },
     {

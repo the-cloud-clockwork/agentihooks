@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from scripts.hub import admission
-from scripts.swarm import readiness
+from scripts.swarm import admission_view, readiness
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.helpers.narrow_ledger import DocLedger
 from tests.swarm.test_readiness import doc, task
@@ -96,3 +96,40 @@ def test_an_admission_claims_the_task_its_dependency_left_open_once_the_dependen
     assert admitted is not None and admitted["task"]["id"] == "t1"
     assert gates.rows["t1"]["state"] == "claimed"
     assert gates.rows["t1"]["claimed_by"] == admitted["name"]
+
+
+@pytest.mark.feature("hub-admission-narrow-read")
+def test_an_admission_hands_the_continuation_the_rows_on_its_task_branch(
+    gates: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import continuation
+
+    asked: list[tuple[str, dict[str, Any]]] = []
+    resolved: list[dict[str, Any]] = []
+    select = gates.ledger.tasks_where
+
+    def tasks_where(slug: str, **filters: Any) -> list[dict[str, Any]]:
+        asked.append((slug, filters))
+        return select(slug, **filters)
+
+    def resolve(repo: str, task: dict[str, Any], rows: dict[str, Any], *rest: Any) -> dict[str, Any]:
+        resolved.append(rows)
+        return {}
+
+    monkeypatch.setattr(gates.ledger, "tasks_where", tasks_where)
+    monkeypatch.setattr(continuation, "resolve", resolve)
+    gates.rows["t1"]["branch"] = "t1-branch"
+    gates.found["tasks"].append(task("t9", state="done", branch="t1-branch", pr_url="https://example.invalid/pull/9"))
+
+    assert gates.admitter.admit(SLUG, ask()) is not None
+    assert (SLUG, {"branches": ["t1-branch"], "fields": admission_view.BRANCH_FIELDS}) in asked
+    assert "t9" in resolved[0]
+
+
+@pytest.mark.feature("hub-admission-narrow-read")
+def test_an_admission_reads_a_plan_task_steering_through_its_readiness_source(gates: SimpleNamespace) -> None:
+    gates.found["tasks"].append(task("plan-p1", kind="plan", lane="plan"))
+
+    gates.admitter.admit(SLUG, ask(task="plan-p1", lane="plan"))
+
+    assert gates.ledger.exports == 1

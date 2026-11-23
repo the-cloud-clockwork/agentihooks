@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 import pytest
 
 from scripts.swarm import ledger_client
-from scripts.swarm_ledger.api import task_list
+from scripts.swarm_ledger.api import resources, task_list
 from tests.swarm_ledger.test_api_services import SLUG, fake_services, served
 
 ROWS: list[dict[str, Any]] = [
@@ -103,3 +103,41 @@ def test_the_tasks_route_serves_every_selection_the_client_asks_for(
     status, body = served(fake_services([]), "GET", f"/api/v1/ledgers/{SLUG}/tasks?{query}")
 
     assert (status, ids(body) if status == 200 else body) == (200, expected)
+
+
+@pytest.mark.feature("hub-admission-narrow-read")
+@pytest.mark.parametrize("path", ["phases?ids=a", f"tasks?ids=a&cursor={'a' * 64}:1"], ids=["not-tasks", "with-cursor"])
+def test_the_route_refuses_a_selection_outside_a_plain_tasks_read(path: str) -> None:
+    status, body = served(fake_services([]), "GET", f"/api/v1/ledgers/{SLUG}/{path}")
+
+    assert (status, body["error"]["code"], body["error"]["message"]) == (
+        400,
+        "schema_invalid",
+        task_list.SELECTION_ONLY,
+    )
+
+
+@pytest.mark.feature("hub-admission-narrow-read")
+def test_a_selection_reply_carries_the_revision_of_its_rows_and_no_cursor() -> None:
+    reply = task_list.selecting(ROWS, {"ids": "a,b"})
+
+    assert set(reply) == {"data", "revision", "next_cursor"}
+    assert reply["revision"] == resources.revision(ROWS[:2])
+    assert reply["next_cursor"] is None
+    assert [row["revision"] for row in reply["data"]] == [resources.revision(row) for row in ROWS[:2]]
+
+
+@pytest.mark.feature("hub-admission-narrow-read")
+def test_the_client_reads_a_selection_through_the_tasks_resource(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[tuple[str, str]] = []
+
+    def resource(self: ledger_client.LedgerClient, slug: str, path: str, collection: bool = False) -> Any:
+        asked.append((slug, path))
+        return [{"id": "a"}]
+
+    monkeypatch.setattr(ledger_client.LedgerClient, "_resource", resource)
+
+    found = ledger_client.LedgerClient().tasks_where("sw", ids=["a", "b"], states=["open"])
+
+    assert found == [{"id": "a"}]
+    assert asked == [("sw", "tasks?ids=a%2Cb&states=open")]

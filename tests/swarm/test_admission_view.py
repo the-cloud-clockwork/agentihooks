@@ -17,18 +17,38 @@ SLUG = "sw"
 
 
 class Recording(DocLedger):
-    """A document ledger that records every narrow tasks selection and claim gate read it answers."""
+    """A document ledger that records every narrow tasks selection and claim gate read it answers, and the swarm each
+    read names."""
 
     def __init__(self, document: dict[str, Any]) -> None:
         super().__init__(document)
         self.selected: list[dict[str, Any]] = []
         self.judged: list[str] = []
+        self.slugs: list[str] = []
+
+    def task(self, slug: str, task_id: str) -> dict[str, Any] | None:
+        self.slugs.append(slug)
+        return super().task(slug, task_id)
+
+    def item(self, slug: str, path: str) -> dict[str, Any] | None:
+        self.slugs.append(slug)
+        return super().item(slug, path)
+
+    def metadata(self, slug: str) -> dict[str, Any]:
+        self.slugs.append(slug)
+        return super().metadata(slug)
+
+    def state(self, slug: str) -> dict[str, Any]:
+        self.slugs.append(slug)
+        return super().state(slug)
 
     def tasks_where(self, slug: str, **filters: Any) -> list[dict[str, Any]]:
+        self.slugs.append(slug)
         self.selected.append(filters)
         return super().tasks_where(slug, **filters)
 
     def focus_verdicts(self, slug: str, target: str) -> dict[str, Any] | None:
+        self.slugs.append(slug)
         self.judged.append(target)
         return super().focus_verdicts(slug, target)
 
@@ -204,3 +224,42 @@ def test_a_frozen_root_task_keeps_no_root_slot(narrow: SimpleNamespace) -> None:
 
     assert narrow.view.waiting(SLUG, lambda: []) == 0
     assert narrow.ledger.judged == ["tasks/w1"]
+
+
+@pytest.mark.feature("hub-admission-narrow-read")
+def test_every_read_the_view_makes_names_its_own_swarm(narrow: SimpleNamespace) -> None:
+    narrow.found["tasks"] += [task("plan-p1", kind="plan", lane="plan"), task("w2", hive="root", depends_on=["t8"])]
+
+    narrow.view.task(SLUG, "t1", marks()[1])
+    narrow.view.task(SLUG, "plan-p1", marks()[1])
+    narrow.view.waiting(SLUG, lambda: [])
+    narrow.view.branched(SLUG, ["t7-branch"])
+
+    assert narrow.ledger.slugs
+    assert set(narrow.ledger.slugs) == {SLUG}
+
+
+@pytest.mark.feature("hub-admission-narrow-read")
+def test_the_snapshot_holds_the_rows_the_view_read_under_its_swarm_and_fix_phase(narrow: SimpleNamespace) -> None:
+    judged: list[tuple[str, list[str]]] = []
+
+    def admitting(store: RedisStore, slug: str, config: SwarmConfig, rows: dict[str, Any]) -> Any:
+        judged.append((slug, sorted(rows)))
+        return lambda task: True
+
+    view = admission_view.Narrow(
+        lambda: narrow.store, narrow.ledger, readiness.Source(narrow.store, narrow.ledger), admitting=admitting
+    ).task(SLUG, "t1", marks()[1])
+
+    assert view.snapshot.slug == SLUG
+    assert view.snapshot.fix == ""
+    assert view.snapshot.doc == {"tasks": list(view.rows.values()), "phases": [], "freezes": []}
+    assert judged == [(SLUG, sorted(view.rows))]
+
+
+def test_a_ledger_without_an_overview_gives_the_view_an_empty_one(
+    narrow: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(narrow.ledger, "metadata", lambda slug: {"_meta": {"rev": 1}})
+
+    assert narrow.view.task(SLUG, "t1", marks()[1]).doc["overview"] == ""
