@@ -323,3 +323,66 @@ def test_a_warm_scheduler_grades_every_pass_like_one_rebuilt_from_redis(tmp_path
             run.finish(grant, "passed", {"seconds": 1.0})
     assert f"completed {warm.grade(HEAD_B).run} success" in _tick(warm, rebuilt, DAY_MS + 100)
     assert warm.lab.client.smembers(scheduler.LIVE) == set()
+
+
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
+def test_a_restarted_scheduler_reads_each_live_grade_once_through_plain_pipelines_and_writes_none(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1), unit(2))}), HEAD_B: plan({"lint": (unit(3),)})})
+    run.push(HEAD_A, lane="first")
+    run.push(HEAD_B, lane="second")
+    run.tick(1000)
+    run.tick(1100)
+    documents = _documents(run)
+    run.engine = run.lab.build(0, Policy(), None)
+    sent = _record(run, monkeypatch)
+    opened: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    pipeline = run.lab.client.pipeline
+
+    def piped(*args: Any, **options: Any) -> Any:
+        opened.append((args, options))
+        return pipeline(*args, **options)
+
+    monkeypatch.setattr(run.lab.client, "pipeline", piped)
+    assert run.tick(1200) == []
+    live = sorted(run.lab.client.smembers(scheduler.LIVE))
+    assert _moved(sent) == [("GET", grade) for grade in live]
+    assert opened and all(entry == ((), {"transaction": False}) for entry in opened)
+    assert _documents(run) == documents
+
+
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
+def test_a_live_grade_stored_without_a_revision_is_written_once_to_take_one_and_then_left_unwritten(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1), unit(2))})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.tick(1100)
+    grade = run.grade(HEAD_A).run
+    run.lab.client.delete(scheduler.REVISIONS, scheduler.RECORDS)
+    sent = _record(run, monkeypatch)
+    assert run.tick(1200) == []
+    assert [(name, written) for name, written, _ in sent if name == "SET"] == [("SET", grade)]
+    assert run.lab.client.hget(scheduler.REVISIONS, grade) == "1"
+    sent.clear()
+    assert run.tick(1300) == []
+    assert _moved(sent) == []
+
+
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
+def test_a_pass_reads_no_grade_whose_finished_unit_is_collected_while_its_other_unit_waits(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1), unit(2))})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.finish(run.lease()[0], "passed", {"seconds": 1.0})
+    run.tick(1100)
+    documents = _documents(run)
+    sent = _record(run, monkeypatch)
+    assert run.tick(1200) == []
+    assert [slot.outcome for slot in run.grade(HEAD_A).units.values()] == ["passed", ""]
+    assert _moved(sent) == []
+    assert _documents(run) == documents

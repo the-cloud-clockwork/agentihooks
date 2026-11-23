@@ -594,6 +594,53 @@ def _moved(state: State) -> list[tuple[str, str, str | None]]:
     ]
 
 
+@dataclass(frozen=True)
+class _Quiet:
+    """What can move a live grade without its document, taken at the revision it was read or stored at: its tier and
+    repository, whether a slot waits for the budget, the jobs of its open slots not yet started and started, whether a
+    check run target moved, whether it records posts for the relay, its post hold and whether every slot is final."""
+
+    revision: int
+    tier: int
+    repo: str
+    held: bool
+    waiting: tuple[str, ...]
+    started: tuple[str, ...]
+    moved: bool
+    relayed: bool
+    hold: int
+    final: bool
+
+
+def _quiet(state: State, revision: int) -> _Quiet:
+    """Return what can move a grade without its document, at the revision it was read or stored at."""
+    slots = state.units.values()
+    open_slots = [slot for slot in slots if slot.job and not slot.outcome and not slot.held]
+    return _Quiet(
+        revision=revision,
+        tier=state.tier,
+        repo=state.repo,
+        held=any(slot.held for slot in slots),
+        waiting=tuple(slot.job for slot in open_slots if not slot.started),
+        started=tuple(slot.job for slot in open_slots if slot.started),
+        moved=bool(_moved(state)),
+        relayed=state.ref.startswith(GRADE_REFS),
+        hold=state.hold,
+        final=all(slot.outcome for slot in slots),
+    )
+
+
+def _still(quiet: _Quiet, states: Sequence[str | None], now_ms: int, repo_hold: int) -> bool:
+    """Return whether advancing a grade would change nothing: no open job is gone or finished and none waiting to
+    start is leased, given their states in waiting then started order, and either a moved check run waits out its
+    hold or nothing moved and the grade cannot close."""
+    if any(state is None or state in FINISHED for state in states) or "leased" in states[: len(quiet.waiting)]:
+        return False
+    if quiet.moved:
+        return not quiet.relayed and now_ms < max(quiet.hold, repo_hold)
+    return not quiet.final
+
+
 def _slug(repo: str) -> str:
     """Return owner/name of a repository URL."""
     return urlsplit(repo).path.removeprefix("/")
@@ -638,6 +685,7 @@ class Scheduler:
         self.registry = metrics.Registry()
         self.held: defaultdict[str, int] = defaultdict(int)
         self._demand_cache: dict[str, tuple[str, _Demand]] = {}
+        self._quiets: dict[str, _Quiet] = {}
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
@@ -752,8 +800,13 @@ class Scheduler:
 
     def save(self, state: State) -> None:
         """Store a grade's state, so the next pass and the relay read it back, with a live grade's next revision and
-        demand record in the same transaction, retried while another writer changes the grade."""
-        self.client.transaction(partial(stage_grade, document=asdict(state)), GRADES + state.run)
+        demand record in the same transaction, retried while another writer changes the grade, and keep a live grade's
+        summary at the revision it stored."""
+        stored = self.client.transaction(partial(stage_grade, document=asdict(state)), GRADES + state.run)
+        if state.conclusion:
+            self._quiets.pop(state.run, None)
+        else:
+            self._quiets[state.run] = _quiet(state, int(stored[1]))
 
     def _drop(self, run: str) -> None:
         """Take a grade out of the live set and remove its revision and demand record in one transaction."""
@@ -762,6 +815,31 @@ class Scheduler:
             pipe.hdel(REVISIONS, run)
             pipe.hdel(RECORDS, run)
             pipe.execute()
+
+    def _survey(self) -> dict[str, _Quiet]:
+        """Return the summary of every live grade that has a document, reading only a grade whose stored revision is
+        not the one its summary was taken at, a missing revision reading as 0, and forget the summaries of grades no
+        longer live."""
+        runs = sorted(self.client.smembers(LIVE))
+        pipe = self.client.pipeline(transaction=False)
+        pipe.hgetall(REVISIONS)
+        for run in runs:
+            pipe.exists(GRADES + run)
+        revisions, *present = pipe.execute()
+        quiets: dict[str, _Quiet] = {}
+        for run in (run for run, exists in zip(runs, present) if exists):
+            revision = int(revisions.get(run, 0))
+            if (quiet := self._quiets.get(run)) is not None and quiet.revision == revision:
+                quiets[run] = quiet
+            elif (state := self.grade(run)) is not None:
+                quiets[run] = _quiet(state, revision)
+        self._quiets = quiets
+        return quiets
+
+    def _settled(self, quiet: _Quiet, now_ms: int) -> bool:
+        """Return whether a summarised grade's open jobs, check runs and slots leave nothing to advance now."""
+        states = self.queue.states([*quiet.waiting, *quiet.started])
+        return _still(quiet, states, now_ms, self.held[quiet.repo])
 
     def _intake(self, now_ms: int) -> list[str]:
         heads = self.ports.inbox.heads()
@@ -994,16 +1072,21 @@ class Scheduler:
         and backfill only into the slots workers offered free after every unit already waiting in the queue, backfill
         and those admitted in this pass included, since the queue leases the most urgent class first and in order
         inside a class, which each unit is enqueued under by its grade's tier. A class the budget newly sheds is named
-        first. Each grade with held units is read again as it is admitted, so the pass holds one at a time."""
+        first. The held grades and their classes come from the live grade summaries, and a held grade is read only
+        when the budget admits its class at its turn, so the pass holds one at a time and reads none it would admit
+        nothing of."""
         actions = self._shedding()
-        held = sorted(
-            (state.tier, state.run) for state in self._live() if any(slot.held for slot in state.units.values())
-        )
+        held = sorted((quiet.tier, run) for run, quiet in self._survey().items() if quiet.held)
         if not held:
             return actions
         load = self.load(now_ms)
         waiting = sum(load.pending_slots.values())
-        for state in filter(None, map(self.grade, (run for _, run in held))):
+        admissible = (
+            run
+            for tier, run in held
+            if budget.admits(CLASSES[tier], DEFAULT.slots, load.slots_free, waiting, self.shed)
+        )
+        for state in filter(None, map(self.grade, admissible)):
             admitted: list[Unit] = []
             for slot in state.units.values():
                 if slot.held and budget.admits(CLASSES[state.tier], DEFAULT.slots, load.slots_free, waiting, self.shed):
@@ -1032,11 +1115,17 @@ class Scheduler:
 
     def _advance(self, run: str, tiers: Mapping[str, int], now_ms: int) -> list[str]:
         """Collect a grade's finished jobs, each counted in its tier, post its check runs and close it once every unit
-        is final and every check run is posted, counting the closed grade."""
-        state = self.grade(run)
-        if state is None:
+        is final and every check run is posted, counting the closed grade. A grade whose summary leaves nothing to
+        advance is neither read nor written, and a grade the pass left unchanged is written only to give it its first
+        revision."""
+        quiet = self._quiets.get(run)
+        if quiet is not None and quiet.revision and self._settled(quiet, now_ms):
+            return []
+        raw = self.client.get(GRADES + run)
+        if raw is None:
             self._drop(run)
             return [f"forgot {run}"]
+        state = _parse(raw)
         for slot in state.units.values():
             self._collect(slot, tiers, state)
         actions = self._post(state, now_ms)
@@ -1049,7 +1138,8 @@ class Scheduler:
             graded = {"class": CLASSES[state.tier], "conclusion": state.conclusion}
             self.registry.inc(contract.HEADS_GRADED_TOTAL, 1.0, graded)
             actions.append(f"completed {run} {state.conclusion}")
-        self.save(state)
+        if quiet is None or not quiet.revision or json.dumps(asdict(state)) != raw:
+            self.save(state)
         return actions
 
     def _collect(self, slot: Slot, tiers: Mapping[str, int], state: State) -> None:
