@@ -1249,13 +1249,24 @@ class Scheduler:
         return tuple(logs)
 
 
+def _unobserved(check: Mapping[str, Any]) -> None:
+    """Leave a completed check unrecorded: the observer of an inbox that feeds no shadow recorder."""
+
+
 class BusInbox:
     """Lab head events read from the bus consumer of `ci.lab.head.>`, each acknowledged once read, or terminated."""
 
-    def __init__(self, consumer: Consumer, batch: int = BATCH, timeout_ms: int = FETCH_MS) -> None:
+    def __init__(
+        self,
+        consumer: Consumer,
+        batch: int = BATCH,
+        timeout_ms: int = FETCH_MS,
+        observe: Callable[[Mapping[str, Any]], object] = _unobserved,
+    ) -> None:
         self.consumer = consumer
         self.batch = batch
         self.timeout_ms = timeout_ms
+        self.observe = observe
 
     def heads(self) -> list[Head]:
         """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself, and its

@@ -140,9 +140,52 @@ def test_a_rerequested_lab_check_is_a_head_event() -> None:
     ]
 
 
-@pytest.mark.parametrize("payload", [check_run("created"), check_run("completed"), check_run(name="unit (3.12)")])
+@pytest.mark.parametrize("payload", [check_run("created"), check_run(name="unit (3.12)")])
 def test_other_check_runs_name_no_head(payload: dict[str, Any]) -> None:
     assert webhooks.head_events("check_run", payload) == []
+
+
+def completed(name: str = "lint", conclusion: str | None = "success", summary: str | None = None) -> dict[str, Any]:
+    payload = check_run("completed", name)
+    run = {
+        **payload["check_run"],
+        "id": 11,
+        "conclusion": conclusion,
+        "app": {"slug": "github-actions", "name": "GitHub Actions"},
+        "output": {"title": "done", "summary": summary, "text": "log"},
+    }
+    return {**payload, "check_run": run}
+
+
+@pytest.mark.feature("lab-completed-check-shadow")
+def test_a_completed_check_run_rides_its_own_subject_with_the_fields_the_shadow_comparison_reads() -> None:
+    (event,) = webhooks.head_events("check_run", completed(summary="Grader revision: g2"))
+    before = time.time_ns() // 1_000_000
+    envelope = webhooks.envelope(event)
+    after = time.time_ns() // 1_000_000
+    assert envelope.type == "ci.lab.head.check_completed"
+    assert (envelope.swarm, envelope.entity, envelope.key, envelope.author, envelope.version) == (
+        "ci-lab",
+        "head",
+        f"{REPO}@{HEAD}",
+        "nestorcolt",
+        0,
+    )
+    assert before <= envelope.time <= after
+    assert envelope.data == {
+        "action": "completed",
+        "repository": {"html_url": REPO},
+        "check_run": {
+            "name": "lint",
+            "head_sha": HEAD,
+            "conclusion": "success",
+            "app": {"slug": "github-actions"},
+            "output": {"summary": "Grader revision: g2"},
+        },
+    }
+    assert envelope.id == hashlib.sha256(json.dumps(envelope.data).encode()).hexdigest()
+    (failed,) = webhooks.head_events("check_run", completed(conclusion="failure"))
+    assert webhooks.envelope(failed).id != envelope.id
 
 
 @pytest.mark.parametrize("name", [None, "ping", "check_suite", "issues"])
@@ -152,7 +195,12 @@ def test_other_events_name_no_head(name: str | None) -> None:
 
 @pytest.mark.parametrize(
     ("name", "payload"),
-    [("push", {"ref": "refs/heads/dev"}), ("pull_request", {"action": "opened"}), ("merge_group", [])],
+    [
+        ("push", {"ref": "refs/heads/dev"}),
+        ("pull_request", {"action": "opened"}),
+        ("merge_group", []),
+        ("check_run", {"action": "completed", "check_run": {"name": "lint", "head_sha": HEAD}}),
+    ],
 )
 def test_a_malformed_head_payload_raises(name: str, payload: Any) -> None:
     with pytest.raises((KeyError, TypeError)):
