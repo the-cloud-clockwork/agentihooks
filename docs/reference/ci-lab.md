@@ -200,6 +200,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_SCHEDULER_URL` | no | yes | Base address of the scheduler lease API |
 | `CI_LAB_SLOTS` | no | yes | Number of units the worker runs at once |
 | `CI_LAB_GIT_MIRROR` | yes | yes | Path of the shared git mirror the worker cuts worktrees from and the scheduler borrows objects from |
+| `CI_LAB_NODE_NAME` | no | yes | Name of the node the worker pod runs on, the `node` label of its `ci_lab_node_mirror_age_seconds` sample; unset, the worker exports no node mirror age |
 | `CI_LAB_WORK_ROOT` | no | yes | Folder of the worker's private git store, its trees, venvs and unit runs and reports |
 | `CI_LAB_MANIFEST` | no | yes | Legacy manifest path accepted by worker settings; test batches carry their selected dependency records in the lease and do not read this file |
 | `CI_LAB_FLAKES` | no | yes | Path of the flake ledger a test unit appends to when its retry passes |
@@ -258,6 +259,7 @@ host.
 | `ci_lab_cache_hits_total` | `cache` | `CACHE_HITS_TOTAL` |
 | `ci_lab_cache_misses_total` | `cache` | `CACHE_MISSES_TOTAL` |
 | `ci_lab_mirror_age_seconds` | | `MIRROR_AGE_SECONDS` |
+| `ci_lab_node_mirror_age_seconds` | `node` | `NODE_MIRROR_AGE_SECONDS` |
 | `ci_lab_core_seconds_total` | `class` | `CORE_SECONDS_TOTAL` |
 | `ci_lab_heads_graded_total` | `class`, `conclusion` | `HEADS_GRADED_TOTAL` |
 | `ci_lab_budget_fraction` | | `BUDGET_FRACTION` |
@@ -291,9 +293,17 @@ answer from no queue, lease or worker state and stay without samples. The counte
 scheduler process and start from zero when it restarts, so KEDA triggers and alerts read them
 through `rate()` or `increase()`.
 
+The worker serves a registry of its own on 9108 and sets one series there. On each scrape
+`scripts.ci_lab.metrics.observe_mirror` sets `ci_lab_node_mirror_age_seconds{node="<CI_LAB_NODE_NAME>"}`
+to the scrape time less the epoch seconds in the node cache's `fetched-at` stamp (`MIRROR_STAMP`)
+under `CI_LAB_GIT_MIRROR`, or to `+Inf` while the stamp is missing or does not read as whole epoch
+seconds. Without `CI_LAB_NODE_NAME` it sets no sample. The series covers the nodes that run a
+worker, and every worker on a node reports the same `node`, so read a node's age with
+`max by (node) (ci_lab_node_mirror_age_seconds)`.
+
 `METRICS` maps each name to its label names. Environment names have constants too:
 `BUS_PREFIX`, `MINIO_PREFIX`, `GITHUB_APP_PREFIX`, `REDIS_URL`, `RUNTIME_CONFIG`,
-`SCHEDULER_URL`, `SLOTS`, `GIT_MIRROR` and `UV_CACHE_DIR`, with `SCHEDULER_PORT` and
+`SCHEDULER_URL`, `SLOTS`, `GIT_MIRROR`, `NODE_NAME` and `UV_CACHE_DIR`, with `SCHEDULER_PORT` and
 `METRICS_PORT` for the ports.
 
 [Alerts and dashboard](#alerts-and-dashboard) lists the series the scheduler sets today and the
@@ -630,7 +640,7 @@ them:
 | `ci_lab_core_seconds_total`, `ci_lab_heads_graded_total` | Core minutes per merged pull request | The stat reads No data |
 | `ci_lab_cache_hits_total`, `ci_lab_cache_misses_total` | `CILabCacheMissRatioHigh`, Cache hit ratio | `Scheduler._place` counts the `verdict` cache and `metrics.observe_unit` counts the `git` and `uv` lookups a unit report carries, so the alert and panel wait only on a running scheduler |
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | `shadow.Shadow` counts it in a registry of its own and has no live caller, so the alert cannot fire |
-| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_records` sets the unit duration when a caller runs it; no code sets the other two |
+| `ci_lab_unit_duration_seconds`, `ci_lab_mirror_age_seconds`, `ci_lab_node_mirror_age_seconds`, `ci_lab_github_rate_remaining` | No alert or panel | Nothing, since no alert or panel reads them. `metrics.observe_records` sets the unit duration when a caller runs it and each worker sets its node mirror age on every scrape; no code sets the other two |
 
 `Scheduler._reap` counts `ci_lab_units_redelivered_total` and `ci_lab_units_lost_total` on the
 registry the metrics port serves, one for each expired lease it requeues or marks lost. No alert or
@@ -883,6 +893,7 @@ is exactly the worker contract:
 | `CI_LAB_SCHEDULER_URL` | `http://ci-lab-scheduler:8800` |
 | `CI_LAB_SLOTS` | `worker.slots`, `5` |
 | `CI_LAB_GIT_MIRROR` | `/cache/git/agentihooks.git` |
+| `CI_LAB_NODE_NAME` | The pod's `spec.nodeName`, from the downward API |
 | `UV_CACHE_DIR` | `/cache/uv` |
 | `CI_LAB_WORK_ROOT` | `/work` |
 | `CI_LAB_MANIFEST` | `/work/manifest.json` |
@@ -1088,9 +1099,9 @@ or from trees they already hold.
 
 ### Limitations
 
-- The worker's `/metrics` on 9108 serves its own empty registry, so a scrape holds no samples, and
-  the chart defines no PodMonitor or ServiceMonitor for the worker pods. The policy admits the
-  monitoring Prometheus to 9108 for when one exists.
+- The worker's `/metrics` on 9108 holds only `ci_lab_node_mirror_age_seconds`, so a node with no
+  worker has no mirror age series, and the chart defines no PodMonitor or ServiceMonitor for the
+  worker pods. The policy admits the monitoring Prometheus to 9108 for when one exists.
 - No code sets `ci_lab_mirror_age_seconds`, so the scheduler exports no mirror age sample.
 - The worker fetches a head it lacks from the node mirror only. The chart sets neither
   `AGENTIHOOKS_LAB_REMOTE` nor `CI_LAB_REPOSITORY`, and the policy reaches neither GitHub nor the
@@ -3557,7 +3568,7 @@ Change chart values through that repository's delivery process. Pod recreation a
 restarts below retain the deployed code.
 
 The scheduler supports startup reindexing. The node recovery steps use the deployment's
-node-cache DaemonSet. The mirror age gauge still has no samples, as listed in
+node-cache DaemonSet. Each worker exports its node's `ci_lab_node_mirror_age_seconds`, as listed in
 [Metrics](#metrics); a successful fetch log alone does not prove the fresh-node metric requirement.
 
 ### Deployment recovery runbook
@@ -3610,9 +3621,10 @@ kubectl -n ci-lab logs -l app.kubernetes.io/component=node-cache -c warm --tail 
 
 A successful refresh logs `mirror fetched`, followed by `uv cache warmed for lock <blob>` or
 `uv cache current for lock <blob>`. The stamp advances before uv warming, so a failed package
-install can follow a successful git fetch. Once the worker exports `ci_lab_mirror_age_seconds`,
-verify that a fresh node's sample is below `mirror.intervalSeconds` after one completed loop.
-Until then, retain the fetch output as cache evidence and leave the metric acceptance unproven.
+install can follow a successful git fetch. Once a worker runs on the fresh node, verify that
+`max by (node) (ci_lab_node_mirror_age_seconds)` for that node is below `mirror.intervalSeconds`
+after one completed loop. A node with no worker has no sample; retain the fetch output as its
+cache evidence.
 
 ### Recover an interrupted refresh or deleted cache
 
@@ -3714,7 +3726,8 @@ and the deployed scheduler's `reindexed N verdicts` line to prove full recovery.
 | `mirror fetched` followed by `node cache refresh failed` | The stamp was already updated; inspect repository lockfile access, package downloads and uv cache permissions |
 | Refresh repeatedly skips | Another run holds `git/.warm.lock`; confirm that run's state before treating a stale mirror lock as the cause |
 | Refresh fails after cache directory deletion | Recreate the affected node-cache pod and workers holding deleted mounts |
-| Mirror age sample is absent | The gauge is not exported yet; the fetch stamp and logs do not satisfy the metric requirement |
+| Mirror age sample is absent | No worker runs on that node, the worker has no `CI_LAB_NODE_NAME`, or nothing scrapes the worker pods; check the worker pods' nodes, environment and Prometheus targets |
+| Mirror age sample is `+Inf` | The worker cannot read `fetched-at` as whole epoch seconds: the first fetch has not finished, or the worker holds a deleted cache mount and needs recreating |
 | No reindex line | Check the exact environment value and startup dependency errors; the chart's default `false` omits the variable |
 | Reindex prints zero | Existing entries are preserved, or no matching reports exist in the configured bucket; check the endpoint, bucket and report objects |
 | Scheduler readiness is delayed during recovery | Reindex reads every report before serving; inspect startup logs and object store access, then disable the startup setting after recovery |

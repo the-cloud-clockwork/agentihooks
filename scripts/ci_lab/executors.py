@@ -349,7 +349,7 @@ def settings(environ: Mapping[str, str]) -> tuple[Pod, Suite, Mutation]:
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Run the worker over the adapters until SIGTERM stops it, then let its running units drain; the contract metrics
-    port serves the worker's registry until the drain ends."""
+    port serves the worker's registry, with its node's mirror age read at each scrape, until the drain ends."""
     argparse.ArgumentParser(prog="agentihooks ci-lab-worker").parse_args(argv)
     pod, suite, graded = settings(environ)
     cpus = os.cpu_count() or 1
@@ -362,7 +362,10 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         service.stop()
 
     signal.signal(signal.SIGTERM, stop)
-    with metrics.serve_registry("", contract.METRICS_PORT, metrics.Registry()) as exposition:
+    registry = metrics.Registry()
+    stamp = Path(environ[contract.GIT_MIRROR]) / contract.MIRROR_STAMP
+    observe = partial(metrics.observe_mirror, registry, stamp, environ.get(contract.NODE_NAME, ""), time.time)
+    with metrics.serve_registry("", contract.METRICS_PORT, registry, observe) as exposition:
         threading.Thread(target=exposition.serve_forever).start()
         try:
             service.run()

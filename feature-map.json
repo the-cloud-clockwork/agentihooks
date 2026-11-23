@@ -7,7 +7,11 @@
       "behaviour": "agentihooks ci-lab-worker answers each GET /metrics scrape with ci_lab_node_mirror_age_seconds labelled with its node name from CI_LAB_NODE_NAME: the scrape time less the epoch seconds in the node cache's fetched-at stamp under CI_LAB_GIT_MIRROR, +Inf while the stamp is missing or does not read as whole epoch seconds, and no sample when the pod has no node name.",
       "seam": "scripts.ci_lab.executors main, scripts.ci_lab.metrics observe_mirror, expose and serve_registry, and scripts.ci_lab.contract NODE_MIRROR_AGE_SECONDS, NODE_NAME and MIRROR_STAMP",
       "tests": [
-        "tests/ci_lab/test_executors.py::test_main_exports_the_age_of_its_node_cache_mirror_under_its_node_name"
+        "tests/ci_lab/test_executors.py::test_main_exports_the_age_of_its_node_cache_mirror_under_its_node_name",
+        "tests/ci_lab/test_metrics.py::test_the_node_mirror_age_is_the_clock_less_the_node_cache_stamp",
+        "tests/ci_lab/test_metrics.py::test_a_stamp_that_does_not_read_as_epoch_seconds_ages_the_node_mirror_to_infinity",
+        "tests/ci_lab/test_metrics.py::test_a_worker_without_a_node_name_sets_no_node_mirror_age",
+        "tests/ci_lab/test_metrics.py::test_the_metrics_route_alone_runs_the_observer_before_it_renders"
       ]
     },
     {
@@ -10120,7 +10124,7 @@
       "id": "lab-worker-metrics",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-metrics",
-      "behaviour": "agentihooks ci-lab-worker binds the contract metrics port while the worker runs and answers GET /metrics with the Prometheus exposition of its own metrics registry, which observes no scheduler gauge and no unit sample; any other path answers 404 and a POST 405; once SIGTERM drains the worker, the server thread ends and the port closes.",
+      "behaviour": "agentihooks ci-lab-worker binds the contract metrics port while the worker runs and answers GET /metrics with the Prometheus exposition of its own metrics registry, which observes no scheduler gauge and no unit sample and, without a node name, no node mirror age; any other path answers 404 and a POST 405; once SIGTERM drains the worker, the server thread ends and the port closes.",
       "seam": "scripts.ci_lab.executors main, scripts.ci_lab.metrics serve_registry and expose, and scripts.ci_lab.contract METRICS_PORT",
       "tests": [
         "tests/ci_lab/test_executors.py::test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_drains",

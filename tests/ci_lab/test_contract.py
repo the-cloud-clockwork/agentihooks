@@ -21,6 +21,7 @@ EXPECTED_METRICS = {
     "ci_lab_cache_hits_total": ("cache",),
     "ci_lab_cache_misses_total": ("cache",),
     "ci_lab_mirror_age_seconds": (),
+    "ci_lab_node_mirror_age_seconds": ("node",),
     "ci_lab_core_seconds_total": ("class",),
     "ci_lab_heads_graded_total": ("class", "conclusion"),
     "ci_lab_budget_fraction": (),
@@ -44,6 +45,7 @@ NAMED_CONSTANTS = {
     "CACHE_HITS_TOTAL": "ci_lab_cache_hits_total",
     "CACHE_MISSES_TOTAL": "ci_lab_cache_misses_total",
     "MIRROR_AGE_SECONDS": "ci_lab_mirror_age_seconds",
+    "NODE_MIRROR_AGE_SECONDS": "ci_lab_node_mirror_age_seconds",
     "CORE_SECONDS_TOTAL": "ci_lab_core_seconds_total",
     "HEADS_GRADED_TOTAL": "ci_lab_heads_graded_total",
     "BUDGET_FRACTION": "ci_lab_budget_fraction",
@@ -75,6 +77,7 @@ WORKER_DESCRIPTION = {
             "CI_LAB_SCHEDULER_URL",
             "CI_LAB_SLOTS",
             "CI_LAB_GIT_MIRROR",
+            "CI_LAB_NODE_NAME",
             "UV_CACHE_DIR",
             "CI_LAB_WORK_ROOT",
             "CI_LAB_MANIFEST",
@@ -103,6 +106,7 @@ ENVIRONMENT_NAMES = (
     "CI_LAB_SCHEDULER_URL",
     "CI_LAB_SLOTS",
     "CI_LAB_GIT_MIRROR",
+    "CI_LAB_NODE_NAME",
     "UV_CACHE_DIR",
     "CI_LAB_WORK_ROOT",
     "CI_LAB_MANIFEST",
@@ -145,6 +149,7 @@ def test_environment_names() -> None:
     assert contract.SCHEDULER_URL == "CI_LAB_SCHEDULER_URL"
     assert contract.SLOTS == "CI_LAB_SLOTS"
     assert contract.GIT_MIRROR == "CI_LAB_GIT_MIRROR"
+    assert contract.NODE_NAME == "CI_LAB_NODE_NAME"
     assert contract.UV_CACHE_DIR == "UV_CACHE_DIR"
     assert contract.RUNTIME_CONFIG == "CI_LAB_RUNTIME_CONFIG"
     assert contract.LAB_URL == "CI_LAB_URL"

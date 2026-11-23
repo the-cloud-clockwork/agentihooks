@@ -15,9 +15,11 @@ its own cache; this is neither a shared volume nor a backup.
 This delivery prepares the caches and records the last successful fetch. The
 [worker Deployment](ci-lab.md#worker-deployment) mounts `git` and `uv` read only, and its pod
 store borrows the node mirror's objects, so a worker reports a git hit for a head the node mirror
-holds without fetching it. No code sets the scheduler's `ci_lab_mirror_age_seconds` yet. The
-[metric contract](ci-lab.md#metrics) names that series; the DaemonSet itself exposes no metrics
-endpoint.
+holds without fetching it. Each worker reads the `fetched-at` stamp through that mount and exports
+its node's `ci_lab_node_mirror_age_seconds` on every scrape, as the
+[metric contract](ci-lab.md#metrics) describes, so a node reports a mirror age while a worker runs
+on it. No code sets the scheduler's `ci_lab_mirror_age_seconds` yet, and the DaemonSet itself
+exposes no metrics endpoint.
 
 ## Placement and security
 
@@ -220,4 +222,4 @@ the deployment repository's CI; a green fake-tool run does not establish live ca
 | Pod is Ready while warming keeps failing | Ready tracks the container, not cache success. Compare the fetch stamp and warmed lock with the checks above |
 | Warmer reports current after an excludes-only change | It keys on the lock blob only; an unchanged requirements lock skips installation |
 | Errors after changing the UID or cache path | Existing nested files keep their old ownership, and another host path starts another cache; plan the deployment change accordingly |
-| Worker still misses git or no mirror age sample appears | This DaemonSet neither mounts worker volumes nor exports the scheduler series. Check the worker's read only mounts and git hit counter in [Worker Deployment](ci-lab.md#worker-deployment); no code sets the mirror age series yet |
+| Worker still misses git or no mirror age sample appears | This DaemonSet neither mounts worker volumes nor exports a metric. Check the worker's read only mounts and git hit counter in [Worker Deployment](ci-lab.md#worker-deployment); `ci_lab_node_mirror_age_seconds` appears only for a node that runs a worker holding `CI_LAB_NODE_NAME`, once Prometheus scrapes the worker pods |
