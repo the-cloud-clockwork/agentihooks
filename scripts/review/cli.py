@@ -1,11 +1,14 @@
 """Agent command that posts review findings on a change request head as the calling swarm agent."""
 
 import argparse
+import json
 import os
+import sys
 
 from scripts.forge import remote
-from scripts.forge.model import Forge
+from scripts.forge.model import Forge, ForgeError
 from scripts.gates.base import Who
+from scripts.review import record
 from scripts.swarm import store as swarm_store
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 
@@ -38,4 +41,13 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str]) -> int:
-    raise NotImplementedError(argv, _forge, _agent)
+    args = parser().parse_args(argv)
+    try:
+        found = connect()
+        agent = _agent(found, args.slug)
+        result = record.post(found, args.slug, _forge(), args.url, agent.name, agent.task, args.finding)
+    except (SwarmError, ForgeError) as error:
+        print(f"review: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(record.document(result)))
+    return 0

@@ -1,0 +1,19 @@
+rules:
+  - id: review-record-write-skips-forge-post
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A review record holds only findings the forge received: build each new Finding with the comment id that
+      forge.post returned for it, so the record never shows a finding the change request does not. Only _decode
+      rebuilds stored findings.
+    paths:
+      include:
+        - /scripts/review/
+        - review-record-write-skips-forge-post.py
+    patterns:
+      - pattern: Finding(...)
+      - pattern-not: Finding($ID, $BODY, $FORGE.post(...), ...)
+      - pattern-not: Finding(..., comment=$FORGE.post(...), ...)
+      - pattern-not-inside: |
+          def _decode(...):
+              ...

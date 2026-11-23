@@ -24,6 +24,7 @@ def test_a_post_stores_each_finding_with_its_forge_comment_on_the_reported_head(
         ("f2", "No test", f"{URL}#issuecomment-2", REVIEWER, "r1"),
     ]
     assert (posted.url, posted.head, _posted(posted)) == (URL, HEAD, expected)
+    assert [(item.state, item.answer, item.read_by) for item in posted.findings] == [("open", "", ())] * 2
     assert record.read(swarm, SLUG, URL, HEAD) == posted
     assert record.read(swarm, SLUG, URL, "another-head") is None
 
