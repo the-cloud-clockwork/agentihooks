@@ -1,6 +1,23 @@
 {
   "features": [
     {
+      "id": "hive-worker-total-excludes-masters-by-role",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-count-masters-out",
+      "behaviour": "The hive worker total placement reads counts no master session as a worker on any login route: a master on the claude ai or master login route leaves through the hive's interactive subtotal, and a live master record on the subscription or api route, root also matching records with no hive name, leaves through its reported slot, capped by that slot's unmarked sessions, so real workers, pending admissions and the CPU line still bind and an expert takes a root hive whose count only masters fill.",
+      "seam": "loaded_hives agents, room and refusal per hive, and HiveLaunch.select for the expert lane",
+      "tests": [
+        "tests/hive/test_master_worker_census.py::test_a_master_on_any_login_route_is_no_worker_and_the_real_worker_still_counts",
+        "tests/hive/test_master_worker_census.py::test_a_root_master_with_no_hive_name_leaves_only_the_root_worker_total",
+        "tests/hive/test_master_worker_census.py::test_a_master_record_without_an_unmarked_session_of_its_slot_removes_no_other_worker",
+        "tests/hive/test_master_worker_census.py::test_zero_cpu_room_still_refuses_once_the_master_leaves_the_worker_total",
+        "tests/hive/test_master_worker_census.py::test_an_expert_takes_the_root_hive_whose_count_only_a_subscription_master_fills"
+      ],
+      "rules": [
+        "hive-worker-total-counts-unmarked-masters"
+      ]
+    },
+    {
       "id": "filter-web-single-token-literals",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-filter-identifier-literals",

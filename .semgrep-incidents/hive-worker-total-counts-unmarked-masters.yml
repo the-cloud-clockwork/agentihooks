@@ -1,0 +1,19 @@
+rules:
+  - id: hive-worker-total-counts-unmarked-masters
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The hive worker total placement reads subtracts only sessions carrying the interactive login marker, so a
+      master on the subscription or api route stays counted as a worker and placement refuses a hive the hub still
+      admits, as expert placement on root did on 23 November. Subtract the hive's live unmarked master records with
+      _unmarked_masters inside the worker total.
+    paths:
+      include:
+        - /scripts/hive/launch.py
+        - hive-worker-total-counts-unmarked-masters.py
+    patterns:
+      - pattern-inside: |
+          def loaded_hives(...):
+              ...
+      - pattern: $HIVE["agents"] = max(0, $TOTAL) + $PENDING
+      - pattern-not: $HIVE["agents"] = max(0, <... _unmarked_masters(...) ...>) + $PENDING
