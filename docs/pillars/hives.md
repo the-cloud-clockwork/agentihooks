@@ -2098,9 +2098,10 @@ slot count never call the readiness snapshot.
 
 Before pull request [#13245](https://github.com/the-cloud-clockwork/agentihooks/pull/13245) every `admit` took that
 readiness snapshot, and `readiness.Source` fetched the whole export again whenever the ledger revision had moved
-since its last read. On 23 November the revision of a large ledger moved about nine times a minute, so nearly every
-admission missed the kept copy: a hit took 66 ms and a miss 1.4 to 17 seconds. After a hub roll every admission
-answered in 8.1 to 22.2 seconds against its 8,000 millisecond answer budget, and the hives stopped waiting for them.
+since its last read. The hub's admission timings on 23 November, the investigation behind #13245, showed the
+revision of a large ledger moving about nine times a minute, so nearly every admission missed the kept copy: a hit
+took 66 ms and a miss 1.4 to 17 seconds. After a hub roll every admission answered in 8.1 to 22.2 seconds against
+its 8,000 millisecond answer budget, and the hives stopped waiting for them.
 
 #### The reads
 
@@ -2120,8 +2121,9 @@ steps (`admission_view.withdrawal`):
 
 1. The local checks of `readiness.withdrawal` on the narrow rows: the task is gone; it is claimed, because an
    unfinished agent of the swarm holds it or the swarm store names a claimant; it is not `open`; it is at another
-   claim generation or moved to another lane; a dependency is not done; or a release, apply, fleet red or lab wait
-   holds it.
+   claim generation or moved to another lane; it is out of scope or merged into another task; a dependency is not
+   done; a claim hold holds it, such as a thin task or one waiting for its post merge proof window; or a release,
+   apply, fleet red or lab wait holds it.
 2. Only when the local checks pass, the claim gate verdict the ledger judges over its stored state, freezes, focus
    records and phases included, so no gate is judged on a partial document. `claimable` admits the offer. Any other
    verdict withdraws it with that text, the same reasons `swarm focus` prints (see
@@ -2164,8 +2166,8 @@ database, so the read reaches no separate server. The same read is open to any l
 | `branches` | Branch names, comma separated | Its `branch` is listed |
 | `fields` | Field names, comma separated | Not a filter: each kept row carries only its `id` and the named fields it has |
 
-A row must pass every filter the query names. Without `fields` each row comes back whole except for its threads,
-with its `revision`. The reply is one page, `{"data": [...], "revision": "<revision>", "next_cursor": null}`, and a
+A row must pass every filter the query names. Without `fields` each row comes back whole with its `revision`,
+except its comments, which come back as `comments_count`. The reply is one page, `{"data": [...], "revision": "<revision>", "next_cursor": null}`, and a
 reply over 262,144 bytes answers `413 resource_too_large` like other ledger reads.
 
 ```text
@@ -2189,9 +2191,9 @@ print(LedgerClient().tasks_where("<slug>", ids=["<task id>"], fields=["state", "
 
 #### Admission timing marks
 
-An admission that finishes past its answer budget logs its step timings after `claim kept` (see
-[Late admissions keep their claim](#late-admissions-keep-their-claim)). Each is the milliseconds since the mark
-before it, in this order:
+An admission that claims the task and finishes past its answer budget logs its step timings after `claim kept` (see
+[Late admissions keep their claim](#late-admissions-keep-their-claim)). A refused, held, withdrawn or kept answer
+logs no `late:` line, however long it took. Each timing is the milliseconds since the mark before it, in this order:
 
 | Mark | Time spent on |
 |---|---|
@@ -2205,7 +2207,7 @@ before it, in this order:
 | `placement` | Whether the asking hive may run the task |
 | `cap` | The task's claim cap |
 | `turn` | The root slot count, then waiting for the hive's admission turn |
-| `full` | Whether the hive has room |
+| `full` | The admission kept for a repeat ask, then whether the hive has room |
 | `claim` | Naming the agent and claiming the task in the swarm store |
 | `seat` | Choosing the seat |
 | `execution` | Starting the execution |
@@ -2256,7 +2258,8 @@ semgrep --test --config .semgrep-incidents/hub-admission-reads-full-export.yml \
 #### Narrow read limitations
 
 - A `plan` task still reads the whole document; see [The reads](#the-reads).
-- The readiness pass and the master spoke's own recheck still read the whole export.
+- The readiness pass, the operator priority preemption pass and the master spoke's own recheck still read the whole
+  export.
 - A ledger server on a release before #13245 refuses every selection with `400 schema_invalid`,
   `Request does not match the resource schema`, because its query schema knows none of the selection parameters. The
   hub does not depend on that server, because it runs the route code in process.
@@ -2267,7 +2270,7 @@ semgrep --test --config .semgrep-incidents/hub-admission-reads-full-export.yml \
 |---|---|---|
 | `late:` lines still show a `snapshot=` mark | The hub runs a release from before #13245 | Roll the hub to the newest release. |
 | `late:` lines show a large `parts` | The task is a `plan` task, whose admission reads the whole document | Expected on a large ledger. |
-| An offer is refused `the offer is withdrawn, <reason>` while the task looks open | The ledger's claim gate holds it: a freeze, a focus elsewhere, an earlier phase or a dependency | Read the verdicts with `agentihooks api --slug <slug> get focus`, then clear the hold; see [Freeze and focus](swarm.md#freeze-and-focus). |
+| An offer is refused `the offer is withdrawn, <reason>` while the task looks open | A local check or the ledger's claim gate holds it, such as a dependency, a freeze, a focus elsewhere or an earlier phase; the reason names it | Read the verdicts with `agentihooks api --slug <slug> get focus`, then clear the hold; see [Freeze and focus](swarm.md#freeze-and-focus). |
 | A selection read answers `400 schema_invalid` with `Only a plain tasks read takes a selection, ...` | It named a filter on a path other than `tasks`, beside a paging parameter, or with only `fields` | Send `ids`, `states`, `pinned` or `branches` on a plain `tasks` read. |
 | A selection read answers `400 schema_invalid` with `Request does not match the resource schema` | The ledger server runs a release before #13245 | Roll the ledger server, or read through the ledger client from a checkout on the newest release. |
 
