@@ -338,13 +338,14 @@ def test_a_warm_scheduler_reaps_supersedes_and_relays_like_one_rebuilt_from_redi
     for run in both:
         run.push(HEAD_A, lane="pr-1", event="pull_request", action="synchronize")
     _tick(warm, rebuilt, 1000)
-    for run in both:
-        assert len(run.lease(ttl_ms=50)) == 1
+    leased = {id(run): run.lease(ttl_ms=50) for run in both}
+    assert [len(grants) for grants in leased.values()] == [1, 1]
     _tick(warm, rebuilt, 1040)
-    _tick(warm, rebuilt, 1100)
+    reaped = leased[id(warm)][0].job
+    assert f"reaped {reaped} pending" in _tick(warm, rebuilt, 1100)
     for run in both:
         assert len(run.lease(ttl_ms=50)) == 1
-    _tick(warm, rebuilt, 1200)
+    assert any(action.startswith("reaped ") for action in _tick(warm, rebuilt, 1200))
     _tick(warm, rebuilt, 1300)
     for run in both:
         run.push(HEAD_C, lane="pr-1", event="pull_request", action="synchronize")
@@ -356,6 +357,7 @@ def test_a_warm_scheduler_reaps_supersedes_and_relays_like_one_rebuilt_from_redi
     _tick(warm, rebuilt, 1300 + HOLD_MS)
 
 
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
 def test_a_restarted_scheduler_reads_each_quiet_live_grade_once_through_plain_pipelines_and_writes_none(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -401,6 +403,7 @@ def test_a_live_grade_stored_without_a_revision_is_written_once_to_take_one_and_
     assert _moved(sent) == []
 
 
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
 def test_a_quiet_pass_after_a_grade_s_first_unit_was_collected_leaves_it_unread_while_its_other_unit_waits(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
