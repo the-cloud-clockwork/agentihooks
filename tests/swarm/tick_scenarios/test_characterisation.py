@@ -144,7 +144,7 @@ def prepare_hive_roll(store: RedisStore, ledger: FakeLedger) -> None:
 
 
 def accepted(slug: str, ops: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Accept an operation batch as a ledger that applies it would, answering with an empty state."""
+    """Answer an operation batch with an empty state and apply none of it, as a client whose ledger accepts it."""
     return {}
 
 

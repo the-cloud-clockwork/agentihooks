@@ -7,6 +7,9 @@ from scripts.swarm_ledger import ledger_phases, ledger_priorities
 from tests.swarm_ledger.plan_slices import anchored
 from tests.swarm_ledger.test_phases import SLUG, make_ledger
 
+ENHANCEMENT = {"id": "enhance-t1", "phase": "p1", "lane": "plan", "kind": "plan", "enhances": "t1", "state": "done"}
+PHASE_PLAN = {"id": "plan-p1", "phase": "p1", "lane": "plan", "kind": "plan", "state": "done"}
+
 
 @pytest.fixture(autouse=True)
 def review_ledger_dir(ledger_dir, monkeypatch):
@@ -121,10 +124,6 @@ def test_send_back_without_a_plan_task_writes_only_the_record():
     assert state["phases"][0]["review"]["rounds"] == 1 and state["tasks"] == []
 
 
-ENHANCEMENT = {"id": "enhance-t1", "phase": "p1", "lane": "plan", "kind": "plan", "enhances": "t1", "state": "done"}
-PHASE_PLAN = {"id": "plan-p1", "phase": "p1", "lane": "plan", "kind": "plan", "state": "done"}
-
-
 @pytest.mark.feature("swarm-phase-admits-enhancement")
 @pytest.mark.parametrize(
     "tasks, reopened",
@@ -134,8 +133,6 @@ PHASE_PLAN = {"id": "plan-p1", "phase": "p1", "lane": "plan", "kind": "plan", "s
 def test_a_send_back_never_reopens_a_task_that_enhances_another(
     tasks: list[dict[str, str]], reopened: list[str]
 ) -> None:
-    """A sent back slice review reopens the phase's own plan task, never an enhancement plan task of the same phase
-    queued ahead of it or standing alone."""
     doc = {"priorities": [], "tasks": [dict(task) for task in tasks]}
     ledger_phases.decided(doc, "p1", {"state": "sent_back", "escalated": False}, "master", Mock())
     assert [task["id"] for task in doc["tasks"] if task["state"] == "open"] == reopened
