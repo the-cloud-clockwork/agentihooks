@@ -57,9 +57,9 @@ Omitted lanes receive their usual defaults. The cap must be a nonnegative
 integer; `0` requests no reviewer capacity. A swarm created without
 `--template` gets the same defaults, so it starts with a review cap of `1`.
 Creation has no review cap flag, so a template with `"cap": 0` on its `review`
-lane is the way to create a swarm with no reviewer capacity. The template must be available in
-the configuration home of the process that creates the swarm. A user template
-with the same name as a built-in takes precedence.
+lane is the way to create a swarm with no reviewer capacity. The template must
+be available in the configuration home of the process that creates the swarm.
+A user template with the same name as a built-in takes precedence.
 
 List the available templates, then select yours when creating a new swarm with
 your plan. Replace the placeholders with the swarm name, repository directory
@@ -140,20 +140,21 @@ passes the normal claimability checks appears on that lane, and new review
 work makes a drained swarm return to `running`. Existing lanes retain their
 own task listings and caps.
 
-The review kind names no proof fields, and as a read only kind it needs no
-pull request, so `done` accepts a review task without a verdict or other
-proof. The `--must`, `--check` and `--judge` contract is carried in the
-agent's prompt.
+The review kind names no proof fields, so `done` closes a review task with no
+verdict, proof or pull request. A review task that records a pull request,
+through `--pr` or its stored one, closes only after that pull request merges,
+unless `--filed` names a follow up. The `--must`, `--check` and `--judge`
+contract goes into the agent's prompt as its proof contract line.
 
 ## Limits
 
 The tick's lane list and the event engine's offer scope are separate. The
 event readiness reactor offers only `eng`, `ci` and `plan` work, so it never
 offers a review task. Hive placement covers the `eng`, `ci`, `plan`,
-`dispatch` and `expert` lanes; a review task that names no hive goes to the
-deployment's other placement backends. A stored review task, a ready-task
-listing or a swarm returning to `running` therefore does not show that a
-reviewer will launch. See the
+`dispatch` and `expert` lanes and any task that names a hive, so a review task
+that names no hive is placed by the deployment's other backends. A stored
+review task, a ready-task listing or a swarm returning to `running` therefore
+does not show that a reviewer will launch. See the
 [event driven engine](../pillars/swarm.md#event-driven-engine).
 
 The `reviewer` package role runs the `swarm-reviewer` skill. Its conditions

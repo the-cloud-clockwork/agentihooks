@@ -4287,8 +4287,8 @@ picks its prompt and the proof `done` must carry, and the ledger refuses `done` 
 The ledger also accepts kind `review`, paired exclusively with lane `review`. Supply both when adding a
 task; selecting only the lane leaves the default code kind and is refused. See
 [Add and inspect a review task](../reference/swarm-review-lane.md#add-and-inspect-a-review-task) for the API
-example. The review kind names no proof fields and, as a read only kind, needs no pull request, so `done` takes
-a review task without a verdict or other proof.
+example. The review kind names no proof fields, so `done` closes a review task with no verdict, proof or pull
+request; one that records a pull request closes only after it merges, unless `--filed` names a follow up.
 
 For `code` and `ci`, `done` reads the pull request (`--pr`, else the task's recorded one) with `gh pr view`
 and refuses unless it is merged, or when GitHub cannot be read. The tick backs this up: a `code` or `ci` task
