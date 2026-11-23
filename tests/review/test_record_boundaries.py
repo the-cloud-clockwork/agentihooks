@@ -61,6 +61,19 @@ def test_trailing_slashes_do_not_change_the_forge_target(requested: str, reporte
 
 
 @pytest.mark.feature("review-record-post")
+def test_both_spellings_of_a_change_request_url_share_one_record() -> None:
+    found = store()
+    record.post(found, SLUG, FakeForge(), URL, REVIEWER, "r1", ["First"])
+    posted = record.post(found, SLUG, FakeForge(), URL + "/", REVIEWER, "r1", ["Second"])
+    assert [(item.id, item.body) for item in posted.findings] == [("f1", "First"), ("f2", "Second")]
+    assert len([key for key in found.redis.keys("*") if ":review:" in key]) == 1
+    for url in (URL, URL + "/"):
+        saved = record.read(found, SLUG, url, HEAD)
+        assert saved is not None
+        assert [item.body for item in saved.findings] == ["First", "Second"]
+
+
+@pytest.mark.feature("review-record-post")
 def test_a_forge_url_with_a_suffix_is_a_different_request() -> None:
     forge = FakeForge(url=URL + "X")
     with pytest.raises(SwarmError) as error:

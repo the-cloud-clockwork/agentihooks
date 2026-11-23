@@ -48,7 +48,7 @@ def document(found: Record) -> dict[str, Any]:
 
 
 def _key(store: RedisStore, slug: str, url: str) -> str:
-    return store.key(slug, "review", sha256(url.encode()).hexdigest()[:16])
+    return store.key(slug, "review", sha256(url.rstrip("/").encode()).hexdigest()[:16])
 
 
 def _decode(raw: str | None, url: str, head: str) -> Record:

@@ -68,6 +68,30 @@ def test_a_forge_failure_prints_its_reason_and_returns_one(
 
 
 @pytest.mark.feature("review-record-post")
+def test_a_forge_without_a_usable_remote_or_token_prints_its_reason_and_returns_one(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _wired(monkeypatch)
+    monkeypatch.setattr(cli, "_forge", Mock(side_effect=ValueError("GITHUB_TOKEN is not set")))
+    assert cli.main(["post", URL, "--slug", SLUG, "--finding", "First"]) == 1
+    assert capsys.readouterr() == ("", "review: GITHUB_TOKEN is not set\n")
+
+
+@pytest.mark.feature("review-record-post")
+def test_a_redis_refusal_prints_its_reason_and_returns_one(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from redis.exceptions import NoPermissionError
+
+    _wired(monkeypatch)
+    monkeypatch.setattr(
+        cli.record, "post", Mock(side_effect=NoPermissionError("NOPERM no permissions to access a key"))
+    )
+    assert cli.main(["post", URL, "--slug", SLUG, "--finding", "First"]) == 1
+    assert capsys.readouterr() == ("", "review: NOPERM no permissions to access a key\n")
+
+
+@pytest.mark.feature("review-record-post")
 def test_a_session_outside_the_swarm_is_refused(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
