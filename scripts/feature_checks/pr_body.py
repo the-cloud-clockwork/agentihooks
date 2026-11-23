@@ -21,7 +21,7 @@ LACKS = "FAIL: the checkout lacks its {part}: {path}"
 
 def _holds(root: Path, path: str, mark: str) -> bool:
     file = root / path
-    return file.is_file() and mark in file.read_text(encoding="utf-8")
+    return file.is_file() and mark.encode() in file.read_bytes()
 
 
 def lines(root: Path) -> list[str]:
