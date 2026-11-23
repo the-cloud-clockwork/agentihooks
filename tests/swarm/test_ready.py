@@ -1079,6 +1079,15 @@ def test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof(
     assert merging.run() == []
 
 
+@pytest.mark.feature("review-done-findings")
+def test_a_merged_review_task_stays_open_until_swarm_done_checks_its_findings(merging: Any) -> None:
+    merging.rows["t1"].update(kind="review", lane="review")
+    merging.pulls[URL] = MERGED
+    assert merging.run() == [f"task t1 awaits its proof, {URL} merged", f"removed the worktree {TOP}"]
+    assert merging.rows["t1"]["state"] == "open"
+    assert merging.ledger.comments == [("t1", ready.PROOF.format(url=URL, kind="review"), "swarm")]
+
+
 def test_a_merged_code_task_waits_for_declared_post_merge_proof(merging):
     merging.rows["t1"]["contract"] = {"after": "yes"}
     merging.pulls[URL] = MERGED

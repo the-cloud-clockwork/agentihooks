@@ -2560,7 +2560,8 @@
         "tests/review/test_done.py::test_swarm_done_never_reads_the_review_record_for_other_lanes_and_kinds",
         "tests/review/test_done.py::test_swarm_done_refuses_a_review_task_that_posted_no_finding",
         "tests/review/test_done.py::test_one_posted_finding_lets_a_review_task_reach_the_proof_check",
-        "tests/review/test_done.py::test_the_count_is_read_for_the_exact_swarm_and_task"
+        "tests/review/test_done.py::test_the_count_is_read_for_the_exact_swarm_and_task",
+        "tests/swarm/test_ready.py::test_a_merged_review_task_stays_open_until_swarm_done_checks_its_findings"
       ],
       "semgrep_rule": "feature-review-done-findings"
     },
