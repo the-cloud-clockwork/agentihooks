@@ -10,7 +10,18 @@ import pytest
 from scripts.handoff.resolve import Resolver
 from scripts.swarm import expert_lineage
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
-from tests.swarm.expert_fixture import ADDRESS, DIGEST, EXPERT, MASTER, TITLE, indexed, started, store, stored
+from tests.swarm.expert_fixture import (
+    ADDRESS,
+    DIGEST,
+    EXPERT,
+    MASTER,
+    SECOND_EXPERT,
+    TITLE,
+    indexed,
+    started,
+    store,
+    stored,
+)
 from tests.swarm.test_expert_mission import GOOD
 
 pytestmark = pytest.mark.unit
@@ -188,3 +199,36 @@ def test_a_mission_address_resolves_while_the_swarm_holds_that_text(store: Redis
     assert not resolves(f"mission:sw/{'0' * 64}")
     assert not resolves("mission:sw")
     assert not Resolver("sw", None)(ADDRESS)
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_the_last_failed_launch_is_kept_beside_a_running_lineage_and_beside_no_other(store: RedisStore) -> None:
+    lineage = started(store)
+    record = stored(store, "expert-lineages")
+    assert expert_lineage.launch_failures(store, "sw") == {}
+    expert_lineage.launch_failed(store, "sw", "expert-1", EXPERT, "herdr down", 5)
+    expert_lineage.launch_failed(store, "sw", "expert-1", SECOND_EXPERT, "no pane", 6)
+    kept = {"expert-1": {"at": 6, "agent": SECOND_EXPERT, "reason": "no pane"}}
+    assert expert_lineage.launch_failures(store, "sw") == kept
+    assert (stored(store, "expert-lineages"), indexed(store)) == (record, {"expert-1"})
+    assert expert_lineage.get(store, "sw", "expert-1") == lineage
+    expert_lineage.stop(store, "sw", "expert-1", MASTER, "superseded", 7)
+    assert expert_lineage.launch_failures(store, "sw") == {}
+    expert_lineage.launch_failed(store, "sw", "expert-1", EXPERT, "too late", 8)
+    expert_lineage.launch_failed(store, "sw", "expert-9", EXPERT, "no such lineage", 9)
+    assert expert_lineage.launch_failures(store, "sw") == {}
+    assert json.loads(stored(store, "expert-launch-failures")["expert-1"])["reason"] == "no pane"
+    assert set(stored(store, "expert-lineages")) == {"expert-1"}
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_a_launch_that_succeeds_drops_the_failure_kept_before_it(store: RedisStore) -> None:
+    started(store)
+    second = started(store, at=2)
+    expert_lineage.launch_recovered(store, "sw", "expert-1")
+    expert_lineage.launch_failed(store, "sw", "expert-1", EXPERT, "herdr down", 5)
+    expert_lineage.launch_failed(store, "sw", second.id, SECOND_EXPERT, "no pane", 6)
+    expert_lineage.launch_recovered(store, "sw", "expert-1")
+    assert expert_lineage.launch_failures(store, "sw") == {
+        second.id: {"at": 6, "agent": SECOND_EXPERT, "reason": "no pane"}
+    }

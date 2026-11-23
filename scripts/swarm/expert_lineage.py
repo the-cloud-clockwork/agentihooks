@@ -6,12 +6,13 @@ ends; this module is the only writer of the lineage records and of the saved mis
 """
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
 from scripts.swarm import expert_launch, expert_mission, naming
+from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.store import SwarmError
 
 LINEAGES = "expert-lineages"
@@ -20,6 +21,7 @@ SEQUENCE = "expert-seq"
 ACTIVE = "expert-running"
 PROOFS = "expert-proofs"
 LAUNCHES = "expert-launches"
+FAILURES = "expert-launch-failures"
 CLOSING = "expert-closing"
 RUNNING = "running"
 STOPPED = "stopped"
@@ -103,6 +105,14 @@ def running(store: Any, slug: str) -> list[Lineage]:
     return sorted(_indexed(store, slug, ACTIVE), key=lambda row: (row.started_at, len(row.id), row.id))
 
 
+def waiting(store: Any, slug: str, agents: Iterable[Any]) -> int:
+    """How many running lineages of the swarm have no live expert among the agents: none of the expert lane holds the
+    lineage in a state that has not ended. A lineage never seated, or whose expert finished on a handoff or ended and
+    waits on the reap, waits for the successor the expert seats step places."""
+    live = {agent.task for agent in agents if agent.lane == expert_launch.LANE and agent.state not in TERMINAL_STATES}
+    return sum(1 for lineage in running(store, slug) if lineage.id not in live)
+
+
 def _indexed(store: Any, slug: str, index: str) -> list[Lineage]:
     """The lineages an index set names, read by its ids; an id whose record is gone is left out."""
     names: list[str] = list(store.redis.smembers(store.key(slug, index)))
@@ -158,6 +168,34 @@ def launched(store: Any, slug: str, name: str) -> int:
 def unlaunched(store: Any, slug: str, name: str) -> int:
     """Take back the count of an expert whose spawn failed after it was counted, and return the count left."""
     return int(store.redis.hincrby(store.key(slug, LAUNCHES), name, -1))
+
+
+def launch_failed(store: Any, slug: str, name: str, agent: str, reason: str, at: int) -> None:
+    """Keep the last failed launch of a running lineage beside its record: why it failed, the expert that did not
+    start and when. The record itself keeps its shape, so a member on an older release still reads it. A lineage
+    that ended, or that the swarm does not hold, gets none."""
+    key = store.key(slug, LINEAGES)
+
+    def write(pipe: Any) -> None:
+        raw = pipe.hget(key, name)
+        pipe.multi()
+        if raw and Lineage(**json.loads(raw)).state == RUNNING:
+            pipe.hset(store.key(slug, FAILURES), name, json.dumps({"at": at, "agent": agent, "reason": reason}))
+
+    store.redis.transaction(write, key)
+
+
+def launch_recovered(store: Any, slug: str, name: str) -> None:
+    """Drop the failed launch kept for the lineage: an expert of it launched since."""
+    store.redis.hdel(store.key(slug, FAILURES), name)
+
+
+def launch_failures(store: Any, slug: str) -> dict[str, dict[str, Any]]:
+    """The last failed launch of each running lineage that has had none succeed since, by lineage id. The set of
+    the running ids bounds the read, so one kept before its lineage ended is no longer read."""
+    names: list[str] = sorted(store.redis.smembers(store.key(slug, ACTIVE)))
+    raws: list[str | None] = store.redis.hmget(store.key(slug, FAILURES), names) if names else []
+    return {name: json.loads(raw) for name, raw in zip(names, raws) if raw}
 
 
 def closing(store: Any, slug: str) -> list[Lineage]:

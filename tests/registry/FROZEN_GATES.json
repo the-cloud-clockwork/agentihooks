@@ -47,7 +47,9 @@
     "5c25989eea2d0eba5f02899e4e74dcfc76357475",
     "e285593508ecbac8c01119645580a1d65e48b5e6",
     "7f2d3ca5d705ec1fa84067c9b85f613bd6ada30e",
-    "0982cc6b024230795ffd6bb393d3bee1dc5a2afb"
+    "0982cc6b024230795ffd6bb393d3bee1dc5a2afb",
+    "ab885d3a2a765b42092d4ff1de6a91eda4e2e58d",
+    "ba71c6a599ef1a14dd90b1b15cedb8ef682479cd"
   ],
   ".github/workflows/gate-protected.yml": [
     "ceb96c5d549c6766bc317390d4278f1d3644edd0",
@@ -76,7 +78,9 @@
   ],
   ".github/workflows/writer-lock.yml": [
     "ad109bdfc822b81ec9f1e8fb695daf3b464acc5b",
-    "081278475b2c798b82a60e9359e5a2560c16775b"
+    "081278475b2c798b82a60e9359e5a2560c16775b",
+    "af2b0fe666d23c70d57bfb75f83a0136ddd9153b",
+    "829ee64f67f43b1ac50ed632e41b81b5fd64a91b"
   ],
   "scripts/ci_reuse.py": [
     "36835a6f3abb51f660443015407532dfc20bcbae",
@@ -86,6 +90,7 @@
     "94715118646c3393621d7e45930e837311f01ba0",
     "28cc2fd58437c6270d1259cea15a8f479ce43bf0",
     "e18e4b34a84302bb66c00b6f7aaabb18b0852f61",
-    "23c9ff6c5085e1b271319c3c8c29fd3cab9d23ae"
+    "23c9ff6c5085e1b271319c3c8c29fd3cab9d23ae",
+    "467610f8a881fbaffcd125e0791b3e30150964fd"
   ]
 }
