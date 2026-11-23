@@ -123,7 +123,7 @@ def test_order_counts_refresh_and_closed_orders_leave_the_panel(orders_page: Any
     doc["phases"][0]["done"] = True
     tab.locator("#orders .empty").wait_for()
     assert tab.locator("#orders").inner_text() == "No open operator orders."
-    assert tab.locator("#orders-count").inner_text() == "· 0 open"
+    assert tab.locator("#orders-count").inner_text() == "· 0 OPEN"
 
 
 @pytest.mark.feature("ledger-orders-panel")
