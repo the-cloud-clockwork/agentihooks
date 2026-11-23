@@ -325,10 +325,11 @@ serves it through `scripts.ci_lab.scheduler.listen`. Ports 8800 and 9108 serve `
 from the same last snapshot a `scripts.ci_lab.metrics.Latest` holds; port 9108 also serves
 `/metrics` from it. `listen` starts the first build with `Latest.start` right after it binds the
 three ports, in the same daemon thread a refresh uses, and no read waits for it: until that build
-finishes, `/capacity` on either port answers 503 with `{"error": "the load snapshot is not built yet"}`
-and `/metrics` answers 200 with the registry alone, so the lab series stay without samples until
-then. A failed first build leaves both answers in place until the serve loop's next refresh builds
-again. Every capacity read after the first build answers at once with the last finished build. Reads on port 9108 set
+finishes, `/capacity` on either port answers 503 with
+`{"error": "the load snapshot is not built yet"}` and `/metrics` answers 200 with the registry
+alone, so the lab series stay without samples until then. A failed first build leaves both answers
+in place until the serve loop's next refresh builds again. Every capacity read after the first
+build answers at once with the last finished build. Reads on port 9108 set
 `ci_lab_load_age_seconds` to the seconds since that build started. Between requests that port's serve loop runs `Latest.refresh`,
 which starts one background build, a daemon thread named `ci-lab-load-refresh`, once the last
 build started `REFRESH_MS` (15 seconds) ago and no build runs. The serve loop checks after each

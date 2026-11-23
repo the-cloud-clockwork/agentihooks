@@ -670,7 +670,10 @@ def test_peek_answers_at_once_while_the_first_build_runs_and_then_the_finished_l
     answers: list[tuple[Load, int] | None] = []
     try:
         assert entered.wait(10)
-        peeker = threading.Thread(target=lambda: answers.append(latest.peek()), daemon=True)
+        def peek() -> None:
+            answers.append(latest.peek())
+
+        peeker = threading.Thread(target=peek, daemon=True)
         peeker.start()
         peeker.join(10)
         assert answers == [None]

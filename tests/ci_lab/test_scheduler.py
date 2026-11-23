@@ -1220,6 +1220,7 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
         assert 'ci_lab_class_shed{class="backfill"} 1.0' in text
         assert "ci_lab_slots_busy 1.0" in text
     finally:
+        leased_first.set()
         for server in servers:
             server.shutdown()
             server.server_close()

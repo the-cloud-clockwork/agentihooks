@@ -343,9 +343,9 @@ class Latest:
     """The load snapshot the scheduler ports serve, with the clock reading its build started at. ``start`` builds the
     first one in the background and ``peek`` answers at once with the last finished build, or None before the first
     one finishes. A ``read`` before any build builds it and reads that meet that build wait for it; every later read
-    answers at once with the last finished build. ``refresh``, which the metrics port's serve loop runs between requests, starts one background build once the last
-    build started at least ``refresh_ms`` ago and none runs, so a failed build keeps the last snapshot and the next
-    starts an interval after it."""
+    answers at once with the last finished build. ``refresh``, which the metrics port's serve loop runs between
+    requests, starts one background build once the last build started at least ``refresh_ms`` ago and none runs, so
+    a failed build keeps the last snapshot and the next starts an interval after it."""
 
     def __init__(self, build: Callable[[int], Load], clock: Callable[[], int], refresh_ms: int) -> None:
         self.build = build
