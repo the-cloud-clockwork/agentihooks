@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 BY = "swarm"
 UNKNOWN_OWNER = "the agent it was sent to is unknown, so no branch was checked"
 LANE_SEAT = re.compile(r"(eng|ci|plan)-(\d+)@.+")
-MOVING_SEAT = re.compile(r"((eng|ci|plan)-\d+|dispatcher)@.+")
+MOVING_SEAT = re.compile(r"((eng|ci|plan|expert)-\d+|dispatcher)@.+")
 
 
 def settle(inbox, name, seat, exit_text, worlds=None):

@@ -175,6 +175,69 @@ def test_hand_made_seat_crons_are_adopted_and_their_duplicates_cancelled(env: En
     assert ids("master@other") == [other]
 
 
+def code_owned(expression: str, text: str) -> str:
+    """A seat cron the code put on the scheduler with a text it no longer holds."""
+    made = commands.add_cron(seat_crons.scheduler(), seat_crons.OWNER, InboxSlot(SEAT), text, expression=expression)
+    return made["id"]
+
+
+@pytest.mark.feature("master-handoff-carries-orders")
+def test_the_master_loop_cron_reads_the_operator_orders_every_loop(env: Env) -> None:
+    created()
+    run(SLUG, "start")
+    assert payload(LOOP) == (
+        "Master loop (seat cron): read agentihooks swarm sw status, read agentihooks api --slug sw get orders and act "
+        "on each order with nothing claimed or in a pull request, clear every focus whose tasks are claimed, in a pull "
+        "request or done, list the urgent tasks and each open pull request of a focused task with what blocks it and "
+        "what can run in parallel, queue priority for green unblockers, reopen pull request tasks whose owner is gone "
+        "and decide every follow up. Act on each. Only the operator's words clear an order. "
+        "Write nothing to the operator."
+    )
+
+
+@pytest.mark.feature("master-handoff-carries-orders")
+def test_a_seat_cron_the_code_owns_with_an_older_text_is_replaced_once(env: Env) -> None:
+    created()
+    old, hand = code_owned(LOOP, "Master loop (seat cron): an older text"), by_hand(DRIFT)
+    run(SLUG, "start")
+    first = ids()
+    assert old not in first and seat_crons.scheduler().get(old).state == "cancelled"
+    assert payload(LOOP).startswith("Master loop (seat cron): read agentihooks swarm sw status, read agentihooks api")
+    assert hand in first and payload(DRIFT) == "by hand"
+    assert schedules() == ALWAYS
+    run(SLUG, "start")
+    assert ids() == first
+
+
+@pytest.mark.feature("master-handoff-carries-orders")
+def test_a_hand_made_cron_is_adopted_in_place_of_an_older_code_owned_one(env: Env) -> None:
+    created()
+    old, hand = code_owned(LOOP, "Master loop (seat cron): an older text"), by_hand(LOOP)
+    run(SLUG, "start")
+    assert [view["id"] for view in aimed() if view["expression"] == LOOP] == [hand]
+    assert seat_crons.scheduler().get(old).state == "cancelled"
+
+
+@pytest.mark.feature("master-handoff-carries-orders")
+@pytest.mark.parametrize("hand_made_first", [True, False])
+def test_a_hand_made_cron_is_adopted_in_place_of_the_code_owned_one_wherever_it_is_listed(
+    env: Env, monkeypatch: pytest.MonkeyPatch, hand_made_first: bool
+) -> None:
+    created()
+    run(SLUG, "start")
+    [mine] = [view["id"] for view in aimed() if view["expression"] == LOOP]
+    hand = by_hand(LOOP)
+    listed = seat_crons.aimed
+
+    def ordered(on: Any, seat: str) -> list[dict[str, Any]]:
+        return sorted(listed(on, seat), key=lambda view: (view["id"] == hand) != hand_made_first)
+
+    monkeypatch.setattr(seat_crons, "aimed", ordered)
+    run(SLUG, "start")
+    assert [view["id"] for view in aimed() if view["expression"] == LOOP] == [hand]
+    assert seat_crons.scheduler().get(mine).state == "cancelled"
+
+
 @pytest.mark.feature("master-seat-durable-crons")
 def test_the_progress_sheet_cron_follows_the_master_seat_script(env: Env) -> None:
     created()
