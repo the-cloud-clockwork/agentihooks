@@ -84,7 +84,7 @@ def test_scan_runs_strict_json_semgrep_past_the_ignore_file(monkeypatch: pytest.
         calls.append((command, kwargs))
         return subprocess.CompletedProcess(command, 0, stdout='{"results": [1]}', stderr="")
 
-    monkeypatch.setattr(gate.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     assert gate.scan([Path("a.yml"), Path("b.yml")], [Path("tests")], "abc") == {"results": [1]}
     assert gate.scan([Path("a.yml")], [Path("tests/test_a.py"), Path("tests/test_b.py")]) == {"results": [1]}
     options = {"capture_output": True, "text": True, "check": False}
@@ -102,7 +102,7 @@ def test_scan_refuses_a_semgrep_run_that_fails(monkeypatch: pytest.MonkeyPatch) 
     def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(command, 2, stdout="", stderr=" rule failed to parse \n")
 
-    monkeypatch.setattr(gate.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(SystemExit, match=r"^semgrep exited 2: rule failed to parse$"):
         gate.scan([gate.RULE], [gate.TESTS])
 
