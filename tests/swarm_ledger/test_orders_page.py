@@ -76,6 +76,9 @@ def test_ordered_phase_shows_quoted_words_and_master_counts(orders_page: Any) ->
     assert row.locator("blockquote").inner_text() == 'Show every order, including <pending> & "busy".'
     assert row.locator(".task-meta span").all_text_contents() == ["1 claimable", "1 busy", "1 done"]
     assert row.locator("pending").count() == 0
+    assert row.locator(".task-meta span").nth(2).evaluate(
+        "(element) => { const probe = document.createElement('span'); probe.style.color = 'var(--positive)'; element.append(probe); const expected = getComputedStyle(probe).color; probe.remove(); return getComputedStyle(element).color === expected; }"
+    )
 
 
 @pytest.mark.feature("ledger-orders-panel")

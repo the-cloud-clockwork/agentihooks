@@ -19,7 +19,7 @@ function orderRow(order) {
     h("div", { class: "task-meta" },
       h("span", { text: `${order.claimable} claimable` }),
       h("span", { text: `${order.busy} busy` }),
-      h("span", { text: `${order.done.length} done` })));
+      h("span", { style: "color: var(--positive)", text: `${order.done.length} done` })));
 }
 
 export async function loadOrders() {
