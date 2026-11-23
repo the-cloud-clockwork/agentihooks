@@ -1143,6 +1143,7 @@ PINNED_TOOL_STEPS = {
     (".github/workflows/test.yml", "lint", "Prepare the dashboard query checker in the background"): (
         "jsonschema",
         "orjson",
+        "packaging",
         "pyyaml",
     ),
     (".github/workflows/test.yml", "mutation-plan", "Install dependencies"): ("mutmut", "pytest", "pyyaml", "tomlkit"),
