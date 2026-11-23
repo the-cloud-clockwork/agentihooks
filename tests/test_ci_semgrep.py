@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -94,7 +95,7 @@ def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step() -> None:
     assert 'copy="$(mktemp -d -p "$RUNNER_TEMP")"' in fixture_run
     assert 'cp -r .semgrep-incidents "$copy/rules"' in fixture_run
     assert ': > "$copy/.semgrepignore"' in fixture_run
-    assert '(cd "$copy" && semgrep --metrics off --test --config rules rules)' in fixture_run
+    assert '(cd "$copy" && semgrep --metrics off --test --strict --config rules rules)' in fixture_run
     assert ".semgrep-incidents/" in (_ROOT / ".semgrepignore").read_text().splitlines()
 
 
@@ -281,9 +282,30 @@ def test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds
 def test_feature_fixture_command_runs_recursively():
     job = _jobs()["feature-tests"]
     commands = [step["run"] for step in job["steps"] if "run" in step]
-    assert "semgrep --metrics off --test .semgrep/features" in commands
+    assert "semgrep --metrics off --test --strict .semgrep/features" in commands
     assert "if" not in job and "continue-on-error" not in job
     assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
+
+
+SEMGREP_CALL = re.compile(r"(?<![\w-])semgrep\s+([^;&|()\n]*)")
+
+
+@pytest.mark.feature("semgrep-test-mode-strict")
+def test_every_semgrep_test_mode_command_runs_strict() -> None:
+    calls = [
+        (workflow.name, job_name, step.get("name"), arguments.split())
+        for workflow in sorted((_ROOT / ".github/workflows").glob("*.yml"))
+        for job_name, job in yaml.safe_load(workflow.read_text())["jobs"].items()
+        for step in job.get("steps", [])
+        for arguments in SEMGREP_CALL.findall(step.get("run", "").replace("\\\n", " "))
+        if "--test" in arguments.split()
+    ]
+    assert {
+        ("semgrep.yml", "scan", "Own rules hold on their fixtures and the code"),
+        ("semgrep.yml", "feature-tests", "Operator feature regressions and passing fixtures"),
+        ("semgrep.yml", "feature-tests", "Outage rules fire on their planted faults and pass their clean cases"),
+    } <= {call[:3] for call in calls}
+    assert [call[:3] for call in calls if "--strict" not in call[3]] == []
 
 
 def test_no_semgrep_job_runs_the_head_feature_map_validator() -> None:
@@ -511,7 +533,7 @@ def test_scan_reads_the_domain_rules_folder_that_holds_rule_files() -> None:
     rules_dir = _ROOT / step["env"]["RULES"]
     assert rules_dir == _ROOT / ".semgrep"
     assert any(_ROOT.glob(".semgrep/*.yml"))
-    assert "semgrep --metrics off --test --config rules rules" in step["run"]
+    assert "semgrep --metrics off --test --strict --config rules rules" in step["run"]
     assert '--config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .' in step["run"]
 
 

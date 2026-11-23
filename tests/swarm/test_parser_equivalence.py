@@ -130,8 +130,23 @@ def test_builder_resolves_current_cli_handlers(monkeypatch: pytest.MonkeyPatch, 
     assert cli.build_parser().parse_args(["sample", command]).handler is replacement
 
 
+def _tracked_cli(root: Path) -> Path:
+    """Return the swarm cli source under ``root``, or under its parent when ``root`` is the mutants copy that a
+    mutation run imports with every mutated function body duplicated."""
+    return (root.parent if root.name == "mutants" else root) / "scripts" / "swarm" / "cli.py"
+
+
 @pytest.mark.feature("swarm-parser-extraction")
 def test_parser_is_separate_and_cli_has_size_headroom() -> None:
     assert cli.build_parser.__module__ == "scripts.swarm.cli_parser"
-    if "MUTANT_UNDER_TEST" not in os.environ:
-        assert len(Path(cli.__file__).read_text().splitlines()) < 2850
+    assert len(_tracked_cli(ROOT).read_text().splitlines()) < 2850
+
+
+@pytest.mark.feature("swarm-parser-extraction")
+def test_headroom_counts_the_tracked_cli_beside_a_mutants_copy(tmp_path: Path) -> None:
+    for folder, lines in ((tmp_path, 2823), (tmp_path / "mutants", 3646)):
+        (folder / "scripts" / "swarm").mkdir(parents=True)
+        (folder / "scripts" / "swarm" / "cli.py").write_text("pass\n" * lines)
+    assert _tracked_cli(tmp_path / "mutants") == tmp_path / "scripts" / "swarm" / "cli.py"
+    assert len(_tracked_cli(tmp_path / "mutants").read_text().splitlines()) == 2823
+    assert _tracked_cli(tmp_path) == tmp_path / "scripts" / "swarm" / "cli.py"

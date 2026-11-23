@@ -1,6 +1,26 @@
 {
   "features": [
     {
+      "id": "placement-role-census",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-placement-role-census",
+      "behaviour": "Hive placement excludes reported master executions by role regardless of login markers, leaving one expert place on a root hive with three masters and eleven workers under a twelve worker limit. Marker overlap never subtracts twice; unregistered processes, pending workers, account separation and CPU refusals retain their limits.",
+      "seam": "loaded_hives through HiveLaunch.select",
+      "tests": [
+        "tests/hive/test_placement_role_census.py::test_three_masters_and_eleven_workers_leave_the_kept_expert_room_usable",
+        "tests/hive/test_placement_role_census.py::test_a_master_execution_does_not_prevent_unclaimed_processes_from_absorbing_pending_workers",
+        "tests/hive/test_placement_role_census.py::test_unreported_masters_never_erase_an_unregistered_worker_process",
+        "tests/hive/test_placement_role_census.py::test_interactive_markers_still_exempt_a_master_whose_execution_is_unreported",
+        "tests/hive/test_placement_role_census.py::test_master_exclusion_does_not_absorb_workers_from_another_account_slot",
+        "tests/hive/test_placement_role_census.py::test_excluding_masters_keeps_a_saturated_cpu_refusal",
+        "tests/hive/test_placement_role_census.py::test_reported_masters_alone_leave_zero_workers_on_the_hive",
+        "tests/hive/test_placement_role_census.py::test_an_identified_worker_process_is_not_reused_for_unreported_workers"
+      ],
+      "rules": [
+        "placement-marker-only-worker-census"
+      ]
+    },
+    {
       "id": "lab-shadow-reusable-caller-pairing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2804",
@@ -640,6 +660,46 @@
         "tests/ci_lab/test_scheduler.py::test_backfill_takes_only_the_slots_left_free_after_the_units_waiting_in_other_classes",
         "tests/ci_lab/test_scheduler.py::test_a_newer_backfill_head_drops_the_held_units_of_the_older_one",
         "tests/ci_lab/test_metrics.py::test_backfill_slots_never_raise_the_slots_wanted_gauge_and_a_shed_class_keeps_its_running_slots"
+      ]
+    },
+    {
+      "id": "lab-retire-gone-merge-groups",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-retire-gone-merge-groups",
+      "behaviour": "The CI lab scheduler ends a merge group grade whose merge group is gone: at the start of every pass Scheduler.tick lists the merge group refs of each repository that has a live merge group grade once and closes each such grade whose head no ref carries, so its grade document and its origin are deleted, the run leaves the live set with its revision and its demand record and the pending jobs of its head are dropped unless another live grade of any repository grades the same head, while its leased jobs keep their leases, each running to completion or, once its lease expires, requeued and lost as the lost retries allow, with no check run posted, no evidence or passed tree recorded and no graded head counted. A grade whose merge group ref is listed keeps its units and its verdict, a grade pushed to a grade ref and a grade of any other class are never retired, and a ref listing git cannot produce within its timeout retires nothing of that repository while the gone grades of every other repository are retired. The scheduler keeps the origin of each live grade, its class, repository, head and grade ref, written at grade start, filled once from the grade document of a live run that has none and removed for a run that is no longer live, so a steady pass reads no grade document for this step.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with an expander that lists merge group heads, scripts.ci_lab.queue.Queue.drop over fakeredis and scripts.ci_lab.scheduler.MirrorExpander.groups over a git origin fixture",
+      "rules": [
+        "lab-pass-skips-merge-group-retire"
+      ],
+      "tests": [
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_whose_ref_is_gone_leaves_the_live_set_and_loses_its_pending_jobs",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_gone_grades_of_one_pass_are_retired_in_run_order",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_posts_nothing_and_records_no_verdict",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_no_revision_and_no_demand_record",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_forget_that_ended_before_the_live_set_exit_is_finished_by_the_next_pass",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_forget_that_ended_before_the_origin_delete_is_retired_again_by_the_next_pass",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_is_judged_by_the_merge_group_refs_of_its_own_repository",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_whose_ref_is_listed_keeps_its_units_and_its_verdict",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_listing_git_cannot_produce_retires_nothing",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_listing_git_cannot_produce_for_one_repository_still_retires_the_gone_grades_of_another",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_the_jobs_another_live_grade_of_its_head_holds",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_the_jobs_a_live_grade_of_its_head_in_another_repository_holds",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_its_leased_jobs_running",
+        "tests/ci_lab/test_scheduler_retire.py::test_an_expired_lease_of_a_retired_merge_group_grade_is_requeued_once_and_then_lost",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_pushed_to_a_grade_ref_is_never_retired",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_pull_request_grade_is_never_retired_for_a_missing_merge_group_ref",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_grade_records_its_origin_when_it_starts",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_gets_one_from_its_grade_document",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_grade_document_with_no_ref_gives_an_origin_with_an_empty_ref",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_gets_its_grade_ref_from_its_grade_document",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_run_with_no_grade_document_holds_no_other_origin_back",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_pass_reads_a_grade_document_for_the_origins_only_when_a_live_grade_has_no_origin",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_is_retired_in_the_pass_that_records_it",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_origin_of_a_run_that_is_no_longer_live_is_removed",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_mirror_expander_lists_the_head_of_every_merge_group_ref",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_mirror_expander_fails_for_a_repository_git_cannot_list",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_mirror_expander_bounds_the_merge_group_listing_by_its_timeout",
+        "tests/ci_lab/test_queue.py::test_drop_removes_the_pending_jobs_of_a_head_and_keeps_its_leased_ones"
       ]
     },
     {
@@ -2586,6 +2646,45 @@
       ]
     },
     {
+      "id": "review-record-post",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-record-post",
+      "behaviour": "A swarm agent posts review findings on a change request head through the forge: each finding is numbered and keeps the comment id the forge returned, one Redis hash per change request URL holds one record per head and expires thirty days after its last write, a post with no finding text is refused before any forge call, a forge reporting another URL for the request number writes nothing, the same transaction counts each posted finding for the posting task, records stay isolated by swarm and change request, and a session that is not an agent of the swarm is refused.",
+      "seam": "scripts.review.record post and read, and the agentihooks review post command through the review entry in scripts.cli_delegates and scripts.review.cli main",
+      "tests": [
+        "tests/review/test_record.py::test_a_post_stores_each_finding_with_its_forge_comment_on_the_reported_head",
+        "tests/review/test_record.py::test_a_post_without_a_finding_is_refused_and_posts_nothing",
+        "tests/review/test_record.py::test_a_second_post_on_the_same_head_appends_numbered_findings",
+        "tests/review/test_record.py::test_a_new_head_starts_its_own_findings",
+        "tests/review/test_record.py::test_a_record_expires_thirty_days_after_its_last_write",
+        "tests/review/test_record.py::test_a_change_request_url_without_a_number_is_refused",
+        "tests/review/test_record.py::test_each_posted_finding_counts_once_for_its_task",
+        "tests/review/test_record.py::test_a_post_without_a_task_counts_nothing",
+        "tests/review/test_identity.py::test_a_forge_for_another_request_cannot_write_the_record",
+        "tests/review/test_record_boundaries.py::test_findings_are_isolated_by_swarm_and_change_request",
+        "tests/review/test_record_boundaries.py::test_a_saved_record_reads_back_from_its_hash_field",
+        "tests/review/test_record_boundaries.py::test_trailing_slashes_do_not_change_the_forge_target",
+        "tests/review/test_record_boundaries.py::test_both_spellings_of_a_change_request_url_share_one_record",
+        "tests/review/test_record_boundaries.py::test_a_forge_url_with_a_suffix_is_a_different_request",
+        "tests/review/test_record_boundaries.py::test_a_forge_url_missing_the_last_character_of_the_request_is_a_different_request",
+        "tests/review/test_record_boundaries.py::test_urls_that_differ_only_in_a_last_character_keep_separate_records",
+        "tests/review/test_record_boundaries.py::test_the_change_request_number_is_the_last_path_part",
+        "tests/review/test_cli.py::test_the_command_line_delegates_review_to_this_module",
+        "tests/review/test_cli.py::test_post_records_the_calling_agent_and_prints_the_record",
+        "tests/review/test_cli.py::test_a_refusal_prints_its_reason_and_returns_one",
+        "tests/review/test_cli.py::test_a_forge_failure_prints_its_reason_and_returns_one",
+        "tests/review/test_cli.py::test_a_forge_without_a_usable_remote_or_token_prints_its_reason_and_returns_one",
+        "tests/review/test_cli.py::test_a_redis_refusal_prints_its_reason_and_returns_one",
+        "tests/review/test_cli.py::test_a_session_outside_the_swarm_is_refused",
+        "tests/review/test_cli.py::test_an_unnamed_session_receives_the_membership_error",
+        "tests/review/test_cli.py::test_agent_lookup_resolves_the_name_in_the_requested_swarm",
+        "tests/review/test_cli.py::test_forge_selection_uses_the_current_remote_and_environment",
+        "tests/review/test_cli.py::test_review_post_requires_a_url_and_swarm",
+        "tests/review/test_cli.py::test_post_help_runs_and_names_the_post_arguments",
+        "tests/hive/test_auth.py::test_a_member_reviewer_posts_findings_only_with_the_review_keys"
+      ]
+    },
+    {
       "id": "hive-agent-token-cache",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2262",
@@ -4135,7 +4234,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-slow-lane-deadline",
       "behaviour": "The slow tick lane covers the accumulated live budgets of its scheduled steps, including budgets resolved after the pass starts, so later slow work finishes beyond the former shared deadline while critical timing and the pass join window stay fixed.",
       "seam": "scripts.tick.engine.run_group and scripts.tick.pool.running",
-      "rules": ["tick-slow-lane-fixed-deadline"],
+      "rules": [
+        "tick-slow-lane-fixed-deadline"
+      ],
       "tests": [
         "tests/tick/test_slow_lane_deadline.py::test_slow_deadline_uses_live_budgets_resolved_after_the_pass_starts",
         "tests/tick/test_slow_lane_deadline.py::test_a_later_slow_step_finishes_after_the_former_lane_deadline",
@@ -4309,6 +4410,16 @@
       "live_check": [
         "bash",
         "scripts/feature_checks/semgrep-feature-tests.sh"
+      ]
+    },
+    {
+      "id": "semgrep-test-mode-strict",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-test-strict",
+      "behaviour": "Every Semgrep test mode command in the workflows runs with --strict, so a rule config whose engine run errors fails its fixture step instead of dropping out of the pass count while the step exits 0.",
+      "seam": "the run text of the steps 'Own rules hold on their fixtures and the code' of job scan, 'Operator feature regressions and passing fixtures' and 'Outage rules fire on their planted faults and pass their clean cases' of job feature-tests in the Semgrep workflow, and every other workflow step run text that calls semgrep with --test",
+      "tests": [
+        "tests/test_ci_semgrep.py::test_every_semgrep_test_mode_command_runs_strict"
       ]
     },
     {
@@ -5427,6 +5538,21 @@
         "tests/swarm/test_thin_hold.py::test_a_task_without_a_lane_reads_as_eng_for_the_thin_hold",
         "tests/swarm/test_thin_hold.py::test_the_thin_hold_names_the_enhancement_task_of_its_own_target",
         "tests/swarm/test_thin_hold.py::test_an_earlier_hold_still_names_itself_before_the_thin_hold"
+      ]
+    },
+    {
+      "id": "swarm-enhance-sweep",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-sweep",
+      "behaviour": "agentihooks swarm <slug> enhance sweep reads every task of the swarm through the ledger API, selects per lane the open eng and ci tasks the thin task pass would queue, and queues each through the thin task pass writer with the same ledger writes, under its own thirty second deadline and three seconds after the previous one; with --dry-run it prints the thin task count and ids per lane and builds no ledger writer.",
+      "seam": "agentihooks swarm <slug> enhance sweep [--dry-run] through scripts.swarm.cli.main into scripts.swarm.enhance_sweep.command, thin_by_lane and sweep",
+      "tests": [
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_selects_per_lane_the_thin_tasks_the_tick_step_would",
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_makes_the_same_ledger_writes_as_the_thin_task_pass_on_one_task_list",
+        "tests/swarm/test_enhance_sweep.py::test_each_thin_task_writes_under_its_own_thirty_second_deadline",
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_pauses_three_seconds_between_thin_tasks_and_never_before_the_first",
+        "tests/swarm/test_enhance_sweep.py::test_the_dry_run_prints_the_thin_task_count_and_ids_per_lane_and_writes_nothing",
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_writes"
       ]
     },
     {
@@ -7140,6 +7266,50 @@
       ]
     },
     {
+      "id": "dev-push-copies-reused-unit-results-in-one-job",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-dev-push-reuse-one-job",
+      "behaviour": "A dev push that reuses the passed queue run of its commit runs one unit job, unit (3.12, copy), that restores every queue leg once and uploads the twenty legs of durations, coverage, flakes and executed lines in the unit job's order, while every other run still runs all twenty unit legs and every reader of a dev push's unit jobs accepts the copy job as a complete unit result.",
+      "seam": "The Tests workflow unit job matrix and steps, the copy job's per leg coverage check and summary step, the shard check wait, the dispatch and coverage ratchet base lookups, the pull request test plan's dev record search and the scripts.ci_unit_copy layout and upload commands",
+      "tests": [
+        "tests/test_ci_dev_reuse.py::test_workflow_preserves_downstream_artifacts",
+        "tests/test_ci_dev_reuse.py::test_the_copy_job_sets_up_the_python_its_layout_runs_and_skips_every_leg_upload",
+        "tests/test_ci_dev_reuse.py::test_the_copy_job_checks_and_summarizes_each_push_leg_as_its_unit_leg_does",
+        "tests/test_ci_dev_reuse.py::test_an_unusable_push_leg_coverage_database_fails_the_copy_job",
+        "tests/test_ci_dev_reuse.py::test_a_reusing_dev_push_runs_one_copy_job_and_every_other_run_runs_every_leg",
+        "tests/test_ci_dev_reuse.py::test_shard_check_takes_the_one_copy_job_for_every_leg_of_a_reusing_push",
+        "tests/test_ci_baseline_lookup.py::test_lookup_accepts_a_dev_push_run_that_copied_its_queue_units_in_one_job",
+        "tests/test_ci_test_plan.py::test_a_dev_run_that_copied_its_queue_units_in_one_job_is_a_record_only_when_the_copy_passed",
+        "tests/test_ci_workflow.py::test_the_copy_job_restores_every_queue_leg_in_one_download",
+        "tests/test_ci_unit_copy.py::test_every_push_leg_is_laid_out_from_the_queue_leg_it_maps_onto",
+        "tests/test_ci_unit_copy.py::test_a_leg_above_the_queue_count_needs_no_elapsed_time_in_its_queue_leg",
+        "tests/test_ci_unit_copy.py::test_a_missing_queue_leg_stops_the_layout",
+        "tests/test_ci_unit_copy.py::test_an_archive_holds_every_file_under_the_folder_by_its_path_inside_it",
+        "tests/test_ci_unit_copy.py::test_a_folder_without_files_is_never_uploaded",
+        "tests/test_ci_unit_copy.py::test_the_expiry_holds_the_retention_days_inside_the_repository_longest_retention",
+        "tests/test_ci_unit_copy.py::test_the_backend_ids_come_from_the_runtime_token_scope",
+        "tests/test_ci_unit_copy.py::test_the_backend_ids_come_from_a_token_whose_payload_needs_padding",
+        "tests/test_ci_unit_copy.py::test_a_service_call_posts_this_jobs_request_and_reads_the_answer",
+        "tests/test_ci_unit_copy.py::test_a_service_call_hands_its_exact_headers_and_method_to_the_request",
+        "tests/test_ci_unit_copy.py::test_an_artifact_expiry_counts_from_the_clock_in_utc",
+        "tests/test_ci_unit_copy.py::test_a_blob_put_hands_its_exact_headers_and_method_to_the_request",
+        "tests/test_ci_unit_copy.py::test_an_empty_service_answer_reads_as_an_empty_object",
+        "tests/test_ci_unit_copy.py::test_a_created_artifact_answers_its_upload_address",
+        "tests/test_ci_unit_copy.py::test_a_name_an_earlier_attempt_left_unfinalized_is_freed_and_created_again",
+        "tests/test_ci_unit_copy.py::test_a_create_refused_for_another_reason_raises_that_refusal",
+        "tests/test_ci_unit_copy.py::test_a_create_the_service_did_not_confirm_raises",
+        "tests/test_ci_unit_copy.py::test_an_upload_of_a_free_name_deletes_nothing",
+        "tests/test_ci_unit_copy.py::test_an_upload_the_service_did_not_finalize_raises",
+        "tests/test_ci_unit_copy.py::test_an_upload_is_retried_in_place_until_it_lands",
+        "tests/test_ci_unit_copy.py::test_an_upload_that_fails_every_attempt_raises_its_last_failure",
+        "tests/test_ci_unit_copy.py::test_each_command_requires_its_inputs",
+        "tests/test_ci_unit_copy.py::test_an_upload_replaces_the_name_puts_the_zip_and_finalizes_it_with_its_digest",
+        "tests/test_ci_unit_copy.py::test_every_leg_uploads_its_artifacts_in_the_unit_job_order_with_their_retention",
+        "tests/test_ci_unit_copy.py::test_the_layout_command_reads_the_queue_leg_map",
+        "tests/test_ci_unit_copy.py::test_the_upload_command_reaches_the_results_service_with_the_runtime_token"
+      ]
+    },
+    {
       "id": "artifact-lookups-past-the-first-page",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-select-artifact-page",
@@ -7150,6 +7320,17 @@
       ],
       "tests": [
         "tests/test_ci_baseline_lookup.py::test_lookup_finds_the_artifacts_past_the_first_page_of_a_crowded_run"
+      ]
+    },
+    {
+      "id": "coverage-ratchet-grades-from-the-nearest-measured-ancestor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45173371476-0",
+      "behaviour": "A dev push whose base commit has no measured Tests run with a live coverage-baseline artifact grades its coverage against the nearest first parent ancestor of that base whose dev push run measured and published one, read from one page of the repository's live coverage-baseline artifacts, and checks out and grades against that ancestor, never a newer dev head or a commit outside the base's first parent history, because a newer push replaced the base's run before it published, the cache entry the earlier fallback reads had been evicted, and every later dev push failed the coverage ratchet.",
+      "seam": "The coverage ratchet's Find the run that published the base baseline step, run in a shell over a real git history against a fake gh, and the BASE of its Check out the base grader and Hold every line the base ran steps",
+      "tests": [
+        "tests/test_ci_gate_workflow.py::test_a_base_whose_run_published_no_baseline_grades_from_its_nearest_measured_ancestor",
+        "tests/test_ci_gate_workflow.py::test_the_base_grader_and_the_hold_grade_the_commit_the_lookup_restored"
       ]
     },
     {
@@ -7387,7 +7568,8 @@
         "tests/swarm/test_parser_equivalence.py::test_namespaces_help_and_refusals_equal_recorded_base",
         "tests/swarm/test_parser_equivalence.py::test_recorded_invalid_arguments_are_refused",
         "tests/swarm/test_parser_equivalence.py::test_builder_resolves_current_cli_handlers",
-        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom"
+        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom",
+        "tests/swarm/test_parser_equivalence.py::test_headroom_counts_the_tracked_cli_beside_a_mutants_copy"
       ]
     },
     {
@@ -11125,7 +11307,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "Among the tasks a lane may claim, the hub readiness pass offers urgent and focused tasks first as before, then the tasks under an operator order, oldest order first, then the rest, each by ledger rank band. A task's order time is the earlier of its own mark and its phase's; the work an ordered task waits on, the plan task that enhances it and the lead it is merged into carry the earliest such time, through every such link in turn, and a mark that is not well formed counts as none. A waiting offer at least one dedupe window old moves behind a later offer of a higher class. An order never changes which tasks are offered: under a focus an ordered task outside it is not offered, and focused offers keep their order.",
+      "behaviour": "Among the tasks a lane may claim, the hub readiness pass offers urgent and focused tasks first as before, then the tasks under an operator order, oldest order first, then the rest, each by ledger rank band. A task's order time is the earlier of its own mark and its phase's; the work an ordered task waits on, the plan task that enhances it and the lead it is merged into carry the earliest such time, through every such link in turn, and a mark that is not well formed counts as none. A waiting offer at least one dedupe window old moves behind a later offer the hub would offer before it: one of a higher class, an ordered one whose order is older or that has the same order time and a higher rank, and among the rest one of a higher rank, so a task raised to high passes the normal offers queued before it. Inside the urgent or focused class a waiting offer keeps its place, and after a move a second pass moves nothing. An order never changes which tasks are offered: under a focus an ordered task outside it is not offered, and focused offers keep their order.",
       "seam": "scripts.swarm.orders.stamps, the walk it runs on (scripts.swarm.freeze.waits and reached), scripts.swarm.readiness.offers and behind, and readiness.publish on the memory work queue read back through readiness.take",
       "tests": [
         "tests/swarm/test_orders.py::test_a_ledger_with_no_order_mark_has_no_order_time",
@@ -11144,6 +11326,12 @@
         "tests/swarm/test_freeze.py::test_waits_names_what_each_task_of_the_ledger_waits_on",
         "tests/swarm/test_freeze.py::test_reached_walks_from_every_seed_along_the_links_and_stops_at_cold_work",
         "tests/swarm/test_readiness.py::test_behind_names_the_old_waiting_offers_ahead_of_an_offer_of_a_higher_class",
+        "tests/swarm/test_readiness.py::test_behind_moves_a_waiting_offer_of_the_rest_behind_a_later_offer_of_a_higher_rank",
+        "tests/swarm/test_readiness.py::test_behind_moves_a_waiting_ordered_offer_behind_a_later_one_ordered_before_it_or_ranked_above_it",
+        "tests/swarm/test_readiness.py::test_behind_moves_nothing_inside_the_urgent_or_focused_class",
+        "tests/swarm/test_readiness.py::test_a_queued_task_raised_to_high_is_taken_before_the_older_normal_offers_ahead_of_it_and_moves_them_once",
+        "tests/swarm/test_readiness.py::test_a_queued_task_lowered_to_low_is_taken_after_the_normal_offers_behind_it",
+        "tests/swarm/test_readiness.py::test_an_ordered_offer_moves_behind_a_later_offer_whose_order_is_older",
         "tests/swarm/test_readiness.py::test_offers_put_urgent_tasks_first_then_ordered_ones_oldest_order_first_then_the_rest",
         "tests/swarm/test_readiness.py::test_the_tasks_of_an_ordered_phase_and_the_work_they_wait_on_are_offered_before_the_rest",
         "tests/swarm/test_readiness.py::test_order_marks_change_the_order_of_offers_and_never_which_tasks_are_offered",
@@ -11847,7 +12035,7 @@
       "id": "lab-scheduler-test-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2629",
-      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. A pull request or hotfix head gets none. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A merge group head also runs one unit per test module its entries change that the head holds and the manifest lists no test of, its member the module path, keyed as a broad test over the measured and test trees, whether the rule chose a unit set or the whole suite; the test executor grades such a member, which the manifest records no files for. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it makes the grade red.",
+      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. An ordinary pull request or hotfix head gets none; a plant pull request runs the listed batches and unlisted module units for the test modules it adds or changes. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A merge group head also runs one unit per test module its entries change that the head holds and the manifest lists no test of, its member the module path, keyed as a broad test over the measured and test trees, whether the rule chose a unit set or the whole suite; the test executor grades such a member, which the manifest records no files for. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it makes the grade red.",
       "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.expand_tests.units, scripts.ci_lab.expand_tests.unlisted_units, scripts.ci_lab.run_tests.outside, scripts.ci_lab.queue.Queue.retry and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
       "tests": [
         "tests/ci_lab/test_expand_tests.py::test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_toolchain",
@@ -12481,6 +12669,18 @@
       ]
     },
     {
+      "id": "lab-fail-once-fixture",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-flake-plant-fixture",
+      "behaviour": "A test that calls the fail once helper fails its first run on a head and passes every later run there: inside the lab its marker sits in the runs folder both attempts of a batch share, the parent of the sandbox folder that holds TMPDIR, keyed by the head tree name and the test node id, so one lab run of the unit.fail-once plant module is green and flaky with one flaky row and the next run on that head is green on its first attempt; outside the lab the marker sits under the pytest temp root it is given.",
+      "seam": "tests.ci_lab.fail_once fail_once and scripts.ci_lab.run_tests run over the module the unit.fail-once plant adds",
+      "tests": [
+        "tests/ci_lab/test_run_tests.py::test_a_fail_once_plant_is_flaky_inside_one_lab_run_and_green_on_the_next",
+        "tests/ci_lab/test_run_tests.py::test_fail_once_keys_its_lab_marker_by_head_tree_and_node_in_the_runs_folder",
+        "tests/ci_lab/test_run_tests.py::test_fail_once_falls_back_to_the_pytest_temp_root_outside_the_lab"
+      ]
+    },
+    {
       "id": "lab-worker-metrics",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-worker-metrics",
@@ -12501,6 +12701,23 @@
         "tests/ci_lab/test_run_mutation.py::test_the_warm_runner_grades_every_corpus_mutant_as_the_selection_gate_does",
         "tests/ci_lab/test_run_mutation.py::test_a_runner_that_grades_a_killable_mutant_survived_fails_the_equivalence",
         "tests/ci_lab/test_run_mutation.py::test_the_fixed_cost_per_mutant_is_a_fraction_of_the_one_collection"
+      ]
+    },
+    {
+      "id": "lab-mutants-read-no-mutmut-config",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs-mutation",
+      "behaviour": "The CI lab generates mutants without reading mutmut's config: the worker's trampolining and the scheduler's expansion name the same mutants from any working directory, also one that holds no project file, and leave mutmut's process wide config unloaded, so a worker whose working directory mutmut cannot guess a source path from still runs mutation units. The lab applies no do_not_mutate_patterns, and the lines a file's own pragmas mark stay unmutated. The mutant generator takes the patterns as an argument: given patterns keep the same lines from mutation as the same patterns in mutmut's config, and without the argument it reads mutmut's config, as the CI mutation gate does inside mutmut's own run.",
+      "seam": "scripts.ci_lab.run_mutation.trampoline and scripts.ci_lab.expand_mutation.mutant_units called from a working directory with no mutmut config and with mutmut's config unloaded, and scripts.ci_mutation.selection.created_mutations and selected_mutants given patterns",
+      "rules": [
+        "lab-mutants-read-mutmut-config"
+      ],
+      "tests": [
+        "tests/ci_lab/test_run_mutation.py::test_trampoline_reads_no_mutmut_config_from_the_working_directory",
+        "tests/ci_lab/test_expand_mutation.py::test_mutant_units_read_no_mutmut_config_from_the_working_directory",
+        "tests/test_ci_mutation_selection.py::test_given_patterns_keep_the_lines_mutmut_config_patterns_keep_from_mutation",
+        "tests/test_ci_mutation_selection.py::test_a_line_a_given_pattern_matches_gets_no_mutant",
+        "tests/test_ci_mutation_selection.py::test_given_patterns_load_no_mutmut_config"
       ]
     },
     {
@@ -13158,13 +13375,20 @@
       "origin": "regression",
       "ordered_at": "2026-11-19",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2527",
-      "behaviour": "On a pull request the test count floor admits a new signed retirement only when a code owner that the base revision's CODEOWNERS names for the retirement file approved the pull request head the run grades. Each reviewer's last approval, request for changes or dismissal decides, and a comment leaves it standing; an approval of an earlier head, an approval from anyone the base does not name, a base CODEOWNERS rule outside the anchored grammar the floor matches, and reviews that cannot be read keep the lost test counted and the job red. The test count job reads the pull request's reviews on its App token and hands the floor the reviews file and the head from the event payload; without a reviewed head, in merge groups and dispatched runs, signed retirements are graded as before.",
-      "seam": "tests.count_floor.retirements with approvers and code_owners, fed by the test-count job's Read the pull request reviews step",
+      "behaviour": "On a pull request the test count floor admits a new signed retirement only when a code owner that the base revision's CODEOWNERS names for the retirement file approved the pull request head the run grades. Each reviewer's last approval, request for changes or dismissal decides, and a comment leaves it standing; an approval of an earlier head, an approval from anyone the base does not name, a base CODEOWNERS rule outside the anchored grammar the floor matches, and reviews that cannot be read keep the lost test counted and the job red. The test count job reads the pull request's reviews on its App token and hands the floor the reviews file and the head from the event payload; without a reviewed head, in merge groups and dispatched runs, signed retirements are graded as before. The approvals mode of the floor grades the same approval on its own, without collecting either tree: it fails when the head holds a new signed retirement that no such code owner approved on the reviewed head, passes when every one is approved, when the head holds none and when no head is named, and is refused beside the record and retire modes.",
+      "seam": "tests.count_floor.retirements with approvers and code_owners, fed by the test-count job's Read the pull request reviews step, and the approvals mode of tests.count_floor.main (hold_approvals), which grades the same approval without collecting",
       "tests": [
         "tests/test_count_floor.py::test_a_signed_retirement_is_admitted_only_with_a_code_owner_approval_of_the_head",
         "tests/test_count_floor.py::test_a_code_owner_rule_the_floor_cannot_match_admits_no_retirement",
         "tests/test_count_floor.py::test_reviews_without_a_reviewed_head_leave_a_signed_retirement_graded_as_before",
-        "tests/test_ci_gate_workflow.py::test_a_pull_request_count_floor_reads_its_reviews_on_the_app_token"
+        "tests/test_ci_gate_workflow.py::test_a_pull_request_count_floor_reads_its_reviews_on_the_app_token",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_fails_a_new_signed_retirement_no_code_owner_approved_on_the_head",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_fails_a_new_signed_retirement_whose_reviews_cannot_be_read",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_fails_a_retirement_whose_file_has_no_code_owner_on_the_base",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_holds_only_new_signed_retirements",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_passes_without_a_reviewed_head",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_collects_nothing_and_passes_a_head_the_floor_refuses",
+        "tests/test_count_floor_approvals.py::test_the_approvals_mode_is_refused_beside_another_mode"
       ]
     },
     {
@@ -14097,17 +14321,20 @@
       "id": "lab-static-plant-proofs",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs",
-      "behaviour": "Deterministic static plant twins preserve the checkout and index, push to the dedicated proof prefix without a lab secret or receiver request, and report only the protected pull request grade when the twin is green and its planted static gate alone is red with the observed named diagnostic.",
+      "behaviour": "Deterministic static plant twins preserve the checkout and index, push to the dedicated proof prefix without a lab secret or receiver request, and report only the protected pull request grade when the twin is green and its planted static gate alone is red with the observed named diagnostic. A plant edit with an empty before on a path absent at the base adds that file with mode 100644, and the unit.fail-once plant adds exactly one new test module.",
       "seam": "scripts.ci_lab.plant_proofs.prepare over git objects and scripts.ci_lab.plant_grade.prove through GitHub pushes and exact grade check runs",
       "tests": [
         "tests/ci_lab/test_static_plants.py::test_every_discovered_static_gate_has_one_plant_or_one_exclusion",
         "tests/ci_lab/test_static_plants.py::test_a_gate_plant_is_named_after_its_gate",
+        "tests/ci_lab/test_static_plants.py::test_a_catalog_plant_outside_the_static_gates_is_a_unit_plant_named_after_its_gate",
         "tests/ci_lab/test_static_plants.py::test_a_gate_plant_edits_this_tree_once_per_edit",
         "tests/ci_lab/test_static_plants.py::test_a_planted_gate_reads_only_the_lab_context",
         "tests/ci_lab/test_static_plants.py::test_an_exclusion_names_what_the_lab_lacks",
         "tests/ci_lab/test_plant_proofs.py::test_a_plant_has_reproducible_commits_and_preserves_the_checkout",
         "tests/ci_lab/test_plant_proofs.py::test_the_lint_fixture_turns_only_import_sorting_red",
         "tests/ci_lab/test_plant_proofs.py::test_the_base_comment_grader_refuses_the_heads_invented_directive",
+        "tests/ci_lab/test_plant_proofs.py::test_an_edit_on_an_absent_path_needs_an_empty_before",
+        "tests/ci_lab/test_plant_proofs.py::test_the_fail_once_plant_adds_exactly_one_new_test_module",
         "tests/ci_lab/test_plant_grade.py::test_two_pushes_grade_against_one_protected_base_and_ignore_other_grades",
         "tests/ci_lab/test_plant_grade.py::test_the_command_accepts_a_discovered_catalog_plant",
         "tests/ci_lab/test_plant_grade.py::test_a_step_plant_uses_its_job_check_and_requires_its_diagnostic",
@@ -14795,6 +15022,21 @@
       ]
     },
     {
+      "id": "swarm-review-cap-setting",
+      "origin": "regression",
+      "ordered_at": "2026-11-23",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-review-cap-setting",
+      "behaviour": "A running swarm opens its review lane with swarm set max-review-agents: set and the bare pair take a whole number and store it as the swarm config review cap, refuse anything else, leave the autoscale caps unpinned and report the cap in the set reply; status shows the review cap after the plan cap; once the cap is above zero on a running swarm the review pass queues the review task it held back at zero.",
+      "seam": "scripts.swarm.cli.cmd_set and the SETTABLE table, scripts.swarm.cli.cmd_status text line, scripts.swarm.store.RedisStore.config and update, and scripts.tick.steps.review._review_pass",
+      "tests": [
+        "tests/swarm/test_review_cap_setting.py::test_set_stores_the_review_cap_on_a_swarm_stored_without_one",
+        "tests/swarm/test_review_cap_setting.py::test_set_refuses_a_review_cap_that_is_not_a_whole_number",
+        "tests/swarm/test_review_cap_setting.py::test_status_shows_the_worker_caps",
+        "tests/swarm/test_review_cap_setting.py::test_status_shows_the_review_cap",
+        "tests/swarm/test_review_cap_setting.py::test_a_review_cap_set_on_a_running_swarm_lets_the_review_pass_queue"
+      ]
+    },
+    {
       "id": "swarm-review-trigger",
       "origin": "inventory",
       "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
@@ -14981,6 +15223,24 @@
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_window",
         "tests/hive/test_daemon_presence.py::test_the_daemon_token_gauges_carry_the_session_agent_and_profile_from_the_seen_record",
         "tests/hive/test_daemon_presence.py::test_a_daemon_pass_skips_token_values_it_cannot_read_and_sends_the_rest"
+      ]
+    },
+    {
+      "id": "lab-plant-test-units",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-flake-plant-units",
+      "behaviour": "A plant head carries its plant marker through intake and held grade requests. Old requests without the marker default to false. At the pull request tier a plant grades listed test batches whose module changed and unlisted added or changed test modules, omits deleted and unchanged modules, and retains the unit job so its check posts. Ordinary pull request and hotfix grades keep no test units.",
+      "seam": "request_from, held request serialization, MirrorExpander.expand over a git origin fixture, and Scheduler.tick check posting",
+      "tests": [
+        "tests/ci_lab/test_plant_test_units.py::test_only_a_plant_event_marks_its_grade_request",
+        "tests/ci_lab/test_plant_test_units.py::test_a_stored_grade_request_keeps_its_plant_marker",
+        "tests/ci_lab/test_plant_test_units.py::test_a_grade_request_stored_before_plant_markers_loads_as_an_ordinary_request",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_keeps_its_marker_while_held_before_expansion",
+        "tests/ci_lab/test_plant_test_units.py::test_a_pull_request_plant_grades_only_its_added_and_changed_test_modules",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_with_no_added_or_changed_test_module_grades_no_test_unit",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_unit_job_posts_its_check",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_frame_keeps_the_unit_job_only_at_the_pull_request_tier",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_selects_changed_test_modules_whose_tests_are_class_methods"
       ]
     }
   ],

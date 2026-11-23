@@ -2569,6 +2569,22 @@ leaves both hashes with it, and a save of a closed grade removes both with its d
 rerequested check run grades the head again under `<run>-<now_ms>`, bypassing negative verdicts in
 the store.
 
+Every pass starts by retiring the merge group grades whose merge group is gone. The hash
+`agentihooks-ci:origins` holds the origin of each live grade: its class, repository, head and grade
+ref, written when the grade starts. `Scheduler._retire_groups` lists the `refs/heads/gh-readonly-queue/*`
+refs of each repository that has a live merge group grade, once per pass, and closes each such
+grade whose head no ref carries: its document and origin are deleted, the run leaves
+`agentihooks-ci:grades` with its revision and demand record, and the pending jobs of its head are dropped, unless another live grade of any
+repository grades that head, since a job names its head alone. Its leased jobs keep their leases:
+each runs to completion, or, once its lease expires, is requeued and lost as the lost retries
+allow. Nothing is posted, no evidence is recorded and no graded head is counted. A grade pushed to
+a grade ref and a grade of any other class are never retired. When git cannot list the refs of a
+repository within `GROUPS_TIMEOUT_S`, 30 seconds, the pass retires nothing of that repository,
+names it in a `cannot list the merge groups of <repo>` action and still retires the gone grades of
+every other repository. A live grade with no
+origin, one that started before this step existed, gets one from its document on the next pass,
+and the origin of a run that is no longer live is removed.
+
 Known limits: a lab head event carries no branch yet, so a head's lane is its own sha and a newer
 head supersedes nothing until intake records the branch; expansion keys static gates, test units
 and mutation units only, so the other jobs the lab does not run yet pass by their frame; a
@@ -3157,6 +3173,10 @@ A head with no kept line gets neither mutation job, and its grade folds on its o
 | A dependency manifest stored at or before the base | The lab store, fetched as [Test units](#test-units) describes | Expansion raises `no dependency manifest at or before <base>` before any mutation unit is built |
 | `CI_LAB_MIRROR_STORE` | The scheduler's [environment](#environment) | The scheduler does not start |
 | `CI_LAB_MUTATION_CACHE`, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` | The worker's [environment](#environment) | The worker does not start |
+
+The lab reads no other mutmut setting. The scheduler names the mutants and the worker trampolines
+them in their own processes without loading mutmut's config, so neither depends on its working
+directory. A head's `do_not_mutate_patterns` are not applied; its `# pragma: no mutate` lines are.
 
 This repository's `pyproject.toml` holds both:
 

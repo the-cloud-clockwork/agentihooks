@@ -77,6 +77,7 @@ from scripts.github_app import GitAuthRefused
 
 __all__ = [
     "GRADES",
+    "ORIGINS",
     "BusInbox",
     "Flags",
     "Head",
@@ -112,6 +113,9 @@ RECORDS = f"{PREFIX}records"
 LANES = f"{PREFIX}lane:"
 WAITING = f"{PREFIX}waiting"
 TREES = f"{PREFIX}tree:"
+ORIGINS = f"{PREFIX}origins"
+MERGE_GROUPS = "refs/heads/gh-readonly-queue/*"
+GROUPS_TIMEOUT_S = 30.0
 UNGRADED = frozenset({*LOSSES, CANNOT_RUN, DROPPED})
 FINISHED = frozenset({"done", "lost"})
 REAPED = {"pending": contract.UNITS_REDELIVERED_TOTAL, "lost": contract.UNITS_LOST_TOTAL}
@@ -366,6 +370,11 @@ class Expander(Protocol):
         """Return whether a ref every node mirror fetches reaches the head."""
         ...
 
+    def groups(self, repo: str) -> frozenset[str]:
+        """Return the head of every merge group ref the repository lists; git fails when it cannot list them in
+        time."""
+        ...
+
 
 class Poster(Protocol):
     """Where check runs go: `Checks.post`, seeded by `Checks.seed` with the check runs a grade already holds."""
@@ -532,7 +541,13 @@ def _request(data: Mapping[str, Any]) -> GradeRequest:
         tier=Priority(data["tier"]),
         actor=str(data["actor"]),
         bypass_negative=bool(data["bypass_negative"]),
+        plant=bool(data.get("plant", False)),
     )
+
+
+def _origin(tier: int, repo: str, head: str, ref: str) -> str:
+    """Return the origin of a live grade as its stored document: its class, repository, head and grade ref."""
+    return json.dumps({"tier": tier, "repo": repo, "head": head, "ref": ref})
 
 
 def _urgency(entry: tuple[str, str]) -> tuple[int, int, str]:
@@ -640,10 +655,16 @@ class Scheduler:
         self._demand_cache: dict[str, tuple[str, _Demand]] = {}
 
     def tick(self, now_ms: int) -> list[str]:
-        """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
-        then advance every live grade, counting each finished job in the most urgent tier of the live grades holding
-        it."""
-        actions = [*self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms), *self._admit(now_ms)]
+        """Run one pass: retire the merge group grades whose merge group is gone, intake, release quiet lanes, reap
+        expired leases, enqueue the held units the budget admits, then advance every live grade, counting each
+        finished job in the most urgent tier of the live grades holding it."""
+        actions = [
+            *self._retire_groups(),
+            *self._intake(now_ms),
+            *self._release(now_ms),
+            *self._reap(now_ms),
+            *self._admit(now_ms),
+        ]
         tiers, _, _ = self._demand()
         for run in sorted(self.client.smembers(LIVE)):
             actions.extend(self._advance(run, tiers, now_ms))
@@ -886,6 +907,62 @@ class Scheduler:
             refusals = self._fail(request, f"{CLASSES[request.tier]} grade retired", reason, f"uncarried-{now_ms}")
         return "; ".join([f"retiring {request.head}: {reason}", *refusals])
 
+    def _origins(self) -> dict[str, dict[str, Any]]:
+        """Return the origin of every live grade by run: its class, repository, head and grade ref. A live grade with
+        no origin recorded gets one from its grade document, and the origin of a run that is no longer live is
+        removed, so a pass reads a grade document here once in the life of a grade at most."""
+        live = self.client.smembers(LIVE)
+        recorded = {run: json.loads(raw) for run, raw in self.client.hgetall(ORIGINS).items()}
+        for run in sorted(recorded.keys() - live):
+            self.client.hdel(ORIGINS, run)
+        origins = {run: origin for run, origin in recorded.items() if run in live}
+        for run in sorted(live - recorded.keys()):
+            raw = self.client.get(GRADES + run)
+            if raw is None:
+                continue
+            grade = json.loads(raw)
+            origin = _origin(grade["tier"], grade["repo"], grade["head"], grade.get("ref", ""))
+            self.client.hset(ORIGINS, run, origin)
+            origins[run] = json.loads(origin)
+        return origins
+
+    def _forget(self, run: str) -> None:
+        """Delete a run's grade document and origin, then take it out of the live set with its revision and demand
+        record; a pass that ends in between leaves a live run with no document, which the next pass retires again
+        while its origin is still recorded and its merge group is still gone, and forgets once its origin is gone."""
+        self.client.delete(GRADES + run)
+        self.client.hdel(ORIGINS, run)
+        self._drop(run)
+
+    def _retire_groups(self) -> list[str]:
+        """Close every live merge group grade whose head no merge group ref of its repository carries, listing the
+        refs of each such repository once: the run is forgotten and the pending jobs of its head are dropped unless
+        another live grade of any repository grades that head, since a job names its head alone. Nothing is posted,
+        recorded as evidence or counted as graded. A grade pushed to a grade ref is never retired, and a listing git
+        cannot produce retires nothing of that repository and is named in the actions."""
+        origins = self._origins()
+        groups = {
+            run: origin for run, origin in origins.items() if origin["tier"] == Priority.QUEUE and not origin["ref"]
+        }
+        actions: list[str] = []
+        gone: dict[str, tuple[str, str]] = {}
+        for repo in sorted({origin["repo"] for origin in groups.values()}):
+            try:
+                carried = self.ports.expander.groups(repo)
+            except subprocess.SubprocessError as error:
+                actions.append(f"cannot list the merge groups of {repo}: {error}")
+                continue
+            for run, origin in groups.items():
+                if origin["repo"] == repo and origin["head"] not in carried:
+                    gone[run] = (repo, origin["head"])
+        kept = {origin["head"] for run, origin in origins.items() if run not in gone}
+        for run, (repo, head) in sorted(gone.items()):
+            dropped = [] if head in kept else self.queue.drop(head)
+            self._forget(run)
+            reason = f"no merge group ref of {repo} carries {head}"
+            actions.append(f"retired {run}: {reason}, dropped {len(dropped)} pending units")
+        return actions
+
     def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
         and hold the store's misses for the budget; a request that bypasses negative verdicts grades again under a run
@@ -928,6 +1005,7 @@ class Scheduler:
             state.gates[gate] = [self._place(state, unit, request.bypass_negative, carried, misses) for unit in units]
         keep_manifests(self.objects, misses)
         self.save(state)
+        self.client.hset(ORIGINS, run, _origin(state.tier, state.repo, state.head, state.ref))
         self.client.sadd(LIVE, run)
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
         return f"grading {run} with {len(misses)} of {len(state.units)} units held"
@@ -1231,11 +1309,13 @@ def frame(
     grader: str,
     gates: Mapping[str, tuple[Unit, ...]],
     authoritative: Sequence[str] = (),
+    plant: bool = False,
 ) -> Plan:
     """Return a tier's plan: the lab's gates its `Gate — Required` rules require, and every other job they require as
     a gate without units, which passes, so only what the lab grades can turn the grade red.
 
-    A pull request or hotfix grade runs with no test scope and no mutation, grades under each required job the units
+    A pull request or hotfix grade runs with no mutation; only a plant pull request runs test units. Each grades
+    under each required job the units
     of every reusable workflow job it calls, which the expander files under the job, a slash and the called job, and
     names each authoritative gate it runs no unit of, which it posts as skipped; a merge group grade runs only the
     queue suite with no lost unit rerun; both keep the authoritative gates, which post as lab/<gate>; a promotion or
@@ -1248,9 +1328,10 @@ def frame(
         required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
         queued = {job: gates.get(job, ()) for job in required}
         return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed)
+    required = (*PULL_REQUIRED, UNIT_JOBS[0]) if tier == Priority.PULL_REQUEST and plant else PULL_REQUIRED
     framed = {
         job: tuple(unit for key, units in gates.items() if key == job or key.startswith(f"{job}/") for unit in units)
-        for job in PULL_REQUIRED
+        for job in required
     }
     idle = frozenset(gate for gate in authoritative if not framed.get(gate))
     return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}}, idle=idle, authoritative=listed)
@@ -1427,6 +1508,13 @@ class MirrorExpander:
             subprocess.run(["git", "-C", str(mirror.store), "merge-base", "--is-ancestor", head, dev]).returncode == 0
         )
 
+    def groups(self, repo: str) -> frozenset[str]:
+        """Return the head of every merge group ref the repository lists; git fails when it cannot list them within
+        GROUPS_TIMEOUT_S."""
+        argv = ["git", "ls-remote", repo, MERGE_GROUPS]
+        listing = subprocess.run(argv, capture_output=True, text=True, check=True, timeout=GROUPS_TIMEOUT_S)
+        return frozenset(line.split()[0] for line in listing.stdout.splitlines())
+
     def trusted(self, repo: str) -> frozenset[str]:
         """Return the runner trust list on the repository's dev branch."""
         return frozenset(validate_actors(json.loads(self._on_dev(repo, ACTORS))))
@@ -1443,7 +1531,7 @@ class MirrorExpander:
     def expand(self, request: GradeRequest) -> Plan:
         """Return one unit per supported static gate outside the protected exclusion catalog, with Actions retaining
         authority for jobs with exclusions, keyed by the files each gate reads at head and base, the unit job's test
-        units of a merge group, promotion or backfill head and the mutation stats and mutant units of a promotion or
+        units of a plant pull request, merge group, promotion or backfill head and the mutation stats and mutant units of a promotion or
         backfill head, framed by the request's tier with the authoritative gates of the grader's delivery.yaml for a
         hotfix or pull request head, with the dev commit of the manifest its test units are keyed on.
         """
@@ -1465,7 +1553,7 @@ class MirrorExpander:
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         commit = ""
-        if request.tier >= Priority.QUEUE:
+        if request.tier >= Priority.QUEUE or request.tier == Priority.PULL_REQUEST and request.plant:
             manifest, contents = self._manifest(mirror, request), self._contents(mirror, head)
             commit = manifest["commit"]
             suite = expand_tests.units(manifest, contents, head, json.loads(contents.get(DURATIONS, b"{}")), toolchain)
@@ -1479,7 +1567,14 @@ class MirrorExpander:
             listed = authoritative_gates(_lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}")), request.tier)
             listed = frozenset(static_exclusions.authority(listed, excluded))
         tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
-        plan = frame(request.tier, tree, grader, {job: tuple(units) for job, units in gates.items()}, sorted(listed))
+        plan = frame(
+            request.tier,
+            tree,
+            grader,
+            {job: tuple(units) for job, units in gates.items()},
+            sorted(listed),
+            request.plant,
+        )
         return replace(plan, manifest=commit)
 
     def _tests(
@@ -1495,6 +1590,8 @@ class MirrorExpander:
         """Return every test batch of the head, or for a merge group head the batches that hold a test its entries
         invalidate, unless the interaction rule sends the group to the whole suite, and one unit per test module its
         entries change that the manifest lists no test of."""
+        if request.tier == Priority.PULL_REQUEST:
+            return self._plant_tests(mirror, request, manifest, suite, contents, toolchain)
         if request.tier != Priority.QUEUE:
             return suite
         group = self._group(mirror, request)
@@ -1506,6 +1603,21 @@ class MirrorExpander:
         if chosen == interaction.FULL:
             return suite + unlisted
         return tuple(unit for unit in suite if chosen.intersection(unit.members)) + unlisted
+
+    def _plant_tests(
+        self,
+        mirror: Mirror,
+        request: GradeRequest,
+        manifest: dict[str, Any],
+        suite: tuple[Unit, ...],
+        contents: Mapping[str, bytes],
+        toolchain: Toolchain,
+    ) -> tuple[Unit, ...]:
+        changed = {
+            path for path, _, _ in dep_manifest.changes(mirror.store, request.base, request.head) if path in contents
+        }
+        listed = tuple(unit for unit in suite if any(test.partition("::")[0] in changed for test in unit.members))
+        return listed + expand_tests.unlisted_units(manifest, contents, changed, toolchain)
 
     def _manifest(self, mirror: Mirror, request: GradeRequest) -> dict[str, Any]:
         """Return the dependency manifest of the nearest commit on the base's first parent chain that has one stored."""
