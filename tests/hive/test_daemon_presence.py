@@ -116,8 +116,27 @@ def test_a_session_sends_its_own_seen_gauge_only_once_the_daemon_beat_is_older_t
 
 
 @pytest.mark.feature("presence-agent-hive-daemon")
+def test_a_record_removed_by_another_pass_mid_export_still_lets_the_daemon_beat(monkeypatch):
+    calls = recorded(monkeypatch)
+    presence.agent("sess-gone", ENV, 1_000.0)
+    read = presence.read_record
+
+    def read_then_vanish(path):
+        found = read(path)
+        path.unlink()
+        return found
+
+    monkeypatch.setattr(presence, "read_record", read_then_vanish)
+    daemon_pass(monkeypatch, 100_000_000)
+    monkeypatch.setattr(presence, "read_record", read)
+    calls.clear()
+    presence.agent("sess-1", ENV, 100_010.0)
+    assert calls == []
+
+
+@pytest.mark.feature("presence-agent-hive-daemon")
 def test_a_dispatcher_mark_after_a_daemon_pass_never_starts_the_otel_worker_or_sdk(monkeypatch):
-    daemon_pass(monkeypatch, int(time.time() * 1000))
+    daemon_pass(monkeypatch, int((time.time() + 3_600) * 1000))
     probe = (
         "import json, threading\n"
         "from hooks.observability import otel, presence\n"

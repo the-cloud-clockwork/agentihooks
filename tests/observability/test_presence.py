@@ -65,6 +65,19 @@ def test_with_no_hive_daemon_a_session_sends_its_seen_gauge_at_most_once_per_int
 
 
 @pytest.mark.feature("presence-agent-hive-daemon")
+def test_an_unreadable_or_non_numeric_daemon_beat_leaves_the_session_sending_its_own_gauge(monkeypatch):
+    from hooks import config
+
+    calls = recorded(monkeypatch)
+    beat = config.AGENTIHOOKS_HOME / "telemetry" / "presence" / "daemon.beat"
+    beat.parent.mkdir(parents=True)
+    for text, now_s in (('{"beat_s": "x"}', 1_000.0), ("{", 2_000.0), ("[]", 3_000.0)):
+        beat.write_text(text)
+        presence.agent("sess-7", ENV, now_s)
+    assert [value for _, value, _ in calls] == [1_000.0, 2_000.0, 3_000.0]
+
+
+@pytest.mark.feature("presence-agent-hive-daemon")
 def test_a_hook_payload_marks_its_session_under_the_process_environment(monkeypatch):
     calls = []
     monkeypatch.setattr(presence, "time", SimpleNamespace(time=lambda: 9.5))
