@@ -44,7 +44,7 @@ def test_post_records_the_calling_agent_and_prints_the_record(
     assert forge.posts == [(7, "First"), (7, "Second")]
     saved = record.read(found, SLUG, URL, HEAD)
     assert saved is not None
-    assert record.document(saved) == printed
+    assert json.loads(json.dumps(record.document(saved))) == printed
 
 
 @pytest.mark.feature("review-record-post")
