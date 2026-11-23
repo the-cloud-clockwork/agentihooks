@@ -28,7 +28,7 @@ for reads and page or infra operations (`new`, `serve`, `watch`, `chat`, `storag
 |---|---|
 | `eng` | An engineer working a code task end to end with the dev-cycle skill. |
 | `ci` | A CI engineer whose only job is CI speed; it proposes each further bottleneck as a follow up. |
-| `review` | Review tasks with reviewer names and numbered seats; see [Review lane](../reference/swarm-review-lane.md) for configuration and delivery limits. |
+| `review` | Review tasks with reviewer names and numbered seats; see [Review lane](../reference/swarm-review-lane.md) for configuration and limits. |
 | `master` | The one agent the operator talks to. It troubleshoots with read only diagnostics, plans with the operator and configures the swarm, the ledger and the operator's environment with him through the agentihooks commands and tools. It works no task and never edits code or config files in a repository, commits or merges. |
 
 Agents run on [hives](hives.md), the machines joined to the swarm; [Deployment modes](../reference/deployment-modes.md)
@@ -174,13 +174,14 @@ the same machine does not hold up the next tick (see
 [Tick lock holder record](#tick-lock-holder-record)).
 
 Every swarm agent is named `<type>@<code>-<number>`: `master@a1b2c3-0001`, `engineer@a1b2c3-0002`,
-`ci@a1b2c3-0001`, `reviewer@a1b2c3-0001`. The types are `master`, `engineer`, `ci`, `planner`,
-`dispatcher` and `reviewer`. A reviewer name maps to the `review` lane and its numbered seats, such as
-`review-2@<slug>`; see [Review lane](../reference/swarm-review-lane.md#names-and-seats). The code is six lowercase hex characters minted once
-when the swarm is created, kept on the swarm record and in a global registry that maps it to its swarm, ledger and
-repo; a code another swarm holds is minted again. A swarm created before this scheme gets its code at its next
-tick. The number has four digits and counts each type on its own within the swarm, never reused, so a successor
-master takes the next master number. A removed swarm's code stays taken; created again, the swarm gets a new one.
+`ci@a1b2c3-0001`, `reviewer@a1b2c3-0001`. The types are `master`, `engineer`, `ci`, `planner`, `dispatcher`,
+`reviewer` and `expert`. A reviewer name maps to the `review` lane and its numbered seats, such as
+`review-2@<slug>`; see [Review lane](../reference/swarm-review-lane.md#names-and-seats). The code is six lowercase
+hex characters minted once when the swarm is created, kept on the swarm record and in a global registry that maps
+it to its swarm, ledger and repo; a code another swarm holds is minted again. A swarm created before this scheme
+gets its code at its next tick. The number has four digits and counts each type on its own within the swarm, never
+reused, so a successor master takes the next master number. A removed swarm's code stays taken; created again, the
+swarm gets a new one.
 
 That name is the Claude or Codex session name, the inbox address, the ledger crew name, the `status` row and the
 `terminate-agent` target ([one Codex conversation can be stood down alone](../reference/cli-commands.md#stand-down-one-codex-conversation)).
@@ -1377,10 +1378,11 @@ A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an opt
 | `model`, `effort` | Passed to init-agent for the lane's agents. An `auto` effort on an eng or ci lane takes the model pick inside the task's size and rank band (see the classifier reference); elsewhere `auto` keeps init-agent's default, `medium`. A model of the other harness, such as `opus` on a Codex agent, launches on the swarm's model for the agent's harness with the lane's effort ([Lane models on the other harness](../reference/classifier.md#lane-models-on-the-other-harness)). The master lane ignores both: a master always launches on the frontier model at high effort for its harness, opus or gpt-6.1-sol. |
 | `kind` | The kind written to a task of this lane that has none when the tick claims it; `auto` writes nothing. |
 
-The `review` entry defaults to cap `1`, profile `reviewer` and kind `review`. Existing swarm configurations
-without `max_review` load a review cap of `0`; autoscale preserves that cap while sizing the other worker lanes.
-See [Review lane configuration](../reference/swarm-review-lane.md#configure-a-new-swarm) for a template example,
-new swarm usage, unsupported cap controls and the separate event delivery requirements.
+The `review` entry defaults to cap `1`, profile `reviewer` and kind `review`, also for a swarm created without
+a template. Existing swarm configurations without `max_review` load a review cap of `0`; autoscale preserves that
+cap while sizing the other worker lanes. See
+[Review lane configuration](../reference/swarm-review-lane.md#configure-a-new-swarm) for a template example, new
+swarm usage, the missing cap controls and the lane's limits.
 
 `links` is a list of `{"from", "to", "kind"}`. `from` and `to` name a seat (`eng-1`) or a lane (`eng`,
 `ci`); `kind` is `delegates-to` or `can-observe`. A swarm created from the template keeps them. When it
@@ -4285,8 +4287,8 @@ picks its prompt and the proof `done` must carry, and the ledger refuses `done` 
 The ledger also accepts kind `review`, paired exclusively with lane `review`. Supply both when adding a
 task; selecting only the lane leaves the default code kind and is refused. See
 [Add and inspect a review task](../reference/swarm-review-lane.md#add-and-inspect-a-review-task) for the API
-example and the current review delivery limits. Review verdict and completion proof integration is separate
-from this lane registration.
+example. The review kind names no proof fields and, as a read only kind, needs no pull request, so `done` takes
+a review task without a verdict or other proof.
 
 For `code` and `ci`, `done` reads the pull request (`--pr`, else the task's recorded one) with `gh pr view`
 and refuses unless it is merged, or when GitHub cannot be read. The tick backs this up: a `code` or `ci` task

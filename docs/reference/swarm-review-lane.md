@@ -1,16 +1,16 @@
 ---
 title: Review lane
 parent: Reference
-nav_order: 95
+nav_order: 97
 permalink: /docs/reference/swarm-review-lane/
 ---
 
 # Review lane
 
 The `review` lane gives review tasks their own kind, reviewer names, numbered
-seats and capacity ceiling alongside `eng`, `ci` and `plan`. This reference
-covers the lane infrastructure introduced by
-[pull request #12916](https://github.com/the-cloud-clockwork/agentihooks/pull/12916).
+seats and capacity ceiling alongside `eng`, `ci` and `plan`.
+[Pull request #12916](https://github.com/the-cloud-clockwork/agentihooks/pull/12916)
+added the lane.
 
 ## Names and seats
 
@@ -22,8 +22,9 @@ address is distinct from the name of its current occupant.
 Numbered seats provide the identity used by shared seat memory and inbox
 routing. See [Agent names](../pillars/swarm.md#agent-names) and
 [Context recycle](../pillars/swarm.md#context-recycle) for the shared conventions.
-Reviewer launch, notes priming and handoff execution require their lifecycle
-integration; the lane registration alone establishes the name and seat format.
+The lane sets the name and seat format. Launch, notes priming and handoff for
+a reviewer happen only when a launch path places one on the lane; see
+[Limits](#limits).
 
 ## Configure a new swarm
 
@@ -53,7 +54,10 @@ Save this JSON as `review-workers.json` under
 ```
 
 Omitted lanes receive their usual defaults. The cap must be a nonnegative
-integer; `0` requests no reviewer capacity. The template must be available in
+integer; `0` requests no reviewer capacity. A swarm created without
+`--template` gets the same defaults, so it starts with a review cap of `1`.
+Creation has no review cap flag, so a template with `"cap": 0` on its `review`
+lane is the way to create a swarm with no reviewer capacity. The template must be available in
 the configuration home of the process that creates the swarm. A user template
 with the same name as a built-in takes precedence.
 
@@ -91,8 +95,8 @@ Its ceiling calculation does not allocate an automatic reviewer share. Quota
 output combines the fixed review ceiling with the autoscaled ceilings of the
 other lanes and can still read decisions saved before review was added.
 
-This delivery adds no `--max-review-agents` creation flag or
-`max-review-agents` setting. Configure the review cap in the template used for
+No `--max-review-agents` creation flag or `max-review-agents` setting
+exists. Configure the review cap in the template used for
 new swarm creation; changing a template file does not change a running swarm.
 
 ## Add and inspect a review task
@@ -136,30 +140,36 @@ passes the normal claimability checks appears on that lane, and new review
 work makes a drained swarm return to `running`. Existing lanes retain their
 own task listings and caps.
 
-## Delivery limits
+The review kind names no proof fields, and as a read only kind it needs no
+pull request, so `done` accepts a review task without a verdict or other
+proof. The `--must`, `--check` and `--judge` contract is carried in the
+agent's prompt.
 
-The tick's lane list and the event engine's offer scope are separate. In this
-delivery the event readiness reactor retains its existing offer lanes and
-does not offer review work. A stored review task, a ready-task listing or a
-swarm returning to `running` therefore does not establish that a hive will
-launch a reviewer. See the [event driven engine](../pillars/swarm.md#event-driven-engine).
+## Limits
 
-The `reviewer` package role exists separately from this lane. Its loop is the
-`swarm-reviewer` skill, and its conditions refuse edits, Serena writes and
-shell writes outside the seat's own folders; see
-[Read only roles](read-only-roles.md). Launching reviewers from offers,
-automatic pull request or merge request triggers, merge group and release
-reviews, and review verdict and completion proof belong to separate
-integrations. Naming the profile in a template records the selection; a
-reviewer runs only after a launch path places one on the lane.
+The tick's lane list and the event engine's offer scope are separate. The
+event readiness reactor offers only `eng`, `ci` and `plan` work, so it never
+offers a review task. Hive placement covers the `eng`, `ci`, `plan`,
+`dispatch` and `expert` lanes; a review task that names no hive goes to the
+deployment's other placement backends. A stored review task, a ready-task
+listing or a swarm returning to `running` therefore does not show that a
+reviewer will launch. See the
+[event driven engine](../pillars/swarm.md#event-driven-engine).
+
+The `reviewer` package role runs the `swarm-reviewer` skill. Its conditions
+refuse edits, Serena writes and shell writes outside `~/scratchpad` and the
+seat's task folder; see [Read only roles](read-only-roles.md). Naming the
+profile in a template records the selection. Nothing adds review tasks on its
+own: no pull request, merge request, merge group or release event creates one,
+and autoscale has no reviewer share.
 
 ## Troubleshooting
 
 | Symptom | Check or action |
 |---|---|
 | Task creation says review tasks must use the review lane | Supply `--lane review --kind review` together. A review kind on another lane, or another kind on the review lane, is refused. |
-| A template has no visible review entry | Check the installed version and the configuration home used by `swarm templates`. Parsed templates in this delivery include review even when the JSON omits it. |
+| A template has no visible review entry | Check the installed version and the configuration home used by `swarm templates`. Parsed templates include review even when the JSON omits it. |
 | An older swarm has zero reviewer capacity | Configurations missing `max_review` default to zero. Editing a template or repeating `init` does not migrate that stored cap. |
-| Autoscale changes the other ceilings but leaves review unchanged | Review retains its configured cap; an automatic reviewer quota share is outside this delivery. |
+| Autoscale changes the other ceilings but leaves review unchanged | Review retains its configured cap; autoscale has no reviewer share. |
 | Review capacity is below its configured ceiling | Inspect account capacity, host room and claimable review demand. A cap permits capacity but does not reserve an account or force placement. |
-| A review task is listed but no reviewer starts | Check the offer and launch integration and the installed reviewer profile. This lane infrastructure alone does not offer review work through the event engine. |
+| A review task is listed but no reviewer starts | The event engine never offers review work, and a hive places a review task only when the task names that hive. Check which placement backend the deployment uses for it and that the reviewer profile is installed there. |
