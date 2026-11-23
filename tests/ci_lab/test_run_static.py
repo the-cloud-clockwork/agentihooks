@@ -153,6 +153,7 @@ def test_ruff_passes_on_a_head_tree_that_refuses_writes(tmp_path: Path, settings
     (head / "sample.py").write_text("VALUE = 1\n")
     head.chmod(0o555)
     try:
+        assert not os.access(head, os.W_OK)
         result = run_static.run(_step("python -m ruff check --isolated .\n"), head, base, grader, settings)
         assert result.green, result.log.read_text()
         assert not (head / ".ruff_cache").exists()

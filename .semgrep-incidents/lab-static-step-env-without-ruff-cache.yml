@@ -1,0 +1,21 @@
+rules:
+  - id: lab-static-step-env-without-ruff-cache
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A lab static step's env names its run folder and no ruff cache folder. Ruff then writes its cache into the
+      working folder, the leased head tree the worker seals read only: on 20 November both ruff units of a twin grade
+      on unchanged dev failed with a permission error on that cache. Name the ruff cache folder inside the run folder,
+      ahead of the whitelist and the step's own env so a step may still name another.
+    paths:
+      include:
+        - /scripts/ci_lab/run_static.py
+        - lab-static-step-env-without-ruff-cache.py
+    patterns:
+      - pattern-inside: |
+          def _sandbox(...):
+              ...
+      - pattern: |
+          {..., "RUNNER_TEMP": $FOLDER, ...}
+      - pattern-not: |
+          {..., RUFF_CACHE: $CACHE, ...}
