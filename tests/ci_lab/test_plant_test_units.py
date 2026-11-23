@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.ci_lab import intake, scheduler
-from scripts.ci_lab.queue import Priority
+from scripts.ci_lab.units import Priority
 from tests.ci_lab import test_scheduler as fixtures
 from tests.ci_lab.test_intake import head
 from tests.ci_lab.test_scheduler import lab as lab
