@@ -94,7 +94,8 @@ def test_a_run_leaving_the_live_set_is_parsed_again_if_it_returns(
 def test_a_missing_grade_stops_contributing_and_is_parsed_when_restored(
     grades: Run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    missing = grades.grade(HEAD_A)
+    states = {state.run: state for state in (grades.grade(HEAD_A), grades.grade(HEAD_B))}
+    missing = states[min(states)]
     first = grades.engine.load(1000)
     calls = _parses(monkeypatch)
     grades.lab.client.delete(scheduler.GRADES + missing.run)
@@ -139,3 +140,10 @@ def test_cached_contributions_preserve_duplicate_slots_and_the_most_urgent_share
     assert grades.engine.load(1000) == updated
     assert grades.lab.build(0, Policy(), None).load(1000) == updated
     assert first.cache_misses == {"promotion": 2, "pull_request": 1}
+
+    urgent.tier = other.tier
+    grades.engine.save(urgent)
+    combined = grades.engine.load(1000)
+    assert combined.cache_hits == {"promotion": 2}
+    assert combined.cache_misses == {"promotion": 2}
+    assert grades.engine.load(1000) == combined
