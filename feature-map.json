@@ -18,6 +18,18 @@
       ]
     },
     {
+      "id": "lab-shadow-reusable-caller-pairing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2804",
+      "behaviour": "Shadow discovery groups reusable static jobs by their calling job, so a bare semgrep lab verdict pairs with all three Actions children in the report and recorder. Any failed child fails the report group, a running or cancelled child excludes the head, and the latest child completion determines the Actions completion time. Explicit labelled mapping collections retain their existing behavior.",
+      "seam": "scripts.ci_lab.shadow.static_jobs and Shadow.observe, and scripts.ci_lab.shadow_report.head using the discovered workflow jobs",
+      "tests": [
+        "tests/ci_lab/test_shadow_report.py::test_bare_semgrep_pairs_with_all_reusable_actions_jobs",
+        "tests/ci_lab/test_shadow_report.py::test_an_unfinished_reusable_child_excludes_the_semgrep_head",
+        "tests/ci_lab/test_shadow.py::test_the_recorder_pairs_bare_semgrep_with_every_reusable_actions_job"
+      ]
+    },
+    {
       "id": "filter-web-single-token-literals",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-filter-identifier-literals",
@@ -112,6 +124,28 @@
       "tests": [
         "tests/hive/test_auth.py::test_a_member_writes_the_expert_keys_a_completion_writes_and_no_other_expert_key",
         "tests/hive/test_auth.py::test_a_member_expert_ends_its_lineage_on_a_proof_and_is_refused_without_one_of_its_keys"
+      ]
+    },
+    {
+      "id": "expert-launch-failure-reason",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-expert-seat-launch-failure-reason",
+      "behaviour": "When the launch of an expert fails for another reason than room, the expert seats pass keeps the error as it happens: secrets redacted in strict mode and the login of any address dropped, on one line, at most 300 characters, and the name of its type when it has no text. The line the pass returns carries the same text. A successor launch stores it as the reason of the failed transfer binding in place of the fixed words. Every failed launch, a first one included, is kept beside the lineage record as its last failed launch with its time and the name of the expert that did not start, only for a running lineage and until a launch succeeds; the record keeps its shape, so a member on an older release still reads it. Expert status carries it as JSON and names it in its text line while the lineage runs with no expert on its seat. A launch refused for room records none. The reason is there when the tick abandoned the step and dropped the lines it returned.",
+      "seam": "swarm.expert_seat.run over a fake runtime and store; handoff.transfers.failed with a reason; expert_lineage.launch_failed, launch_recovered and launch_failures; the swarm command expert status through cli.main; tick.engine.run_step abandoning the pass at its budget",
+      "semgrep_rule": "feature-expert-launch-failure-reason",
+      "tests": [
+        "tests/handoff/test_transfers.py::test_a_failed_launch_keeps_the_reason_it_is_given_in_place_of_the_fixed_words",
+        "tests/swarm/test_expert_lineage.py::test_the_last_failed_launch_is_kept_beside_a_running_lineage_and_beside_no_other",
+        "tests/swarm/test_expert_lineage.py::test_a_launch_that_succeeds_drops_the_failure_kept_before_it",
+        "tests/swarm/test_expert_commands.py::test_status_names_the_last_failed_launch_while_the_seat_is_empty_and_carries_it_as_json",
+        "tests/swarm/test_expert_seat.py::test_a_successor_launch_that_fails_keeps_its_error_on_the_binding_and_beside_the_lineage",
+        "tests/swarm/test_expert_seat.py::test_a_first_launch_that_fails_keeps_its_error_with_no_transfer_to_carry_it_until_a_launch_succeeds",
+        "tests/swarm/test_expert_seat.py::test_the_kept_reason_and_the_line_of_the_pass_hold_no_secret_and_no_login_of_an_address",
+        "tests/swarm/test_expert_seat.py::test_the_login_dropped_from_a_word_runs_from_its_first_address_mark_to_the_last_at_sign_after_it",
+        "tests/swarm/test_expert_seat.py::test_a_launch_refused_for_room_records_no_failed_launch",
+        "tests/swarm/test_expert_seat.py::test_the_kept_reason_is_redacted_put_on_one_line_and_cut_at_three_hundred_characters",
+        "tests/swarm/test_expert_seat.py::test_an_error_with_no_text_is_kept_as_the_name_of_its_type",
+        "tests/swarm/test_expert_seat.py::test_a_pass_the_tick_abandons_still_leaves_the_reason_expert_status_reads"
       ]
     },
     {
@@ -1585,6 +1619,41 @@
         "tests/swarm/test_readiness.py::test_a_reader_waiting_behind_a_fetch_reads_the_revision_current_at_its_turn",
         "tests/swarm/test_readiness.py::test_a_readers_change_to_its_task_rows_never_reaches_the_shared_copy",
         "tests/hub/test_admission_claim_cap.py::test_a_claim_cap_block_leaves_the_shared_ledger_copy_as_the_ledger_exported_it"
+      ]
+    },
+    {
+      "id": "hub-admission-narrow-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-admit-narrow-read",
+      "behaviour": "A hub events admission reads only what its own task needs: the task row, the rows it names, the running rows, the overview and its phase, and the claim gate verdict the ledger judges over its stored state, through a narrow tasks selection of ids, states, pins and branches; it never reads the whole ledger export however often the revision moves, and it refuses a frozen, unfocused, phased, waiting or thin task without claiming it.",
+      "seam": "Admission.admit over a ledger whose revision moves and whose export is counted, admission_view.Narrow, the ledger API tasks selection and the ledger client where_query function",
+      "tests": [
+        "tests/hub/test_admission_gates.py::test_an_admission_never_reads_the_full_export_when_the_revision_moves",
+        "tests/hub/test_admission_gates.py::test_an_admission_refuses_a_task_its_claim_gate_holds_and_claims_nothing",
+        "tests/hub/test_admission_gates.py::test_an_admission_claims_the_task_its_dependency_left_open_once_the_dependency_is_done",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_returns_the_rows_matching_every_filter_it_names",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_projects_rows_without_threads_and_keeps_only_the_named_fields",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_client_query_names_only_the_filters_given",
+        "tests/swarm/test_admission_view.py::test_the_view_reads_the_task_the_rows_it_names_and_the_running_rows_only",
+        "tests/swarm/test_admission_view.py::test_a_task_with_nothing_named_reads_only_the_running_rows",
+        "tests/swarm/test_admission_view.py::test_a_gone_task_leaves_no_row_and_withdraws_its_offer",
+        "tests/swarm/test_admission_view.py::test_a_plan_task_keeps_the_whole_document_for_its_steering",
+        "tests/swarm/test_admission_view.py::test_the_withdrawal_asks_the_ledger_claim_gate_once_the_local_checks_pass",
+        "tests/swarm/test_admission_view.py::test_a_local_refusal_never_asks_the_ledger",
+        "tests/swarm/test_admission_view.py::test_the_view_counts_an_unfinished_agent_or_a_claimant_as_claimed",
+        "tests/swarm/test_admission_view.py::test_the_root_waiting_count_judges_only_open_tasks_pinned_to_the_root_hive",
+        "tests/swarm/test_admission_view.py::test_the_branched_rows_carry_only_the_continuation_fields",
+        "tests/swarm/test_admission_view.py::test_a_frozen_root_task_keeps_no_root_slot",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_only_a_plain_tasks_read_naming_a_filter_is_a_selection",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_tasks_route_serves_every_selection_the_client_asks_for",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_route_refuses_a_selection_outside_a_plain_tasks_read",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_reply_carries_the_revision_of_its_rows_and_no_cursor",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_client_reads_a_selection_through_the_tasks_resource",
+        "tests/swarm/test_admission_view.py::test_every_read_the_view_makes_names_its_own_swarm",
+        "tests/swarm/test_admission_view.py::test_the_snapshot_holds_the_rows_the_view_read_under_its_swarm_and_fix_phase",
+        "tests/hub/test_admission_gates.py::test_an_admission_hands_the_continuation_the_rows_on_its_task_branch",
+        "tests/hub/test_admission_gates.py::test_an_admission_reads_a_plan_task_steering_through_its_readiness_source",
+        "tests/swarm/test_admission_view.py::test_the_admits_gate_needs_a_running_swarm_and_every_wait_clear"
       ]
     },
     {
@@ -13558,7 +13627,7 @@
       "ordered_at": "2026-11-22",
       "ledger_item": "ledger:rig-grade-swarm/phases/p130",
       "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
-      "behaviour": "Every pass of the tick keeps the seat of each running expert lineage. An empty seat gets one expert, launched on Claude Code at the lineage's effort with the lineage, the mission and its number in the lineage; a seat that holds a record in any state gets no second one. After an accepted handoff the next expert launches on the same seat with the handoff and the transfer it confirms, and the handoff stays on the seat until that expert confirms it. A launch that fails leaves no record and a failed binding, one refused for room hands the transfer back, and no slot, a full host or a placement elsewhere holds the launch by name. An expert lost without a handoff leaves its successor one: the handoff it never confirmed, offered again, or a recovery handoff in the expert handoff form with every deliverable pending and unknown. The expert of a stopped lineage is finished with its open mail closed, and the expert of a completed lineage is closed from the kept proof with the master told once. Nothing launches while the swarm is paused, stopping, stopped or in panic. A lineage started from the Handoff v2 of a session that was not an expert gives its first expert that handoff to confirm.",
+      "behaviour": "Every pass of the tick keeps the seat of each running expert lineage. An empty seat gets one expert, launched on Claude Code at the lineage's effort with the lineage, the mission and its number in the lineage; a seat that holds a record in any state gets no second one. After an accepted handoff the next expert launches on the same seat with the handoff and the transfer it confirms, and the handoff stays on the seat until that expert confirms it. A launch that fails leaves no record; a successor launch leaves a failed binding carrying the reason, and every failed launch its reason kept beside the lineage; one refused for room hands the transfer back, and no slot, a full host or a placement elsewhere holds the launch by name. An expert lost without a handoff leaves its successor one: the handoff it never confirmed, offered again, or a recovery handoff in the expert handoff form with every deliverable pending and unknown. The expert of a stopped lineage is finished with its open mail closed, and the expert of a completed lineage is closed from the kept proof with the master told once. Nothing launches while the swarm is paused, stopping, stopped or in panic. A lineage started from the Handoff v2 of a session that was not an expert gives its first expert that handoff to confirm.",
       "seam": "swarm.expert_seat.run over a fake runtime and store; the tick step expert seats in tick.steps.experts; expert_lineage.launches, launched and unlaunched, closing and closed; expert_seat.close, drop_confirmed and keep_handoff; the confirm-handoff verb, swarm.handoff_commands.confirm, which calls drop_confirmed; the expert start --handoff and --from options; the live checks scripts.feature_checks.expert_seats over the experts of each running swarm and scripts.feature_checks.expert_handoffs over the handoff a lineage was started from",
       "semgrep_rule": "feature-expert-seat-in-tick",
       "tests": [
