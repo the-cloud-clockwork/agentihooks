@@ -1893,8 +1893,9 @@ ledger reads. The hub answers `admit` on the same `slots.<swarm>.<hive>` request
 member's credential may publish only for its own hive; a request naming another hive than its subject is refused.
 It rechecks the offer against narrow ledger reads of that task (see
 [What an admission reads](#what-an-admission-reads)), claims the task, starts the execution on that hive, occupies
-a seat, marks the task claimed (or back in `pr`) and returns the primed spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
-hive gets none. After a failed admit ask or launch, the spoke sends `reopen`, which returns an admitted task to
+a seat, marks the task claimed (or back in `pr`) and returns the primed spawn task. A repeat from the same hive
+returns the same admission, so a retried launch keeps its agent; any other hive gets none. After a failed admit ask
+or launch, the spoke sends `reopen`, which returns an admitted task to
 `open` (see [When a launch fails](#when-a-launch-fails)). The hub answers these requests on a pool of eight threads
 and drops one that waited there as long as the hive waits for its answer, so an admission the hive gave up on never
 claims the task; see
@@ -2278,7 +2279,7 @@ semgrep --test --config .semgrep-incidents/hub-admission-reads-full-export.yml \
 | `late:` lines still show a `snapshot=` mark | The hub runs a release from before #13245 | Roll the hub to the newest release. |
 | `late:` lines show a large `parts` | The task is a `plan` task, whose admission reads the whole document | Expected on a large ledger. |
 | An offer is refused `the offer is withdrawn, <reason>` while the task looks open | A local check or the ledger's claim gate holds it, such as a dependency, a freeze, a focus elsewhere or an earlier phase; the reason names it | Read the verdicts with `agentihooks api --slug <slug> get focus`, then clear the hold; see [Freeze and focus](swarm.md#freeze-and-focus). |
-| A selection read answers `400 schema_invalid` with `Only a plain tasks read takes a selection, ...` | It named a filter on a path other than `tasks`, beside a paging parameter or `state` on a `tasks` read, or with only `fields` | Send `ids`, `states`, `pinned` or `branches` on a plain `tasks` read. |
+| A selection read answers `400 schema_invalid` with `Only a plain tasks read takes a selection, ...` | It named a filter on a path other than `tasks`, beside `cursor`, `limit`, `offset`, `q`, `state` or `targets` on a `tasks` read, or with only `fields` | Send `ids`, `states`, `pinned` or `branches` on a plain `tasks` read. |
 | A selection read answers `400 schema_invalid` with `State and offset read the done rows of a collection` | It sent `state`, `offset` or `q` on a path that is not a ledger collection | Drop that parameter, and send the selection on a plain `tasks` read. |
 | A selection read answers `400 schema_invalid` with `Request does not match the resource schema` | `pinned` carries a value other than `1`, a list passes its length limit, or the ledger server runs a release before #13245 | Send `pinned=1` and split a long list over several reads; otherwise roll the ledger server, or read through the ledger client from a checkout on the newest release. |
 
