@@ -552,6 +552,7 @@
       "seam": "scripts.ci_lab.scheduler.Scheduler.save, Scheduler.tick and scripts.ci_lab.compact.compact over the scheduler lab fixture on fakeredis, reading the grade document, the REVISIONS and RECORDS hash fields and comparing the record with _grade_demand of the stored document",
       "tests": [
         "tests/ci_lab/test_scheduler_demand_records.py::test_a_save_stores_the_document_with_its_next_revision_and_the_demand_record_of_that_revision",
+        "tests/ci_lab/test_scheduler_demand_records.py::test_the_first_save_of_a_grade_without_a_revision_records_revision_one",
         "tests/ci_lab/test_scheduler_demand_records.py::test_a_failed_save_transaction_leaves_the_document_revision_and_record_as_they_were",
         "tests/ci_lab/test_scheduler_demand_records.py::test_a_save_racing_another_writer_of_the_grade_retries_and_records_the_revision_it_stored",
         "tests/ci_lab/test_scheduler_demand_records.py::test_a_completed_grade_leaves_the_live_set_with_neither_revision_nor_record_and_a_closed_save_writes_none",

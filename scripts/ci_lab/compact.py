@@ -17,7 +17,7 @@ from redis.exceptions import WatchError
 
 from scripts.ci_lab import contract, expand_tests, queue
 from scripts.ci_lab.objects import Objects, manifest_folder
-from scripts.ci_lab.scheduler import GRADES, LIVE, UNPACK, keep_manifests, storage
+from scripts.ci_lab.scheduler import GRADES, LIVE, UNPACK, keep_manifests, stage_grade, storage
 from scripts.ci_lab.units import Unit
 
 __all__ = ["compact", "main"]
@@ -74,8 +74,7 @@ def _grade(client: Any, objects: Objects, key: str, kept: set[str], wanted: Want
             if commit and slot["kind"] == expand_tests.KIND and slot.get("job") and not slot.get("outcome"):
                 wanted[(state["repo"], commit)][slot["key"]] = slot["members"]
         if carried:
-            pipe.multi()
-            pipe.set(key, json.dumps(state))
+            stage_grade(pipe, state)
             try:
                 pipe.execute()
                 counts["grades stripped"] += 1
