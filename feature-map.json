@@ -572,6 +572,20 @@
       ]
     },
     {
+      "id": "lab-scheduler-capacity-cached",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-capacity-cached",
+      "behaviour": "The CI lab scheduler port 8800 answers GET /capacity from the same metrics.Latest load snapshot the metrics port 9108 serves instead of building a full load per request: two capacity reads in a row build the load once, a capacity read and a metrics scrape share one build, the capacity document equals a fresh Scheduler.load of the same state, a capacity read after the metrics port's serve loop refreshed the snapshot serves that newer build, and GET /grades/<sha> still reads the grade store on every request.",
+      "seam": "scripts.ci_lab.scheduler.listen over fakeredis read through GET /capacity, GET /grades/<sha> and GET /metrics with a counting Scheduler.load and a movable clock",
+      "tests": [
+        "tests/ci_lab/test_scheduler_snapshot.py::test_two_capacity_reads_in_a_row_build_the_load_once",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_a_capacity_read_and_a_scrape_share_one_load_build",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_the_capacity_document_equals_a_fresh_build_of_the_same_state",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_the_capacity_route_serves_the_build_the_metrics_port_refreshed",
+        "tests/ci_lab/test_scheduler_snapshot.py::test_the_grades_route_reads_every_request_beside_the_cached_capacity"
+      ]
+    },
+    {
       "id": "lab-scheduler-release-bound",
       "rules": [
         "lab-release-starts-every-waiting-head"
