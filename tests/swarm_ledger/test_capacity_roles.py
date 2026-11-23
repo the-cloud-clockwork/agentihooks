@@ -36,7 +36,7 @@ def test_a_status_with_agents_of_every_role_renders_one_row_per_role_with_its_li
         {"name": "c1", "lane": "ci"},
         {"name": "p1", "lane": "plan", "profile": "planner"},
     ]
-    status = {**SWARM, "config": {**SWARM["config"], "max_plan": 1}, "agents": agents}
+    status = {**SWARM, "config": {**SWARM["config"], "max_plan": 1, "max_review": 0}, "agents": agents}
     tab.route("**/api/v1/**", lambda route: fulfill_events(route, swarm=status))
     tab.reload()
     tab.get_by_role("tab", name="Swarm", exact=False).click()
