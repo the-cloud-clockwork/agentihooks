@@ -8910,15 +8910,23 @@ make that visible.
   every focus record with `target`, `by`, `at`, `reason`, `claimable`, `done` (the ids of done tasks under it),
   `tasks` (every other task under it with its `lane`, `state` and `verdict`) and `unclaimed_minutes`: the minutes
   since the focus while a task under it is open and none is claimed or in a pull request, otherwise null.
-  `GET .../focus/<target>` answers one target in the same shape, or `404 resource_missing` when the target does not
-  exist. The swarm's Doctor fix phase is read from the swarm store; without one the read uses no fix phase.
+  `get focus/<target>` (`GET .../focus/<target>`) answers one target in the same shape, or `404 resource_missing`
+  when the target does not exist. `get focus/<target>/tasks` (`GET .../focus/<target>/tasks`) lists the tasks under
+  one target that are not done, each with its `id`, `lane`, `state` and `verdict`, through the cursor paging every
+  collection uses (`cursor`, `limit`, `next_cursor`), and the command line reads it to its end. A list that changes
+  between two pages answers `409 revision_conflict` and is read again from its first page. A name that is itself a
+  plan node, such as a task whose id is `tasks`, keeps its one reply read. Each reply is held to the reply limit:
+  past it the focus list answers `413 resource_too_large` and names `get freezes` for the records and
+  `get focus/<target>/tasks` for the tasks of one, and the read of one target names its own paged read. A ledger
+  server on a release older than the paged read answers it `404 resource_missing`. The swarm's Doctor fix phase is
+  read from the swarm store; without one the read uses no fix phase.
 - **One orders read.** `agentihooks api --slug <id> get orders` (ledger API `GET /api/v1/ledgers/<id>/orders`) lists
   every phase or task that carries the operator's order and is neither done nor out of scope, oldest order first:
   `item`, `title`, `by`, `at`, his `quote` or the `request` entry id, `claimable`, `busy` (the count claimed or in a
   pull request), `done` (the ids of done tasks under it), `tasks` (every task under it that is neither done nor out
   of scope, with its `lane`, `state` and `verdict`) and `line`, one plain line. The reply is one page: when the open
-  orders pass the reply limit the read answers `413 resource_too_large` and names `focus/<item>`, which lists the
-  tasks of one order.
+  orders pass the reply limit the read answers `413 resource_too_large` and names the command line read
+  `agentihooks api --slug <id> get focus/<item>/tasks`, which lists the tasks of one order in pages.
 - **Focus unclaimed finding.** Each tick the `focus unclaimed` step counts, for every task under a focus record
   whose verdict is `claimable`, the consecutive ticks it stays so; any other verdict drops the count. Past three
   ticks a `focus unclaimed` health finding names the task and the focus, and the findings pass sends it to the

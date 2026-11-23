@@ -157,7 +157,7 @@ def judged_reply(
     reply: dict[str, Any] = {"data": found, "revision": resources.revision(found)}
     if listed:
         reply["next_cursor"] = None
-    return resources.bounded(reply, too_large)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return resources.bounded(reply, too_large)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
 def fix_phase(services: Services, slug: str) -> str:
