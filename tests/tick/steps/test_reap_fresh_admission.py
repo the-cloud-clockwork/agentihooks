@@ -119,13 +119,17 @@ def test_a_fresh_hub_admission_still_ends_on_a_row_another_claimant_or_a_closed_
 
 
 @pytest.mark.feature("hub-late-admission-retry-launches")
-@pytest.mark.parametrize("change", ["released", "launched", "suspect"])
+@pytest.mark.parametrize("change", ["released", "launched", "launch-recorded", "suspect"])
 def test_an_agent_past_its_fresh_admission_still_ends_on_an_unclaimed_row(store: RedisStore, change: str) -> None:
     agent = _admitted(store)
     if change == "released":
         assert store.release(SLUG, "t1", agent.name)
     else:
-        moved = {"launched": {"state": "working", "launched_at": NOW + 1}, "suspect": {"state": tick.SUSPECT}}
+        moved = {
+            "launched": {"state": "working", "launched_at": NOW + 1},
+            "launch-recorded": {"launched_at": NOW + 1},
+            "suspect": {"state": tick.SUSPECT},
+        }
         agent = replace(agent, **moved[change])
         store.put_agent(SLUG, agent)
 
