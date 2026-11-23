@@ -114,7 +114,7 @@ agentihooks swarm <slug> set engine=events
    id that arrives within 120 seconds, so a task whose offer left the queue unclaimed is offered again after that
    window. Each work queue is its own stream on `agentihooks.queue.<name>`.
 3. **Pull.** A hive's spoke takes an offer only when it has room. Before it acts, the offer is checked against a
-   fresh ledger read: by a master spoke itself, and by the hub when it admits an eng, ci or plan offer. A stale offer
+   fresh ledger read: by a master spoke itself, and by the hub when it admits an eng, ci, review or plan offer. A stale offer
    is terminated: the task is gone, claimed, no longer open, on a different
    generation or lane, or held.
 4. **Claim and launch.** The spoke records its claim in the hive buckets and launches the agent. It publishes
@@ -156,8 +156,8 @@ runs master failover and recovery, the orphan pass that reopens a claimed task w
 and no claim, pane evidence, exits, verification, the dispatcher, master
 scaling and the promotion and release watches. Master agents are reaped by the tick.
 
-The hub offers eng, ci and plan tasks, and the spoke code is the same for every lane. With
-`AGENTIHOOKS_DEPLOYMENT=distributed`, a workstation runs the master lane spoke and the eng, ci and plan spokes with
+The hub offers eng, ci, review and plan tasks, and the spoke code is the same for every lane. With
+`AGENTIHOOKS_DEPLOYMENT=distributed`, a workstation runs the master lane spoke and the eng, ci, review and plan spokes with
 `agentihooks swarm spoke`, and every worker hive runs the lane spokes it does not exclude inside
 `agentihooks hive run`. The master spoke launches only master offers that carry an execution identity; a lane spoke
 launches what the hub admitted (see [Pulling work from the hub](hives.md#pulling-work-from-the-hub)).
@@ -1249,7 +1249,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm init --no-start` | Check Docker and the Compose plugin, write the stack files, `.env` (adoption included with `--adopt`) and `client.env`, then stop: no service, swarm or ledger is started or created. |
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
 | `agentihooks swarm tick-watch` | The stale tick watcher, run by its own user service: one inbox alert per stale tick episode to the front door master seat and every live agent seat, a resolved notice when a fresh pass lands, on a workstation a scheduler tick restart and a respawn of an empty front door master while the tick is stale, and in a cluster a placement of an empty front door master (see [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher)). |
-| `agentihooks swarm spoke` | The workstation spoke, run by the `agentihooks-spoke` user service when `AGENTIHOOKS_DEPLOYMENT=distributed`: a master lane spoke per swarm takes master work from the bus as this hive and launches it in a herdr pane, beside an eng, ci and plan spoke per `events` swarm that launches what the hub admits. Refused in any other mode. |
+| `agentihooks swarm spoke` | The workstation spoke, run by the `agentihooks-spoke` user service when `AGENTIHOOKS_DEPLOYMENT=distributed`: a master lane spoke per swarm takes master work from the bus as this hive and launches it in a herdr pane, beside an eng, ci, review and plan spoke per `events` swarm that launches what the hub admits. Refused in any other mode. |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the scheduler runs it every minute). On a workstation where every swarm in the store is served in Anton or stopped, the pass also cancels the scheduled tick cron and removes the `agentihooks-swarm-waits`, `agentihooks-tick-watch` and `agentihooks-inbox-waker` units; see [Retire the workstation tick](../reference/deployment-modes.md#retire-the-workstation-tick). |
 | `agentihooks swarm <id> tick` | One tick pass for that swarm alone, printing each action. A swarm whose stored `api_url` names its controller is served in Anton: the command prints `swarm: the swarm <id> is served in Anton, so only its controller ticks it` and exits 1 without ticking. It never installs or removes units. |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
@@ -1375,7 +1375,7 @@ A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an opt
 | `cap` | The lane cap the swarm is created with. |
 | `profile` | The profile name recorded for the lane; review defaults to `reviewer`. |
 | `agent` | `claude`, `codex` or `auto`; `claude` and `codex` always spawn that harness; `auto` takes the harness of the account the session rotation picks: the eligible account with the fewest live sessions under its five hour band. Codex is one more account in the rotation, judged on its week alone with the top band. |
-| `model`, `effort` | Passed to init-agent for the lane's agents. An `auto` effort on an eng or ci lane takes the model pick inside the task's size and rank band (see the classifier reference); elsewhere `auto` keeps init-agent's default, `medium`. A model of the other harness, such as `opus` on a Codex agent, launches on the swarm's model for the agent's harness with the lane's effort ([Lane models on the other harness](../reference/classifier.md#lane-models-on-the-other-harness)). The master lane ignores both: a master always launches on the frontier model at high effort for its harness, opus or gpt-6.1-sol. |
+| `model`, `effort` | Passed to init-agent for the lane's agents. An `auto` effort on an eng, ci or review lane takes the model pick inside the task's size and rank band (see the classifier reference); elsewhere `auto` keeps init-agent's default, `medium`. A model of the other harness, such as `opus` on a Codex agent, launches on the swarm's model for the agent's harness with the lane's effort ([Lane models on the other harness](../reference/classifier.md#lane-models-on-the-other-harness)). The master lane ignores both: a master always launches on the frontier model at high effort for its harness, opus or gpt-6.1-sol. |
 | `kind` | The kind written to a task of this lane that has none when the tick claims it; `auto` writes nothing. |
 
 The `review` entry defaults to cap `1`, profile `reviewer` and kind `review`, also for a swarm created without

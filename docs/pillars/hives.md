@@ -882,7 +882,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `max-agents` | whole number, 0 or more, or `auto` | `auto` | A cap on the hive's agent ceiling. With no cap the ceiling is computed each tick from the hive's own heartbeat reading: the agents it runs plus the room the workstation host room rule gives its free memory less swap in use and its one minute load. A cap holds the ceiling lower; `0` scales the hive fully down, so the tick places no new agent there; `auto` clears it. Placement admits no hive past the ceiling, and the headroom admission still applies beside it. With no cap and no fresh reading the ceiling reads `unknown`. Masters do not count against it. A stored value is kept. |
 | `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
-Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role
+Every hive takes every agent type (master, eng, ci, review, plan, dispatch and any profile) unless the agent's lane role
 or profile is in its `excluded` list, and never past its max agents. `prefer` refuses a role the hive excludes. An
 unset `excluded` follows the hive's current `ui`. A hive still on a legacy record with the old `roles` setting drops
 it, with its stored `max-agents`, on its next heartbeat, join or `hive set`, and reads under the defaults until then.
@@ -920,14 +920,14 @@ prints each agent's hive in its Hive column, and the ledger page agents table na
 The operator runs a PC, a VM and a set of pods:
 
 ```bash
-agentihooks hive set pc  ui=yes excluded=qa,frontend,eng,ci,plan,dispatch prefer=master:1
-agentihooks hive set vm  ui=yes excluded=eng,ci,plan,dispatch prefer=master:2,qa:1,frontend:1
+agentihooks hive set pc  ui=yes excluded=qa,frontend,eng,ci,review,plan,dispatch prefer=master:1
+agentihooks hive set vm  ui=yes excluded=eng,ci,review,plan,dispatch prefer=master:2,qa:1,frontend:1
 agentihooks hive set pod-1 ui=no ephemeral=yes max-agents=20
 ```
 
 - The master runs on the PC while it is live, and on the VM when the PC is gone; the pods exclude it by default.
 - QA and frontend work runs on the VM, then on a pod when the VM is gone.
-- Engineer, CI, planner and dispatcher work runs on the pods, and on the PC when every pod is full once the PC no
+- Engineer, CI, reviewer, planner and dispatcher work runs on the pods, and on the PC when every pod is full once the PC no
   longer excludes that role.
 
 ### The dispatcher seat on hives
@@ -935,7 +935,7 @@ agentihooks hive set pod-1 ui=no ephemeral=yes max-agents=20
 The dispatcher is one seat per swarm, `dispatcher@<slug>`, in the `dispatch` lane. The tick's dispatch seat step
 starts it while the swarm runs at `autonomy=full` and has an open dispatcher trigger: a Priorities item, an
 uncovered bottleneck share, a red dev run that holds work, or an inbox item for the seat. It ends the seat when the
-triggers close. It spawns through hive placement like the `eng`, `ci` and `plan` lanes: the
+triggers close. It spawns through hive placement like the `eng`, `ci`, `review` and `plan` lanes: the
 `dispatcher` profile places as the `dispatch` worker role, so it lands on any live hive that does not exclude
 `dispatch` or `dispatcher`, ordered as in [Placement](#placement).
 
@@ -1039,7 +1039,7 @@ unchanged.
 
 #### How round robin picks a hive
 
-For each `eng`, `ci`, `plan` or `dispatch` launch, and any other worker profile, placement:
+For each `eng`, `ci`, `review`, `plan` or `dispatch` launch, and any other worker profile, placement:
 
 1. Keeps the live hives that are not draining, do not exclude the launch's lane, role or profile, and host its
    profile, as under `anton-first`.
@@ -1100,14 +1100,14 @@ when agents placed before the switch still run where `anton-first` put them. Rou
 
 ### Workstation fallback for workers
 
-A headless hive refusing an `eng`, `ci`, `plan` or `dispatch` launch does not prevent an eligible UI hive,
+A headless hive refusing an `eng`, `ci`, `review`, `plan` or `dispatch` launch does not prevent an eligible UI hive,
 such as the workstation, from taking it. This covers a missing account slot, a repo mismatch, a missing login,
 no admission room, or no live headless hive. The workstation must pass the same account, repo, role and room
 checks. A fallback never bypasses a task's hive pin or workstation requirement.
 
 Worker selection now ranks eligible headed and headless hives together using `prefer` and utilization. Set a
 lower `prefer` rank for a worker to favor it; being headless alone does not force that worker to win. The engineer,
-cicd, planner and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; frontend and qa profiles keep
+cicd, reviewer, planner and dispatcher profiles place as `eng`, `ci`, `review`, `plan` and `dispatch`; frontend and qa profiles keep
 their UI role on any lane.
 
 For a workstation reporting five accounts and a headless worker reporting one, a launch can use the worker's
@@ -1169,6 +1169,7 @@ does:
 | `qa`, on any lane | `qa` | UI hive only |
 | `engineer` | `eng` | Any hive that does not exclude it |
 | `cicd` | `ci` | Any hive that does not exclude it |
+| `reviewer` | `review` | Any hive that does not exclude it |
 | `planner` | `plan` | Any hive that does not exclude it |
 | `dispatcher` | `dispatch` | Any hive that does not exclude it |
 
@@ -1183,7 +1184,7 @@ UI roles, `master`, `qa` and `frontend`:
   `no live swarm-master takes qa` (or `frontend`). It never runs on the headless hive.
 - These roles never overflow to the local machine, and round robin placement leaves them under `anton-first`.
 
-Worker roles, `eng`, `ci`, `plan` and `dispatch`, place on every live hive that does not exclude them, UI or
+Worker roles, `eng`, `ci`, `review`, `plan` and `dispatch`, place on every live hive that does not exclude them, UI or
 headless, by the order above. A UI hive's `excluded` default is empty, so the workstation takes worker work on
 equal terms with the pods unless it excludes the worker roles or the pods rank first in `prefer`. With the
 defaults, worker roles are not held to headless hives. Two layouts control when worker roles reach the
@@ -1192,11 +1193,11 @@ workstation:
 ```bash
 # Worker work never runs on the workstation; it waits for a pod with room
 agentihooks hive set anton-1 ui=no ephemeral=yes                 # excluded defaults to master
-agentihooks hive set desk ui=yes excluded=eng,ci,plan,dispatch prefer=master:1
+agentihooks hive set desk ui=yes excluded=eng,ci,review,plan,dispatch prefer=master:1
 
 # Worker work runs on the workstation only when no ranked pod takes it, with the reason logged
-agentihooks hive set anton-1 prefer=eng:1,ci:1,plan:1,dispatch:1
-agentihooks hive set anton-2 prefer=eng:2,ci:2,plan:2,dispatch:2
+agentihooks hive set anton-1 prefer=eng:1,ci:1,review:1,plan:1,dispatch:1
+agentihooks hive set anton-2 prefer=eng:2,ci:2,review:2,plan:2,dispatch:2
 agentihooks hive set desk ui=yes excluded=
 agentihooks hive show desk                                       # "excluded": [], "prefer": {}
 ```
@@ -3205,13 +3206,13 @@ The feature map entry `events-outage-hold-hub-agents` lists the regression tests
 ### Running a spoke
 
 With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation,
-and `agentihooks hive run`, the worker hive image's last start step, runs beside its telemetry loop an eng, ci and
-plan spoke for every swarm on the `events` engine, leaving out the lanes in `HIVE_EXCLUDED`. The workstation spoke
+and `agentihooks hive run`, the worker hive image's last start step, runs beside its telemetry loop an eng, ci, review
+and plan spoke for every swarm on the `events` engine, leaving out the lanes in `HIVE_EXCLUDED`. The workstation spoke
 runs the same lane spokes for every lane. Legacy engine swarms get no lane spoke. Each new spoke logs
 `hive spoke for swarm <slug> lane <lane> takes swarm.<slug>.ready.<lane>`, and a stopped set of lane spokes logs
 why and starts again after 30 seconds. Spokes take work from the bus and bind to the hub's streams instead of
 creating them. Outside distributed mode `agentihooks swarm spoke` refuses, because the workstation then runs the
-swarm engine itself, but `agentihooks hive run` still starts the eng, ci and plan spokes: under the `events` engine
+swarm engine itself, but `agentihooks hive run` still starts the eng, ci, review and plan spokes: under the `events` engine
 the tick launches no workstation task and offers each one pinned to the root hive, so the root hive's lane spokes
 are its only taker, and only a spoke poll beats the hive's presence. `hive run` loads the operator env files before
 the spokes read their bus settings, and a draining hive polls no spoke but keeps beating presence on every `events`
