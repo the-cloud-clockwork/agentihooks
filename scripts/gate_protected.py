@@ -108,6 +108,19 @@ def _pinned_tool_form(value: Any) -> Any:
     return value
 
 
+def _floating_tool_form(value: Any) -> Any:
+    """Write the pinned parser install back in the single quoted form the provenance template held before its pin."""
+    if isinstance(value, dict):
+        return {key: _floating_tool_form(item) for key, item in cast(dict[Any, Any], value).items()}
+    if isinstance(value, list):
+        return [_floating_tool_form(item) for item in cast(list[Any], value)]
+    if not isinstance(value, str):
+        return value
+    return value.replace(
+        "pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3", "pip install 'pyyaml>=6.0'"
+    )
+
+
 def reuse_jobs(policy: object = None) -> list[dict]:
     jobs = []
     for factory in (ci_reuse.reuse_job, ci_reuse.paged_reuse_job, ci_reuse.retried_reuse_job):
@@ -289,7 +302,7 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
         }
     bounds = {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}}
     admitted = [variant for steps in (prefix, retried) for variant in (steps, [steps[0] | bounds, *steps[1:]])]
-    admitted += [_pinned_tool_form(steps) for steps in admitted]
+    admitted += [form(steps) for steps in admitted for form in (_pinned_tool_form, _floating_tool_form)]
     if producer.get("steps", [])[: len(prefix)] not in admitted:
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
