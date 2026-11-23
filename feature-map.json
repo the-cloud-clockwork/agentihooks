@@ -13,6 +13,9 @@
         "tests/hive/test_placement_role_census.py::test_interactive_markers_still_exempt_a_master_whose_execution_is_unreported",
         "tests/hive/test_placement_role_census.py::test_master_exclusion_does_not_absorb_workers_from_another_account_slot",
         "tests/hive/test_placement_role_census.py::test_excluding_masters_keeps_a_saturated_cpu_refusal"
+      ],
+      "rules": [
+        "placement-marker-only-worker-census"
       ]
     },
     {
