@@ -118,6 +118,7 @@ def test_a_clean_head_is_green_under_the_grader_copy(tmp_path: Path, settings: r
     assert "0 units over a limit, 0 on the base allowlist, 0 errors" in graded.log.read_text()
 
 
+@pytest.mark.feature("lab-static-step-tools")
 def test_the_step_reads_each_tree_where_the_workflow_puts_it(tmp_path: Path, settings: run_static.Settings) -> None:
     head, base, grader = _folders(tmp_path)
     result = run_static.run(_step(LAYOUT), head, base, grader, settings)
@@ -125,11 +126,38 @@ def test_the_step_reads_each_tree_where_the_workflow_puts_it(tmp_path: Path, set
     assert result.green
     trees = [str(head.resolve()), str(head), str(grader.resolve()), str(base.resolve())]
     bin_folder = settings.venv / "bin"
-    path = f"{bin_folder}{os.pathsep}{os.defpath}"
+    path = os.pathsep.join((str(bin_folder), "/usr/local/bin", os.defpath))
     assert result.log.read_text().splitlines() == [*trees, str(bin_folder / "python"), path, "41000", "kept"]
     assert result.report.read_text() == "summary\n"
     assert settings.root in result.report.parents
     assert settings.root in result.log.parents
+
+
+@pytest.mark.feature("lab-static-step-tools")
+def test_a_step_keeps_the_ruff_cache_in_its_run_folder_outside_every_tree(
+    tmp_path: Path, settings: run_static.Settings
+) -> None:
+    head, base, grader = _folders(tmp_path)
+    result = run_static.run(_step('echo "$RUFF_CACHE_DIR"\necho "$RUNNER_TEMP"\n'), head, base, grader, settings)
+    cache, folder = (Path(line) for line in result.log.read_text().splitlines())
+    assert cache.parent == folder
+    assert settings.root in cache.parents
+    assert not {head, base, grader} & set(cache.parents)
+    named = _step('echo "$RUFF_CACHE_DIR"\n', (("RUFF_CACHE_DIR", "/elsewhere"),))
+    assert run_static.run(named, head, base, grader, settings).log.read_text() == "/elsewhere\n"
+
+
+@pytest.mark.feature("lab-static-step-tools")
+def test_ruff_passes_on_a_head_tree_that_refuses_writes(tmp_path: Path, settings: run_static.Settings) -> None:
+    head, base, grader = _folders(tmp_path)
+    (head / "sample.py").write_text("VALUE = 1\n")
+    head.chmod(0o555)
+    try:
+        result = run_static.run(_step("python -m ruff check --isolated .\n"), head, base, grader, settings)
+        assert result.green, result.log.read_text()
+        assert not (head / ".ruff_cache").exists()
+    finally:
+        head.chmod(0o755)
 
 
 @pytest.mark.parametrize("step", ["false\necho reached\n", "false | true\necho reached\n"])
