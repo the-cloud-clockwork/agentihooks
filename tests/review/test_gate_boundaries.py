@@ -39,3 +39,25 @@ def test_queue_admission_preserves_intent_review_and_freshness_order(
     if not stop:
         expected.append(call.freshness(URL, HEAD))
     assert events.mock_calls == expected
+
+
+@pytest.mark.feature("review-queue-gate")
+@pytest.mark.parametrize("targets", [[], [{"id": "t1"}, {"id": "t2"}]])
+def test_a_master_without_one_target_never_substitutes_itself_for_the_author(
+    monkeypatch: pytest.MonkeyPatch, targets: list[dict[str, str]]
+) -> None:
+    from types import SimpleNamespace
+
+    from scripts.gates import log
+    from scripts.swarm.ledger_client import LedgerClient
+
+    gate = import_module("scripts.review.gate")
+    metadata = store()
+    monkeypatch.setattr(metadata, "config", lambda slug: SimpleNamespace(gates={"review": "enforce"}))
+    monkeypatch.setattr(LedgerClient, "tasks_targeting", lambda *args: targets)
+    monkeypatch.setattr(gate.record, "read", lambda *args: None)
+    monkeypatch.setattr(log, "append", lambda *args: None)
+    monkeypatch.setattr(gate.queue_exit, "require_fresh", lambda *args: pytest.fail("missing author admitted"))
+    caller = AgentRecord("master@a1b2c3-0002", "master", "master")
+    with pytest.raises(SwarmError, match="no author recorded"):
+        gate.queue_admit(metadata, argparse.Namespace(slug=SLUG, url=URL), None, caller, HEAD, Mock(), None)

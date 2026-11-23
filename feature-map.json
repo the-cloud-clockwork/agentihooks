@@ -10189,6 +10189,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-queue-gate",
       "behaviour": "Every first queue entry checks an independent review of the exact observed head that the task claimant has read. The gate logs by default and refuses only with the swarm review enforce mode. Master and automatic callers keep the claimant as author.",
       "seam": "scripts.review.gate through swarm cmd_merge, ready first admission and recovery, and status gate modes",
+      "rules": ["merge-queue-admit-skips-review"],
       "tests": [
         "tests/review/test_queue_gate.py::test_review_defaults_to_log_only_and_enforces_only_from_swarm_configuration",
         "tests/review/test_queue_gate.py::test_refusal_requires_independence_and_the_actual_authors_read",
@@ -10198,6 +10199,7 @@
         "tests/review/test_queue_protection.py::test_intent_refusal_stops_freshness_and_queue_mutation",
         "tests/review/test_queue_protection.py::test_nonqueue_operations_do_not_run_admission",
         "tests/review/test_gate_boundaries.py::test_queue_admission_preserves_intent_review_and_freshness_order",
+        "tests/review/test_gate_boundaries.py::test_a_master_without_one_target_never_substitutes_itself_for_the_author",
         "tests/review/test_queue_callers.py::test_ready_first_entries_apply_the_review_gate_to_the_actual_head_and_claimant",
         "tests/review/test_queue_callers.py::test_each_command_caller_checks_the_task_authors_independent_read",
         "tests/gates/test_mode_names.py::test_status_uses_new_names_in_modes_and_decisions"

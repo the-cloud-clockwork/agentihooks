@@ -1,6 +1,7 @@
 import copy
 import json
 import subprocess
+from collections.abc import Callable
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, TypeVar
 
@@ -403,7 +404,9 @@ def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_reques
     monkeypatch.setattr(stall_watch, "ntfy", lambda *args: "")
     attempts = []
 
-    def queue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def queue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         attempts.append(url)
         if pull.queued:
             return {}
@@ -584,7 +587,7 @@ class Ledger:
 
 
 @pytest.fixture
-def merging(monkeypatch):
+def merging(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -601,7 +604,9 @@ def merging(monkeypatch):
     monkeypatch.setattr(stack, "shell", shell)
     _port(monkeypatch, shell.port)
 
-    def queue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def queue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         queued.append((action, url))
         queue.journals.append(journal)
         return {"url": url, "queued": True, **getattr(queue, "extra", {})}
@@ -701,8 +706,10 @@ def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging,
             data = {"resource": pull}
         return subprocess.CompletedProcess(command, 0, json.dumps({"data": data}))
 
-    def queue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
-        return merge_queue.operate(action, url, github, journal=journal, priority=priority)
+    def queue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
+        return merge_queue.operate(action, url, github, admit=admit, journal=journal, priority=priority)
 
     merging.run(queuer=queue)
     assert merged_heads == [f"head={HEAD}"]

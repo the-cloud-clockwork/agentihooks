@@ -104,7 +104,6 @@ from scripts.swarm import (
     priming_trace,
     prompt,
     pull_head,
-    queue_exit,
     queue_priority,
     queue_record,
     ready,
@@ -2173,6 +2172,8 @@ def _require_target(store: object, args: argparse.Namespace, agent: AgentRecord)
 
 
 def cmd_merge(store: Any, args: argparse.Namespace) -> None:
+    from scripts.review import gate as review
+
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
@@ -2194,9 +2195,8 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: (
-                    (agent is not None and _queue_intent(store, args, agent, head))
-                    or queue_exit.require_fresh(args.url, head)
+                admit=lambda head: review.queue_admit(
+                    store, args, agent, _me(store, args), head, _queue_intent, stalled
                 ),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,

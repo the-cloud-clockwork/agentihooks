@@ -11,6 +11,8 @@ from tests.swarm.test_merge_queue import URL, swarm_of
 def test_intent_refusal_stops_freshness_and_queue_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli.done_gate, "require_local", lambda *args: None)
+    monkeypatch.setattr(cli, "_require_target", lambda *args: None)
     queued: list[str] = []
 
     def intent(*args: Any) -> None:
@@ -33,6 +35,8 @@ def test_intent_refusal_stops_freshness_and_queue_mutation(monkeypatch: pytest.M
 def test_nonqueue_operations_do_not_run_admission(monkeypatch: pytest.MonkeyPatch, action: str) -> None:
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli.done_gate, "require_local", lambda *args: None)
+    monkeypatch.setattr(cli, "_require_target", lambda *args: None)
     monkeypatch.setattr(cli, "_queue_intent", lambda *args: pytest.fail("nonqueue intent"))
     monkeypatch.setattr(queue_exit, "require_fresh", lambda *args: pytest.fail("nonqueue freshness"))
 
