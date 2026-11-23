@@ -348,6 +348,7 @@ def test_only_a_trusted_actors_head_becomes_a_grade_request() -> None:
 
 def test_a_trusted_sender_reopening_an_untrusted_authors_pull_request_admits_nothing() -> None:
     (event,) = webhooks.head_events("pull_request", pull_request("reopened", author="stranger", sender="nestorcolt"))
+    assert isinstance(event, HeadEvent)
     assert event.actor == "stranger"
     assert intake.admit(event, intake.trusted_actors(ROOT)) is None
 
