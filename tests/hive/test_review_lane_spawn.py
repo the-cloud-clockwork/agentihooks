@@ -89,6 +89,12 @@ def test_the_hive_controller_places_the_lane_on_a_hive(lane: str, profile: str) 
     assert _hive_lane(lane, {}, False)
 
 
+@pytest.mark.parametrize(("lane", "on_hive"), [("eng", False), ("review", False), ("ci", True)])
+@pytest.mark.feature("review-lane-spawn")
+def test_a_kubernetes_proof_keeps_reviewers_off_hives_like_engineers(lane: str, on_hive: bool) -> None:
+    assert _hive_lane(lane, {}, True) is on_hive
+
+
 @pytest.mark.parametrize("lane", ["eng", "review"])
 @pytest.mark.feature("review-lane-spawn")
 def test_the_kubernetes_backend_places_the_lane(lane: str) -> None:

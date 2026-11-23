@@ -2222,6 +2222,7 @@
         "tests/hive/test_review_lane_spawn.py::test_each_hive_lane_profile_takes_its_lane_as_hive_role",
         "tests/hive/test_review_lane_spawn.py::test_the_reviewer_profile_takes_the_review_role_on_a_hive",
         "tests/hive/test_review_lane_spawn.py::test_the_hive_controller_places_the_lane_on_a_hive",
+        "tests/hive/test_review_lane_spawn.py::test_a_kubernetes_proof_keeps_reviewers_off_hives_like_engineers",
         "tests/hive/test_review_lane_spawn.py::test_the_kubernetes_backend_places_the_lane",
         "tests/hive/test_review_lane_spawn.py::test_a_hive_runs_a_review_spoke_on_the_review_ready_queue",
         "tests/hive/test_review_lane_spawn.py::test_a_workstation_engineer_spawn_takes_the_model_pick",
