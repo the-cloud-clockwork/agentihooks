@@ -14,7 +14,7 @@ from scripts.gates.verdicts import Verdicts
 from scripts.swarm import capacity, claim_hold, cli, linked_issues, merge_queue, outage, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_pull
-from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from scripts.tick.steps import agents as agent_steps
@@ -664,7 +664,10 @@ def test_a_queue_pass_watches_the_merge_whatever_the_queue_command_reports(mergi
     assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "merge", "target": URL}
 
 
-def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging, monkeypatch):
+def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(
+    merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    merging.store.create(SwarmConfig("sw", TOP, 1, 1))
     merging.pulls[URL] = GREEN
     monkeypatch.setattr(merge_queue.ledger_events, "view", read_pull)
     pull = {
