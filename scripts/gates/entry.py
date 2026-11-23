@@ -11,55 +11,75 @@ and write the gate log row instead.
 import json
 import os
 import sys
-from collections.abc import MutableMapping
+from collections import ChainMap
+from collections.abc import Iterator, MutableMapping
+from importlib import import_module
 from pathlib import Path
 from typing import Protocol
 
 from scripts.gates import lift, log, modes
-from scripts.gates.base import Call, Decision, Who
-from scripts.gates.brain import BrainGate
-from scripts.gates.build import BuildGate
-from scripts.gates.claim_stop import ClaimStop
-from scripts.gates.expert_stop import ExpertStop
-from scripts.gates.identity import PinnedIdentity
-from scripts.gates.intent import IntentGate
-from scripts.gates.node_caps import NodeCaps
-from scripts.gates.one_push import OnePush
-from scripts.gates.placement import PlacementGate
-from scripts.gates.prompts import PromptGuard
-from scripts.gates.push_stop import PushStop
-from scripts.gates.quiet import QuietClaim
-from scripts.gates.recon import ReconGate
-from scripts.gates.reruns import RerunBudget
-from scripts.gates.sign_ins import SignIns
-from scripts.gates.subagents import SubagentBudget
-from scripts.gates.terminations import Terminations
-from scripts.gates.verdicts import Verdicts
-from scripts.gates.watch import WatchBudget
+from scripts.gates.base import Call, Decision, Gate, Who
 
 LIFTED = "lifted by the operator: "
 FAILED_OPEN = Decision()
 
-GATES = {
-    gate.name: gate
-    for gate in (
-        PinnedIdentity(),
-        WatchBudget(),
-        SubagentBudget(),
-        RerunBudget(),
-        IntentGate(),
-        ReconGate(),
-        BuildGate(),
-        ClaimStop(),
-        ExpertStop(),
-        PushStop(),
-        QuietClaim(),
-        OnePush(),
-        BrainGate(),
-    )
-}
-HOST_GATES = {gate.name: gate for gate in (PlacementGate(), PromptGuard(), NodeCaps(), Terminations(), SignIns())}
-BEFORE = {BuildGate.name: (ReconGate.name,)}
+
+class GateRegistry(MutableMapping[str, Gate]):
+    def __init__(self, declarations: dict[str, tuple[str, str]]) -> None:
+        self._entries: dict[str, Gate | tuple[str, str]] = dict(declarations)
+
+    def __getitem__(self, key: str) -> Gate:
+        value = self._entries[key]
+        if isinstance(value, tuple):
+            module, name = value
+            gate: Gate = getattr(import_module(f"scripts.gates.{module}"), name)()
+            self._entries[key] = gate
+            return gate
+        return value
+
+    def __setitem__(self, key: str, value: Gate) -> None:
+        self._entries[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        del self._entries[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._entries)
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._entries
+
+
+GATES = GateRegistry(
+    {
+        "identity": ("identity", "PinnedIdentity"),
+        "watch": ("watch", "WatchBudget"),
+        "subagents": ("subagents", "SubagentBudget"),
+        "reruns": ("reruns", "RerunBudget"),
+        "intent": ("intent", "IntentGate"),
+        "recon": ("recon", "ReconGate"),
+        "build": ("build", "BuildGate"),
+        "claim-stop": ("claim_stop", "ClaimStop"),
+        "expert-stop": ("expert_stop", "ExpertStop"),
+        "push-stop": ("push_stop", "PushStop"),
+        "quiet": ("quiet", "QuietClaim"),
+        "one-push": ("one_push", "OnePush"),
+        "brain": ("brain", "BrainGate"),
+    }
+)
+HOST_GATES = GateRegistry(
+    {
+        "placement": ("placement", "PlacementGate"),
+        "prompts": ("prompts", "PromptGuard"),
+        "node-caps": ("node_caps", "NodeCaps"),
+        "terminations": ("terminations", "Terminations"),
+        "sign-ins": ("sign_ins", "SignIns"),
+    }
+)
+BEFORE = {"build": ("recon",)}
 
 
 class Stdin(Protocol):
@@ -76,7 +96,7 @@ def main(
     it through gives the exit code."""
     argv = sys.argv[1:] if argv is None else argv
     environ = os.environ if environ is None else environ
-    named = {**GATES, **HOST_GATES}
+    named = ChainMap(HOST_GATES, GATES)
     gates = [named.get(first) for name in argv for first in (*BEFORE.get(name, ()), name)]
     if not gates or None in gates:
         print(f"agentihooks gate: name one gate of: {', '.join(sorted(named))}", file=sys.stderr)
