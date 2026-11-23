@@ -186,6 +186,10 @@ def test_write_methods_return_what_the_plain_methods_return() -> None:
     owner = value["owner"]
     owner |= {"seat": "eng-1"}
     assert value["owner"]["seat"] == "eng-1"
+    owner.update(lead="eng-2")
+    assert value["owner"]["lead"] == "eng-2"
+    tags.sort(reverse=True)
+    assert value["owner"]["tags"] == ["b", "b", "a", "a"]
 
 
 @pytest.mark.feature("ledger-write-partial-rebuild")
