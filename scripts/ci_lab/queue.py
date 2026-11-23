@@ -1,16 +1,21 @@
 """Lab queue state in Redis: pending, leased and done jobs, globally and per head."""
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import LOST
 from scripts.ci_lab.units import Unit
 
-__all__ = ["PREFIX", "Job", "Queue", "Requirement"]
+__all__ = ["BAND", "PAGE", "PREFIX", "RANKS", "UNRANKED", "Job", "Queue", "Requirement"]
 
 PREFIX = "agentihooks-ci:queue:"
+RANKS = len(CLASSES)
+UNRANKED = RANKS
+BAND = 2**40
+PAGE = 64
 
 
 @dataclass(frozen=True)
@@ -35,17 +40,35 @@ class Job:
     base: str = ""
     grader: str = ""
     leased_ms: int = 0
+    rank: int = UNRANKED
     event: str = ""
     head_branch: str = ""
 
 
-ENQUEUE = """
-if redis.call('HSETNX', KEYS[1], 'head', ARGV[2]) == 0 then return 0 end
-for index = 3, #ARGV, 2 do redis.call('HSET', KEYS[1], ARGV[index], ARGV[index + 1]) end
-redis.call('ZADD', KEYS[2], redis.call('INCR', KEYS[3]), ARGV[1])
+SCORE = f"""
+local function rank_of(job) return tonumber(redis.call('HGET', job, 'rank') or {RANKS}) end
+local function score(counter, rank) return counter - ({RANKS} - rank) * {BAND} end
+"""
+
+ENQUEUE = (
+    SCORE
+    + """
+local rank = tonumber(ARGV[3])
+if redis.call('HSETNX', KEYS[1], 'head', ARGV[2]) == 0 then
+  local placed = redis.call('ZSCORE', KEYS[2], ARGV[1])
+  local held = rank_of(KEYS[1])
+  if placed and rank < held then
+    redis.call('HSET', KEYS[1], 'rank', rank)
+    redis.call('ZADD', KEYS[2], score(tonumber(placed), rank) - score(0, held), ARGV[1])
+  end
+  return 0
+end
+for index = 4, #ARGV, 2 do redis.call('HSET', KEYS[1], ARGV[index], ARGV[index + 1]) end
+redis.call('ZADD', KEYS[2], score(redis.call('INCR', KEYS[3]), rank), ARGV[1])
 redis.call('SADD', KEYS[4], ARGV[1])
 return 1
 """
+)
 
 DROP = """
 if redis.call('ZREM', KEYS[2], ARGV[1]) == 0 then return 0 end
@@ -83,7 +106,9 @@ redis.call('SMOVE', KEYS[4], KEYS[5], ARGV[1])
 return 1
 """
 
-REAP = """
+REAP = (
+    SCORE
+    + """
 local expires = redis.call('ZSCORE', KEYS[2], ARGV[1])
 if not expires or tonumber(expires) > tonumber(ARGV[2]) then return '' end
 local attempts = tonumber(redis.call('HGET', KEYS[1], 'attempts') or 0)
@@ -91,7 +116,7 @@ redis.call('ZREM', KEYS[2], ARGV[1])
 if attempts < tonumber(ARGV[3]) then
   redis.call('HINCRBY', KEYS[1], 'attempts', 1)
   redis.call('HSET', KEYS[1], 'state', 'pending', 'worker', '', 'token', '')
-  redis.call('ZADD', KEYS[3], redis.call('INCR', KEYS[4]), ARGV[1])
+  redis.call('ZADD', KEYS[3], score(redis.call('INCR', KEYS[4]), rank_of(KEYS[1])), ARGV[1])
   redis.call('SMOVE', KEYS[6], KEYS[7], ARGV[1])
   return 'pending'
 end
@@ -100,16 +125,20 @@ redis.call('SADD', KEYS[5], ARGV[1])
 redis.call('SMOVE', KEYS[6], KEYS[8], ARGV[1])
 return 'lost'
 """
+)
 
-RETRY = """
+RETRY = (
+    SCORE
+    + """
 if redis.call('HGET', KEYS[1], 'state') ~= 'done' then return 0 end
 redis.call('HINCRBY', KEYS[1], 'attempts', 1)
 redis.call('HSET', KEYS[1], 'state', 'pending', 'worker', '', 'outcome', '')
 redis.call('SREM', KEYS[2], ARGV[1])
-redis.call('ZADD', KEYS[3], redis.call('INCR', KEYS[4]), ARGV[1])
+redis.call('ZADD', KEYS[3], score(redis.call('INCR', KEYS[4]), rank_of(KEYS[1])), ARGV[1])
 redis.call('SMOVE', KEYS[5], KEYS[6], ARGV[1])
 return 1
 """
+)
 
 PRUNE = """
 local fields = redis.call('HGETALL', KEYS[1])
@@ -158,11 +187,14 @@ class Queue:
         requirements: Mapping[str, Requirement],
         base: str = "",
         grader: str = "",
+        rank: int = UNRANKED,
         event: str = "",
         head_branch: str = "",
     ) -> list[str]:
         """Add each unit of the head as a pending job, with the base and grader revision its grade reads, unless that
-        job is already known."""
+        job is already known. The pending order is the rank first, the most urgent class lowest, then the order of
+        enqueue; a job with no rank sorts after every ranked one, as every job enqueued before ranks existed does. A
+        known job still pending under a less urgent rank moves to this one and keeps its place by enqueue order."""
         added: list[str] = []
         for unit in units:
             job = f"{head}:{unit.kind}:{unit.key}"
@@ -173,17 +205,17 @@ class Queue:
                 "kind": unit.kind,
                 "key": unit.key,
                 "members": json.dumps(unit.members),
-                "manifest": unit.manifest,
                 "slots": need.slots,
                 "capabilities": json.dumps(sorted(need.capabilities)),
                 "state": "pending",
                 "attempts": 0,
                 "worker": "",
                 "outcome": "",
+                "rank": rank,
             }
             fields = [item for pair in record.items() for item in pair]
             keys = [_job(job), _key("pending"), _key("seq"), _head(head, "pending")]
-            if self._enqueue(keys=keys, args=[job, head, *fields]):
+            if self._enqueue(keys=keys, args=[job, head, rank, *fields]):
                 added.append(job)
         return added
 
@@ -193,8 +225,30 @@ class Queue:
         keys = [_key("pending"), _head(head, "pending")]
         return [job for job in self.pending() if job in mine and self._drop(keys=[_job(job), *keys], args=[job])]
 
+    def drop(self, head: str) -> list[str]:
+        """Remove the head's pending jobs and return them by name; its leased jobs run to completion. The jobs are
+        read from the head's own pending set and dropped in one pipeline, so the whole pending order is never read."""
+        jobs = sorted(self.members(head, "pending"))
+        keys = [_key("pending"), _head(head, "pending")]
+        pipe = self.client.pipeline()
+        for job in jobs:
+            self._drop(keys=[_job(job), *keys], args=[job], client=pipe)
+        return [job for job, dropped in zip(jobs, pipe.execute()) if dropped]
+
     def pending(self) -> list[str]:
         return list(self.client.zrange(_key("pending"), 0, -1))
+
+    def ordered(self, page: int = PAGE) -> Iterator[str]:
+        """Yield the pending jobs in lease order, read page jobs at a time from the score after the last job read, so
+        a job that leaves the pending set between two pages shifts none of the rest."""
+        after = "-inf"
+        while True:
+            rows = self.client.zrangebyscore(_key("pending"), after, "+inf", start=0, num=page, withscores=True)
+            for job, _ in rows:
+                yield job
+            if len(rows) < page:
+                return
+            after = f"({rows[-1][1]}"
 
     def members(self, head: str, state: str) -> set[str]:
         return set(self.client.smembers(_head(head, state)))
@@ -206,12 +260,7 @@ class Queue:
         return Job(
             id=job,
             head=record["head"],
-            unit=Unit(
-                kind=record["kind"],
-                key=record["key"],
-                members=tuple(json.loads(record["members"])),
-                manifest=record.get("manifest", ""),
-            ),
+            unit=Unit(kind=record["kind"], key=record["key"], members=tuple(json.loads(record["members"]))),
             requirement=Requirement(
                 slots=int(record["slots"]), capabilities=frozenset(json.loads(record["capabilities"]))
             ),
@@ -222,21 +271,8 @@ class Queue:
             base=record["base"],
             grader=record["grader"],
             leased_ms=int(record.get("leased_ms", 0)),
+            rank=int(record.get("rank", UNRANKED)),
         )
-
-    def restore_manifests(self, proposed: Mapping[str, str]) -> dict[str, str]:
-        with self.client.pipeline(transaction=False) as reading:
-            for job in proposed:
-                reading.hmget(_job(job), "head", "manifest")
-            found = reading.execute()
-        restored: dict[str, str] = {}
-        with self.client.pipeline() as writing:
-            for (job, manifest), (head, existing) in zip(proposed.items(), found):
-                restored[job] = existing or manifest
-                if head is not None and not existing:
-                    writing.hset(_job(job), "manifest", manifest)
-            writing.execute()
-        return restored
 
     def slots(self, jobs: Sequence[str]) -> dict[str, tuple[int, int]]:
         """Return the slots and lease start of each job whose record still exists, read with HMGET in one pipeline that

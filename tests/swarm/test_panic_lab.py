@@ -17,6 +17,7 @@ from scripts.tick.ports.source_control import ChangeRef, ChangeState
 SLUG = "sw"
 CODE = "a1b2c3"
 URL = "http://lab:8800"
+CONTROL = "http://lab:8801"
 PULL = "https://github.com/the-cloud-clockwork/agentihooks/pull/1"
 BRANCH = "https://github.com/the-cloud-clockwork/agentihooks/tree/fix-branch"
 LAB_KEY = f"{PREFIX}:{SLUG}:panic:lab"
@@ -61,7 +62,7 @@ def lab(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict[str, Any]]
 
     def urlopen(request: Request, timeout: float) -> Reply:
         body = json.loads(request.data if isinstance(request.data, bytes) else b"{}")
-        path = request.full_url.removeprefix(URL)
+        path = request.full_url.removeprefix(CONTROL)
         orders.append((path, str(request.get_header("Authorization")), body))
         if path == "/priority":
             return Reply({"priority": body["heads"], "class": "hotfix", "expires_ms": 9})
@@ -106,7 +107,7 @@ def test_panic_on_grades_the_fixes_first_and_pauses_the_rest_of_pull_request_gra
         ("/priority", "Bearer tok", {"heads": ["fix-branch", "pr-branch"], "class": "hotfix"}),
         ("/pause", "Bearer tok", {"class": "pull_request", "except": ["fix-branch", "pr-branch"]}),
     ]
-    assert store.redis.get(LAB_KEY) == URL
+    assert store.redis.get(LAB_KEY) == CONTROL
 
 
 @pytest.mark.feature("panic-reaches-lab")
@@ -134,6 +135,23 @@ def test_panic_on_without_a_fix_pauses_every_pull_request_grade(
         {"heads": [], "class": "hotfix"},
         {"class": "pull_request", "except": []},
     ]
+
+
+@pytest.mark.feature("panic-drop-one-fix")
+def test_the_operator_drops_a_panic_fix_and_the_lab_grades_only_the_fixes_left_first(
+    store: RedisStore,
+    lab: list[tuple[str, str, dict[str, Any]]],
+    heads: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    panic.engage(store, SLUG, "pressed", False, [PULL, BRANCH], 0)
+    out = _press(store, capsys, "drop", "--fix", BRANCH)
+    assert out == {"panic": "on", "fixes": [PULL], "lab": "lab paused pull request grading except pr-branch"}
+    assert lab == [
+        ("/priority", "Bearer tok", {"heads": ["pr-branch"], "class": "hotfix"}),
+        ("/pause", "Bearer tok", {"class": "pull_request", "except": ["pr-branch"]}),
+    ]
+    assert panic.state(store, SLUG) == panic.Panic(0, "pressed", False, (PULL,))
 
 
 @pytest.mark.feature("panic-reaches-lab")
@@ -168,8 +186,8 @@ def test_panic_on_with_no_token_is_an_action_line(
 @pytest.mark.parametrize(
     ("error", "why"),
     [
-        (URLError("down"), f"the lab at {URL} is unreachable: <urlopen error down>"),
-        (HTTPError(URL, 401, "Unauthorized", Message(), None), f"the lab at {URL} refused the control token"),
+        (URLError("down"), f"the lab at {CONTROL} is unreachable: <urlopen error down>"),
+        (HTTPError(CONTROL, 401, "Unauthorized", Message(), None), f"the lab at {CONTROL} refused the control token"),
     ],
     ids=["unreachable", "refused"],
 )
@@ -255,7 +273,7 @@ def test_panic_off_keeps_the_lab_mark_when_the_lab_cannot_be_told(
         "panic": "off",
         "lab": "lab not told: CI_LAB_CONTROL_TOKEN is not set on this host",
     }
-    assert store.redis.get(LAB_KEY) == URL
+    assert store.redis.get(LAB_KEY) == CONTROL
 
 
 @pytest.mark.feature("panic-reaches-lab")

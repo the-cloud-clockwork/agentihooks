@@ -319,7 +319,7 @@ def test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task(
     store = _DropStore(claims)
     expected = {"claimed_by": "a", "claim_generation": row.get("claim_generation", 0)}
     ledger = _DropLedger({"state": "open", "claimed_by": ""}, live_row or {**row, **expected})
-    agent = SimpleNamespace(name="a", task="t1", seat="eng-1@slug")
+    agent = SimpleNamespace(name="a", lane="eng", task="t1", seat="eng-1@slug")
     rows: dict[str, dict[str, object]] = {"t1": dict(row)}
     options = {"refund": True} if refund else {}
     assert common._drop("slug", store, ledger, rows, agent, **options) == (", task t1 reopened" if reopened else "")
@@ -348,7 +348,7 @@ def test_drop_releases_an_agent_whose_task_has_no_row(monkeypatch: pytest.Monkey
     monkeypatch.setattr(tick.exits, "settle", lambda *args: settled.append(args))
     store = _DropStore(1)
     ledger = _DropLedger({"state": "open", "claimed_by": ""}, {})
-    agent = SimpleNamespace(name="a", task="gone", seat="eng-1@slug")
+    agent = SimpleNamespace(name="a", lane="eng", task="gone", seat="eng-1@slug")
     assert common._drop("slug", store, ledger, {}, agent, refund=True) == ""
     assert store.calls == [
         ("claim_generation", "slug", "gone"),
@@ -357,6 +357,23 @@ def test_drop_releases_an_agent_whose_task_has_no_row(monkeypatch: pytest.Monkey
     ]
     assert ledger.calls == []
     assert settled == [(("inbox", "redis"), "a", "", "stopped")]
+
+
+@pytest.mark.feature("expert-seat-recovery")
+@pytest.mark.parametrize(("goes_on", "seat"), [(True, "expert-1@slug"), (False, "")])
+def test_drop_keeps_the_mail_of_an_expert_on_its_seat_while_its_lineage_goes_on(
+    monkeypatch: pytest.MonkeyPatch, goes_on: bool, seat: str
+) -> None:
+    settled: list[tuple[object, ...]] = []
+    asked: list[tuple[object, ...]] = []
+    monkeypatch.setattr(tick, "InboxStore", lambda redis: ("inbox", redis))
+    monkeypatch.setattr(tick.exits, "settle", lambda *args: settled.append(args))
+    monkeypatch.setattr(common.expert_lineage, "goes_on", lambda *args: asked.append(args) or goes_on)
+    store = _DropStore(1)
+    agent = SimpleNamespace(name="x", lane="expert", task="expert-1", seat="expert-1@slug")
+    assert common._drop("slug", store, _DropLedger({"state": "open", "claimed_by": ""}, {}), {}, agent) == ""
+    assert asked == [(store, "slug", agent)]
+    assert settled == [(("inbox", "redis"), "x", seat, "stopped")]
 
 
 MERGING = "https://github.com/o/r/pull/7"
@@ -375,7 +392,7 @@ def _merge_wait_drop(
     row: dict[str, object] = {"id": "t1", "state": state, "claimed_by": "a", "claim_generation": 2, "pr_url": MERGING}
     store, ledger = _DropStore(1), _DropLedger(live, row)
     rows = {"t1": dict(row)}
-    agent = SimpleNamespace(name="a", task="t1", seat="eng-1@slug")
+    agent = SimpleNamespace(name="a", lane="eng", task="t1", seat="eng-1@slug")
     return common._drop("slug", store, ledger, rows, agent, refund=True), store, ledger, rows, seen
 
 

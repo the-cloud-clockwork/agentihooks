@@ -71,6 +71,10 @@ class Calls(worker.Client):
         return super().complete(job, token, outcome)
 
 
+class SinkServer(ThreadingHTTPServer):
+    request_queue_size = 40
+
+
 class Sink:
     def __init__(self) -> None:
         self.bodies: dict[str, bytes] = {}
@@ -82,7 +86,7 @@ class Sink:
             request.end_headers()
 
         handler = type("SinkHandler", (BaseHTTPRequestHandler,), {"do_PUT": put})
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.server = SinkServer(("127.0.0.1", 0), handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
 
@@ -165,10 +169,7 @@ def slow() -> Iterator[Slow]:
 
 @pytest.fixture
 def scheduler(lab: Counted, sink: Sink) -> Iterator[str]:
-    import fakeredis
-
-    routes = lease_api.ControlRoutes(fakeredis.FakeRedis(decode_responses=True), "", lambda: 0)
-    server = lease_api.serve("127.0.0.1", 0, lab, Signer(sink.url), routes)
+    server = lease_api.serve("127.0.0.1", 0, lab, Signer(sink.url))
     _serving(server)
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()
@@ -251,6 +252,23 @@ def test_every_slot_runs_a_unit_at_once(scheduler: str, jobs: queue.Queue, tmp_p
     assert len(wide.run_once()) == 40
     assert wide.drain() == []
     assert [found(jobs, f"h1:test:{key}").outcome for key in keys] == ["passed"] * 40
+
+
+@pytest.mark.feature("lab-worker-sink-backlog")
+def test_the_sink_listens_with_room_for_forty_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
+    backlogs: list[int] = []
+    activate = ThreadingHTTPServer.server_activate
+
+    def observed(server: ThreadingHTTPServer) -> None:
+        backlogs.append(server.request_queue_size)
+        activate(server)
+
+    monkeypatch.setattr(ThreadingHTTPServer, "server_activate", observed)
+    upload = Sink()
+    upload.server.server_close()
+
+    assert len(backlogs) == 1
+    assert backlogs[0] >= 40
 
 
 @pytest.mark.feature("lab-worker-pod-loop")

@@ -31,7 +31,7 @@ __all__ = [
     "test_key",
 ]
 
-LOCKFILE = ".github/test-requirements.lock"
+LOCKFILE = stats_cache.LOCKFILE
 SCHEMAS: dict[str, int] = {"static": 1, "test": 1, "stats": stats_cache.SCHEMA, "mutant": 1, "grade": 1}
 
 
@@ -81,9 +81,7 @@ class StatsInputs:
     discovery: str
     sources: Mapping[str, str]
     options: tuple[str, ...]
-    interpreter: str
-    platform: str
-    versions: Mapping[str, str]
+    lockfile: str | None
 
 
 @dataclass(frozen=True)
@@ -171,7 +169,7 @@ def stats_key(inputs: StatsInputs) -> str:
         "schema": schema,
         "sources": dict(inputs.sources),
         "options": list(inputs.options),
-        "runtime": [inputs.interpreter, inputs.platform, dict(inputs.versions)],
+        "runtime": inputs.lockfile,
     }
     identity = {
         "context": context,

@@ -269,7 +269,8 @@ class Consumer:
 
     def _start_resume(self, order: CommandOrder, receipt: str) -> None:
         """Start a process for an unanswered resume order unless one holds its running marker; after RESUME_RUNS
-        starts that never answered, answer it failed so the hub hands the task to a fresh agent."""
+        starts that never answered, or when its process cannot start, answer it failed so the hub hands the task to a
+        fresh agent."""
         redis: Any = self.orders.redis
         if not redis.set(f"{receipt}:running", "1", nx=True, ex=RESUME_RUN_SECONDS):
             return
@@ -277,7 +278,10 @@ class Consumer:
             answer(redis, receipt, Ack(FAILED, {"host_id": self.hive}, "resume never answered"))
             return
         redis.expire(receipt, RECEIPT_SECONDS)
-        self.offbeat(order)
+        try:
+            self.offbeat(order)
+        except Exception as exc:
+            answer(redis, receipt, Ack(FAILED, {"host_id": self.hive}, f"error: {type(exc).__name__}"))
 
     def sync_workspaces(self, ttl: int) -> None:
         """Publishes the work folder of each worker task whose latest execution runs here: the hive its host target

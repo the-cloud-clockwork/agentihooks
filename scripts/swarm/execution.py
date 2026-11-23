@@ -24,6 +24,7 @@ LAUNCH_BINDING = (
     "launch_timings",
     "overlays",
 )
+LAUNCH_DECISION = ("harness", "profile", "account", "model", "effort", "overlays", "profile_decision")
 WRITES: dict[str, threading.RLock] = {}
 
 
@@ -77,10 +78,10 @@ def _archivable(row: dict) -> bool:
     )
 
 
-def _stale(row: dict[str, Any], head: dict[str, Any], listed: set[str]) -> bool:
+def _stale(row: dict[str, Any], head: dict[str, Any], newest: dict[str, Any], listed: set[str]) -> bool:
     current = row["generation"] >= head["generation"] and row["name"] in listed
     if row.get("state") in TERMINAL_STATES:
-        return not current
+        return not current and not (row["name"] in listed and newest is row)
     return row["generation"] < head["generation"] and row["name"] not in listed
 
 
@@ -131,7 +132,8 @@ class ExecutionRegistry:
         def move(doc: dict[str, Any]) -> Any:
             rows = {key: row for key, row in doc["executions"].items() if _archivable(row)}
             heads: dict[str, dict[str, Any]] = latest(rows.values(), "seat")
-            old = [key for key, row in rows.items() if _stale(row, heads[row["seat"]], listed)]
+            named: dict[str, dict[str, Any]] = latest(rows.values(), "name")
+            old = [key for key, row in rows.items() if _stale(row, heads[row["seat"]], named[row["name"]], listed)]
             current = doc["executions"].keys() - set(old)
             stale = [
                 key
@@ -280,7 +282,7 @@ class ExecutionRegistry:
             return current, previous
 
         current, previous = self._fenced(slug, admit, history=True)
-        removed = previous.name if previous and previous.name != current.name else ""
+        removed = previous.name if previous and previous.state != "finished" and previous.name != current.name else ""
         self._project(slug, (current.name, *((previous.name,) if previous else ())), current, removed=removed)
         return current
 
@@ -486,7 +488,9 @@ def _binding_conflict(previous: dict[str, Any], current: dict[str, Any]) -> bool
 
 
 def _resolve(current: AgentRecord, agent: AgentRecord, *, revive: bool = False) -> tuple[AgentRecord, bool]:
-    """Resolve an execution write, preserving ended records unless revival is explicit."""
+    """Resolve an execution write, preserving ended records unless revival is explicit, and keeping the launch
+    decision the execution holds wherever a write lacking both its profile and its profile decision, a copy read
+    before that decision landed, carries it empty."""
     if current.state == "ended":
         if not revive:
             return current, False
@@ -495,6 +499,10 @@ def _resolve(current: AgentRecord, agent: AgentRecord, *, revive: bool = False) 
         written = replace(written, state="finished")
     if _read_before_ack(written.runtime_target, current.runtime_target):
         written = replace(written, **{field: getattr(current, field) for field in LAUNCH_BINDING})
+    if current.profile_decision and not (written.profile_decision or written.profile):
+        written = replace(
+            written, **{field: getattr(current, field) for field in LAUNCH_DECISION if not getattr(written, field)}
+        )
     conflict = _binding_conflict(
         cast(dict[str, Any], current.runtime_target), cast(dict[str, Any], written.runtime_target)
     )

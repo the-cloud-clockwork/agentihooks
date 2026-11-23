@@ -1,0 +1,19 @@
+rules:
+  - id: lab-unanswered-fetch-holds-forever
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab scheduler puts a head back in its lane with its quiet window restarted and no cap on how often. On 20
+      November a ci seat found a head whose dependency manifest fetch GitHub kept answering with server errors waiting
+      in its lane on every pass with no check run or alert; only the holding line of each scheduler pass showed it.
+      Count the unanswered fetches in the head's waiting entry and drop the head with its failed required check run
+      once the count reaches the cap.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-unanswered-fetch-holds-forever.py
+    patterns:
+      - pattern: '$CLIENT.hset(WAITING, $NAME, json.dumps({**$HELD, "since": $NOW, ...}))'
+      - pattern-not-inside: |
+          if $COUNT < $CAP:
+              ...

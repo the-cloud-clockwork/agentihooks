@@ -572,7 +572,8 @@ def test_storage_builds_the_shared_repository_only_for_the_default_folder(monkey
 
 def test_storage_read_helpers_read_the_shared_database_when_its_url_is_set(monkeypatch, tmp_path):
     seen = []
-    for name in ("read_document", "read_ids", "read_ledger", "read_ledgers", "read_registry", "read_slugs", "fenced"):
+    names = ("read_document", "read_flags", "read_ids", "read_ledger", "read_ledgers", "read_registry", "read_slugs")
+    for name in (*names, "fenced"):
         monkeypatch.setattr(sqlite, name, lambda *args, name=name: seen.append((name, *args)) or name)
     monkeypatch.delenv(postgres.URL, raising=False)
     assert storage.store(tmp_path) is tmp_path
@@ -581,6 +582,7 @@ def test_storage_read_helpers_read_the_shared_database_when_its_url_is_set(monke
     assert isinstance(storage.store(tmp_path), postgres.Database)
     assert storage.store(tmp_path).address == ADDRESS
     assert storage.read_document(tmp_path, "s") == "read_document"
+    assert storage.read_flags(tmp_path, "s", ("phases",), ("done",)) == "read_flags"
     assert storage.read_ids(tmp_path, "s", "tasks") == "read_ids"
     assert storage.read_ledger(tmp_path, "s", "a") == "read_ledger"
     assert storage.read_ledgers(tmp_path, "a", "b") == "read_ledgers"
@@ -590,6 +592,7 @@ def test_storage_read_helpers_read_the_shared_database_when_its_url_is_set(monke
     assert seen[0] == ("read_ledger", tmp_path, "s", "a", "b")
     assert [entry[0] for entry in seen[1:]] == [
         "read_document",
+        "read_flags",
         "read_ids",
         "read_ledger",
         "read_ledgers",
@@ -598,7 +601,16 @@ def test_storage_read_helpers_read_the_shared_database_when_its_url_is_set(monke
         "fenced",
     ]
     assert all(isinstance(entry[1], postgres.Database) for entry in seen[1:])
-    assert [entry[2:] for entry in seen[1:]] == [("s",), ("s", "tasks"), ("s", "a"), ("a", "b"), ("bin",), (), ("s",)]
+    assert [entry[2:] for entry in seen[1:]] == [
+        ("s",),
+        ("s", ("phases",), ("done",)),
+        ("s", "tasks"),
+        ("s", "a"),
+        ("a", "b"),
+        ("bin",),
+        (),
+        ("s",),
+    ]
 
 
 def test_a_shared_database_never_adopts_files_left_in_a_host_folder(tmp_path, monkeypatch):

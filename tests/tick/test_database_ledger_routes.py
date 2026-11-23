@@ -1,5 +1,6 @@
 """The in process ledger transport pinned to the exact statuses, bodies, headers and clients the server path gives."""
 
+import functools
 import io
 import logging
 import urllib.error
@@ -189,10 +190,13 @@ def test_a_reply_below_400_is_returned(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.feature("swarm-tick-database-ledger")
-def test_the_database_client_carries_the_base_timeout_and_in_process_transport() -> None:
+def test_the_database_client_carries_the_base_timeout_and_the_writer_first_transport() -> None:
     built = database_ledger.client("http://ledger", 2.5)
     assert (built.base, built.credentials, built.timeout) == ("http://ledger", {}, 2.5)
-    assert built.transport is database_ledger.request
+    transport: Any = built.transport
+    assert isinstance(transport, functools.partial)
+    assert (transport.func.__module__, transport.func.__name__) == (database_ledger.__name__, "routed")
+    assert (transport.args, transport.keywords) == ((2.5,), {})
 
 
 @pytest.mark.feature("swarm-tick-database-ledger")
