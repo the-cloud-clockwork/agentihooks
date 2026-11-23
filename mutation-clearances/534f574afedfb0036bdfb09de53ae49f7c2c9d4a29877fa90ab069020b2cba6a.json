@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/queue.py:scripts.ci_lab.queue.x\u01c1Queue\u01c1ordered:dabecaf7aa704bcab70fd9c60589d5d97f6ff12a0179aeeab81a368ab6bf4164": {
+    "reader": "standards_reader",
+    "reason": "fakeredis converts the bound with Python float(), which reads \"-INF\" and \"-inf\" as the same value, and Redis parses the bound with strtod, which also ignores case, so the upper case bound selects the same range."
+  }
+}
