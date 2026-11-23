@@ -2600,6 +2600,23 @@
       ]
     },
     {
+      "id": "review-findings-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-findings-read",
+      "behaviour": "The author of a change request marks the review findings on its current forge head read, or answered with a reply: no finding ids marks every finding, the marker joins the finding's readers once after earlier readers, a later plain read clears an earlier answer, a head with no review, an unknown finding and a reviewer's own findings are refused and write nothing, and a mark never counts as a posted finding.",
+      "seam": "scripts.review.record mark, and the agentihooks review read command through scripts.review.cli main",
+      "tests": [
+        "tests/review/test_record_mark.py::test_the_author_marks_findings_read_or_answered_on_the_current_head",
+        "tests/review/test_record_mark.py::test_marking_an_unknown_finding_or_a_head_without_review_is_refused",
+        "tests/review/test_record_mark.py::test_a_reviewer_cannot_mark_its_own_findings",
+        "tests/review/test_record_mark.py::test_a_read_keeps_the_calling_author_once_beside_earlier_readers",
+        "tests/review/test_record_mark.py::test_reads_add_no_posts",
+        "tests/review/test_cli_read.py::test_read_marks_the_chosen_finding_answered_by_the_calling_author",
+        "tests/review/test_cli_read.py::test_read_without_options_marks_every_finding_read",
+        "tests/review/test_cli_read.py::test_a_refused_read_prints_its_reason_and_returns_one"
+      ]
+    },
+    {
       "id": "master-token-slot-route-report",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",
