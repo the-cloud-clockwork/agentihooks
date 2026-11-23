@@ -516,23 +516,6 @@ def stage_grade(pipe: Any, document: dict[str, Any]) -> None:
     pipe.hset(RECORDS, run, json.dumps({"revision": revision, "tier": document["tier"], "hits": hits, "jobs": jobs}))
 
 
-def stage_grade(pipe: Any, document: dict[str, Any]) -> None:
-    """Queue, on a pipeline watching the grade's key, one transaction storing the grade document and, while the grade
-    is live, its next revision and the demand record of that revision, or for a closed grade the removal of both."""
-    run = document["run"]
-    revision = None if document.get("conclusion") else int(pipe.hget(REVISIONS, run) or 0) + 1
-    pipe.multi()
-    pipe.set(GRADES + run, json.dumps(document))
-    if revision is None:
-        pipe.hdel(REVISIONS, run)
-        pipe.hdel(RECORDS, run)
-        return
-    jobs = [slot["job"] for slot in document["units"].values() if slot.get("job")]
-    hits = len(document["units"]) - len(jobs)
-    pipe.hincrby(REVISIONS, run)
-    pipe.hset(RECORDS, run, json.dumps({"revision": revision, "tier": document["tier"], "hits": hits, "jobs": jobs}))
-
-
 def _evidence(state: State) -> evidence.GradeEvidence:
     """Return a closed grade's evidence: its inputs and each of its units with the grade run that used its verdict."""
     inputs = GradeInputs(state.repo, state.head, state.base, CLASSES[state.tier], state.grader)
