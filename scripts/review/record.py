@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from typing import Any, NamedTuple, Protocol
 from urllib.parse import urlsplit
@@ -43,8 +43,21 @@ def _redis(store: RedisStore) -> _Redis:
     return store.redis  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
+def _stored(item: Finding) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "body": item.body,
+        "comment": item.comment,
+        "by": item.by,
+        "task": item.task,
+        "state": item.state,
+        "answer": item.answer,
+        "read_by": list(item.read_by),
+    }
+
+
 def document(found: Record) -> dict[str, Any]:
-    return {"url": found.url, "head": found.head, "findings": [asdict(item) for item in found.findings]}
+    return {"url": found.url, "head": found.head, "findings": [_stored(item) for item in found.findings]}
 
 
 def _key(store: RedisStore, slug: str, url: str) -> str:

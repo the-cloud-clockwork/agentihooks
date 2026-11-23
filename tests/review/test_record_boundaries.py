@@ -46,7 +46,7 @@ def test_a_saved_record_reads_back_from_its_hash_field() -> None:
                 "task": "r1",
                 "state": "answered",
                 "answer": "Fixed",
-                "read_by": ("engineer@x",),
+                "read_by": ["engineer@x"],
             }
         ],
     }
