@@ -51,7 +51,18 @@ def validate(schema: dict, body: object) -> None:
         raise APIError(400, "schema_invalid", "Request does not match the resource schema")
 
 
-LEDGER_PARTS = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
+LEDGER_PARTS = (
+    "tasks",
+    "_meta",
+    "phases",
+    "slices",
+    "plans",
+    "freezes",
+    "priorities",
+    "followups",
+    "alerts",
+    "overview",
+)
 
 PAGINATION = {
     "type": "object",

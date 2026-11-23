@@ -648,7 +648,7 @@ def test_a_head_task_whose_waiters_finish_leaves_the_head_naming_no_open_work(st
 
 def test_the_default_caps_are_the_lane_maximums_without_a_quota_decision():
     config = SwarmConfig(SLUG, "/repo", max_eng=5, max_ci=3, max_plan=2)
-    assert capacity.caps({}, config) == {"eng": 5, "ci": 3, "plan": 2}
+    assert capacity.caps({}, config) == {"eng": 5, "ci": 3, "plan": 2, "review": 0}
     assert capacity.caps({"effective": {"eng": 1}}, config) == {"eng": 1}
 
 

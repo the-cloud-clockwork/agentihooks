@@ -371,7 +371,6 @@ INTENTIONAL_SMOKES = {
 FLOATING_INSTALLS: tuple[str, ...] = (
     ".github/workflows/branch-lanes.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/coverage-stability.yml: pip install --constraint .github/test-requirements.lock 'coverage>=7.4'",
-    ".github/workflows/gate-protected.yml: pip install 'pyyaml>=6.0'",
     ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
     ".github/workflows/semgrep.yml: pip install 'semgrep==$SEMGREP_VERSION'",
     ".github/workflows/semgrep.yml: pip install pyyaml==6.0.2",
