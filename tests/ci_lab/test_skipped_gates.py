@@ -29,14 +29,17 @@ def test_a_pull_request_frame_grades_each_reusable_workflow_job_under_the_job_th
     gates = {
         "lint": (unit(1),),
         "semgrep/scan": (unit(2),),
+        "semgrep": (unit(5),),
         "semgrep/feature-tests": (unit(3),),
         "semgrep/charts": (unit(4),),
+        "semgrep-extra/scan": (unit(6),),
     }
     for tier in (Priority.HOTFIX, Priority.PULL_REQUEST):
         framed = scheduler.frame(tier, TREE, BASE, gates, ("semgrep",))
-        assert framed.gates["semgrep"] == (unit(2), unit(3), unit(4))
+        assert framed.gates["semgrep"] == (unit(2), unit(5), unit(3), unit(4))
         assert framed.gates["lint"] == (unit(1),)
         assert set(framed.gates) == set(scheduler.PULL_REQUIRED)
+        assert unit(6) not in {item for units in framed.gates.values() for item in units}
         assert framed.idle == frozenset()
     for tier in (Priority.PROMOTION, Priority.BACKFILL):
         assert scheduler.frame(tier, TREE, BASE, gates).gates == gates
