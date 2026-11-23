@@ -434,13 +434,22 @@ def _reviewed_pair(needs: list[str]) -> dict[str, dict[str, dict[str, object]]]:
 
 
 @pytest.mark.parametrize(
-    "added,accepted",
-    [((), True), (("collect", "lint-actions"), True), (("collect",), False), (("lint-actions",), False)],
+    "announced,added,accepted",
+    [
+        (True, (), True),
+        (True, ("collect", "lint-actions"), True),
+        (True, ("collect",), False),
+        (True, ("lint-actions",), False),
+        (False, ("collect", "lint-actions"), False),
+    ],
+    ids=["neither", "both", "collect alone", "lint-actions alone", "both without the announced gates"],
 )
 @pytest.mark.feature("gate-required-split-jobs")
-def test_the_early_gate_accepts_the_split_jobs_only_together(added: tuple[str, ...], accepted: bool) -> None:
+def test_the_early_gate_accepts_the_split_jobs_only_together(
+    announced: bool, added: tuple[str, ...], accepted: bool
+) -> None:
     inventory = ci_gate_queue.REQUIRED | ci_gate_queue.SKIPPED | {"unit", "unit-lost", "unit-rerun", "queue-fail-fast"}
-    workflows = _reviewed_pair(sorted(inventory | ci_gate_queue.ANNOUNCED | set(added)))
+    workflows = _reviewed_pair(sorted(inventory | (ci_gate_queue.ANNOUNCED if announced else set()) | set(added)))
     if accepted:
         assert ci_gate_queue.normalize(workflows)["test.yml"]["jobs"]["gate-required"]["name"] == "Gate — Required"
     else:
