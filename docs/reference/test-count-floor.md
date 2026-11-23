@@ -138,7 +138,7 @@ The existing base grading command accepts these environment settings:
 | `TEST_COUNT_COLLECTION_CACHE` | Directory for the separate exact collection cache, used for sides still needing collection. |
 | `TEST_COUNT_ENVIRONMENT` | Environment key required to enable that cache; CI uses the restored test environment's primary cache key. |
 | `TEST_COUNT_HEAD_COLLECTION` | Optional output file for collected head ids. No step of the Tests workflow sets it; the `collect` job's own `Collect the head's tests` step writes the head ids to its own `COLLECTED` file instead. |
-| `TEST_COUNT_REVIEWED_HEAD`, `TEST_COUNT_REVIEWS` | The pull request head and its reviews; see [Code owner approval](#code-owner-approval). |
+| `TEST_COUNT_REVIEWED_HEAD`, `TEST_COUNT_REVIEWS` | The pull request head and its reviews. The Tests workflow sets them only on the approval hold of the `collect` job; see [Code owner approval](#code-owner-approval). |
 
 For example, the workflow grades from the base checkout with the downloaded record:
 
@@ -245,7 +245,7 @@ An entry admits its lost test only when all of these hold:
 1. Its file name matches its node id and holds that one entry.
 2. The reader starts with the word `Standards`, in any case (`Standards reader`, `standards_reader`), and the reason is not blank.
 3. The base has no file of that name, so the pull request itself retires the test.
-4. On a pull request, a code owner of the retirement file approved the pull request head the run grades.
+4. While a reviewed head is set, a code owner of the retirement file approved that head. The Tests workflow grades this rule in the `collect` job, not in the floor step.
 
 Any other file under `test-retirements/`, a symbolic link included, is named in the log and admits nothing; a `test-retirements` folder that is itself a symbolic link admits nothing, and `--retire` refuses to write through one. A lost test without an entry still counts against the floor. `/test-retirements/` is code-owned, so every retirement goes through owner review, which the floor checks on a pull request through [Code owner approval](#code-owner-approval).
 
@@ -256,7 +256,7 @@ tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary is admitted: 
 
 #### Code owner approval
 
-The reader is text the pull request writes, so on a pull request the floor also needs a code owner's approval. The `Read the pull request reviews` step of `test-count` lists the pull request's reviews on the job's App token, which holds pull requests read, and writes one line per review with its `user`, `state` and `commit_id`. The floor step hands that file and the pull request head from the event payload to the base copy of the floor:
+The reader is text the pull request writes, so on a pull request a retirement also needs a code owner's approval. The `collect` job grades it. Its `Read the pull request reviews` step lists the pull request's reviews on the job's App token, which holds pull requests read, and writes one line per review with its `user`, `state` and `commit_id`. Its `Hold each new retirement to a code owner's approval` step then runs the base copy of the floor in its approvals mode with that file and the pull request head from the event payload:
 
 | Setting | Use |
 |---|---|
@@ -270,7 +270,7 @@ test-retirements/1f0f….json is not approved on the pull request head by a code
 The pull request reviews could not be read, so no retirement is admitted
 ```
 
-The approval can also be graded on its own, without collecting either tree:
+The hold step runs the approvals mode, which grades the approval on its own, without collecting either tree:
 
 ```bash
 python -m tests.count_floor --approvals --base "<base checkout>" --head "<head checkout>"
@@ -283,11 +283,13 @@ test-retirements/1f0f….json is not approved on the pull request head by a code
 ::error::tests/test_ci_workflow.py::test_nightly_report_uploads_its_summary is retired without a code owner's approval of the pull request head.
 ```
 
-The mode needs `--base`; beside `--record` or `--retire` it is refused with a usage error.
+The mode needs `--base`; beside `--record` or `--retire` it is refused with a usage error. A base copy of the floor without the mode fails the hold step with `The base carries no count floor approvals mode`; merge dev into the branch.
 
-A review does not start a Tests run. After a code owner approves the head, rerun the failed `test-count` job. GitHub refuses an author's approval of their own pull request, so a pull request authored by the only code owner's account cannot retire a test.
+The floor step of `test-count` sets neither setting, so its verdict depends only on the two trees and the grading lab can run it: it grades signed retirements by the first three rules. The hold is stricter than a floor that read the reviews: a new signed retirement without an approval fails `collect` even when its test is not lost.
 
-Merge groups and dispatched runs carry no pull request head, so they grade signed retirements by the first three rules. A pull request enters the queue only with its own `test-count` green, which required the approval.
+A review does not start a Tests run. After a code owner approves the head, rerun the failed `collect` job. GitHub refuses an author's approval of their own pull request, so a pull request authored by the only code owner's account cannot retire a test.
+
+Merge groups and dispatched runs carry no pull request head, so they grade signed retirements by the first three rules. A pull request enters the queue only with its own `collect` green, which required the approval.
 
 ### Deleted keyword branches
 

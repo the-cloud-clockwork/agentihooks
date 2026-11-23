@@ -1055,22 +1055,12 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/count-record.zip" || exit 0
           python -c 'import sys, zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read("record.json"))' "$RUNNER_TEMP/count-record.zip" > "$RUNNER_TEMP/base-record.json" || rm -f "$RUNNER_TEMP/base-record.json"
 
-      - name: Read the pull request reviews
-        if: steps.app-token.outcome == 'success' && github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          PULL: ${{ github.event.pull_request.number }}
-        run: |
-          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PULL/reviews?per_page=100" --jq '.[] | {user: .user.login, state, commit_id}' > "$RUNNER_TEMP/pull-reviews.jsonl" || rm -f "$RUNNER_TEMP/pull-reviews.jsonl"
-
       # The base revision's copy grades, so a pull request cannot loosen its own floor.
       - name: Hold the base revision's test count
         env:
           TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
           TEST_COUNT_ENVIRONMENT: ${{ steps.day.outputs.key }}
           TEST_COUNT_BASE_RECORD: ${{ runner.temp }}/base-record.json
-          TEST_COUNT_REVIEWS: ${{ runner.temp }}/pull-reviews.jsonl
-          TEST_COUNT_REVIEWED_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then
             echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."
@@ -1260,6 +1250,28 @@ jobs:
           path: ${{ runner.temp }}/count-record/record.json
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Read the pull request reviews
+        if: steps.app-token.outcome == 'success' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PULL: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PULL/reviews?per_page=100" --jq '.[] | {user: .user.login, state, commit_id}' > "$RUNNER_TEMP/pull-reviews.jsonl" || rm -f "$RUNNER_TEMP/pull-reviews.jsonl"
+
+      # The base revision's copy grades, so a pull request cannot approve its own retirement.
+      - name: Hold each new retirement to a code owner's approval
+        if: github.event_name == 'pull_request'
+        env:
+          TEST_COUNT_REVIEWS: ${{ runner.temp }}/pull-reviews.jsonl
+          TEST_COUNT_REVIEWED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if ! grep -q -- --approvals "$RUNNER_TEMP/base/tests/count_floor.py" 2>/dev/null; then
+            echo "::error::The base carries no count floor approvals mode, so nothing trusted can grade the retirements; merge dev."
+            exit 1
+          fi
+          cd "$RUNNER_TEMP/base"
+          python -m tests.count_floor --approvals --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
   # Every shard of a version splits on the one map this job chooses, so the whole suite is collected once per version, not once per shard.
   split:

@@ -492,7 +492,9 @@ def test_fetching_the_dev_count_record_never_fails_and_writes_only_a_dev_record(
 
 @pytest.mark.parametrize("answer", ["reviews", "fail"])
 @pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
-def test_a_pull_request_count_floor_reads_its_reviews_on_the_app_token(tmp_path: Path, answer: str) -> None:
+def test_the_collect_job_reads_the_pull_request_reviews_on_the_app_token_for_the_approval_hold(
+    tmp_path: Path, answer: str
+) -> None:
     from tests.test_ci_hosted_lanes import _evaluate
 
     jobs = _workflow()["jobs"]
