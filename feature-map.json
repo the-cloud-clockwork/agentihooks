@@ -1,6 +1,21 @@
 {
   "features": [
     {
+      "id": "placement-role-census",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-placement-role-census",
+      "behaviour": "Hive placement excludes reported master executions by role regardless of login markers, leaving one expert place on a root hive with three masters and eleven workers under a twelve worker limit. Marker overlap never subtracts twice; unregistered processes, pending workers, account separation and CPU refusals retain their limits.",
+      "seam": "loaded_hives through HiveLaunch.select",
+      "tests": [
+        "tests/hive/test_placement_role_census.py::test_three_masters_and_eleven_workers_leave_the_kept_expert_room_usable",
+        "tests/hive/test_placement_role_census.py::test_a_master_execution_does_not_prevent_unclaimed_processes_from_absorbing_pending_workers",
+        "tests/hive/test_placement_role_census.py::test_unreported_masters_never_erase_an_unregistered_worker_process",
+        "tests/hive/test_placement_role_census.py::test_interactive_markers_still_exempt_a_master_whose_execution_is_unreported",
+        "tests/hive/test_placement_role_census.py::test_master_exclusion_does_not_absorb_workers_from_another_account_slot",
+        "tests/hive/test_placement_role_census.py::test_excluding_masters_keeps_a_saturated_cpu_refusal"
+      ]
+    },
+    {
       "id": "filter-web-single-token-literals",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-filter-identifier-literals",
@@ -4066,7 +4081,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-slow-lane-deadline",
       "behaviour": "The slow tick lane covers the accumulated live budgets of its scheduled steps, including budgets resolved after the pass starts, so later slow work finishes beyond the former shared deadline while critical timing and the pass join window stay fixed.",
       "seam": "scripts.tick.engine.run_group and scripts.tick.pool.running",
-      "rules": ["tick-slow-lane-fixed-deadline"],
+      "rules": [
+        "tick-slow-lane-fixed-deadline"
+      ],
       "tests": [
         "tests/tick/test_slow_lane_deadline.py::test_slow_deadline_uses_live_budgets_resolved_after_the_pass_starts",
         "tests/tick/test_slow_lane_deadline.py::test_a_later_slow_step_finishes_after_the_former_lane_deadline",
