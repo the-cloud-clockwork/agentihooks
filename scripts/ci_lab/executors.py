@@ -108,11 +108,11 @@ class Trees:
                     self.worktrees.release(head)
 
     @contextlib.contextmanager
-    def owned(self, head: str) -> Generator[tuple[Path, bool]]:
-        """Cut a private writable tree of the revision for the block, with whether the store fetched it, and drop it
-        after."""
+    def owned(self, head: str, base: str) -> Generator[tuple[Path, bool]]:
+        """Cut a private writable tree of the revision for the block, with the base its unit compares it against in
+        the store and whether the store fetched the revision, and drop it after."""
         with self.lock:
-            tree, fetched = self.worktrees.own(head)
+            tree, fetched = self.worktrees.own(head, base)
         try:
             yield tree, fetched
         finally:
@@ -305,7 +305,7 @@ def mutation(pod: Pod, settings: Mutation, lease: Lease) -> Finished:
     report counts the git and uv cache lookups it made."""
     unit = lease.unit
     named = {"kind": unit.kind, "key": unit.key, "options": list(OPTIONS)}
-    with pod.trees.owned(lease.head) as (tree, fetched):
+    with pod.trees.owned(lease.head, lease.base) as (tree, fetched):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
         _trampolined(tree)
         started = pod.clock()

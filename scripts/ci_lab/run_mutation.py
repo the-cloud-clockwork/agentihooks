@@ -11,7 +11,7 @@ trampolined sources.
 import json
 import math
 import sys
-from collections.abc import Mapping, MutableMapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence, Set
 from dataclasses import asdict, dataclass
 from functools import partial
 from gc import freeze
@@ -65,9 +65,10 @@ def install(modules: MutableMapping[str, ModuleType]) -> ModuleType:
     return light
 
 
-def trampoline(tree: Path, path: str) -> list[str]:
-    """Rewrite path under tree with every mutant mutmut makes of it behind trampolines and return their full names,
-    applying no ignore pattern and reading no mutmut config."""
+def trampoline(tree: Path, path: str, changed: Set[int]) -> list[str]:
+    """Rewrite path under tree with every mutant of each function whose lines meet changed behind trampolines, leave
+    its other functions as they stand and return the full names of the mutants written, applying no ignore pattern
+    and reading no mutmut config."""
     target = tree / path
     code, names = selected_mutants(path, target.read_text(), set(EVERY_LINE), patterns=())
     target.write_text(code)

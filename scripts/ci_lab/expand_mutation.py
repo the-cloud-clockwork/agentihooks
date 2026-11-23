@@ -11,13 +11,13 @@ import hashlib
 import math
 import re
 import subprocess
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence, Set
 from pathlib import Path
 from typing import Any
 
 import libcst as cst
-from libcst.metadata import ParentNodeProvider, PositionProvider, WhitespaceInclusivePositionProvider
-from mutmut.mutation.file_mutation import group_by_top_level_node
+from libcst.metadata import MetadataWrapper, ParentNodeProvider, PositionProvider, WhitespaceInclusivePositionProvider
+from mutmut.mutation.file_mutation import Mutation, group_by_top_level_node
 from mutmut.mutation.trampoline_templates import mangle_function_name
 from mutmut.utils.format_utils import get_mutant_name
 
@@ -117,6 +117,20 @@ def split_members(members: tuple[str, ...], timeout: float) -> list[tuple[str, .
     size = len(members)
     count = next((parts for parts in range(1, size) if -(-size // parts) * MUTANT_SECONDS <= timeout), size)
     return [members[index * size // count : (index + 1) * size // count] for index in range(count)]
+
+
+def changed_functions(
+    path: str, source: str, changed: Set[int]
+) -> tuple[MetadataWrapper, dict[cst.FunctionDef, Sequence[Mutation]]]:
+    """Parse source once and return its wrapper with the graded mutations of each function mutmut trampolines in path
+    whose lines meet changed, applying no ignore pattern and reading no mutmut config. The scheduler names a mutant
+    unit's members from it and the worker trampolines from it, so both take the same mutants."""
+    raise NotImplementedError
+
+
+def changed_tests(root: Path, base: str, head: str) -> list[str]:
+    """List the test modules under root's test tree that head changes against base and still holds."""
+    raise NotImplementedError
 
 
 def function_units(
