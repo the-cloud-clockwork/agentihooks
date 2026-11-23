@@ -1,0 +1,15 @@
+rules:
+  - id: lab-pull-frame-drops-reusable-job-units
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A lab pull request frame looks each required job up by its bare name. The expander files the units of a reusable
+      workflow job under the calling job, a slash and the called job, so on 20 November no pull request or hotfix grade
+      carried a Semgrep unit and the semgrep gate passed with nothing graded. Give each required job its own units and
+      those of every key that starts with the job and a slash.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-pull-frame-drops-reusable-job-units.py
+    pattern: |
+      {$JOB: $GATES.get($JOB, ...) for $JOB in PULL_REQUIRED}
