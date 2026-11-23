@@ -56,7 +56,9 @@ from scripts.hive import scope
 from scripts.inbox import exits, outbox
 from scripts.inbox import relay as relay
 from scripts.inbox import wake as wake
-from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
+from scripts.inbox.seats import CANON, SeatError, is_seat, seat_address
+from scripts.inbox.seats import DEFAULT_MATURITY as DEFAULT_MATURITY
+from scripts.inbox.seats import MATURITIES as MATURITIES
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     affinity,
@@ -129,6 +131,7 @@ from scripts.swarm import (
 from scripts.swarm import ledger_client as ledger_client
 from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
+from scripts.swarm.cli_parser import build_parser
 from scripts.swarm.health import activity, focus_check, report
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused
@@ -2728,188 +2731,6 @@ def cmd_terminal(store, args):
     from scripts.swarm_v2.kubernetes import operator_terminal
 
     print(json.dumps(operator_terminal.command(store, args.slug, args.execution, os.environ, Who.from_env())))
-
-
-def build_parser() -> argparse.ArgumentParser:
-    from scripts.swarm import launch_starts, master_drill, night_watch_drill, tasks_read, tick_report
-
-    parser = argparse.ArgumentParser(
-        prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument("slug")
-    parser.add_argument("--as", dest="name", default="")
-    sub = parser.add_subparsers(dest="command", required=True)
-    create = sub.add_parser("create")
-    create.add_argument("--repo", required=True)
-    create.add_argument("--template", default="")
-    create.add_argument("--max-eng-agents", type=int, default=None)
-    create.add_argument("--max-ci-agents", type=int, default=None)
-    create.add_argument("--max-plan-agents", type=int, default=None)
-    create.add_argument("--operator-asked")
-    drills = {"night-watch-drill": night_watch_drill.command, "master-drill": master_drill.command}
-    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", "exit", *drills):
-        sub.add_parser(plain).set_defaults(handler=drills.get(plain))
-    sub.add_parser("restore").add_argument("--from", dest="source", default="")
-    sub.add_parser("stop").add_argument("--now", action="store_true")
-    close = sub.add_parser("close")
-    close.add_argument("--note", default="")
-    close.add_argument("--now", action="store_true")
-    sub.add_parser("take-master").add_argument("--replace", action="store_true")
-    sub.add_parser("proof-control").add_argument("--request", required=True)
-    master_actions = sub.add_parser("master").add_subparsers(dest="action", required=True)
-    master_up = master_actions.add_parser("up")
-    master_actions.add_parser("move").add_argument("--to", required=True)
-    pick = master_up.add_mutually_exclusive_group()
-    pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
-    pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
-    pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
-    pick.add_argument("--forced", dest="choice", action="store_const", const=master_launch.FORCED)
-    sub.add_parser("agent-up").add_argument("profile")
-    sub.add_parser("set").add_argument("pairs", nargs="+")
-    sub.add_parser("save-template").add_argument("template_name", metavar="name")
-    sub.add_parser("status").add_argument("--json", action="store_true")
-    sub.add_parser("tasks").set_defaults(handler=tasks_read.command)
-    sub.add_parser("launches").set_defaults(handler=launch_starts.command)
-    sub.add_parser("probe").set_defaults(handler=probe_command)
-    sub.add_parser("tick").set_defaults(handler=cmd_swarm_tick)
-    report = sub.add_parser("tick-report")
-    report.add_argument("--passes", type=tick_report.pass_count, default=100)
-    report.set_defaults(handler=tick_report.command)
-    for verb in ("freeze", "focus", "unfreeze"):
-        frozen = sub.add_parser(verb)
-        frozen.add_argument("target")
-        frozen.add_argument("--reason", default="")
-        frozen.add_argument("--quote", default="")
-        if verb == "focus":
-            frozen.add_argument("--only", action="store_true")
-            place = frozen.add_mutually_exclusive_group()
-            place.add_argument("--top", dest="position", action="store_const", const="top")
-            place.add_argument("--bottom", dest="position", action="store_const", const="bottom")
-    scale = sub.add_parser("autoscale")
-    scale.add_argument("--fixture", default="")
-    scale.add_argument("--json", action="store_true")
-    sub.add_parser("controller").add_argument("action", nargs="?", choices=("release",), default=None)
-    sub.add_parser("names").add_argument("--json", action="store_true")
-    path = sub.add_parser("merge-path")
-    path.add_argument("--hours", type=float, default=24.0)
-    path.add_argument("--json", action="store_true")
-    path.add_argument("--post")
-    verdict = sub.add_parser("verdict")
-    verdict.add_argument("finding")
-    verdict.add_argument("verdict")
-    verdict.add_argument("--note", default="")
-    sub.add_parser("terminal").add_argument("execution")
-    classify = sub.add_parser("classify")
-    classify.add_argument("execution_id")
-    classify.add_argument("ruling", choices=("lost", "working"))
-    classify.add_argument("--reason", required=True)
-    sub.add_parser("send-message").add_argument("text")
-    lift = sub.add_parser("lift")
-    lift.add_argument("agent")
-    lift.add_argument("gate")
-    cover = sub.add_parser("cover")
-    cover.add_argument("stage")
-    cover.add_argument("item")
-    cover.add_argument("--reason", required=True)
-    sub.add_parser("issue").add_argument("url")
-    pr = sub.add_parser("pr")
-    pr.add_argument("url")
-    pr.add_argument("--half", type=int, default=0)
-    declared = pr.add_mutually_exclusive_group()
-    declared.add_argument("--stage")
-    declared.add_argument("--prerequisite")
-    merge = sub.add_parser("merge")
-    merge.add_argument("action", choices=("queue", "dequeue", "state", "priority"))
-    merge.add_argument("url")
-    merge.add_argument(
-        "--lift", action="store_true", help="operator: prioritize immediately despite a running head group"
-    )
-    blockers_cmd = sub.add_parser("blockers")
-    blockers_cmd.add_argument("action", nargs="?", default="list", choices=("list", "clear"))
-    blockers_cmd.add_argument("category", nargs="?", default="")
-    blockers_cmd.set_defaults(handler=cmd_blockers)
-    panic_cmd = sub.add_parser("panic")
-    panic_cmd.add_argument("action", nargs="?", default="status", choices=("on", "off", "status", "drop"))
-    panic_cmd.add_argument("--fix", action="append", default=[])
-    panic_cmd.set_defaults(handler=cmd_panic)
-    sub.add_parser("prepare")
-    publish = sub.add_parser("publish")
-    publish.add_argument("--message", "-m", required=True)
-    publish.add_argument("--via", choices=["lab"], default="", help="grade HEAD on the lab remote before origin")
-    publish.add_argument("--direct", action="store_true", help="with --via lab, push origin without the lab grade")
-    publish.add_argument("files", nargs="*")
-    sub.add_parser("branch")
-    sub.add_parser("review")
-    resolve_cmd = sub.add_parser("resolve")
-    resolve_cmd.add_argument("action", choices=("attempt", "critic", "escalate", "status"))
-    resolve_cmd.add_argument("item")
-    for flag in ("--tried", "--output", "--reason", "--evidence"):
-        resolve_cmd.add_argument(flag, default="")
-    resolve_cmd.add_argument("--command", dest="ran", default="")
-    done = sub.add_parser("done")
-    done.add_argument("--pr", default="")
-    for key in ledger_kinds.PROOF_KEYS:
-        done.add_argument("--" + key.replace("_", "-"), dest=f"proof_{key}", default="")
-    block = sub.add_parser("block")
-    block.add_argument("note")
-    block.add_argument("--dev-red", action="store_true")
-    sub.add_parser("trace-plan")
-    plan = sub.add_parser("plan").add_subparsers(dest="action", required=True)
-    for action in plan_review.DECISIONS:
-        decision = plan.add_parser(action)
-        decision.add_argument("phase", nargs="?")
-        decision.add_argument("--task")
-        decision.add_argument("--note", required=action == "send-back")
-        if action == "approve":
-            decision.add_argument("--override", default="")
-        else:
-            decision.set_defaults(override="")
-    wait = sub.add_parser("wait")
-    wait.add_argument("minutes", type=int, nargs="?")
-    prerequisite_wait.arguments(wait)
-    wait.add_argument("--reason", default="")
-    wait.add_argument("--inbox", action="store_true")
-    reported = sub.add_parser("progress")
-    reported.add_argument("--doing", required=True)
-    reported.add_argument("--ends-when", required=True)
-    sub.add_parser("park").add_argument("doc")
-    sub.add_parser("ready").add_argument("doc")
-    sub.add_parser("restack")
-    handoff = sub.add_parser("handoff")
-    handoff.add_argument("doc")
-    handoff.add_argument("--recap", default="")
-    handoff.add_argument("--reason", choices=handoff_envelope.REASONS, default="recycle")
-    confirm = sub.add_parser("confirm-handoff")
-    confirm.add_argument("transfer")
-    confirm.add_argument("--next", required=True)
-    decision = sub.add_parser("restore-decision")
-    decision.add_argument("agent")
-    decision.add_argument("choice", choices=("resume", "native", "context", "fresh"))
-    learned = sub.add_parser("learned")
-    learned.add_argument("text", nargs="?", default="")
-    learned.add_argument("--all", action="store_true", help="list every seat instead of the caller and shared guidance")
-    learned.add_argument("--maturity", choices=MATURITIES, default=DEFAULT_MATURITY)
-    promote = sub.add_parser("promote")
-    promote.add_argument("seat")
-    promote.add_argument("number", type=int)
-    promote.add_argument("maturity", choices=MATURITIES)
-    promote.add_argument("--reason", required=True)
-    retire = sub.add_parser("retire")
-    retire.add_argument("seat")
-    retire.add_argument("number", type=int)
-    retire.add_argument("--reason", required=True)
-    channel = sub.add_parser("masters-channel").add_subparsers(dest="action", required=True)
-    channel.add_parser("say").add_argument("text")
-    channel.add_parser("read").add_argument("--all", action="store_true")
-    culture = sub.add_parser("culture").add_subparsers(dest="action", required=True)
-    culture.add_parser("set").add_argument("file")
-    culture.add_parser("show")
-    expert_commands.register(sub)
-    say = sub.add_parser("say")
-    say.add_argument("text")
-    say.add_argument("--to", default="")
-    say.add_argument("--fyi", action="store_true")
-    return parser
 
 
 def _tick_store():
