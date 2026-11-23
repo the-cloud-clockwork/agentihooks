@@ -16,8 +16,9 @@ pytestmark = pytest.mark.unit
 
 SLUG = "relay-marks"
 MASTER = "master@c0ffee-0001"
-SAID = "Build the reviewer seats today before anything else runs"
+SAID = "Build the reviewer seats today at high rank before anything else runs"
 QUOTE = "build the  reviewer seats TODAY"
+RANKED = "seats today at HIGH rank"
 RECORDED = Path(__file__).with_name("relay_marks_recorded.json")
 VOLATILE = ("at", "rev")
 
@@ -69,7 +70,7 @@ def relay_run() -> list[str]:
     question = sent("relay", MASTER, "r-note", item="notes", text="Use the queue.", quote=QUOTE)["questions"][0]["id"]
     sent("relay", MASTER, "r-comment", item="notes/r-note", text="Ship it first.", quote=QUOTE)
     sent("relay", MASTER, "r-answer", item=f"questions/{question}", text="The queue.", quote=QUOTE)
-    sent("task_update", MASTER, "r-rank", item="tasks/t1", fields={"rank": "high"}, quote=QUOTE)
+    sent("task_update", MASTER, "r-rank", item="tasks/t1", fields={"rank": "high"}, quote=RANKED)
     sent("order_set", MASTER, "o-quote", item="phases/p1", quote=QUOTE)
     asked = sent("add", None, "c-ask", thread="chat", text="Build the reviewer seats")["chat"][-1]["id"]
     sent("order_set", MASTER, "o-request", item="tasks/t1", request=asked)
