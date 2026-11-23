@@ -140,7 +140,7 @@ def test_a_step_keeps_the_ruff_cache_in_its_run_folder_outside_every_tree(
     head, base, grader = _folders(tmp_path)
     result = run_static.run(_step('echo "$RUFF_CACHE_DIR"\necho "$RUNNER_TEMP"\n'), head, base, grader, settings)
     cache, folder = (Path(line) for line in result.log.read_text().splitlines())
-    assert cache.parent == folder
+    assert cache == folder / "ruff"
     assert settings.root in cache.parents
     assert not {head, base, grader} & set(cache.parents)
     named = _step('echo "$RUFF_CACHE_DIR"\n', (("RUFF_CACHE_DIR", "/elsewhere"),))
