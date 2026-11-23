@@ -1,0 +1,16 @@
+rules:
+  - id: hub-admission-reads-full-export
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hub events admission read the readiness source snapshot or the whole ledger export, which it refetched every
+      time the revision moved, so admissions on a large ledger answered past their eight second budget and spokes gave
+      up on their claims. Read the task, the rows it names and the claim gate verdict through the narrow admission
+      view (admission_view.Narrow) instead; the full export belongs to the readiness pass.
+    paths:
+      include:
+        - /scripts/hub/admission.py
+        - hub-admission-reads-full-export.py
+    pattern-either:
+      - pattern: $OBJ.snapshot(...)
+      - pattern: $OBJ.state(...)
