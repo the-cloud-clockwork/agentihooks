@@ -4496,10 +4496,11 @@ A phase plan task's `steering.md` carries no Enhancement target block.
 
 The target's `enhancement` field keeps it from being claimed. While the field reads `needed`, the claim gate
 (`scripts.swarm.claim_hold.thin`) holds an `eng` or `ci` task with the reason
-`it waits for its enhancement plan task enhance-<target id>`; a task in any other lane is not held. Pull request
-[#12947](https://github.com/the-cloud-clockwork/agentihooks/pull/12947) closes the loop: `swarm done` on the plan
-task grades the target's plan section, and the hold lifts when the target's enhancement turns `planned`, at once at
-`full` autonomy with a clean slice check, otherwise after a review.
+`it waits for its enhancement plan task enhance-<target id>`; a task in any other lane is not held. No code on `dev`
+writes `needed` yet, so the hold applies only where the field was set to it through the `task_enhancement`
+operation. Pull request [12947](https://github.com/the-cloud-clockwork/agentihooks/pull/12947) releases the hold:
+`swarm done` on the plan task grades the target's plan section, and the hold lifts when the target's enhancement
+turns `planned`, at once at `full` autonomy with a clean slice check, otherwise after a review.
 
 ##### What swarm done checks
 
@@ -4512,14 +4513,14 @@ refuses in two cases:
 
 | Check | Refusal |
 |---|---|
-| The ledger holds the target and the target carries `plan_lines` | `plan task <task> enhances task <target>, but target <target> carries no plan slice: link its section with` the `task set <target> plan_url=<link> plan_slice=<anchor>` command, `then run swarm done again` |
+| The ledger holds the target and the target carries `plan_lines` | `plan task <task> enhances task <target>, but target <target> carries no plan slice: link its section with`, then the ledger's `task set <target> plan_url=<link> plan_slice=<anchor>` command and `then run swarm done again` |
 | The text of the target's `plan_lines` is a complete section (`scripts.swarm.thin_task.section_complete`) | `the plan section of task <target> is incomplete: <problems>` |
 
-`<problems>` joins one line per missing part, in this order:
+`<problems>` is the problem sentences for the missing parts joined with spaces, in this order:
 
 | Part the section needs | Problem line |
 |---|---|
-| A seam named in the text under the Seams heading: a backticked name, a call shape such as `refresh(`, a dotted or snake case name, a path, or an `agentihooks` or `python -m` command | `The section names no seam.` |
+| A seam named in the text under the Seams heading: a backticked name, a call shape such as `refresh(`, a dotted or snake case name, an endpoint path such as `/api/tasks`, or an `agentihooks` or `python -m` command | `The section names no seam.` |
 | Each recon heading with text under it: What will be built, Code areas touched, What might break, Regression tests, Resources needed, Protection plan | `The section has no <heading> heading.` |
 | Each pull request body heading with text under it: Summary, Seams, Tests, Proof | `The section has no <heading> pull request body section.` |
 | A done when sentence | `The section has no done when sentence.` |
@@ -4535,7 +4536,7 @@ autonomy releases the target by itself, and they travel in the master's ask.
 |---|---|
 | The description has fewer than 20 words | `Task <id> has a description under 20 words.` |
 | A description of 20 words or more has no done when sentence | `Task <id> has no done when sentence.` |
-| A task of a kind other than `code` or `ci` lacks must, check or judge in its contract | `Task <id> is <kind> work without must, check and judge in its contract.` |
+| A task of a kind other than `code` or `ci` lacks any of must, check or judge in its contract | `Task <id> is <kind> work without must, check and judge in its contract.` |
 | A `code` or `ci` task names no territory | `Task <id> names no territory.` |
 | A `code` or `ci` task names more areas than `AGENTIHOOKS_PLAN_MAX_AREAS` (default 6) | `Task <id> names <n> areas, more than <max>.` |
 | A dependency sits in another phase that is not done | `Task <id> depends on <dependency> in a phase that is not done.` |
@@ -4543,7 +4544,9 @@ autonomy releases the target by itself, and they travel in the master's ask.
 
 ##### After the plan task is done
 
-Once the task is marked done, `scripts.swarm.enhance_review.settle` decides who releases the target:
+Once the task is marked done, `scripts.swarm.enhance_review.settle` decides who releases the target. It runs after the
+done write, so a release write that fails leaves the plan task done and the target held; the review below still
+accepts that pair, so at `delegate` and `full` the master's `plan approve --task` releases it.
 
 | Autonomy | Slice check findings | Result |
 |---|---|---|
@@ -4629,7 +4632,7 @@ new value as its text.
   call. `done --slice <target>` checks that the target is on the ledger in the enhancement task's phase, is not a
   plan task, and carries a `plan_url` and `plan_lines` that match its anchor.
 - No `agentihooks api` command and no ledger page control sends the `task_enhancement` operation. The swarm sends it
-  from `swarm done` at `full` autonomy and from `plan approve --task`. Nothing on `dev` sets a task's enhancement to
+  from `swarm done` at `full` autonomy with a clean slice check and from `plan approve --task`. Nothing on `dev` sets a task's enhancement to
   `needed` or `skipped`, and the operator's approval that the relay ask names at `manual` and `assist` has no
   command yet, so at those levels the target stays held until the field is written some other way.
 - `tests/swarm/test_enhance_close.py`, feature map entry `swarm-enhance-close`, covers the close, the release at each
@@ -4650,9 +4653,9 @@ new value as its text.
 | Step 4 refused with `plan task sections need a slice marker above each heading` | The section's parts sit at the plan's task level. Add one title above the section, as in the example, and publish again. |
 | Step 5 refused with `slice anchor <anchor> is missing or repeated in its phase` | The anchor is not in the published plan, or appears twice. Fix the anchor line in `plan.md`, publish again, then repeat step 5. |
 | Step 5 refused with `plan slice <anchor> already belongs to open task <task>` | Another open task already holds that anchor. Give the target its own anchor in `plan.md`, publish again, then repeat step 5. |
-| `swarm done` refused with `plan task <task> enhances task <target>, but target <target> carries no plan slice` | The ledger does not hold the target, or the target has no `plan_lines` because step 5 did not land. Run steps 4 and 5, then `done` again. A target missing from the ledger is a block, as above. |
+| `swarm done` refused with `plan task <task> enhances task <target>, but target <target> carries no plan slice` | The ledger does not hold the target, or the target has no `plan_lines` because step 5 did not land. Run steps 4 and 5, then `done` again. When the target is not on the ledger at all, block the task as its Enhancement target block says. |
 | `swarm done` refused with `the plan section of task <target> is incomplete:` and problem lines | Add each part the lines name to the section in `plan.md`, publish it again into the phase, run step 5 again so the target's `plan_lines` cover the new text, then `done` again. |
-| The plan task is done but the target is still held with `it waits for its enhancement plan task enhance-<target>` | The target's enhancement is still `needed`: the master inbox holds the review or relay ask, because autonomy is not `full` or the slice check found something. The master runs `plan approve --task <plan task>` or `plan send-back --task <plan task> --note "<what to change>"`; at `manual` and `assist` the operator decides. |
+| The plan task is done but the target is still held with `it waits for its enhancement plan task enhance-<target>` | The target's enhancement is still `needed`: the master inbox holds the review or relay ask, because autonomy is not `full` or the slice check found something, or the release write failed after the done write. The master runs `plan approve --task <plan task>` or `plan send-back --task <plan task> --note "<what to change>"`; at `manual` and `assist` the operator decides. |
 | `plan approve` or `plan send-back` refused with `name exactly one of a phase or --task <enhancement task id>` | The command named both a phase and `--task`, or neither. Name the phase for a phase slice, or `--task <plan task>` for an enhancement. |
 | `plan approve --task` refused with `the enhancement of task <target> is not in review` | The plan task is not done yet, or the target's enhancement is already `planned` or `skipped`, or was never `needed`. Read the target with `agentihooks api --slug <slug> --as <name> get tasks/<target>`. |
 | `plan approve --task` refused with `task <task> enhances no task` | `--task` named the target or another task without `enhances`. Name the enhancement plan task. |
