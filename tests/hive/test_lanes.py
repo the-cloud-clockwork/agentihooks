@@ -637,7 +637,7 @@ def test_the_lane_loop_binds_the_bus_from_its_environment_and_runs_as_this_hive(
 
     assert [(c.backend, c.url, c.provision) for c in configs] == [("nats", "nats://bus:4222", False)]
     [(seen_store, seen_bus, runtime, hive, taken)] = served
-    assert (seen_store, seen_bus, hive, taken) == ("swarm store", bus, "hive-a", ("eng", "plan"))
+    assert (seen_store, seen_bus, hive, taken) == ("swarm store", bus, "hive-a", ("eng", "review", "plan"))
     assert (type(runtime).__name__, runtime.herdr) == ("LocalHerdrRuntime", "herdr")
     bus.close.assert_called_once_with()
 

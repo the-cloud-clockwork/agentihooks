@@ -840,9 +840,35 @@ def test_launch_keeps_lane_settings_and_selected_assignment(
 
 @pytest.mark.feature("review-lane-spawn")
 def test_a_hive_order_launches_a_review_seat_with_the_reviewer_profile(setup: SimpleNamespace) -> None:
-    agent = replace(setup.agent, lane="review", profile="reviewer")
-    setup.store.execution_registry.update("fixture", agent)
-    setup.consumer.apply(replace(setup.order, lane="review", profile="reviewer"))
+    from scripts.hive.orders import carried
+    from scripts.swarm.store import AgentRecord
+
+    agent = setup.store.start_execution(
+        "fixture",
+        AgentRecord(
+            setup.store.next_name("fixture", "review"),
+            "review",
+            "review-task",
+            seat="review-1@fixture",
+            state="launching",
+            harness="codex",
+            profile="reviewer",
+            account="account",
+            hive="host",
+            runtime_target={"host_id": "host"},
+        ),
+    )
+    setup.redis.set("review-prompt", json.dumps(carried("fixture", {"id": "review-task"}, "opening")))
+    order = replace(
+        setup.order,
+        execution_id=agent.execution_id,
+        generation=agent.generation,
+        profile="reviewer",
+        lane="review",
+        task="review-task",
+        prompt_ref="review-prompt",
+    )
+    setup.consumer.apply(order)
     request = setup.runtime.spawn.call_args.args[0]
     assert (request.lane, request.config.lanes["review"]["role"]) == ("review", "reviewer")
     assert request.task["launch_assignment"]["profile"] == "reviewer"

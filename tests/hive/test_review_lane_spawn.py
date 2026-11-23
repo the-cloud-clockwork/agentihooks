@@ -5,12 +5,11 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
-import fakeredis
 import pytest
 
 from scripts.events import scope, subjects
 from scripts.hive import lanes, launch, nats_grant
-from scripts.swarm import model_pick, naming, profile_choice, readiness, seat_spawn
+from scripts.swarm import model_pick, naming, profile_choice, prompt, readiness, seat_spawn
 from scripts.swarm import runtime as swarm_runtime
 from scripts.swarm.controller import _hive_lane
 from scripts.swarm.store import RedisStore, SwarmConfig
@@ -92,12 +91,6 @@ def test_the_hive_controller_places_the_lane_on_a_hive(lane: str, profile: str) 
 
 @pytest.mark.parametrize("lane", ["eng", "review"])
 @pytest.mark.feature("review-lane-spawn")
-def test_a_kubernetes_proof_keeps_the_lane_off_hives(lane: str) -> None:
-    assert not _hive_lane(lane, {}, True)
-
-
-@pytest.mark.parametrize("lane", ["eng", "review"])
-@pytest.mark.feature("review-lane-spawn")
 def test_the_kubernetes_backend_places_the_lane(lane: str) -> None:
     assert Placement("kubernetes").backend_for(lane, {"id": "t1"}) == "kubernetes"
 
@@ -150,7 +143,15 @@ def test_a_workstation_review_spawn_launches_the_reviewer_profile_through_the_mo
 
 
 @pytest.mark.feature("review-lane-spawn")
+def test_a_review_opening_prompt_names_the_agent_a_reviewer() -> None:
+    text = prompt.build("sw", "/repo", "review", "agent@a1b2c3-0001", {"id": "t1", "title": "Review the change"})
+    assert text.splitlines()[0] == "You are agent@a1b2c3-0001, a reviewer in swarm sw, working in the repo /repo."
+
+
+@pytest.mark.feature("review-lane-spawn")
 def test_seat_spawn_places_a_review_seat() -> None:
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0))
     runtime = FakeRuntime()
