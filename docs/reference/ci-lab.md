@@ -4202,7 +4202,7 @@ agentihooks ci lab flakes \
 | Setting | Default | What it sets |
 |---|---|---|
 | `--out FOLDER` | required | The folder that receives `lab-flakes.jsonl`, created when missing |
-| `--hours N` | `168` | The window: objects written in the last N hours, the same seven days the flake budget keeps |
+| `--hours N` | `168` | The window: objects written in the last N hours, 1 to 168, at most the seven days the flake budget keeps |
 | `--objects ROOT` | the lab object store | A local objects folder to read instead of the object store |
 | `CI_LAB_MINIO_ENDPOINT`, `CI_LAB_MINIO_BUCKET`, `CI_LAB_MINIO_ACCESS_KEY`, `CI_LAB_MINIO_SECRET_KEY` | none | The object store it lists and reads without `--objects`; a read only key is enough |
 
@@ -4212,8 +4212,8 @@ store error, a listing longer than the store backend's page cap or an `--objects
 folder prints one `ci lab flakes: <reason>` line on standard error, writes no file and exits 1.
 
 The budget counts a test once per run, and a lab row's run is its unit key, so a cached flaky unit
-that every dev push rereads counts once however many exports carry it. Keep `--hours` at or below
-168 so a row leaves the export before its history line expires.
+that every dev push rereads counts once however many exports carry it. The command refuses `--hours`
+above 168, so a row leaves the export before its history line expires.
 
 ### What reaches the policy
 

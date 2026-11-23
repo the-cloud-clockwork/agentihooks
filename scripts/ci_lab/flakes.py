@@ -42,7 +42,7 @@ def export(objects: LocalObjects | S3Objects, since_s: float, out: Path) -> Path
 def declare(parser: argparse.ArgumentParser) -> None:
     """Declare the ci lab flakes arguments: the output folder, the window in hours and an optional objects folder."""
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--hours", type=int, default=WINDOW_HOURS)
+    parser.add_argument("--hours", type=_hours, default=WINDOW_HOURS)
     parser.add_argument("--objects", type=Path)
 
 
@@ -70,6 +70,13 @@ def _listed(objects: S3Objects, prefix: str) -> dict[str, float]:
             return found
         request["ContinuationToken"] = page["NextContinuationToken"]
     raise ArtifactError(f"listing {prefix} did not finish within {PAGES} pages")
+
+
+def _hours(text: str) -> int:
+    hours = int(text)
+    if not 1 <= hours <= WINDOW_HOURS:
+        raise argparse.ArgumentTypeError(f"{text} is not 1 to {WINDOW_HOURS} hours")
+    return hours
 
 
 def _store(root: Path | None, environ: Mapping[str, str]) -> LocalObjects | S3Objects:

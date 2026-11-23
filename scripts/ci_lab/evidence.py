@@ -142,7 +142,7 @@ def main(argv: Sequence[str]) -> int:
 
 
 def ci(argv: Sequence[str]) -> int:
-    """Print every grade of a head in run order: agentihooks ci lab show SHA --objects ROOT; or agentihooks ci lab flakes."""
+    """Run agentihooks ci lab show SHA --objects ROOT, printing a head's grades in run order, or ci lab flakes."""
     parser = argparse.ArgumentParser(prog="agentihooks ci")
     lab = parser.add_subparsers(dest="group", required=True).add_parser("lab")
     commands = lab.add_subparsers(dest="command", required=True)
