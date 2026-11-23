@@ -467,23 +467,22 @@ def _parse(raw: str | bytes) -> State:
 
 @dataclass(frozen=True)
 class _Demand:
-    revision: int
     tier: int
     hits: int
     jobs: tuple[str, ...]
 
 
-def _grade_demand(raw: str | bytes, revision: int) -> _Demand:
+def _grade_demand(raw: str | bytes) -> _Demand:
     state = _parse(raw)
     jobs = tuple(slot.job for slot in state.units.values() if slot.job)
-    return _Demand(revision, state.tier, len(state.units) - len(jobs), jobs)
+    return _Demand(state.tier, len(state.units) - len(jobs), jobs)
 
 
-def _record_demand(record: str | bytes) -> _Demand:
-    """Read a stored demand record: the revision it was written at, its grade's tier, the units the verdict store
+def _record_demand(record: str | bytes) -> tuple[str, _Demand]:
+    """Read a stored demand record: the revision it was written at, then its grade's tier, the units the verdict store
     answered and the queue jobs of the rest."""
     data = json.loads(record)
-    return _Demand(data["revision"], data["tier"], data["hits"], tuple(data["jobs"]))
+    return str(data["revision"]), _Demand(data["tier"], data["hits"], tuple(data["jobs"]))
 
 
 def _records(client: Any, runs: Sequence[str]) -> list[str | None]:
@@ -638,7 +637,7 @@ class Scheduler:
         self.shed: tuple[str, ...] = ()
         self.registry = metrics.Registry()
         self.held: defaultdict[str, int] = defaultdict(int)
-        self._demand_cache: dict[str, _Demand] = {}
+        self._demand_cache: dict[str, tuple[str, _Demand]] = {}
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: intake, release quiet lanes, reap expired leases, enqueue the held units the budget admits,
@@ -713,29 +712,30 @@ class Scheduler:
                 tiers[job] = min(tiers.get(job, contribution.tier), contribution.tier)
         return tiers, hits, misses
 
-    def _contributions(self, live: list[str]) -> Iterable[_Demand]:
-        """Return each live run's demand contribution and keep them for the next build: the kept one while the stored
-        revision is unchanged, else the one read again."""
+    def _contributions(self, live: list[str]) -> list[_Demand]:
+        """Return each live run's demand contribution: the kept one while the stored revision is unchanged, else the
+        one read again; keep those that carry a revision for the next build."""
         revisions = self.client.hgetall(REVISIONS)
-        cache = {
-            run: demand
+        kept = {
+            run: entry
             for run in live
-            if (demand := self._demand_cache.get(run)) is not None and revisions.get(run) == str(demand.revision)
+            if (entry := self._demand_cache.get(run)) is not None and entry[0] == revisions.get(run)
         }
-        cache.update(self._read_demand([run for run in live if run not in cache]))
-        self._demand_cache = cache
-        return cache.values()
+        recorded, parsed = self._read_demand([run for run in live if run not in kept])
+        self._demand_cache = kept | recorded
+        return [demand for _, demand in self._demand_cache.values()] + parsed
 
-    def _read_demand(self, runs: list[str]) -> dict[str, _Demand]:
-        """Return each run's demand read again: its stored demand record under the revision it carries, else its parsed
-        grade document under revision 0, which no stored revision matches; a run with neither is left out."""
-        read: dict[str, _Demand] = {}
+    def _read_demand(self, runs: list[str]) -> tuple[dict[str, tuple[str, _Demand]], list[_Demand]]:
+        """Return the runs' demand read again: each stored demand record with the revision it carries, and the parsed
+        grade document of each run without a record, which no later build reuses; a run with neither is left out."""
+        recorded: dict[str, tuple[str, _Demand]] = {}
+        parsed: list[_Demand] = []
         for run, record in zip(runs, _records(self.client, runs)):
             if record is not None:
-                read[run] = _record_demand(record)
+                recorded[run] = _record_demand(record)
             elif (raw := _document(self.client, run)) is not None:
-                read[run] = _grade_demand(raw, 0)
-        return read
+                parsed.append(_grade_demand(raw))
+        return recorded, parsed
 
     def grades_of(self, head: str) -> list[dict[str, Any]]:
         """Return every grade of a commit by run: its live grades and the closed ones its evidence markers name."""

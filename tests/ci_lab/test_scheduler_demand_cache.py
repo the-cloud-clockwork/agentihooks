@@ -200,11 +200,13 @@ def test_cached_contributions_preserve_duplicate_slots_and_the_most_urgent_share
 def test_a_load_with_demand_records_equals_a_fresh_load_from_the_grade_documents_alone(grades: Run) -> None:
     changed = grades.grade(HEAD_A)
     changed.tier = 1
+    changed.units["cached"] = replace(next(iter(changed.units.values())), job="")
     grades.engine.save(changed)
     first = grades.engine.load(1000)
     grades.lab.client.delete(scheduler.REVISIONS, scheduler.RECORDS)
 
     assert grades.lab.build(0, Policy(), None).load(1000) == first
+    assert first.cache_hits == {"pull_request": 1}
     assert first.cache_misses == {"promotion": 1, "pull_request": 1}
 
 

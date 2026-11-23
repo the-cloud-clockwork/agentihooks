@@ -1,6 +1,6 @@
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -108,7 +108,8 @@ def test_the_measure_sends_only_read_commands_directly_and_through_pipelines_and
     assert load_measure.main(["--builds", "2"], environ) == 0
     assert {"SMEMBERS", "GET", "HMGET", "HGETALL"} <= set(sent) <= READS
     assert set(run.engine.queue.offers(0)) == {"fresh", "stale"}
-    assert json.loads(capsys.readouterr().out)["parses"] == 2
+    figures = json.loads(capsys.readouterr().out)
+    assert (figures["parses"], figures["documents_fetched"]) == (2, [1, 1])
 
 
 @pytest.mark.feature("lab-scheduler-load-measure")
@@ -145,3 +146,24 @@ def test_the_measure_times_each_build_on_both_clocks_and_puts_the_scheduler_pars
         load_measure.measure(engine, 1, 1000, time.process_time, time.perf_counter)
     assert scheduler._parse is parse
     assert (scheduler._parse, scheduler._records, scheduler._document) == helpers
+
+
+@pytest.mark.feature("lab-scheduler-load-measure")
+def test_the_read_counter_adds_every_fetch_of_a_build_to_that_build_alone() -> None:
+    records: dict[str, str | None] = {"a": '{"r": 1}', "b": None, "c": "{}"}
+    documents: dict[str, str | None] = {"a": "doc", "b": None}
+
+    def stored(client: Any, runs: Sequence[str]) -> list[str | None]:
+        return [records[run] for run in runs]
+
+    def document(client: Any, run: str) -> str | None:
+        return documents[run]
+
+    reads = load_measure.Reads(stored, document)
+    reads.build()
+    assert reads.fetch_records(None, ["a", "b"]) == ['{"r": 1}', None]
+    assert reads.fetch_records(None, ["c"]) == ["{}"]
+    assert [reads.fetch_document(None, run) for run in ("a", "b", "a")] == ["doc", None, "doc"]
+    reads.build()
+    assert reads.fetch_document(None, "b") is None
+    assert (reads.documents, reads.record_bytes) == ([2, 0], [10, 0])
