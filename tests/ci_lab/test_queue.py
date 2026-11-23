@@ -98,6 +98,24 @@ def test_supersede_drops_pending_and_keeps_leased(jobs: queue.Queue) -> None:
     assert jobs.supersede("old") == []
 
 
+@pytest.mark.feature("lab-retire-gone-merge-groups")
+def test_drop_removes_the_pending_jobs_of_a_head_and_keeps_its_leased_ones(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a"), unit("b"), unit("c")], "old", {})
+    jobs.enqueue([unit("a")], "new", {})
+    assert take(jobs, "old:test:b")
+
+    assert jobs.drop("old") == ["old:test:a", "old:test:c"]
+
+    assert jobs.pending() == ["new:test:a"]
+    assert jobs.job("old:test:a") is None
+    assert jobs.job("old:test:c") is None
+    assert found(jobs, "old:test:b").state == "leased"
+    assert jobs.members("old", "pending") == set()
+    assert jobs.members("old", "leased") == {"old:test:b"}
+    assert jobs.members("new", "pending") == {"new:test:a"}
+    assert jobs.drop("old") == []
+
+
 def test_claim_is_won_once(jobs: queue.Queue) -> None:
     jobs.enqueue([unit("a")], "h1", {})
     record = found(jobs, "h1:test:a")

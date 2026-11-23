@@ -151,6 +151,9 @@ class Expander:
     def reachable(self, repo: str, head: str) -> bool:
         return True
 
+    def groups(self, repo: str) -> frozenset[str]:
+        return frozenset(self.plans)
+
 
 @dataclass
 class Poster:

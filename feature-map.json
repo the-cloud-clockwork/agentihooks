@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "lab-shadow-reusable-caller-pairing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2804",
+      "behaviour": "Shadow discovery groups reusable static jobs by their calling job, so a bare semgrep lab verdict pairs with all three Actions children in the report and recorder. Any failed child fails the report group, a running or cancelled child excludes the head, and the latest child completion determines the Actions completion time. Explicit labelled mapping collections retain their existing behavior.",
+      "seam": "scripts.ci_lab.shadow.static_jobs and Shadow.observe, and scripts.ci_lab.shadow_report.head using the discovered workflow jobs",
+      "tests": [
+        "tests/ci_lab/test_shadow_report.py::test_bare_semgrep_pairs_with_all_reusable_actions_jobs",
+        "tests/ci_lab/test_shadow_report.py::test_an_unfinished_reusable_child_excludes_the_semgrep_head",
+        "tests/ci_lab/test_shadow.py::test_the_recorder_pairs_bare_semgrep_with_every_reusable_actions_job"
+      ]
+    },
+    {
       "id": "filter-web-single-token-literals",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-filter-identifier-literals",
@@ -95,6 +107,28 @@
       "tests": [
         "tests/hive/test_auth.py::test_a_member_writes_the_expert_keys_a_completion_writes_and_no_other_expert_key",
         "tests/hive/test_auth.py::test_a_member_expert_ends_its_lineage_on_a_proof_and_is_refused_without_one_of_its_keys"
+      ]
+    },
+    {
+      "id": "expert-launch-failure-reason",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-expert-seat-launch-failure-reason",
+      "behaviour": "When the launch of an expert fails for another reason than room, the expert seats pass keeps the error as it happens: secrets redacted in strict mode and the login of any address dropped, on one line, at most 300 characters, and the name of its type when it has no text. The line the pass returns carries the same text. A successor launch stores it as the reason of the failed transfer binding in place of the fixed words. Every failed launch, a first one included, is kept beside the lineage record as its last failed launch with its time and the name of the expert that did not start, only for a running lineage and until a launch succeeds; the record keeps its shape, so a member on an older release still reads it. Expert status carries it as JSON and names it in its text line while the lineage runs with no expert on its seat. A launch refused for room records none. The reason is there when the tick abandoned the step and dropped the lines it returned.",
+      "seam": "swarm.expert_seat.run over a fake runtime and store; handoff.transfers.failed with a reason; expert_lineage.launch_failed, launch_recovered and launch_failures; the swarm command expert status through cli.main; tick.engine.run_step abandoning the pass at its budget",
+      "semgrep_rule": "feature-expert-launch-failure-reason",
+      "tests": [
+        "tests/handoff/test_transfers.py::test_a_failed_launch_keeps_the_reason_it_is_given_in_place_of_the_fixed_words",
+        "tests/swarm/test_expert_lineage.py::test_the_last_failed_launch_is_kept_beside_a_running_lineage_and_beside_no_other",
+        "tests/swarm/test_expert_lineage.py::test_a_launch_that_succeeds_drops_the_failure_kept_before_it",
+        "tests/swarm/test_expert_commands.py::test_status_names_the_last_failed_launch_while_the_seat_is_empty_and_carries_it_as_json",
+        "tests/swarm/test_expert_seat.py::test_a_successor_launch_that_fails_keeps_its_error_on_the_binding_and_beside_the_lineage",
+        "tests/swarm/test_expert_seat.py::test_a_first_launch_that_fails_keeps_its_error_with_no_transfer_to_carry_it_until_a_launch_succeeds",
+        "tests/swarm/test_expert_seat.py::test_the_kept_reason_and_the_line_of_the_pass_hold_no_secret_and_no_login_of_an_address",
+        "tests/swarm/test_expert_seat.py::test_the_login_dropped_from_a_word_runs_from_its_first_address_mark_to_the_last_at_sign_after_it",
+        "tests/swarm/test_expert_seat.py::test_a_launch_refused_for_room_records_no_failed_launch",
+        "tests/swarm/test_expert_seat.py::test_the_kept_reason_is_redacted_put_on_one_line_and_cut_at_three_hundred_characters",
+        "tests/swarm/test_expert_seat.py::test_an_error_with_no_text_is_kept_as_the_name_of_its_type",
+        "tests/swarm/test_expert_seat.py::test_a_pass_the_tick_abandons_still_leaves_the_reason_expert_status_reads"
       ]
     },
     {
@@ -641,6 +675,46 @@
         "tests/ci_lab/test_scheduler.py::test_backfill_takes_only_the_slots_left_free_after_the_units_waiting_in_other_classes",
         "tests/ci_lab/test_scheduler.py::test_a_newer_backfill_head_drops_the_held_units_of_the_older_one",
         "tests/ci_lab/test_metrics.py::test_backfill_slots_never_raise_the_slots_wanted_gauge_and_a_shed_class_keeps_its_running_slots"
+      ]
+    },
+    {
+      "id": "lab-retire-gone-merge-groups",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-retire-gone-merge-groups",
+      "behaviour": "The CI lab scheduler ends a merge group grade whose merge group is gone: at the start of every pass Scheduler.tick lists the merge group refs of each repository that has a live merge group grade once and closes each such grade whose head no ref carries, so its grade document and its origin are deleted, the run leaves the live set with its revision and its demand record and the pending jobs of its head are dropped unless another live grade of any repository grades the same head, while its leased jobs keep their leases, each running to completion or, once its lease expires, requeued and lost as the lost retries allow, with no check run posted, no evidence or passed tree recorded and no graded head counted. A grade whose merge group ref is listed keeps its units and its verdict, a grade pushed to a grade ref and a grade of any other class are never retired, and a ref listing git cannot produce within its timeout retires nothing of that repository while the gone grades of every other repository are retired. The scheduler keeps the origin of each live grade, its class, repository, head and grade ref, written at grade start, filled once from the grade document of a live run that has none and removed for a run that is no longer live, so a steady pass reads no grade document for this step.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with an expander that lists merge group heads, scripts.ci_lab.queue.Queue.drop over fakeredis and scripts.ci_lab.scheduler.MirrorExpander.groups over a git origin fixture",
+      "rules": [
+        "lab-pass-skips-merge-group-retire"
+      ],
+      "tests": [
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_whose_ref_is_gone_leaves_the_live_set_and_loses_its_pending_jobs",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_gone_grades_of_one_pass_are_retired_in_run_order",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_posts_nothing_and_records_no_verdict",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_no_revision_and_no_demand_record",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_forget_that_ended_before_the_live_set_exit_is_finished_by_the_next_pass",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_forget_that_ended_before_the_origin_delete_is_retired_again_by_the_next_pass",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_is_judged_by_the_merge_group_refs_of_its_own_repository",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_whose_ref_is_listed_keeps_its_units_and_its_verdict",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_listing_git_cannot_produce_retires_nothing",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_listing_git_cannot_produce_for_one_repository_still_retires_the_gone_grades_of_another",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_the_jobs_another_live_grade_of_its_head_holds",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_the_jobs_a_live_grade_of_its_head_in_another_repository_holds",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_retired_merge_group_grade_leaves_its_leased_jobs_running",
+        "tests/ci_lab/test_scheduler_retire.py::test_an_expired_lease_of_a_retired_merge_group_grade_is_requeued_once_and_then_lost",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_merge_group_grade_pushed_to_a_grade_ref_is_never_retired",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_pull_request_grade_is_never_retired_for_a_missing_merge_group_ref",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_grade_records_its_origin_when_it_starts",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_gets_one_from_its_grade_document",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_grade_document_with_no_ref_gives_an_origin_with_an_empty_ref",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_gets_its_grade_ref_from_its_grade_document",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_run_with_no_grade_document_holds_no_other_origin_back",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_pass_reads_a_grade_document_for_the_origins_only_when_a_live_grade_has_no_origin",
+        "tests/ci_lab/test_scheduler_retire.py::test_a_live_grade_with_no_origin_is_retired_in_the_pass_that_records_it",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_origin_of_a_run_that_is_no_longer_live_is_removed",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_mirror_expander_lists_the_head_of_every_merge_group_ref",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_mirror_expander_fails_for_a_repository_git_cannot_list",
+        "tests/ci_lab/test_scheduler_retire.py::test_the_mirror_expander_bounds_the_merge_group_listing_by_its_timeout",
+        "tests/ci_lab/test_queue.py::test_drop_removes_the_pending_jobs_of_a_head_and_keeps_its_leased_ones"
       ]
     },
     {
@@ -1603,6 +1677,41 @@
         "tests/swarm/test_readiness.py::test_a_reader_waiting_behind_a_fetch_reads_the_revision_current_at_its_turn",
         "tests/swarm/test_readiness.py::test_a_readers_change_to_its_task_rows_never_reaches_the_shared_copy",
         "tests/hub/test_admission_claim_cap.py::test_a_claim_cap_block_leaves_the_shared_ledger_copy_as_the_ledger_exported_it"
+      ]
+    },
+    {
+      "id": "hub-admission-narrow-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-admit-narrow-read",
+      "behaviour": "A hub events admission reads only what its own task needs: the task row, the rows it names, the running rows, the overview and its phase, and the claim gate verdict the ledger judges over its stored state, through a narrow tasks selection of ids, states, pins and branches; it never reads the whole ledger export however often the revision moves, and it refuses a frozen, unfocused, phased, waiting or thin task without claiming it.",
+      "seam": "Admission.admit over a ledger whose revision moves and whose export is counted, admission_view.Narrow, the ledger API tasks selection and the ledger client where_query function",
+      "tests": [
+        "tests/hub/test_admission_gates.py::test_an_admission_never_reads_the_full_export_when_the_revision_moves",
+        "tests/hub/test_admission_gates.py::test_an_admission_refuses_a_task_its_claim_gate_holds_and_claims_nothing",
+        "tests/hub/test_admission_gates.py::test_an_admission_claims_the_task_its_dependency_left_open_once_the_dependency_is_done",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_returns_the_rows_matching_every_filter_it_names",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_projects_rows_without_threads_and_keeps_only_the_named_fields",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_client_query_names_only_the_filters_given",
+        "tests/swarm/test_admission_view.py::test_the_view_reads_the_task_the_rows_it_names_and_the_running_rows_only",
+        "tests/swarm/test_admission_view.py::test_a_task_with_nothing_named_reads_only_the_running_rows",
+        "tests/swarm/test_admission_view.py::test_a_gone_task_leaves_no_row_and_withdraws_its_offer",
+        "tests/swarm/test_admission_view.py::test_a_plan_task_keeps_the_whole_document_for_its_steering",
+        "tests/swarm/test_admission_view.py::test_the_withdrawal_asks_the_ledger_claim_gate_once_the_local_checks_pass",
+        "tests/swarm/test_admission_view.py::test_a_local_refusal_never_asks_the_ledger",
+        "tests/swarm/test_admission_view.py::test_the_view_counts_an_unfinished_agent_or_a_claimant_as_claimed",
+        "tests/swarm/test_admission_view.py::test_the_root_waiting_count_judges_only_open_tasks_pinned_to_the_root_hive",
+        "tests/swarm/test_admission_view.py::test_the_branched_rows_carry_only_the_continuation_fields",
+        "tests/swarm/test_admission_view.py::test_a_frozen_root_task_keeps_no_root_slot",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_only_a_plain_tasks_read_naming_a_filter_is_a_selection",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_tasks_route_serves_every_selection_the_client_asks_for",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_route_refuses_a_selection_outside_a_plain_tasks_read",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_a_selection_reply_carries_the_revision_of_its_rows_and_no_cursor",
+        "tests/swarm_ledger/test_task_list_selecting.py::test_the_client_reads_a_selection_through_the_tasks_resource",
+        "tests/swarm/test_admission_view.py::test_every_read_the_view_makes_names_its_own_swarm",
+        "tests/swarm/test_admission_view.py::test_the_snapshot_holds_the_rows_the_view_read_under_its_swarm_and_fix_phase",
+        "tests/hub/test_admission_gates.py::test_an_admission_hands_the_continuation_the_rows_on_its_task_branch",
+        "tests/hub/test_admission_gates.py::test_an_admission_reads_a_plan_task_steering_through_its_readiness_source",
+        "tests/swarm/test_admission_view.py::test_the_admits_gate_needs_a_running_swarm_and_every_wait_clear"
       ]
     },
     {
@@ -4278,6 +4387,16 @@
       ]
     },
     {
+      "id": "semgrep-test-mode-strict",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-test-strict",
+      "behaviour": "Every Semgrep test mode command in the workflows runs with --strict, so a rule config whose engine run errors fails its fixture step instead of dropping out of the pass count while the step exits 0.",
+      "seam": "the run text of the steps 'Own rules hold on their fixtures and the code' of job scan, 'Operator feature regressions and passing fixtures' and 'Outage rules fire on their planted faults and pass their clean cases' of job feature-tests in the Semgrep workflow, and every other workflow step run text that calls semgrep with --test",
+      "tests": [
+        "tests/test_ci_semgrep.py::test_every_semgrep_test_mode_command_runs_strict"
+      ]
+    },
+    {
       "id": "feature-suite-harness",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/fsuite1",
@@ -4397,6 +4516,18 @@
         "tests/swarm_ledger/test_dependency_audit.py::test_a_dependency_with_disjoint_territories_and_no_named_code_is_reported",
         "tests/swarm/test_ordering_dependencies.py::test_the_tick_records_each_ordering_only_dependency",
         "tests/swarm/test_ordering_dependencies.py::test_status_prints_the_list"
+      ]
+    },
+    {
+      "id": "thin-task-enhancement-snapshot",
+      "behaviour": "The thin task pass sends the enhancement value from its task snapshot with its needed mark. A refreshed resource revision retains that expectation and cannot overwrite a concurrent planned or skipped decision or emit a success notice.",
+      "seam": "scripts.tick.steps.thin.enhance and _marking through ClientLedger and ResourceClient",
+      "rules": ["thin-enhancement-without-expected"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2885",
+      "tests": [
+        "tests/tick/steps/test_thin_task_pass.py::test_the_thin_mark_carries_the_enhancement_value_read",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_revision_retry_preserves_the_thin_snapshot_and_refuses_a_concurrent_decision"
       ]
     },
     {
@@ -5381,6 +5512,21 @@
         "tests/swarm/test_thin_hold.py::test_a_task_without_a_lane_reads_as_eng_for_the_thin_hold",
         "tests/swarm/test_thin_hold.py::test_the_thin_hold_names_the_enhancement_task_of_its_own_target",
         "tests/swarm/test_thin_hold.py::test_an_earlier_hold_still_names_itself_before_the_thin_hold"
+      ]
+    },
+    {
+      "id": "swarm-enhance-sweep",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-sweep",
+      "behaviour": "agentihooks swarm <slug> enhance sweep reads every task of the swarm through the ledger API, selects per lane the open eng and ci tasks the thin task pass would queue, and queues each through the thin task pass writer with the same ledger writes, under its own thirty second deadline and three seconds after the previous one; with --dry-run it prints the thin task count and ids per lane and builds no ledger writer.",
+      "seam": "agentihooks swarm <slug> enhance sweep [--dry-run] through scripts.swarm.cli.main into scripts.swarm.enhance_sweep.command, thin_by_lane and sweep",
+      "tests": [
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_selects_per_lane_the_thin_tasks_the_tick_step_would",
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_makes_the_same_ledger_writes_as_the_thin_task_pass_on_one_task_list",
+        "tests/swarm/test_enhance_sweep.py::test_each_thin_task_writes_under_its_own_thirty_second_deadline",
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_pauses_three_seconds_between_thin_tasks_and_never_before_the_first",
+        "tests/swarm/test_enhance_sweep.py::test_the_dry_run_prints_the_thin_task_count_and_ids_per_lane_and_writes_nothing",
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_writes"
       ]
     },
     {
@@ -6598,6 +6744,17 @@
       ]
     },
     {
+      "id": "ledger-relay-marks-one-helper",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "An entry the orchestrator relays for the operator carries who relayed it, from where and the proof it rests on, his quoted words or the entry he wrote, in that order in the stored entry and in its event. A recorded run of a relayed note, comment and answer, a rank set by his words, an order set by his words and by an entry he wrote and an order cleared keeps the stored text of each. One helper builds the marks, and no other module writes who relayed an entry and from where side by side.",
+      "seam": "ledger_core.sync over the relay, task_update, order_set and order_clear ops, and every module under scripts and hooks against scripts.swarm_ledger.ledger_relay.marks_of",
+      "semgrep_rule": "feature-ledger-relay-marks-one-helper",
+      "tests": [
+        "tests/swarm_ledger/test_relay_marks_recorded.py::test_a_recorded_run_of_the_relaying_ops_keeps_the_text_of_every_entry_and_event"
+      ]
+    },
+    {
       "id": "ledger-followup-duplicates",
       "origin": "inventory",
       "behaviour": "A follow up repeating an open follow up or task is refused naming it, unless a plain words not duplicate reason is given and stored.",
@@ -7096,6 +7253,17 @@
       ]
     },
     {
+      "id": "coverage-ratchet-grades-from-the-nearest-measured-ancestor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45173371476-0",
+      "behaviour": "A dev push whose base commit has no measured Tests run with a live coverage-baseline artifact grades its coverage against the nearest first parent ancestor of that base whose dev push run measured and published one, read from one page of the repository's live coverage-baseline artifacts, and checks out and grades against that ancestor, never a newer dev head or a commit outside the base's first parent history, because a newer push replaced the base's run before it published, the cache entry the earlier fallback reads had been evicted, and every later dev push failed the coverage ratchet.",
+      "seam": "The coverage ratchet's Find the run that published the base baseline step, run in a shell over a real git history against a fake gh, and the BASE of its Check out the base grader and Hold every line the base ran steps",
+      "tests": [
+        "tests/test_ci_gate_workflow.py::test_a_base_whose_run_published_no_baseline_grades_from_its_nearest_measured_ancestor",
+        "tests/test_ci_gate_workflow.py::test_the_base_grader_and_the_hold_grade_the_commit_the_lookup_restored"
+      ]
+    },
+    {
       "id": "codex-adopt-refusal-fields",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-adopt-refusal-fields",
@@ -7182,6 +7350,19 @@
       "seam": "scripts.size_limits.measure and scripts.size_limits.grade, called by the unit suite on the merge group head",
       "tests": [
         "tests/test_size_limits.py::test_the_checked_out_tree_holds_the_size_limits"
+      ]
+    },
+    {
+      "id": "task-enhancement-expected-value",
+      "behaviour": "The task enhancement operation compares an optional expected value with the current enhancement and refuses mismatches before assignment, stamping or events. Null matches an absent enhancement, empty remains distinct, and omission preserves legacy callers.",
+      "seam": "scripts.swarm_ledger.ledger_enhancement.check and apply through the versioned operation schema",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2885",
+      "tests": [
+        "tests/swarm/test_enhance_close.py::test_a_stale_enhancement_expectation_refuses_without_effects",
+        "tests/swarm/test_enhance_close.py::test_a_matching_enhancement_expectation_passes_the_api_and_writes",
+        "tests/swarm/test_enhance_close.py::test_an_omitted_enhancement_expectation_keeps_legacy_writes",
+        "tests/swarm/test_enhance_close.py::test_the_enhancement_expectation_rejects_invalid_values"
       ]
     },
     {
@@ -11055,7 +11236,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/comments/relay-6310d1adbf",
-      "behaviour": "Among the tasks a lane may claim, the hub readiness pass offers urgent and focused tasks first as before, then the tasks under an operator order, oldest order first, then the rest, each by ledger rank band. A task's order time is the earlier of its own mark and its phase's; the work an ordered task waits on, the plan task that enhances it and the lead it is merged into carry the earliest such time, through every such link in turn, and a mark that is not well formed counts as none. A waiting offer at least one dedupe window old moves behind a later offer of a higher class. An order never changes which tasks are offered: under a focus an ordered task outside it is not offered, and focused offers keep their order.",
+      "behaviour": "Among the tasks a lane may claim, the hub readiness pass offers urgent and focused tasks first as before, then the tasks under an operator order, oldest order first, then the rest, each by ledger rank band. A task's order time is the earlier of its own mark and its phase's; the work an ordered task waits on, the plan task that enhances it and the lead it is merged into carry the earliest such time, through every such link in turn, and a mark that is not well formed counts as none. A waiting offer at least one dedupe window old moves behind a later offer the hub would offer before it: one of a higher class, an ordered one whose order is older or that has the same order time and a higher rank, and among the rest one of a higher rank, so a task raised to high passes the normal offers queued before it. Inside the urgent or focused class a waiting offer keeps its place, and after a move a second pass moves nothing. An order never changes which tasks are offered: under a focus an ordered task outside it is not offered, and focused offers keep their order.",
       "seam": "scripts.swarm.orders.stamps, the walk it runs on (scripts.swarm.freeze.waits and reached), scripts.swarm.readiness.offers and behind, and readiness.publish on the memory work queue read back through readiness.take",
       "tests": [
         "tests/swarm/test_orders.py::test_a_ledger_with_no_order_mark_has_no_order_time",
@@ -11074,6 +11255,12 @@
         "tests/swarm/test_freeze.py::test_waits_names_what_each_task_of_the_ledger_waits_on",
         "tests/swarm/test_freeze.py::test_reached_walks_from_every_seed_along_the_links_and_stops_at_cold_work",
         "tests/swarm/test_readiness.py::test_behind_names_the_old_waiting_offers_ahead_of_an_offer_of_a_higher_class",
+        "tests/swarm/test_readiness.py::test_behind_moves_a_waiting_offer_of_the_rest_behind_a_later_offer_of_a_higher_rank",
+        "tests/swarm/test_readiness.py::test_behind_moves_a_waiting_ordered_offer_behind_a_later_one_ordered_before_it_or_ranked_above_it",
+        "tests/swarm/test_readiness.py::test_behind_moves_nothing_inside_the_urgent_or_focused_class",
+        "tests/swarm/test_readiness.py::test_a_queued_task_raised_to_high_is_taken_before_the_older_normal_offers_ahead_of_it_and_moves_them_once",
+        "tests/swarm/test_readiness.py::test_a_queued_task_lowered_to_low_is_taken_after_the_normal_offers_behind_it",
+        "tests/swarm/test_readiness.py::test_an_ordered_offer_moves_behind_a_later_offer_whose_order_is_older",
         "tests/swarm/test_readiness.py::test_offers_put_urgent_tasks_first_then_ordered_ones_oldest_order_first_then_the_rest",
         "tests/swarm/test_readiness.py::test_the_tasks_of_an_ordered_phase_and_the_work_they_wait_on_are_offered_before_the_rest",
         "tests/swarm/test_readiness.py::test_order_marks_change_the_order_of_offers_and_never_which_tasks_are_offered",
@@ -12434,6 +12621,23 @@
       ]
     },
     {
+      "id": "lab-mutants-read-no-mutmut-config",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs-mutation",
+      "behaviour": "The CI lab generates mutants without reading mutmut's config: the worker's trampolining and the scheduler's expansion name the same mutants from any working directory, also one that holds no project file, and leave mutmut's process wide config unloaded, so a worker whose working directory mutmut cannot guess a source path from still runs mutation units. The lab applies no do_not_mutate_patterns, and the lines a file's own pragmas mark stay unmutated. The mutant generator takes the patterns as an argument: given patterns keep the same lines from mutation as the same patterns in mutmut's config, and without the argument it reads mutmut's config, as the CI mutation gate does inside mutmut's own run.",
+      "seam": "scripts.ci_lab.run_mutation.trampoline and scripts.ci_lab.expand_mutation.mutant_units called from a working directory with no mutmut config and with mutmut's config unloaded, and scripts.ci_mutation.selection.created_mutations and selected_mutants given patterns",
+      "rules": [
+        "lab-mutants-read-mutmut-config"
+      ],
+      "tests": [
+        "tests/ci_lab/test_run_mutation.py::test_trampoline_reads_no_mutmut_config_from_the_working_directory",
+        "tests/ci_lab/test_expand_mutation.py::test_mutant_units_read_no_mutmut_config_from_the_working_directory",
+        "tests/test_ci_mutation_selection.py::test_given_patterns_keep_the_lines_mutmut_config_patterns_keep_from_mutation",
+        "tests/test_ci_mutation_selection.py::test_a_line_a_given_pattern_matches_gets_no_mutant",
+        "tests/test_ci_mutation_selection.py::test_given_patterns_load_no_mutmut_config"
+      ]
+    },
+    {
       "id": "test-seat-through-admission",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-leo-seat-helper",
@@ -13127,6 +13331,16 @@
       ]
     },
     {
+      "id": "lab-sandbox-gone-probe-reaped-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "The probe the lab sandbox tests ask whether a unit's child is gone counts a child reaped between the open and the read of its stat file as gone, so the tests of the process group kill do not fail on a child that ends at that moment.",
+      "seam": "tests/ci_lab/test_sandbox.py _gone, the gone probe under _gone_within",
+      "tests": [
+        "tests/ci_lab/test_sandbox.py::test_a_child_reaped_between_the_open_and_the_read_of_its_stat_counts_as_gone"
+      ]
+    },
+    {
       "id": "lab-venv-build-sandbox",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2644",
@@ -13574,7 +13788,7 @@
       "ordered_at": "2026-11-22",
       "ledger_item": "ledger:rig-grade-swarm/phases/p130",
       "ledger_relay": "ledger:rig-grade-swarm/comments/relay-f93d579a4d",
-      "behaviour": "Every pass of the tick keeps the seat of each running expert lineage. An empty seat gets one expert, launched on Claude Code at the lineage's effort with the lineage, the mission and its number in the lineage; a seat that holds a record in any state gets no second one. After an accepted handoff the next expert launches on the same seat with the handoff and the transfer it confirms, and the handoff stays on the seat until that expert confirms it. A launch that fails leaves no record and a failed binding, one refused for room hands the transfer back, and no slot, a full host or a placement elsewhere holds the launch by name. An expert lost without a handoff leaves its successor one: the handoff it never confirmed, offered again, or a recovery handoff in the expert handoff form with every deliverable pending and unknown. The expert of a stopped lineage is finished with its open mail closed, and the expert of a completed lineage is closed from the kept proof with the master told once. Nothing launches while the swarm is paused, stopping, stopped or in panic. A lineage started from the Handoff v2 of a session that was not an expert gives its first expert that handoff to confirm.",
+      "behaviour": "Every pass of the tick keeps the seat of each running expert lineage. An empty seat gets one expert, launched on Claude Code at the lineage's effort with the lineage, the mission and its number in the lineage; a seat that holds a record in any state gets no second one. After an accepted handoff the next expert launches on the same seat with the handoff and the transfer it confirms, and the handoff stays on the seat until that expert confirms it. A launch that fails leaves no record; a successor launch leaves a failed binding carrying the reason, and every failed launch its reason kept beside the lineage; one refused for room hands the transfer back, and no slot, a full host or a placement elsewhere holds the launch by name. An expert lost without a handoff leaves its successor one: the handoff it never confirmed, offered again, or a recovery handoff in the expert handoff form with every deliverable pending and unknown. The expert of a stopped lineage is finished with its open mail closed, and the expert of a completed lineage is closed from the kept proof with the master told once. Nothing launches while the swarm is paused, stopping, stopped or in panic. A lineage started from the Handoff v2 of a session that was not an expert gives its first expert that handoff to confirm.",
       "seam": "swarm.expert_seat.run over a fake runtime and store; the tick step expert seats in tick.steps.experts; expert_lineage.launches, launched and unlaunched, closing and closed; expert_seat.close, drop_confirmed and keep_handoff; the confirm-handoff verb, swarm.handoff_commands.confirm, which calls drop_confirmed; the expert start --handoff and --from options; the live checks scripts.feature_checks.expert_seats over the experts of each running swarm and scripts.feature_checks.expert_handoffs over the handoff a lineage was started from",
       "semgrep_rule": "feature-expert-seat-in-tick",
       "tests": [

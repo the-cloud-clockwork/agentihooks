@@ -753,7 +753,9 @@ def test_a_superseded_base_falls_back_to_the_newest_dev_baseline_before_the_arti
     assert restored["if"] == (
         "steps.cached.outputs.cache-hit != 'true' && steps.cached.outputs.cache-matched-key != ''"
     )
-    assert hold["env"]["BASE"] == "${{ steps.restored.outputs.commit || steps.base.outputs.commit }}"
+    assert hold["env"]["BASE"] == (
+        "${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}"
+    )
 
 
 @pytest.mark.parametrize("measured", ["ancestor", "unrelated", "unrecorded"])
@@ -785,7 +787,9 @@ def test_the_newest_dev_baseline_grades_only_from_an_ancestor_of_the_head(tmp_pa
 
 
 @pytest.mark.parametrize(("kept", "found"), [("0 1", "id=run-2\n"), ("0 0", None)])
-def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(tmp_path, kept, found):
+def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(
+    tmp_path: Path, kept: str, found: str | None
+) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     first, second = kept.split()
@@ -797,6 +801,7 @@ def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(tmp_pa
         '  */runs\\?*) if [[ $2 == *"status=success"* ]]; then printf "run-1\\nrun-2\\n"; else printf "run-1 push\\nrun-2 push\\n"; fi ;;\n'
         f"  */run-1/*) echo {first} ;;\n"
         f"  */run-2/*) echo {second} ;;\n"
+        "  */actions/artifacts\\?*) echo '[]' ;;\n"
         "esac\n"
     )
     (bin_dir / "gh").chmod(0o755)
@@ -808,6 +813,119 @@ def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(tmp_pa
     result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
     assert (result.returncode == 0) == (found is not None)
     assert output.read_text() == (found or "")
+    error = "::error::No measured Tests run on base base kept a live coverage-baseline artifact"
+    assert (error in result.stdout) == (found is None), result.stdout + result.stderr
+
+
+def _dev_push_jobs(publish: str) -> dict[str, object]:
+    jobs: list[dict[str, object]] = [
+        {"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in range(1, 21)
+    ]
+    steps = [
+        {"name": "Compute the coverage baseline", "conclusion": "success"},
+        {"name": "Publish the passed dev coverage baseline", "conclusion": publish},
+    ]
+    jobs.append({"name": "coverage-baseline", "conclusion": publish, "steps": steps})
+    return {"total_count": len(jobs), "jobs": jobs}
+
+
+@pytest.mark.feature("coverage-ratchet-grades-from-the-nearest-measured-ancestor")
+@pytest.mark.parametrize(
+    ("published", "restored"),
+    [
+        (
+            (("newer", 104, "measured"), ("nearest", 102, "measured"), ("older", 101, "measured")),
+            (102, "nearest"),
+        ),
+        (
+            (("newer", 104, "measured"), ("nearest", 102, "unmeasured"), ("older", 101, "measured")),
+            (101, "older"),
+        ),
+        (
+            (("newer", 104, "measured"), ("nearest", 102, "expired"), ("older", 101, "measured")),
+            (101, "older"),
+        ),
+        (
+            (("nearest", 106, "unmeasured"), ("nearest", 102, "measured"), ("older", 101, "measured")),
+            (102, "nearest"),
+        ),
+        ((("newer", 104, "measured"), ("side", 105, "measured")), None),
+        ((("newer", 104, "measured"), ("side", 105, "measured"), ("nearest", 102, "unmeasured")), None),
+    ],
+    ids=[
+        "nearest-measured",
+        "nearest-unmeasured",
+        "nearest-expired",
+        "nearest-rerun-unmeasured",
+        "outside-history-only",
+        "no-measured-ancestor",
+    ],
+)
+def test_a_base_whose_run_published_no_baseline_grades_from_its_nearest_measured_ancestor(
+    tmp_path: Path, published: tuple[tuple[str, int, str], ...], restored: tuple[int, str] | None
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    commits = {name: _commit(repo, {"a": name}) for name in ("older", "nearest", "base", "newer")}
+    _git(repo, "checkout", "-q", "-b", "side", commits["older"])
+    commits["side"] = _commit(repo, {"b": "side"})
+    _git(repo, "checkout", "-q", "--detach", commits["newer"])
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    base_runs = [{"id": 7, "event": "push", "head_branch": "dev", "head_sha": commits["base"]}]
+    (fake / "base-runs.json").write_text(json.dumps({"workflow_runs": base_runs}))
+    artifacts = [
+        {
+            "name": "coverage-baseline",
+            "expired": state == "expired",
+            "workflow_run": {"id": run, "head_branch": "dev", "head_sha": commits[name]},
+        }
+        for name, run, state in published
+    ]
+    (fake / "artifacts.json").write_text(json.dumps({"total_count": len(artifacts), "artifacts": artifacts}))
+    for _, run, state in published:
+        publish = "failure" if state == "unmeasured" else "success"
+        (fake / f"jobs-{run}.json").write_text(json.dumps(_dev_push_jobs(publish)))
+    (fake / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "endpoint=$2\n"
+        'case "$endpoint" in\n'
+        '  */compare/*) body=\'{"status": "ahead"}\' ;;\n'
+        '  */workflows/test.yml/runs\\?*) body=$(cat "$FAKE/base-runs.json") ;;\n'
+        "  */runs/7/artifacts\\?*) body='{\"artifacts\": []}' ;;\n"
+        '  */actions/artifacts\\?*) body=$(cat "$FAKE/artifacts.json") ;;\n'
+        '  */jobs\\?*) run=${endpoint#*/runs/}; body=$(cat "$FAKE/jobs-${run%%/*}.json") ;;\n'
+        '  *) echo "unexpected API endpoint: $endpoint" >&2; exit 1 ;;\n'
+        "esac\n"
+        "while [[ $1 != --jq ]]; do shift; done\n"
+        'jq -r "$2" <<< "$body"\n'
+    )
+    (fake / "gh").chmod(0o755)
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(
+        os.environ,
+        PATH=f"{fake}:{os.environ['PATH']}",
+        FAKE=str(fake),
+        BASE=commits["base"],
+        GITHUB_REPOSITORY="o/r",
+        GITHUB_OUTPUT=str(output),
+    )
+    step = _step("coverage-ratchet", "Find the run that published the base baseline")
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, capture_output=True, text=True)
+    expected = f"id={restored[0]}\ncommit={commits[restored[1]]}\n" if restored else ""
+    assert (result.returncode, output.read_text()) == (0 if restored else 1, expected), result.stdout + result.stderr
+    error = f"::error::No measured Tests run on base {commits['base']} kept a live coverage-baseline artifact"
+    assert (error in result.stdout) == (restored is None)
+
+
+@pytest.mark.feature("coverage-ratchet-grades-from-the-nearest-measured-ancestor")
+def test_the_base_grader_and_the_hold_grade_the_commit_the_lookup_restored() -> None:
+    graded = "${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}"
+    for name in ("Check out the base grader", "Hold every line the base ran"):
+        assert _step("coverage-ratchet", name)["env"]["BASE"] == graded
 
 
 def test_coverage_ratchet_grades_a_batched_dev_push_against_the_previous_tip(tmp_path):

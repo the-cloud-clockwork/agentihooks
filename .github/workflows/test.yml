@@ -3658,15 +3658,8 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BASE: ${{ steps.base.outputs.commit }}
         run: |
-          ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...dev" --jq .status)
-          [[ "$ancestry" == ahead || "$ancestry" == identical ]] || { echo "::error::Base $BASE is outside dev history."; exit 1; }
-          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE&per_page=20" --jq '.workflow_runs[] | select((.event == "push" and .head_branch == "dev") or (.event == "merge_group" and (.head_branch | startswith("gh-readonly-queue/dev/")))) | "\(.id) \(.event)"')
-          while read -r run event; do
-            [[ -n "$run" ]] || continue
-            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
-            [[ "$kept" -gt 0 ]] || continue
-            jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
-            if ! jq -s -e --arg event "$event" '
+          measured() {
+            jq -s -e --arg event "$1" '
               [.[] | select(.name | startswith("unit ("))] as $units |
               (($units | length > 0 and all(.[]; .conclusion == "success") and
                 (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
@@ -3683,13 +3676,32 @@ jobs:
                 .name == "queue-baseline" and
                 any(.steps[]?; .name == "Record this run\u0027s coverage baseline" and .conclusion == "success") and
                 any(.steps[]?; .name == "Publish this run\u0027s coverage baseline" and .conclusion == "success")
-              end)' <<< "$jobs" > /dev/null; then
-              continue
-            fi
+              end)' > /dev/null
+          }
+          ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...dev" --jq .status)
+          [[ "$ancestry" == ahead || "$ancestry" == identical ]] || { echo "::error::Base $BASE is outside dev history."; exit 1; }
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE&per_page=20" --jq '.workflow_runs[] | select((.event == "push" and .head_branch == "dev") or (.event == "merge_group" and (.head_branch | startswith("gh-readonly-queue/dev/")))) | "\(.id) \(.event)"')
+          while read -r run event; do
+            [[ -n "$run" ]] || continue
+            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
+            [[ "$kept" -gt 0 ]] || continue
+            jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
+            measured "$event" <<< "$jobs" || continue
             echo "Restoring the coverage baseline of base $BASE from measured run $run"
             echo "id=$run" >> "$GITHUB_OUTPUT"
             exit 0
           done <<< "$runs"
+          published=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=coverage-baseline&per_page=100" --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "dev") | [.workflow_run.head_sha, .workflow_run.id]]')
+          candidates=$(git rev-list --first-parent --skip=1 --max-count=1000 "$BASE" -- | jq -R -r --argjson published "$published" '. as $commit | $published[] | select(.[0] == $commit) | "\(.[0]) \(.[1])"')
+          while read -r commit run; do
+            [[ -n "$run" ]] || continue
+            jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
+            measured push <<< "$jobs" || continue
+            echo "Restoring the coverage baseline of base $BASE from measured run $run of its nearest measured first parent ancestor $commit, because no run of the base kept one"
+            echo "id=$run" >> "$GITHUB_OUTPUT"
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
+            exit 0
+          done <<< "$candidates"
           echo "::error::No measured Tests run on base $BASE kept a live coverage-baseline artifact with successful measuring and publishing jobs."
           exit 1
 
@@ -3741,7 +3753,7 @@ jobs:
       - name: Check out the base grader
         id: grader
         env:
-          BASE: ${{ steps.restored.outputs.commit || steps.base.outputs.commit }}
+          BASE: ${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}
         run: |
           git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
           if [[ ! -f "$RUNNER_TEMP/base/tests/coverage_ratchet.py" ]]; then
@@ -3798,7 +3810,7 @@ jobs:
 
       - name: Hold every line the base ran
         env:
-          BASE: ${{ steps.restored.outputs.commit || steps.base.outputs.commit }}
+          BASE: ${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}
           HEAD_INPUT: ${{ steps.grader.outputs.input }}
         run: |
           base="$BASE"
