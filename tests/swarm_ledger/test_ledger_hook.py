@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm_ledger import ledger_hook
+from scripts.swarm_ledger import ledger_gate, ledger_hook
 from tests.swarm_ledger import legacy_page
 
 NAME = "engineer@a1-1"
@@ -152,8 +152,6 @@ def bind(folder: Path, doc: dict[str, Any]) -> None:
 
 
 def gate_decisions(folder: Path, monkeypatch: pytest.MonkeyPatch, doc: dict[str, Any], event: str) -> list[Any]:
-    import ledger_gate
-
     bind(folder, doc)
     seen = []
 
@@ -167,8 +165,6 @@ def gate_decisions(folder: Path, monkeypatch: pytest.MonkeyPatch, doc: dict[str,
 
 
 def ledger_gate_defaults() -> dict[str, int]:
-    import ledger_gate
-
     return dict(ledger_gate.DEFAULT_POLICY)
 
 
