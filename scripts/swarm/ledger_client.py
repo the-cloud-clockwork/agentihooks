@@ -232,6 +232,20 @@ class LedgerClient:
         found: list[dict[str, Any]] = [row for row in rows if url in pull_links(row)]
         return found
 
+    def tasks_where(
+        self,
+        slug: str,
+        ids: Iterable[str] = (),
+        states: Iterable[str] = (),
+        pinned: bool = False,
+        branched: bool = False,
+        fields: Iterable[str] = (),
+    ) -> list[dict[str, Any]]:
+        """The task rows matching every given filter, read by a narrow query instead of the whole ledger."""
+        query = where_query(ids, states, pinned, branched, fields)
+        rows: list[dict[str, Any]] = self._resource(slug, f"tasks?{urlencode(query)}")
+        return rows
+
     def freezes(self, slug: str) -> list[dict[str, Any]]:
         """The ledger's freeze and focus records, read without its tasks."""
         return self._resource(slug, "freezes", collection=True)
@@ -521,7 +535,14 @@ def where_query(
     fields: Iterable[str] = (),
 ) -> dict[str, str]:
     """The tasks collection query naming only the filters given."""
-    raise NotImplementedError((ids, states, pinned, branched, fields))
+    query = {
+        "ids": ",".join(ids),
+        "states": ",".join(states),
+        "pinned": "1" if pinned else "",
+        "branched": "1" if branched else "",
+        "fields": ",".join(fields),
+    }
+    return {key: value for key, value in query.items() if value}
 
 
 def _op(kind, by, **fields):

@@ -1,5 +1,6 @@
 import json
 import threading
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from . import resources
@@ -7,6 +8,9 @@ from . import resources
 PAGES_KEPT = 32
 ENCODER = json.JSONEncoder(ensure_ascii=False)
 LEDGERS_KEPT = 4
+SELECTORS = ("ids", "states", "pinned", "branched")
+SELECTION = (*SELECTORS, "fields")
+SELECTION_ONLY = "Only a plain tasks read takes a selection, and it names ids, states, pinned or branched"
 
 
 class Page(dict):
@@ -68,6 +72,8 @@ def read(repository: object, slug: str, query: dict[str, Any]) -> dict[str, Any]
         held.refresh(slug)
         if "targets" in query:
             return targeting(held.stored[2], query["targets"])
+        if query.keys() & set(SELECTION):
+            return selecting(held.stored[2], query)
         return held.page(query)
 
 
@@ -78,9 +84,38 @@ def targeting(rows: list[Any], url: str) -> dict[str, Any]:
     return resources.bounded({"data": data, "revision": resources.revision(found), "next_cursor": None})
 
 
-def selecting(rows: list[Any], query: dict[str, Any]) -> dict[str, Any]:
-    """The task rows matching every filter the query names, in one reply."""
-    raise NotImplementedError(query)
+def selecting(rows: Sequence[Mapping[str, Any]], query: dict[str, Any]) -> dict[str, Any]:
+    """The task rows matching every filter the query names: ids, states, a hive or workstation pin and a branch with
+    a pull request, each without its threads or cut to the named fields beside its id, in one reply."""
+    ids, states, fields = _listed(query.get("ids")), _listed(query.get("states")), _listed(query.get("fields"))
+    found = [
+        row
+        for row in rows
+        if isinstance(row, dict)
+        and (not ids or row.get("id") in ids)
+        and (not states or row.get("state") in states)
+        and ("pinned" not in query or bool(row.get("hive") or row.get("workstation")))
+        and ("branched" not in query or bool(row.get("branch") and row.get("pr_url")))
+    ]
+    reply = {"data": [_shown(row, fields) for row in found], "revision": resources.revision(found), "next_cursor": None}
+    bounded: dict[str, Any] = resources.bounded(reply)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return bounded
+
+
+def selection(path: str, query: dict[str, Any]) -> bool:
+    """Whether a query is a narrow selection of the tasks collection alone, naming at least one filter."""
+    return path == "tasks" and query.keys() <= set(SELECTION) and any(query.get(key) for key in SELECTORS)
+
+
+def _listed(value: object) -> frozenset[str]:
+    return frozenset(filter(None, str(value or "").split(",")))
+
+
+def _shown(row: dict[str, Any], fields: frozenset[str]) -> dict[str, Any]:
+    if fields:
+        return {key: row[key] for key in ("id", *sorted(fields)) if key in row}
+    shown: dict[str, Any] = resources.project({**row, "revision": resources.revision(row)})  # pyright: ignore[reportAssignmentType]
+    return shown
 
 
 def pull_links(row: dict[str, Any]) -> set[Any]:
