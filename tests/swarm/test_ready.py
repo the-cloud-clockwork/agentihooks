@@ -711,14 +711,16 @@ def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging,
     ) -> dict[str, Any]:
         return merge_queue.operate(action, url, github, admit=admit, journal=journal, priority=priority)
 
-    merging.run(queuer=queue)
-    assert merged_heads == [f"head={HEAD}"]
+    actions = merging.run(queuer=queue)
+    assert merged_heads == [f"head={HEAD}"], actions
     assert merging.run() == [f"task t1 done, {URL} merged", f"removed the worktree {TOP}"]
     assert merging.rows["t1"]["state"] == "done" and merging.rows["t1"]["awaiting"] == ""
     assert ready.record(merging.store, "sw", "t1") is None
 
 
-def refused(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+def refused(
+    action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+) -> dict[str, Any]:
     raise SwarmError("GraphQL: Pull request is not mergeable")
 
 
@@ -761,7 +763,9 @@ def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
 def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error):
     merging.pulls[URL] = GREEN
 
-    def failed(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def failed(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError(error)
 
     assert merging.run(queuer=failed) == [
@@ -789,7 +793,9 @@ def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error)
 def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(merging, error):
     merging.pulls[URL] = GREEN
 
-    def down(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def down(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError(error)
 
     for _ in range(6):
@@ -798,7 +804,9 @@ def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(mergi
     assert merging.rows["t1"]["state"] == "pr"
 
 
-def timed_out(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+def timed_out(
+    action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+) -> dict[str, Any]:
     raise SwarmError("GitHub API: timed out")
 
 
@@ -871,7 +879,9 @@ def test_outage_time_never_counts_toward_a_released_pull_request_green_hold(
 def test_a_pull_request_into_another_base_counts_as_a_refusal(merging):
     merging.pulls[URL] = GREEN
 
-    def elsewhere(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def elsewhere(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError("swarm merge queue operations require a pull request into dev")
 
     merging.run(queuer=elsewhere)
@@ -1461,7 +1471,9 @@ def test_an_enqueue_github_refuses_reopens_the_task_awaiting_fix(merging):
     merging.pulls[URL] = GREEN
     error = "GitHub refused to enqueue the pull request"
 
-    def refused_enqueue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def refused_enqueue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError(error)
 
     assert merging.run(queuer=refused_enqueue) == [
@@ -1588,7 +1600,9 @@ def test_a_requeue_the_queue_refuses_records_no_requeue_comment(merging):
     left_queue_green(merging)
     merging.exits.failures = []
 
-    def refuse(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def refuse(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError("timed out")
 
     for minute in range(ready.QUEUE_TRIES + 1):
@@ -1797,7 +1811,9 @@ def test_a_failed_requeue_raises_a_ledger_alert(merging):
     dequeued_transient(merging)
     merging.pulls[URL] = GREEN
 
-    def refuse(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def refuse(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         merging.queued.append((action, url))
         raise SwarmError("timed out")
 
