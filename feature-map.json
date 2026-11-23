@@ -1188,7 +1188,7 @@
       "id": "metrics-spool-drops-shipped-ledger-snapshots",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-ephemeral-disk",
-      "behaviour": "A ledger metrics record drops the ledger snapshot rows the spool has already shipped, so the controller's metrics spool holds only the newest snapshot cycle instead of a day of them, while unshipped snapshot rows and shipped rows of every other table stay.",
+      "behaviour": "A ledger metrics record drops the ledger snapshot rows the spool has already shipped, so the controller's metrics spool holds the newest snapshot cycle plus any cycle not yet shipped instead of a day of them, while unshipped snapshot rows and shipped rows of every other table stay.",
       "seam": "metrics_ledger.record against a metrics outbox whose flush shipped or failed to ship earlier snapshot cycles",
       "tests": [
         "tests/swarm/test_metrics_ledger.py::test_unshipped_snapshots_and_shipped_ledger_events_survive_the_next_record",
