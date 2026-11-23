@@ -14061,6 +14061,27 @@
       ]
     },
     {
+      "id": "ledger-focus-task-pages",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "One ledger API list read, GET focus/<target>/tasks or agentihooks api get focus/<target>/tasks, serves the tasks under one focus target that are not done, each with its lane, state and claim gate verdict, through the cursor paging every collection uses, so a target one reply cannot hold is read whole in pages; a target that does not exist reads 404 resource_missing. A name that is itself a plan node, such as a task whose id is tasks, keeps its one reply read. A list that changes between two pages answers 409 and the client reads it again from its first page, giving up with the conflict after its retries, because the export holds no verdicts. The command line takes focus/<target> and reads focus/<target>/tasks to its end. Past the reply limit the orders read, the focus list and the read of one target each name the command line read that fits.",
+      "seam": "scripts.swarm_ledger.api.routes.ledger_read at focus/<target>/tasks, focus, focus/<target> and orders through the ledger swarm port focus_check.task_rows, ResourceClient.collection, and agentihooks api get",
+      "tests": [
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_target_one_reply_cannot_hold_is_read_whole_through_its_task_pages",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_page_of_the_task_list_carries_the_cursor_to_the_next_page",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_cursor_of_a_task_list_that_changed_is_refused_as_a_conflict",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_task_list_holds_the_unfinished_tasks_of_its_target_and_no_done_one",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_task_list_under_no_target_answers_404",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_node_whose_id_is_tasks_keeps_its_one_reply_read_and_lists_its_tasks_one_name_down",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_task_list_that_changes_between_two_pages_is_read_again_from_its_first_page",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_task_list_that_keeps_changing_gives_up_with_the_conflict",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_get_takes_a_focus_target_and_its_task_list",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_get_refuses_a_focus_item_that_names_no_target",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_get_reads_a_focus_target_in_one_reply_and_its_task_list_to_the_end",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_a_focus_read_past_the_reply_limit_names_the_command_line_read_that_fits"
+      ]
+    },
+    {
       "id": "master-handoff-carries-orders",
       "origin": "regression",
       "ordered_at": "2026-11-21",
