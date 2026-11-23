@@ -50,7 +50,8 @@ THIN: dict[str, Any] = {
 FULL = (
     "Add the step body seam scripts.tick.steps.thin so every open engineer task with a thin text gets one planner "
     "enhancement task and the master hears about it once, while tasks that already carry a plan stay untouched by "
-    "the pass. Done when the pull request is merged."
+    "the pass. Tests observe scripts.tick.steps.thin writes one planner enhancement per thin task. "
+    "Done when the pull request is merged."
 )
 
 
