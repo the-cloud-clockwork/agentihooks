@@ -19,11 +19,11 @@ worker's PriorityClass is a cluster object outside that module;
 
 | Command | Module form | What it does today |
 |---|---|---|
+| `agentihooks ci lab flakes --out FOLDER [--hours N] [--objects ROOT]` | none | Copies the flake rows the lab stored in the window into `FOLDER/lab-flakes.jsonl` for the flake budget (see [Export the lab flake rows](#export-the-lab-flake-rows)) |
 | `agentihooks ci-lab-scheduler --self-test` | `python -m scripts.ci_lab scheduler --self-test` | Checks the scheduler contract offline and prints it as JSON |
 | `agentihooks ci-lab-scheduler [--interval S] [--passes N]` | `python -m scripts.ci_lab scheduler [--interval S] [--passes N]` | Runs the scheduler service: reads the runtime config, serves the lease API, `/capacity` and `/grades/<sha>` on port 8800 and `/metrics` on 9108, and runs one grading pass every interval (2 seconds), forever unless `--passes` is set |
 | `agentihooks ci-lab-worker --self-test` | `python -m scripts.ci_lab worker --self-test` | Refuses any GitHub App variable, checks the worker contract offline and prints it as JSON |
 | `agentihooks ci-lab-worker` | `python -m scripts.ci_lab worker` | Runs the worker service: builds the pod from the worker environment, leases units from the scheduler and runs each through the adapter of its kind (see [Worker executors](#worker-executors)) until SIGTERM, then lets running units drain; serves `/metrics` on 9108 from its own registry until the drain ends, and exits at start when it cannot bind 9108 |
-| `agentihooks ci lab flakes --out FOLDER [--hours N] [--objects ROOT]` | none | Copies the flake rows the lab stored in the window into `FOLDER/lab-flakes.jsonl` for the flake budget (see [Export the lab flake rows](#export-the-lab-flake-rows)) |
 
 The self tests make no network, Redis, object store or GitHub calls. They exit 0 when the
 contract holds and 1 with the reason on standard error when it does not. A self test fails when
