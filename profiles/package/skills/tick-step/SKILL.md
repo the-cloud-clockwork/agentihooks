@@ -34,9 +34,11 @@ python -m scripts.tick.new_step --check <name>
   reader, `(tick, get)`, returning the step's action lines. Fill its `needs`,
   `reads` and `writes` with what the body uses.
 - A health check may keep its own value between passes, only through
-  `scripts/swarm/health/kept.py` and under a key named for that check. That
-  value is private to its step and is not declared in `writes`. The moment
-  another step reads it, it is a declared domain written through a port.
+  `scripts/swarm/health/kept.py` and under a key named for that check. Only
+  the check's own module reads and writes it: its observe half writes it in
+  the check's step and its findings half reads it in the health findings
+  step, so it is not declared in `writes`. A value any other module reads is
+  a declared domain written through a port.
 - A step written as a `WriteStep` or a `Step` dataclass acts only through
   `ctx.tools`, the view of the ports it declares in `effects`, reads the pass
   view with `ctx.view.read(domain, key)`, never `ledger.state`, finishes under

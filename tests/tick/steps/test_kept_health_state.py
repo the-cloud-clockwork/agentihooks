@@ -1,17 +1,39 @@
 """The health checks that keep state between tick passes store it as one JSON text under their own key of the swarm:
 the time of the pass first, their rows after it."""
 
+import re
+from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
+import yaml
 
 from scripts.swarm.health import focus_unclaimed, kept, order_waiting
+from scripts.swarm.store import SwarmConfig
 from tests.swarm.test_freeze import doc, record, task
 from tests.swarm.test_order_check import ORDER, ledger_doc
 from tests.tick.steps.test_focus_unclaimed import store
 
 SLUG = "sw"
 START = 1_800_000_000_000
+ROOT = Path(__file__).resolve().parents[3]
+HEALTH = ROOT / "scripts" / "swarm" / "health"
+RULE = ROOT / ".semgrep" / "features" / "health-kept-state-one-helper.yml"
+BEFORE_THE_HELPER = frozenset(
+    {
+        "early_ends",
+        "merge_stall",
+        "night_watch",
+        "ordering_dependencies",
+        "panic_call",
+        "prompt_backlog",
+        "spawn_stall",
+        "stall_blockers",
+        "step_starvation",
+        "urgent_hold",
+    }
+)
 _fixtures = (store,)
 
 
@@ -53,8 +75,6 @@ def test_the_order_check_keeps_its_waits_as_one_text_under_its_key(store: Any) -
 
 @pytest.mark.feature("health-kept-state-one-helper")
 def test_each_check_keeps_its_state_apart_from_the_other_and_from_another_swarm(store: Any) -> None:
-    from scripts.swarm.store import SwarmConfig
-
     store.create(SwarmConfig("other", "/repo", max_eng=2, max_ci=1))
     focus_unclaimed.observe(store, SLUG, doc(tasks=[task("t1")]), 7)
     assert (stored(store, "focus-unclaimed"), stored(store, "order-waiting")) == ('{"at": 7, "tasks": {}}', None)
@@ -70,3 +90,25 @@ def test_the_helper_reads_empty_then_what_it_wrote_under_the_key_of_that_swarm(s
     assert kept.read(store, SLUG, "other-check") == {}
     kept.write(store, SLUG, "any-check", 10)
     assert stored(store, "any-check") == '{"at": 10}'
+
+
+@pytest.mark.feature("health-kept-state-one-helper")
+def test_the_rule_excuses_only_checks_that_still_keep_state_on_their_own_and_did_before_the_helper() -> None:
+    rule: dict[str, Any] = yaml.safe_load(RULE.read_text())["rules"][0]
+    excused = {Path(path).stem for path in rule["paths"]["exclude"]} - {"kept"}
+    assert excused <= BEFORE_THE_HELPER
+    own = re.compile(r"redis\.(?:get|set)\(")
+    assert [name for name in sorted(excused) if not own.search((HEALTH / f"{name}.py").read_text())] == []
+
+
+@pytest.mark.feature("health-kept-key-own-module")
+@pytest.mark.parametrize("check", [focus_unclaimed, order_waiting])
+def test_only_the_check_names_the_key_of_the_state_it_keeps(check: ModuleType) -> None:
+    own = Path(str(check.__file__)).resolve()
+    named = [
+        path.relative_to(ROOT).as_posix()
+        for folder in ("scripts", "hooks")
+        for path in sorted((ROOT / folder).rglob("*.py"))
+        if path.resolve() != own and f'"{check.KEY}"' in path.read_text()
+    ]
+    assert named == []

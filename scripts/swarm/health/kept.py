@@ -1,6 +1,7 @@
 """The state a health check keeps between tick passes: one JSON value under the check's own key of the swarm.
 
-The value is private to the check's step, so the step declares no write for it. A value another step reads is a
+The value belongs to the check's module alone: its observe half writes it in the check's own step and its findings
+half reads it in the health findings step, so no step declares a write for it. A value another module reads is a
 declared domain, written through a port, and does not belong here.
 """
 

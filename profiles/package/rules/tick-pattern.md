@@ -8,7 +8,7 @@ description: A swarm tick step is added or changed only through the tick pattern
 A tick task loads the `tick-step` skill first. A tick step is:
 
 1. A registered step in `scripts/tick/steps/<module>.py` declaring name, group, lane, needs, reads, writes, effects and feature, with a floor row in `budgets.FLOORS` at an interval of 60, 120 or 600.
-2. A body declaring what it reads and writes, reaching other systems only through the ports in `effects`; no new function in `scripts/swarm/tick.py`. One exception: a health check keeps its own value between passes through `scripts/swarm/health/kept.py`, undeclared until another step reads it.
+2. A body declaring what it reads and writes, reaching other systems only through the ports in `effects`; no new function in `scripts/swarm/tick.py`. One exception: a health check keeps its own value between passes through `scripts/swarm/health/kept.py`, read and written by that check's module alone and undeclared; a value another module reads is a declared domain through a port.
 3. A scenario row in `tests/swarm/tick_scenarios/steps.json`, a feature test in `tests/tick/steps/` and a `feature-map.json` entry.
 4. A catalogue entry: `python -m scripts.tick.catalogue check` holds the registry against the feature map and the scenario index.
 5. One kind of change per pull request; a move cites the tick equivalence and planted fault run ids.
