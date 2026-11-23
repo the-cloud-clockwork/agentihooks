@@ -64,8 +64,8 @@ def _codex_full(harnesses: tuple[str, ...]) -> autoscale.Decision:
     )
 
 
-def _pinned_review(codex_sessions: int) -> dict:
-    config = SwarmConfig(SLUG, "/repo", max_eng=0, max_ci=0, max_plan=0, max_review=2, lanes={"review": REVIEWER})
+def _review_placement(codex_sessions: int, lanes: dict[str, dict[str, str]]) -> dict:
+    config = SwarmConfig(SLUG, "/repo", max_eng=0, max_ci=0, max_plan=0, max_review=2, lanes=lanes)
     accounts = [account("a", cap=3), account("cx", cap=3, sessions=codex_sessions, harness="codex")]
     return capacity.calculate(config, accounts, [], {"eng": 0, "ci": 0, "plan": 0, "review": 2})
 
@@ -179,7 +179,7 @@ def test_autoscaled_holds_the_review_share_and_sizes_the_review_cap() -> None:
 
 @pytest.mark.feature("swarm-review-affinity-quota")
 def test_a_codex_only_review_lane_is_placed_only_on_codex_while_claude_has_room() -> None:
-    decision = _pinned_review(codex_sessions=0)
+    decision = _review_placement(codex_sessions=0, lanes={"review": REVIEWER})
     assert decision["allocation"]["review"] == {"claude": 0, "codex": 2}
     assert [slot["harness"] for slot in decision["placements"]["review"]] == ["codex", "codex"]
     assert decision["placeable"]["claude"] == 3
@@ -187,10 +187,17 @@ def test_a_codex_only_review_lane_is_placed_only_on_codex_while_claude_has_room(
 
 @pytest.mark.feature("swarm-review-affinity-quota")
 def test_a_codex_only_review_lane_waits_while_codex_is_full() -> None:
-    decision = _pinned_review(codex_sessions=3)
+    decision = _review_placement(codex_sessions=3, lanes={"review": REVIEWER})
     assert decision["allocation"]["review"] == {"claude": 0, "codex": 0}
     assert decision["placements"]["review"] == []
     assert decision["placeable"]["claude"] == 3
+
+
+@pytest.mark.feature("swarm-review-affinity-quota")
+def test_an_unpinned_review_lane_still_takes_claude_seats_while_codex_is_full() -> None:
+    decision = _review_placement(codex_sessions=3, lanes={})
+    assert decision["allocation"]["review"] == {"claude": 2, "codex": 0}
+    assert [slot["harness"] for slot in decision["placements"]["review"]] == ["claude", "claude"]
 
 
 @pytest.mark.feature("swarm-review-affinity-quota")

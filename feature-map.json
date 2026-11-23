@@ -14299,6 +14299,7 @@
         "tests/swarm/test_review_affinity_quota.py::test_autoscaled_holds_the_review_share_and_sizes_the_review_cap",
         "tests/swarm/test_review_affinity_quota.py::test_a_codex_only_review_lane_is_placed_only_on_codex_while_claude_has_room",
         "tests/swarm/test_review_affinity_quota.py::test_a_codex_only_review_lane_waits_while_codex_is_full",
+        "tests/swarm/test_review_affinity_quota.py::test_an_unpinned_review_lane_still_takes_claude_seats_while_codex_is_full",
         "tests/swarm/test_review_affinity_quota.py::test_the_review_lane_launches_with_its_codex_model_and_xhigh_effort",
         "tests/swarm/test_review_affinity_quota.py::test_a_stuck_codex_never_moves_the_review_lane_pin",
         "tests/swarm/test_review_affinity_quota.py::test_the_review_share_defaults_to_twenty_and_loads_for_existing_swarms",
