@@ -84,3 +84,71 @@ def test_no_open_order_has_an_explicit_empty_state(orders_page: Any) -> None:
     tab, _ = orders_page
     tab.locator("#orders .empty").wait_for()
     assert tab.locator("#orders").inner_text() == "No open operator orders."
+
+
+@pytest.mark.feature("ledger-orders-panel")
+def test_every_open_order_is_rendered_oldest_first_with_safe_text(orders_page: Any) -> None:
+    tab, doc = orders_page
+    tab.locator("#orders > li .item-title").wait_for()
+    doc["phases"].append(
+        {"id": "earlier", "title": "Earlier <script>order</script>", "ordered": {"at": 2, "by": "operator"}}
+    )
+    tab.wait_for_function("() => document.querySelectorAll('#orders > li .item-title').length === 2")
+    rows = tab.locator("#orders > li")
+    assert rows.locator(".item-title").all_text_contents() == [
+        "Earlier <script>order</script>",
+        "Finish the operator console",
+    ]
+    assert rows.nth(0).locator(".task-meta span").all_text_contents() == ["0 claimable", "0 busy", "0 done"]
+    assert rows.nth(0).locator("blockquote").count() == 0
+    assert rows.locator("script").count() == 0
+
+
+@pytest.mark.feature("ledger-orders-panel")
+def test_order_counts_refresh_and_closed_orders_leave_the_panel(orders_page: Any) -> None:
+    tab, doc = orders_page
+    tab.locator("#orders > li .item-title").wait_for()
+    doc["tasks"][0]["state"] = "claimed"
+    tab.wait_for_function(
+        "() => document.querySelector('#orders .task-meta').textContent === '0 claimable2 busy1 done'"
+    )
+    assert tab.locator("#orders .task-meta span").all_text_contents() == ["0 claimable", "2 busy", "1 done"]
+    doc["phases"][0]["done"] = True
+    tab.locator("#orders .empty").wait_for()
+    assert tab.locator("#orders").inner_text() == "No open operator orders."
+    assert tab.locator("#orders-count").inner_text() == "· 0 open"
+
+
+@pytest.mark.feature("ledger-orders-panel")
+def test_failed_read_preserves_orders_and_recovers_on_the_next_update(orders_page: Any) -> None:
+    tab, doc = orders_page
+    tab.locator("#orders > li .item-title").wait_for()
+
+    def refuse(call: Any) -> None:
+        call.fulfill(status=503, json={"error": {"message": "Unavailable"}})
+
+    tab.context.route("**/orders", refuse)
+    doc["overview"] = "An update while the orders read is unavailable."
+    tab.wait_for_function(
+        "() => document.querySelector('#orders-status').textContent === 'Operator orders unavailable.'"
+    )
+    assert tab.locator("#orders .item-title").inner_text() == "Finish the operator console"
+    assert tab.locator("#orders .empty").count() == 0
+    tab.context.unroute("**/orders", refuse)
+    doc["tasks"][0]["state"] = "done"
+    tab.wait_for_function(
+        "() => document.querySelector('#orders .task-meta').textContent === '0 claimable1 busy2 done'"
+    )
+    assert tab.locator("#orders-status").inner_text() == ""
+
+
+@pytest.mark.feature("ledger-orders-panel")
+def test_order_panel_fold_choice_survives_reload(orders_page: Any) -> None:
+    tab, _ = orders_page
+    tab.locator("#orders > li .item-title").wait_for()
+    tab.locator("#orders-box > summary").click()
+    assert not tab.locator("#orders-box").evaluate("(box) => box.open")
+    tab.reload()
+    loaded(tab)
+    assert not tab.locator("#orders-box").evaluate("(box) => box.open")
+    assert tab.locator("#sec-orders").count() == 1

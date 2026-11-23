@@ -3,6 +3,7 @@ import threading
 import time
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -125,7 +126,8 @@ def note(n):
     return {"op": "add", "thread": "notes", "id": f"n-{n}", "text": f"streamed note {n}"}
 
 
-def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser, live):
+@pytest.mark.feature("ledger-orders-panel")
+def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser: Any, live: Any) -> None:
     base, status = live
     context = browser.new_context(viewport={"width": 1440, "height": 900})
     requests = []
@@ -142,7 +144,15 @@ def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser,
         tab.wait_for_function("() => document.body.textContent.includes('streamed note 1')", timeout=5000)
         tab.wait_for_function("() => document.querySelector('#swarm-state').textContent === 'paused'", timeout=5000)
     time.sleep(3)
-    reads = [(method, path) for method, path in requests if path.startswith("/api/") and path != "/api/v1/layout"]
+    orders_path = f"/api/v1/ledgers/{SLUG}/orders"
+    orders_reads = [method for method, path in requests if path == orders_path]
+    assert 2 <= len(orders_reads) <= 6
+    assert set(orders_reads) == {"GET"}
+    reads = [
+        (method, path)
+        for method, path in requests
+        if path.startswith("/api/") and path not in ("/api/v1/layout", orders_path)
+    ]
     assert sorted(reads) == sorted(
         [
             ("GET", f"/api/v1/ledgers/{SLUG}/events"),
