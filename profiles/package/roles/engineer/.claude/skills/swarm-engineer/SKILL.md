@@ -72,6 +72,23 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
   `agentihooks msg close <id> cancel "<why>"`.
 - Never leave an item open when your life ends.
 
+## Pull request body
+
+Before the first push, put the review details under level three headings within
+the task recon's six sections: Assumptions, What could break, What will not break,
+Features that may disconnect, Dependencies, Resources, Why the fix, Why the
+feature, and Notes for the reviewer. Use observed recon findings; state an
+explicit absence where a section does not apply.
+
+Prepare the summary and evidence in a body file in the task work folder. Run
+`agentihooks-pr-body fill --recon RECON --body BODY`, then
+`agentihooks-pr-body check --body BODY`. The installed command uses the
+AgentiHooks interpreter independently of the target repository. Use that file with
+`gh pr create --body-file BODY` at the first draft creation and with body updates.
+The filler retains unrelated body sections. When recon changes, fill and check
+the existing file again. Done when all nine sections contain recon details and
+the check passes. Reviewers read these sections first.
+
 ## Work
 
 A tick task (one that adds, moves or changes a tick step) loads the

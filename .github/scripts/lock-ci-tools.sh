@@ -9,7 +9,7 @@ lock() {
     --custom-compile-command 'bash .github/scripts/lock-ci-tools.sh'
 }
 
-lock parser pyyaml==6.0.3
+lock parser pyyaml==6.0.3 markdown-it-py==4.2.0 mdurl==0.1.2
 lock audit pip-audit==2.10.1 'platformdirs!=4.14.8'
 lock semgrep semgrep==1.177.0 pyyaml==6.0.2
 lock build build==1.6.1 setuptools==84.2.1 setuptools-scm==10.3.4 wheel==0.48.0
