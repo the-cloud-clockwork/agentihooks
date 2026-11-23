@@ -5963,6 +5963,25 @@
       ]
     },
     {
+      "id": "lab-flakes-export",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/flake-lab-export",
+      "behaviour": "agentihooks ci lab flakes copies the rows of every lab flakes object written within the window, 168 hours by default, from a local objects folder or the lab object store named by the CI_LAB_MINIO settings, into one lab-flakes.jsonl in the output folder, in path order. The flake budget reads that file and counts a flaky unit's test once however many exports reread it, because the run of a lab row is the unit key. An empty store writes an empty file and exits 0; a missing setting, an object store error, a listing past the page cap or an objects path that is not a folder prints one plain line and exits 1 without writing a file; a missing output folder or a window outside 1 to 168 hours is refused with exit 2.",
+      "seam": "scripts.ci_lab.flakes.declare and command, reached through the ci delegate scripts.ci_lab.evidence.ci, over a local object store or scripts.ci_lab.scheduler.storage, with the written file read by tests.flake_budget.main",
+      "tests": [
+        "tests/ci_lab/test_flakes.py::test_two_exports_of_one_flaky_unit_count_its_test_once_in_the_flake_budget",
+        "tests/ci_lab/test_flakes.py::test_an_empty_store_writes_an_empty_file_and_the_budget_exits_zero",
+        "tests/ci_lab/test_flakes.py::test_the_window_keeps_an_object_written_at_its_start_and_drops_one_a_second_older",
+        "tests/ci_lab/test_flakes.py::test_the_s3_listing_follows_continuation_pages_honours_the_store_prefix_and_keeps_window_objects_in_path_order",
+        "tests/ci_lab/test_flakes.py::test_a_missing_store_setting_exits_one_naming_it",
+        "tests/ci_lab/test_flakes.py::test_an_object_store_error_exits_one_with_one_plain_line",
+        "tests/ci_lab/test_flakes.py::test_an_objects_path_that_is_not_a_folder_exits_one_naming_it",
+        "tests/ci_lab/test_flakes.py::test_ci_lab_flakes_refuses_a_missing_output_folder_and_a_window_outside_the_budget_history",
+        "tests/ci_lab/test_flakes.py::test_ci_lab_flakes_resolves_through_the_ci_delegate_and_prints_the_written_file",
+        "tests/ci_lab/test_flakes.py::test_ci_lab_flakes_reads_the_object_store_named_by_the_environment_and_exits_one_on_its_error"
+      ]
+    },
+    {
       "id": "selectors-read-outside-files",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2636",
