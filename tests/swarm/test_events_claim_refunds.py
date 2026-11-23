@@ -326,7 +326,7 @@ def test_a_reachable_agent_is_retired_through_its_runtime_with_its_task_scratch_
     runtime = SimpleNamespace(retire=lambda agent, **kwargs: retired.append((agent.name, kwargs)) or True)
     monkeypatch.setattr(tick_module.reaper, "scratch_homes", lambda slug, task: [f"{slug}/{task}"])
 
-    assert tick_module._retire_or_stop(SLUG, runtime, AgentRecord(name="a1", lane="eng", task="t1"), "idle")
+    assert tick_module._retire_or_stop(SLUG, runtime, AgentRecord(name="a1", lane="eng", task="t1"), "idle", Mock())
 
     assert retired == [("a1", {"homes": [f"{SLUG}/t1"]})]
 
@@ -910,47 +910,63 @@ def test_a_stop_the_bus_takes_for_a_dropped_agent_keeps_nothing_pending(
 
 
 @pytest.mark.feature("member-tick-stop-forwarded-by-hub")
+@pytest.mark.parametrize("reason", ["ended", "idle", "mismatch", "refused", "revoked", "stuck"])
+@pytest.mark.parametrize("refuse", [False, True])
 def test_a_member_bind_tick_parks_its_stop_until_the_hub_sends_it(
     env: tuple[RedisStore, Any, Any],
     bus: Bus,
     seat: Callable[..., AgentRecord],
     monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+    refuse: bool,
 ) -> None:
-    store, _, _ = env
+    store, ledger, rt = env
     agent, event = launched(env, bus, seat)
     spoke_started(bus)
-    finish(env, agent, "finished")
     original = execution_stop.stop
+    refusal = Mock(side_effect=[ConnectionError("controller stop refused"), None] if refuse else [None])
 
-    def send(controller: Bus, slug: str, stopped: AgentRecord, reason: str) -> str:
+    def send(controller: Bus, slug: str, stopped: AgentRecord, why: str) -> str:
         if controller is not bus:
             raise PermissionError("member cannot publish execution stops")
-        return original(controller, slug, stopped, reason)
+        refusal()
+        return original(controller, slug, stopped, why)
 
     sender = Mock(side_effect=send)
     monkeypatch.setattr(execution_stop, "stop", sender)
     monkeypatch.setenv(BIND_ENV, "1")
-
-    reap_pass(env, NOW + 1)
+    if reason == "ended":
+        finish(env, agent, "finished")
+        reap_pass(env, NOW + 1)
+    elif reason in WATCH_FREES:
+        WATCH_FREES[reason](SLUG, store, ledger, rt, {row["id"]: row for row in ledger.tasks(SLUG)}, agent, NOW + 1)
+    else:
+        monkeypatch.setattr(rt, "retire", Mock(return_value=False))
+        retire(reason, env, agent)
     reap_pass(env, NOW + 2)
 
     sender.assert_not_called()
-    held = json.loads(pending_stops(store)[agent.execution_id])
+    queued = pending_stops(store)
+    held = json.loads(queued[agent.execution_id])
     assert (held["agent"]["execution_id"], held["agent"]["name"], held["reason"]) == (
         agent.execution_id,
         agent.name,
-        "ended",
+        reason,
     )
-    assert [seated.name for seated in store.agents(SLUG)] == [agent.name]
+    assert [seated.name for seated in store.agents(SLUG)] == ([agent.name] if reason == "ended" else [])
     assert sent_stops(bus, agent) == []
 
     hub = reconciler.Reconciler(bus, store, clock=lambda: NOW + 3)
+    if refuse:
+        with pytest.raises(RuntimeError, match="controller stop refused"):
+            hub.poll()
+        assert pending_stops(store) == queued
     hub.poll()
 
-    assert sender.call_count == 1
+    assert sender.call_count == 1 + int(refuse)
     assert sender.call_args.args[0] is bus
     sent = sent_stops(bus, agent)
-    assert [(stop.key, stop.cause, stop.data["reason"]) for stop in sent] == [(agent.execution_id, event.id, "ended")]
+    assert [(stop.key, stop.cause, stop.data["reason"]) for stop in sent] == [(agent.execution_id, event.id, reason)]
     assert pending_stops(store) == {}
     hub.poll()
-    assert sender.call_count == 1
+    assert sender.call_count == 1 + int(refuse)
