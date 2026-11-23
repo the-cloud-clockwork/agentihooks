@@ -7,10 +7,12 @@ from typing import Any
 import pytest
 from redis.exceptions import RedisError
 
-from scripts.ci_lab import budget, scheduler
+from scripts.ci_lab import budget, scheduler, shadow
+from scripts.ci_lab.digests import Toolchain
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.webhooks import HeadEvent, envelope, head_events
+from scripts.dep_manifest import _git
 from scripts.events.envelope import Envelope
 from tests.ci_lab.test_scheduler import (
     ACTOR,
@@ -26,10 +28,15 @@ from tests.ci_lab.test_scheduler import (
     Inbox,
     Lab,
     Run,
+    _commit,
+    _no_tests,
+    _unknown,
     fake_redis,
     scrape,
 )
+from tests.ci_lab.test_scheduler import origin as origin
 
+ROOT = Path(__file__).resolve().parents[2]
 GITHUB = "https://github.com/the-cloud-clockwork/agentihooks"
 OTHER = "https://github.com/acme/widgets"
 LAB_APP = "agentihooks-lab"
@@ -110,7 +117,7 @@ def test_the_built_scheduler_counts_a_lab_verdict_that_disagrees_with_actions_on
 ) -> None:
     monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({ACTOR}))
     monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy())
-    monkeypatch.setattr(scheduler.MirrorExpander, "static_jobs", lambda self, repo: frozenset({"lint"}), raising=False)
+    monkeypatch.setattr(scheduler.MirrorExpander, "static_jobs", lambda self, repo: frozenset({"lint"}))
     monkeypatch.setattr(scheduler, "worker_pods", lambda found: FakeKube())
     environ = {
         scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
@@ -131,3 +138,41 @@ def test_the_built_scheduler_counts_a_lab_verdict_that_disagrees_with_actions_on
     exposition = scrape(Run(Lab(client, objects, Inbox(), Expander({})), built), 1000)
     assert '\nci_lab_verdict_mismatch_total{gate="lint"} 1.0\n' in exposition
     assert client.keys(f"agentihooks-ci:shadow:lint:{HEAD_B}") == []
+
+
+@pytest.mark.feature("lab-completed-check-shadow")
+def test_a_scheduler_built_without_the_lab_app_acknowledges_completed_checks_unrecorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({ACTOR}))
+    monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy())
+    monkeypatch.setattr(scheduler, "worker_pods", lambda found: FakeKube())
+    environ = {
+        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
+        scheduler.MIRROR_STORE: str(tmp_path / "stores"),
+        scheduler.REPOSITORY: f"{GITHUB}.git",
+    }
+    deliveries = [Delivery(completed_check("lint", "success"))]
+    client = fake_redis()
+    spending = budget.Budget(client, lambda: 1000, budget.Policy(100.0, {}))
+    built = scheduler.build(environ, client, LocalObjects(tmp_path / "objects"), Consumer([*deliveries]), spending)
+    built.tick(1000)
+    assert [delivery.acked for delivery in deliveries] == [True]
+    assert client.keys("agentihooks-ci:shadow*") == []
+
+
+@pytest.mark.feature("lab-completed-check-shadow")
+def test_the_mirror_expander_reads_the_static_gate_ids_of_dev_as_the_shadow_report_reads_a_tree(
+    tmp_path: Path, origin: tuple[Path, str, str]
+) -> None:
+    repo, _, _ = origin
+    folder = ROOT / ".github/workflows"
+    found = [*folder.glob("*.yml"), *folder.glob("*.yaml")]
+    _commit(repo, {f".github/workflows/{path.name}": path.read_text() for path in found})
+    node = tmp_path / "node"
+    _git(tmp_path, "init", "-q", "--bare", str(node))
+    toolchain = Toolchain("3.12", {}, "", "", "", {})
+    expander = scheduler.MirrorExpander(node, tmp_path / "stores", toolchain, _no_tests, _unknown)
+    gates = expander.static_jobs(f"file://{repo}")
+    assert "lint" in gates
+    assert gates == shadow.static_jobs(ROOT)

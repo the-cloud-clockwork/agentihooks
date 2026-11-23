@@ -2594,7 +2594,6 @@ class FakeChecks:
 def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({repo}))
     monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy(lost=len(repo)))
-    monkeypatch.setattr(scheduler.MirrorExpander, "static_jobs", lambda self, repo: frozenset(), raising=False)
     monkeypatch.setattr(scheduler, "Checks", FakeChecks)
     kube = FakeKube()
     pods_of: list[Mapping[str, str]] = []
