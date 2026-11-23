@@ -111,15 +111,15 @@ def focus_read(services: Services, slug: str, path: str) -> dict[str, Any]:
     def read(state: dict[str, Any], fix: str) -> Any:
         return ports.swarm().focus_check.read(state, path, fix, int(time.time() * 1000))
 
-    return judged(services, slug, read, path == "focus")
+    return judged_reply(services, slug, read, path == "focus")
 
 
 def orders_read(services: Services, slug: str) -> dict[str, Any]:
     """Every open operator order with the claim gate verdict on each unfinished task under it."""
-    return judged(services, slug, ports.swarm().order_check.read, True, ORDERS_TOO_LARGE)
+    return judged_reply(services, slug, ports.swarm().order_check.read, True, ORDERS_TOO_LARGE)
 
 
-def judged(
+def judged_reply(
     services: Services, slug: str, read: Callable[[dict[str, Any], str], Any], listed: bool, too_large: str = ""
 ) -> dict[str, Any]:
     """The reply of a read that judges the ledger state under the swarm's fix phase: its data and their revision,
