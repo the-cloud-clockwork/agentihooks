@@ -232,17 +232,20 @@ class FencedRuntime:
         return room(config) if room else 1
 
     def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> "Placed":
-        lease.require_epoch(self.store, self.slug, self.held.epoch)
-        task = _master_task(lane, task)
-        try:
-            return self._changing(self._spawn, config, lane, name, task)
-        except BaseException:
-            from scripts.hive import admission
-            from scripts.swarm.commands import hive_id
+    lease.require_epoch(self.store, self.slug, self.held.epoch)
+    task = _master_task(lane, task)
+    try:
+        return self._changing(self._spawn, config, lane, name, task)
+    except BaseException as exc:
+        from scripts.hive import admission
+        from scripts.swarm.commands import hive_id
+        from scripts.swarm.tick import SpawnError
 
-            local_slots.release(self.store, hive_id(), self.slug, name)
-            admission.release(self.store.redis, hive_id(), f"{self.slug}/{name}")
+        if isinstance(exc, SpawnError) and exc.status == "pending":
             raise
+        local_slots.release(self.store, hive_id(), self.slug, name)
+        admission.release(self.store.redis, hive_id(), f"{self.slug}/{name}")
+        raise
 
     def _spawn(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> "Placed":
         with timing.step(f"{__name__}.FencedRuntime._refusal", report=False):

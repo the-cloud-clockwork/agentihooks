@@ -213,6 +213,7 @@ def _launch(
             "handoff": store.handoff(slug, lineage.id),
             "transfer": SEAT.transfers.attach(store, slug, record),
             "requires_harness": expert_launch.HARNESS,
+            tick.ACK_LATER: True,
             expert_launch.EFFORT_KEY: lineage.effort,
         }
         primed: dict[str, Any] = tick.primed(store, slug, record.seat, task)
@@ -223,6 +224,8 @@ def _launch(
     try:
         record, placed = SEAT.seat_spawn.place_seat(slug, config, store, runtime, seat, now_ms, prepare)
     except SEAT.seat_spawn.SeatFailed as failed:
+        if isinstance(failed.error, tick.SpawnError) and failed.error.status == "pending":
+            return [*left, WAITS.format(lineage=lineage.id, error=_why(failed.error))]
         if counted:
             expert_lineage.unlaunched(store, slug, lineage.id)
         store.drop_agent(slug, failed.record.name)
