@@ -1517,6 +1517,19 @@
       ]
     },
     {
+      "id": "hub-admission-expert-room-reserve",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-expert-room-reserve",
+      "behaviour": "While an expert lineage of any swarm runs with no expert in a state that has not ended, never seated, finished on a handoff or ended and waiting on the reap, the hub keeps one slot per such lineage on the asking hive and answers a lane offer that would take it with a held answer naming the slots kept for expert lineages, before any claim, execution, seat or ledger write; a lineage whose expert is live or that ended keeps nothing, and the tick's expert seats step places the successor through its own launch path, never this admission.",
+      "seam": "expert_lineage.waiting through Admission.admit and Admission._full for a hive spoke request",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_holds_a_launch_on_a_hive_one_below_max_agents_while_a_running_expert_lineage_waits",
+        "tests/hub/test_admission.py::test_a_lineage_of_another_swarm_waiting_for_an_expert_also_holds_the_hive",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_below_max_agents_while_no_running_expert_lineage_waits"
+      ],
+      "rules": []
+    },
+    {
       "id": "controller-done-clears-awaiting",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2488",
