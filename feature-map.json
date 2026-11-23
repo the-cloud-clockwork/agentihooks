@@ -1,6 +1,20 @@
 {
   "features": [
     {
+      "id": "swarm-parser-extraction",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-cli-split-parser",
+      "behaviour": "The swarm parser preserves every recorded command namespace, help page, refusal and current CLI handler binding while its builder lives separately and the CLI stays below 2850 lines.",
+      "seam": "scripts.swarm.cli.build_parser and scripts.swarm.cli_parser.build_parser",
+      "tests": [
+        "tests/swarm/test_parser_equivalence.py::test_recorded_arguments_cover_every_parser_leaf",
+        "tests/swarm/test_parser_equivalence.py::test_namespaces_help_and_refusals_equal_recorded_base",
+        "tests/swarm/test_parser_equivalence.py::test_recorded_invalid_arguments_are_refused",
+        "tests/swarm/test_parser_equivalence.py::test_builder_resolves_current_cli_handlers",
+        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom"
+      ]
+    },
+    {
       "id": "node-caps-named-import",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-node-caps-cpu",
@@ -9591,7 +9605,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
