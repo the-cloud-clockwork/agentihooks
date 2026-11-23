@@ -5050,6 +5050,30 @@
       ]
     },
     {
+      "id": "swarm-review-seat-mail",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2881",
+      "behaviour": "A reviewer seat is a worker seat for its inbox: its open seat mail follows a live occupant into the world of the host it runs on, and mail left on an empty reviewer seat numbered above the review lane cap is withdrawn with the sender told the review lane cap, while mail on a reviewer seat within the cap waits for the next occupant; the Doctor inbox read treats a reviewer seat above the cap as having no seat wait.",
+      "seam": "scripts.inbox.exits seat patterns and no_successor through the inbox exit sweep, and scripts.doctor.read inbox receivers",
+      "tests": [
+        "tests/swarm/test_lane_kinds.py::test_a_reviewer_seat_moves_its_mail_and_is_capped_like_an_engineer_seat",
+        "tests/inbox/test_exits.py::test_review_seat_mail_above_the_review_lane_cap_is_settled_and_within_it_waits",
+        "tests/inbox/test_member_mail.py::test_the_sweep_moves_open_review_seat_mail_to_the_new_occupants_host",
+        "tests/doctor/test_empty_seats.py::test_a_review_seat_above_the_review_lane_cap_has_no_seat_wait",
+        "tests/doctor/test_empty_seats.py::test_a_review_seat_on_a_config_stored_without_a_review_cap_has_no_seat_wait"
+      ]
+    },
+    {
+      "id": "swarm-review-dispatcher-lane-cap",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2881",
+      "behaviour": "The dispatcher lane caps carry the review lane cap from the swarm config, so focused review tasks yield their focus position once the review lane holds its focus weight share of claimed and pull request tasks, as engineering, CI and plan tasks do.",
+      "seam": "scripts.swarm.dispatcher.lane_caps and the claim key focus order",
+      "tests": [
+        "tests/swarm/test_dispatcher.py::test_the_claim_key_yields_review_focus_when_the_review_lane_share_is_full"
+      ]
+    },
+    {
       "id": "swarm-session-cap",
       "origin": "inventory",
       "behaviour": "With no free session slot the spawn and the master seat are held and the hold says why.",
