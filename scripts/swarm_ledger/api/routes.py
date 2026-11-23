@@ -125,7 +125,8 @@ def judged(
     """The reply of a read that judges the ledger state under the swarm's fix phase: its data and their revision,
     an empty cursor when it lists, held to the reply limit under the read's own message when it has one. A read
     that finds no target answers 404."""
-    found = read(services.repository.current(slug).state, fix_phase(services, slug))
+    state: dict[str, Any] = services.repository.current(slug).state
+    found = read(state, fix_phase(services, slug))
     if found is None:
         raise APIError(404, "resource_missing", "No such target")
     reply: dict[str, Any] = {"data": found, "revision": resources.revision(found)}
