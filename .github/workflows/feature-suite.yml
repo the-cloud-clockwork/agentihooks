@@ -20,13 +20,13 @@ jobs:
       AGENTIHOOKS_SWARM_REDIS_URL: redis://127.0.0.1:6380/0
       AGENTIHOOKS_SWARM_DATABASE_URL: postgresql://postgres@127.0.0.1:5434/ledger
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
       - name: Restore the service images saved on dev
         id: service-images
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         continue-on-error: true
         timeout-minutes: 5
         env:
@@ -53,7 +53,7 @@ jobs:
 
       - name: Save the service images for later runs
         if: steps.service-images.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         continue-on-error: true
         timeout-minutes: 5
         with:
@@ -67,11 +67,11 @@ jobs:
           timeout 30 bash -c "until docker exec feature-redis-$GITHUB_RUN_ID redis-cli ping; do sleep 1; done"
           timeout 60 bash -c "until docker exec feature-postgres-$GITHUB_RUN_ID pg_isready -h 127.0.0.1 -p 5432 -d ledger; do sleep 1; done"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: '0.12.23'
           checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'

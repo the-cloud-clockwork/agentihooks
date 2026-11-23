@@ -29,15 +29,15 @@ jobs:
       matrix:
         order: [fixed, random]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           enable-cache: false
@@ -64,7 +64,7 @@ jobs:
       - name: Keep the findings for the follow up job
         id: keep
         if: failure() && steps.suite.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: leaks-${{ matrix.order }}
           path: leaks-${{ matrix.order }}.json
@@ -79,11 +79,11 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

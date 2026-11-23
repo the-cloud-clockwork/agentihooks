@@ -74,7 +74,7 @@ jobs:
       attempt: ${{ steps.decision.outputs.attempt }}
       grader: ${{ steps.grader.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: dev
           fetch-depth: 0
@@ -84,7 +84,7 @@ jobs:
         id: grader
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: hashFiles('scripts/ci_reuse.py') != ''
         with:
           python-version: "3.12"
@@ -98,7 +98,7 @@ jobs:
       - name: Mint the tcc main ci App token
         id: app-token
         if: github.event_name == 'merge_group' && hashFiles('scripts/ci_reuse.py') != ''
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -200,15 +200,15 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -259,7 +259,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
       - uses: ./.github/actions/tick-scale
@@ -275,14 +275,14 @@ jobs:
     outputs:
       promote: ${{ steps.grade.outputs.promote }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Mint the tcc main ci App token
         id: app-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -290,7 +290,7 @@ jobs:
           permission-contents: read
           permission-pull-requests: read
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -312,11 +312,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -331,7 +331,7 @@ jobs:
     outputs:
       due: ${{ steps.key.outputs.hit != 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
@@ -366,13 +366,13 @@ jobs:
       lab_sonar: ${{ steps.verdict.outputs['lab_sonar'] }}
       lab_mutation: ${{ steps.verdict.outputs['lab_mutation'] }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: grader
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -397,7 +397,7 @@ jobs:
       - name: Mint a checks read token
         id: app-token
         if: steps.authority.outputs.authoritative != '{}'
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -434,7 +434,7 @@ jobs:
       count: ${{ steps.select.outputs.count }}
       sonar: ${{ steps.select.outputs.sonar }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
         with:
           ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
@@ -445,7 +445,7 @@ jobs:
           GIT_HTTP_LOW_SPEED_LIMIT: "1000"
           GIT_HTTP_LOW_SPEED_TIME: "60"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
         with:
           python-version: '3.12'
@@ -489,13 +489,13 @@ jobs:
           echo "GIT_CONFIG_KEY_0=maintenance.auto" >> "$GITHUB_ENV"
           echo "GIT_CONFIG_VALUE_0=false" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: github.event_name == 'push'
         with:
           ref: ${{ needs.reuse.outputs.grader }}
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: github.event_name == 'push'
         with:
           python-version: "3.12"
@@ -507,7 +507,7 @@ jobs:
       - name: Look up the base revision's dev durations
         id: stored
         if: github.event_name == 'pull_request' || github.event_name == 'push'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
@@ -518,7 +518,7 @@ jobs:
       - name: Mint the tcc main ci App token
         id: app-token
         if: (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') || github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != '')
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -734,7 +734,7 @@ jobs:
 
       - name: Check out the upload action for artifact republishing
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           path: .upload-action
@@ -785,7 +785,7 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: github.event_name == 'pull_request'
         with:
           python-version: "3.12"
@@ -822,7 +822,7 @@ jobs:
 
       - name: Restore latest dev durations
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -940,7 +940,7 @@ jobs:
       matrix:
         python-version: ["3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -948,7 +948,7 @@ jobs:
       - &python
         name: Set up Python ${{ matrix.python-version }}
         id: python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -966,7 +966,7 @@ jobs:
         name: Restore the test environment
         if: runner.environment != 'self-hosted'
         id: venv
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -976,7 +976,7 @@ jobs:
       - &uv
         name: Set up uv
         if: steps.venv.outputs.cache-hit != 'true'
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -1016,7 +1016,7 @@ jobs:
 
       - name: Restore exact count collections
         id: counts
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -1027,7 +1027,7 @@ jobs:
       - name: Mint the token that reads the dev count record
         id: app-token
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -1223,7 +1223,7 @@ jobs:
 
       - name: Save exact count collections
         if: steps.counts.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/count-collections
           key: ${{ steps.counts.outputs.cache-primary-key }}
@@ -1252,7 +1252,7 @@ jobs:
       queue_312: ${{ steps.queue-size.outputs.queue_312 }}
       queue_legs: ${{ steps.queue-legs.outputs.queue_legs }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -1262,7 +1262,7 @@ jobs:
       - name: Restore the test environment
         if: github.event_name == 'push' && env.UNIT_SOURCE == ''
         id: venv
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -1271,7 +1271,7 @@ jobs:
 
       - name: Set up uv
         if: github.event_name == 'push' && env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -1291,7 +1291,7 @@ jobs:
       - &save-venv
         name: Save the test environment from dev
         if: env.UNIT_SOURCE == '' && steps.venv.outcome == 'success' && steps.venv.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/venv
           key: ${{ steps.venv.outputs.cache-primary-key }}
@@ -1304,7 +1304,7 @@ jobs:
       - name: Mint the token that reads the collection job
         id: app-token
         if: (github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) || needs.select.outputs.source != ''
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -1357,7 +1357,7 @@ jobs:
 
       - name: Restore latest dev durations
         if: needs.select.outputs.source == '' && needs.select.outputs.key != ''
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -1518,7 +1518,7 @@ jobs:
       - name: Check out the graded commit
         id: checkout
         continue-on-error: true
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         env: &low-speed
           GIT_HTTP_LOW_SPEED_LIMIT: "1000"
           GIT_HTTP_LOW_SPEED_TIME: "60"
@@ -1529,7 +1529,7 @@ jobs:
 
       - name: Check out the graded commit, attempt 2
         if: steps.checkout.outcome == 'failure'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         env: *low-speed
         with: *unit-checkout
 
@@ -1551,7 +1551,7 @@ jobs:
       - name: Restore the Codex CLI
         id: codex
         if: needs.split.outputs.source == '' && matrix.python-version == '3.12' && matrix.shard == 1
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -1601,7 +1601,7 @@ jobs:
       - name: Mint the token that reads the dev coverage
         id: dev-token
         if: &reused-coverage needs.split.outputs.source == '' && needs.split.outputs.run != '' && needs.split.outputs.reused != '0' && matrix.python-version == '3.12' && github.event_name != 'merge_group'
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -1688,7 +1688,7 @@ jobs:
       - name: Mint the token that restores queue unit artifacts
         id: unit-token
         if: needs.split.outputs.source != ''
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -1983,14 +1983,14 @@ jobs:
     outputs:
       matrix: ${{ steps.classify.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Mint the tcc main ci App token
         id: app-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -2043,7 +2043,7 @@ jobs:
         python-version: ["3.12"]
         leg: ${{ fromJSON(needs.select.outputs.legs) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
@@ -2137,7 +2137,7 @@ jobs:
       - name: Restore the Codex CLI
         id: codex
         if: matrix.python-version == '3.12' && contains(format(' {0} ', env.FILES), ' tests/routing/test_codex_api.py ')
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -2317,7 +2317,7 @@ jobs:
       matrix:
         python-version: ["3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.event.merge_group.base_sha || github.event_name == 'push' && github.sha || github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
           persist-credentials: false
@@ -2350,7 +2350,7 @@ jobs:
 
       - name: Mint the tcc main ci App token
         id: app-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -2468,7 +2468,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -2496,7 +2496,7 @@ jobs:
           printf 'event=%s\nbase=%s\nhead=%s\ntest_only=%s\n' "$EVENT" "$BASE" "$HEAD" "$test_only" > sonar-scope.txt
           cat sonar-scope.txt
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: steps.source.outputs.test_only != 'true'
         with:
           python-version: "3.12"
@@ -2508,7 +2508,7 @@ jobs:
       - name: Mint the token that reads the pull request runs' coverage
         id: app-token
         if: &branch-carry github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -2518,7 +2518,7 @@ jobs:
       - name: Mint the token that reads this run's job states
         id: jobs-token
         if: &jobs-token github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -2578,7 +2578,7 @@ jobs:
         if: needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
         continue-on-error: true
         timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 75 || 45 }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}
           SCOPE: ${{ needs.select.outputs.scope }}
@@ -2842,12 +2842,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -2943,7 +2943,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -2999,14 +2999,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
       # A failed cache download leaves the segment timer holding the step open until it fires.
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -3037,7 +3037,7 @@ jobs:
         run: python -m pip install --constraint .github/test-requirements.lock tree-sitter==0.26.0 tree-sitter-bash==0.25.1 tree-sitter-javascript==0.25.0 tree-sitter-css==0.25.0
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -3057,7 +3057,7 @@ jobs:
 
       - name: Check out kernel marker vector authority
         if: ${{ !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: the-cloud-clockwork/agentibrain-kernel
           ref: dev
@@ -3289,7 +3289,7 @@ jobs:
       - name: Mint the antoncore read token
         if: ${{ !cancelled() }}
         id: app-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -3471,7 +3471,7 @@ jobs:
       matrix:
         python-version: ["3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -3521,12 +3521,12 @@ jobs:
       GIT_CONFIG_KEY_0: maintenance.auto
       GIT_CONFIG_VALUE_0: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -3547,7 +3547,7 @@ jobs:
       - name: Restore the exact coverage baseline
         id: cached
         if: github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -3570,7 +3570,7 @@ jobs:
       - name: Mint the tcc main ci App token
         id: app-token
         if: steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true' && steps.restored.outputs.commit == ''
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -3750,14 +3750,14 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Mint the tcc main ci App token
         id: app-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -3784,7 +3784,7 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: github.event_name == 'merge_group'
         with:
           ref: ${{ github.event.merge_group.base_sha }}
@@ -3793,7 +3793,7 @@ jobs:
       - name: Mint the tcc main ci App token
         id: app-token
         if: github.event_name == 'merge_group'
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -3892,7 +3892,7 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: ${{ always() }}
         with:
           ref: ${{ github.sha }}
@@ -3933,15 +3933,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -3953,7 +3953,7 @@ jobs:
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Restore recent shard durations
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -3998,13 +3998,13 @@ jobs:
         run: mkdir -p ~/dev-durations && cp .test_durations* ~/dev-durations/
 
       - name: Save merged durations to the cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.sha }}
 
       - name: Save recent shard durations
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/durations-samples
           key: durations-samples-${{ github.sha }}
@@ -4017,17 +4017,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Restore the dev test stats
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -4037,7 +4037,7 @@ jobs:
 
       - name: Mint the token that reads the merged pull requests' test stats
         id: app-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -4052,7 +4052,7 @@ jobs:
         run: python -m scripts.ci_stats_seed .mutation-stats-cache --head "$GITHUB_SHA" --before "$BEFORE"
 
       - name: Save the dev test stats
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -4065,17 +4065,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Restore the flake history
         id: restore-flake-history
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env: &flake-budget-restore-the-flake-history-env
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with: &flake-budget-restore-the-flake-history
@@ -4095,7 +4095,7 @@ jobs:
       - name: Restore the flake history, attempt 2
         id: restore-flake-history-2
         if: steps.restore-flake-history.outputs.cache-matched-key == ''
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env: *flake-budget-restore-the-flake-history-env
         with: *flake-budget-restore-the-flake-history
 
@@ -4133,7 +4133,7 @@ jobs:
           retention-days: 14
 
       - name: Save the flake history
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/flake-history
           key: ${{ (steps.restore-flake-history.outputs.cache-matched-key || steps.restore-flake-history-2.outputs.cache-matched-key) && 'flake-history' || 'flake-seed' }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -4144,12 +4144,12 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -4165,7 +4165,7 @@ jobs:
           echo "previous=$(git rev-parse "$PREVIOUS^{tree}")" >> "$GITHUB_OUTPUT"
 
       - name: Restore measured coverage history
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -4208,7 +4208,7 @@ jobs:
             --previous "$HOME/coverage-baseline/baseline.json"
 
       - name: Save the passed dev coverage baseline
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.tree.outputs.tree }}
@@ -4243,7 +4243,7 @@ jobs:
       GIT_CONFIG_KEY_0: maintenance.auto
       GIT_CONFIG_VALUE_0: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
@@ -4254,11 +4254,11 @@ jobs:
           mkdir -p .workflow-revision
           git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -4266,7 +4266,7 @@ jobs:
 
       - name: Mint the tcc main ci App token
         id: app-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -4294,7 +4294,7 @@ jobs:
       - name: Restore latest dev durations
         id: durations
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -4310,7 +4310,7 @@ jobs:
           python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
 
       - name: Restore measured statistics timings
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -4454,7 +4454,7 @@ jobs:
 
       - name: Save the merged test stats
         if: steps.collect.outputs.collected == 'true' && steps.plan.outputs.stats_parts == '[0]'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -4498,7 +4498,7 @@ jobs:
 
       - name: Restore the tests that killed this branch's earlier mutants
         if: steps.collect.outputs.collected == 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -4593,18 +4593,18 @@ jobs:
       GIT_CONFIG_KEY_0: maintenance.auto
       GIT_CONFIG_VALUE_0: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           version: "0.12.23"
@@ -4672,7 +4672,7 @@ jobs:
 
       - name: Restore latest dev durations
         if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.durations != ''
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -4690,7 +4690,7 @@ jobs:
 
       - name: Restore compatible test stats
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -4709,7 +4709,7 @@ jobs:
 
       - name: Save the merged test stats
         if: strategy.job-total == 1 && needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -4764,7 +4764,7 @@ jobs:
 
       - name: Restore the tests that killed this branch's earlier mutants
         if: needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -4815,7 +4815,7 @@ jobs:
       - name: Check out the head history without file contents
         id: checkout
         continue-on-error: true
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         env: *low-speed
         with: &refine-checkout
           fetch-depth: 2147483647
@@ -4824,15 +4824,15 @@ jobs:
 
       - name: Check out the head history without file contents, attempt 2
         if: steps.checkout.outcome == 'failure'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         env: *low-speed
         with: *refine-checkout
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -4894,7 +4894,7 @@ jobs:
         with: *mutation-refine-download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -4934,16 +4934,16 @@ jobs:
       GIT_CONFIG_KEY_0: maintenance.auto
       GIT_CONFIG_VALUE_0: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -5027,7 +5027,7 @@ jobs:
         with: *mutation-probe-download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -5080,16 +5080,16 @@ jobs:
     outputs:
       shards: ${{ steps.replan.outputs.shards }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -5109,7 +5109,7 @@ jobs:
       - *mutation-planning-install
 
       - name: Restore the tests that killed this branch's earlier mutants
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -5188,7 +5188,7 @@ jobs:
       GIT_CONFIG_KEY_0: maintenance.auto
       GIT_CONFIG_VALUE_0: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           fetch-depth: 0
@@ -5196,7 +5196,7 @@ jobs:
 
       - name: Restore compatible test stats
         if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -5226,7 +5226,7 @@ jobs:
         uses: actions/download-artifact@v8.0.2
         with: *mutation-download-every-parts-test-stats-cache
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           python-version: "3.12"
@@ -5244,12 +5244,12 @@ jobs:
 
       - name: Save the merged test stats
         if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true' && steps.merged-stats.outputs.found == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           version: "0.12.23"
@@ -5317,7 +5317,7 @@ jobs:
 
       - name: Restore latest dev durations
         if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -5392,7 +5392,7 @@ jobs:
 
       - name: Restore the tests that killed this branch's earlier mutants
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -5515,13 +5515,13 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           python-version: "3.12"
@@ -5557,7 +5557,7 @@ jobs:
 
       - name: Restore the tests that killed this branch's earlier mutants
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -5589,7 +5589,7 @@ jobs:
 
       - name: Keep the tests that killed mutants for this branch's next plan
         if: ${{ !cancelled() && needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats/killers/*') != '' }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .mutation-stats/killers
           key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
