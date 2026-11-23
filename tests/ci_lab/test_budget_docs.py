@@ -60,5 +60,6 @@ def test_the_published_lab_budget_docs_match_the_shed_thresholds_in_code() -> No
 def test_a_docs_copy_with_the_thresholds_swapped_fails_the_check(published: str, planted: str) -> None:
     text = DOC.read_text()
     assert published in text
+    assert_docs_match_shed_thresholds(text)
     with pytest.raises(AssertionError):
         assert_docs_match_shed_thresholds(text.replace(published, planted))
