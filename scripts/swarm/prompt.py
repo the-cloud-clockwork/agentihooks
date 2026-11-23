@@ -95,6 +95,7 @@ LANE_ROLE = {
     "eng": "an engineer",
     "ci": "a CI engineer whose only job is CI speed: find the slowest jobs and steps, fix the bottleneck so CI runs "
     "as parallel and as fast as possible, and propose each further bottleneck you find as a follow up",
+    "review": "a reviewer",
 }
 
 
