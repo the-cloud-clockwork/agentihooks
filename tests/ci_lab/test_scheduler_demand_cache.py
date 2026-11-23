@@ -59,8 +59,8 @@ def _fetched(client: Any, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], l
         note(args)
         return command(*args, **options)
 
-    def piped(**options: Any) -> Any:
-        pipe = pipeline(**options)
+    def piped(*args: Any, **options: Any) -> Any:
+        pipe = pipeline(*args, **options)
         stack = pipe.execute_command
 
         def stacked(*args: Any, **kwargs: Any) -> Any:
