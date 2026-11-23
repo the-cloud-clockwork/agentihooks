@@ -18,6 +18,7 @@ GONE = "the task is gone"
 DONE = "it is done"
 Mark = Callable[[str], None]
 Claims = Callable[[RedisStore, str], Callable[[str], bool]]
+Admitting = Callable[[RedisStore, str, SwarmConfig, dict[str, Any]], Callable[[dict[str, Any]], bool]]
 
 
 @dataclass(frozen=True)
@@ -78,9 +79,15 @@ class Narrow:
     evidence of a plan task."""
 
     def __init__(
-        self, store: Callable[[], RedisStore], ledger: Any, full: readiness.Source, claims: Claims = claimed
+        self,
+        store: Callable[[], RedisStore],
+        ledger: Any,
+        full: readiness.Source,
+        claims: Claims = claimed,
+        admitting: Admitting = admits,
     ) -> None:
         self._store, self._ledger, self._full, self._claims = store, ledger, full, claims
+        self._admitting = admitting
 
     def task(self, slug: str, task_id: str, mark: Mark) -> View:
         """The view an admission of one task judges and claims from, marking each read it times."""
@@ -137,7 +144,7 @@ class Narrow:
         doc = {"tasks": list(rows.values()), "phases": [], "freezes": []}
         fix = freeze.fix_phase(config)
         return readiness.Snapshot(
-            slug, rows, doc, {}, fix, self._claims(store, slug), admits(store, slug, config, rows)
+            slug, rows, doc, {}, fix, self._claims(store, slug), self._admitting(store, slug, config, rows)
         )
 
     def _held(self, slug: str) -> Callable[[dict[str, Any]], str]:

@@ -74,6 +74,11 @@ PAGINATION = {
         "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "q": {"type": "string", "maxLength": 200},
         "targets": {"type": "string", "minLength": 1, "maxLength": 500},
+        "ids": {"type": "string", "maxLength": 8000},
+        "states": {"type": "string", "maxLength": 200},
+        "pinned": {"enum": ["1"]},
+        "branches": {"type": "string", "maxLength": 8000},
+        "fields": {"type": "string", "maxLength": 500},
     },
 }
 

@@ -2,6 +2,7 @@
 request, every given filter matched, optionally projected to named fields, and the client query that asks for it."""
 
 from typing import Any
+from urllib.parse import urlencode
 
 import pytest
 
@@ -80,3 +81,26 @@ def test_only_a_plain_tasks_read_naming_a_filter_is_a_selection(
     path: str, query: dict[str, str], selected: bool
 ) -> None:
     assert task_list.selection(path, query) is selected
+
+
+@pytest.mark.feature("hub-admission-narrow-read")
+@pytest.mark.parametrize(
+    ("filters", "expected"),
+    [
+        ({"ids": ("t2", "gone")}, ["t2"]),
+        ({"states": ("open",)}, []),
+        ({"pinned": True}, []),
+        ({"branches": ("c-branch",)}, []),
+        ({"ids": ("t1", "t2"), "fields": ("state",)}, ["t1", "t2"]),
+    ],
+    ids=["ids", "states", "pinned", "branches", "fields"],
+)
+def test_the_tasks_route_serves_every_selection_the_client_asks_for(
+    filters: dict[str, Any], expected: list[str]
+) -> None:
+    from tests.swarm_ledger.test_api_services import SLUG, fake_services, served
+
+    query = urlencode(ledger_client.where_query(**filters))
+    status, body = served(fake_services([]), "GET", f"/api/v1/ledgers/{SLUG}/tasks?{query}")
+
+    assert (status, ids(body) if status == 200 else body) == (200, expected)

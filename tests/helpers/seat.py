@@ -74,7 +74,7 @@ def seat_agent(
     request = {"hive": hive, "task": task_id, "lane": row["lane"], "generation": readiness.generation(row)}
     decision = {**LAUNCH, "profile": PROFILES.get(row["lane"], "engineer"), **(launch or {})}
     source = SimpleNamespace(slugs=lambda: [slug], snapshot=lambda name: view(store, ledger, name))
-    admitter = admission.Admission(store, narrow_ledger.Reads(ledger), source, clock)  # pyright: ignore[reportArgumentType]
+    admitter = narrow_ledger.viewed(admission.Admission(store, ledger, source, clock))  # pyright: ignore[reportArgumentType]
     admitted = admitter.admit(slug, request)
     if not admitted or "name" not in admitted:
         pytest.fail(f"hub admission refused {task_id}: {admitted}")
