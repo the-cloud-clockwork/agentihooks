@@ -1890,7 +1890,8 @@ hive. Hives pull offers from the hub over NATS JetStream instead, through one sp
 A master spoke rechecks its offer against the ledger itself. An eng, ci or plan spoke asks the hub to admit it,
 because a member's Redis user cannot claim a task, name an agent or take a seat, and a remote hive makes no service
 ledger reads. The hub answers `admit` on the same `slots.<swarm>.<hive>` request subject as account slots, which a
-member's credential may publish only for its own hive; a request naming another hive than its subject is refused. It rechecks the offer against the ledger, claims the task,
+member's credential may publish only for its own hive; a request naming another hive than its subject is refused. It rechecks the offer against narrow ledger reads of that task (see
+[What an admission reads](#what-an-admission-reads)), claims the task,
 starts the execution on that hive, occupies a seat, marks the task claimed (or back in `pr`) and returns the primed
 spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
 hive gets none. After a failed admit ask or launch, the spoke sends `reopen`, which returns an admitted task to
@@ -2088,6 +2089,188 @@ and its detector with it. `legacy-spawn-events-coverage` is now a retired id in 
 | A task outside the focus is offered while the focus has open work | It is a Doctor fix phase task, or a focused task waits on it. Read its `phase`, and the `depends_on` and `parked_on` of the focused tasks. |
 | No offer for a task that looks ready | A claim hold, a recorded claimant or a wait holds it, or the swarm is not `running`; [Freeze and focus](swarm.md#freeze-and-focus) and `agentihooks swarm <slug> status` name the holds. |
 
+### What an admission reads
+
+The readiness pass reads the whole ledger export of every `events` swarm (see [Offer order](#offer-order)). An
+admission reads only what its own task needs: the task row, the rows it names, the running rows, its phase and the
+ledger overview, and the claim gate verdict the ledger judges over its stored state. `admit`, the claim and the root
+slot count never call the readiness snapshot.
+
+Before pull request [#13245](https://github.com/the-cloud-clockwork/agentihooks/pull/13245) every `admit` took that
+readiness snapshot, and `readiness.Source` fetched the whole export again whenever the ledger revision had moved
+since its last read. On 23 November the revision of a large ledger moved about nine times a minute, so nearly every
+admission missed the kept copy: a hit took 66 ms and a miss 1.4 to 17 seconds. After a hub roll every admission
+answered in 8.1 to 22.2 seconds against its 8,000 millisecond answer budget, and the hives stopped waiting for them.
+
+#### The reads
+
+`scripts.swarm.admission_view.Narrow` builds an admission's view of one swarm. `Admission.admit` asks it for the
+offered task right after the claims stopped check:
+
+| Read | Ledger request | What it returns | Timing mark |
+|---|---|---|---|
+| The task | `GET tasks/<task id>` | The task row, or none when the task is gone | `row` |
+| The rows it names | `GET tasks?ids=<ids>` | Every task the row names in `depends_on`, `parked_on` or `group_members`, and its `enhances` and `merged_into` targets. Skipped when it names none. | `rows` |
+| The running rows | `GET tasks?states=claimed,pr` | Every task claimed or in a pull request, which the claim reads for the task's overlaps | `rows` |
+| Its parts | `GET phases/<phase>` and `GET metadata` | The task's phase and the ledger overview, which the claim seeds read. A `plan` task reads the whole document instead; see below. | `parts` |
+| The claim gate verdict | `GET focus/tasks/<task id>` | The verdict the ledger judges for the task over its whole stored state | inside `withdrawal` |
+
+From these rows the view builds a readiness snapshot with no phases and no freezes, and judges the offer in two
+steps (`admission_view.withdrawal`):
+
+1. The local checks of `readiness.withdrawal` on the narrow rows: the task is gone; it is claimed, because an
+   unfinished agent of the swarm holds it or the swarm store names a claimant; it is not `open`; it is at another
+   claim generation or moved to another lane; a dependency is not done; or a release, apply, fleet red or lab wait
+   holds it.
+2. Only when the local checks pass, the claim gate verdict the ledger judges over its stored state, freezes, focus
+   records and phases included, so no gate is judged on a partial document. `claimable` admits the offer. Any other
+   verdict withdraws it with that text, the same reasons `swarm focus` prints (see
+   [Focus sanity check](swarm.md#focus-sanity-check)). A target the ledger does not know reads `the task is gone`,
+   and a done task `it is done`. The view asks once per task and keeps the answer for that admission.
+
+A withdrawn offer is refused with
+`hub: events admission swarm=<slug> task=<task id> hive=<hive> refused: the offer is withdrawn, <reason>`, unless the
+asking hive's own earlier admission of the offer is kept, which it receives again.
+
+A task of kind `plan` still reads the whole ledger document through `readiness.Source.state`, because its claim
+seeds carry the steering evidence of the whole ledger. That read is fetched again only when the revision moved, so a
+plan task admission can still take seconds on a large ledger.
+
+#### The root slot count and the continuation
+
+When the root hive asks for a task any hive could run, the admission keeps one root slot for each claimable task
+only the root hive takes, across every `events` swarm. For each swarm it reads only the open pinned tasks
+(`GET tasks?states=open&pinned=1`) and keeps those `readiness.root_only` accepts: pinned to the root hive, or a
+workstation task pinned to no other hive. It then reads the rows they name and counts the tasks that pass both the
+local checks and the ledger's claim gate verdict. A frozen root only task keeps no slot. A swarm with no such task
+costs one read.
+
+The claim's continuation reads only the tasks on the branches it may continue from, cut to `branch`,
+`branch_repo` and `pr_url` (`GET tasks?branches=<names>&fields=branch,branch_repo,pr_url`). A row the claim already
+holds wins over the cut one.
+
+#### The tasks selection
+
+`LedgerClient.tasks_where` sends one narrow read of the tasks collection, naming only the filters it is given
+(`ledger_client.where_query`). The hub runs the ledger API route code in its own process over the shared ledger
+database, so the read reaches no separate server. The same read is open to any ledger API caller as
+`GET /api/v1/ledgers/<slug>/tasks?<filters>`:
+
+| Parameter | Value | A row is kept when |
+|---|---|---|
+| `ids` | Task ids, comma separated | Its `id` is listed |
+| `states` | Task states, comma separated | Its `state` is listed |
+| `pinned` | `1` | It names a `hive` or sets `workstation`. The filter is on whenever the parameter is present. |
+| `branches` | Branch names, comma separated | Its `branch` is listed |
+| `fields` | Field names, comma separated | Not a filter: each kept row carries only its `id` and the named fields it has |
+
+A row must pass every filter the query names. Without `fields` each row comes back whole except for its threads,
+with its `revision`. The reply is one page, `{"data": [...], "revision": "<revision>", "next_cursor": null}`, and a
+reply over 262,144 bytes answers `413 resource_too_large` like other ledger reads.
+
+```text
+GET /api/v1/ledgers/<slug>/tasks?ids=t2,t3
+GET /api/v1/ledgers/<slug>/tasks?states=claimed,pr
+GET /api/v1/ledgers/<slug>/tasks?states=open&pinned=1
+GET /api/v1/ledgers/<slug>/tasks?branches=engineer-1&fields=branch,branch_repo,pr_url
+```
+
+The ledger refuses a selection anywhere else with `400 schema_invalid`,
+`Only a plain tasks read takes a selection, and it names ids, states, pinned or branches`: on any path other than
+`tasks`, with `cursor`, `limit`, `offset`, `q` or `targets` beside it, or with no non empty `ids`, `states`, `pinned`
+or `branches`, so `fields` alone is refused.
+
+From a checkout, the same read through the ledger client:
+
+```bash
+python -c 'from scripts.swarm.ledger_client import LedgerClient
+print(LedgerClient().tasks_where("<slug>", ids=["<task id>"], fields=["state", "claimed_by"]))'
+```
+
+#### Admission timing marks
+
+An admission that finishes past its answer budget logs its step timings after `claim kept` (see
+[Late admissions keep their claim](#late-admissions-keep-their-claim)). Each is the milliseconds since the mark
+before it, in this order:
+
+| Mark | Time spent on |
+|---|---|
+| `release` | Refusing a hive whose release is below the hub's |
+| `held` | The admission already kept for the offer |
+| `stopped` | The swarm's claims stopped check |
+| `row` | Reading the task row |
+| `rows` | Reading the rows it names and the running rows |
+| `parts` | Reading its phase and the overview, or the whole document for a `plan` task |
+| `withdrawal` | The local checks and the ledger's claim gate verdict |
+| `placement` | Whether the asking hive may run the task |
+| `cap` | The task's claim cap |
+| `turn` | The root slot count, then waiting for the hive's admission turn |
+| `full` | Whether the hive has room |
+| `claim` | Naming the agent and claiming the task in the swarm store |
+| `seat` | Choosing the seat |
+| `execution` | Starting the execution |
+| `ledger` | Marking the task claimed on the ledger |
+| `continuation` | Holding the seat and resolving the continuation, its branch read included |
+| `seeds` | The overlaps, the group and the claim seeds |
+| `primed` | Priming the spawn task |
+| `transfer` | The stack base and attaching the handoff transfer |
+
+`row`, `rows` and `parts` replaced the single `snapshot` mark of releases before #13245, so a slow read now names
+itself. `continuation`, `seeds`, `primed` and `transfer` time the work after the ledger write, which the older line
+left untimed. A line whose marks sum to far less than `finished after` waited in the hub's serve queue; see
+[How the hub serves requests](../reference/swarm-bus-scope.md#how-the-hub-serves-requests).
+
+#### Checking admission reads on a live swarm
+
+```bash
+# Late admissions and their step timings
+kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'hub: events admission .* late:'
+# hub: events admission swarm=<slug> task=<task id> hive=<hive> late: finished after 8412 ms, past the 8000 ms
+#   answer budget, claim kept release=2 held=1 stopped=0 row=41 rows=96 parts=38 withdrawal=55 ...
+
+# Offers the admission withdrew, with the reason the local checks or the claim gate gave
+kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'refused: the offer is withdrawn'
+```
+
+A `late:` line with a large `row`, `rows` or `parts` points at the ledger database. A large `parts` on a `plan` task
+is its whole document read. A large `turn` on the root hive is the root slot count across every `events` swarm.
+
+#### Narrow read guards
+
+- Feature `hub-admission-narrow-read` in `feature-map.json`. Its tests in `tests/hub/test_admission_gates.py` run two
+  admissions on a ledger whose revision moves and count its export reads at zero, refuse a frozen, unfocused, phased,
+  waiting or thin task without claiming it, and claim a task once its dependency is done.
+  `tests/swarm/test_admission_view.py` covers the view's reads, a gone task, the plan task's whole document, the
+  verdict asked only after the local checks, the claimed count, the root slot count and the branch read.
+  `tests/swarm_ledger/test_task_list_selecting.py` covers the selection's filters, its field cut, the client query
+  and the refusal.
+- Semgrep incident rule `hub-admission-reads-full-export`, scoped to `scripts/hub/admission.py`: any `.snapshot(...)`
+  or `.state(...)` call there is an error. Run it by hand with:
+
+```bash
+semgrep scan --config .semgrep-incidents/hub-admission-reads-full-export.yml scripts/hub/
+semgrep --test --config .semgrep-incidents/hub-admission-reads-full-export.yml \
+  .semgrep-incidents/hub-admission-reads-full-export.py
+```
+
+#### Narrow read limitations
+
+- A `plan` task still reads the whole document; see [The reads](#the-reads).
+- The readiness pass and the master spoke's own recheck still read the whole export.
+- A ledger server on a release before #13245 refuses every selection with `400 schema_invalid`,
+  `Request does not match the resource schema`, because its query schema knows none of the selection parameters. The
+  hub does not depend on that server, because it runs the route code in process.
+
+#### Narrow read troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `late:` lines still show a `snapshot=` mark | The hub runs a release from before #13245 | Roll the hub to the newest release. |
+| `late:` lines show a large `parts` | The task is a `plan` task, whose admission reads the whole document | Expected on a large ledger. |
+| An offer is refused `the offer is withdrawn, <reason>` while the task looks open | The ledger's claim gate holds it: a freeze, a focus elsewhere, an earlier phase or a dependency | Read the verdicts with `agentihooks api --slug <slug> get focus`, then clear the hold; see [Freeze and focus](swarm.md#freeze-and-focus). |
+| A selection read answers `400 schema_invalid` with `Only a plain tasks read takes a selection, ...` | It named a filter on a path other than `tasks`, beside a paging parameter, or with only `fields` | Send `ids`, `states`, `pinned` or `branches` on a plain `tasks` read. |
+| A selection read answers `400 schema_invalid` with `Request does not match the resource schema` | The ledger server runs a release before #13245 | Roll the ledger server, or read through the ledger client from a checkout on the newest release. |
+
 ### When a launch fails
 
 An admission claims the task, starts its execution, occupies a seat and marks the ledger row `claimed` before the
@@ -2171,7 +2354,7 @@ queued for a hub serve thread is included. The hive whose ask timed out holds it
 that admission on its next poll. Pull request #11051 also released and refused a late admission; pull
 request [#11511](https://github.com/the-cloud-clockwork/agentihooks/pull/11511) reverted that part, because the
 release raised the claim generation and withdrew the offer, so on 16 November no urgent ci task kept a live
-claimant.
+claimant. [Admission timing marks](#admission-timing-marks) names each step timing of the `late:` line.
 
 #### Launch failure limits
 
@@ -2247,7 +2430,7 @@ semgrep --test --config .semgrep-incidents/hub-admission-late-answer-releases-cl
 | An eng, ci or plan task stays `claimed` by an agent no hive lists, its hive logged `poll failed`, and the tick retires the agent with `its hive no longer lists it` six minutes or more after the launch | The hive runs a release from before #11051, whose spoke gave back only its own claim | Roll the hive to the hub's release. Until it rolls, drain it with `agentihooks hive set <hive> draining=yes --keep`. |
 | The hub logs `refused: release <member> below hub release <hub>` for every admit of one hive | The hive runs an older release than the hub, and the hub refuses it so an old spoke cannot strand a claim | Roll that hive, or, for a hive meant to stay on one release, set `workers.pinned: true` in its chart so its record reads `pinned=yes`. |
 | A task's claim generation climbs by two on each attempt and no agent runs | Each admission's launch fails, and its `reopen` returns the task; both changes of claimant raise the generation | Read the hive's `poll failed` lines and the task's `launch-failures` entry, and fix the launch cause. After `max_deliver` failed deliveries of one offer, the offer dead letters. |
-| The hive logs `poll failed (Unanswered: ...)` and the task stays claimed by an agent that has not launched | The hub finished the admission after the hive stopped waiting and kept it | Nothing to undo: the hive's next poll asks again and launches that admission. Find what slowed the hub in its `late:` lines. |
+| The hive logs `poll failed (Unanswered: ...)` and the task stays claimed by an agent that has not launched | The hub finished the admission after the hive stopped waiting and kept it | Nothing to undo: the hive's next poll asks again and launches that admission. Find what slowed the hub in its `late:` lines; [Admission timing marks](#admission-timing-marks) names each step. |
 | A task launches again on the harness that just failed | The runtime answered `unavailable`, which sends no `failed`, or its refusal named no harness | Expected: only a refusal that names its harness steers the next admission. |
 
 ### Handoff continuity on admission
