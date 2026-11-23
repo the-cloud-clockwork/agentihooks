@@ -385,6 +385,8 @@ def test_a_queued_task_lowered_to_low_is_taken_after_the_normal_offers_behind_it
     clock.now += WINDOW
     view = snapshot(doc([task("l", rank="low"), task("n1"), task("n2")]))
     assert readiness.publish(bus, view, clock.now) == ["ready:sw:l:0"]
+    clock.now += WINDOW
+    assert readiness.publish(bus, view, clock.now) == []
     assert queued(bus, "eng", view) == ["n1", "n2", "l"]
 
 
@@ -395,6 +397,8 @@ def test_an_ordered_offer_moves_behind_a_later_offer_whose_order_is_older(bus: B
     clock.now += WINDOW
     view = snapshot(doc([newer, task("o1", ordered=ORDER)]))
     assert readiness.publish(bus, view, clock.now) == ["ready:sw:o1:0", "ready:sw:o9:0"]
+    clock.now += WINDOW
+    assert readiness.publish(bus, view, clock.now) == []
     assert queued(bus, "eng", view) == ["o1", "o9"]
 
 
