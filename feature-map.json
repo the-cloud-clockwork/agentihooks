@@ -624,6 +624,23 @@
       ]
     },
     {
+      "id": "lab-scheduler-grade-demand-records",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-labload-demand-records",
+      "behaviour": "Every save of a live lab grade writes its document, increments its revision in the revisions hash and writes the demand record of that revision (revision, tier, hits, job ids, equal to the demand of the stored document) in one watched transaction that retries when another writer changes the grade; a failed transaction changes none of the three. A grade that completes or is forgotten leaves the live set with neither revision nor record, a save of a closed grade removes both in the transaction that writes its document, and compaction bumps the revision and rewrites the record of each grade it strips.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.save, Scheduler.tick and scripts.ci_lab.compact.compact over the scheduler lab fixture on fakeredis, reading the grade document, the REVISIONS and RECORDS hash fields and comparing the record with the tier, hits and job ids of the parsed stored document",
+      "tests": [
+        "tests/ci_lab/test_scheduler_demand_records.py::test_a_save_stores_the_document_with_its_next_revision_and_the_demand_record_of_that_revision",
+        "tests/ci_lab/test_scheduler_demand_records.py::test_the_first_save_of_a_grade_without_a_revision_records_revision_one",
+        "tests/ci_lab/test_scheduler_demand_records.py::test_a_failed_save_transaction_leaves_the_document_revision_and_record_as_they_were",
+        "tests/ci_lab/test_scheduler_demand_records.py::test_a_save_racing_another_writer_of_the_grade_retries_and_records_the_revision_it_stored",
+        "tests/ci_lab/test_scheduler_demand_records.py::test_a_completed_grade_leaves_the_live_set_with_neither_revision_nor_record_and_a_closed_save_writes_none",
+        "tests/ci_lab/test_scheduler_demand_records.py::test_a_closed_save_removes_a_revision_and_record_left_beside_its_grade",
+        "tests/ci_lab/test_scheduler_demand_records.py::test_a_forgotten_grade_leaves_the_live_set_with_neither_revision_nor_record",
+        "tests/ci_lab/test_compact.py::test_compaction_bumps_the_revision_and_rewrites_the_record_of_each_grade_it_strips"
+      ]
+    },
+    {
       "id": "lab-scheduler-memory",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2755",
@@ -2603,6 +2620,28 @@
       "seam": "HiveLaunch.spawn after a cached selection",
       "tests": [
         "tests/hive/test_draining_placement.py::test_a_cached_launch_skips_a_hive_that_started_draining_or_was_removed"
+      ]
+    },
+    {
+      "id": "hive-role-release-floor",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-role-release-floor",
+      "behaviour": "A role records the first release that can host it, and a hive that reports an older release does not host that role: the launcher never selects it, the local overflow never takes it and a preferred hive is passed over, pinned or not. A hive whose release cannot be judged still hosts: one that reports no version, a text that is no version, or a development install. A role with no first release is hosted by a hive of any release. A role no live hive is new enough for waits as a role no live hive takes, and a preferred hive passed over for its release is named with both releases.",
+      "seam": "hive.placement.hosts, outdated, release, choose, place and unhosted over hive records; hive.launch select for the expert lane over a hive written to the registry with a version; the placement table FIRST_RELEASE",
+      "semgrep_rule": "feature-hive-role-release-floor",
+      "tests": [
+        "tests/hive/test_release_floor.py::test_an_expert_is_hosted_only_by_a_hive_at_or_past_its_first_release",
+        "tests/hive/test_release_floor.py::test_a_hive_whose_release_cannot_be_judged_still_hosts_an_expert",
+        "tests/hive/test_release_floor.py::test_a_release_a_hive_reports_is_read_as_one_that_can_be_compared",
+        "tests/hive/test_release_floor.py::test_a_pinned_hive_is_held_to_the_first_release_of_a_role_too",
+        "tests/hive/test_release_floor.py::test_a_role_with_no_first_release_is_hosted_by_a_hive_of_any_release",
+        "tests/hive/test_release_floor.py::test_the_first_release_a_hive_misses_is_named_and_none_when_it_carries_it",
+        "tests/hive/test_release_floor.py::test_the_first_release_applies_under_any_name_placement_asks_for_and_the_newest_one_wins",
+        "tests/hive/test_release_floor.py::test_a_role_no_live_hive_is_new_enough_for_waits_as_a_role_no_live_hive_takes",
+        "tests/hive/test_release_floor.py::test_a_preferred_hive_passed_over_for_its_release_is_named_with_both_releases",
+        "tests/hive/test_release_floor.py::test_the_launcher_never_selects_a_hive_older_than_the_first_release_of_the_expert",
+        "tests/hive/test_release_floor.py::test_the_local_machine_takes_an_expert_no_hive_has_room_for_only_at_or_past_its_first_release",
+        "tests/hive/test_release_floor.py::test_every_first_release_names_a_role_the_swarm_launches_and_a_release"
       ]
     },
     {
