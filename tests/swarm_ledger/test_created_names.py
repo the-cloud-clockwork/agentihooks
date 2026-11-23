@@ -147,6 +147,7 @@ def test_a_proof_slug_needs_the_agent_and_the_task():
         assert str(refused.value) == message
 
 
+@pytest.mark.feature("worktree-name-skips-taken-names")
 def test_name_worktree_prints_the_next_free_name_and_checks_a_given_one(tmp_path, monkeypatch, capsys, repo):
     primary, _ = repo
     monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "trees"))
@@ -168,6 +169,26 @@ def test_name_worktree_prints_the_next_free_name_and_checks_a_given_one(tmp_path
     )
 
 
+@pytest.mark.feature("worktree-name-skips-taken-names")
+def test_name_worktree_skips_a_name_whose_changelog_fragment_is_on_origin_dev(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], repo: tuple[Path, Path]
+) -> None:
+    primary, _ = repo
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "trees"))
+    for key, value in AGENT.items():
+        monkeypatch.setenv(key, value)
+    fragment = primary / "changelog.d" / "engineer-a1b2c3-0002.md"
+    fragment.parent.mkdir()
+    fragment.write_text("### Fixed\n\n- The earlier pull request from this name.\n")
+    git = ["git", "-C", str(primary), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "add", "changelog.d"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "f"], check=True)
+    subprocess.run([*git, "update-ref", "refs/remotes/origin/dev", "HEAD"], check=True)
+    assert gc_cli.main(["name", "worktree", "--repo", str(primary)]) == 0
+    assert capsys.readouterr().out == "engineer-a1b2c3-0002-2\n"
+
+
+@pytest.mark.feature("worktree-name-skips-taken-names")
 def test_name_reads_the_default_worktree_root_and_the_current_repo(tmp_path, monkeypatch, capsys, repo):
     _, linked = repo
     monkeypatch.delenv("WORKTREE_ROOT", raising=False)

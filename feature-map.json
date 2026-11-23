@@ -14392,6 +14392,18 @@
       ]
     },
     {
+      "id": "worktree-name-skips-taken-names",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-worktree-name-fragment-taken",
+      "behaviour": "agentihooks name worktree offers the session base name, then the base with a -2, -3 suffix, skipping every name that already has a folder under the worktree root or a changelog fragment on origin/dev, so a reused name never collides with the fragment its earlier pull request put on dev.",
+      "seam": "scripts.gc_cli.main name worktree, then scripts.gc_cli._name and scripts.swarm.naming.worktree",
+      "tests": [
+        "tests/swarm_ledger/test_created_names.py::test_name_worktree_prints_the_next_free_name_and_checks_a_given_one",
+        "tests/swarm_ledger/test_created_names.py::test_name_worktree_skips_a_name_whose_changelog_fragment_is_on_origin_dev",
+        "tests/swarm_ledger/test_created_names.py::test_name_reads_the_default_worktree_root_and_the_current_repo"
+      ]
+    },
+    {
       "id": "master-hive-drain-item",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-hive-items",
