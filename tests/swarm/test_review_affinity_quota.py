@@ -232,6 +232,14 @@ def test_a_review_share_outside_zero_to_one_hundred_is_refused(share: int) -> No
 
 
 @pytest.mark.feature("swarm-review-affinity-quota")
+def test_a_review_share_of_zero_or_one_hundred_is_kept_and_one_more_is_refused() -> None:
+    assert SwarmConfig(SLUG, "/repo", 0, 0, review_share=0).review_share == 0
+    assert SwarmConfig(SLUG, "/repo", 0, 0, review_share=100).review_share == 100
+    with pytest.raises(SwarmError, match="^review share must be a whole number from 0 to 100$"):
+        SwarmConfig(SLUG, "/repo", 0, 0, review_share=101)
+
+
+@pytest.mark.feature("swarm-review-affinity-quota")
 def test_swarm_set_takes_the_review_share(env: tuple, capsys: pytest.CaptureFixture[str]) -> None:
     saved, _, _ = env
     run(SLUG, "create", "--repo", "/repo")

@@ -14304,6 +14304,7 @@
         "tests/swarm/test_review_affinity_quota.py::test_a_stuck_codex_never_moves_the_review_lane_pin",
         "tests/swarm/test_review_affinity_quota.py::test_the_review_share_defaults_to_twenty_and_loads_for_existing_swarms",
         "tests/swarm/test_review_affinity_quota.py::test_a_review_share_outside_zero_to_one_hundred_is_refused",
+        "tests/swarm/test_review_affinity_quota.py::test_a_review_share_of_zero_or_one_hundred_is_kept_and_one_more_is_refused",
         "tests/swarm/test_review_affinity_quota.py::test_swarm_set_takes_the_review_share"
       ]
     },
