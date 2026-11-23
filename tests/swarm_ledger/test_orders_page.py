@@ -5,7 +5,15 @@ from typing import Any
 import pytest
 
 from scripts.swarm.health import order_check
-from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, loaded, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import (
+    fulfill_events,
+    is_events,
+    ledger_state,
+    loaded,
+    reload_after_folds,
+    serve_modules,
+    shell_html,
+)
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -155,7 +163,6 @@ def test_order_panel_fold_choice_survives_reload(orders_page: Any) -> None:
     tab.locator("#orders > li .item-title").wait_for()
     tab.locator("#orders-box > summary").click()
     assert not tab.locator("#orders-box").evaluate("(box) => box.open")
-    tab.reload()
-    loaded(tab)
+    reload_after_folds(tab, "#orders-box")
     assert not tab.locator("#orders-box").evaluate("(box) => box.open")
     assert tab.locator("#sec-orders").count() == 1

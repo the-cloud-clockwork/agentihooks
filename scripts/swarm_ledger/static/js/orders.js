@@ -4,14 +4,6 @@ import { readOrders } from "./api.js";
 let loading = false;
 let pending = false;
 
-export function mountOrders() {
-  const box = h("details", { id: "orders-box", class: "sources-box fold", open: true },
-    h("summary", { text: "Operator orders " }, h("span", { id: "orders-count", class: "count" })),
-    h("ul", { id: "orders" }),
-    h("p", { id: "orders-status", class: "desc", role: "status", text: "Loading operator orders…" }));
-  $("sec-priorities").before(h("section", { id: "sec-orders", "data-outline": "orders" }, box));
-}
-
 function orderRow(order) {
   return h("li", { class: "item" },
     h("div", { class: "item-title", text: order.title }),

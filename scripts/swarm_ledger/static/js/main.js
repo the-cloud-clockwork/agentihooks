@@ -12,13 +12,11 @@ import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
 import { connectEvents } from "./events.js";
 import { loadArchitecture } from "./architecture.js";
-import { mountOrders } from "./orders.js";
 import { keepSession, loadTips } from "./api.js";
 import { tips } from "./state.js";
 import { toggleFrozenView } from "./frozen_view.js";
 
 function start() {
-  mountOrders();
   loadSaved();
   startLayout();
   $("sync").addEventListener("click", () => sendSync("sync", "sync"));
