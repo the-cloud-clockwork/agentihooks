@@ -10,7 +10,18 @@ import pytest
 from scripts.handoff.resolve import Resolver
 from scripts.swarm import expert_lineage
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
-from tests.swarm.expert_fixture import ADDRESS, DIGEST, EXPERT, MASTER, TITLE, indexed, started, store, stored
+from tests.swarm.expert_fixture import (
+    ADDRESS,
+    DIGEST,
+    EXPERT,
+    MASTER,
+    SECOND_EXPERT,
+    TITLE,
+    indexed,
+    started,
+    store,
+    stored,
+)
 from tests.swarm.test_expert_mission import GOOD
 
 pytestmark = pytest.mark.unit
@@ -188,3 +199,30 @@ def test_a_mission_address_resolves_while_the_swarm_holds_that_text(store: Redis
     assert not resolves(f"mission:sw/{'0' * 64}")
     assert not resolves("mission:sw")
     assert not Resolver("sw", None)(ADDRESS)
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_the_last_failed_launch_is_kept_on_a_running_lineage_and_on_no_other(store: RedisStore) -> None:
+    started(store)
+    assert expert_lineage.get(store, "sw", "expert-1").launch_failure == {}
+    expert_lineage.launch_failed(store, "sw", "expert-1", EXPERT, "herdr down", 5)
+    expert_lineage.launch_failed(store, "sw", "expert-1", SECOND_EXPERT, "no pane", 6)
+    kept = expert_lineage.get(store, "sw", "expert-1")
+    assert kept.launch_failure == {"at": 6, "agent": SECOND_EXPERT, "reason": "no pane"}
+    assert (kept.state, indexed(store)) == ("running", {"expert-1"})
+    ended = expert_lineage.stop(store, "sw", "expert-1", MASTER, "superseded", 7)
+    expert_lineage.launch_failed(store, "sw", "expert-1", EXPERT, "too late", 8)
+    assert expert_lineage.get(store, "sw", "expert-1") == ended
+    assert ended.launch_failure == {"at": 6, "agent": SECOND_EXPERT, "reason": "no pane"}
+    expert_lineage.launch_failed(store, "sw", "expert-9", EXPERT, "no such lineage", 9)
+    assert set(stored(store, "expert-lineages")) == {"expert-1"}
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_a_lineage_saved_before_failed_launches_were_kept_reads_with_none(store: RedisStore) -> None:
+    lineage = started(store)
+    row: dict[str, Any] = json.loads(stored(store, "expert-lineages")["expert-1"])
+    del row["launch_failure"]
+    store.redis.hset(store.key("sw", "expert-lineages"), "expert-1", json.dumps(row))
+    assert expert_lineage.get(store, "sw", "expert-1") == lineage
+    assert expert_lineage.running(store, "sw") == expert_lineage.every(store, "sw") == [lineage]

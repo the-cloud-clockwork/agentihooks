@@ -3,6 +3,7 @@ an expert that was lost, the end of an ended lineage's expert, and a lineage sta
 
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,10 +13,13 @@ from scripts.handoff import expert as handoff_expert
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import cli, expert_lineage, expert_seat, naming, prompt
+from scripts.swarm import cli, expert_lineage, expert_seat, naming, prompt, timing
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
+from scripts.tick import engine
+from scripts.tick.deadline import Deadline
+from scripts.tick.step import Context, Result
 from tests.handoff.test_expert_contract import VALID as HANDOFF
 from tests.handoff.test_mission_proof import VALID as PROOF
 from tests.swarm.expert_fixture import ENGINEER, MASTER, TITLE, acting, indexed, mission_file, run, started, store
@@ -23,6 +27,7 @@ from tests.swarm.test_expert_complete import RECAP
 from tests.swarm.test_expert_handoff_command import V2
 from tests.swarm.test_expert_mission import GOOD
 from tests.swarm.test_tick import FakeRuntime
+from tests.tick.test_engine import FakeStep, View
 
 pytestmark = pytest.mark.unit
 _fixtures = (store, mission_file)
@@ -33,6 +38,7 @@ NEXT = "1. Finish slice two; done when its test passes."
 SEED_NEXT = "1. Make seam two green; done when its test passes."
 SESSION = "s-261122-002433"
 ROOM = "no hive has room, and the local machine runs 4 of its 4 agents"
+REFUSED = "herdr refused the pane: exit 3"
 
 
 def go(found: RedisStore, runtime: Any, now: int = NOW) -> list[str]:
@@ -187,6 +193,103 @@ def test_a_launch_refused_for_room_waits_and_hands_its_transfer_back(store: Redi
     assert experts(store) == []
     [kept] = rows(store)
     assert (kept["id"], kept["successor"], kept["binding"]) == (row["id"], "", {"state": "pending"})
+
+
+def failing(text: str = REFUSED) -> FakeRuntime:
+    """A runtime whose launch fails with that error text and no room refusal in it."""
+    return FakeRuntime(crash=tick_module.SpawnError(text, "unavailable"))
+
+
+def failure(found: RedisStore) -> dict[str, Any]:
+    kept: dict[str, Any] = expert_lineage.get(found, "sw", "expert-1").launch_failure
+    return kept
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_a_successor_launch_that_fails_keeps_its_error_on_the_binding_and_on_the_lineage(store: RedisStore) -> None:
+    started(store)
+    row = handed_off(store, launched(store, FakeRuntime()))
+    assert go(store, failing(), NOW + MINUTE) == [f"expert spawn failed on lineage expert-1: {REFUSED}"]
+    [failed] = [found for found in rows(store) if found["id"] == row["id"]]
+    assert (failed["binding"]["state"], failed["binding"]["reason"]) == ("absent", REFUSED)
+    assert failed["binding"]["session"] == failed["successor"] != ""
+    assert failure(store) == {"at": NOW + MINUTE, "agent": failed["successor"], "reason": REFUSED}
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_a_first_launch_that_fails_keeps_its_error_on_the_lineage_with_no_transfer_to_carry_it(
+    store: RedisStore,
+) -> None:
+    started(store)
+    go(store, failing())
+    kept = failure(store)
+    assert rows(store) == [] and experts(store) == []
+    assert (kept["at"], kept["reason"], naming.lane_of(kept["agent"])) == (NOW, REFUSED, "expert")
+    launched(store, FakeRuntime(), NOW + MINUTE)
+    assert failure(store) == kept
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_a_launch_refused_for_room_records_no_failed_launch(store: RedisStore) -> None:
+    started(store)
+    full = FakeRuntime(crash=tick_module.SpawnError(ROOM, "unavailable"))
+    assert go(store, full) == [f"lineage expert-1 waits: {ROOM}"]
+    assert failure(store) == {}
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_the_kept_reason_is_redacted_put_on_one_line_and_cut_at_three_hundred_characters(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started(store)
+    seen: list[tuple[str, str]] = []
+
+    def redact(text: str, *, mode: str) -> str:
+        seen.append((text, mode))
+        return text.replace("private", "[gone]")
+
+    monkeypatch.setattr(expert_seat, "redact", redact)
+    raw = "login failed:\n  the private word\t" + "x" * 400
+    go(store, failing(raw))
+    assert seen == [(raw, "strict")]
+    assert failure(store)["reason"] == ("login failed: the [gone] word " + "x" * 400)[:300]
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_an_error_with_no_text_is_kept_as_the_name_of_its_type(store: RedisStore) -> None:
+    started(store)
+    go(store, failing(""))
+    assert failure(store)["reason"] == "SpawnError"
+
+
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_a_pass_the_tick_abandons_still_leaves_the_reason_expert_status_reads(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
+    started(store)
+    release = Event()
+
+    class Slow(FakeRuntime):
+        def spawn(self, config: Any, lane: str, name: str, task: dict[str, Any]) -> Any:
+            release.wait(30)
+            return super().spawn(config, lane, name, task)
+
+    slow = Slow(crash=tick_module.SpawnError(REFUSED, "unavailable"))
+
+    def seats(ctx: Context) -> Result:
+        go(store, slow)
+        return Result()
+
+    step = FakeStep("expert seats abandoned", seats, budget_s=0.05)
+    try:
+        record = engine.run_step(step, Context(View(), Deadline.after(60.0)))
+        assert (record.abandoned, record.result) == (True, None)
+        assert failure(store) == {}
+    finally:
+        release.set()
+        engine._RUNNING[(timing.SWARM.get(), step.name)].join(5)
+    assert run("sw", "expert", "status") == 0
+    assert capsys.readouterr().out.endswith(f" failed: {REFUSED})\n")
 
 
 def test_no_session_slot_holds_the_launch(store: RedisStore) -> None:

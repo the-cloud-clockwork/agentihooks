@@ -199,6 +199,35 @@ def test_status_as_json_carries_each_running_record_and_its_occupant(
     assert json.loads(capsys.readouterr().out) == [{**asdict(ended), "occupant": ""}]
 
 
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_status_names_the_last_failed_launch_while_the_seat_is_empty_and_carries_it_as_json(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
+    started(store, at=1)
+    expert_lineage.launch_failed(store, "sw", "expert-1", EXPERT, "herdr refused the pane: exit 3", 7)
+    failure = {"at": 7, "agent": EXPERT, "reason": "herdr refused the pane: exit 3"}
+    assert run("sw", "expert", "status") == 0
+    assert capsys.readouterr().out == (
+        f"expert-1 running at xhigh, no expert yet: {TITLE} "
+        f"(started by {MASTER}; last launch as {EXPERT} failed: herdr refused the pane: exit 3)\n"
+    )
+    seated(store, EXPERT, "expert-1", state="finished")
+    assert run("sw", "expert", "status", "expert-1") == 0
+    assert capsys.readouterr().out.endswith(f"; last launch as {EXPERT} failed: herdr refused the pane: exit 3)\n")
+    seated(store, SECOND_EXPERT, "expert-1")
+    assert run("sw", "expert", "status") == 0
+    assert capsys.readouterr().out == (f"expert-1 running at xhigh, {SECOND_EXPERT}: {TITLE} (started by {MASTER})\n")
+    assert run("sw", "expert", "status", "--json") == 0
+    [row] = json.loads(capsys.readouterr().out)
+    assert (row["launch_failure"], row["occupant"]) == (failure, SECOND_EXPERT)
+    store.drop_agent("sw", SECOND_EXPERT)
+    expert_lineage.stop(store, "sw", "expert-1", MASTER, "superseded", 9)
+    assert run("sw", "expert", "status", "expert-1") == 0
+    assert capsys.readouterr().out == (
+        f"expert-1 stopped at xhigh: {TITLE} (started by {MASTER}, ended by {MASTER}: superseded)\n"
+    )
+
+
 def test_the_master_stops_a_lineage_with_a_note(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
