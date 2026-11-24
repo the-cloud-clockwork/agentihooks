@@ -4520,6 +4520,16 @@
       ]
     },
     {
+      "id": "swarm-wrapper-phases-hook-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-wrapper-phases-doc-read",
+      "behaviour": "The wrapper phases site hook declares the pass box key doc, under which it stores the ledger pass state and reads it back, so a pass of that hook under AGENTIHOOKS_TICK_HOOK_READS enforce or observe answers true with no undeclared read raised or logged, keeps the pass state under doc, hands its open tasks to the panic fixer sweep and clears the halt marks.",
+      "seam": "scripts.swarm.cli.WRAPPER_HOOK_READS and the wrapper phases hook of scripts.swarm.cli._Wrapper.hooks",
+      "tests": [
+        "tests/tick/test_hook_reads.py::test_the_phases_hook_reads_back_the_pass_state_it_stores_without_an_undeclared_read"
+      ]
+    },
+    {
       "id": "swarm-tick-no-shared-rows",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c5",
