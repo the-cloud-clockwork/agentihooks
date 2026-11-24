@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 import requests
 
-from scripts.ci_lab import budget, scheduler, stale_heads, webhooks
+from scripts.ci_lab import budget, intake, scheduler, stale_heads, webhooks
 from scripts.ci_lab.checks import API
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.retry import Policy
@@ -44,11 +44,14 @@ from tests.ci_lab.test_scheduler import (
 
 OTHER_REPO = f"{REPO}-bundle"
 HEAD_C = "f" * 40
+OTHER_BASE = "d" * 40
+THIRD_BASE = "e" * 40
 OWNER = "the-cloud-clockwork"
 PULLS = f"{API}/repos/{SLUG}/pulls?state=open&per_page=100"
 PULLS_NEXT = f"{API}/repositories/7/pulls?state=open&per_page=100&page=2"
 PLANTS = f"{API}/repos/{SLUG}/git/matching-refs/heads/diffcheck/lab-plant-?per_page=100"
 PLANT = {"ref": "refs/heads/diffcheck/lab-plant-size-green", "object": {"sha": HEAD_B}}
+ELSEWHERE = f"{API}.example.com/repositories/7/pulls?state=open&per_page=100&page=2"
 BEARER = f"Bearer token of {SLUG}"
 PULL_LANE = f"{REPO}|feature|{int(Priority.PULL_REQUEST)}"
 Asked = tuple[str, str]
@@ -105,14 +108,14 @@ def _restarted(run: Run) -> Run:
     return Run(run.lab, run.lab.build(0, Policy(), None))
 
 
-def _pull(action: str, head: str, branch: str = "feature", owner: str = OWNER) -> dict[str, Any]:
+def _pull(action: str, head: str, branch: str = "feature", owner: str = OWNER, base: str = BASE) -> dict[str, Any]:
     return {
         "action": action,
         "repository": {"html_url": REPO},
         "sender": {"login": ACTOR},
         "pull_request": {
             "head": {"sha": head, "ref": branch, "label": f"{owner}:{branch}"},
-            "base": {"sha": BASE, "label": f"{OWNER}:dev"},
+            "base": {"sha": base, "label": f"{OWNER}:dev"},
             "user": {"login": ACTOR},
         },
     }
@@ -166,6 +169,25 @@ def _listings(pulls: list[Any], plants: list[Any]) -> Callable[[str], requests.R
         PLANTS: _answer(PLANTS, plants),
     }
     return pages.__getitem__
+
+
+def _readings(*pulls: list[str]) -> Callable[[str], requests.Response]:
+    turns = iter(pulls)
+
+    def answer(url: str) -> requests.Response:
+        return _answer(url, [PLANT] if url == PLANTS else [{"head": {"sha": head}} for head in next(turns)])
+
+    return answer
+
+
+def _twin_grades(run: Run) -> tuple[scheduler.State, scheduler.State]:
+    _deliver(run, _pull("opened", HEAD_A))
+    run.tick(1000)
+    _deliver(run, _pull("opened", HEAD_A, base=OTHER_BASE))
+    run.tick(1010)
+    one, two = (next(grade for grade in run.grades() if grade.base == base) for base in (BASE, OTHER_BASE))
+    assert run.lab.client.get(scheduler.LANES + PULL_LANE) == two.run
+    return one, two
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
@@ -305,6 +327,136 @@ def test_a_closed_pull_request_keeps_the_pending_units_another_live_grade_grades
     assert f"closed feature of {REPO}: retired {pulled.run}, dropped 0 pending units" in run.tick(1100)
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, first)]
     assert [grade.tier for grade in run.grades()] == [int(Priority.QUEUE)]
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_closed_pull_request_ends_its_own_grade_and_leaves_the_other_pull_request_of_its_branch(
+    lab: Callable[..., Run],
+) -> None:
+    first, second = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (first,)}), HEAD_B: plan({"lint": (second,)})})
+    one, two = _twin_grades(run)
+    _deliver(run, _pull("closed", HEAD_A))
+    assert f"closed feature of {REPO}: retired {one.run}, {two.run} still grades {HEAD_A}" in run.tick(1100)
+    assert [grade.run for grade in run.grades()] == [two.run]
+    assert run.lab.client.hkeys(scheduler.ORIGINS) == [two.run]
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, first)]
+    assert run.lab.client.get(scheduler.LANES + PULL_LANE) == two.run
+    _deliver(run, _pull("synchronize", HEAD_B, base=OTHER_BASE))
+    run.tick(1200)
+    assert run.grade(HEAD_A).superseded
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, second)]
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+@pytest.mark.parametrize("base", [OTHER_BASE, HEAD_C])
+def test_a_closed_pull_request_whose_grade_its_lane_names_hands_the_lane_to_the_other_pull_request(
+    lab: Callable[..., Run], base: str
+) -> None:
+    first, second = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (first,)}), HEAD_B: plan({"lint": (second,)})})
+    one, two = _twin_grades(run)
+    _deliver(run, _pull("closed", HEAD_A, base=base))
+    assert f"closed feature of {REPO}: retired {two.run}, {one.run} still grades {HEAD_A}" in run.tick(1100)
+    assert [grade.run for grade in run.grades()] == [one.run]
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, first)]
+    assert run.lab.client.get(scheduler.LANES + PULL_LANE) == one.run
+    _deliver(run, _pull("synchronize", HEAD_B))
+    run.tick(1200)
+    assert run.grade(HEAD_A).superseded
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, second)]
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_three_pull_requests_of_one_branch_end_one_grade_at_each_close(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    one, two = _twin_grades(run)
+    _deliver(run, _pull("opened", HEAD_A, base=THIRD_BASE))
+    run.tick(1020)
+    three = next(grade for grade in run.grades() if grade.base == THIRD_BASE)
+    stays, other = sorted([one, two], key=lambda grade: grade.run)
+    _deliver(run, _pull("closed", HEAD_A, base=HEAD_C))
+    assert f"closed feature of {REPO}: retired {three.run}, {stays.run} still grades {HEAD_A}" in run.tick(1100)
+    assert run.lab.client.get(scheduler.LANES + PULL_LANE) == stays.run
+    _deliver(run, _pull("closed", HEAD_A, base=other.base))
+    assert f"closed feature of {REPO}: retired {other.run}, {stays.run} still grades {HEAD_A}" in run.tick(1200)
+    assert [grade.run for grade in run.grades()] == [stays.run]
+    assert run.lab.client.get(scheduler.LANES + PULL_LANE) == stays.run
+    _deliver(run, _pull("closed", HEAD_A, base=stays.base))
+    assert f"closed feature of {REPO}: retired {stays.run}, dropped 1 pending units" in run.tick(1300)
+    assert run.grades() == []
+    assert run.lab.client.get(scheduler.LANES + PULL_LANE) == stays.run
+    _deliver(run, _pull("closed", HEAD_A, base=THIRD_BASE))
+    assert run.tick(1400) == [f"closed feature of {REPO}: nothing held"]
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_closed_pull_request_keeps_the_waiting_head_of_a_branch_another_pull_request_holds(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})}, quiet_ms=500)
+    _deliver(run, _pull("opened", HEAD_A))
+    run.tick(1000)
+    run.tick(1600)
+    _deliver(run, _pull("opened", HEAD_A, base=OTHER_BASE))
+    run.tick(1700)
+    run.tick(2300)
+    one, two = (next(grade for grade in run.grades() if grade.base == base) for base in (BASE, OTHER_BASE))
+    _deliver(run, _pull("synchronize", HEAD_B, base=OTHER_BASE))
+    run.tick(2400)
+    _deliver(run, _pull("closed", HEAD_B))
+    assert f"closed feature of {REPO}: retired {one.run}, {two.run} still grades {HEAD_A}" in run.tick(2500)
+    assert list(run.lab.client.hgetall(scheduler.WAITING)) == [PULL_LANE]
+    run.tick(3000)
+    assert run.grade(HEAD_B).base == OTHER_BASE
+    assert run.grade(HEAD_A).superseded
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_second_grade_of_the_same_head_and_base_is_no_other_pull_request(lab: Callable[..., Run]) -> None:
+    first = unit(1)
+    run = lab({HEAD_A: plan({"lint": (first,)})})
+    _deliver(run, _pull("opened", HEAD_A))
+    run.tick(1000)
+    earlier = run.grade(HEAD_A).run
+    run.push(HEAD_A, event="pull_request", action=intake.RERUN)
+    run.tick(1010)
+    again = run.lab.client.get(scheduler.LANES + PULL_LANE)
+    assert again != earlier and sorted(grade.run for grade in run.grades()) == sorted([earlier, again])
+    _deliver(run, _pull("closed", HEAD_A))
+    assert f"closed feature of {REPO}: retired {again}, dropped 0 pending units" in run.tick(1100)
+    assert [grade.run for grade in run.grades()] == [earlier]
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_grade_of_the_same_head_in_another_lane_is_no_other_pull_request_of_the_branch(
+    lab: Callable[..., Run],
+) -> None:
+    first = unit(1)
+    run = lab({HEAD_A: plan({"lint": (first,)})})
+    _deliver(run, _pull("opened", HEAD_A, branch="other", base=OTHER_BASE))
+    run.tick(1000)
+    _deliver(run, _pull("opened", HEAD_A))
+    run.tick(1010)
+    other, mine = (next(grade for grade in run.grades() if grade.lane == lane) for lane in ("other", "feature"))
+    _deliver(run, _pull("closed", HEAD_A))
+    assert f"closed feature of {REPO}: retired {mine.run}, dropped 0 pending units" in run.tick(1100)
+    assert [grade.run for grade in run.grades()] == [other.run]
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, first)]
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_closed_pull_request_whose_live_grade_lost_its_document_is_still_forgotten(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    _deliver(run, _pull("opened", HEAD_A))
+    run.tick(1000)
+    live = run.grade(HEAD_A).run
+    run.lab.client.delete(scheduler.GRADES + live)
+    _deliver(run, _pull("closed", HEAD_A))
+    assert f"closed feature of {REPO}: retired {live}, dropped 1 pending units" in run.tick(1100)
+    assert run.lab.client.smembers(scheduler.LIVE) == set()
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
@@ -498,12 +650,53 @@ def test_the_listing_reads_every_page_of_open_pull_requests_and_of_plant_branche
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
-def test_a_head_either_reading_of_the_listings_names_is_wanted(monkeypatch: pytest.MonkeyPatch) -> None:
-    readings = iter(([{"head": {"sha": HEAD_A}}], [PLANT], [{"head": {"sha": HEAD_C}}], []))
+def test_the_listings_are_read_again_until_two_readings_in_a_row_name_the_same_heads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     asked: list[Asked] = []
-    monkeypatch.setattr(requests, "get", _github(lambda url: _answer(url, next(readings)), asked))
+    monkeypatch.setattr(requests, "get", _github(_readings([HEAD_A], [HEAD_A, HEAD_C], [HEAD_A, HEAD_C]), asked))
     assert stale_heads.OpenHeads(Token)(REPO) == frozenset({HEAD_A, HEAD_B, HEAD_C})
-    assert [url for url, _ in asked] == [PULLS, PLANTS, PULLS, PLANTS]
+    assert [url for url, _ in asked] == [PULLS, PLANTS] * 3
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_reading_that_repeats_an_earlier_one_but_not_the_last_settles_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[Asked] = []
+    monkeypatch.setattr(requests, "get", _github(_readings([HEAD_A], [HEAD_C], [HEAD_A], [HEAD_A]), asked))
+    assert stale_heads.OpenHeads(Token)(REPO) == frozenset({HEAD_A, HEAD_B})
+    assert [url for url, _ in asked] == [PULLS, PLANTS] * 4
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_the_listings_settle_on_the_last_reading_they_are_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    heads = [[f"{number:040x}"] for number in range(4)]
+    asked: list[Asked] = []
+    monkeypatch.setattr(requests, "get", _github(_readings(*heads, heads[-1]), asked))
+    assert stale_heads.OpenHeads(Token)(REPO) == frozenset({heads[-1][0], HEAD_B})
+    assert [url for url, _ in asked] == [PULLS, PLANTS] * 5
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_listings_that_never_repeat_raise_instead_of_naming_heads(monkeypatch: pytest.MonkeyPatch) -> None:
+    heads = [[f"{number:040x}"] for number in range(6)]
+    asked: list[Asked] = []
+    monkeypatch.setattr(requests, "get", _github(_readings(*heads), asked))
+    with pytest.raises(OSError, match=f"the listings of {SLUG} changed through 5 readings"):
+        stale_heads.OpenHeads(Token)(REPO)
+    assert [url for url, _ in asked] == [PULLS, PLANTS] * 5
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_next_link_outside_the_api_raises_and_sends_the_token_nowhere_else(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[Asked] = []
+    monkeypatch.setattr(requests, "get", _github(lambda url: _answer(url, [], ELSEWHERE), asked))
+    with pytest.raises(OSError, match=f"pulls of {SLUG} continues outside {API}"):
+        stale_heads.OpenHeads(Token)(REPO)
+    assert asked == [(PULLS, BEARER)]
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
