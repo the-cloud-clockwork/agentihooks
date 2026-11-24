@@ -54,15 +54,16 @@ def test_a_pass_holds_its_ledger_view_exactly_once(
 ) -> None:
     """A running and a stopped pass each hold their ledger view once and start the step pool once."""
     order = _ordered_pass(env, monkeypatch, state)
-    assert len([seen for seen in order if seen != LANE_CLOCK_STARTED]) == 1
+    assert len([hold for hold in order if hold != LANE_CLOCK_STARTED]) == 1
     assert order.count(LANE_CLOCK_STARTED) == 1
 
 
 @pytest.mark.feature("swarm-tick-view-held-before-lane-clock")
-def test_the_sites_of_a_running_pass_read_the_view_the_pass_holds(
+def test_the_sites_of_a_running_pass_start_on_the_view_the_pass_holds(
     env: tuple[RedisStore, Any, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The sites of a running pass read the view its hold set, and the pass leaves no view held when it ends."""
+    """The sites of a running pass start with the view its hold set as the current view, and the pass leaves no view
+    held when it ends."""
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     store.update("sw", state="running")

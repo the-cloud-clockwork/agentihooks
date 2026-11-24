@@ -3669,7 +3669,7 @@
       "seam": "scripts.swarm.cli.run_tick, the order of _hold_view against scripts.tick.pool.running",
       "tests": [
         "tests/swarm/test_pass_view_before_lane.py::test_a_pass_holds_its_ledger_view_exactly_once",
-        "tests/swarm/test_pass_view_before_lane.py::test_the_sites_of_a_running_pass_read_the_view_the_pass_holds",
+        "tests/swarm/test_pass_view_before_lane.py::test_the_sites_of_a_running_pass_start_on_the_view_the_pass_holds",
         "tests/swarm/test_pass_view_before_lane.py::test_the_pass_holds_its_ledger_view_before_the_step_pool_starts_the_lane_clock"
       ],
       "rules": [
