@@ -115,6 +115,7 @@ class Outline(unittest.TestCase):
 
     def test_operator_notes_sit_right_after_priorities_on_the_page_and_in_the_outline(self):
         order = [
+            "sec-orders",
             "sec-priorities",
             "sec-notes",
             "sec-questions",
@@ -153,7 +154,7 @@ class Outline(unittest.TestCase):
         )
         out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
         self.assertEqual([s["id"] for s in out], order)
-        self.assertEqual(out[1]["title"], "Operator notes")
+        self.assertEqual(out[2]["title"], "Operator notes")
 
 
 if __name__ == "__main__":
