@@ -1,0 +1,31 @@
+rules:
+  - id: seat-learned-scan-unindexed
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A learned note lookup walks the whole shared Redis keyspace with SCAN on every call. The hub admission primed
+      step scanned about 1.48 million keys for 64 learned lists, three to six seconds per admission, and pushed lane
+      admissions past the spoke ask timeout. Read the swarm learned seat index and scan only behind a check that the
+      index was never built.
+    paths:
+      include:
+        - /scripts/
+        - seat-learned-scan-unindexed.py
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: $R.scan_iter(..., match=$M, ...)
+              - metavariable-regex:
+                  metavariable: $M
+                  regex: '.*:learned"$'
+          - patterns:
+              - pattern-inside: |
+                  $P = $F
+                  ...
+              - pattern: $R.scan_iter(..., match=$P, ...)
+              - metavariable-regex:
+                  metavariable: $F
+                  regex: '.*:learned"$'
+      - pattern-not-inside: |
+          if not $R2.exists(...):
+              ...
