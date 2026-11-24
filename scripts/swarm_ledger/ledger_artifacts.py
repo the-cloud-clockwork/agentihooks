@@ -5,6 +5,7 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from pathlib import PurePath
+from typing import Any
 
 import ledger_comments
 import ledger_core as core
@@ -180,7 +181,7 @@ def check_add(op: dict) -> None:
     ledger_comments.check(op["title"], "item")
 
 
-def operator_asked(doc, entry_id):
+def operator_asked(doc: dict[str, Any], entry_id: str | None) -> bool:
     if not entry_id:
         return False
     return any(

@@ -452,11 +452,11 @@ def clear_managed_mcp(target: str) -> None:
 
 
 def shared_directive(bundle_dir: Path | None) -> str:
+    from hooks.context.profile_chain import doctrine
+
     if not bundle_dir:
         return ""
-    bundle_md = bundle_dir / ".claude" / "CLAUDE.md"
-    if not bundle_md.exists():
-        bundle_md = bundle_dir / "CLAUDE.md"
+    bundle_md = doctrine(bundle_dir)
     return bundle_md.read_text().strip() if bundle_md.exists() else ""
 
 

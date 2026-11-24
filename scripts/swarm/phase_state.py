@@ -1,5 +1,7 @@
 """A phase's lifecycle, derived from stored facts only, so the tick, the CLI and the page cannot drift apart."""
 
+from typing import Any
+
 LABELS = {
     "out_of_scope": "Out of scope",
     "done": "Done",
@@ -44,11 +46,16 @@ def status(doc):
     return {p["id"]: {"state": lifecycle(p, doc), "label": label(p, doc)} for p in doc.get("phases", [])}
 
 
-def admits(task, doc):
+def admits(task: dict[str, Any], doc: dict[str, Any]) -> bool:
+    """Whether ``task``'s phase lets it be claimed: a plan task while the phase plans, an enhancement task while it
+    plans or builds, and any other task while it builds."""
     phase = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), None)
     if phase is None:
         return True
-    return lifecycle(phase, doc) == ("planning" if task.get("kind") == "plan" else "building")
+    state = lifecycle(phase, doc)
+    if task.get("enhances"):
+        return state in ("planning", "building")
+    return state == ("planning" if task.get("kind") == "plan" else "building")
 
 
 def report(doc):
@@ -66,5 +73,7 @@ def report(doc):
     return rows
 
 
-def _plan_task(phase, doc):
-    return next((t for t in doc["tasks"] if t.get("phase") == phase["id"] and t.get("kind") == "plan"), None)
+def _plan_task(phase: dict[str, Any], doc: dict[str, Any]) -> dict[str, Any] | None:
+    """The phase's own plan task: its first plan kind task that enhances no other task."""
+    owned = (t for t in doc["tasks"] if t.get("phase") == phase["id"] and t.get("kind") == "plan")
+    return next((t for t in owned if not t.get("enhances")), None)

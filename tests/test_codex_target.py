@@ -636,6 +636,44 @@ class TestMcp:
         state = install._load_state()
         assert "a" in install._global_record(state, "codex").get("managed_mcp", [])
 
+    @staticmethod
+    def _install_run(servers: dict, persisted: str = "p") -> CodexAdapter:
+        run = CodexAdapter()
+        run.register_mcp(servers)
+        install._register_target_global(persisted, target="codex")
+        run.post_install_reconcile(["p"], persisted)
+        return run
+
+    def test_reinstall_prunes_servers_the_chain_no_longer_ships(self, adapter, capsys):
+        self._install_run({name: {"command": f"/bin/{name}"} for name in ("a", "b", "c")})
+        run = self._install_run({"a": {"command": "/bin/a"}})
+        assert set(run._load_toml(codex_home() / "config.toml")["mcp_servers"]) == {"a"}
+        assert install._global_record(install._load_state(), "codex")["managed_mcp"] == ["a"]
+        assert "Removed 2 codex MCP server(s) no longer shipped: b, c" in capsys.readouterr().out
+
+    def test_reinstall_survives_a_recorded_server_the_operator_removed(self, adapter):
+        self._install_run({"a": {"command": "/bin/a"}, "b": {"command": "/bin/b"}})
+        config = codex_home() / "config.toml"
+        doc = adapter._load_toml(config)
+        del doc["mcp_servers"]["b"]
+        adapter._dump_toml(config, doc)
+        self._install_run({"a": {"command": "/bin/a"}})
+        assert install._global_record(install._load_state(), "codex")["managed_mcp"] == ["a"]
+
+    def test_reinstall_keeps_operator_servers(self, adapter):
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "config.toml").write_text('[mcp_servers.mine]\ncommand = "/bin/mine"\n')
+        self._install_run({"a": {"command": "/bin/a"}})
+        run = self._install_run({"a": {"command": "/bin/a"}})
+        assert "mine" in run._load_toml(home / "config.toml")["mcp_servers"]
+
+    def test_reinstall_keeps_servers_when_a_profile_did_not_resolve(self, adapter, capsys):
+        self._install_run({"a": {"command": "/bin/a"}, "b": {"command": "/bin/b"}})
+        run = self._install_run({"a": {"command": "/bin/a"}}, persisted="p,gone,lost")
+        assert set(run._load_toml(codex_home() / "config.toml")["mcp_servers"]) == {"a", "b"}
+        assert "profile(s) gone, lost did not resolve" in capsys.readouterr().out
+
     def test_credential_shaped_header_dropped(self, adapter, capsys):
         # Built by concatenation so the literal secret-shaped string never appears
         # whole anywhere else in this file.

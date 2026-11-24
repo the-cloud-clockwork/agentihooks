@@ -9,8 +9,9 @@
 
 - A full plan is a plan file a master or planner writes and publishes to the
   artifacts; every task built from it carries its slice.
-- Follow ups, open questions, operator notes and orders the operator types or
-  gives are standalone tasks with no plan and no slice.
+- Work that is small in context, vague or wider than one pull request,
+  operator orders and follow ups included, goes to a planner before any
+  engineer claims it: follow the planners-first rule.
 - A standalone task that a master or planner expands because it grew wide
   becomes a plan: write and publish the plan with slice markers, then add its
   tasks with their slices.

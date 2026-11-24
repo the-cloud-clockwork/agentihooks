@@ -60,7 +60,7 @@ jobs:
           SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
         run: |
           uv venv .venv
-          uv pip install --python .venv/bin/python -e ".[all]"
+          uv pip install --python .venv/bin/python --constraint .github/test-requirements.lock -e ".[all]"
 
       - name: Seed brain-feed fixtures
         if: steps.key.outputs.hit != 'true'

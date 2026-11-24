@@ -8,7 +8,7 @@ import threading
 import time
 from _thread import LockType
 from collections import deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -24,11 +24,12 @@ SLOW_SECONDS = 5.0
 DEFAULT_RECORDS = 1000
 MAX_RECORDS = 10000
 JOURNAL_NAME = ".request-metrics.jsonl"
+TIMING_FILE = "AGENTIHOOKS_LEDGER_TIMING_FILE"
 WRITES = frozenset(("POST", "PUT", "PATCH", "DELETE"))
 STEPS = ("hierarchy_sync", "outbox_write", "refresh_record", "event_append")
 JOURNAL_WIDTHS = {"held": 2, "lost": 3, "evicted": 2, "start": 2, "flush": 2, "stop": 2, "s": 9 + len(STEPS)}
 LEGACY_SAMPLE_WIDTHS = frozenset((7, 9))
-CURRENT = ContextVar("ledger_request_timing", default=None)
+CURRENT: ContextVar["Timing | None"] = ContextVar("ledger_request_timing", default=None)
 Row = tuple[float, str, str, float, float, float, float, float, float, float, float, float]
 SAMPLES: deque[Row] = deque(maxlen=MAX_SAMPLES)
 PENDING: list[Row] = []
@@ -52,6 +53,7 @@ class Timing:
     locking: int = 0
     steps: dict[str, float] = field(default_factory=dict)
     detail: str = ""
+    step_cpu: dict[str, float] = field(default_factory=dict)
 
 
 RESOURCES = frozenset(
@@ -406,14 +408,52 @@ def detailed(text: str) -> None:
 
 @contextmanager
 def step(name: str) -> Iterator[None]:
-    """Add the wall time of one ledger write substep to the current request's timing."""
+    """Add the wall and thread CPU time of one ledger write substep to the current request's timing."""
     timing = CURRENT.get()
-    wall = time.perf_counter()
+    wall, cpu = time.perf_counter(), time.thread_time()
     try:
         yield
     finally:
         if timing is not None:
             timing.steps[name] = timing.steps.get(name, 0.0) + time.perf_counter() - wall
+            timing.step_cpu[name] = timing.step_cpu.get(name, 0.0) + time.thread_time() - cpu
+
+
+@contextmanager
+def command(method: str, path: str) -> Generator[None]:
+    """Time one command line ledger request as a server request is timed and append its line to the file the timing
+    variable names; inside a server request its substeps join that request instead."""
+    if CURRENT.get() is not None:
+        yield
+        return
+    wall, cpu = time.perf_counter(), time.thread_time()
+    timing = Timing(started=wall)
+    token = CURRENT.set(timing)
+    try:
+        yield
+    finally:
+        elapsed, used = time.perf_counter() - wall, time.thread_time() - cpu
+        CURRENT.reset(token)
+        target = os.environ.get(TIMING_FILE)
+        if target:
+            append_lines(Path(target), [timed(method, path, elapsed, used, timing)])
+
+
+def timed(method: str, path: str, wall: float, cpu: float, timing: Timing) -> dict[str, object]:
+    """One command line request's timing line: its route, wall, CPU, waits and each substep's wall and CPU."""
+    return {
+        "method": method,
+        "route": route_name(path),
+        "detail": timing.detail,
+        "wall": wall,
+        "cpu": cpu,
+        "lock_wait": timing.lock_wait,
+        "client_wait": timing.client_wait,
+        "postgres_wait": timing.postgres_wait,
+        "steps": {
+            name: {"wall": seconds, "cpu": timing.step_cpu.get(name, 0.0)} for name, seconds in timing.steps.items()
+        },
+    }
 
 
 @contextmanager

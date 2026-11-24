@@ -153,7 +153,9 @@ def test_a_spill_past_a_cpu_saturated_first_ranked_hive_records_its_cpu_refusal(
     assert setup.launcher.spawn(request).status is Status.PENDING
     order = setup.launcher.orders_for(request.task["id"])
     assert order.hive == "spare"
-    refused = "cpu: five minute load 28.70 on 16 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line"
+    refused = (
+        "cpu: five minute load 28.70 on 16 CPUs, 0.5 CPU per agent by default, fits 0 more under the 80 percent line"
+    )
     decision = setup.store.execution_registry.get("fixture", order.execution_id).profile_decision
     assert decision["placement_spill"] == {"preferred": "remote", "refusal": refused}
 

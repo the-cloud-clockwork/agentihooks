@@ -1,10 +1,53 @@
 """Tests for hooks.observability.token_monitor."""
 
-from unittest.mock import patch
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import ANY, patch
 
 import pytest
 
 pytestmark = pytest.mark.unit
+
+SEAM_ENV = {
+    "OTEL_HOOKS_ENABLED": "true",
+    "AGENTIHOOKS_OTLP_ENDPOINT": "http://127.0.0.1:9",
+    "AGENTIHOOKS_OTLP_PROTOCOL": "http/protobuf",
+    "TOKEN_MONITOR_ENABLED": "true",
+    "REDIS_URL": "",
+}
+
+
+def _tokens(session_id: str) -> dict[str, object]:
+    from hooks.observability import presence
+
+    path = presence.seen_dir() / f"{session_id}.json"
+    return json.loads(path.read_text()).get("tokens", {}) if path.exists() else {}
+
+
+def _otel_after(run: str, env: dict[str, str]) -> dict[str, bool]:
+    from hooks import config
+
+    probe = (
+        "import json, threading\n"
+        "from hooks.observability import otel\n"
+        f"{run}\n"
+        "worker = any(thread.name == 'otel-worker' for thread in threading.enumerate())\n"
+        "print(json.dumps({'initialized': otel._initialized, 'worker': worker}))\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, **SEAM_ENV, **env, "AGENTIHOOKS_HOME": str(config.AGENTIHOOKS_HOME)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    return json.loads(done.stdout.splitlines()[-1])
 
 
 def _payload(used: int, remaining: int, session_id: str = "sess-test", model: str = "sonnet-4.6") -> dict:
@@ -119,7 +162,10 @@ class TestTokenMonitor:
         assert level == "warning"
 
 
-def test_native_statusline_emits_context_gauge(monkeypatch, capsys, tmp_path):
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_native_statusline_writes_its_fill_into_the_seen_record_without_otel(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     import io
     import json
 
@@ -139,8 +185,15 @@ def test_native_statusline_emits_context_gauge(monkeypatch, capsys, tmp_path):
         patch("hooks.observability.otel.flush") as flush,
     ):
         statusline.main()
-    gauge.assert_any_call("agentihooks.tokens.fill_pct", 25.0, {"session.id": "native-claude"})
-    flush.assert_called_once()
+    gauge.assert_not_called()
+    flush.assert_not_called()
+    assert _tokens("native-claude") == {
+        "session_id": "native-claude",
+        "fill_pct": 25.0,
+        "burn_rate": None,
+        "at_s": ANY,
+        "correlation": {},
+    }
     assert "25%" in capsys.readouterr().out
 
 
@@ -173,8 +226,10 @@ def test_native_context_without_measurement_emits_no_gauge(monkeypatch, tmp_path
         else:
             record_lifecycle_context(payload)
     gauge.assert_not_called()
+    assert _tokens("empty") == {}
 
 
+@pytest.mark.feature("tokens-gauges-hive-daemon")
 @pytest.mark.parametrize("event", ["PostToolUse", "Stop"])
 def test_codex_context_growth_and_compaction(monkeypatch, event):
     from hooks import config
@@ -192,17 +247,23 @@ def test_codex_context_growth_and_compaction(monkeypatch, event):
         patch("hooks.observability.token_monitor._get_previous_used", side_effect=[previous, 50000]),
         patch("hooks.observability.token_monitor.persist_token_metrics") as persist,
         patch("hooks.observability.otel.record_gauge") as gauge,
+        patch("hooks.observability.token_monitor.time", SimpleNamespace(time=lambda: 1_234.5)),
     ):
         payload = {"session_id": "growth", "hook_event_name": event}
         record_lifecycle_context(payload)
         record_lifecycle_context(payload)
-    gauge.assert_any_call("agentihooks.tokens.fill_pct", 25.0, {"session.id": "growth"})
-    gauge.assert_any_call("agentihooks.tokens.burn_rate", 10000, {"session.id": "growth"})
-    gauge.assert_any_call("agentihooks.tokens.fill_pct", 5.0, {"session.id": "growth"})
-    gauge.assert_any_call("agentihooks.tokens.burn_rate", 0.0, {"session.id": "growth"})
+    gauge.assert_not_called()
+    assert _tokens("growth") == {
+        "session_id": "growth",
+        "fill_pct": 5.0,
+        "burn_rate": 0.0,
+        "at_s": 1_234.5,
+        "correlation": {},
+    }
     assert persist.call_args.args[1]["used"] == 10000
 
 
+@pytest.mark.feature("tokens-gauges-hive-daemon")
 @pytest.mark.parametrize("window,used", [(200000, 50000), (1, 0)])
 def test_lifecycle_reads_the_current_session_rollout(monkeypatch, tmp_path, window, used):
     import json
@@ -233,6 +294,69 @@ def test_lifecycle_reads_the_current_session_rollout(monkeypatch, tmp_path, wind
         patch("hooks.observability.otel.record_gauge") as gauge,
     ):
         record_lifecycle_context({"session_id": "current-session", "hook_event_name": "PostToolUse"})
-    gauge.assert_called_once_with(
-        "agentihooks.tokens.fill_pct", 25.0 if used else 0.0, {"session.id": "current-session"}
+    gauge.assert_not_called()
+    assert _tokens("current-session")["fill_pct"] == (25.0 if used else 0.0)
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_status_line_run_never_starts_the_otel_worker_or_sdk() -> None:
+    payload = {"session_id": "status-seam", "context_window": {"context_window_size": 200000, "used_percentage": 25}}
+    run = (
+        f"import io, sys\nsys.stdin = io.StringIO({json.dumps(payload)!r})\n"
+        "from hooks import statusline\nstatusline.main()"
     )
+    assert _otel_after(run, {}) == {"initialized": False, "worker": False}
+    assert _tokens("status-seam")["fill_pct"] == 25.0
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_codex_lifecycle_record_never_starts_the_otel_worker_or_sdk(tmp_path: Path) -> None:
+    day = tmp_path / "sessions" / "2026" / "10" / "07"
+    day.mkdir(parents=True)
+    usage = {"last_token_usage": {"total_tokens": 50000}, "model_context_window": 200000}
+    line = {"type": "event_msg", "payload": {"type": "token_count", "info": usage}}
+    (day / "rollout-codex-seam.jsonl").write_text(json.dumps(line) + "\n")
+    run = (
+        "from hooks.observability.token_monitor import record_lifecycle_context\n"
+        "record_lifecycle_context({'session_id': 'codex-seam', 'hook_event_name': 'PostToolUse'})"
+    )
+    env = {"AGENTIHOOKS_TARGET": "codex", "CODEX_HOME": str(tmp_path)}
+    assert _otel_after(run, env) == {"initialized": False, "worker": False}
+    assert _tokens("codex-seam")["fill_pct"] == 25.0
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_the_presence_and_token_writers_keep_each_others_values_in_the_seen_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hooks.observability import otel, presence
+    from hooks.observability.token_monitor import record_tokens
+
+    monkeypatch.setattr(otel, "record_gauge", lambda *args: None)
+    path = presence.seen_dir() / "sess-merge.json"
+    record_tokens("sess-merge", 40.0, 500.0, 1_000.0, {})
+    assert json.loads(path.read_text())["seen_s"] == 1_000.0
+    presence.agent("sess-merge", {"AGENTIHOOKS_HIVE_ID": "hive-1"}, 1_001.0)
+    first = {"session_id": "sess-merge", "fill_pct": 40.0, "burn_rate": 500.0, "at_s": 1_000.0, "correlation": {}}
+    assert _tokens("sess-merge") == first
+    record_tokens("sess-merge", 41.0, None, 1_002.0, {})
+    record = json.loads(path.read_text())
+    assert record["tokens"] == {**first, "fill_pct": 41.0, "burn_rate": None, "at_s": 1_002.0}
+    assert record["seen_s"] == 1_001.0
+    assert record["attributes"]["session.id"] == "sess-merge"
+    assert record["sent_s"] == 1_001.0
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_token_write_names_only_a_present_agent_and_a_validated_string_profile(tmp_path: Path) -> None:
+    from hooks.observability.token_monitor import record_tokens
+
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"state": "validated", "validation": {"profile": 7}}))
+    blank = {"AGENTIHOOKS_AGENT_NAME": "", "AGENTIHOOKS_PROFILE_REPORT": str(report)}
+    record_tokens("sess-blank", 1.0, None, 1_000.0, blank)
+    assert _tokens("sess-blank")["correlation"] == {}
+    report.write_text(json.dumps({"state": "failed", "validation": {"profile": "engineer"}}))
+    named = {"AGENTIHOOKS_AGENT_NAME": "engineer@1-2", "AGENTIHOOKS_PROFILE_REPORT": str(report)}
+    record_tokens("sess-blank", 1.0, None, 1_001.0, named)
+    assert _tokens("sess-blank")["correlation"] == {"agentihooks.correlation.agent.name": "engineer@1-2"}

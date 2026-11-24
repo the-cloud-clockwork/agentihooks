@@ -3,6 +3,7 @@ from collections.abc import Callable
 
 DELEGATED_CLIS = {
     "agents": "scripts.agents.cli",
+    "review": "scripts.review.cli",
     "msg": "scripts.inbox.cli",
     "recall": "scripts.recall.cli",
     "knowledge": "scripts.ledger_knowledge.cli",
@@ -25,6 +26,7 @@ DELEGATED_CLIS = {
     "cron": "scripts.scheduler.cli:cron",
     "judge": "scripts.judge.cli",
     "scout": "scripts.scout.cli",
+    "forge": "scripts.forge.cli",
     "safety-nudge": "scripts.swarm.safety_nudge",
     "quick": "scripts.quick.cli",
     "ci-lab-scheduler": "scripts.ci_lab.contract:scheduler",

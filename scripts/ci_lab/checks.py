@@ -16,6 +16,7 @@ from typing import Any, Protocol
 import requests
 
 from scripts.ci_budget.rate_limit import LIMITED, MAX_WAIT, SECONDARY_WAIT, WAITS
+from scripts.ci_lab import metrics
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.webhooks import CHECK_PREFIX
 from scripts.github_app import GitHubAppAuth
@@ -180,11 +181,13 @@ class Checks:
         *,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.time,
+        registry: metrics.Registry | None = None,
     ) -> None:
         self.repo = repo
         self.auth: Token = auth if auth is not None else GitHubAppAuth(f"github.com/{repo}", permissions=PERMISSIONS)
         self.sleep = sleep
         self.clock = clock
+        self.registry = registry
         self.runs: dict[Key, tuple[int, str]] = {}
 
     def status(self, key: Key) -> str | None:
@@ -239,11 +242,15 @@ class Checks:
         return _json(self._request(method, path, body), method, path)
 
     def _request(self, method: str, path: str, body: Mapping[str, Any]) -> requests.Response:
-        """Send one check runs request with a fresh token."""
-        return requests.request(
+        """Send one check runs request with a fresh token, setting the registry's GitHub calls left from its answer
+        when the poster has a registry."""
+        response = requests.request(
             method,
             f"{API}/repos/{self.repo}/{path}",
             headers={"Authorization": f"Bearer {self.auth.get_token()}", **HEADERS},
             json=body,
             timeout=TIMEOUT,
         )
+        if self.registry is not None:
+            metrics.observe_rate(self.registry, response.headers)
+        return response
