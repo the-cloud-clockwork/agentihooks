@@ -90,6 +90,21 @@ def problems(chart: str) -> list[str]:
     if single.returncode:
         return [*found, f"one controller fails to render: {single.stderr.strip()}"]
     docs = controller_docs(single.stdout)
+    spec = docs["Deployment"]["spec"]["template"]["spec"]
+    current = container(docs)
+    volumes = {row["name"]: row for row in spec.get("volumes", [])}
+    mounts = {row["name"]: row.get("mountPath") for row in current.get("volumeMounts", [])}
+    env = {row["name"]: row.get("value") for row in current.get("env", [])}
+    if volumes.get("cache", {}).get("emptyDir") != {"medium": "Memory", "sizeLimit": "512Mi"}:
+        found.append("the controller tick view is not on a bounded memory volume")
+    if mounts.get("cache") != "/home/swarm/.cache":
+        found.append("the controller cache volume does not cover its scheduler runtime folder")
+    if (
+        volumes.get("home", {}).get("emptyDir", {}).get("medium") != "Memory"
+        or mounts.get("home") != "/run/agentihooks"
+        or env.get("AGENTIHOOKS_HOME") != "/run/agentihooks"
+    ):
+        found.append("the controller no longer keeps its existing memory home")
     if docs["Deployment"]["spec"].get("strategy", {}).get("type") != "Recreate":
         found.append("one controller replica no longer rolls out by Recreate")
     if "PodDisruptionBudget" in docs:

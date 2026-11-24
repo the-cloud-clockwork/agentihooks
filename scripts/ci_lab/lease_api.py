@@ -17,6 +17,7 @@ from scripts.ci_lab.leases import Grant, Leases
 
 __all__ = [
     "MAX_WAIT_MS",
+    "STALE",
     "Answer",
     "ControlRoutes",
     "Reply",
@@ -31,6 +32,7 @@ __all__ = [
 ]
 
 MAX_WAIT_MS = 30_000
+STALE = 426
 MAX_BODY_BYTES = 65_536
 LENGTH = "Content-Length"
 AUTHORIZATION = "Authorization"
@@ -121,12 +123,13 @@ def _grant(grant: Grant) -> dict[str, Any]:
 
 def _lease(leases: Leases, signer: UploadSigner, query: str, raw: bytes) -> Reply:
     data = _body(raw)
-    grants = leases.lease(
-        _text(data, "worker"),
-        _number(data, "free_slots"),
-        _texts(data, "capabilities"),
-        min(_number(data, "wait_ms"), MAX_WAIT_MS),
-    )
+    worker = _text(data, "worker")
+    free_slots = _number(data, "free_slots")
+    capabilities = _texts(data, "capabilities")
+    wait_ms = min(_number(data, "wait_ms"), MAX_WAIT_MS)
+    if leases.stale(worker):
+        return STALE, {"error": "stale worker"}
+    grants = leases.lease(worker, free_slots, capabilities, wait_ms)
     return 200, {"leases": [_grant(grant) for grant in grants]}
 
 

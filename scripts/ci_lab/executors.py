@@ -211,16 +211,21 @@ def _masked(text: bytes, secrets: Sequence[str]) -> bytes:
 
 def static(pod: Pod, lease: Lease) -> Finished:
     """Run the static gate the lease names over its head, with its base and grader trees and the context of its lease
-    fields and the secrets its steps read, on the venv of the head's lockfile; the report counts the git and uv cache
-    lookups it made, and each secret value the steps printed reads *** in the log and the summary, as Actions masks
-    it."""
-    with pod.trees.shared(lease.head, lease.base, lease.grader) as ((head, base, grader), fetched):
+    fields and the secrets its steps read, on the venv of the head's lockfile; a gate whose step rewrites its tree
+    runs in a private tree of the head, dropped when it ends, and every other in the shared one; the report counts
+    the git and uv cache lookups it made, and each secret value the steps printed reads *** in the log and the
+    summary, as Actions masks it."""
+    with (
+        pod.trees.shared(lease.head, lease.base, lease.grader) as ((head, base, grader), fetched),
+        contextlib.ExitStack() as private,
+    ):
         found = gate(grader, lease.unit.members[0])
         venv, built = venvs.venv_for(lockfile_digest(head), head, pod.venvs, pod.build)
         context = _context(lease, found, pod.secrets)
         options = run_static.Settings(pod.runs, venv, pod.ports, pod.whitelist, pod.timeout, context)
+        tree = private.enter_context(pod.trees.owned(lease.head, lease.base))[0] if found.rewrites_tree else head
         started = pod.clock()
-        result = run_static.run(found, head, base, grader, options)
+        result = run_static.run(found, tree, base, grader, options)
         seconds = pod.clock() - started
     secrets = [value for name, value in context.items() if name.startswith(SECRETS) and value]
     if secrets:
@@ -283,12 +288,13 @@ def covering(records: Sequence[Mapping[str, Any]], function: str) -> dict[str, f
     return {test: record["durations"][test] for record in records for test in record["tests"].get(function, [])}
 
 
-def _run(pod: Pod, tree: Path, venv: Path, request: Mapping[str, Any]) -> tuple[dict[str, Any] | None, Path]:
-    """Run one mutation runner request in the sandbox from the tree; the result is None when the runner failed."""
+def _run(pod: Pod, grader: Path, venv: Path, request: Mapping[str, Any]) -> tuple[dict[str, Any] | None, Path]:
+    """Run one mutation runner request in the sandbox from the grader tree, bound read only, so the grader's copy of
+    the runner grades the tree the request names; the result is None when the runner failed."""
     folder = Path(tempfile.mkdtemp(dir=pod.runs))
     source, output = folder / "request.json", folder / "result.json"
     source.write_text(json.dumps(request))
-    box = Sandbox(pod.runs, tree, pod.ports, pod.whitelist)
+    box = Sandbox(pod.runs, grader, pod.ports, pod.whitelist, (grader,))
     argv = [str(venv / "bin" / "python"), "-m", run_mutation.__name__, str(source), str(output)]
     outcome = box.run(argv, pod.timeout)
     return (json.loads(output.read_text()) if outcome.code == 0 else None), outcome.log
@@ -297,25 +303,28 @@ def _run(pod: Pod, tree: Path, venv: Path, request: Mapping[str, Any]) -> tuple[
 def mutation(pod: Pod, settings: Mutation, lease: Lease) -> Finished:
     """Run a stats unit with the tree as root and the stats cache, or a mutant unit with the kill memory, budget, cap
     and the tests the stats records of the test files its manifest names show reaching its function, in a private
-    tree of the head that holds behind trampolines the functions the head changes against the lease's base; the
-    report counts the git and uv cache lookups it made."""
+    tree of the head that holds behind trampolines the functions the head changes against the lease's base,
+    graded by the grader tree's copy of the mutation runner; the report counts the git and uv cache lookups it made."""
     unit = lease.unit
-    named = {"kind": unit.kind, "key": unit.key, "options": list(OPTIONS)}
-    with pod.trees.owned(lease.head, lease.base) as (tree, fetched):
+    with (
+        pod.trees.shared(lease.grader) as ((grader,), shared),
+        pod.trees.owned(lease.head, lease.base) as (tree, fetched),
+    ):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
         written = _trampolined(tree, lease.base, lease.head)
         files = list(unit.members) if unit.kind == STATS else _traced(unit, written)
         started = pod.clock()
+        named = {"kind": unit.kind, "key": unit.key, "options": list(OPTIONS), "tree": str(tree)}
         stats = {**named, "kind": STATS, "root": str(tree), "cache": str(settings.cache)}
-        result, log = _run(pod, tree, venv, {**stats, "members": files})
+        result, log = _run(pod, grader, venv, {**stats, "members": files})
         if result is not None and unit.kind == MUTANT:
             tests = covering(result["stats"], function_of(unit.members[0]))
             graded = {"members": list(unit.members), "killers": str(settings.killers), "tests": tests}
             limits = {"budget": settings.budget, "cap": settings.cap}
-            result, log = _run(pod, tree, venv, {**named, **graded, **limits})
+            result, log = _run(pod, grader, venv, {**named, **graded, **limits})
         seconds = pod.clock() - started
     passed = result is not None and all(row["status"] == KILLED for row in result.get("rows", ()))
-    lookups = caches.report([fetched], [built])
+    lookups = caches.report([*shared, fetched], [built])
     return Finished(
         PASSED if passed else FAILED, _report(pod, {**(result or {}), "seconds": seconds, caches.KEY: lookups}), log
     )
@@ -346,9 +355,11 @@ def settings(environ: Mapping[str, str]) -> tuple[Pod, Suite, Mutation]:
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
-    """Run the worker over the adapters until SIGTERM stops it, then let its running units drain; the contract metrics
-    port serves the worker's registry until the drain ends."""
+    """Run the worker over the adapters until SIGTERM stops it, then let its running units drain; the contract
+    metrics port serves the worker's registry until the drain ends. The work root is emptied first, so a restart on
+    another image starts from an empty root as a new pod would."""
     argparse.ArgumentParser(prog="agentihooks ci-lab-worker").parse_args(argv)
+    worktrees.empty(Path(worker.environment(environ)[contract.WORK_ROOT]))
     pod, suite, graded = settings(environ)
     cpus = os.cpu_count() or 1
     service = worker.build(

@@ -13,6 +13,7 @@ Usage::
 """
 
 import os
+import sys
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -215,16 +216,24 @@ def _session_correlation(environ: Mapping[str, str]) -> dict[str, str]:
 def export_tokens(now_s: float) -> None:
     """Sends the last fill, and the burn rate when known, under its session id, agent name and profile for every seen
     record whose tokens were written within the presence fresh window."""
-    from hooks.observability import otel, presence
+    from hooks.observability import presence
 
     for path in sorted(presence.seen_dir().glob("*.json")):
-        fresh = _fresh_tokens(presence.read_record(path), now_s)
-        if fresh is None:
-            continue
-        attributes, fill_pct, burn_rate = fresh
-        otel.record_gauge(FILL, fill_pct, attributes)
-        if burn_rate is not None:
-            otel.record_gauge(BURN, burn_rate, attributes)
+        send_tokens(presence.read_record(path), now_s)
+
+
+def send_tokens(record: Mapping[str, object], now_s: float) -> None:
+    """Sends one seen record's last fill, and the burn rate when known, when its tokens were written within the
+    presence fresh window."""
+    from hooks.observability import otel
+
+    fresh = _fresh_tokens(record, now_s)
+    if fresh is None:
+        return
+    attributes, fill_pct, burn_rate = fresh
+    otel.record_gauge(FILL, fill_pct, attributes)
+    if burn_rate is not None:
+        otel.record_gauge(BURN, burn_rate, attributes)
 
 
 def _fresh_tokens(record: Mapping[str, object], now_s: float) -> tuple[dict[str, str], float, float | None] | None:
@@ -252,7 +261,7 @@ def record_lifecycle_context(payload: dict) -> None:
     from hooks.config import TOKEN_MONITOR_ENABLED
     from hooks.targets import is_codex
 
-    if not TOKEN_MONITOR_ENABLED or not is_codex():
+    if not TOKEN_MONITOR_ENABLED or not is_codex() or sys.platform == "win32":
         return
     if payload.get("hook_event_name") not in ("PostToolUse", "Stop"):
         return

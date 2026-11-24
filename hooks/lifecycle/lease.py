@@ -1,9 +1,9 @@
-import fcntl
 import json
 import os
 from dataclasses import asdict
 from pathlib import Path
 
+from hooks.compat import fcntl
 from hooks.lifecycle.model import Holder, Lease
 
 WORKTREE_LEASE = "agentihooks-lease.json"
