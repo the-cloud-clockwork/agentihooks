@@ -123,7 +123,7 @@ def test_rendered_ledger_home_guard_rejects_each_storage_fault(
         )
 
     monkeypatch.setattr(chart_ledger_rollout, "render", rendered)
-    found = getattr(chart_ledger_rollout, "cache_problems")("chart", "64Mi")
+    found = chart_ledger_rollout.cache_problems("chart", "64Mi")
 
     if expected is None:
         assert found == []
