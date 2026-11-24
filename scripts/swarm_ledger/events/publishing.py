@@ -1,22 +1,24 @@
 import sys
 import threading
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from scripts.swarm_ledger.repository.entry import Entry
+    from scripts.swarm_ledger.repository.task_write import Written
 
 
 class Publishing:
     """A LedgerRepository that hands each stored generation it reads or writes to every publisher(slug, state) once,
     on its own thread, newest generation per ledger, so no reader or writer waits for a publication."""
 
-    def __init__(self, inner, *publishers):
+    def __init__(self, inner: Any, *publishers: Callable[[str, dict[str, Any]], object]) -> None:
         self.inner = inner
         self.publishers = list(publishers)
-        self.published = {}
+        self.published: dict[str, int] = {}
         self.queued = threading.Condition()
-        self.pending = {}
-        self.worker = None
+        self.pending: dict[str, Entry | Newest] = {}
+        self.worker: threading.Thread | None = None
 
     def __getattr__(self, name):
         return getattr(self.inner, name)
@@ -31,10 +33,11 @@ class Publishing:
             self.queue(slug, entry)
         return entry
 
-    def queue(self, slug: str, entry: "Entry") -> None:
+    def queue(self, slug: str, entry: "Entry | Newest") -> None:
         with self.queued:
             held = self.pending.get(slug)
-            if held is None or held.generation < entry.generation:
+            fresher = not isinstance(held, Newest) and (held is None or held.generation < entry.generation)
+            if isinstance(entry, Newest) or fresher:
                 self.pending[slug] = entry
             if self.worker is None:
                 self.worker = threading.Thread(target=self.run, name="ledger-publish", daemon=True)
@@ -45,8 +48,11 @@ class Publishing:
         while True:
             with self.queued:
                 self.queued.wait_for(lambda: self.pending)
-                slug, entry = next(iter(self.pending.items()))
+                slug, queued = next(iter(self.pending.items()))
+            entry = queued
             try:
+                if isinstance(entry, Newest):
+                    entry = self.inner.current(slug)
                 if entry.generation > self.published.get(slug, -1):
                     self.publish(slug, entry.state)
                     self.published[slug] = entry.generation
@@ -55,7 +61,7 @@ class Publishing:
             finally:
                 with self.queued:
                     held = self.pending.pop(slug)
-                    if held is not entry:
+                    if held is not queued:
                         self.pending[slug] = held
                     self.queued.notify_all()
 
@@ -74,6 +80,18 @@ class Publishing:
         state, rejected = self.inner.apply_ops(slug, changes=changes, ops=ops, gate=gate, **options)
         self.current(slug)
         return state, rejected
+
+    def apply_task_update(self, slug: str, op: dict[str, Any], gate: object = None) -> "Written | None":
+        written: Written | None = self.inner.apply_task_update(slug, op, gate)  # pyright: ignore[reportUnknownMemberType]
+        if written is not None and slug in self.published:  # pyright: ignore[reportUnknownMemberType]
+            self.queue(slug, Newest())
+        return written
+
+
+class Newest:
+    """A queued publication of whatever generation is stored when the publish thread reaches it."""
+
+    generation: int = -1
 
 
 SHARED = {}

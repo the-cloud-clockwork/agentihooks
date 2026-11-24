@@ -2,7 +2,8 @@ import { QUOTA_REFRESH_MS } from "./config.js";
 import { $ } from "./dom.js";
 import { flush, loadSaved, loaded, renderSync, seed, sendSync } from "./sync.js";
 import { showArtifacts } from "./artifacts.js";
-import { render, renderStats } from "./render.js";
+import { render } from "./render.js";
+import { renderStats } from "./stats.js";
 import { editOverview, editTitle, saveOverview, saveTitle } from "./edits.js";
 import { clearNotification, clearPriority, showAlerts, showNotifications } from "./notices.js";
 import { completeList, foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutline, wireOutline } from "./outline.js";
@@ -79,7 +80,7 @@ function start() {
   document.querySelector(".col").addEventListener("toggle", (ev) => {
     if (!sectionBoxes().includes(ev.target)) return;
     rememberUnanimous("sections", sectionBoxes());
-    if (ev.target.open) render(null, true);
+    if (ev.target.open) render(null, true, true, ev.target.closest("section").dataset.outline);
     else markToggles();
   }, true);
   $("outline").addEventListener("toggle", (ev) => {

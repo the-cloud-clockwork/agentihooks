@@ -1,0 +1,14 @@
+rules:
+  - id: queue-exit-counts-gate-summary
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A cancelled merge group run is read as the pull request's own failure on any failed job, so the Queue gate
+      summary, which always runs and fails once GitHub cancels the run for a regroup or the checks timeout, makes swarm
+      merge queue refuse the head and the ready requeue reopen its task. Count a cancelled run failed only on a failed
+      job other than the Queue gate summary.
+    paths:
+      include:
+        - /scripts/swarm/queue_exit.py
+        - queue-exit-counts-gate-summary.py
+    pattern: any($JOB["conclusion"] in $FAILED for $JOB in $JOBS)

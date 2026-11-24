@@ -1,11 +1,10 @@
 """Operator orders nobody works on: the slow lane notes when each open order's unfinished tasks first had nothing
 claimed or in a pull request, and past thirty minutes that is an order waiting health finding for the master."""
 
-import json
 from typing import Any
 
 from scripts.swarm import freeze
-from scripts.swarm.health import focus_check, order_check
+from scripts.swarm.health import focus_check, kept, order_check
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.store import RedisStore
 
@@ -16,9 +15,7 @@ UNCLAIMED = "every open task under it is claimable and no agent claimed one"
 
 
 def read(store: RedisStore, slug: str) -> dict[str, Any]:
-    client: Any = store
-    raw: str | None = client.redis.get(store.key(slug, KEY))
-    return json.loads(raw) if raw else {}
+    return kept.read(store, slug, KEY)
 
 
 def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[str, Any]:
@@ -37,8 +34,7 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
             "claimable": entry["claimable"],
             "reasons": sorted({task["verdict"] for task in entry["tasks"]} - {focus_check.CLAIMABLE}),
         }
-    client: Any = store
-    client.redis.set(store.key(slug, KEY), json.dumps({"at": at, "orders": waiting}))
+    kept.write(store, slug, KEY, at, "orders", waiting)
     return waiting
 
 

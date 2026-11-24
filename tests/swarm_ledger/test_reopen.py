@@ -42,7 +42,7 @@ def test_reopen_buttons_call_the_existing_authenticated_swarm_endpoint():
     page = page_source()
     assert 'id="closed-label"' in page
     assert 'data-swarm="reopen"' in page
-    assert '$("closed-label").textContent = closedText(doc.closed_at)' in page
+    assert 'setText($("closed-label"), closedText(doc.closed_at))' in page
     assert '$("closed-banner").addEventListener("click", (event) => {' in page
     assert '$("closed-banner").querySelectorAll("button[data-swarm]")' in page
     static = server.core.HOME.parent / "static"
