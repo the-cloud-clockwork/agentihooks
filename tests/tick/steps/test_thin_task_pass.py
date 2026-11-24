@@ -47,6 +47,8 @@ THIN: dict[str, Any] = {
     "phase": "p1",
     "description": "Fix the claim.",
 }
+EXISTING = {"id": "enhance-t1", "state": "open", "lane": "plan", "kind": "plan", "enhances": "t1"}
+MARKED = "marked thin task t1 as needing enhancement by its existing enhance-t1"
 FULL = (
     "Add the step body seam scripts.tick.steps.thin so every open engineer task with a thin text gets one planner "
     "enhancement task and the master hears about it once, while tasks that already carry a plan stay untouched by "
@@ -246,11 +248,23 @@ def test_a_thin_ci_or_engineer_task_is_queued_whatever_its_lane_field(lane: dict
 
 @pytest.mark.feature("tick-thin-task-pass")
 def test_an_existing_enhancement_task_skips_the_add_and_still_marks_the_task() -> None:
-    """When the ledger already holds enhance-t1 the pass adds nothing and its one write only marks t1."""
-    found = _run([THIN, {"id": "enhance-t1", "state": "open", "lane": "plan", "kind": "plan", "enhances": "t1"}])
+    """When the ledger already holds enhance-t1 the pass adds nothing, its one write only marks t1, its line reports t1
+    as marked only and the master hears nothing."""
+    found = _run([THIN, EXISTING])
     assert [name for name, _ in found.calls()] == ["mutate"]
     assert _operations(found) == [MARK]
-    assert found.lines == ["queued enhance-t1 for thin task t1"]
+    assert found.lines == [MARKED]
+    assert found.inbox.sent == []
+
+
+@pytest.mark.feature("tick-thin-task-pass")
+def test_a_mark_only_task_is_left_out_of_the_master_notice_beside_a_queued_task() -> None:
+    """A pass that only marks t1, whose enhance-t1 exists, and queues enhance-t2 for t2 reports t1 as marked and names
+    only enhance-t2 in its one master notice."""
+    found = _run([THIN, EXISTING, {**THIN, "id": "t2"}])
+    assert found.lines == [MARKED, "queued enhance-t2 for thin task t2"]
+    assert [operation["id"] for operation in _operations(found)] == ["thin-mark-t1", "thin-add-t2", "thin-mark-t2"]
+    assert found.inbox.sent == [("swarm", f"master@{SLUG}", _notice("enhance-t2"), True)]
 
 
 @pytest.mark.feature("tick-thin-task-pass")
