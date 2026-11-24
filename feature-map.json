@@ -15140,7 +15140,8 @@
         "tests/tick/steps/test_review_queue.py::test_an_author_task_without_a_phase_gives_the_review_no_phase",
         "tests/tick/steps/test_review_queue.py::test_the_durable_consumer_is_named_by_kind_and_swarm",
         "tests/tick/steps/test_review_queue.py::test_an_event_at_the_edge_of_the_replay_window_still_queues",
-        "tests/tick/steps/test_review_queue.py::test_the_step_opens_the_configured_shared_bus"
+        "tests/tick/steps/test_review_queue.py::test_the_step_opens_the_configured_shared_bus",
+        "tests/tick/steps/test_review_queue.py::test_a_scoped_bus_review_pass_queues_only_its_own_swarm_events"
       ]
     },
     {
