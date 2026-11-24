@@ -82,3 +82,55 @@ def test_a_guarded_command_inside_the_body_stays_data(
 @pytest.mark.feature("guard-stripping-keeps-heredoc-delimiter-line")
 def test_a_body_closed_with_its_command_substitution_stays_data() -> None:
     check_branch_guard(_payload("notes=$(cat <<EOF\ngit push origin main\nEOF)"))
+
+
+SHIFTS_OUTSIDE_DOUBLE_PARENTHESES = [
+    "echo $(( (1 + (2 << 3)) ))\ngit push origin main\n3",
+    "(( x = (1 + (y << n)) ))\ngit push origin main\nn",
+    "echo $[ 1 << END ]\ngit push origin main\nEND",
+    "a[1<<WORD]=x\ngit push origin main\nWORD",
+    "echo ${v:1<<N}\ngit push origin main\nN",
+]
+
+
+@pytest.mark.feature("guard-stripping-reads-heredocs-from-the-bash-parse")
+@pytest.mark.parametrize("command", SHIFTS_OUTSIDE_DOUBLE_PARENTHESES)
+def test_stripping_keeps_the_line_after_any_arithmetic_shift(command: str) -> None:
+    assert "\ngit push origin main\n" in strip_non_command_content(command)
+
+
+@pytest.mark.feature("guard-stripping-reads-heredocs-from-the-bash-parse")
+@pytest.mark.parametrize("command", SHIFTS_OUTSIDE_DOUBLE_PARENTHESES)
+def test_branch_guard_refuses_a_push_after_any_arithmetic_shift(command: str) -> None:
+    with pytest.raises(BlockAction, match="directly to main"):
+        check_branch_guard(_payload(command))
+
+
+@pytest.mark.feature("guard-stripping-reads-heredocs-from-the-bash-parse")
+def test_stripping_drops_a_double_quoted_heredoc_like_a_single_quoted_one() -> None:
+    command = 'cat <<"EOF" > out.txt && git status\nbody line\nEOF'
+    assert strip_non_command_content(command) == "cat  > out.txt && git status"
+
+
+@pytest.mark.feature("guard-stripping-reads-heredocs-from-the-bash-parse")
+@pytest.mark.parametrize(
+    ("command", "stripped"),
+    [
+        (
+            "echo «déjà» && cat <<EOF > notes.md\nnaïve — body\nEOF\ngit status ✓",
+            "echo «déjà» && cat  > notes.md\ngit status ✓",
+        ),
+        ("cat <<EOF > empty.txt\nEOF\ngit status", "cat  > empty.txt\ngit status"),
+        (
+            "cat <<A > a.txt\nalpha\nA\ngit status\ncat <<'B' > b.txt\nbeta\nB",
+            "cat  > a.txt\ngit status\ncat  > b.txt",
+        ),
+        (
+            "cat <<OUTER > notes.md\n$(cat <<INNER\ninner\nINNER\n)\nOUTER\ngit status",
+            "cat  > notes.md\ngit status",
+        ),
+        ("cat <<EOF > notes.md\n\ud800\nEOF\ngit status", "cat  > notes.md\ngit status"),
+    ],
+)
+def test_stripping_keeps_exact_text_around_heredocs(command: str, stripped: str) -> None:
+    assert strip_non_command_content(command) == stripped
