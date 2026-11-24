@@ -271,11 +271,10 @@ def test_a_failed_gate_names_its_unreviewed_hotspots(tmp_path: Path, scope: str)
     ]
     assert (tmp_path / "output").read_text() == ""
 
+
 @pytest.mark.feature("sonar-failed-gate-names-new-hotspots")
 def test_finding_searches_use_the_read_token_and_polling_keeps_the_scan_token(tmp_path: Path) -> None:
-    result, _ = _gate(
-        tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH, issues=_BUGS, hotspots=_HOTSPOTS
-    )
+    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH, issues=_BUGS, hotspots=_HOTSPOTS)
     assert result.returncode == 1
     headers = (tmp_path / "headers").read_text().splitlines()
     assert len(headers) == 4
