@@ -27,9 +27,12 @@ __all__ = [
 GIT_TIMEOUT_SEC = 30
 TOKEN_ENV = "GITLAB_TOKEN"
 KINDS = ("github", "gitlab")
+_SEGMENT = r"(?!\.\.?/)[\w.][\w.-]*"
+_PROJECT = rf"{_SEGMENT}(?<!\.git)"
 CHANGE_LINK = re.compile(
-    r"https://(?:github\.com/[\w.-]+/[\w.-]+/pull"
-    r"|(?:[\w-]+\.)*gitlab(?:\.[\w-]+)*/[\w.][\w.-]*(?:/[\w.][\w.-]*)+/-/merge_requests)/[1-9][0-9]*"
+    rf"https://(?:github\.com/{_SEGMENT}/{_PROJECT}/pull"
+    rf"|(?:[a-z0-9-]+\.)*gitlab(?:\.[a-z0-9-]+)*/(?:{_SEGMENT}/)+{_PROJECT}/-/merge_requests)/[1-9][0-9]*",
+    re.ASCII,
 )
 MARKERS = {"github": "/pull/", "gitlab": "/-/merge_requests/"}
 
@@ -73,10 +76,11 @@ def kind_of(host: str) -> str:
 def change_link(url: str) -> ChangeLink:
     """Read a GitHub pull link or a GitLab merge request link into its forge, project and number.
 
-    Only the exact link is accepted: https, a lowercase host without a port or credentials, no trailing slash, sub
-    page, query or fragment, and a number without a leading zero. A GitLab host must carry a gitlab label, the rule
-    kind_of applies, and a GitLab project path keeps its nested groups whole. CHANGE_LINK accepts the same links.
-    Anything else raises ValueError.
+    Only the exact link is accepted: https, a lowercase host without a port or credentials, ASCII path segments other
+    than . and .., a project name not ending in .git, a number without a leading zero, and no trailing slash, sub page,
+    query or fragment. A GitLab host must carry a gitlab label, the rule kind_of applies, and a GitLab project path
+    keeps its nested groups whole. CHANGE_LINK accepts the same links, so the web link and clone remote read back
+    through parse to the same host and path. Anything else raises ValueError.
     """
     if not CHANGE_LINK.fullmatch(url):
         raise ValueError("not a GitHub pull link or GitLab merge request link")

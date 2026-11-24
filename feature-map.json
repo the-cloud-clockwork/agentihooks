@@ -6414,14 +6414,16 @@
       "behaviour": "A GitHub pull link or a GitLab merge request link parses in one place into its forge kind, host, project path with nested groups kept whole, number, project web link and clone remote; any other link is refused, and one shared pattern accepts exactly the links the parser accepts.",
       "seam": "scripts.forge.remote.change_link returns a ChangeLink or raises ValueError; scripts.forge.remote.CHANGE_LINK is the shared pattern for callers that only test a link",
       "tests": [
-        "tests/forge/test_remote.py::test_today_the_remote_parser_reads_a_project_web_link_and_its_clone_remote",
+        "tests/forge/test_remote.py::test_the_remote_parser_reads_a_project_web_link_and_its_clone_remote",
         "tests/forge/test_remote.py::test_a_github_pull_link_parses_into_its_forge_project_and_number",
+        "tests/forge/test_remote.py::test_a_parsed_change_link_is_frozen",
         "tests/forge/test_remote.py::test_a_github_pull_link_names_its_project_web_link_and_clone_remote",
         "tests/forge/test_remote.py::test_a_malformed_or_foreign_github_link_is_refused",
         "tests/forge/test_remote.py::test_a_gitlab_merge_request_link_keeps_its_nested_groups_whole",
         "tests/forge/test_remote.py::test_a_malformed_or_unlabelled_gitlab_link_is_refused",
         "tests/forge/test_remote.py::test_the_web_link_and_clone_remote_read_back_to_the_same_project",
         "tests/forge/test_remote.py::test_the_shared_pattern_accepts_exactly_the_links_the_parser_accepts",
+        "tests/forge/test_remote.py::test_hostile_variants_of_every_accepted_link_are_refused_by_pattern_and_parser",
         "tests/forge/test_remote.py::test_the_shared_pattern_finds_change_links_in_text_as_plain_strings",
         "tests/forge/test_remote.py::test_the_parser_and_shared_pattern_are_public_names_of_the_remote_module"
       ]
