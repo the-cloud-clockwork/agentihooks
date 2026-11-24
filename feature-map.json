@@ -9988,13 +9988,13 @@
       "rules": [
         "kept-step-queues-behind-ready-sibling"
       ],
-      "behaviour": "A sweep of the pass scheduler submits its ready kept steps before its other ready steps, so every placing step of the placement site but quota notice (master down, tick master, master scale, seat alarm, dispatch seat, codex hook order and rank pass) is kept and, ready in the same sweep as quota notice, runs first on the pass's one placement worker instead of queueing behind quota notice's whole body and being skipped when the critical lane ends.",
+      "behaviour": "A sweep of the pass scheduler submits its ready kept steps before its other ready steps, so every placing step of the placement site but quota notice and dispatch seat (master down, tick master, master scale, seat alarm, codex hook order and rank pass) is kept and, ready in the same sweep as quota notice, runs first on the pass's one placement worker instead of queueing behind quota notice's whole body and being skipped when the critical lane ends; dispatch seat stays unkept and starts after quota notice because its routing check reads the capacity decision quota notice writes in the same pass.",
       "seam": "engine._eager submission order through engine._kept_first, pool.Pass.placer; the kept declaration of CallStep and WriteStep",
       "tests": [
         "tests/tick/test_placement_worker.py::test_a_kept_lock_taking_step_ready_beside_a_slower_one_ahead_of_it_runs_first_on_the_placement_worker",
-        "tests/tick/test_placement_worker.py::test_the_placing_steps_of_the_placement_site_reach_the_placement_worker_ahead_of_quota_notice",
+        "tests/tick/test_placement_worker.py::test_the_kept_placing_steps_of_the_placement_site_reach_the_placement_worker_ahead_of_quota_notice",
         "tests/tick/test_placement_worker.py::test_a_write_step_is_kept_only_when_it_declares_kept",
-        "tests/tick/test_master_steps_kept.py::test_the_placing_steps_of_the_place_and_masters_modules_but_quota_notice_are_kept"
+        "tests/tick/test_master_steps_kept.py::test_the_placing_steps_of_the_place_and_masters_modules_but_quota_notice_and_dispatch_seat_are_kept"
       ]
     },
     {

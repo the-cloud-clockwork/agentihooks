@@ -61,18 +61,17 @@ def _sleeping(seconds: float) -> Callable[[Context], Result]:
 
 
 @pytest.mark.feature("kept-placing-steps-first-on-the-placement-worker")
-def test_the_placing_steps_of_the_place_and_masters_modules_but_quota_notice_are_kept() -> None:
+def test_the_placing_steps_of_the_place_and_masters_modules_but_quota_notice_and_dispatch_seat_are_kept() -> None:
     declared = (*place.STEPS, *masters.STEPS)
     placing = {step.name for step in declared if getattr(step, "placing", False)}
     kept = {step.name for step in declared if getattr(step, "kept", False)}
 
-    assert kept == placing - {"quota notice"}
+    assert kept == placing - {"quota notice", "dispatch seat"}
     assert kept == {
         "master down",
         "tick master",
         "master scale",
         "seat alarm",
-        "dispatch seat",
         "codex hook order",
         "rank pass",
     }

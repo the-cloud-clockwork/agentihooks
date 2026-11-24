@@ -178,7 +178,7 @@ def test_a_kept_lock_taking_step_ready_beside_a_slower_one_ahead_of_it_runs_firs
 
 
 @pytest.mark.feature("kept-placing-steps-first-on-the-placement-worker")
-def test_the_placing_steps_of_the_placement_site_reach_the_placement_worker_ahead_of_quota_notice(
+def test_the_kept_placing_steps_of_the_placement_site_reach_the_placement_worker_ahead_of_quota_notice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     site = (
@@ -206,8 +206,15 @@ def test_the_placing_steps_of_the_placement_site_reach_the_placement_worker_ahea
     with pool.running(workers=2, critical_s=20.0, slow_s=20.0):
         rows = engine.run_graph((registered[name] for name in site), Context(View(), Deadline.after(20.0)))
 
-    assert sorted(started) == sorted(site)
-    assert started[-1] == "quota notice"
+    assert set(started[:6]) == {
+        "codex hook order",
+        "master down",
+        "tick master",
+        "master scale",
+        "seat alarm",
+        "rank pass",
+    }
+    assert started[6:] == ["quota notice", "dispatch seat"]
     assert {record.name: record.outcome for record in rows} == dict.fromkeys(site, engine.OK)
 
 
