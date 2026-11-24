@@ -3636,6 +3636,38 @@
       ]
     },
     {
+      "id": "ledger-write-partial-rebuild",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2778",
+      "behaviour": "A warm ledger point write rebuilds only the document fragments and writer copy branches its operations change: writer copy leaves are tracked containers that hold the stored fragment they equal until any write method changes them or anything inside them, so untouched leaves keep their stored fragment and writer object without being serialized or compared again, a cold write copy built from stored fragments starts tracked, copies of tracked leaves are plain, and on the recorded operations corpus the warm path stores, publishes and relays byte for byte what a full rebuild does while a write past the write methods turns that comparison red, with less storage write CPU inside the ledger lock.",
+      "seam": "scripts.swarm_ledger.repository.writer_copy.written and detached, scripts.swarm_ledger.repository.fragments.leaf, scripts.swarm_ledger.repository.tracked, scripts.swarm_ledger.repository.entry.Entry.for_write, and the recorded corpus replay through the ledger API write path",
+      "tests": [
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_warm_point_write_serializes_as_many_values_on_four_thousand_untouched_tasks_as_on_two_thousand",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_point_write_from_a_stored_entry_serializes_as_many_values_on_four_thousand_tasks_as_on_two_thousand",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_untouched_tasks_keep_their_stored_fragment_and_writer_object",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_write_that_removes_the_first_task_keeps_every_later_task_fragment_and_writer_object",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_write_copy_built_from_stored_fragments_shares_only_stamp_records_with_the_stored_state",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_warm_point_write_stores_what_a_fresh_encoding_of_the_written_state_stores",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_bound_copy_equals_its_fragment_shares_no_container_and_holds_it",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_reads_leave_a_bound_copy_holding_its_fragment",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_every_dict_write_method_on_the_leaf_or_inside_it_drops_its_fragment",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_every_list_write_method_inside_the_leaf_drops_its_fragment",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_every_dict_and_list_method_a_tracked_leaf_inherits_is_a_read",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_list_leaf_drops_its_fragment_on_a_write_and_keeps_it_on_reads",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_nested_container_never_claims_a_fragment_and_moving_it_drops_the_leaf_it_enters",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_copies_of_a_tracked_leaf_are_plain",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_deep_copy_keeps_the_containers_a_writer_copy_shares",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_write_methods_return_what_the_plain_methods_return",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_leaf_that_no_json_round_trip_keeps_is_bound_after_one",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_scalar_leaf_copy_is_the_scalar_and_holds_nothing",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_writer_copy_of_a_document_keeps_its_structure_plain_and_its_leaves_bound",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_the_warm_write_replay_answers_every_recorded_write",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_warm_writes_store_publish_and_relay_what_the_full_rebuild_does_on_the_recorded_corpus",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_a_write_into_an_untouched_writer_task_past_the_write_methods_turns_the_equivalence_red",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_warm_writes_spend_less_storage_write_cpu_than_the_full_rebuild_on_the_recorded_corpus"
+      ]
+    },
+    {
       "id": "swarm-tick-slow-export",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2161",
