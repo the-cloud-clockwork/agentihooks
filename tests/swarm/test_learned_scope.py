@@ -223,6 +223,37 @@ def test_notes_written_before_the_index_load_through_one_scan(
 
 
 @pytest.mark.feature("swarm-learned-scope")
+def test_an_expired_scan_marker_loads_notes_written_without_the_index(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from scripts.inbox.seats import SeatMemory
+
+    store, _, _ = env
+    memory = SeatMemory(store.redis)
+    store.memory.learn("eng-1@sw", "previous occupant", "own note", 1, "note")
+    memory.scoped("sw", "eng-1@sw")
+    entry = {"occupant": "older release", "text": "unindexed canon", "at": 2, "maturity": "canon"}
+    store.redis.rpush(memory.key("ci-1@sw", "learned"), json.dumps(entry))
+    scans: list[dict[str, object]] = []
+    scan = store.redis.scan_iter
+
+    def recorded(**options: Any) -> Any:
+        scans.append(options)
+        return scan(**options)
+
+    monkeypatch.setattr(store.redis, "scan_iter", recorded)
+    held = memory.scoped("sw", "eng-1@sw")
+    store.redis.delete(f"{memory.learned_index('sw')}:listed")
+    expired = memory.scoped("sw", "eng-1@sw")
+    assert [row["text"] for row in held] == ["own note"]
+    assert [row["text"] for row in expired] == ["unindexed canon", "own note"]
+    assert len(scans) == 1
+
+
+@pytest.mark.feature("swarm-learned-scope")
 def test_learned_help_explains_the_explicit_full_listing(capsys: pytest.CaptureFixture[str]) -> None:
     from scripts.swarm.cli import build_parser
 

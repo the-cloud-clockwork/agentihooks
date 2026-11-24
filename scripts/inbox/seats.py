@@ -224,18 +224,15 @@ class SeatMemory:
         return selected
 
     def _learned_seats(self, slug: str) -> set[str]:
-        """The addresses learn recorded for the swarm, with the seats a keyspace scan finds once per rescan window, so
-        notes a writer of an older release adds without the index still load within that window."""
+        """The addresses learn recorded for the swarm, with the seats a keyspace scan finds; one caller per rescan
+        window claims that scan, so notes a writer of an older release adds without the index still load."""
         index = self.learned_index(slug)
-        if not self.redis.exists(f"{index}:listed"):
+        if self.redis.set(f"{index}:listed", 1, nx=True, ex=LEARNED_RESCAN_S):
             pattern = f"{PREFIX}:*@{slug}:learned"
             found: list[str] = list(self.redis.scan_iter(match=pattern, count=SCAN_PAGE))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             seats = [key[len(PREFIX) + 1 : -len(":learned")] for key in found]
-            with self.redis.pipeline() as pipe:
-                if seats:
-                    pipe.sadd(index, *seats)
-                pipe.set(f"{index}:listed", 1, ex=LEARNED_RESCAN_S)
-                pipe.execute()
+            if seats:
+                self.redis.sadd(index, *seats)
         members: set[str] = self.redis.smembers(index)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         return members
 

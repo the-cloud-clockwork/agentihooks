@@ -5,8 +5,8 @@ rules:
     message: >-
       A learned note lookup walks the whole shared Redis keyspace with SCAN on every call. The hub admission primed
       step scanned about 1.48 million keys for 64 learned lists, three to six seconds per admission, and pushed lane
-      admissions past the spoke ask timeout. Read the swarm learned seat index and scan only behind a check that the
-      index was never built.
+      admissions past the spoke ask timeout. Read the swarm learned seat index and scan only behind a claim that no
+      caller scanned within the rescan window.
     paths:
       include:
         - /scripts/
@@ -28,4 +28,7 @@ rules:
                   regex: '.*:learned"$'
       - pattern-not-inside: |
           if not $R2.exists(...):
+              ...
+      - pattern-not-inside: |
+          if $R2.set(..., nx=True, ...):
               ...
