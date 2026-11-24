@@ -2539,6 +2539,24 @@
       ]
     },
     {
+      "id": "hub-preemption-suppresses-relaunch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-preempt-suppress-relaunch",
+      "behaviour": "Once the hub asks a holder to hand off for an urgent or focused task, it asks no further holder for that task until one answer window has passed since the ask or since the task's latest admitted launch attempt, whatever its claim generation and whether the asked holder left or a lower task relaunched into the freed seat. The asked hand off counts as live for one answer window from the ask; a handoff record left on the lower task never extends it, because that record outlives the lower task's successor and would starve the urgent task. The suppression is one expiring record per waiting task, set by the ask and refreshed only by an admission; an admission of a task never asked for writes nothing. Deriving the suppression from the holder keyed ask records is the Semgrep incident preempt-holder-scoped-suppression.",
+      "seam": "Hub preemption through Admission and Spoke runtime refusal, reopening and successful start; preempt.step and preempt.attempted; semgrep incident rule preempt-holder-scoped-suppression",
+      "tests": [
+        "tests/hub/test_preemption_relaunch.py::test_a_refused_urgent_spawn_keeps_one_ask_after_its_claim_generation_advances",
+        "tests/hub/test_preemption_relaunch.py::test_the_relaunched_lower_task_is_not_asked_again_for_the_same_urgent_task",
+        "tests/hub/test_preemption_relaunch.py::test_the_urgent_task_starts_on_the_freed_seat_after_one_handoff",
+        "tests/swarm/test_preempt.py::test_a_departed_holder_is_forgotten_while_its_waiting_task_asks_nobody_else_in_the_window",
+        "tests/swarm/test_preempt.py::test_an_admitted_attempt_keeps_the_episode_open_one_window_past_it",
+        "tests/swarm/test_preempt.py::test_an_attempt_opens_no_episode_and_each_write_expires_within_the_window"
+      ],
+      "rules": [
+        "preempt-holder-scoped-suppression"
+      ]
+    },
+    {
       "id": "swarm-preempt-claim-view-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-preempt-claim-view-reuse",
