@@ -44,6 +44,7 @@ from hooks.classifier import settings as classifier_settings
 from hooks.context import injection_trace, quarantine
 from scripts import review
 from scripts.doctor import priming
+from scripts.forge.remote import CHANGE_LINK
 from scripts.gates import Who, catalog, intent, lift, modes, quiet
 from scripts.gates import feature as feature_gate
 from scripts.gates import log as gate_log
@@ -2088,7 +2089,7 @@ def cmd_pr(store: RedisStore, args: argparse.Namespace) -> None:
     keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
     head, repo, number, sha, body = PullHead(*pull_branch(args.url))
     pull_head.refuse_other_branch(row, args, PullHead(head, repo))
-    if not keeps_main:
+    if not keeps_main and not pull_head.gitlab_link(args.url):
         linked_issues.refuse_unnamed(args.url, body, row, lambda member: ledger.task(args.slug, member))
     branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
     confirmed = {"pr_number": number, "pr_head": sha} if number and not keeps_main else {}
@@ -2136,10 +2137,7 @@ def _split_binding(row, url, half):
     return {"split_pulls": [*pulls, url]}
 
 
-PULL_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
-
-
-def _pull_scope(row, args):
+def _pull_scope(row: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     scopes = row.get("pull_scopes") or {}
     kind = "stage" if args.stage is not None else "prerequisite" if args.prerequisite is not None else ""
     if not kind:
@@ -2147,8 +2145,8 @@ def _pull_scope(row, args):
     scope = getattr(args, kind).strip()
     if not scope:
         raise SwarmError(f"--{kind} needs the scope this pull request delivers")
-    if not PULL_URL.fullmatch(args.url):
-        raise SwarmError(f"--{kind} needs a GitHub pull request URL, not {args.url}")
+    if not CHANGE_LINK.fullmatch(args.url):
+        raise SwarmError(f"--{kind} needs a GitHub pull request or GitLab merge request URL, not {args.url}")
     return {"pull_scopes": {**scopes, args.url: {"kind": kind, "scope": scope}}}
 
 
