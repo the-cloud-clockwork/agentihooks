@@ -884,9 +884,11 @@ def test_only_the_trusted_tests_workflow_may_use_dedicated_dispatch_lanes(change
     elif change == "untrusted":
         baseline = None
     elif change == "job":
-        updated["jobs"]["untrusted"] = {"concurrency": {"group": "other"}}
+        updated["jobs"]["untrusted"] = copy.deepcopy(updated["jobs"]["admission"])
     found = lanes.problems(updated, baseline)
     assert bool(found) == (change is not None)
+    if change == "job":
+        assert found == ["job untrusted has no shared hosted lane concurrency group"]
     if found:
         assert all("has no shared hosted lane concurrency group" in problem for problem in found)
 
