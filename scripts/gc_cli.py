@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -15,6 +16,7 @@ from hooks.lifecycle.run import state_home, sweep
 from hooks.lifecycle.scratch_rm import remove_scratch
 from hooks.lifecycle.timer import install_timer, remove_timer
 from scripts import herdr_gc
+from scripts.ci_changelog_fragments import FOLDER
 from scripts.host_guard import sync as host_guard
 from scripts.swarm import naming
 
@@ -110,10 +112,17 @@ def _scratch_new(name: str) -> int:
     return 0
 
 
+def _fragments(repo: str) -> set[str]:
+    listed = subprocess.run(
+        ["git", "-C", repo, "ls-tree", "--name-only", "origin/dev", f"{FOLDER}/"], capture_output=True, text=True
+    )
+    return {Path(name).stem for name in listed.stdout.splitlines()}
+
+
 def _name(kind: str, repo: str, check: str) -> int:
     folder = Path(os.environ.get("WORKTREE_ROOT", Path.home() / "dev" / "worktrees")) / naming.repo_name(repo)
     folder = folder / "_tmp" if kind == "tmp" else folder
-    taken = {path.name for path in folder.iterdir()} if folder.is_dir() else set()
+    taken = ({path.name for path in folder.iterdir()} if folder.is_dir() else set()) | _fragments(repo)
     try:
         built = naming.tmp_worktree(os.environ, taken) if kind == "tmp" else naming.worktree(os.environ, taken)
         if check and not naming.is_worktree(check, os.environ, tmp=kind == "tmp"):
