@@ -63,6 +63,22 @@ if sys.argv[1] == "venv":
     pathlib.Path(sys.argv[-1]).mkdir(parents=True, exist_ok=True)
 """
 GIT = ("git", "-c", "user.name=lab", "-c", "user.email=lab@example.invalid")
+RUNNER = """import json
+import sys
+from pathlib import Path
+
+answers = json.loads(Path(__file__).with_name("answers.json").read_text())
+kind = json.loads(Path(sys.argv[1]).read_text())["kind"]
+Path(sys.argv[2]).write_text(json.dumps(answers[kind]))
+sys.exit(answers["code"])
+"""
+MUTANTS = ("scripts.alpha.x_first__mutmut_1", "scripts.alpha.x_first__mutmut_2")
+REACHING = {
+    "status": 0,
+    "tests": {"scripts.alpha.x_first": ["tests/test_alpha.py::test_a"]},
+    "durations": {"tests/test_alpha.py::test_a": 0.5},
+    "cpu": 0.0,
+}
 TRAMPOLINED = {
     "hooks/pkg/gamma.py": ["hooks.pkg.gamma.x_third__mutmut_1"],
     "scripts/alpha.py": ["scripts.alpha.x_first__mutmut_1", "scripts.alpha.x_first__mutmut_2"],
@@ -70,6 +86,7 @@ TRAMPOLINED = {
 
 
 CACHED = {"git": {"hits": 1, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
+CACHED_WITH_GRADER = {"git": {"hits": 2, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
 ROOT = Path(__file__).resolve().parents[2]
 LEASE_CONTEXT = {
     "inputs.base": "b1",
@@ -144,8 +161,10 @@ class Box:
         self.requests: list[dict[str, Any]] = []
         self.runs: list[tuple[list[str], float]] = []
 
-    def __call__(self, root: Path, cwd: Path, ports: PortAllocator, whitelist: dict[str, str]) -> "Box":
-        self.made.append((root, cwd, ports, whitelist))
+    def __call__(
+        self, root: Path, cwd: Path, ports: PortAllocator, whitelist: dict[str, str], readonly: tuple[Path, ...] = ()
+    ) -> "Box":
+        self.made.append((root, cwd, ports, whitelist, readonly))
         return self
 
     def run(self, argv: list[str], timeout: float) -> Outcome:
@@ -711,6 +730,24 @@ def mutation_settings(tmp_path: Path) -> executors.Mutation:
     return executors.Mutation(tmp_path / "cache", tmp_path / "killers.json", 60.0, 4)
 
 
+def answering(tree: Path, code: int, status: str) -> Path:
+    rows = [{"name": mutant, "status": status, "seconds": 0.0} for mutant in MUTANTS]
+    answers = {
+        "code": code,
+        "stats": {"stats": [REACHING], "runner": tree.name},
+        "mutant": {"collection_seconds": 0.0, "rows": rows, "runner": tree.name},
+    }
+    files = {"scripts/__init__.py": "", "scripts/ci_lab/__init__.py": "", "scripts/ci_lab/run_mutation.py": RUNNER}
+    return folder(tree.parent, tree.name, {**files, "scripts/ci_lab/answers.json": json.dumps(answers)})
+
+
+def python_in(venv: Path) -> None:
+    python = venv / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    python.chmod(0o755)
+
+
 @pytest.mark.feature("lab-worker-executors")
 def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
     monkeypatch: pytest.MonkeyPatch,
@@ -722,7 +759,8 @@ def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
     stats = {"stats": [{"status": 0, "tests": {}, "durations": {}, "cpu": 1.0}]}
     box = Box([(0, stats)], tmp_path)
     monkeypatch.setattr(executors, "Sandbox", box)
-    trees = FakeWorktrees({"h1": mutation_tree}, fetched=frozenset({"h1"}))
+    grader = tmp_path / "grader"
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": grader}, fetched=frozenset({"h1"}))
     pod = pod_of(tmp_path, trees)
 
     finished = executors.mutation(pod, mutation_settings(tmp_path), lease("stats", "k1", ("tests/test_alpha.py",)))
@@ -745,6 +783,7 @@ def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
             "kind": "stats",
             "key": "k1",
             "options": OPTIONS,
+            "tree": str(mutation_tree),
             "root": str(mutation_tree),
             "cache": str(tmp_path / "cache"),
             "members": ["tests/test_alpha.py"],
@@ -758,14 +797,14 @@ def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
         pod.runs,
     )
     assert timeout == 30.0
-    assert box.made == [(pod.runs, mutation_tree, pod.ports, WHITELIST)]
+    assert box.made == [(pod.runs, grader, pod.ports, WHITELIST, (grader,))]
     assert finished == Finished(PASSED, finished.report, tmp_path / "log1.txt")
     assert report(finished, pod) == {
         **stats,
         "seconds": 2.5,
-        "caches": {"git": {"hits": 0, "misses": 1}, "uv": {"hits": 1, "misses": 0}},
+        "caches": {"git": {"hits": 1, "misses": 1}, "uv": {"hits": 1, "misses": 0}},
     }
-    assert trees.calls == [("own", "h1", "b1"), ("drop", mutation_tree)]
+    assert trees.calls == [("lease", "g1"), ("own", "h1", "b1"), ("drop", mutation_tree), ("release", "g1")]
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -783,7 +822,8 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
     }
     box = Box([(0, stats), (0, graded)], tmp_path)
     monkeypatch.setattr(executors, "Sandbox", box)
-    pod = pod_of(tmp_path, FakeWorktrees({"h1": mutation_tree}))
+    grader = tmp_path / "grader"
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": mutation_tree, "g1": grader}))
 
     traced = ["tests/unit/test_beta.py", "tests/unit/test_new.py"]
 
@@ -796,6 +836,7 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
             "kind": "stats",
             "key": "m1",
             "options": OPTIONS,
+            "tree": str(mutation_tree),
             "root": str(mutation_tree),
             "cache": str(tmp_path / "cache"),
             "members": traced,
@@ -804,6 +845,7 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
             "kind": "mutant",
             "key": "m1",
             "options": OPTIONS,
+            "tree": str(mutation_tree),
             "members": list(members),
             "killers": str(tmp_path / "killers.json"),
             "tests": {"tests/test_alpha.py::test_a": 0.5},
@@ -811,9 +853,9 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
             "cap": 4,
         },
     ]
-    assert box.made == [(pod.runs, mutation_tree, pod.ports, WHITELIST)] * 2
+    assert box.made == [(pod.runs, grader, pod.ports, WHITELIST, (grader,))] * 2
     assert finished == Finished(PASSED, finished.report, tmp_path / "log2.txt")
-    assert report(finished, pod) == {**graded, "seconds": 2.5, "caches": CACHED}
+    assert report(finished, pod) == {**graded, "seconds": 2.5, "caches": CACHED_WITH_GRADER}
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -839,7 +881,7 @@ def test_mutation_fails_a_mutant_unit_whose_runner_fails_or_whose_mutant_lives(
     results = [result for _, result in scripted]
     box = Box(list(scripted), tmp_path)
     monkeypatch.setattr(executors, "Sandbox", box)
-    trees = FakeWorktrees({"h1": mutation_tree})
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": tmp_path / "grader"})
     pod = pod_of(tmp_path, trees)
 
     unit = lease("mutant", "m1", ("scripts.alpha.x_first__mutmut_1",), manifest='["tests/test_alpha.py"]')
@@ -848,8 +890,8 @@ def test_mutation_fails_a_mutant_unit_whose_runner_fails_or_whose_mutant_lives(
 
     assert finished == Finished(FAILED, finished.report, tmp_path / log)
     assert len(box.runs) == runs
-    assert report(finished, pod) == {**(results[-1] or {}), "seconds": 2.5, "caches": CACHED}
-    assert trees.calls == [("own", "h1", "b1"), ("drop", mutation_tree)]
+    assert report(finished, pod) == {**(results[-1] or {}), "seconds": 2.5, "caches": CACHED_WITH_GRADER}
+    assert trees.calls == [("lease", "g1"), ("own", "h1", "b1"), ("drop", mutation_tree), ("release", "g1")]
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -858,14 +900,86 @@ def test_mutation_drops_its_private_tree_when_the_runner_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation_tree: Path
 ) -> None:
     monkeypatch.setattr(executors, "Sandbox", Recorder(CannotRun("no bwrap")))
-    trees = FakeWorktrees({"h1": mutation_tree})
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": tmp_path / "grader"})
 
     with pytest.raises(CannotRun, match="^no bwrap$"):
         executors.mutation(
             pod_of(tmp_path, trees), mutation_settings(tmp_path), lease("stats", "k", ("tests/test_alpha.py",))
         )
 
-    assert trees.calls == [("own", "h1", "b1"), ("drop", mutation_tree)]
+    assert trees.calls == [("lease", "g1"), ("own", "h1", "b1"), ("drop", mutation_tree), ("release", "g1")]
+
+
+@pytest.mark.feature("lab-mutation-protected-runner")
+@pytest.mark.parametrize(
+    ("code", "status", "verdict"), [(0, "killed", PASSED), (0, "survived", FAILED), (3, "killed", FAILED)]
+)
+@pytest.mark.usefixtures("bwrap", "trampolines", "venv")
+def test_mutation_answers_the_verdict_and_rows_of_the_runner_process_it_starts(
+    tmp_path: Path, mutation_tree: Path, code: int, status: str, verdict: str
+) -> None:
+    python_in(tmp_path / "venv")
+    head, grader = answering(mutation_tree, code, status), answering(tmp_path / "grader", code, status)
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": head, "g1": grader}))
+
+    finished = executors.mutation(
+        pod, mutation_settings(tmp_path), lease("mutant", "m1", MUTANTS, manifest='["tests/test_alpha.py"]')
+    )
+
+    rows = [{"name": mutant, "status": status, "seconds": 0.0} for mutant in MUTANTS]
+    assert finished.outcome == verdict
+    assert report(finished, pod).get("rows") == (None if code else rows)
+
+
+@pytest.mark.feature("lab-mutation-protected-runner")
+@pytest.mark.parametrize(
+    ("grader", "head", "verdict"),
+    [
+        ((0, "survived"), (0, "killed"), FAILED),
+        ((0, "killed"), (3, "survived"), PASSED),
+        ((3, "killed"), (0, "killed"), FAILED),
+    ],
+)
+@pytest.mark.usefixtures("bwrap", "trampolines", "venv")
+def test_the_grader_trees_runner_decides_a_mutant_unit_whatever_the_head_runner_answers(
+    tmp_path: Path, mutation_tree: Path, grader: tuple[int, str], head: tuple[int, str], verdict: str
+) -> None:
+    python_in(tmp_path / "venv")
+    trees = FakeWorktrees({"h1": answering(mutation_tree, *head), "g1": answering(tmp_path / "grader", *grader)})
+    pod = pod_of(tmp_path, trees)
+
+    finished = executors.mutation(
+        pod, mutation_settings(tmp_path), lease("mutant", "m1", MUTANTS, manifest='["tests/test_alpha.py"]')
+    )
+
+    code, status = grader
+    rows = [{"name": mutant, "status": status, "seconds": 0.0} for mutant in MUTANTS]
+    graded = {} if code else {"collection_seconds": 0.0, "rows": rows, "runner": "grader"}
+    assert finished.outcome == verdict
+    assert report(finished, pod) == {**graded, "seconds": 2.5, "caches": CACHED_WITH_GRADER}
+    assert trees.calls == [("lease", "g1"), ("own", "h1", "b1"), ("drop", mutation_tree), ("release", "g1")]
+
+
+@pytest.mark.feature("lab-mutation-protected-runner")
+@pytest.mark.usefixtures("bwrap", "trampolines", "venv")
+def test_the_grader_trees_runner_answers_a_stats_unit_whatever_the_head_runner_answers(
+    tmp_path: Path, mutation_tree: Path
+) -> None:
+    python_in(tmp_path / "venv")
+    trees = FakeWorktrees(
+        {"h1": answering(mutation_tree, 3, "killed"), "g1": answering(tmp_path / "grader", 0, "killed")}
+    )
+    pod = pod_of(tmp_path, trees)
+
+    finished = executors.mutation(pod, mutation_settings(tmp_path), lease("stats", "k1", ("tests/test_alpha.py",)))
+
+    assert finished.outcome == PASSED
+    assert report(finished, pod) == {
+        "stats": [REACHING],
+        "runner": "grader",
+        "seconds": 2.5,
+        "caches": CACHED_WITH_GRADER,
+    }
 
 
 @pytest.mark.feature("lab-mutation-units-work-on-the-change")
@@ -896,7 +1010,7 @@ def test_mutation_refuses_a_mutant_unit_with_no_manifest_or_a_member_its_tree_ho
 ) -> None:
     box = Box([], tmp_path)
     monkeypatch.setattr(executors, "Sandbox", box)
-    trees = FakeWorktrees({"h1": mutation_tree})
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": tmp_path / "grader"})
 
     with pytest.raises(ValueError, match=refusal):
         executors.mutation(
@@ -904,7 +1018,7 @@ def test_mutation_refuses_a_mutant_unit_with_no_manifest_or_a_member_its_tree_ho
         )
 
     assert box.runs == []
-    assert trees.calls == [("own", "h1", "b1"), ("drop", mutation_tree)]
+    assert trees.calls == [("lease", "g1"), ("own", "h1", "b1"), ("drop", mutation_tree), ("release", "g1")]
 
 
 @pytest.mark.feature("lab-mutation-units-work-on-the-change")

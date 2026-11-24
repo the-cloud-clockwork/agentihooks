@@ -4,18 +4,20 @@ A stats unit returns, through the stats cache, which collected tests reach each 
 collects its covering tests once in this process, then forks one child per mutant that selects it through mutmut's
 trampolines with MUTANT_UNDER_TEST, runs the remembered killer first and stops at the first failing test. Each row
 carries the mutant's wall seconds, and a function's mutants run side by side only when in turn they would overrun
-the unit budget. Run it as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT` in the tree that holds the
-trampolined sources.
+the unit budget. Run it as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT` from the tree whose copy of it
+grades: each pytest session runs in the tree the request names, the one that holds the trampolined sources, or in
+the working directory when it names none, and imports that tree's scripts package, so a copy started from the
+grader tree grades the head while its own code stays the grader's.
 """
 
 import json
 import math
 import sys
-from collections.abc import Mapping, MutableMapping, Sequence, Set
+from collections.abc import Callable, Mapping, MutableMapping, Sequence, Set
 from dataclasses import asdict, dataclass
 from functools import partial
 from gc import freeze
-from os import _exit, environ, fork, wait, waitstatus_to_exitcode
+from os import _exit, chdir, environ, fork, getcwd, wait, waitstatus_to_exitcode
 from pathlib import Path
 from time import monotonic, process_time
 from types import ModuleType, SimpleNamespace
@@ -43,6 +45,7 @@ STATUSES = {0: "survived", 1: "killed"}
 CRASHED = 3
 NOTHING_COLLECTED = int(pytest.ExitCode.NO_TESTS_COLLECTED)
 HITS: set[str] = set()
+PACKAGE = "scripts"
 
 
 @dataclass(frozen=True)
@@ -192,46 +195,91 @@ def collected_status(code: int) -> int:
     return 0 if code == NOTHING_COLLECTED else code
 
 
-def collect(options: Sequence[str], chosen: list[str]) -> list[dict[str, Any]]:
-    """Run chosen once with stats tracing on and return the one stats result the cache splits per test file."""
+def packaged(modules: Mapping[str, ModuleType]) -> list[str]:
+    """Name every loaded module of the package the runner shares with the code it grades."""
+    return [name for name in modules if name == PACKAGE or name.startswith(f"{PACKAGE}.")]
+
+
+def under_test(
+    tree: Path,
+    session: Callable[[], int | pytest.ExitCode],
+    modules: MutableMapping[str, ModuleType] = sys.modules,
+    path: list[str] = sys.path,
+) -> int | pytest.ExitCode:
+    """Run one pytest session in tree, the tree under test, then give the runner back its own tree.
+
+    While the session runs, the working directory is tree, the package modules the runner loaded are out of modules
+    and tree leads path in place of the directory the runner started in, so the tests import tree's code even when the
+    runner was started from another tree; afterwards tree's package modules are dropped and the runner's modules, path
+    and working directory come back.
+    """
+    start = getcwd()
+    own = {name: modules.pop(name) for name in packaged(modules)}
+    saved = list(path)
+    path[:] = [str(tree), *(entry for entry in saved if entry != start)]
+    chdir(tree)
+    try:
+        return session()
+    finally:
+        chdir(start)
+        path[:] = saved
+        for name in packaged(modules):
+            del modules[name]
+        modules.update(own)
+
+
+def collect(tree: Path, options: Sequence[str], chosen: list[str]) -> list[dict[str, Any]]:
+    """Run chosen once in tree with stats tracing on and return the one stats result the cache splits per test file."""
     recorder = Recorder()
     environ[SWITCH] = STATS
     started = process_time()
-    status = pytest.main([*options, *chosen], plugins=[recorder.plugin()])
+    status = under_test(tree, partial(pytest.main, [*options, *chosen], plugins=[recorder.plugin()]))
     tests = {function: sorted(names) for function, names in recorder.tests.items()}
     cpu = process_time() - started
     return [{"status": collected_status(int(status)), "tests": tests, "durations": recorder.durations, "cpu": cpu}]
 
 
-def stats(root: Path, cache: Path, file_batch: Sequence[str], options: Sequence[str]) -> list[dict[str, Any]]:
-    """Return the stats records of file_batch from the cache keyed by root's content, collecting misses here."""
-    collected = partial(collect, options)
+def stats(
+    root: Path, cache: Path, file_batch: Sequence[str], options: Sequence[str], tree: Path
+) -> list[dict[str, Any]]:
+    """Return the stats records of file_batch from the cache keyed by root's content, collecting misses in tree."""
+    collected = partial(collect, tree, options)
     records: list[dict[str, Any]] = collect_cached_stats(root, cache, {}, list(file_batch), list(options), collected)  # pyright: ignore[reportUnknownVariableType]
     return records
 
 
 def mutants(
-    unit: Unit, tests: Mapping[str, float], memory: KillMemory, options: Sequence[str], budget: float, cap: int
+    unit: Unit,
+    tests: Mapping[str, float],
+    memory: KillMemory,
+    options: Sequence[str],
+    budget: float,
+    cap: int,
+    tree: Path,
 ) -> tuple[list[Row], float]:
-    """Grade every mutant of unit here and return its rows with the seconds the one collection of tests took."""
+    """Grade every mutant of unit here over tree and return its rows with the seconds the one collection took."""
     if not tests:
         return [Row(name, NO_TESTS, 0.0) for name in unit.members], 0.0
     ordered = sorted(tests, key=tests.__getitem__)
     loop = WarmLoop(unit.members, ordered, memory, lanes(len(unit.members), sum(tests.values()), budget, cap))
     environ[SWITCH] = CLEAN
-    status = pytest.main([*options, *ordered], plugins=[loop.plugin(), memory])
+    status = under_test(tree, partial(pytest.main, [*options, *ordered], plugins=[loop.plugin(), memory]))
     if status:
         raise SystemExit(int(status))
     return loop.rows, loop.collection
 
 
 def run(request: Mapping[str, Any]) -> dict[str, Any]:
-    """Run the unit a request names in the working directory and return its JSON result."""
+    """Run the unit a request names over the tree it names, the working directory when it names none, and return
+    its JSON result."""
     unit = Unit(request["kind"], request["key"], tuple(request["members"]))
+    tree = Path(request.get("tree") or getcwd())
     if unit.kind == STATS:
-        return {"stats": stats(Path(request["root"]), Path(request["cache"]), unit.members, request["options"])}
+        return {"stats": stats(Path(request["root"]), Path(request["cache"]), unit.members, request["options"], tree)}
     memory = KillMemory(Path(request["killers"]))
-    rows, collection = mutants(unit, request["tests"], memory, request["options"], request["budget"], request["cap"])
+    rows, collection = mutants(
+        unit, request["tests"], memory, request["options"], request["budget"], request["cap"], tree
+    )
     return {"collection_seconds": collection, "rows": [asdict(row) for row in rows]}
 
 
