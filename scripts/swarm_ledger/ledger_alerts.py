@@ -172,7 +172,7 @@ def expired(alert: dict, at: int) -> bool:
     )
 
 
-def raise_warning(doc: dict, ctx: OpContext, warning: tuple, before: list) -> None:
+def warning_raised(doc: dict, rev: int, at: int, warning: tuple, before: list) -> bool:
     source, text, *owner = warning
     writer, target_item = owner if owner else (None, None)
     rows = doc["alerts"]
@@ -184,28 +184,39 @@ def raise_warning(doc: dict, ctx: OpContext, warning: tuple, before: list) -> No
     live = next((a for a in matching if a["state"] != DONE), None)
     if live:
         if source == SYNC and owner:
-            live["last_refused_at"] = ctx.at
-            ctx.dirty = True
-        return
+            live["last_refused_at"] = at
+            return True
+        return False
     if matching and text in before and not owner:
-        return
-    alert = new_alert(doc, ctx, source, text, writer if writer and writer != OPERATOR else TARGETS[source])
+        return False
+    alert = alert_row(doc, rev, at, source, text, writer if writer and writer != OPERATOR else TARGETS[source])
     if source == SYNC:
-        alert.update(writer=writer, item=target_item, last_refused_at=ctx.at)
+        alert.update(writer=writer, item=target_item, last_refused_at=at)
+    return True
 
 
-def new_alert(doc: dict[str, Any], ctx: OpContext, source: str, text: str, target: str) -> dict[str, Any]:
+def raise_warning(doc: dict, ctx: OpContext, warning: tuple, before: list) -> None:
+    if warning_raised(doc, ctx.rev, ctx.at, warning, before):
+        ctx.dirty = True
+
+
+def alert_row(doc: dict[str, Any], rev: int, at: int, source: str, text: str, target: str) -> dict[str, Any]:
     rows = doc["alerts"]
     alert = {
-        "id": f"al-{ctx.rev}-{len(rows)}",
+        "id": f"al-{rev}-{len(rows)}",
         "text": text,
         "source": source,
         "target": target,
         "state": OPEN,
-        "at": ctx.at,
-        "rev": ctx.rev,
+        "at": at,
+        "rev": rev,
     }
     rows.append(alert)
+    return alert
+
+
+def new_alert(doc: dict[str, Any], ctx: OpContext, source: str, text: str, target: str) -> dict[str, Any]:
+    alert = alert_row(doc, ctx.rev, ctx.at, source, text, target)
     ctx.dirty = True
     return alert
 

@@ -7511,6 +7511,23 @@
       ]
     },
     {
+      "id": "ledger-alert-warning-without-context",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "ledger_alerts.warning_raised raises the warning of a refused ledger writer from the revision and the time of the write, with no op context: it returns whether the alert list changed, matching an existing alert by text and, for a sync warning, by writer and item, moving a live sync alert's last_refused_at, skipping a closed alert whose text is already known, and otherwise appending one new alert built by ledger_alerts.alert_row. ledger_alerts.raise_warning keeps its ctx-taking signature and sets ctx.dirty only when warning_raised returns true, and PostgresLedgerRepository.admit calls warning_raised directly with the ledger's revision and one read of the domain clock, with no stand-in context.",
+      "seam": "scripts.swarm_ledger.ledger_alerts.warning_raised and ledger_alerts.alert_row, called by ledger_alerts.raise_warning and by scripts.swarm_ledger.repository.postgres.PostgresLedgerRepository.admit",
+      "tests": [
+        "tests/swarm_ledger/test_postgres_floor.py::test_each_refused_writer_becomes_one_open_master_alert_on_the_next_allowed_write",
+        "tests/swarm_ledger/test_postgres_floor.py::test_a_refusal_alert_starts_the_alert_list_on_a_ledger_without_one",
+        "tests/swarm_ledger/test_postgres_floor.py::test_a_closed_refusal_alert_is_not_raised_again_while_its_writer_stays_connected",
+        "tests/swarm_ledger/test_ledger_alerts.py::test_warning_raised_appends_a_row_with_the_revision_and_the_time",
+        "tests/swarm_ledger/test_ledger_alerts.py::test_warning_raised_moves_last_refused_at_of_a_live_sync_alert_with_an_owner",
+        "tests/swarm_ledger/test_ledger_alerts.py::test_warning_raised_does_nothing_for_a_live_alert_of_a_non_sync_source",
+        "tests/swarm_ledger/test_ledger_alerts.py::test_warning_raised_skips_a_closed_alert_whose_text_was_already_known",
+        "tests/swarm_ledger/test_ledger_alerts.py::test_raise_warning_sets_dirty_only_when_the_alerts_changed"
+      ]
+    },
+    {
       "id": "swarm-autoscaler-scale-up-alert",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2789",

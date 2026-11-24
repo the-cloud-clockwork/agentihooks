@@ -284,6 +284,60 @@ def test_nothing_new_leaves_the_sync_clean():
     assert derived([{"id": "o", "text": "x", "state": "open"}], [("sync", "x")], ["x"])[1] is False
 
 
+@pytest.mark.feature("ledger-alert-warning-without-context")
+def test_warning_raised_appends_a_row_with_the_revision_and_the_time():
+    doc = {"alerts": []}
+    assert ledger_alerts.warning_raised(doc, 9, 123, ("writer", "refused"), []) is True
+    assert doc["alerts"] == [
+        {
+            "id": "al-9-0",
+            "text": "refused",
+            "source": "writer",
+            "target": "master",
+            "state": "open",
+            "at": 123,
+            "rev": 9,
+        }
+    ]
+
+
+@pytest.mark.feature("ledger-alert-warning-without-context")
+def test_warning_raised_moves_last_refused_at_of_a_live_sync_alert_with_an_owner():
+    live = {"text": "refused", "state": "open", "writer": "writer-1", "item": "tasks/t1"}
+    doc = {"alerts": [live]}
+    raised = ledger_alerts.warning_raised(doc, 9, 500, (ledger_alerts.SYNC, "refused", "writer-1", "tasks/t1"), [])
+    assert raised is True
+    assert live["last_refused_at"] == 500
+    assert doc["alerts"] == [live]
+
+
+@pytest.mark.feature("ledger-alert-warning-without-context")
+def test_warning_raised_does_nothing_for_a_live_alert_of_a_non_sync_source():
+    live = {"text": "too long", "state": "open"}
+    doc = {"alerts": [live]}
+    assert ledger_alerts.warning_raised(doc, 9, 500, ("size", "too long"), []) is False
+    assert doc["alerts"] == [live]
+    assert "last_refused_at" not in live
+
+
+@pytest.mark.feature("ledger-alert-warning-without-context")
+def test_warning_raised_skips_a_closed_alert_whose_text_was_already_known():
+    closed = {"text": "refused", "state": "done"}
+    doc = {"alerts": [closed]}
+    assert ledger_alerts.warning_raised(doc, 9, 500, ("writer", "refused"), ["refused"]) is False
+    assert doc["alerts"] == [closed]
+
+
+@pytest.mark.feature("ledger-alert-warning-without-context")
+def test_raise_warning_sets_dirty_only_when_the_alerts_changed():
+    doc = {"alerts": [{"text": "refused", "state": "done"}]}
+    ctx = core.Context({"rev": 8, "stamps": {}}, 500)
+    ledger_alerts.raise_warning(doc, ctx, ("writer", "refused"), ["refused"])
+    assert ctx.dirty is False
+    ledger_alerts.raise_warning(doc, ctx, ("writer", "new"), [])
+    assert ctx.dirty is True
+
+
 def test_an_alert_op_on_a_ledger_without_alerts_is_refused() -> None:
     op = {"op": "alert_claim", "id": "k", "target": "al-1-0"}
     assert ledger_alerts.apply({}, op, SimpleNamespace(at=1, refused=[])) is False
