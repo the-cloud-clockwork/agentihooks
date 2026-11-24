@@ -9,7 +9,6 @@ __all__ = ["authority_live", "live"]
 
 
 @pytest.mark.wall_clock
-@pytest.mark.feature("ledger-cold-load")
 def test_a_cold_browser_shows_the_first_task_rows_within_a_second_and_a_megabyte(
     live: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
