@@ -399,3 +399,25 @@ def test_an_own_copy_holds_the_base_its_unit_compares_it_against(tmp_path: Path,
     known, fetched = trees.own(head, later)
     assert fetched is False
     assert _git(known, "merge-base", later, head).strip() == fork
+
+
+def test_an_own_copy_takes_a_hard_reset_to_its_base_and_back_while_the_leased_tree_stays_sealed(
+    tmp_path: Path, origin: Path
+) -> None:
+    base = _commit(origin, "a", "a")
+    _commit(origin, "a", "changed")
+    head = _commit(origin, "b", "new")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, base), root=tmp_path / "trees", capacity=1)
+    shared, _ = trees.lease(head)
+    own, _ = trees.own(head, base)
+
+    _git(own, "reset", "-q", "--hard", base)
+    assert (own / "a").read_text() == "a"
+    assert not (own / "b").exists()
+    _git(own, "reset", "-q", "--hard", head)
+
+    assert ((own / "a").read_text(), (own / "b").read_text()) == ("changed", "new")
+    assert _git(own, "status", "--porcelain") == ""
+    assert ((shared / "a").read_text(), (shared / "b").read_text()) == ("changed", "new")
+    assert _git(shared, "rev-parse", "HEAD").strip() == head
+    assert _writable(shared) == []
