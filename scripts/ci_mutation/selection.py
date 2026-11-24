@@ -12,7 +12,7 @@ from collections import Counter
 from pathlib import Path
 from time import process_time
 from types import ModuleType, SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from mutmut.utils.format_utils import get_mutant_name
@@ -29,7 +29,7 @@ from scripts.ci_mutation.stats_dependencies import records_within
 from scripts.ci_mutation.timeouts import retry_timeouts
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from libcst import Module
     from libcst.metadata import MetadataWrapper
@@ -41,8 +41,10 @@ GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 IMPORT_GROUPS = {"fakeredis"}
 
 
-def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[Module, list[Mutation]]:
-    wrapper, mutations, _ = created_mutations(filename, source)
+def changed_mutations(
+    filename: str, source: str, changed: set[int], patterns: Sequence[str] | None = None
+) -> tuple[Module, list[Mutation]]:
+    wrapper, mutations, _ = created_mutations(filename, source, patterns)
     return wrapper.module, on_changed_lines(wrapper, mutations, changed)
 
 
@@ -67,8 +69,27 @@ def on_changed_lines(wrapper: MetadataWrapper, mutations: list[Mutation], change
     return selected
 
 
-def created_mutations(filename: str, source: str) -> tuple[MetadataWrapper, list[Mutation], list[Mutation]]:
-    """Parse source once and return its metadata wrapper with the graded and the possible mutations on it."""
+def ignored_by(filename: str, source: str, wrapper: MetadataWrapper, patterns: Sequence[str]) -> IgnoredCode:
+    """Return the lines the file's pragmas and the given patterns keep from mutation, as mutmut's get_ignored_lines
+    does with its config patterns, without loading that config."""
+    from mutmut.mutation.pragma_handling import IgnoredCode, PragmaVisitor
+
+    pragmas = PragmaVisitor(filename)
+    wrapper.visit(pragmas)
+    matched = {
+        number
+        for number, line in enumerate(source.splitlines(), 1)
+        if any(re.search(pattern, line) for pattern in patterns)
+    }
+    return IgnoredCode(pragmas.no_mutate_lines, pragmas.ignore_node_lines, matched)
+
+
+def created_mutations(
+    filename: str, source: str, patterns: Sequence[str] | None = None
+) -> tuple[MetadataWrapper, list[Mutation], list[Mutation]]:
+    """Parse source once and return its metadata wrapper with the graded and the possible mutations on it. Lines
+    matching patterns carry no mutation; None takes the patterns from mutmut's config, which mutmut loads from the
+    working directory."""
     import libcst as cst
     from libcst.metadata import MetadataWrapper
     from mutmut.mutation.file_mutation import NEVER_MUTATE_FUNCTION_NAMES, MutationVisitor
@@ -92,7 +113,11 @@ def created_mutations(filename: str, source: str) -> tuple[MetadataWrapper, list
             return isinstance(node, cst.FunctionDef) and node.name.value in NEVER_MUTATE_FUNCTION_NAMES
 
     wrapper = MetadataWrapper(cst.parse_module(source), unsafe_skip_copy=True)
-    ignored = get_ignored_lines(filename, source, wrapper)
+    ignored = (
+        get_ignored_lines(filename, source, wrapper)
+        if patterns is None
+        else ignored_by(filename, source, wrapper, patterns)
+    )
     graded = Visitor(
         ignored,
         lambda node: all(map(is_dataclass, node.decorators)) if isinstance(node, cst.ClassDef) else True,
@@ -180,10 +205,12 @@ def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int,
     return len(found), [function.name.value for function in ungraded]
 
 
-def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:
+def selected_mutants(
+    filename: str, source: str, changed: set[int], patterns: Sequence[str] | None = None
+) -> tuple[str, list[str]]:
     from mutmut.mutation.file_mutation import combine_mutations_to_source
 
-    module, selected = changed_mutations(filename, source, changed)
+    module, selected = changed_mutations(filename, source, changed, patterns)
     code, names = combine_mutations_to_source(module, selected)
     if any(getattr(mutation.contained_by_top_level_function, "decorators", None) for mutation in selected):
         code = plain_copies(code)
@@ -355,8 +382,23 @@ def loaded_files(bases: list[Path], modules: dict[str, ModuleType] = sys.modules
     return sorted(found)
 
 
-def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
+def run_stats_with_flake_ledger(test_runner: Any, tests: list[str], output: Path) -> int:
     os.environ["MUTANT_UNDER_TEST"] = "stats"
+    flakes = output.with_suffix(".flakes.jsonl")
+    flakes.unlink(missing_ok=True)
+    test_runner._pytest_add_cli_args.extend(["-p", "xdist", "-p", "tests.flake_ledger"])
+    previous = os.environ.get("CI_FLAKES")
+    os.environ["CI_FLAKES"] = str(flakes)
+    try:
+        return test_runner.run_stats(tests=tests)
+    finally:
+        if previous is None:
+            os.environ.pop("CI_FLAKES", None)
+        else:
+            os.environ["CI_FLAKES"] = previous
+
+
+def collect_shard_stats(runner: Any, test_runner: Any, tests: list[str], output: Path, basetemp: str) -> None:
     os.environ["PY_IGNORE_IMPORTMISMATCH"] = "1"
     # Stats tracing slows every test, so a wall clock bound only holds in the unit shards.
     test_runner._pytest_add_cli_args = [
@@ -386,7 +428,7 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
         *(Path(root).resolve() for root in [os.environ.get("MUTATION_STATS_ROOT")] if root),
     ]
     start = process_time()
-    status = test_runner.run_stats(tests=tests)
+    status = run_stats_with_flake_ledger(test_runner, tests, output)
     # A bucket of only wall clock tests deselects everything, and pytest reports that as no tests collected.
     status = 0 if status == pytest.ExitCode.NO_TESTS_COLLECTED else status
     dependencies = {}
@@ -499,7 +541,21 @@ def collect_file_stats(runner, test_runner, files: list[str], workers: int, work
     return collect(files)
 
 
-def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stats: tuple[str, ...]) -> None:
+def collect_stats_with_flake_ledger(
+    runner: Any, test_runner: Any, files: list[str], workers: int, work: Path, output: Path, index: int
+) -> list[dict[str, Any]]:
+    for flakes in work.glob("stats-*.flakes.jsonl"):
+        flakes.unlink()
+    try:
+        return collect_file_stats(runner, test_runner, files, workers, work)
+    finally:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.with_name(f"flakes-{index}.jsonl").write_text(
+            "".join(flakes.read_text() for flakes in sorted(work.glob("stats-*.flakes.jsonl")))
+        )
+
+
+def load_or_collect_stats(runner: Any, test_runner: Any, paths: list[str], mode: str, stats: tuple[str, ...]) -> None:
     if mode not in ("", "collect", "reuse"):
         raise ValueError(f"unknown mutation stats mode {mode!r}")
     for path in paths:
@@ -509,7 +565,9 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
             break
     else:
         if mode == "collect":
-            write_part(Path(stats[0]), stats[1], (int(stats[2]), int(stats[3])), [])
+            output = Path(stats[0])
+            write_part(output, stats[1], (int(stats[2]), int(stats[3])), [])
+            output.with_name(f"flakes-{int(stats[2])}.jsonl").write_text("")
         raise SystemExit(0)
     if mode == "reuse":
         apply_stats(runner, json.loads(Path(stats[0]).read_text()))
@@ -526,7 +584,9 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
             if total > 1:
                 files = collect_test_ids(test_runner, files)
             split = split_files(Path.cwd(), files, total)
-            results = collect_file_stats(runner, test_runner, split[index], workers, Path.cwd())
+            results = collect_stats_with_flake_ledger(
+                runner, test_runner, split[index], workers, Path.cwd(), output, index
+            )
             write_part(output, key, (index, total), results, split_key(split))
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)

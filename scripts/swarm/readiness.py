@@ -6,7 +6,8 @@ An offer's id carries the task's claim generation, so the bus drops a repeat onl
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from functools import cached_property
+from typing import Any, NamedTuple
 
 from scripts.events import subjects
 from scripts.events.bus import Bus, Delivery, WorkQueue
@@ -21,6 +22,17 @@ from scripts.swarm_ledger.repository import hierarchy
 
 AUTHOR = "readiness"
 UNFIT_NAK_MS = 5_000
+PREFERRED, ORDERED, REST = range(3)
+LAST: tuple[int, ...] = (REST + 1,)
+
+
+class Classes(NamedTuple):
+    """The focus rank of each task of a snapshot, the rank of a task no focus covers, and the one function that gives
+    a task's offer its class with the keys that order offers inside it."""
+
+    focus: dict[str, int]
+    unfocused: int
+    band: Callable[[dict[str, Any]], tuple[int, ...]]
 
 
 @dataclass(frozen=True)
@@ -32,6 +44,29 @@ class Snapshot:
     fix: str
     claimed: Callable[[str], bool]
     admits: Callable[[dict], bool]
+
+    @cached_property
+    def classes(self) -> Classes:
+        """The classes of the snapshot's offers, worked out once for every read of the snapshot."""
+        return _classes(self.doc)
+
+
+def _classes(doc: dict[str, Any]) -> Classes:
+    """Class each task of the document: urgent or under a focus first, then under an operator order, oldest order
+    first, then the rest, each by ledger rank band."""
+    from scripts.swarm import focus_budget, orders, preempt
+    from scripts.swarm_ledger import ledger_rank
+
+    focus, unfocused, stamped = focus_budget.ranks(doc), focus_budget.outside(doc), orders.stamps(doc)
+
+    def band(task: dict[str, Any]) -> tuple[int, ...]:
+        rank = ledger_rank.order(task)
+        if focus[task["id"]] != unfocused or task.get("rank") == preempt.URGENT:
+            return PREFERRED, rank
+        at = stamped.get(task["id"])
+        return (REST, rank) if at is None else (ORDERED, at, rank)
+
+    return Classes(focus, unfocused, band)
 
 
 def _on_events(store: RedisStore, slug: str) -> bool:
@@ -199,29 +234,27 @@ def anywhere(event: Envelope) -> bool:
 
 
 def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
-    """Each claimable task's offer, focused tasks first, then by ledger rank band, then by focus record order."""
+    """Each claimable task's offer: focused and urgent tasks first, then the tasks under an operator order, oldest
+    order first, then the rest, each by ledger rank band and focused tasks by focus record order."""
     from scripts.swarm import focus_budget
-    from scripts.swarm_ledger import ledger_rank
 
     rows: Any = view.rows
     ready = [
         (task["lane"], task)
         for task in rows.values()
-        if task.get("lane")
+        if task.get("lane") in LANES
         and (not task.get("workstation") or task.get("hive") in (None, "", ROOT))
         and claimable(task, task["lane"], view)
     ]
-    ordered = focus_budget.ordered(
-        ready, focus_budget.ranks(view.doc), ledger_rank.order, focus_budget.outside(view.doc)
-    )
-    return [offer(task, view, now_ms) for _, task in ordered]
+    focus, unfocused, band = view.classes
+    return [offer(task, view, now_ms) for _, task in focus_budget.ordered(ready, focus, band, unfocused)]
 
 
 def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePolicy()) -> list[str]:
     """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned, and
     withdraws the stale offers there before the fresh ones join them; an offer still queued is not offered again, so
-    one that waits past the dedupe window stays a single copy, unless it waits ``behind`` an urgent or focused offer,
-    when it is withdrawn and offered again after it."""
+    one that waits past the dedupe window stays a single copy, unless it waits ``behind`` an offer the hub would offer
+    before it, when it is withdrawn and offered again after it."""
     events = offers(view, now_ms)
     offered = {event.id for event in events}
     lanes = dict.fromkeys([*LANES, *(event.data["lane"] for event in events)])
@@ -256,15 +289,26 @@ def _sweep(queue: WorkQueue, view: Snapshot) -> list[Envelope]:
 
 
 def behind(kept: list[Envelope], fresh: list[Envelope], view: Snapshot, now_ms: int) -> set[str]:
-    """The ids of one lane's waiting offers of tasks neither urgent nor focused, the set preemption serves first, that
-    sit ahead of an urgent or focused offer waiting or about to be offered and are at least one dedupe window old, so
-    offering one again behind it is never dropped by the bus dedupe and moves it at most once per window."""
-    from scripts.swarm import preempt
+    """The ids of one lane's waiting offers that sit ahead of an offer the hub would offer before them, waiting or
+    about to be offered, and are at least one dedupe window old, so offering one again behind it is never dropped by
+    the bus dedupe and moves it at most once per window. An offer is graded by the key it is offered by wherever that
+    key is the whole order: one under an operator order by its order time then its rank, one of the rest by its rank.
+    The urgent or focused offers share one grade, so none of them moves behind another."""
+    band = view.classes.band
 
-    flags = [preempt.preferred(view.rows[event.key], view.doc, view.graph) for event in [*kept, *fresh]]
-    last = max((index for index, flag in enumerate(flags) if flag), default=0)
+    def grade(event: Envelope) -> tuple[int, ...]:
+        found = band(view.rows[event.key])
+        return found[:1] if found[0] == PREFERRED else found
+
     window = BusConfig().dedupe_window_ms
-    return {event.id for event, flag in zip(kept[:last], flags) if not flag and now_ms - event.time >= window}
+    best = min(map(grade, fresh), default=LAST)
+    moving: set[str] = set()
+    for event in reversed(kept):
+        own = grade(event)
+        if own > best and now_ms - event.time >= window:
+            moving.add(event.id)
+        best = min(best, own)
+    return moving
 
 
 def stale(event: Envelope, view: Snapshot) -> bool:

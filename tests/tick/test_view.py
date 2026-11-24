@@ -256,6 +256,8 @@ def test_the_view_and_the_export_schema_read_one_ledger_part_list() -> None:
         "tasks",
         "_meta",
         "phases",
+        "slices",
+        "plans",
         "freezes",
         "priorities",
         "followups",

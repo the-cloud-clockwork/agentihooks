@@ -24,7 +24,7 @@ from scripts.swarm_v2.kubernetes import approved
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
 
 HIVE = "hive"
-ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "planner": "plan", "dispatcher": "dispatch"}
+ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "reviewer": "review", "planner": "plan", "dispatcher": "dispatch"}
 TTL_MS = 300000
 LAUNCH_MS = 75000
 ORDERS = "controller-launch-orders"
@@ -76,15 +76,17 @@ def loaded_hives(
     agents than the live worker records any swarm places on it. ``reservations`` reads a hive's pending admission
     count."""
     agents = [agent for slug in store.slugs() for agent in store.agents(slug)]
+    masters = {agent.execution_id for agent in agents if agent.lane == "master"}
     hives, now = registry.hives(store.redis), lease.now_ms(store)
     for hive in hives:
         counts = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
         executions = counts.get("_executions", {})
         seen = {execution for ids in executions.values() for execution in ids}
         reported = {
-            key: count for key, count in counts.items() if key != "_executions" and not key.startswith("interactive:")
+            key: max(0, count - max(counts.get(f"interactive:{key}", 0), len(set(executions.get(key, [])) & masters)))
+            for key, count in counts.items()
+            if key != "_executions" and not key.startswith("interactive:")
         }
-        masters = sum(count for key, count in counts.items() if key.startswith("interactive:"))
         spellings = {account_key(key): key for key in reported}
         pending: dict[str, int] = {}
         recorded = 0
@@ -96,10 +98,12 @@ def loaded_hives(
                     slot = spellings.get(account_key(slot), slot)
                     pending[slot] = pending.get(slot, 0) + 1
         unclaimed = {
-            slot: max(0, reported.get(slot, 0) - counts.get(f"interactive:{slot}", 0) - len(executions.get(slot, [])))
+            slot: max(
+                0, reported.get(slot, 0) - sum(execution not in masters for execution in executions.get(slot, []))
+            )
             for slot in pending
         }
-        hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
+        hive["agents"] = sum(reported.values()) + sum(
             max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
         hive["agents"] = max(hive["agents"], recorded)

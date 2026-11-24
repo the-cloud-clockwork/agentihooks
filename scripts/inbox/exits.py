@@ -7,14 +7,15 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import SimpleNamespace
 
     from scripts.inbox.store import InboxStore, Item
-    from scripts.swarm.store import RedisStore
+    from scripts.swarm.store import RedisStore, SwarmConfig
 
 BY = "swarm"
 UNKNOWN_OWNER = "the agent it was sent to is unknown, so no branch was checked"
-LANE_SEAT = re.compile(r"(eng|ci|plan)-(\d+)@.+")
-MOVING_SEAT = re.compile(r"((eng|ci|plan)-\d+|dispatcher)@.+")
+LANE_SEAT = re.compile(r"(eng|ci|plan|review)-(\d+)@.+")
+MOVING_SEAT = re.compile(r"((eng|ci|plan|review|expert)-\d+|dispatcher)@.+")
 
 
 def settle(inbox, name, seat, exit_text, worlds=None):
@@ -376,14 +377,14 @@ def _withdraw_escalations(inbox: "InboxStore", item_id: str, seat: str) -> None:
                     world.withdraw(raised, BY, f"cancelled: message {item_id} is closed, {seat} can get no successor")
 
 
-def no_successor(seat: str, config) -> str:
+def no_successor(seat: str, config: "SwarmConfig | SimpleNamespace") -> str:
     found = LANE_SEAT.fullmatch(seat)
     if not found:
         return ""
     if config.state == "stopped":
         return "the swarm stopped"
     lane = found.group(1)
-    cap = {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan}[lane]
+    cap = {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan, "review": config.max_review}[lane]
     return f"the {lane} lane cap is {cap}" if int(found.group(2)) > cap else ""
 
 

@@ -1926,7 +1926,6 @@ Hosted lane users share three lanes, the concurrency groups `hosted-lane-a`, `ho
 | Feature suite | `feature-suite.yml` | runs under its own name |
 | Gate Required status | `gate-required.yml` | every run |
 | Helm chart in kind | `helm-kind.yml` | runs under its own name |
-| Helm chart release | `chart-release.yml` | every run |
 | Hierarchy CPU proof | `hierarchy-cpu.yml` | runs under its own name |
 | Ledger server load | `ledger-load.yml` | runs under its own name |
 | Lost runner | `lost-runner.yml` | every run |

@@ -6,6 +6,9 @@
   "doc items map": [
    "running"
   ],
+  "expert seats": [
+   "running"
+  ],
   "focus unclaimed": [
    "running"
   ],
@@ -18,6 +21,9 @@
   "lab capacity": [
    "running"
   ],
+  "order waiting": [
+   "running"
+  ],
   "orphans": [
    "orphan"
   ],
@@ -27,11 +33,18 @@
   "reap": [
    "hive-roll"
   ],
+  "review pass": [
+   "running"
+  ],
   "status publish": [
    "running"
   ],
   "step starvation": [
    "running"
+  ],
+  "thin task pass": [
+   "running",
+   "thin-accepted"
   ],
   "tick master": [
    "running"

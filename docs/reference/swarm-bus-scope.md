@@ -84,7 +84,7 @@ Stream names carry the swarm id as the hex of its UTF-8 bytes, so `rig` becomes 
 | Events | `AGENTIHOOKS-<hex>-EVENTS` | `swarm.<swarm>.events.>` | durable per reactor |
 | Dead letters | `AGENTIHOOKS-<hex>-DEAD` | `swarm.<swarm>.dead.>` | durable per reader |
 | Execution stops | `AGENTIHOOKS-<hex>-STOP` | `swarm.<swarm>.stop.>` | one durable per hive, created by the hub; see [Execution stops](#execution-stops) |
-| Work queue, one per lane `eng`, `ci`, `plan` | `AGENTIHOOKS-<hex>-h-<queue-digest>` | `swarm.<swarm>.queue.<lane>.>`; offers publish to `swarm.<swarm>.queue.<lane>.work` | durable named `<lane>` |
+| Work queue, one per lane `eng`, `ci`, `review`, `plan` | `AGENTIHOOKS-<hex>-h-<queue-digest>` | `swarm.<swarm>.queue.<lane>.>`; offers publish to `swarm.<swarm>.queue.<lane>.work` | durable named `<lane>` |
 | State bucket | `AGENTIHOOKS-<hex>-h-<state-digest>` | `swarm.<swarm>.state.<bucket>.<key>`, 64 revisions kept per key | none; reads use direct message get |
 
 New stream and consumer names use letters, digits and hyphens. Queue and state resource components use
@@ -385,13 +385,17 @@ answer budget from when the hub received the request. The budget, `ANSWER_MS` in
 admission and a hive that gave up gets the same admission when it asks again for that offer. The hub logs:
 
 ```text
-hub: events admission swarm=rig task=t1 hive=one late: finished after 9120 ms, past the 8000 ms answer budget, claim kept release=3 held=1 stopped=0 snapshot=12 withdrawal=0 placement=40 cap=2 turn=0 full=1 claim=30 seat=18 execution=9 ledger=4
+hub: events admission swarm=rig task=t1 hive=one late: finished after 9120 ms, past the 8000 ms answer budget, claim kept release=3 held=1 stopped=0 row=4 rows=5 parts=2 withdrawal=1 placement=40 cap=2 turn=0 full=1 claim=10 seat=8 execution=9 ledger=4 continuation=3 seeds=6 primed=9 transfer=2
 ```
 
 `finished after` counts from receipt, queue wait included. The step timings after `claim kept` count from when the
 handler started, so their sum falls short of `finished after` by at least the time the request spent in the queue. In this
 example the request queued for 9 000 ms of its 9 120 ms. A late line with small steps therefore points at a full serve
-pool, not at a slow admission step.
+pool, not at a slow admission step. `row`, `rows` and `parts` time the admission's narrow ledger reads, which replaced
+the single `snapshot` mark of releases before pull request
+[#13245](https://github.com/the-cloud-clockwork/agentihooks/pull/13245), and `continuation`, `seeds`, `primed` and
+`transfer` time the work after the ledger write. The hives pillar lists every mark under
+[Admission timing marks](../pillars/hives.md#admission-timing-marks).
 
 `NatsBus.close` returns without waiting for the handlers still running and cancels every queued request: those never
 start and are never answered, and their hives time out.
@@ -578,7 +582,7 @@ missing hive user is accepted only in operator mode, where the values file has n
 | Symptom | Cause | Fix |
 |---|---|---|
 | `select a swarm before opening a scoped queue` | A scoped bus was asked for a queue name that is not `swarm.<swarm>.ready.<lane>` | Pass the full lane queue name or call `for_swarm(<swarm>)` first |
-| `queue '<name>' does not belong to swarm '<swarm>'` | The lane is not `eng`, `ci` or `plan`, or the name names another swarm | Use one of the three lanes of the bus swarm |
+| `queue '<name>' does not belong to swarm '<swarm>'` | The lane is not `eng`, `ci`, `review` or `plan`, or the name names another swarm | Use one of the four lanes of the bus swarm |
 | `a scoped bus cannot change its swarm` | `for_swarm` was called on a view of a different swarm | Call `for_swarm` on the root bus |
 | `permissions violation for publish to "swarm.<swarm>...."` on the member's own swarm | The signer record does not list that swarm for this member | Add it under `member_swarms`, then `agentihooks hive refresh` on the member |
 | Member gets `permissions violation` on every subject | `member_swarms` lists this member with no swarms | Add its swarms, then `agentihooks hive refresh` on the member |

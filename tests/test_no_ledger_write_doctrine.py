@@ -1,4 +1,5 @@
-"""Tests for the gate that refuses new prose teaching an agent to write to the ledger."""
+"""Tests for the gate that refuses new prose teaching an agent to write to the ledger. The one write path stays the
+ledger API route code, run in process or on the host warm writer socket that runs the same route code."""
 
 import json
 import subprocess
@@ -14,6 +15,9 @@ _ROOT = Path(__file__).resolve().parents[1]
 WRITE_LINE = 'agentihooks ledger --slug <slug> --as <name> task add <id> "<title>"\n'
 READ_LINE = "agentihooks ledger --slug {slug} get phases/{phase}.\n"
 API_LINE = 'agentihooks api --slug <slug> --as <name> task add <id> "<title>"\n'
+ORDER_LINE = 'agentihooks ledger order phases/p1 --quote "..."\n'
+ORDER_API_LINE = 'agentihooks api order phases/p1 --quote "..."\n'
+READ_ORDERS_LINE = "agentihooks ledger --slug <slug> get orders\n"
 
 
 def _tree(root: Path, files: dict[str, str]) -> Path:
@@ -70,6 +74,29 @@ def test_rewriting_to_the_api_alias_clears_the_finding(tmp_path: Path, capsys: p
     fixed = _recorded(tmp_path / "fixed", {"docs/example.md": API_LINE})
     assert gate.load(fixed) == {}
     assert _grade(base, fixed, capsys) == (0, "0 files teach a ledger write, 1 on the base allowlist, 0 errors\n")
+
+
+@pytest.mark.feature("ledger-write-doctrine-order-verb")
+@pytest.mark.parametrize(("source", "count"), [(ORDER_LINE, 1), (ORDER_API_LINE, 0), (READ_ORDERS_LINE, 0)])
+def test_an_order_through_the_ledger_command_is_a_write_line_and_through_the_api_is_not(
+    source: str, count: int
+) -> None:
+    assert gate.hits(source) == count
+
+
+@pytest.mark.feature("ledger-write-doctrine-order-verb")
+def test_a_new_line_teaching_an_order_through_the_ledger_command_is_red_and_the_api_form_is_green(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = _recorded(tmp_path / "base", {"docs/example.md": READ_LINE})
+    planted = _tree(tmp_path / "planted", {"docs/example.md": ORDER_LINE})
+    fixed = _tree(tmp_path / "fixed", {"docs/example.md": ORDER_API_LINE})
+    for head in (planted, fixed):
+        (head / gate.ALLOWLIST).write_text((base / gate.ALLOWLIST).read_text())
+    code, out = _grade(base, planted, capsys)
+    assert code == 1
+    assert "docs/example.md teaches a ledger write 1 times; the base allowlist allows 0" in out
+    assert _grade(base, fixed, capsys) == (0, "0 files teach a ledger write, 0 on the base allowlist, 0 errors\n")
 
 
 def test_files_outside_the_scope_are_not_graded(tmp_path: Path) -> None:
