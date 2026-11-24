@@ -7610,6 +7610,17 @@
       ]
     },
     {
+      "id": "plan-slice-task-plan-url",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-range-task-url",
+      "behaviour": "Swarm done on a plan task grades each slice task against its own plan link, so a plan task with no phase accepts a slice task whose plan lines match its plan, and a phase plan link still grades a slice task without one.",
+      "seam": "scripts.swarm_ledger.plan_ranges invalid_tasks, called by the ledger_tasks slice refusal when a plan task moves to done",
+      "tests": [
+        "tests/swarm_ledger/test_plan_ranges.py::test_a_plan_task_without_a_phase_grades_a_slice_task_by_its_own_plan_url",
+        "tests/swarm_ledger/test_plan_ranges.py::test_a_phase_plan_url_grades_a_slice_task_without_its_own"
+      ]
+    },
+    {
       "id": "ledger-home",
       "origin": "inventory",
       "behaviour": "The HOME page lists every ledger with its title, kind, counts, swarm state and last activity, and a closed ledger shows closed with a reopen button.",
@@ -9217,6 +9228,19 @@
         "tests/swarm_ledger/test_postgres_pool_liveness.py::test_takers_wait_for_the_first_connection_to_measure_the_server",
         "tests/swarm/test_ledger_probe.py::test_a_database_connection_closed_during_a_write_keeps_the_tick_running",
         "tests/swarm/test_time_left.py::test_a_closed_database_connection_is_a_refused_ledger_write"
+      ]
+    },
+    {
+      "id": "hive-startup-recovers-stuck-gc",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2764",
+      "behaviour": "Worker startup recovers configured existing primary checkouts with a stale garbage collection log by pruning unreachable objects older than two weeks, removing the log only after successful pruning, then running full garbage collection with cruft packs that preserve younger unreachable objects. Checkouts without a log and unconfigured repositories remain untouched.",
+      "seam": "configured repository startup loop through scripts.hive.repo_maintenance.recover",
+      "rules": ["hive-prune-needs-expiry"],
+      "tests": [
+        "tests/hive/test_repo_maintenance.py::test_startup_recovers_only_configured_existing_checkouts_with_a_gc_log",
+        "tests/hive/test_repo_maintenance.py::test_failed_pruning_keeps_the_gc_log_and_does_not_start_gc",
+        "tests/hive/test_repo_maintenance.py::test_recovery_retains_young_unreachable_objects_without_another_gc_warning"
       ]
     },
     {
@@ -11459,6 +11483,21 @@
         "tests/profiles/test_read_only_shell.py::test_an_unmatched_close_parenthesis_keeps_the_top_level_folder",
         "tests/profiles/test_read_only_shell.py::test_a_reviewer_appends_to_its_task_folder_with_a_heredoc",
         "tests/profiles/test_read_only_shell.py::test_edit_tool_payloads_keep_the_edit_path"
+      ]
+    },
+    {
+      "id": "read-only-roles-tool-writes-inside-own-folders",
+      "origin": "regression",
+      "ordered_at": "2026-11-24",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2856",
+      "behaviour": "A qa or reviewer session runs chmod, truncate, mkdir, tar, unzip and patch when every place their command names for a write is inside its scratchpad or its own swarm task folder, and refuses them when any such place is outside. chmod's mode operand and --reference value, truncate's size and reference values and mkdir's mode value are values, never targets; chmod is refused with -L or --dereference, which newer coreutils use to follow links and older chmod rejects, or with a long option that is abbreviated or not chmod's own. tar writes its -f archives in create, append, update, delete and concatenate modes, also judged under each -C folder, and on extract writes into its chained -C folders and the current folder unless a -C precedes every member, nothing for -O; a create with no archive or a remote archive is refused, and in every mode a command running, side file or name rewriting option such as --to-command, -I, -P, --remove-files or --transform, or a long option that is abbreviated or not tar's own, is refused. unzip writes into its -d folders or the current folder, writes nothing for its read flags alone or clustered, and is refused with -: or a word starting with two dashes. patch writes into its last chained -d folder or the current folder plus its output, reject and patched files named under it, writes nothing for --dry-run, and is refused with a backup prefix, --follow-symlinks or a long option that is abbreviated or not patch's own. An option missing its value leaves the target unknown, and a value glued to its option keeps a leading tilde as a folder name.",
+      "seam": "hooks.context.read_only_shell.write_reason through the chmod, truncate, mkdir, tar, unzip and patch target readers, called by profiles.package.roles._guards.no_code_edits.deny_reason for Bash payloads, run by the qa and reviewer pre-bash-no_shell_writes condition shims",
+      "tests": [
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_refuses_each_tool_writing_outside_its_folders",
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_runs_each_tool_inside_its_folders",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_reads_each_tool_destination_inside_its_folders",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_reads_each_tool_destination_outside_its_folders",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_judges_tool_destinations_from_its_scratchpad"
       ]
     },
     {

@@ -460,6 +460,38 @@ def test_slice_tasks_of_a_missing_phase_or_without_a_slice_are_invalid():
     assert plan_ranges.invalid_tasks({"phase": "gone"}, doc, ["a", "b"]) == ["a", "b"]
 
 
+SLICED = "## Build\n<!-- slice: one -->\nStep\n"
+SLICED_URL = "http://127.0.0.1:8765/artifacts/s/f1"
+
+
+def read_sliced(slug: str, file_id: str) -> bytes:
+    return {("s", "f1"): SLICED.encode()}[(slug, file_id)]
+
+
+@pytest.mark.feature("plan-slice-task-plan-url")
+def test_a_plan_task_without_a_phase_grades_a_slice_task_by_its_own_plan_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm_ledger import plan_ranges
+
+    monkeypatch.setattr(ledger_artifacts, "read", read_sliced)
+    task = {"id": "a", "plan_url": SLICED_URL, "plan_slice": "one", "plan_lines": "2-3"}
+    doc = {"phases": [], "artifacts": [{"plan": True, "file": {"id": "f1"}}], "tasks": [task]}
+    assert plan_ranges.invalid_tasks({"phase": ""}, doc, ["a"]) == []
+
+
+@pytest.mark.feature("plan-slice-task-plan-url")
+def test_a_phase_plan_url_grades_a_slice_task_without_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm_ledger import plan_ranges
+
+    monkeypatch.setattr(ledger_artifacts, "read", read_sliced)
+    tasks = [
+        {"id": "a", "plan_slice": "one", "plan_lines": "2-3"},
+        {"id": "b", "plan_url": None, "plan_slice": "one", "plan_lines": "2-3"},
+    ]
+    phase = {"id": "p1", "plan_url": SLICED_URL}
+    doc = {"phases": [phase], "artifacts": [{"plan": True, "file": {"id": "f1"}}], "tasks": tasks}
+    assert plan_ranges.invalid_tasks({"phase": "p1"}, doc, ["a", "b"]) == []
+
+
 MARKED = "## Build\n<!-- slice: one -->\n### A\n<!-- slice: two -->\n### B\n## Ship\n<!-- slice: three -->\n### C\n"
 
 
