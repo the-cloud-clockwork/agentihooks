@@ -88,9 +88,23 @@ class KubePods:
             return False
 
     def images(self, pod: str) -> Images | None:
-        """Read the pod's declared and running image; None when the pod has no container status yet, the running
-        image carries no digest, or the API server could not be reached."""
-        return None
+        """Read the pod's declared and running image over the Kubernetes API with the service account token; None on
+        a failed read, a reply that is not the expected shape, no container status yet, or a running image with no
+        digest."""
+        url = f"{self.server}/api/v1/namespaces/{self.namespace}/pods/{quote_plus(pod)}"
+        request = urllib.request.Request(url)
+        try:
+            request.add_header(AUTHORIZATION, f"Bearer {self.token.read_text().strip()}")
+            with self.opener(request, timeout=TIMEOUT_S, context=self.context) as response:
+                body = json.loads(response.read())
+        except (OSError, http.client.HTTPException, ValueError):
+            return None
+        try:
+            declared = body["spec"]["containers"][0]["image"]
+            running = body["status"]["containerStatuses"][0]["imageID"]
+        except (LookupError, TypeError):
+            return None
+        return Images(declared, running) if "@" in running else None
 
 
 def pod_images(pods: Pods) -> PodImages:

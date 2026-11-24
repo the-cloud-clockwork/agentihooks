@@ -350,9 +350,11 @@ def settings(environ: Mapping[str, str]) -> tuple[Pod, Suite, Mutation]:
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
-    """Run the worker over the adapters until SIGTERM stops it, then let its running units drain; the contract metrics
-    port serves the worker's registry until the drain ends."""
+    """Run the worker over the adapters until SIGTERM stops it, then let its running units drain; the contract
+    metrics port serves the worker's registry until the drain ends. The work root is emptied first, so a restart on
+    another image starts from an empty root as a new pod would."""
     argparse.ArgumentParser(prog="agentihooks ci-lab-worker").parse_args(argv)
+    worktrees.empty(Path(worker.environment(environ)[contract.WORK_ROOT]))
     pod, suite, graded = settings(environ)
     cpus = os.cpu_count() or 1
     service = worker.build(

@@ -978,6 +978,8 @@ def test_main_empties_the_work_root_before_it_builds_its_settings(
     assert executors.main([], environ) == 0
 
     assert not stale.exists()
+    assert (tmp_path / "work" / "runs").is_dir()
+    assert (tmp_path / "work" / "venvs").is_dir()
 
 
 @pytest.mark.feature("lab-worker-metrics")

@@ -399,12 +399,17 @@ def test_empty_removes_sealed_trees_locked_folders_files_and_symlinks_but_keeps_
     outside = tmp_path / "outside.txt"
     outside.write_text("kept")
     (folder / "link").symlink_to(outside)
+    kept_dir = tmp_path / "kept-dir"
+    kept_dir.mkdir()
+    (kept_dir / "file").write_text("kept too")
+    (folder / "dirlink").symlink_to(kept_dir)
 
     worktrees.empty(folder)
 
     assert folder.exists()
     assert list(folder.iterdir()) == []
     assert outside.read_text() == "kept"
+    assert (kept_dir / "file").read_text() == "kept too"
 
 
 @pytest.mark.feature("lab-worker-seat-keeping-restart")

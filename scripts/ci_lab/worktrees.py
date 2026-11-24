@@ -16,6 +16,7 @@ from scripts.ci_lab.remote import checkout
 __all__ = ["Lab", "Mirror", "Worktrees", "empty", "lab"]
 
 WRITE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+OWNED = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
 
 
 def _git(repo: Path, *args: str, env: Mapping[str, str] | None = None) -> None:
@@ -51,6 +52,17 @@ def lab(environ: Mapping[str, str]) -> Lab | None:
 def empty(folder: Path) -> None:
     """Remove every entry of the folder, sealed trees and folders without owner access included, leaving the folder
     itself in place; a symlink's target stays untouched, and a missing folder is not an error."""
+    if not folder.is_dir():
+        return
+    folder.chmod(folder.stat().st_mode | OWNED)
+    for entry in folder.iterdir():
+        if entry.is_symlink():
+            entry.unlink()
+        elif entry.is_dir():
+            empty(entry)
+            entry.rmdir()
+        else:
+            entry.unlink()
 
 
 def _owned(tree: Path) -> list[Path]:

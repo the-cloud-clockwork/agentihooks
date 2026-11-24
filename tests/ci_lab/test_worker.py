@@ -680,7 +680,9 @@ def test_a_lease_call_the_scheduler_answers_426_stops_the_worker_without_raising
 
     assert stale.stopping.is_set()
     assert paced.waits == []
-    assert "lease call failed" not in capsys.readouterr().err
+    logged = capsys.readouterr().err
+    assert "lease call failed" not in logged
+    assert "ci-lab worker: the lab wants another image, restarting\n" in logged
 
 
 @pytest.mark.feature("lab-worker-seat-keeping-restart")
