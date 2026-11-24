@@ -6408,6 +6408,27 @@
       ]
     },
     {
+      "id": "forge-change-link-parse",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gl-change-link",
+      "behaviour": "A GitHub pull link or a GitLab merge request link parses in one place into its forge kind, host, project path with nested groups kept whole, number, project web link and clone remote; any other link is refused, and one shared pattern accepts exactly the links the parser accepts.",
+      "seam": "scripts.forge.remote.change_link returns a ChangeLink or raises ValueError; scripts.forge.remote.CHANGE_LINK is the shared pattern for callers that only test a link",
+      "tests": [
+        "tests/forge/test_remote.py::test_the_remote_parser_reads_a_project_web_link_and_its_clone_remote",
+        "tests/forge/test_remote.py::test_a_github_pull_link_parses_into_its_forge_project_and_number",
+        "tests/forge/test_remote.py::test_a_parsed_change_link_is_frozen",
+        "tests/forge/test_remote.py::test_a_github_pull_link_names_its_project_web_link_and_clone_remote",
+        "tests/forge/test_remote.py::test_a_malformed_or_foreign_github_link_is_refused",
+        "tests/forge/test_remote.py::test_a_gitlab_merge_request_link_keeps_its_nested_groups_whole",
+        "tests/forge/test_remote.py::test_a_malformed_or_unlabelled_gitlab_link_is_refused",
+        "tests/forge/test_remote.py::test_the_web_link_and_clone_remote_read_back_to_the_same_project",
+        "tests/forge/test_remote.py::test_the_shared_pattern_accepts_exactly_the_links_the_parser_accepts",
+        "tests/forge/test_remote.py::test_hostile_variants_of_every_accepted_link_are_refused_by_pattern_and_parser",
+        "tests/forge/test_remote.py::test_the_shared_pattern_finds_change_links_in_text_as_plain_strings",
+        "tests/forge/test_remote.py::test_the_parser_and_shared_pattern_are_public_names_of_the_remote_module"
+      ]
+    },
+    {
       "id": "ledger-event-relay",
       "origin": "inventory",
       "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order with only its catalogued fields, a crash between publish and mark never duplicates an event, and a row the bus refuses as too large never holds back the rows after it.",
@@ -10710,6 +10731,32 @@
       ]
     },
     {
+      "id": "review-queue-gate",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-queue-gate",
+      "behaviour": "Every first queue entry checks an independent review of the exact observed head that the task claimant has read. The gate logs by default and refuses only with the swarm review enforce mode. Master and automatic callers keep the claimant as author.",
+      "seam": "scripts.review.gate through swarm cmd_merge, ready first admission and recovery, and status gate modes",
+      "rules": ["merge-queue-admit-skips-review"],
+      "tests": [
+        "tests/review/test_queue_gate.py::test_review_defaults_to_log_only_and_enforces_only_from_swarm_configuration",
+        "tests/review/test_queue_gate.py::test_refusal_requires_independence_and_the_actual_authors_read",
+        "tests/review/test_queue_gate.py::test_refusal_names_missing_authors_reviews_and_each_unread_finding",
+        "tests/review/test_queue_gate.py::test_admission_reads_only_the_observed_head_and_respects_the_swarm_mode",
+        "tests/review/test_queue_gate.py::test_a_review_of_an_older_head_cannot_admit_a_new_head",
+        "tests/review/test_queue_protection.py::test_intent_refusal_stops_freshness_and_queue_mutation",
+        "tests/review/test_queue_protection.py::test_nonqueue_operations_do_not_run_admission",
+        "tests/review/test_gate_boundaries.py::test_queue_admission_preserves_intent_review_and_freshness_order",
+        "tests/review/test_gate_boundaries.py::test_a_master_without_one_target_never_substitutes_itself_for_the_author",
+        "tests/review/test_queue_callers.py::test_ready_first_entries_apply_the_review_gate_to_the_actual_head_and_claimant",
+        "tests/review/test_queue_callers.py::test_each_command_caller_checks_the_task_authors_independent_read",
+        "tests/review/test_queue_gate.py::test_refusals_quote_twelve_head_characters_and_the_exact_next_step",
+        "tests/review/test_queue_gate.py::test_admission_reads_the_callers_swarm_mode_and_logs_the_refusal_it_enforces",
+        "tests/review/test_gate_boundaries.py::test_the_author_is_the_claimant_of_the_routed_task_or_the_only_targeting_task",
+        "tests/review/test_queue_callers.py::test_the_merge_watcher_admits_as_itself_for_the_task_claimant",
+        "tests/gates/test_mode_names.py::test_status_uses_new_names_in_modes_and_decisions"
+      ]
+    },
+    {
       "id": "merge-queue-task-pulls",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-merge-queue-task-prs",
@@ -12462,7 +12509,7 @@
       "id": "lab-scheduler-mutation-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutation-expansion",
-      "behaviour": "The CI lab scheduler expands the mutation units of a promotion or backfill head beside its test units, so a surviving mutant can turn a lab grade red. In a temporary checkout of the head it finds the lines the head changes against its base in measured Python files, builds one mutant unit per changed function under the mutation job, keyed with the fingerprint of every dependency manifest test that ran the function or a function nested in it, and one stats unit per test file holding such a test, present at the head, under the mutation-stats job. It removes the checkout after expansion. A head that changes no measured Python line gets neither job, and a hotfix, pull request or merge group head never does, since its frame and Gate Required rules hold no mutation job.",
+      "behaviour": "The CI lab scheduler expands the mutation units of a promotion or backfill head beside its test units, so a surviving mutant can turn a lab grade red. In a temporary checkout of the head it finds the lines the head changes against its base in measured Python files, builds one mutant unit per changed function under the mutation job, keyed with the fingerprint of every dependency manifest test that ran the function or a function nested in it and the hash of each test module the head changes, and one stats unit per test file its mutant units trace under the mutation-stats job: each file present at the head that holds such a test, each test module the manifest lists no test of and each test module the head changes. It removes the checkout after expansion. A head that changes no measured Python line gets neither job, and a hotfix, pull request or merge group head never does, since its frame and Gate Required rules hold no mutation job.",
       "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture and scripts.ci_lab.expand_mutation.covering over a fixture repository",
       "tests": [
         "tests/ci_lab/test_expand_mutation.py::test_covering_maps_each_function_of_the_changed_files_to_the_tests_that_ran_it_or_a_function_nested_in_it",
@@ -12489,7 +12536,7 @@
       "id": "lab-mutant-unit-unlisted-tests",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2658",
-      "behaviour": "Every CI lab mutant unit key also carries the hash of each test module of the head that holds no dependency manifest test, of each conftest pytest loads for such a module and of each test tree module either imports, because the mutation executor runs every test module of the head against the mutants while the stored manifest only names the tests of the base. A head that adds a test module changes the key of each of its mutant units, and an edit to that module changes it again, so no cached mutant verdict graded without the new tests is reused.",
+      "behaviour": "Every CI lab mutant unit key also carries the hash of each test module of the head that holds no dependency manifest test, of each conftest pytest loads for such a module and of each test tree module either imports, because the mutation executor runs each such module against the mutants, named on the mutant unit's manifest, while the stored manifest only names the tests of the base. A head that adds a test module changes the key of each of its mutant units, and an edit to that module changes it again, so no cached mutant verdict graded without the new tests is reused.",
       "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture, scripts.ci_lab.expand_tests.unlisted_test_hashes over a tree and scripts.ci_lab.expand_mutation.mutant_units over a fixture repository",
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_promotion_head_keys_a_mutant_unit_by_the_test_modules_the_manifest_lacks",
@@ -13030,7 +13077,7 @@
       "id": "lab-worker-executors",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2533",
-      "behaviour": "The CI lab queue stores the base and grader revision of every job a grade enqueues and the lease reply carries both; agentihooks ci-lab-worker builds the worker from the worker contract environment and runs each leased unit through the adapter of its kind: a static unit runs the gate it names from the grader tree's workflow over the head with the base and grader trees and inputs.base, a test unit runs its batch on the venv of the head's lockfile digest with the manifest and flake ledger, and a stats or mutant unit runs the mutation runner in the sandbox from a private trampolined tree of the head with the stats cache, kill memory, budget, cap and the tests the tree's stats records show reaching the mutant's function; each adapter answers a JSON report with the unit's seconds and releases every tree it cut, and SIGTERM stops the worker.",
+      "behaviour": "The CI lab queue stores the base and grader revision of every job a grade enqueues and the lease reply carries both; agentihooks ci-lab-worker builds the worker from the worker contract environment and runs each leased unit through the adapter of its kind: a static unit runs the gate it names from the grader tree's workflow over the head with the base and grader trees and inputs.base, a test unit runs its batch on the venv of the head's lockfile digest with the manifest and flake ledger, and a stats or mutant unit runs the mutation runner in the sandbox from a private tree of the head that holds behind trampolines the functions the head changes against the lease's base, with the stats cache, kill memory, budget, cap and the tests the stats records of the test files the mutant unit's manifest names show reaching the mutant's function; each adapter answers a JSON report with the unit's seconds and releases every tree it cut, and SIGTERM stops the worker.",
       "seam": "scripts.ci_lab.queue Queue.enqueue and job, scripts.ci_lab.leases Leases.lease, scripts.ci_lab.lease_api POST /lease, scripts.ci_lab.worker Client.lease, scripts.ci_lab.executors static, tests, mutation, executors, settings and main, and scripts.ci_lab.contract worker",
       "tests": [
         "tests/ci_lab/test_queue.py::test_enqueue_stores_the_base_and_grader_revision_each_job_reads",
@@ -13120,6 +13167,47 @@
         "tests/test_ci_mutation_selection.py::test_given_patterns_keep_the_lines_mutmut_config_patterns_keep_from_mutation",
         "tests/test_ci_mutation_selection.py::test_a_line_a_given_pattern_matches_gets_no_mutant",
         "tests/test_ci_mutation_selection.py::test_given_patterns_load_no_mutmut_config"
+      ]
+    },
+    {
+      "id": "lab-mutation-units-work-on-the-change",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs-mutation",
+      "behaviour": "A CI lab mutation unit works on the change it grades. In its private tree the worker puts behind trampolines only the functions its head changes against the base on its lease, taken from the one selection the scheduler names mutant units from, and leaves every other file as it stands, so a unit's memory and time follow the size of the change and not of the repository. The scheduler names on every mutant unit the test files it traces: the files of the dependency manifest tests that ran a changed function, each test module the manifest lists no test of and each test module the head changes against its base and still holds, with one stats unit per file and none for a head that changes no function. The hash of each changed test module enters every mutant key of the head, so an edited test module rekeys the units that trace it. The lease carries that list and the worker's stats request names only those files. A mutant unit with no list, or with a member its tree holds behind no trampoline, raises before the runner starts, and the base is fetched into the pod's store with the head.",
+      "seam": "scripts.ci_lab.expand_mutation.changed_functions and changed_tests, scripts.ci_lab.run_mutation.trampoline, scripts.ci_lab.expand_tests.unlisted_modules, scripts.ci_lab.executors.mutation over a git fixture tree with a base and a head, scripts.ci_lab.worktrees.Worktrees.own, scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture and scripts.ci_lab.scheduler.stored_manifest",
+      "rules": [
+        "lab-trampolines-every-source-file"
+      ],
+      "tests": [
+        "tests/ci_lab/test_expand_mutation.py::test_changed_functions_holds_the_graded_mutations_of_each_function_the_changed_lines_meet",
+        "tests/ci_lab/test_expand_mutation.py::test_changed_tests_lists_the_test_modules_the_head_changes_and_still_holds",
+        "tests/ci_lab/test_run_mutation.py::test_trampoline_rewrites_only_the_functions_the_changed_lines_meet",
+        "tests/ci_lab/test_run_mutation.py::test_trampoline_leaves_a_file_no_function_of_which_meets_the_changed_lines_as_it_was",
+        "tests/ci_lab/test_run_mutation.py::test_trampoline_keeps_the_wrappers_of_a_decorated_function_on_its_trampoline_alone",
+        "tests/ci_lab/test_expand_tests.py::test_unlisted_modules_lists_the_test_modules_that_hold_no_manifest_test",
+        "tests/ci_lab/test_executors.py::test_mutation_refuses_a_mutant_unit_with_no_manifest_or_a_member_its_tree_holds_behind_no_trampoline",
+        "tests/ci_lab/test_executors.py::test_the_worker_trampolines_the_mutants_the_scheduler_names_for_a_change",
+        "tests/ci_lab/test_worktrees.py::test_an_own_copy_holds_the_base_its_unit_compares_it_against",
+        "tests/ci_lab/test_scheduler_mutation.py::test_a_promotion_head_names_on_its_mutant_units_the_test_files_they_trace",
+        "tests/ci_lab/test_scheduler_mutation.py::test_every_part_of_a_split_mutant_unit_names_the_test_files_it_traces",
+        "tests/ci_lab/test_scheduler_mutation.py::test_a_test_module_the_head_changes_rekeys_the_mutant_units_that_trace_it",
+        "tests/ci_lab/test_scheduler_mutation.py::test_a_promotion_head_that_changes_no_function_plans_no_stats_unit_for_its_test_modules",
+        "tests/ci_lab/test_manifest_records.py::test_a_lease_reads_the_stored_manifest_of_a_mutant_unit"
+      ]
+    },
+    {
+      "id": "lab-stats-of-a-test-file-with-no-test",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-plant-proofs-mutation",
+      "behaviour": "A CI lab stats collection over test files that collect no test ends as a record with status zero and no test, so a traced test module that holds no test fails neither its stats unit nor the mutant units that trace it beside a file whose record is stored. Only pytest's no tests collected exit code is read that way: a failed, interrupted, internally broken or misused session keeps its code and still fails the collection.",
+      "seam": "scripts.ci_lab.run_mutation.collected_status for each pytest exit code, scripts.ci_lab.run_mutation.collect for a session that collects no test, and the lab runner run as its own process in a corpus tree for a stats request over a test file that holds no test, alone on an empty cache and beside a test file whose record is stored",
+      "rules": [
+        "lab-stats-record-carries-pytests-exit-code"
+      ],
+      "tests": [
+        "tests/ci_lab/test_run_mutation.py::test_only_the_no_tests_collected_code_reads_as_a_passing_stats_status",
+        "tests/ci_lab/test_run_mutation.py::test_a_stats_collection_that_collects_no_test_is_an_empty_record",
+        "tests/ci_lab/test_run_mutation.py::test_the_runner_answers_a_stats_request_over_a_test_file_that_holds_no_test"
       ]
     },
     {
@@ -13908,6 +13996,17 @@
         "tests/ci_lab/test_run_static.py::test_the_step_reads_each_tree_where_the_workflow_puts_it",
         "tests/ci_lab/test_run_static.py::test_a_step_keeps_the_ruff_cache_in_its_run_folder_outside_every_tree",
         "tests/ci_lab/test_run_static.py::test_ruff_passes_on_a_head_tree_that_refuses_writes"
+      ]
+    },
+    {
+      "id": "chart-grader-sealed-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "The chart pod template grader grades a head tree whatever its permission bits: the bumped copy of a chart read from a read only tree, as the lab worker seals a leased head, carries the probe version in a Chart.yaml the grader can rewrite, the source chart stays unchanged, and the grader renders both and removes its scratch copy.",
+      "seam": "tests/ci_charts/chart_pod_templates.py bumped_copy and main over a tree whose files and folders carry no write bit",
+      "tests": [
+        "tests/test_ci_charts_grader.py::test_the_bumped_copy_of_a_read_only_chart_carries_the_probe_version",
+        "tests/test_ci_charts_grader.py::test_the_pod_template_grader_renders_a_read_only_tree_and_leaves_no_scratch_behind"
       ]
     },
     {
@@ -15268,6 +15367,20 @@
         "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_on_a_line_after_an_opener",
         "tests/context/test_strip_heredoc_delimiter_line.py::test_a_guarded_command_inside_the_body_stays_data",
         "tests/context/test_strip_heredoc_delimiter_line.py::test_a_body_closed_with_its_command_substitution_stays_data"
+      ]
+    },
+    {
+      "id": "guard-stripping-reads-heredocs-from-the-bash-parse",
+      "origin": "regression",
+      "ordered_at": "2026-11-24",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2809",
+      "behaviour": "The shared command stripping finds heredocs in the tree-sitter bash parse, so a << shift outside double parentheses never opens one and branch guard refuses a push on the line after it. The text around a heredoc stays exact. A heredoc is cut only when its terminator holds the delimiter word, so a double quoted delimiter keeps its body as before, and a command the parse reads with an error keeps every heredoc.",
+      "seam": "hooks.context._strip.strip_non_command_content, observed through hooks.context.branch_guard.check_branch_guard on Bash payloads",
+      "tests": [
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_the_line_after_any_arithmetic_shift",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_after_any_arithmetic_shift",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_exact_text_around_heredocs",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_a_heredoc_the_parse_cannot_close"
       ]
     },
     {

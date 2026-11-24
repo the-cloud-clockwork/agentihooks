@@ -135,6 +135,7 @@ FAIL_FAST_RESULTS = frozenset({"success", "failure", "cancelled"})
 MUTATION_JOBS = frozenset({"mutation", "mutation-plan", "mutation-stats"})
 STATS_JOB = "mutation-stats"
 MUTANT_JOB = "mutation"
+MANIFEST_KINDS = (expand_tests.KIND, "mutant")
 ALWAYS_SKIPPABLE = frozenset({"unit-lost", "unit-rerun", "queue-baseline", "unit-selected"})
 PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
 HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent))
@@ -1498,9 +1499,10 @@ def keep_manifests(objects: Objects, units: Iterable[Unit]) -> int:
 
 
 def stored_manifest(objects: Objects, unit: Unit) -> str:
-    """Return the batch manifest a test unit's lease carries, read from its unit key's place in the object store;
-    empty for another kind of unit or a test unit with none stored."""
-    if unit.kind != expand_tests.KIND:
+    """Return the manifest a test or mutant unit's lease carries, a test unit's batch manifest or a mutant unit's
+    traced test files, read from its unit key's place in the object store; empty for another kind of unit or a unit
+    with none stored."""
+    if unit.kind not in MANIFEST_KINDS:
         return ""
     path = unit_path(unit.kind, unit.key, "manifest")
     if path not in objects.keys(str(PurePosixPath(path).parent) + "/"):
@@ -1718,8 +1720,11 @@ class MirrorExpander:
         self, mirror: Mirror, request: GradeRequest, manifest: dict[str, Any], contents: Mapping[str, bytes]
     ) -> dict[str, list[Unit]]:
         """Return one mutant unit per function the head changes against its base and one stats unit per test file
-        present at the head that holds a test running such a function, built in a temporary checkout of the head;
-        none when the head changes no measured Python line."""
+        its mutant units trace, built in a temporary checkout of the head: the files present at the head that hold a
+        manifest test running such a function, the test modules the manifest lists no test of and the test modules
+        the head changes against its base. Every mutant unit carries those files as its manifest, a JSON list, and
+        the hash of each such changed test module enters its key with the unlisted test hashes; none when the head
+        changes no function of a measured Python file."""
         from scripts.ci_lab import executors, expand_mutation
 
         with self._checkout(mirror, request.head) as root:
@@ -1727,18 +1732,21 @@ class MirrorExpander:
             if not changes:
                 return {}
             covering = expand_mutation.covering(root, manifest, expand_tests.fingerprints(manifest, contents), changes)
-            mutants = expand_mutation.mutant_units(
-                root,
-                changes,
-                covering,
-                expand_tests.unlisted_test_hashes(manifest, contents),
-                timeout=executors.UNIT_TIMEOUT_S,
-            )
+            changed = expand_mutation.changed_tests(root, request.base, request.head)
+            keyed = expand_tests.unlisted_test_hashes(manifest, contents)
+            keyed.update({path: expand_mutation.file_digest(root / path) for path in changed})
+            mutants = expand_mutation.mutant_units(root, changes, covering, keyed, timeout=executors.UNIT_TIMEOUT_S)
+            if not mutants:
+                return {}
             owners = {executors.function_of(unit.members[0]) for unit in mutants}
             tests = {test.partition("::")[0] for name in owners for test in covering.get(name, {})}
+            tests.update(expand_tests.unlisted_modules(manifest, contents))
+            tests.update(changed)
             files = sorted(path for path in tests if (root / path).is_file())
             stats = expand_mutation.stats_units(root, files, executors.OPTIONS)
-        return {job: list(units) for job, units in ((STATS_JOB, stats), (MUTANT_JOB, mutants)) if units}
+        traced = json.dumps(files)
+        named = [replace(unit, manifest=traced) for unit in mutants]
+        return {job: list(units) for job, units in ((STATS_JOB, stats), (MUTANT_JOB, named)) if units}
 
     @contextmanager
     def _checkout(self, mirror: Mirror, sha: str) -> Generator[Path]:
