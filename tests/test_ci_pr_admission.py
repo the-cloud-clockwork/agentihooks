@@ -102,14 +102,14 @@ def test_selection_installs_the_pinned_ruff_without_a_matching_runner_copy(
     jobs: dict[str, Any], tmp_path: Path, installed: str
 ) -> None:
     code, calls, _ = _install_ruff(jobs, tmp_path, installed)
-    assert (code, calls) == (0, [f"-m pip install ruff=={RUFF_VERSION}"])
+    assert (code, calls) == (0, [f"-m pip install --constraint .github/ci-tools/lint-tools.lock ruff=={RUFF_VERSION}"])
 
 
 def test_selection_fails_when_its_ruff_differs_from_the_pinned_lint_version(
     jobs: dict[str, Any], tmp_path: Path
 ) -> None:
     code, calls, _ = _install_ruff(jobs, tmp_path, "", pip_gives=OTHER_RUFF)
-    assert (code, calls) == (1, [f"-m pip install ruff=={RUFF_VERSION}"])
+    assert (code, calls) == (1, [f"-m pip install --constraint .github/ci-tools/lint-tools.lock ruff=={RUFF_VERSION}"])
 
 
 def test_the_lock_the_runner_image_smoke_reads_pins_the_lint_ruff() -> None:

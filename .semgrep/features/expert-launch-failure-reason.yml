@@ -1,0 +1,15 @@
+rules:
+  - id: feature-expert-launch-failure-reason
+    languages: [python]
+    severity: ERROR
+    message: >-
+      An expert launch that fails keeps its reason: the expert seats pass never marks a transfer failed without
+      the reason of the failure, because the fixed words say nothing once the tick has dropped the lines the pass
+      returned.
+    pattern-either:
+      - pattern: $SEAT.transfers.failed($STORE, $SLUG, $RECORD)
+      - pattern: transfers.failed($STORE, $SLUG, $RECORD)
+    paths:
+      include:
+        - /scripts/swarm/expert_seat.py
+        - '*.test.py'

@@ -148,7 +148,7 @@ def render_released(app_version: str, *settings: str) -> list[dict]:
     """Render a copy of the chart whose appVersion is the one the chart release package stamps."""
     with tempfile.TemporaryDirectory() as scratch:
         copy = Path(scratch) / CHART.name
-        shutil.copytree(CHART, copy)
+        shutil.copytree(CHART, copy, copy_function=shutil.copyfile)
         meta = yaml.safe_load((copy / "Chart.yaml").read_text())
         meta["appVersion"] = app_version
         (copy / "Chart.yaml").write_text(yaml.safe_dump(meta, sort_keys=False))

@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.doctor import loop, priming
@@ -109,6 +111,41 @@ def test_claim_gate_still_holds_a_frozen_or_watched_task():
     assert freeze.claim_gate(row, frozen_doc, hierarchy.project(frozen_doc)[0], "")
     watched_doc = {**doc(tasks=[row]), freeze.WATCHED: ["the focus elsewhere"]}
     assert freeze.claim_gate(row, watched_doc, hierarchy.project(watched_doc)[0], "")
+
+
+@pytest.mark.parametrize("target", ["tasks/t2", "phases/p1", "lane:eng"])
+@pytest.mark.feature("swarm-focus-plan-work")
+def test_a_plan_task_of_a_phase_holding_focused_work_passes_the_focus(target: str) -> None:
+    plan = task("plan-p1", lane="plan", kind="plan")
+    assert held(plan, record("tasks/t9", "focus"), tasks=[ELSEWHERE])
+    assert not held(plan, record(target, "focus"), tasks=[task("t2"), ELSEWHERE])
+
+
+@pytest.mark.parametrize("target", ["tasks/t3", "tasks/t2"])
+@pytest.mark.feature("swarm-focus-plan-work")
+def test_an_enhancement_task_passes_the_focus_when_its_target_is_admitted(target: str) -> None:
+    work = [task("t2", phase="p2", depends_on=["t3"]), task("t3")]
+    enhancement = task("enhance-t3", lane="plan", kind="plan", enhances="t3")
+    assert not held(enhancement, record(target, "focus"), tasks=work)
+
+
+@pytest.mark.feature("swarm-focus-plan-work")
+def test_a_focus_still_holds_the_work_beside_the_plan_work_it_admits() -> None:
+    focus, focused = record("tasks/t2", "focus"), task("t2")
+    plan = task("plan-p1", lane="plan", kind="plan", depends_on=["t9"])
+    assert held(task("t4"), focus, tasks=[focused])
+    assert held(task("t7", kind="plan"), focus, tasks=[focused])
+    assert held(task("plan-p2", lane="plan", kind="plan", phase="p2"), focus, tasks=[focused])
+    assert held(
+        task("enhance-t5", lane="plan", phase="p2", enhances="t5"), focus, tasks=[focused, task("t5", phase="p2")]
+    )
+    assert held(ELSEWHERE, focus, tasks=[focused, plan])
+    phaseless = {"id": "plan-x", "lane": "plan", "state": "open"}
+    assert held(phaseless, record("tasks/t6", "focus"), tasks=[{"id": "t6", "lane": "eng", "state": "open"}])
+    frozen = doc(focus, record("tasks/plan-p1"), tasks=[focused, plan])
+    assert freeze.admitted(frozen, hierarchy.project(frozen)[0]) == {"t2"}
+    stuck = doc(focus, record("tasks/t9"), tasks=[focused, plan, ELSEWHERE])
+    assert freeze.admitted(stuck, hierarchy.project(stuck)[0]) == {"t2"}
 
 
 def test_a_cycle_in_the_parent_links_ends_the_walk():
@@ -397,3 +434,30 @@ def test_held_accepts_a_precomputed_admitted_queue_and_skips_recomputing_it(monk
     without_queue = freeze.held(row, found, graph, "")
     assert calls == [1]
     assert with_queue == without_queue is True
+
+
+@pytest.mark.feature("ready-ordered-offer-first")
+def test_waits_names_what_each_task_of_the_ledger_waits_on() -> None:
+    phases: list[dict[str, Any]] = [{"id": "p1"}, {"id": "p2", "depends_on": ["p1"]}]
+    rows: list[dict[str, Any]] = [task("t1"), task("t2", phase="p2", depends_on=["t9"], parked_on=["t8"])]
+    waits_on = freeze.waits({"phases": phases, "tasks": rows})
+    assert [waits_on(row) for row in rows] == [[], ["t9", "t8", "t1"]]
+    assert freeze.waits({})(rows[1]) == ["t9", "t8"]
+
+
+@pytest.mark.feature("ready-ordered-offer-first")
+def test_reached_walks_from_every_seed_along_the_links_and_stops_at_cold_work() -> None:
+    rows: dict[str, dict[str, Any]] = {
+        "a": task("a", depends_on=["b"]),
+        "b": task("b", depends_on=["c", "a"]),
+        "c": task("c"),
+        "d": task("d", depends_on=["c"]),
+    }
+
+    def links(row: dict[str, Any]) -> list[str]:
+        return row.get("depends_on") or []
+
+    assert freeze.reached(["a"], rows, set(), links) == {"a", "b", "c"}
+    assert freeze.reached(["a", "d"], rows, {"b"}, links) == {"a", "d", "c"}
+    assert freeze.reached([], rows, set(), links) == set()
+    assert freeze.reached(["gone"], rows, set(), links) == {"gone"}

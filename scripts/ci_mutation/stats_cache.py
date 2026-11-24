@@ -4,11 +4,8 @@ import functools
 import hashlib
 import json
 import subprocess
-import sys
-import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from importlib import metadata
 from pathlib import Path
 
 from scripts.ci_mutation.scope import imported_names, module_name, selected_name, selects, test_file
@@ -17,7 +14,9 @@ SCHEMA = 4
 CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
 KEY_FIELDS = ("path", "tests")
 DYNAMIC_IMPORTS = ("import_module", "__import__", "spec_from_file_location", "module_from_spec")
-CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", "uv.lock", ".coveragerc"}
+LOCKFILE = ".github/test-requirements.lock"
+EXCLUDES = ".github/test-excludes.txt"
+CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", LOCKFILE, ".coveragerc", EXCLUDES}
 # CI rewrites the durations from dev each run; they only order and split tests, and records keep their own durations.
 UNKEYED = {".test_durations"}
 TRACKED = ("git", "ls-files", "-z")
@@ -42,6 +41,11 @@ def plugin_names(nodes: list[ast.AST]) -> set[str]:
         for part in ast.walk(node.value)
         if isinstance(part, ast.Constant) and isinstance(part.value, str)
     }
+
+
+@functools.cache
+def file_name(path: str) -> str:
+    return Path(path).name
 
 
 def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str, set[str]]) -> set[str]:
@@ -92,10 +96,15 @@ def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str,
             candidates = {
                 path
                 for path in candidates
-                if fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(Path(path).name, pattern)
+                if fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(file_name(path), pattern)
             }
         inputs.update(candidates)
     return inputs
+
+
+@functools.cache
+def conftest_candidates(start: str) -> tuple[str, ...]:
+    return tuple(str(parent / "conftest.py") for parent in Path(start).parents)
 
 
 def test_inputs(
@@ -111,10 +120,7 @@ def test_inputs(
     starts = [path] if isinstance(path, str) else path
     known = set(modules.values())
     pending = set(starts) | {
-        str(parent / "conftest.py")
-        for start in starts
-        for parent in Path(start).parents
-        if str(parent / "conftest.py") in known
+        conftest for start in starts for conftest in conftest_candidates(start) if conftest in known
     }
     inputs = {}
     while pending:
@@ -182,16 +188,10 @@ def current_input(root: Path, changes: dict, digests: dict[str, str | None], nam
     return [digests[name], changes.get(name)]
 
 
-def distribution_versions(root: Path) -> dict[str, str]:
-    config = root / "pyproject.toml"
-    own = tomllib.loads(config.read_text()).get("project", {}).get("name") if config.is_file() else None
-    # The project's own dev and local version segments change with every commit; its files already key the stats.
-    return {
-        distribution.metadata["Name"]: distribution.version.partition("+")[0].partition(".dev")[0]
-        if distribution.metadata["Name"] == own
-        else distribution.version
-        for distribution in metadata.distributions()
-    }
+def runtime_digest(root: Path) -> str | None:
+    """Return the sha256 of root's dependency lockfile, the runtime a stats record is keyed on, or None without one."""
+    lockfile = root / LOCKFILE
+    return hashlib.sha256(lockfile.read_bytes()).hexdigest() if lockfile.is_file() else None
 
 
 def loaded_inputs(
@@ -352,8 +352,7 @@ def collect_cached_stats(
         for path in tracked
         if path and (path in CONFIGURATION or path.startswith("scripts/ci_mutation/")) and (root / path).is_file()
     }
-    versions = distribution_versions(root)
-    context = dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, [sys.version, sys.platform, versions])))
+    context = dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, runtime_digest(root))))
     context["inventory"] = sorted(filter(None, tracked))
     modules = {module_name(Path(path)): path for path in tracked if Path(path).suffix == ".py"}
     folder.mkdir(parents=True, exist_ok=True)

@@ -867,6 +867,11 @@ class TestLabRemote(WtBase):
         labs = (
             "http://lab.invalid/the-cloud-clockwork/origin.git",
             "git@lab.invalid:THE-CLOUD-CLOCKWORK/origin.git",
+            "SSH://git@lab.invalid/The-Cloud-Clockwork/origin.git",
+            "https://lab.invalid/group//The-Cloud-Clockwork///origin.git/",
+            "/mirror/other-owner/origin.git",
+            "file:///mirror/other-owner/origin.git",
+            f"{self.LAB}/",
             self.LAB,
         )
         for lab in labs:
@@ -876,6 +881,20 @@ class TestLabRemote(WtBase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn(f"lab\t{lab} (push)", self.remotes(Path(result.stdout.strip())))
                 self.assertEqual(self.config(f"credential.{lab}.helper"), checkout.HELPER)
+
+    @pytest.mark.feature("wt-lab-remote-owner")
+    def test_new_and_tmp_add_no_lab_remote_for_an_ownerless_or_different_origin_owner(self) -> None:
+        lab = "https://lab.invalid/the-cloud-clockwork/origin.git"
+        self.env["AGENTIHOOKS_LAB_REMOTE"] = lab
+        for index, origin in enumerate((str(self.origin), "https://github.com/another-owner/origin.git")):
+            if index:
+                self.own(origin)
+            for command in ("new", "tmp"):
+                with self.subTest(origin=origin, command=command):
+                    result = self.run_wt(command, f"owner-mismatch-{index}-{command}", "--repo", str(self.primary))
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertNotIn("lab\t", self.remotes(Path(result.stdout.strip())))
+                    self.assertEqual(self.config(f"credential.{lab}.helper"), "")
 
 
 class FromRef(WtBase):

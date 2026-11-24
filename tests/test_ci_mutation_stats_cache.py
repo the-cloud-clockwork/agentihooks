@@ -160,7 +160,10 @@ def test_failed_collection_never_populates_reusable_stats(tmp_path):
     assert list(cache.glob("*.json")) == []
 
 
-def test_collection_parts_reuse_stats_and_keep_the_new_head_identity(tmp_path, monkeypatch):
+@pytest.mark.feature("mutation-stats-flake-ledger")
+def test_collection_parts_reuse_stats_and_keep_the_new_head_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import json
     from types import SimpleNamespace
 
@@ -194,8 +197,11 @@ def test_collection_parts_reuse_stats_and_keep_the_new_head_identity(tmp_path, m
         "cpu": 2,
     }
 
-    def collect(engine, test_runner, buckets, work):
+    flake = '{"test":"test_sample.py::test_sample","outcome":"flaky","errors":["first attempt fails"]}\n'
+
+    def collect(engine: object, test_runner: object, buckets: list[list[str]], work: Path) -> list[dict]:
         calls.append(buckets)
+        (work / "stats-0.flakes.jsonl").write_text(flake)
         return [result]
 
     monkeypatch.setattr("scripts.ci_mutation.selection.run_stats_buckets", collect)
@@ -211,6 +217,10 @@ def test_collection_parts_reuse_stats_and_keep_the_new_head_identity(tmp_path, m
                 (str(output), head, "0", "1"),
             )
         assert json.loads(output.read_text())["key"] == head
+        assert (root / "flakes-0.jsonl").read_text() == (flake if head == "old" else "")
+        records = list((tmp_path / "cache").glob("*.json"))
+        assert records
+        assert all("first attempt fails" not in path.read_text() for path in records)
     assert calls == [[["test_sample.py"]]]
 
 
@@ -223,22 +233,24 @@ def test_collection_parts_reuse_stats_and_keep_the_new_head_identity(tmp_path, m
         "imported_fixture",
         "imported_fixture_through_helper",
         "options",
-        "runtime",
-        "dependency",
-        "package_version",
+        "lockfile",
+        "excludes",
     ],
 )
-def test_incompatible_source_fixture_and_runtime_stats_are_recollected(tmp_path, monkeypatch, changed):
-    import sys
-    from importlib import metadata
-    from types import SimpleNamespace
-
-    from scripts.ci_mutation.stats_cache import collect_cached_stats
+def test_incompatible_source_fixture_and_runtime_stats_are_recollected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str
+) -> None:
+    from scripts.ci_mutation.stats_cache import LOCKFILE, collect_cached_stats
 
     root = tmp_path / "repo"
     root.mkdir()
     (root / "scripts").mkdir()
     (root / "tests").mkdir()
+    lockfile = root / LOCKFILE
+    lockfile.parent.mkdir()
+    lockfile.write_text("pytest==8.3.4\n")
+    excludes = root / ".github/test-excludes.txt"
+    excludes.write_text("opentelemetry-exporter-otlp-proto-grpc\n")
     source = root / "scripts/sample.py"
     source.write_text("def sample():\n    return 1\n")
     test = root / "tests/test_sample.py"
@@ -252,14 +264,20 @@ def test_incompatible_source_fixture_and_runtime_stats_are_recollected(tmp_path,
         test.write_text("from tests.helper import value\ndef test_sample():\n    assert value == 1\n")
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     subprocess.run(
-        ["git", "add", "scripts/sample.py", "tests/test_sample.py", "tests/conftest.py", "tests/test_shared.py"],
+        [
+            "git",
+            "add",
+            "scripts/sample.py",
+            "tests/test_sample.py",
+            "tests/conftest.py",
+            "tests/test_shared.py",
+            ".github/test-excludes.txt",
+        ],
         cwd=root,
         check=True,
     )
     if changed == "imported_fixture_through_helper":
         subprocess.run(["git", "add", "tests/helper.py"], cwd=root, check=True)
-    package = "agentihooks" if changed == "package_version" else "sample"
-    monkeypatch.setattr(metadata, "distributions", lambda: [SimpleNamespace(metadata={"Name": package}, version="1")])
     calls = []
     files = ["tests/test_sample.py"]
 
@@ -288,29 +306,28 @@ def test_incompatible_source_fixture_and_runtime_stats_are_recollected(tmp_path,
         shared.write_text("value = 2\n")
     elif changed == "options":
         options = ["-x"]
-    elif changed == "runtime":
-        monkeypatch.setattr(sys, "version", "changed")
+    elif changed == "excludes":
+        excludes.write_text("opentelemetry-exporter-otlp-proto-http\n")
     else:
-        monkeypatch.setattr(
-            metadata, "distributions", lambda: [SimpleNamespace(metadata={"Name": package}, version="2")]
-        )
+        lockfile.write_text("pytest==8.3.5\n")
     collect_cached_stats(root, cache, changes, files, options, collect)
     assert calls == [files, files]
 
 
 @pytest.mark.parametrize(
-    ("package", "before", "after", "recollected"),
+    ("package", "before", "after"),
     [
-        ("sample-project", "1.2.dev3+gabc", "1.2.dev4+gdef", False),
-        ("sample-project", "1.2.dev3", "1.2.dev4", False),
-        ("sample-project", "1.2+gabc", "1.2+gdef", False),
-        ("sample-project", "1.2.dev3+gabc", "1.3.dev1+gdef", True),
-        ("sample-project", "1.2", "1.3", True),
-        ("dependency", "1.2+gabc", "1.2+gdef", True),
-        ("dependency", "1.2.dev3", "1.2.dev4", True),
+        ("sample-project", "1.2.dev3+gabc", "1.3.dev1+gdef"),
+        ("sample-project", "1.2", "1.3"),
+        ("dependency", "1.2.dev3", "1.2.dev4"),
+        ("dependency", "1.2+gabc", "1.2+gdef"),
+        ("dependency", "1.2", "1.3"),
     ],
 )
-def test_the_project_build_number_alone_keeps_stats(tmp_path, monkeypatch, package, before, after, recollected):
+def test_the_interpreter_and_installed_packages_alone_keep_stats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, package: str, before: str, after: str
+) -> None:
+    import sys
     from importlib import metadata
     from types import SimpleNamespace
 
@@ -331,9 +348,10 @@ def test_the_project_build_number_alone_keeps_stats(tmp_path, monkeypatch, packa
     cache = tmp_path / "cache"
     for version in (before, after):
         distribution = SimpleNamespace(metadata={"Name": package}, version=version)
+        monkeypatch.setattr(sys, "version", version)
         monkeypatch.setattr(metadata, "distributions", lambda distribution=distribution: [distribution])
         collect_cached_stats(root, cache, {}, files, [], collect)
-    assert calls == ([files, files] if recollected else [files])
+    assert calls == [files]
 
 
 def test_persisted_stats_reuse_survives_a_new_python_process(tmp_path):
@@ -883,6 +901,29 @@ def test_configuration_collector_fixture_and_binary_resource_changes_recollect_s
     collect_cached_stats(root, cache, {}, files, [], collect)
     assert calls == [files]
     (root / target).write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
+@pytest.mark.feature("tracked-test-lock-cache-keys")
+def test_a_test_requirements_lock_change_recollects_stats(tmp_path: Path) -> None:
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    lock = ".github/test-requirements.lock"
+    _repository(root, {files[0]: "def test_sample():\n    pass\n", lock: "pytest==8.4.2\n"})
+    calls: list[list[str]] = []
+
+    def collect(chosen: list[str]) -> list[dict[str, object]]:
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+    (root / lock).write_text("pytest==8.4.3\n")
     collect_cached_stats(root, cache, {}, files, [], collect)
     assert calls == [files, files]
 
@@ -1684,6 +1725,17 @@ def test_the_discovery_digest_of_one_input_set_is_computed_once(tmp_path: Path) 
     assert reads == {"scripts/scan.py": 1, "scripts/plain.py": 1}
     assert inputs.discovery({"scripts/plain.py": "same"}) != digest
     assert reads == {"scripts/scan.py": 1, "scripts/plain.py": 2}
+
+
+def test_conftest_candidates_name_every_parent_folder_conftest_nearest_first() -> None:
+    from scripts.ci_mutation.stats_cache import conftest_candidates
+
+    assert conftest_candidates("tests/swarm/test_cli.py") == (
+        "tests/swarm/conftest.py",
+        "tests/conftest.py",
+        "conftest.py",
+    )
+    assert conftest_candidates("conftest.py") == ("conftest.py",)
 
 
 def test_selected_test_ids_read_the_collected_stats_once_not_once_per_id(tmp_path):

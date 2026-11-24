@@ -1,0 +1,23 @@
+rules:
+  - id: master-floor-skips-handoff-week-line
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A week-left comparison against primary_reserve_pct alone ignores the quota hook's
+      AGENTIHOOKS_HANDOFF_WEEK_PCT handoff line. On 24 November the master's own quota hook handed
+      a master off at 97% of the week used while this check only closed the login at 98%, so every
+      successor launched right back onto the login the hook told it to leave. Compare against
+      reservation.master_week_floor, which takes the wider of the two reserves.
+    patterns:
+      - pattern-not-inside: |
+          def master_week_floor(...):
+              ...
+      - pattern-not-inside: |
+          def primary_reserve_pct(...):
+              ...
+      - pattern-not-inside: |
+          def primary_login_ceiling(...):
+              ...
+      - pattern-either:
+          - pattern: $X <= primary_reserve_pct(...)
+          - pattern: $X <= $MOD.primary_reserve_pct(...)

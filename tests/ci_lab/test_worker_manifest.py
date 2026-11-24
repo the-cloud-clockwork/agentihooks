@@ -8,9 +8,9 @@ from typing import Any, cast
 import pytest
 
 from scripts import dep_manifest
-from scripts.ci_lab import executors, expand_tests, lease_api, queue, run_tests, scheduler, worker
+from scripts.ci_lab import compact, executors, expand_tests, lease_api, queue, run_tests, scheduler, worker
 from scripts.ci_lab.digests import Toolchain
-from scripts.ci_lab.objects import manifest_folder
+from scripts.ci_lab.objects import manifest_folder, unit_path
 from scripts.ci_lab.outcomes import PASSED
 from scripts.ci_lab.units import Unit
 from tests.ci_lab import test_executors as support
@@ -20,7 +20,7 @@ from tests.ci_lab.test_worker import Signer
 
 
 @pytest.mark.feature("lab-worker-manifest")
-@pytest.mark.parametrize("legacy", ["fresh", "queued", "held", "payload"])
+@pytest.mark.parametrize("legacy", ["fresh", "queued", "held", "unrecorded"])
 @pytest.mark.parametrize("unlisted", [False, True])
 def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lab: Callable[..., Run], unlisted: bool, legacy: str
@@ -54,10 +54,9 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
         monkeypatch.setattr(run.engine, "_admit", lambda _now: [])
     run.tick(1000)
     if legacy != "fresh":
-        restore_old_schema(run, manifests, keep_jobs=legacy == "payload")
+        store_old_schema(run, manifests, carried=legacy != "unrecorded")
         run.tick(1001)
-    routes = lease_api.ControlRoutes(run.lab.client, "", lambda: 0)
-    server = lease_api.serve("127.0.0.1", 0, run.leases(), Signer("http://unused"), routes)
+    server = lease_api.serve("127.0.0.1", 0, run.leases(), Signer("http://unused"))
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -90,24 +89,25 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
             assert not suite.manifest.exists()
 
 
-def restore_old_schema(run: Run, manifests: dict[str, dict[str, Any]], keep_jobs: bool = False) -> None:
+def store_old_schema(run: Run, manifests: dict[str, dict[str, Any]], carried: bool) -> None:
     for state in run.grades():
         key = scheduler.GRADES + state.run
         raw = json.loads(run.lab.client.get(key))
         for slot in raw["units"].values():
-            slot.pop("manifest")
-            if not keep_jobs:
-                run.lab.client.hdel(queue._job(slot["job"]), "manifest")
+            slot["manifest"] = ""
+            if slot["kind"] == expand_tests.KIND:
+                path = unit_path(slot["kind"], slot["key"], "manifest")
+                text = run.lab.objects.read(path).decode()
+                run.lab.objects.remove(path)
+                if carried:
+                    slot["manifest"] = text
+                    if run.lab.client.exists(queue._job(slot["job"])):
+                        run.lab.client.hset(queue._job(slot["job"]), "manifest", text)
         run.lab.client.set(key, json.dumps(raw))
-        path = f"{manifest_folder(scheduler._slug(state.repo))}{state.manifest}.json"
-        manifest = copy.deepcopy(manifests[state.head])
-        if keep_jobs:
-            for record in manifest["tests"].values():
-                record["outside"] = []
-        run.lab.objects.write_once(path, json.dumps(dep_manifest.pack(manifest)).encode())
+        if not carried:
+            path = f"{manifest_folder(scheduler._slug(state.repo))}{state.manifest}.json"
+            packed = dep_manifest.pack(copy.deepcopy(manifests[state.head]))
+            run.lab.objects.write_once(path, json.dumps(packed).encode())
+    compact.compact(run.lab.client, run.lab.objects)
     old = run.engine
-    run.engine = scheduler.Scheduler(run.lab.client, run.lab.objects, old.ports, old.settings)
-    for state in run.grades():
-        path = f"{manifest_folder(scheduler._slug(state.repo))}{state.manifest}.json"
-        run.lab.objects.remove(path)
     run.engine = scheduler.Scheduler(run.lab.client, run.lab.objects, old.ports, old.settings)

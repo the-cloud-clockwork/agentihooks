@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -306,6 +307,22 @@ def focus_split(holders=1):
     return doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
 
 
+def focused_plan() -> dict[str, Any]:
+    """Two open plan tasks, each unblocking one engineer task, with the second plan task focused ahead of the first."""
+    tasks = [task("p1", phase="", lane="plan"), task("p2", phase="", lane="plan")]
+    tasks += [task("q1", phase="", depends_on=["p1"]), task("q2", phase="", depends_on=["p2"])]
+    focus = [{"verb": "focus", "target": "tasks/p2"}, {"verb": "focus", "target": "tasks/p1"}]
+    return doc(tasks, phases=[], freezes=focus)
+
+
+def held_plan() -> dict[str, Any]:
+    """The focused plan work with a claimed focused plan task that fills a plan lane share of one."""
+    found = focused_plan()
+    found["tasks"].append(task("p0", phase="", lane="plan", state="claimed"))
+    found["freezes"].append({"verb": "focus", "target": "tasks/p0"})
+    return found
+
+
 def test_focus_cap_rounds_a_fractional_share_down():
     order = dispatcher._focus_order(focus_split(), {"eng": 3}, 50)
     assert order["h"] == order["a"]
@@ -336,9 +353,28 @@ def test_a_lane_without_focus_holders_keeps_its_first_focus_slot():
     assert order["h"] < order["a"]
 
 
-def test_lane_caps_name_each_lane_with_its_own_cap():
-    config = SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=2, max_plan=3)
-    assert dispatcher.lane_caps(config) == {"eng": 1, "ci": 2, "plan": 3}
+@pytest.mark.feature("swarm-plan-cap-floor")
+@pytest.mark.parametrize(
+    ("plan", "found", "caps"),
+    [
+        (3, None, {"eng": 1, "ci": 2, "plan": 3, "review": 0}),
+        (0, doc([task("e"), task("p", lane="plan")]), {"eng": 1, "ci": 2, "plan": 1, "review": 0}),
+        (
+            0,
+            doc([task("p", lane="plan", state="claimed"), task("q", lane="plan", state="done")]),
+            {"eng": 1, "ci": 2, "plan": 0, "review": 0},
+        ),
+        (0, doc([task("e")]), {"eng": 1, "ci": 2, "plan": 0, "review": 0}),
+        (0, None, {"eng": 1, "ci": 2, "plan": 0, "review": 0}),
+        (3, doc([task("p", lane="plan")]), {"eng": 1, "ci": 2, "plan": 3, "review": 0}),
+    ],
+    ids=["stored caps", "open plan work", "plan work held or done", "no plan task", "no ledger", "plan cap above one"],
+)
+def test_lane_caps_name_each_lane_with_its_own_cap(
+    plan: int, found: dict[str, Any] | None, caps: dict[str, int]
+) -> None:
+    config = SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=2, max_plan=plan)
+    assert dispatcher.lane_caps(config, found) == caps
 
 
 def test_the_claim_key_orders_focus_by_the_swarm_focus_weight(store):
@@ -357,18 +393,66 @@ def test_the_claim_key_yields_focus_when_the_lane_share_is_full(store):
     assert key(known["a"]) < key(known["h"])
 
 
-@pytest.mark.parametrize("weight,head", [(50, ["h"]), (100, ["h"])])
-def test_at_delegate_the_queue_holds_only_focused_work_at_any_focus_weight(store, home, shipped, weight, head):
-    config = store.update(SLUG, autonomy="delegate", max_eng=2, focus_weight=weight)
+@pytest.mark.feature("swarm-review-dispatcher-lane-cap")
+def test_the_claim_key_yields_review_focus_when_the_review_lane_share_is_full(store: RedisStore) -> None:
+    config = store.update(SLUG, autonomy="delegate", max_review=2, focus_weight=50)
+    tasks = [task("c0", phase="", state="claimed", lane="review", kind="hot")]
+    tasks += [task("a", phase="", lane="review"), task("h", phase="", lane="review", kind="hot")]
+    found = doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+    key = dispatcher.claim_key(config, found)
+    known = {t["id"]: t for t in found["tasks"]}
+    assert dispatcher.lane_caps(config, found)["review"] == 2
+    assert key(known["a"]) < key(known["h"])
+
+
+@pytest.mark.feature("swarm-plan-cap-floor")
+@pytest.mark.parametrize(
+    ("found", "fields", "seats", "head"),
+    [
+        (focus_split, {"focus_weight": 50, "max_eng": 2}, {"eng": 2, "ci": 0, "plan": 0}, ["h"]),
+        (focus_split, {"focus_weight": 100, "max_eng": 2}, {"eng": 2, "ci": 0, "plan": 0}, ["h"]),
+        (focused_plan, {"focus_weight": 100, "max_plan": 0}, {"eng": 0, "ci": 0, "plan": 1}, ["p2"]),
+        (held_plan, {"focus_weight": 100, "max_plan": 1}, {"eng": 0, "ci": 0, "plan": 1}, ["p1"]),
+    ],
+    ids=["half weight", "full weight", "plan work under a stored zero cap", "plan lane share full"],
+)
+def test_at_delegate_the_queue_holds_only_focused_work_at_any_focus_weight(
+    store: RedisStore,
+    home: Any,
+    shipped: Any,
+    found: Callable[[], dict[str, Any]],
+    fields: dict[str, int],
+    seats: dict[str, int],
+    head: list[str],
+) -> None:
+    config = store.update(SLUG, autonomy="delegate", **fields)
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"effective": seats}))
     ledger = Ledger()
-    rank_pass(SLUG, config, store, ledger, focus_split(), NOW)
+    rank_pass(SLUG, config, store, ledger, found(), NOW)
     assert [comment[0] for comment in ledger.comments] == head
 
 
-def test_below_delegate_proposals_name_only_focused_work_at_full_focus_weight(store, home, shipped):
-    config = store.update(SLUG, autonomy="assist", max_eng=2, focus_weight=100)
-    proposals = rank_pass(SLUG, config, store, Ledger(), focus_split(), NOW)
-    assert proposed(proposals) == ["h"]
+@pytest.mark.feature("swarm-plan-cap-floor")
+@pytest.mark.parametrize(
+    ("found", "caps", "head"),
+    [
+        (focus_split, {"max_eng": 2}, ["h"]),
+        (focused_plan, {"max_plan": 0}, ["p2", "p1"]),
+        (held_plan, {"max_plan": 1}, ["p1", "p2"]),
+    ],
+    ids=["engineer work", "plan work under a stored zero cap", "plan lane share full"],
+)
+def test_below_delegate_proposals_name_only_focused_work_at_full_focus_weight(
+    store: RedisStore,
+    home: Any,
+    shipped: Any,
+    found: Callable[[], dict[str, Any]],
+    caps: dict[str, int],
+    head: list[str],
+) -> None:
+    config = store.update(SLUG, autonomy="assist", focus_weight=100, **caps)
+    proposals = rank_pass(SLUG, config, store, Ledger(), found(), NOW)
+    assert proposed(proposals) == head
 
 
 def test_below_delegate_proposals_never_name_free_work_while_the_focus_is_open(store, home, shipped):
@@ -576,7 +660,7 @@ def test_a_head_task_whose_waiters_finish_leaves_the_head_naming_no_open_work(st
 
 def test_the_default_caps_are_the_lane_maximums_without_a_quota_decision():
     config = SwarmConfig(SLUG, "/repo", max_eng=5, max_ci=3, max_plan=2)
-    assert capacity.caps({}, config) == {"eng": 5, "ci": 3, "plan": 2}
+    assert capacity.caps({}, config) == {"eng": 5, "ci": 3, "plan": 2, "review": 0}
     assert capacity.caps({"effective": {"eng": 1}}, config) == {"eng": 1}
 
 

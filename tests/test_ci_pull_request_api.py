@@ -189,11 +189,14 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_gate_summary.py",
         "scripts/ci_hive_nats_grants.py",
         "scripts/ci_input_key.py",
+        "scripts/ci_lab/__main__.py",
+        "scripts/ci_lab/scheduler.py",
         "scripts/ci_lab_verdict.py",
         "scripts/ci_launch_hotfix.py",
         "scripts/ci_marker_vectors.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/arrival.py",
+        "scripts/ci_mutation/evidence.py",
         "scripts/ci_mutation/identity.py",
         "scripts/ci_mutation/measured.py",
         "scripts/ci_mutation/merge.py",
@@ -204,8 +207,11 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_release.sh",
         "scripts/ci_semgrep_floors.py",
         "scripts/ci_stats_seed.py",
+        "scripts/ci_swarm_imports.py",
+        "scripts/ci_unit_copy.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
+        "scripts/events/nats.py",
         "scripts/feature_map.py",
         "scripts/gates/build.py",
         "scripts/gates/claims.py",
@@ -306,6 +312,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/swarm_ledger/test_postgres_writer_floor.py",
         "tests/swarm_ledger/test_postgres_repository.py",
         "tests/test_memory_postgres_parity.py",
+        "tests/swarm_ledger/test_warm_writer_parity.py",
         "tests/ci_lab/test_sandbox.py",
         "tests/ci_lab/test_run_static.py",
         "tests/ci_lab/test_run_tests.py",
@@ -590,7 +597,7 @@ def test_a_value_without_the_workflow_token_holds_none(value):
 
 def test_sonar_takes_this_runs_coverage_through_the_runtime_token_as_the_shards_upload_it() -> None:
     sonar = _jobs()["sonar"]
-    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict"]
+    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict", "test-count"]
     steps = sonar["steps"]
     arrivals = next(step for step in steps if step.get("name") == "Take each shard's coverage as it lands")
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")
@@ -610,7 +617,7 @@ def test_sonar_takes_this_runs_coverage_through_the_runtime_token_as_the_shards_
     assert not API_CALL.search((ROOT / ".github/coverage/arrivals.py").read_text())
 
 
-def test_every_reader_of_the_unit_shard_count_matches_the_matrix():
+def test_every_reader_of_the_unit_shard_count_matches_the_matrix() -> None:
     jobs = _jobs()
     shards = jobs["unit"]["strategy"]["matrix"]["shard"]
     count = len(shards)
@@ -620,7 +627,7 @@ def test_every_reader_of_the_unit_shard_count_matches_the_matrix():
         run["env"]["SHARD"]
         == f"${{{{ matrix.shard }}}}/${{{{ matrix.python-version == '3.12' && {count} || {count} }}}}"
     )
-    floor = jobs["unit"]["strategy"]["matrix"]["exclude"]
+    floor = [entry for entry in jobs["unit"]["strategy"]["matrix"]["exclude"] if "shard" in entry]
     assert [entry["shard"] for entry in floor] == shards[12:]
     assert ci_test_plan.UNIT_JOBS == {f"unit (3.12, {shard})" for shard in shards}
     assert ci_test_plan.COVERAGE == {f"coverage-3.12-{shard}" for shard in shards}

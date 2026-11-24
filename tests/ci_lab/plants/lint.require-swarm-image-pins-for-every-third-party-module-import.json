@@ -1,0 +1,11 @@
+{
+  "gate": "lint/require-swarm-image-pins-for-every-third-party-module-import",
+  "reason": "a module level third party import that the swarm image lock does not pin",
+  "edits": [
+    {
+      "path": "scripts/pr_body.py",
+      "before": "from markdown_it import MarkdownIt\n",
+      "after": "from markdown_it import MarkdownIt\nimport unpinned_plant_dependency\n"
+    }
+  ]
+}

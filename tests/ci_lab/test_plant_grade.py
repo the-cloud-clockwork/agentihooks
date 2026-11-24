@@ -163,6 +163,8 @@ def test_two_pushes_grade_against_one_protected_base_and_ignore_other_grades(rep
         "base": base,
         "green": "https://github.com/acme/widgets/runs/required",
         "red": "https://github.com/acme/widgets/runs/required",
+        "green_run": grade_key(GradeInputs(REPOSITORY, lab.heads[0], base, "pull_request", base)),
+        "red_run": grade_key(GradeInputs(REPOSITORY, lab.heads[1], base, "pull_request", base)),
     }
     assert len(lab.heads) == 2
     assert git(repository, "show", f"{lab.heads[0]}:sample.py") == "before"
@@ -702,3 +704,54 @@ def test_proof_links_distinguish_the_twin_and_plant_and_accept_a_named_diagnosti
     assert result["green"] == f"https://github.com/acme/widgets/runs/required/{lab.heads[0]}"
     assert result["red"] == f"https://github.com/acme/widgets/runs/required/{lab.heads[1]}"
     assert result["reason"] == "I001: import block order"
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_the_command_accepts_a_discovered_catalog_plant(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    name = "lint.lint-check"
+    catalog = repository / "tests/ci_lab/plants"
+    definition = json.loads((catalog / "gate-script.json").read_text())
+    (catalog / f"{name}.json").write_text(json.dumps(definition))
+    lab = Lab(repository, name)
+    monkeypatch.chdir(repository)
+    assert plant_grade.main(["--plant", name, "--base", "HEAD", "--repository", REPOSITORY], {}, lab.ports()) == 0
+    assert json.loads(capsys.readouterr().out)["plant"] == name
+
+
+@pytest.mark.parametrize("diagnostic", ["I001", "missing-diagnostic"])
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_a_step_plant_uses_its_job_check_and_requires_its_diagnostic(repository: Path, diagnostic: str) -> None:
+    catalog = repository / "tests/ci_lab/plants/lint.json"
+    definition = json.loads(catalog.read_text())
+    definition["gate"] = "semgrep/scan/rule-exceptions-only-shrink"
+    definition["reason"] = f"{diagnostic}: the step diagnostic"
+    catalog.write_text(json.dumps(definition))
+    lab = Lab(repository)
+
+    def fetch(path: str, timeout_s: float) -> Mapping[str, Any]:
+        result = lab.fetch(path, timeout_s)
+        for row in result["check_runs"]:
+            if row["name"] == "lab-shadow/lint":
+                row["name"] = "lab-shadow/semgrep"
+        return result
+
+    ports = plant_grade.Ports(fetch, lab.sleep, lab.clock, lab.push)
+    if diagnostic == "missing-diagnostic":
+        with pytest.raises(ValueError, match="plant grade lacks the expected diagnostic"):
+            plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ports)
+    else:
+        result = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, ports)
+        assert result["gate"] == definition["gate"]
+        assert len(lab.heads) == 2
+
+
+@pytest.mark.feature("lab-static-plant-proofs")
+def test_a_plant_proof_reports_the_green_and_red_grade_run_ids(repository: Path) -> None:
+    lab = Lab(repository)
+    result = plant_grade.prove(repository, "lint", "HEAD", REPOSITORY, lab.ports())
+    green, red = lab.heads
+    assert result["green_run"] == grade_key(GradeInputs(REPOSITORY, green, lab.base, "pull_request", lab.base))
+    assert result["red_run"] == grade_key(GradeInputs(REPOSITORY, red, lab.base, "pull_request", lab.base))
+    assert result["green_run"] != result["red_run"]

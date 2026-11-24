@@ -1,4 +1,5 @@
 import re
+from typing import Any
 
 from scripts.swarm_ledger import ledger_plans
 
@@ -233,14 +234,15 @@ def review_record(phase: dict, op: dict, at: int) -> dict:
     return record
 
 
-def decided(doc: dict, phase_id: str, review: dict, by: str, ctx) -> None:
+def decided(doc: dict, phase_id: str, review: dict, by: str, ctx: Any) -> None:
     if review["state"] == "pending":
         return
     item = f"phases/{phase_id}"
     doc["priorities"] = [row for row in doc["priorities"] if row["item"] != item]
     if review["state"] != "sent_back" or review["escalated"]:
         return
-    plan = next((t for t in doc["tasks"] if t.get("phase") == phase_id and t.get("kind") == "plan"), None)
+    owned = (t for t in doc["tasks"] if t.get("phase") == phase_id and t.get("kind") == "plan")
+    plan = next((t for t in owned if not t.get("enhances")), None)
     if plan is None or plan.get("state") == "open":
         return
     plan.update(state="open", claimed_by="", done=False)

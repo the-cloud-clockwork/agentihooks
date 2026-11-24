@@ -11,7 +11,7 @@ from scripts.gates.lift import LIFT_SECONDS, agent_lifted
 NAME = "talk"
 BUDGET = 10
 DEFAULT_MODE = "observe"
-WORKER_LANES = ("eng", "ci")
+WORKER_LANES = ("eng", "ci", "review")
 REFUSED = "talk refused"
 LIFTED = "gate lifted"
 TALK_THREADS = ("chat",)

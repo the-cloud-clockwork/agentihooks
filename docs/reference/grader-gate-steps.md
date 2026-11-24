@@ -83,8 +83,9 @@ holds an authoritative verdict for it.
 
 The ruff steps run `python -P`, which keeps the current directory off the
 import path. A head that ships its own `ruff` package therefore cannot stand in
-for the installed one. Every lint gate step carries `if: ${{ !cancelled() }}`,
-so each one reports even after an earlier step turns red.
+for the installed one. Every lint gate step carries
+{% raw %}`if: ${{ !cancelled() }}`{% endraw %}, so each one reports even after
+an earlier step turns red.
 
 The marker vector step compares the head's fixture byte for byte with
 `tests/fixtures/marker-idempotency-vectors.json` from `agentibrain-kernel` on
@@ -467,7 +468,7 @@ does not exist.
 | `The head changes tests/registry/FROZEN_GATES.json and the frozen gate file <path> together; ...` from `Require trusted actors before private runner admission`, on a pull request whose own commits leave `<path>` unchanged | The step graded a revision that carries `dev`'s frozen changes: a run of the step text from before pull request 11515, or a head that merged in `dev` commits newer than the event base. See [Why the step grades the head instead of the synthetic merge](#why-the-step-grades-the-head-instead-of-the-synthetic-merge) | Compare the sha on the `graded` line with the pull request head sha. Run `git diff --name-only <merge base> <head> -- tests/registry/FROZEN_GATES.json <path>` with the two shas from that line to list what the graded revision changed |
 | `The head drops the frozen gate file <path> from tests/registry/FROZEN_GATES.json; a frozen file stays frozen.` from the same step | The head's registry no longer lists a file the event base registry freezes | Restore the entry in `tests/registry/FROZEN_GATES.json`. A frozen file stays frozen |
 | `The head changes the frozen gate file <path> to content tests/registry/FROZEN_GATES.json on the base does not accept; ...` from the same step | The head changes a frozen file to a blob the event base registry does not list | Land a pull request that adds the blob to the registry first. See [Change the job](ci-lab.md#change-the-job) |
-| Semgrep reports `protected-gate-grades-synthetic-merge` | A new workflow line runs `scripts.gate_protected` with `--head` set to the run sha | Pass the pull request head instead, through {% raw %}`HEAD_SHA: ${{ github.event.pull_request.head.sha \|\| github.sha }}`{% endraw %}, as in [Protected gate step in lint](#protected-gate-step-in-lint) |
+| Semgrep reports `protected-gate-grades-synthetic-merge` | A new workflow line runs `scripts.gate_protected` with `--head` set to the run sha | Pass the pull request head instead, through {% raw %}<code>HEAD_SHA: ${{ github.event.pull_request.head.sha &#124;&#124; github.sha }}</code>{% endraw %}, as in [Protected gate step in lint](#protected-gate-step-in-lint) |
 
 ## Tests and feature map
 

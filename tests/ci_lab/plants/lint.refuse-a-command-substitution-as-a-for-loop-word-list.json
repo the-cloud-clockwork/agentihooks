@@ -1,0 +1,11 @@
+{
+  "gate": "lint/refuse-a-command-substitution-as-a-for-loop-word-list",
+  "reason": "a for loop word list holds a command substitution: a command substitution as a for loop word list",
+  "edits": [
+    {
+      "path": ".github/scripts/lock-test-deps.sh",
+      "before": "set -euo pipefail\n\nuv pip compile",
+      "after": "set -euo pipefail\n\nfor name in $(ls); do echo \"$name\"; done\nuv pip compile"
+    }
+  ]
+}
