@@ -58,6 +58,7 @@ LANES = {"eng": ["t1", "t8", "t9", "t10"], "ci": ["t2"]}
 REPORT = {"eng": {"count": 4, "ids": ["t1", "t8", "t9", "t10"]}, "ci": {"count": 1, "ids": ["t2"]}}
 HELD = _task("t11", phase="p2")
 SLICED = _task("t11", phase="p3", slice="slices/s2")
+MERGED = [_task("t11", merged_into="t13"), _task("t13", phase="p2", state="done")]
 UNFROZEN = thin.unfrozen({"tasks": TASKS})
 
 
@@ -202,23 +203,29 @@ def test_an_unfrozen_thin_task_beside_a_frozen_phase_is_still_listed(
 
 @pytest.mark.feature("swarm-enhance-sweep")
 @pytest.mark.parametrize(
-    ("target", "task"),
-    [("tasks/t11", HELD), ("phases/p2", HELD), ("plans/b", HELD), ("phases/p2", SLICED)],
-    ids=["task freeze", "phase freeze", "plan freeze", "phase freeze over its slice"],
+    ("target", "added"),
+    [
+        ("tasks/t11", [HELD]),
+        ("phases/p2", [HELD]),
+        ("plans/b", [HELD]),
+        ("phases/p2", [SLICED]),
+        ("phases/p2", MERGED),
+    ],
+    ids=["task freeze", "phase freeze", "plan freeze", "phase freeze over its slice", "phase freeze over its merge"],
 )
 def test_the_sweep_lists_and_queues_no_thin_task_a_freeze_holds(
     target: str,
-    task: dict[str, Any],
+    added: list[dict[str, Any]],
     swarm: list[float],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     ledger = FakeLedger(dict(ANSWERS))
     held = _frozen(target)
-    _serve(monkeypatch, {"tasks": [*TASKS, task], **held})
+    _serve(monkeypatch, {"tasks": [*TASKS, *added], **held})
     monkeypatch.setattr(enhance_sweep, "ClientLedger", lambda slug, clients: ledger)
     monkeypatch.setattr(enhance_sweep, "resource_client", lambda slug: slug)
     assert cli.main(["sw", "enhance", "sweep"]) == 0
     assert json.loads(capsys.readouterr().out)["lanes"] == REPORT
     assert swarm == [3.0, 3.0, 3.0, 3.0]
-    assert _calls(ledger) == _tick_calls([*TASKS, task], held)
+    assert _calls(ledger) == _tick_calls([*TASKS, *added], held)
