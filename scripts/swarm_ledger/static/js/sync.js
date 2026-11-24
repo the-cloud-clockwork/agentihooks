@@ -288,6 +288,7 @@ export function receiveLedger(state) {
   if (inflight) return;
   if (staleAndIdle(state._meta.page_version)) return location.reload();
   applyServer(state);
+  if (ops.length || Object.keys(checks).length) flush(false);
 }
 
 export function loadSaved() {
