@@ -116,7 +116,14 @@ def test_a_cold_browser_shows_the_first_task_rows_within_a_second_and_a_megabyte
         try:
             page.wait_for_function("() => window.firstTaskRow !== undefined", timeout=30000)
         except Exception as exc:
-            shown = page.evaluate("() => (document.getElementById('tasks') || document.body).outerHTML.slice(0, 3000)")
+            shown = page.evaluate(
+                """async () => {
+                  const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+                  const sync = await import(new URL("sync.js", main));
+                  const tasks = document.getElementById("tasks");
+                  return {loaded: sync.doc.tasks.length, rev: sync.meta && sync.meta.rev, html: tasks && tasks.outerHTML.slice(0, 500)};
+                }"""
+            )
             raise AssertionError(f"no task row shown; refused or failed: {refused}; tasks: {shown}") from exc
         transferred = sum(totals.values())
         first_row = float(page.evaluate("window.firstTaskRow"))
