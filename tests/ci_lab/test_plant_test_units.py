@@ -79,7 +79,7 @@ def test_a_pull_request_plant_grades_only_its_added_and_changed_test_modules(
     assert found.manifest == "dev"
     assert found.grader == suite.base
     assert found.tree == fixtures._tree(suite, commit)
-    assert set(found.gates) == {*scheduler.PULL_REQUIRED, "unit"}
+    assert set(found.gates) == {*scheduler.PULL_REQUIRED, "split", "unit", "shard-check"}
 
 
 @pytest.mark.feature("lab-plant-test-units")
@@ -155,3 +155,36 @@ def test_a_plant_grade_with_a_failed_gate_posts_its_required_check_and_that_gate
     assert run.grade(fixtures.HEAD_A).conclusion == "failure"
     assert run.lab.poster.moves(fixtures.HEAD_A, failed) == [("completed", "failure")]
     assert run.lab.poster.moves(fixtures.HEAD_A, scheduler.REQUIRED) == [("completed", "failure")]
+
+
+@pytest.mark.feature("lab-plant-required-verdict")
+@pytest.mark.parametrize("tested", [(), (fixtures.unit(2),)], ids=["no test unit", "a passing test unit"])
+def test_a_plant_grade_whose_gates_all_pass_posts_its_required_check_as_success(
+    lab: Callable[..., fixtures.Run], tested: tuple[Unit, ...]
+) -> None:
+    linted = fixtures.unit(1)
+    run = lab({fixtures.HEAD_A: plant_plan({"lint": (linted,), "unit": tested})})
+    for item in (linted, *tested):
+        run.cache(item)
+    run.push(fixtures.HEAD_A, event="plant")
+    run.tick(1000)
+    assert run.grade(fixtures.HEAD_A).conclusion == "success"
+    assert run.lab.poster.moves(fixtures.HEAD_A, scheduler.REQUIRED) == [("completed", "success")]
+    assert run.lab.poster.moves(fixtures.HEAD_A, "lint") == [("completed", "success")]
+    assert run.lab.poster.moves(fixtures.HEAD_A, "unit") == [("completed", "success")] * len(tested)
+    assert run.lab.poster.moves(fixtures.HEAD_A, "split") == []
+    assert run.lab.poster.moves(fixtures.HEAD_A, "shard-check") == []
+
+
+@pytest.mark.feature("lab-plant-required-verdict")
+def test_a_plant_frame_is_a_full_scope_run_with_exactly_the_jobs_that_scope_requires() -> None:
+    linted, tested = (fixtures.unit(1),), (fixtures.unit(2),)
+    found = plant_plan({"lint": linted, "unit": tested, "other": (fixtures.unit(3),)})
+    assert found.outputs == {"select": {"scope": "full"}}
+    assert found.gates == {
+        **{job: linted if job == "lint" else () for job in scheduler.PULL_REQUIRED},
+        "split": (),
+        "unit": tested,
+        "shard-check": (),
+    }
+    assert (found.skipped, found.idle, found.flags) == (frozenset(), frozenset(), scheduler.Flags())
