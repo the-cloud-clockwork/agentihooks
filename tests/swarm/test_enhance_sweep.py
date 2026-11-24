@@ -22,7 +22,9 @@ ANSWERS: dict[str, object] = {"update_task": {"enhancement": "needed"}}
 FULL = (
     "Add the sweep seam scripts.swarm.enhance_sweep so every open engineer task whose text is too thin to build from "
     "gets one planner enhancement task through the thin task pass writer, while tasks that already carry a plan "
-    "slice or a planned enhancement stay untouched by the sweep. Done when the pull request is merged."
+    "slice or a planned enhancement stay untouched by the sweep. "
+    "Tests observe scripts.swarm.enhance_sweep writes one planner enhancement per thin task. "
+    "Done when the pull request is merged."
 )
 
 

@@ -160,6 +160,7 @@ def test_post_help_runs_and_names_the_post_arguments(capsys: pytest.CaptureFixtu
     assert help_text.startswith("usage: agentihooks review post ")
     assert "--slug SLUG" in help_text
     assert "--finding FINDING" in help_text
-    assert " {post} post post findings on the change request head through the forge options: " in " ".join(
-        cli.parser().format_help().split()
-    )
+    assert (
+        " {post,read} post post findings on the change request head through the forge"
+        " read mark findings on the current head read, or answered with --answer options: "
+    ) in " ".join(cli.parser().format_help().split())

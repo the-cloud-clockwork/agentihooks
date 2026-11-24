@@ -1,7 +1,7 @@
 import { SLUG } from "./config.js";
 import { $, age, clock, h, newId, span } from "./dom.js";
 import { readRouting, writeRouting, writeSwarm } from "./api.js";
-import { renderStats } from "./render.js";
+import { renderStats } from "./stats.js";
 import { renderChatTo } from "./chat.js";
 import { appliedCaps, renderControls, renderGates, settleCaps, showNote } from "./controls.js";
 import { firstPage, moreButton } from "./pages.js";
