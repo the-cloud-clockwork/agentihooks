@@ -755,6 +755,26 @@
       ]
     },
     {
+      "id": "lab-type-gate-one-per-worker",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "A CI lab worker holds one strict type gate unit at a time: a lease grants a static gate of the job type-gate only to a worker that holds no live lease on another one, in the same take or a later one, until that lease completes or is reaped, while another worker takes the next one and every other unit is granted as before at one slot. The rule is read from the unit when the lease is taken, so a unit enqueued earlier is held to it; the worker's leases are read once per take and only when such a unit is met; and every discovered gate that runs the type checker belongs to a job the rule names. A lab static step runs with AGENTIHOOKS_TYPE_WORKERS set to 1 unless its own env names another count, so the unit runs one basedpyright checker at a time.",
+      "seam": "scripts.ci_lab.leases.Leases.lease and solo over fakeredis, scripts.ci_lab.static_gates.discover over the repository's workflow, and scripts.ci_lab.run_static.run reading the variable in a sandboxed step",
+      "tests": [
+        "tests/ci_lab/test_leases.py::test_static_gates_of_other_jobs_fill_a_worker_at_one_slot_each",
+        "tests/ci_lab/test_leases.py::test_units_of_other_kinds_fill_a_worker_whatever_their_members_name",
+        "tests/ci_lab/test_leases.py::test_a_lease_of_units_that_share_a_worker_reads_no_lease_record",
+        "tests/ci_lab/test_leases.py::test_one_take_grants_a_worker_one_type_gate_unit_and_reads_its_leases_once",
+        "tests/ci_lab/test_leases.py::test_a_worker_that_holds_a_type_gate_unit_takes_the_next_one_only_after_it_completes",
+        "tests/ci_lab/test_leases.py::test_another_worker_takes_the_type_gate_unit_a_worker_that_holds_one_leaves",
+        "tests/ci_lab/test_leases.py::test_a_reaped_type_gate_lease_frees_its_worker_for_one_more",
+        "tests/ci_lab/test_leases.py::test_a_lease_whose_record_vanished_holds_no_type_gate_unit",
+        "tests/ci_lab/test_leases.py::test_only_a_static_gate_of_a_named_job_is_a_unit_a_worker_runs_one_at_a_time",
+        "tests/ci_lab/test_leases.py::test_every_discovered_gate_that_runs_the_type_checker_is_held_to_one_a_worker",
+        "tests/ci_lab/test_run_static.py::test_a_step_runs_one_type_checker_at_a_time_unless_its_env_names_another_count"
+      ]
+    },
+    {
       "id": "lab-scheduler-budget-charge",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2718",
