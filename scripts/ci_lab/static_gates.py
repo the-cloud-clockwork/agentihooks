@@ -72,6 +72,7 @@ VARIABLE = re.compile(r"\$\{?(\w+)\}?")
 CHECKOUT = re.compile(r"^\$RUNNER_TEMP/(?:grader|base)/")
 SCRIPT = re.compile(r"\w[\w/]*\.py")
 WORD = re.compile(r"[a-z0-9]+")
+BASELINE_SCAN = re.compile(r"--baseline-commit(?=[\s=])")
 
 
 @dataclass(frozen=True)
@@ -127,7 +128,7 @@ class StaticGate:
     def rewrites_tree(self) -> bool:
         """Whether the step rewrites its working tree, so it needs a tree of its own: a Semgrep scan against a
         baseline commit resets the tree to that commit and back."""
-        return False
+        return BASELINE_SCAN.search(self.run) is not None
 
 
 @dataclass(frozen=True)

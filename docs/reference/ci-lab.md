@@ -3452,7 +3452,7 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 
 | Kind | Trees | Executor inputs |
 |---|---|---|
-| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
+| `static` | head, base and grader, read only, shared by the pod's units; a gate whose step passes `--baseline-commit` runs in a private writable tree of the head | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
 | `test` | head, read only | the batch and its selected manifest records, read from the object store into its lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
 | `stats` | a private copy of the head with the functions the head changes against the lease's base behind their trampolines, and the base present in the pod's store | the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
 | `mutant` | the same private trampolined copy | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of the test files its manifest names show reaching the mutant's function, with their seconds |
@@ -4516,7 +4516,11 @@ verdict.
 
 - `RUNNER_TEMP` is a fresh folder under `settings.root`. Its `grader` and `base` entries are
   symlinks to the real tree paths, and it holds the empty `GITHUB_STEP_SUMMARY` file.
-- `GITHUB_WORKSPACE` and the working folder are the head tree.
+- `GITHUB_WORKSPACE` and the working folder are the head tree. For a gate whose step passes
+  `--baseline-commit` (`StaticGate.rewrites_tree`) that is a private writable tree of the head,
+  cut for the lease's head and base and dropped when the gate ends: Semgrep resets its working
+  tree to the baseline commit and back whenever the current scan has a finding, and the leased
+  tree is sealed and read by every unit of the head at once.
 - `PATH` is `settings.venv/bin`, then `/usr/local/bin`, where the worker image installs semgrep
   and helm, then `/bin:/usr/bin`. `RUFF_CACHE_DIR` is the `ruff` folder inside `RUNNER_TEMP`,
   since the worker seals the leased head tree and ruff would otherwise write `.ruff_cache` into
