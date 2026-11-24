@@ -55,6 +55,7 @@ TASKS = [
 LANES = {"eng": ["t1", "t8", "t9", "t10"], "ci": ["t2"]}
 REPORT = {"eng": {"count": 4, "ids": ["t1", "t8", "t9", "t10"]}, "ci": {"count": 1, "ids": ["t2"]}}
 HELD = _task("t11", phase="p2")
+SLICED = _task("t11", phase="p3", slice="slices/s2")
 UNFROZEN = thin.unfrozen({"tasks": TASKS})
 
 
@@ -99,6 +100,7 @@ def _frozen(target: str) -> dict[str, list[dict[str, Any]]]:
     return {
         "plans": [{"id": "a", "title": "Claims"}, {"id": "b", "title": "Hives"}],
         "phases": [{"id": "p1", "title": "Build", "plan": "plans/a"}, {"id": "p2", "title": "Ship", "plan": "plans/b"}],
+        "slices": [{"id": "s2", "title": "Cut", "phase": "phases/p2"}],
         "freezes": [
             {"id": f"freeze-{target}", "verb": "freeze", "target": target, "by": "operator", "at": 1, "reason": ""}
         ],
@@ -198,17 +200,23 @@ def test_an_unfrozen_thin_task_beside_a_frozen_phase_is_still_listed(
 
 @pytest.mark.feature("swarm-enhance-sweep")
 @pytest.mark.parametrize(
-    "target", ["tasks/t11", "phases/p2", "plans/b"], ids=["task freeze", "phase freeze", "plan freeze"]
+    ("target", "task"),
+    [("tasks/t11", HELD), ("phases/p2", HELD), ("plans/b", HELD), ("phases/p2", SLICED)],
+    ids=["task freeze", "phase freeze", "plan freeze", "phase freeze over its slice"],
 )
 def test_the_sweep_lists_and_queues_no_thin_task_a_freeze_holds(
-    target: str, swarm: list[float], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    target: str,
+    task: dict[str, Any],
+    swarm: list[float],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     ledger = FakeLedger(dict(ANSWERS))
     held = _frozen(target)
-    _serve(monkeypatch, {"tasks": [*TASKS, HELD], **held})
+    _serve(monkeypatch, {"tasks": [*TASKS, task], **held})
     monkeypatch.setattr(enhance_sweep, "ClientLedger", lambda slug, clients: ledger)
     monkeypatch.setattr(enhance_sweep, "resource_client", lambda slug: slug)
     assert cli.main(["sw", "enhance", "sweep"]) == 0
     assert json.loads(capsys.readouterr().out)["lanes"] == REPORT
     assert swarm == [3.0, 3.0, 3.0, 3.0]
-    assert _calls(ledger) == _tick_calls([*TASKS, HELD], held)
+    assert _calls(ledger) == _tick_calls([*TASKS, task], held)
