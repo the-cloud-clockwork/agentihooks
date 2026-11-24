@@ -23,7 +23,7 @@ def test_sonar_remains_required_during_promotion_trigger_rollout() -> None:
     jobs = workflow["jobs"]
     assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
-    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict"]
+    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict", "test-count"]
     assert sonar["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
