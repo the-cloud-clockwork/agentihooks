@@ -834,6 +834,19 @@
       ]
     },
     {
+      "id": "lab-scheduler-job-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-pipelined-slot-reads",
+      "behaviour": "A scheduler pass reads the job of each open slot, one with no outcome, not held and naming a job, through Queue.jobs: HGETALL in Redis pipelines that open no transaction, at most 500 ids each, in slot order and within one grade at a time, each batch read only once the one before it was taken. Queue.jobs yields exactly the Job or None that Queue.job returns for each id, duplicates and missing records included, so collected, held, empty, missing, leased and finished slots keep the outcomes serial reads gave them.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis, counting direct job reads and the job reads of each pipeline, and scripts.ci_lab.queue.Queue.jobs against Queue.job on pending, leased, done, lost, legacy and missing records",
+      "tests": [
+        "tests/ci_lab/test_scheduler_job_reads.py::test_a_pass_preserves_collected_missing_empty_and_started_slots",
+        "tests/ci_lab/test_scheduler_job_reads.py::test_a_pass_reads_only_open_jobs_in_nontransactional_batches_of_at_most_500",
+        "tests/ci_lab/test_scheduler_job_reads.py::test_batched_job_reads_return_exactly_what_serial_reads_return",
+        "tests/ci_lab/test_scheduler_job_reads.py::test_batched_job_reads_read_each_batch_only_once_the_one_before_was_taken"
+      ]
+    },
+    {
       "id": "lab-scheduler-load-measure",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-parse-measure",
@@ -1985,6 +1998,22 @@
       ]
     },
     {
+      "id": "controller-expired-codex-closed",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-view-expired-codex",
+      "behaviour": "The deployed controller counts a Codex login that a live hive reports expired as a closed account with zero free seats, so the capacity decision places no seat on it and the stall watch raises no free seat alert for it. An unexpired hive reading keeps its week band.",
+      "seam": "swarm_v2.quota._hive_reading and QuotaObservations.reading through kubernetes.approved.AccountRoute and FleetAccounts; swarm.capacity.calculate; swarm.stall_watch.stall_pass",
+      "tests": [
+        "tests/test_swarm_v2_approved_accounts.py::test_a_codex_key_with_a_live_unexpired_hive_reading_is_an_open_row_at_its_week_band",
+        "tests/test_swarm_v2_approved_accounts.py::test_an_expired_codex_hive_entry_reads_expired_with_no_cap",
+        "tests/test_swarm_v2_approved_accounts.py::test_the_controller_closes_an_expired_codex_key_with_no_free_seat",
+        "tests/test_swarm_v2_approved_accounts.py::test_the_stall_watch_fed_an_expired_codex_decision_raises_no_free_seat_alert"
+      ],
+      "rules": [
+        "hive-quota-reading-drops-expired"
+      ]
+    },
+    {
       "id": "nats-withdraw-gone-message",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-withdraw-gone-message",
@@ -2709,6 +2738,22 @@
       ]
     },
     {
+      "id": "review-done-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-done-findings",
+      "behaviour": "Swarm done refuses a task in the review lane, or of kind review, until the post counter for that exact swarm and task holds at least one posted finding, and names the review post command in its refusal; the refusal runs before the proof check, a count under another swarm or task does not satisfy it, and every other lane and kind closes without reading the review record.",
+      "seam": "scripts.swarm.cli.cmd_done through swarm done, calling scripts.review.record require_done and done_refusal over the review-tasks counter",
+      "tests": [
+        "tests/review/test_done.py::test_swarm_done_never_reads_the_review_record_for_other_lanes_and_kinds",
+        "tests/review/test_done.py::test_swarm_done_refuses_a_review_task_that_posted_no_finding",
+        "tests/review/test_done.py::test_one_posted_finding_lets_a_review_task_reach_the_proof_check",
+        "tests/review/test_done.py::test_a_finding_posted_through_the_review_record_lets_its_task_reach_the_proof_check",
+        "tests/review/test_done.py::test_the_count_is_read_for_the_exact_swarm_and_task",
+        "tests/swarm/test_ready.py::test_a_merged_review_task_stays_open_for_swarm_done"
+      ],
+      "semgrep_rule": "feature-review-done-findings"
+    },
+    {
       "id": "review-record-post",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-record-post",
@@ -2760,6 +2805,24 @@
         "tests/swarm_ledger/test_hive_token_cache.py::test_a_cached_hive_token_check_holds_only_its_own_ledger_and_agent",
         "tests/swarm_ledger/test_hive_token_cache.py::test_the_hive_token_cache_keeps_at_most_its_bound",
         "tests/swarm_ledger/test_hive_token_cache.py::test_a_hive_token_check_is_read_again_once_exactly_its_window_has_passed"
+      ]
+    },
+    {
+      "id": "review-findings-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-findings-read",
+      "behaviour": "The author of a change request marks the review findings on its current forge head read, or answered with a reply: no finding ids marks every finding, the marker joins the finding's readers once after earlier readers, a later plain read clears an earlier answer, a head with no review, an unknown finding and a reviewer's own findings are refused and write nothing, and a mark never counts as a posted finding.",
+      "seam": "scripts.review.record mark, and the agentihooks review read command through scripts.review.cli main",
+      "tests": [
+        "tests/review/test_record_mark.py::test_the_author_marks_findings_read_or_answered_on_the_current_head",
+        "tests/review/test_record_mark.py::test_marking_an_unknown_finding_or_a_head_without_review_is_refused",
+        "tests/review/test_record_mark.py::test_a_reviewer_cannot_mark_its_own_findings",
+        "tests/review/test_record_mark.py::test_a_read_keeps_the_calling_author_once_beside_earlier_readers",
+        "tests/review/test_record_mark.py::test_reads_add_no_posts",
+        "tests/review/test_cli_read.py::test_read_marks_the_chosen_finding_answered_by_the_calling_author",
+        "tests/review/test_cli_read.py::test_read_without_options_marks_every_finding_read",
+        "tests/review/test_cli_read.py::test_a_refused_read_prints_its_reason_and_returns_one",
+        "tests/review/test_cli_read.py::test_review_read_requires_a_url_and_swarm"
       ]
     },
     {
@@ -4484,6 +4547,17 @@
       ]
     },
     {
+      "id": "tick-finished-step-ends-at-lane-expiry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2893",
+      "behaviour": "When a tick lane expires, the pass engine ends every submitted step whose run already finished through the normal apply path with its real result, before it records any step cut or skipped: a step that finished inside its lane but was collected only after the lane ended keeps its outcome, its writes are applied and a dependent in a lane that has not expired runs. A step still running at the lane end is recorded cut, its writes are never applied and that dependent is dropped. Recording a step cut at a lane end without checking that its run is still going is the Semgrep incident cut-finished-step-at-lane-expiry.",
+      "seam": "tick.engine.run_graph in a parallel pass with appliers and a finished callback; semgrep incident rule cut-finished-step-at-lane-expiry",
+      "tests": [
+        "tests/tick/test_lane_expiry_collect.py::test_a_step_still_running_at_its_lane_expiry_is_recorded_cut_with_its_writes_and_dependent_dropped",
+        "tests/tick/test_lane_expiry_collect.py::test_a_step_that_finished_before_its_lane_expired_but_was_collected_after_keeps_its_result"
+      ]
+    },
+    {
       "id": "semgrep-feature-tests",
       "origin": "operator",
       "operator_words": "We need to put a fucking feature semgrep test. You know semgrep? We're going to start to establish testing for features. We're going to start establishing the use of semgrep for features and we're going to establish a system for semgrep. Semgrep is going to fucking put a feature test so that if it fails again we know that we had a regression.",
@@ -5634,7 +5708,7 @@
       "id": "swarm-enhance-sweep",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-sweep",
-      "behaviour": "agentihooks swarm <slug> enhance sweep reads every task of the swarm through the ledger API, selects per lane the open eng and ci tasks the thin task pass would queue, and queues each through the thin task pass writer with the same ledger writes, under its own thirty second deadline and three seconds after the previous one; with --dry-run it prints the thin task count and ids per lane and builds no ledger writer.",
+      "behaviour": "agentihooks swarm <slug> enhance sweep reads every task of the swarm through the ledger API, selects per lane the open eng and ci tasks the thin task pass would queue, leaving out every task the swarm freeze check reads as frozen (a freeze on the task, its slice, its phase or its plan, judged by the thin task pass's own freeze check over the tasks, freezes, plans, phases and slices collections), and queues each through the thin task pass writer with the same ledger writes, under its own thirty second deadline and three seconds after the previous one; with --dry-run it prints the thin task count and ids per lane and builds no ledger writer.",
       "seam": "agentihooks swarm <slug> enhance sweep [--dry-run] through scripts.swarm.cli.main into scripts.swarm.enhance_sweep.command, thin_by_lane and sweep",
       "tests": [
         "tests/swarm/test_enhance_sweep.py::test_the_sweep_selects_per_lane_the_thin_tasks_the_tick_step_would",
@@ -5642,7 +5716,10 @@
         "tests/swarm/test_enhance_sweep.py::test_each_thin_task_writes_under_its_own_thirty_second_deadline",
         "tests/swarm/test_enhance_sweep.py::test_the_sweep_pauses_three_seconds_between_thin_tasks_and_never_before_the_first",
         "tests/swarm/test_enhance_sweep.py::test_the_dry_run_prints_the_thin_task_count_and_ids_per_lane_and_writes_nothing",
-        "tests/swarm/test_enhance_sweep.py::test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_writes"
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_writes",
+        "tests/swarm/test_enhance_sweep.py::test_an_unfrozen_thin_task_beside_a_frozen_phase_is_still_listed",
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_lists_and_queues_no_thin_task_a_freeze_holds",
+        "tests/swarm/test_ledger_client_task.py::test_a_work_tree_read_asks_the_ledger_for_its_plans_phases_and_slices_alone"
       ]
     },
     {
@@ -7282,6 +7359,44 @@
       "tests": [
         "tests/swarm_ledger/test_tabs.py::test_tabs_keep_the_shell_fixed_and_scroll_only_the_active_body",
         "tests/swarm_ledger/test_tabs.py::test_tab_choice_hash_keyboard_and_scroll_positions_survive_switches"
+      ]
+    },
+    {
+      "id": "ledger-live-row-updates",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "A live ledger change rebuilds only the section rows whose inputs changed and moves rows to their place; every other row keeps its element, so comment drafts and focus survive, while marks, blocker text, slice counts, header counts, stats and the sync badge still follow the change.",
+      "seam": "The ledger page applying stream changes through sync.receiveLedger and the keyed section render",
+      "tests": [
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_live_change_to_one_task_rebuilds_only_its_row_and_updates_its_counts",
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_live_change_to_one_phase_rebuilds_only_its_row",
+        "tests/swarm_ledger/test_page_live_rows.py::test_rank_and_state_changes_move_a_live_row_to_its_place",
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_live_change_keeps_a_comment_draft_and_its_focus",
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_freeze_mark_reaches_a_row_whose_task_did_not_change",
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_new_task_in_a_slice_updates_its_phase_slice_count",
+        "tests/swarm_ledger/test_page_live_rows.py::test_the_agents_stat_counts_a_new_commenter_after_a_live_change",
+        "tests/swarm_ledger/test_page_live_rows.py::test_the_sync_badge_counts_agents_that_have_not_synced",
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_burst_of_live_changes_on_a_production_size_ledger_rebuilds_only_the_changed_rows"
+      ]
+    },
+    {
+      "id": "ledger-task-blockers-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "An open task row names what it waits on, which dependency branch it is ready to start on, or the branch it is parked on, and drops the text once the blocker is done, hidden done tasks included.",
+      "seam": "The task rows of the ledger page Swarm tasks section",
+      "tests": [
+        "tests/swarm_ledger/test_page_live_rows.py::test_waiting_ready_and_parked_tasks_name_their_blockers_until_the_blocker_finishes"
+      ]
+    },
+    {
+      "id": "ledger-cache-first-screen",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "The ledger page writes its browser cache once live changes go quiet, and the cached document keeps only the first page of each list in display order.",
+      "seam": "state.lsWrite and the cache worker on the ledger page",
+      "tests": [
+        "tests/swarm_ledger/test_page_live_rows.py::test_live_changes_defer_the_cache_write_and_keep_it_to_the_first_screen"
       ]
     },
     {
@@ -10255,6 +10370,18 @@
       ]
     },
     {
+      "id": "master-floor-agrees-with-handoff-week-line",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/master2-1070-floor-fix",
+      "behaviour": "The master week floor that closes a hive's master Claude login, and the master login pick that skips a reserved primary login, both widen to the quota hook's AGENTIHOOKS_HANDOFF_WEEK_PCT handoff line when that line reserves more of the week than the configured primary login reserve, so a successor is never placed back on a login the hook already told the running master to leave.",
+      "seam": "scripts.routing.reservation.master_week_floor through scripts.hive.launch._master_floor and scripts.routing.reservation.primary_reserved",
+      "tests": [
+        "tests/routing/test_reservation.py::test_master_week_floor_widens_to_the_hooks_handoff_line",
+        "tests/routing/test_reservation.py::test_primary_reserved_widens_at_the_hooks_handoff_week_line",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_is_refused_at_the_master_floor_when_the_handoff_line_is_tighter"
+      ]
+    },
+    {
       "id": "docs-sanity-scan",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-public-docs-lan-scrub",
@@ -10281,6 +10408,17 @@
         "tests/test_docs_sanity.py::test_a_baseline_never_holds_addresses_or_secrets",
         "tests/test_docs_sanity.py::test_the_public_docs_pass_and_the_baseline_matches_them_exactly",
         "tests/test_docs_sanity.py::test_a_written_baseline_sorts_rules_and_indents_two_spaces"
+      ]
+    },
+    {
+      "id": "docs-table-double-pipe",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-docs-double-pipe",
+      "behaviour": "No markdown page under docs carries a table row whose code span escapes a double pipe, because kramdown keeps the backslash inside a code span and the Pages build would print a backslash before each pipe. A double pipe in table code is written as an inline code element with pipe entities, which renders a plain double pipe in the Pages build and in GitHub's view.",
+      "seam": "every markdown page under docs, read by the docs table pipe check",
+      "tests": [
+        "tests/test_docs_table_pipes.py::test_the_check_flags_an_escaped_double_pipe_and_passes_the_entity_form",
+        "tests/test_docs_table_pipes.py::test_no_docs_table_code_span_escapes_a_double_pipe"
       ]
     },
     {
@@ -11322,13 +11460,38 @@
     {
       "id": "hive-registry-unique-name-suffix",
       "origin": "inventory",
-      "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another registered hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it, and a headless hive renamed to a held name takes the next free suffix.",
+      "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another live hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it while its base stays held, and a headless hive renamed to a held name takes the next free suffix.",
       "seam": "scripts.hive.registry.update through _settle, _read_name, _held and _unique",
       "tests": [
         "tests/hive/test_registry.py::test_two_headed_hives_joining_take_unique_names",
         "tests/hive/test_registry.py::test_a_restarted_headed_hive_keeps_its_derived_name",
         "tests/hive/test_registry.py::test_a_headless_hive_renamed_to_a_held_name_takes_the_next_free_suffix",
         "tests/hive/test_registry.py::test_a_second_seeded_headed_hive_gets_a_unique_name_on_its_next_named_set"
+      ]
+    },
+    {
+      "id": "hive-registry-name-returns-to-base",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "Only a live hive holds a name, so a never beaten settings record or a stale hive leaves its name free, and a hive carrying a derived numeric suffix returns to its base name at its next heartbeat once no other live hive holds that base; the root hive reads swarm-master again instead of keeping swarm-master-2 forever.",
+      "seam": "scripts.hive.registry.update and scripts.hive.registry.beat through _held, _base, _named and _healed",
+      "tests": [
+        "tests/hive/test_registry.py::test_a_suffixed_master_name_returns_to_its_base_once_no_other_live_hive_holds_it",
+        "tests/hive/test_registry.py::test_a_suffixed_headless_name_returns_to_its_base_once_its_holder_goes_stale",
+        "tests/hive/test_registry.py::test_a_never_beaten_settings_record_holds_no_name",
+        "tests/hive/test_registry.py::test_a_stored_master_suffix_with_no_live_holder_returns_on_the_next_heartbeat",
+        "tests/hive/test_registry.py::test_an_interface_hive_turned_headless_keeps_its_name_and_chases_no_master_name",
+        "tests/hive/test_registry.py::test_a_derived_name_stays_while_its_base_is_held_and_a_rename_drops_its_base"
+      ]
+    },
+    {
+      "id": "monitor-hive-names-match-registry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "The home resource monitor names each live hive row by the name the hive registry holds, the same name hive list prints, so an interface hive with a derived name is never shown as plain swarm-master, and the swarm-master row still sorts first.",
+      "seam": "scripts.swarm_ledger.api.monitor.labels and tally behind the monitor route",
+      "tests": [
+        "tests/swarm_ledger/test_api_monitor.py::test_each_live_hive_row_reads_the_registry_name_hive_list_prints"
       ]
     },
     {
@@ -12160,6 +12323,17 @@
         "tests/test_ci_branch_reuse_workflow.py::test_sonar_leaves_a_bare_download_at_the_folder_root_when_two_legs_were_selected",
         "tests/test_ci_branch_reuse_workflow.py::test_sonar_takes_a_lone_legs_newest_attempt_when_its_attempts_land_in_their_own_folders",
         "tests/test_ci_lone_artifact_download.py::test_the_gate_summary_counts_a_lone_report_that_lands_at_the_folder_root"
+      ]
+    },
+    {
+      "id": "sonar-reads-the-reused-plan-after-test-count-uploads-it",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-sonar-reused-artifacts-race",
+      "behaviour": "The sonar job of the Tests workflow waits for every job that uploads the reused test plan artifacts it downloads by the pattern {reused-branch,reused}-3.12, so its download lists both reused-branch-3.12 and reused-3.12 and each lands in its own folder where the branch coverage carrier reads it. Before, Sonar could list the run's artifacts between the two uploads, take the lone match into the bare folder, carry no reused coverage and fail the quality gate on new coverage. Sonar still runs when test-count is skipped or fails, because its condition starts with !cancelled() and reads no test-count result.",
+      "seam": "The needs and the condition of the sonar job and the upload steps of the test-count job in the Tests workflow",
+      "tests": [
+        "tests/test_ci_lone_artifact_download.py::test_sonar_lists_the_reused_test_plan_only_after_every_job_that_uploads_it_finished",
+        "tests/test_ci_sonar_workflow.py::test_sonar_runs_when_test_count_is_skipped_or_failed"
       ]
     },
     {
@@ -14774,6 +14948,16 @@
       "seam": "Proofs workflow concurrency group",
       "tests": [
         "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane"
+      ]
+    },
+    {
+      "id": "lane-grader-admits-the-gate-required-status-head-group",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-required-status-lane",
+      "behaviour": "The branch lane grader lets the report job of the trusted Gate Required status workflow leave the shared hosted lanes only for one concurrency group keyed by the head of the Tests run it reports, with queue max and no cancelling. It refuses any other group, queue or cancel setting, another job, an edited report job, a renamed workflow, changed triggers and an untrusted base.",
+      "seam": "ci_branch_lanes.problems and gate_required_status_group",
+      "tests": [
+        "tests/test_ci_branch_lanes.py::test_only_the_trusted_gate_required_status_report_job_may_queue_on_its_own_head_group"
       ]
     },
     {
