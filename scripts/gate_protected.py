@@ -58,6 +58,7 @@ LAB_PINNED_INSTALL = {
 DOWNLOAD_ARTIFACT = "actions/download-artifact@"
 SUMMARY_DOWNLOADS = ("actions/download-artifact@v4", "actions/download-artifact@v8.0.2")
 SUMMARY_REPORTS = ("Download this run's test reports", "{durations,flakes}-3.*")
+MERGE_KEY = "tag:yaml.org,2002:merge"
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -463,10 +464,43 @@ def _git(root: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout
 
 
-def load(root: Path, rev: str) -> tuple[dict[str, dict], dict]:
+class RefusedKey(ValueError):
+    """A head workflow key the grader cannot read as GitHub Actions does."""
+
+
+class ActionsLoader(yaml.SafeLoader):
+    """Read a head workflow as GitHub Actions does: refuse the merge key and a key repeated in its mapping.
+
+    Keys repeat when they match case-folded, as Actions compares them, or construct to one value, as PyYAML keeps them.
+    """
+
+    def _refused(self, key_node: Any, reason: str) -> RefusedKey:
+        return RefusedKey(f"{self.name} line {key_node.start_mark.line + 1}: {reason}, so the head is refused.")
+
+    def flatten_mapping(self, node: Any) -> None:
+        for key_node, _ in node.value:
+            if key_node.tag == MERGE_KEY:
+                raise self._refused(key_node, f"GitHub Actions does not merge the key {key_node.value}")
+        super().flatten_mapping(node)
+        keys: set[object] = set()
+        for key_node, _ in node.value:
+            key = cast(Any, self).construct_object(key_node)
+            folded = key.casefold() if isinstance(key, str) else key
+            if folded in keys:
+                raise self._refused(key_node, f"the key {key_node.value} repeats an earlier key of its mapping")
+            keys.add(folded)
+
+
+def _read(loader: type[yaml.SafeLoader], text: str, path: str) -> Any:
+    reader: Any = loader(text)
+    reader.name = path
+    return reader.get_single_data()
+
+
+def load(root: Path, rev: str, loader: type[yaml.SafeLoader] = yaml.SafeLoader) -> tuple[dict[str, dict], dict]:
     tracked = _git(root, "ls-tree", "-r", "-z", "--name-only", rev).split("\0")
     workflows = {
-        Path(path).name: yaml.safe_load(_git(root, "show", f"{rev}:{path}")) or {}
+        Path(path).name: _read(loader, _git(root, "show", f"{rev}:{path}"), path) or {}
         for path in tracked
         if Path(path).parent == Path(WORKFLOWS) and path.endswith((".yml", ".yaml"))
     }
@@ -638,7 +672,11 @@ def main(argv: list[str] | None = None) -> int:
         section: {**branched_config.get(section, {}), **tip_config.get(section, {})}
         for section in ("not_gates", "outside_gate")
     }
-    head_workflows, head_config = load(root, args.head)
+    try:
+        head_workflows, head_config = load(root, args.head, ActionsLoader)
+    except RefusedKey as refused:
+        print(f"::error::{refused}")
+        return 1
     actors = None
     if ci_runner_trust.ACTORS in _git(root, "ls-tree", "-r", "--name-only", args.base).splitlines():
         actors = json.loads(_git(root, "show", f"{args.base}:{ci_runner_trust.ACTORS}"))
