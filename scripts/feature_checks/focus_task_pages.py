@@ -3,16 +3,20 @@ pages at ``focus/<target>/tasks`` holds the task rows the one reply read of ``fo
 focus records with the most tasks of each ledger, prints one line per target and never a credential."""
 
 import sys
+import urllib.error
 from collections.abc import Callable, Iterable
 from typing import Any, Protocol
 
 FAIL = "FAIL: "
 SAME = "{slug} focus {target}: {count} task rows in pages, as the read of the target holds"
+PAGED = "{slug} focus {target}: {count} task rows in pages, more than one reply holds"
 DIFFERENT = "{slug} focus {target}: the pages hold {paged} task rows that differ from the {whole} the target holds"
 NONE = "{slug} holds no focus record"
 CHECKED = 3
 ATTEMPTS = 3
 KEYS = ("id", "lane", "state", "verdict")
+TOO_LARGE = 413
+FOCUS = "focus"
 
 Read = Callable[[str, str, bool], Any]
 
@@ -28,9 +32,20 @@ class Swarms(Protocol):
 def lines(slug: str, read: Read) -> list[str]:
     """One line per checked focus target of a ledger, a failing one where the pages and the read of the target
     still differ after both were read again, or one line that says the ledger holds no focus record."""
-    records: list[dict[str, Any]] = read(slug, "focus", True)
-    largest = sorted(records, key=_size, reverse=True)[:CHECKED]
-    return [_target(slug, record["target"], read) for record in largest] or [NONE.format(slug=slug)]
+    return [_target(slug, target, read) for target in _targets(slug, read)] or [NONE.format(slug=slug)]
+
+
+def _targets(slug: str, read: Read) -> list[str]:
+    """The targets to check: those of the focus records with the most tasks. A focus list one reply cannot hold
+    names no size, so its first records are taken as the freezes read lists them; any other refusal is raised."""
+    try:
+        records: list[dict[str, Any]] = read(slug, "focus", True)
+    except urllib.error.HTTPError as refused:
+        if refused.code != TOO_LARGE:
+            raise
+        listed: list[dict[str, Any]] = read(slug, "freezes", True)
+        return [record["target"] for record in listed if record["verb"] == FOCUS][:CHECKED]
+    return [record["target"] for record in sorted(records, key=_size, reverse=True)[:CHECKED]]
 
 
 def _size(record: dict[str, Any]) -> int:
@@ -43,11 +58,17 @@ def _rows(rows: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
 
 def _target(slug: str, target: str, read: Read) -> str:
     """The line of one target. A ledger that moves between the two reads is read again, so only a difference that
-    stays is a failure."""
+    stays is a failure. A target one reply cannot hold has only its pages, so it passes on them; any other refusal
+    is raised."""
     whole: list[tuple[Any, ...]] = []
     paged: list[tuple[Any, ...]] = []
     for _ in range(ATTEMPTS):
-        whole = _rows(read(slug, f"focus/{target}", False)["tasks"])
+        try:
+            whole = _rows(read(slug, f"focus/{target}", False)["tasks"])
+        except urllib.error.HTTPError as refused:
+            if refused.code != TOO_LARGE:
+                raise
+            return PAGED.format(slug=slug, target=target, count=len(read(slug, f"focus/{target}/tasks", True)))
         paged = _rows(read(slug, f"focus/{target}/tasks", True))
         if whole == paged:
             return SAME.format(slug=slug, target=target, count=len(paged))
