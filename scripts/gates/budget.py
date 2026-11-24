@@ -60,7 +60,7 @@ class Budget:
             spends = listed.read_text().splitlines()
             listed.unlink()
             for spend in spends:
-                subject, _, counter = spend.partition("\t")
+                subject, _, counter = spend.rpartition("\t")
                 with self.path(subject, counter).open("a+") as held:
                     fcntl.flock(held, fcntl.LOCK_EX)
                     held.seek(0)
