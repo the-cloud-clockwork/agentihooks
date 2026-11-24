@@ -1,0 +1,19 @@
+rules:
+  - id: feature-hive-role-release-floor
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive older than the first release of a role does not host it: hosts, the one predicate every placement
+      site asks, consults the first release of the role through outdated.
+    patterns:
+      - pattern: |
+          def hosts(...):
+            ...
+      - pattern-not: |
+          def hosts(...):
+            ...
+            return <... outdated(...) ...>
+    paths:
+      include:
+        - /scripts/hive/placement.py
+        - '*.test.py'

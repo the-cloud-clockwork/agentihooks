@@ -226,7 +226,7 @@ def canon_note(slug: str, crew: Crew) -> list[str]:
 
 
 def cron(slug: str, crew: Crew) -> dict[str, Any]:
-    """The session cron the master sets: the verbatim intent every thirty minutes and this run's layout."""
+    """The seat cron the master sets on the scheduler: the verbatim intent every thirty minutes and this run's layout."""
     prompt = CRON_TEXT.format(slug=slug, order=ORDER, layout=layout(crew))
     return {"cron": CRON, "recurring": True, "prompt": prompt}
 

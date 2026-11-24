@@ -31,6 +31,7 @@ PYTEST_INVOCATION = (
 BROAD_TREES = (*dep_manifest.MEASURED, "tests/")
 KIND = "test"
 BATCH_SECONDS = 60.0
+UNLISTED = "unlisted"
 
 
 def _digest(record: object) -> str:
@@ -152,12 +153,19 @@ def unlisted_units(
     manifest: Mapping[str, Any], tree: Mapping[str, bytes], paths: Iterable[str], toolchain: Toolchain
 ) -> tuple[Unit, ...]:
     """Return one test unit per test module among the paths that the tree holds and that holds no manifest test, its
-    member the module's path, keyed as a broad test over the tree with the pytest invocation and the toolchain."""
+    member the module's path, keyed as a broad test over the tree and the files the manifest's `UNLISTED` notes say
+    the module opened outside it, with the pytest invocation and the toolchain."""
     listed = {test.partition("::")[0] for test in manifest["tests"]}
+    noted: Mapping[str, Sequence[str]] = manifest.get(UNLISTED, {})
     files = sorted({path for path in paths if _test_module(path) and path in tree and path not in listed})
-    keys = fingerprints({"units": [], "tests": {path: {"files": []} for path in files}}, tree)
+    keys = fingerprints({"units": [], "tests": {path: {"files": list(noted.get(path, ()))} for path in files}}, tree)
     return tuple(
-        Unit(KIND, test_key(TestInputs({path: keys[path]}, {}, PYTEST_INVOCATION, toolchain)), (path,))
+        Unit(
+            KIND,
+            test_key(TestInputs({path: keys[path]}, {}, PYTEST_INVOCATION, toolchain)),
+            (path,),
+            json.dumps({"tests": {}}),
+        )
         for path in files
     )
 
@@ -210,5 +218,9 @@ def units(
         outside = {path for test in batch for path in manifest["tests"][test].get("outside", ())}
         opened = {path: blobs[path] for path in outside if path in blobs}
         inputs = TestInputs({test: keys[test] for test in batch}, opened, PYTEST_INVOCATION, toolchain)
-        found.append(Unit(KIND, test_key(inputs), batch))
+        found.append(
+            Unit(
+                KIND, test_key(inputs), batch, json.dumps({"tests": {test: manifest["tests"][test] for test in batch}})
+            )
+        )
     return tuple(found)

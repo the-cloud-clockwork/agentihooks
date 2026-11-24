@@ -1,7 +1,6 @@
 """The sites of the flat pass graph: the tick's site table, its checks between sites and the graph runner."""
 
 from collections.abc import Callable, Mapping
-from contextvars import Token
 from dataclasses import dataclass
 from functools import partial
 from importlib import import_module
@@ -90,7 +89,8 @@ class TickSites:
     scanning: bool = False
     left: bool = False
     left_from: str = START
-    scan: Token[PassProcesses | None] | None = None
+    scan: PassProcesses | None = None
+    prior: PassProcesses | None = None
 
     def hooks(self) -> dict[str, Callable[[], bool]]:
         """Return the checks run before the start, agents and tasks sites, each reading and writing the keys
@@ -111,17 +111,22 @@ class TickSites:
         return FINISHED in self.box or left or asleep
 
     def close(self) -> None:
-        """End the process table scan the start check began, once."""
-        if self.scan is not None:
-            reaper.PASS.reset(self.scan)
+        """End the process table scan the start check began, once, in the context that holds it: put back the value
+        the scan replaced. A close from another context, such as the slow lane thread opening the relay hook, leaves
+        that context as it is and the scan to the close of the context that began it."""
+        if self.scan is not None and reaper.PASS.get() is self.scan:
+            reaper.PASS.set(self.prior)
             self.scan = None
 
     def _start(self) -> bool:
-        """Load the master move modules, start the scan when asked, read the tick clock and add its appliers."""
+        """Load the master move modules, start the scan when asked, keeping the value it replaces, read the tick clock
+        and add its appliers."""
         for name in tick.MASTER_MOVE_MODULES:
             import_module(name)
         if self.scanning:
-            self.scan = reaper.PASS.set(reaper.PassProcesses(lambda: reaper.processes()))
+            self.prior = reaper.PASS.get()
+            self.scan = reaper.PassProcesses(lambda: reaper.processes())
+            reaper.PASS.set(self.scan)
         self.state["now_ms"] = self.clock()
         self.apply.update(task_steps.appliers(self.state))
         return True

@@ -8,6 +8,7 @@ command). Unbound sessions exit at once. Every error fails open.
 
 import json
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -22,9 +23,11 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parents[1]))
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SESSIONS = LEDGER_DIR / ".sessions"
-GATE_READS = ("_meta.members", "_meta.events", "tasks", "phases", "followups", "policy")
+GATE_READS = ("_meta.members", "_meta.events", "policy")
 SHOWN = 5
 CLI = "agentihooks api"
+VARIABLE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
+ASSIGNMENT = re.compile(r"([A-Za-z_]\w*)=(.*)", re.DOTALL)
 
 
 def log(message):
@@ -148,11 +151,33 @@ def emit(event, text):
     print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
 
 
-def touched(command):
+def expanded(command: str) -> str:
+    """The command with each $NAME or ${NAME} put in from the command's own assignments or the environment."""
+    assigned: dict[str, str] = {}
+
+    def value(found: re.Match[str]) -> str:
+        name = found[1] or found[2]
+        return assigned.get(name, os.environ.get(name, ""))
+
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    setattr(lexer, "whitespace_split", True)
+    try:
+        words = list(lexer)
+    except ValueError:
+        words = []
+    for word in words:
+        if found := ASSIGNMENT.fullmatch(word):
+            assigned[found[1]] = VARIABLE.sub(value, found[2])
+    return VARIABLE.sub(value, command)
+
+
+def touched(command: str | None) -> bool:
     import ledger_gate
 
-    tokens = tokens_of(command)
-    return is_ledger_cli(tokens) and any(t in ledger_gate.WRITE_COMMANDS for t in tokens)
+    return any(
+        is_ledger_cli(tokens) and any(t in ledger_gate.WRITE_COMMANDS for t in tokens)
+        for tokens in (tokens_of(command), tokens_of(expanded(command or "")))
+    )
 
 
 def restart(session):
@@ -317,7 +342,7 @@ def serve_ledgers():
         )
 
 
-def dispatch(payload):
+def dispatch(payload: dict[str, Any]) -> None:
     global LEDGER_DIR, SESSIONS
     LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
     SESSIONS = LEDGER_DIR / ".sessions"
@@ -338,16 +363,35 @@ def dispatch(payload):
     handler = HANDLERS.get(payload.get("hook_event_name"))
     if session is None or handler is None:
         return
-    import ledger_gate
+    state = gate_state(session["slug"], session["name"])
+    if state is not None:
+        handler(payload, session, state, sfile)
 
-    from scripts.swarm_ledger.storage import read_ledger
 
-    state = read_ledger(LEDGER_DIR, session["slug"], *GATE_READS)
-    if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or ledger_gate.closed(state):
-        return
-    if session["name"] not in state["_meta"].get("members", {}):
-        return
-    handler(payload, session, state, sfile)
+def gate_state(slug: str, name: str) -> dict[str, Any] | None:
+    """The ledger parts the gates read for member `name`; None when the ledger is unreadable, not its crew's or closed.
+
+    Members, events and policy, the done and out of scope flags of phases and follow ups, and only the tasks the
+    member's unhandled operator events target: never a whole tasks, phases or followups collection.
+    """
+    from scripts.swarm_ledger import ledger_gate
+    from scripts.swarm_ledger.storage import read_flags, read_ledger
+
+    state: dict[str, Any] | None = read_ledger(LEDGER_DIR, slug, *GATE_READS)
+    if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict):
+        return None
+    if name not in state["_meta"].get("members", {}):
+        return None
+    flags = read_flags(LEDGER_DIR, slug, ledger_gate.CLOSING, ledger_gate.CLOSED_FLAGS)
+    if not flags or ledger_gate.closed(flags):
+        return None
+    targets = ledger_gate.task_targets(state["_meta"], name)
+    if targets:
+        found: dict[str, Any] | None = read_ledger(LEDGER_DIR, slug, *targets)
+        if found is None:
+            return None
+        state["tasks"] = found.get("tasks", [])
+    return state
 
 
 def main():

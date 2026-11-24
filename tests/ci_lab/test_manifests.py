@@ -247,6 +247,58 @@ def test_actions_marks_a_request_github_never_answered_or_answered_with_a_server
     assert not isinstance(unreadable.value, FetchUnanswered)
 
 
+@pytest.mark.feature("lab-token-mint-status")
+@pytest.mark.parametrize(
+    ("status", "refusal"), [(403, FetchRefused), (499, FetchRefused), (500, FetchUnanswered), (599, FetchUnanswered)]
+)
+def test_actions_classifies_the_real_token_mint_refusal_by_its_http_status(
+    monkeypatch: pytest.MonkeyPatch, status: int, refusal: type[FetchRefused]
+) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "fixture")
+    monkeypatch.setattr(github_app.jwt, "encode", Mock(return_value="signed"))
+    mint = Mock(return_value=answer(status))
+    monkeypatch.setattr(requests, "post", mint)
+    get = Mock()
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(refusal) as refused:
+        Actions("example/repo").archive(zipped(9))
+    assert type(refused.value) is refusal
+    assert str(refused.value) == (
+        "GET actions/artifacts/9/zip token mint failed: GitHub App cannot supply scoped actions read credentials: "
+        f"GitHub answered {status}"
+    )
+    assert isinstance(refused.value.__cause__, github_app.GitAuthRefused)
+    assert refused.value.__cause__.status_code == status
+    get.assert_not_called()
+    assert mint.call_count == 1
+
+
+@pytest.mark.feature("lab-token-mint-status")
+def test_actions_keeps_a_mint_scope_refusal_permanent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "fixture")
+    monkeypatch.setattr(github_app.jwt, "encode", Mock(return_value="signed"))
+    mint = Mock(
+        return_value=answer(201, {"repositories": [{"full_name": "example/repo"}], "permissions": {"actions": "write"}})
+    )
+    monkeypatch.setattr(requests, "post", mint)
+    get = Mock()
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(FetchRefused) as refused:
+        Actions("example/repo").json(COMMIT_RUNS_PATH)
+    assert type(refused.value) is FetchRefused
+    assert str(refused.value) == (
+        f"GET {COMMIT_RUNS_PATH} token mint failed: GitHub App cannot supply scoped actions read credentials: "
+        "GitHub answered 201 with a token outside that scope"
+    )
+    assert isinstance(refused.value.__cause__, github_app.GitAuthRefused)
+    assert refused.value.__cause__.status_code is None
+    get.assert_not_called()
+
+
 @pytest.mark.feature("lab-dev-manifest-fetch")
 def test_the_fetcher_reads_each_repository_through_one_reader_of_its_own() -> None:
     made: list[str] = []

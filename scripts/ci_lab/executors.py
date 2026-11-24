@@ -64,7 +64,6 @@ TEST = "test"
 STATS = run_mutation.STATS
 MUTANT = "mutant"
 KILLED = "killed"
-LOCKFILE = "uv.lock"
 PYPROJECT = "pyproject.toml"
 INPUTS_BASE = "inputs.base"
 MASK = b"***"
@@ -171,7 +170,7 @@ class Mutation:
 
 def lockfile_digest(tree: Path) -> str:
     """Return the sha256 of the tree's lockfile, the key of its venv."""
-    return hashlib.sha256((tree / LOCKFILE).read_bytes()).hexdigest()
+    return hashlib.sha256((tree / venvs.LOCKFILE).read_bytes()).hexdigest()
 
 
 def _report(pod: Pod, record: Mapping[str, Any]) -> Path:
@@ -239,10 +238,11 @@ def static(pod: Pod, lease: Lease) -> Finished:
 
 def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
     """Run the lease's test batch on its head with the venv of the head's lockfile digest, the manifest and the flake
-    ledger, on as many workers as its slots; the report counts the git and uv cache lookups it made."""
+    ledger, on as many workers as its slots; the report counts the git and uv cache lookups it made and carries the
+    flake ledger rows of a batch its retry passed, with the unit key as run and the attempt count as run_attempt."""
     with pod.trees.shared(lease.head) as ((tree,), fetched):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
-        manifest = json.loads(suite.manifest.read_text())
+        manifest = json.loads(lease.unit.manifest)
         lab = run_tests.Lab(pod.runs, pod.ports, pod.whitelist, manifest, suite.flakes, pod.timeout, False)
         started = pod.clock()
         verdict = run_tests.run(lease.unit.members, tree, venv, lease.slots, lab)
@@ -254,6 +254,7 @@ def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
         "attempts": verdict.attempts,
         "seconds": seconds,
         caches.KEY: caches.report(fetched, [built]),
+        "flakes": [{**row, "run": lease.unit.key, "run_attempt": verdict.attempts} for row in verdict.flakes],
     }
     return Finished(verdict.outcome, _report(pod, record), verdict.log)
 

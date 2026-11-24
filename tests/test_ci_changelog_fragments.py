@@ -159,9 +159,63 @@ def test_lint_grades_the_pull_request_branch_with_the_protected_grader() -> None
     assert step["if"] == "${{ !cancelled() }}"
     assert step["env"] == {"BRANCH": "${{ github.head_ref || github.ref_name }}"}
     assert step["run"] == (
-        'if [[ -f "$RUNNER_TEMP/grader/scripts/ci_changelog_fragments.py" ]]; then\n'
-        '  cd "$RUNNER_TEMP/grader"\n'
-        "fi\n"
+        'cd "$RUNNER_TEMP/grader"\n'
         "python -m scripts.ci_changelog_fragments"
         ' --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" --branch "$BRANCH"\n'
     )
+
+
+@pytest.mark.feature("changelog-fragment-required-on-pull-request")
+@pytest.mark.parametrize("in_base", [False, True])
+def test_a_pull_request_that_adds_no_branch_fragment_is_red_naming_the_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, in_base: bool
+) -> None:
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    base, head = _trees(tmp_path, {})
+    if in_base:
+        for tree in (base, head):
+            _tree(Path(tree), {"changelog.d/team-eng-1.md": CLEAN_FIXTURE.read_text()})
+    assert main(["--base", base, "--head", head, "--branch", "team/eng-1"]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "Changelog fragments: 0 added, 1 problems",
+        "::error::changelog.d/team-eng-1.md: a pull request from the branch team/eng-1 adds no fragment at this path",
+    ]
+
+
+@pytest.mark.feature("changelog-fragment-required-on-pull-request")
+@pytest.mark.parametrize("event", ["workflow_dispatch", "push", "merge_group", None])
+def test_a_run_outside_a_pull_request_that_adds_no_fragment_stays_green(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, event: str | None
+) -> None:
+    if event is None:
+        monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    else:
+        monkeypatch.setenv("GITHUB_EVENT_NAME", event)
+    base, head = _trees(tmp_path, {})
+    assert main(["--base", base, "--head", head, "--branch", "team/eng-1"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["Changelog fragments: 0 added, 0 problems"]
+
+
+@pytest.mark.feature("changelog-fragment-required-on-pull-request")
+def test_a_pull_request_that_adds_its_branch_fragment_is_green(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    base, head = _trees(tmp_path, {"changelog.d/team-eng-1.md": CLEAN_FIXTURE.read_text()})
+    assert main(["--base", base, "--head", head, "--branch", "team/eng-1"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["Changelog fragments: 1 added, 0 problems"]
+
+
+@pytest.mark.feature("changelog-fragment-required-on-pull-request")
+def test_a_pull_request_that_adds_only_a_misnamed_fragment_is_red_naming_both(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    base, head = _trees(tmp_path, {"changelog.d/notes.md": CLEAN_FIXTURE.read_text()})
+    assert main(["--base", base, "--head", head, "--branch", "team/eng-1"]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "Changelog fragments: 1 added, 2 problems",
+        "::error::changelog.d/notes.md: a pull request from the branch team/eng-1 adds its fragment as "
+        "changelog.d/team-eng-1.md",
+        "::error::changelog.d/team-eng-1.md: a pull request from the branch team/eng-1 adds no fragment at this path",
+    ]

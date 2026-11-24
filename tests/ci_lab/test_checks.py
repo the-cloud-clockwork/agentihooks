@@ -224,6 +224,59 @@ def test_an_output_over_the_github_limit_lists_the_lines_that_end_exactly_at_it(
     assert rendered["summary"].endswith("Unit keys: 2 of 3 listed")
 
 
+@pytest.mark.feature("lab-static-check-log-tail")
+def test_a_unit_log_shows_fenced_under_its_unit_key_ahead_of_the_unit_keys() -> None:
+    rendered = checks.render(replace(OUTPUT, logs=((UNITS[0], "ruff failed\n"),)))
+    assert rendered["text"] == (
+        "Log tail of static `ruff-1f2e`:\n```\nruff failed\n\n```\n- static `ruff-1f2e`\n- tests `batch-9c0d`\n"
+    )
+    assert rendered["summary"] == checks.render(OUTPUT)["summary"]
+
+
+@pytest.mark.feature("lab-static-check-log-tail")
+def test_a_unit_log_keeps_its_last_4096_characters_in_a_fence_longer_than_its_backtick_runs() -> None:
+    log = "dropped head\n" + "y" * 5000 + "\n```text```\n"
+    rendered = checks.render(replace(OUTPUT, units=UNITS[:1], logs=((UNITS[0], log),)))
+    assert rendered["text"] == f"Log tail of static `ruff-1f2e`:\n````\n{log[-4096:]}\n````\n- static `ruff-1f2e`\n"
+
+
+@pytest.mark.feature("lab-static-check-log-tail")
+def test_unit_logs_that_fill_half_the_github_limit_exactly_all_show() -> None:
+    half, frame = 65535 // 2, len("Log tail of static `ruff-1f2e`:\n```\n\n```\n")
+    full = (half - frame) // (frame + 4096)
+    logs = (*((UNITS[0], "z" * 4096) for _ in range(full)), (UNITS[0], "w" * (half - full * (frame + 4096) - frame)))
+    rendered = checks.render(replace(OUTPUT, units=UNITS[:1], logs=logs))
+    shown = "".join(f"Log tail of static `ruff-1f2e`:\n```\n{log}\n```\n" for _, log in logs)
+    assert len(shown) == half
+    assert rendered["text"] == shown + "- static `ruff-1f2e`\n"
+
+
+@pytest.mark.feature("lab-static-check-log-tail")
+def test_unit_logs_past_half_the_github_limit_show_those_that_fit_and_a_note() -> None:
+    note = "Log tails of 9 failed units exceed half of GitHub's limit; the later ones are left out.\n"
+    half, frame = 65535 // 2, len("Log tail of static `ruff-1f2e`:\n```\n\n```\n")
+    full = (half - len(note) - frame) // (frame + 4096)
+    last = "w" * (half - len(note) - full * (frame + 4096) - frame)
+    logs = (*((UNITS[0], "z" * 4096) for _ in range(full)), (UNITS[0], last), (UNITS[0], "v" * 100))
+    rendered = checks.render(replace(OUTPUT, units=UNITS[:1], logs=logs))
+    shown = "".join(f"Log tail of static `ruff-1f2e`:\n```\n{log}\n```\n" for _, log in logs[:-1]) + note
+    assert len(logs) == 9
+    assert len(shown) == half
+    assert rendered["text"] == shown + "- static `ruff-1f2e`\n"
+
+
+@pytest.mark.feature("lab-static-check-log-tail")
+def test_unit_keys_after_a_unit_log_stop_at_the_github_limit_and_point_at_the_full_list() -> None:
+    units = tuple(Unit("tests", f"{index:064x}", ()) for index in range(2000))
+    rendered = checks.render(replace(OUTPUT, units=units, logs=((units[0], "q" * 4096),)))
+    block = f"Log tail of tests `{units[0].key}`:\n```\n{'q' * 4096}\n```\n"
+    tail = f"The full list of 2000 unit keys is at {OUTPUT.details}"
+    listed = (65535 - len(block) - len(tail)) // len(f"- tests `{units[0].key}`\n")
+    assert rendered["text"] == block + "".join(f"- tests `{unit.key}`\n" for unit in units[:listed]) + tail
+    assert len(rendered["text"]) <= 65535
+    assert rendered["summary"].endswith(f"Unit keys: {listed} of 2000 listed")
+
+
 def test_a_batch_posts_only_the_last_transition_of_each_check_run(monkeypatch: pytest.MonkeyPatch) -> None:
     created = [answer(201, {"id": run}) for run in (1, 2, 3)]
     poster, request, _ = lab(monkeypatch, *created, answer(200, {"id": 2}))
@@ -294,6 +347,7 @@ def test_a_batch_refuses_a_move_back_from_a_status_already_posted(monkeypatch: p
         (answer(403, text=LIMITED, headers={"x-ratelimit-reset": "99999"}), 900),
     ],
 )
+@pytest.mark.feature("lab-check-run-rate-limits")
 def test_a_rate_limited_post_waits_like_the_ci_budget_then_posts(
     monkeypatch: pytest.MonkeyPatch, limited: Mock, wait: float
 ) -> None:
@@ -312,6 +366,7 @@ def test_a_rate_limited_post_waits_like_the_ci_budget_then_posts(
         answer(404),
     ],
 )
+@pytest.mark.feature("lab-check-run-rate-limits")
 def test_a_refusal_outside_a_rate_limit_raises_without_waiting(monkeypatch: pytest.MonkeyPatch, refused: Mock) -> None:
     poster, _, sleep = lab(monkeypatch, refused)
     with pytest.raises(PostRefused) as error:
@@ -320,6 +375,7 @@ def test_a_refusal_outside_a_rate_limit_raises_without_waiting(monkeypatch: pyte
     sleep.assert_not_called()
 
 
+@pytest.mark.feature("lab-check-run-rate-limits")
 def test_the_backoff_stops_after_four_waits(monkeypatch: pytest.MonkeyPatch) -> None:
     limited = answer(403, text=SECONDARY)
     poster, request, sleep = lab(monkeypatch, *[limited] * 5)
@@ -333,6 +389,7 @@ def test_the_backoff_stops_after_four_waits(monkeypatch: pytest.MonkeyPatch) -> 
     assert request.call_args_list[-1].kwargs["json"]["name"] == "lab/lint"
 
 
+@pytest.mark.feature("lab-check-run-rate-limits")
 def test_the_backoff_waits_out_the_last_second_of_its_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     almost = answer(403, text=LIMITED, headers={"x-ratelimit-reset": "1898.5"})
     poster, request, sleep = lab(monkeypatch, almost, almost, answer(201, {"id": 7}))
@@ -341,6 +398,7 @@ def test_the_backoff_waits_out_the_last_second_of_its_budget(monkeypatch: pytest
     assert request.call_count == 3
 
 
+@pytest.mark.feature("lab-check-run-rate-limits")
 def test_the_backoff_never_waits_past_fifteen_minutes_for_one_request(monkeypatch: pytest.MonkeyPatch) -> None:
     soon = answer(403, text=LIMITED, headers={"x-ratelimit-reset": "1700"})
     late = answer(403, text=LIMITED, headers={"x-ratelimit-reset": "99999"})

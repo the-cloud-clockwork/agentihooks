@@ -23,6 +23,7 @@ LOCAL_ONLY = {
     ROOT / "scripts/ci_stats_seed.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
     ROOT / "scripts/swarm/prompt.py": {"issue_step", "manual_ship"},
+    ROOT / ".github/coverage/queue_watch.py": {"main"},
 }
 METADATA_ONLY = {
     ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"},
@@ -163,6 +164,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         ".github/coverage/flatten.py",
         ".github/coverage/parallel_xml.py",
         ".github/coverage/proxy.py",
+        ".github/coverage/queue_watch.py",
         ".github/coverage/sonar-retry.sh",
         ".github/scripts/pypi-retry.sh",
         "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh",
@@ -187,11 +189,14 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_gate_summary.py",
         "scripts/ci_hive_nats_grants.py",
         "scripts/ci_input_key.py",
+        "scripts/ci_lab/__main__.py",
+        "scripts/ci_lab/scheduler.py",
         "scripts/ci_lab_verdict.py",
         "scripts/ci_launch_hotfix.py",
         "scripts/ci_marker_vectors.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/arrival.py",
+        "scripts/ci_mutation/evidence.py",
         "scripts/ci_mutation/identity.py",
         "scripts/ci_mutation/measured.py",
         "scripts/ci_mutation/merge.py",
@@ -202,8 +207,10 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_release.sh",
         "scripts/ci_semgrep_floors.py",
         "scripts/ci_stats_seed.py",
+        "scripts/ci_unit_copy.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
+        "scripts/events/nats.py",
         "scripts/feature_map.py",
         "scripts/gates/build.py",
         "scripts/gates/claims.py",
@@ -250,6 +257,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/chart_hive_home.py",
         "tests/chart_hive_join.py",
         "tests/chart_hive_only.py",
+        "tests/chart_hive_pinned.py",
         "tests/chart_hive_rollout.py",
         "tests/chart_hub.py",
         "tests/chart_ledger_rollout.py",
@@ -303,6 +311,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/swarm_ledger/test_postgres_writer_floor.py",
         "tests/swarm_ledger/test_postgres_repository.py",
         "tests/test_memory_postgres_parity.py",
+        "tests/swarm_ledger/test_warm_writer_parity.py",
         "tests/ci_lab/test_sandbox.py",
         "tests/ci_lab/test_run_static.py",
         "tests/ci_lab/test_run_tests.py",
@@ -607,7 +616,7 @@ def test_sonar_takes_this_runs_coverage_through_the_runtime_token_as_the_shards_
     assert not API_CALL.search((ROOT / ".github/coverage/arrivals.py").read_text())
 
 
-def test_every_reader_of_the_unit_shard_count_matches_the_matrix():
+def test_every_reader_of_the_unit_shard_count_matches_the_matrix() -> None:
     jobs = _jobs()
     shards = jobs["unit"]["strategy"]["matrix"]["shard"]
     count = len(shards)
@@ -617,7 +626,7 @@ def test_every_reader_of_the_unit_shard_count_matches_the_matrix():
         run["env"]["SHARD"]
         == f"${{{{ matrix.shard }}}}/${{{{ matrix.python-version == '3.12' && {count} || {count} }}}}"
     )
-    floor = jobs["unit"]["strategy"]["matrix"]["exclude"]
+    floor = [entry for entry in jobs["unit"]["strategy"]["matrix"]["exclude"] if "shard" in entry]
     assert [entry["shard"] for entry in floor] == shards[12:]
     assert ci_test_plan.UNIT_JOBS == {f"unit (3.12, {shard})" for shard in shards}
     assert ci_test_plan.COVERAGE == {f"coverage-3.12-{shard}" for shard in shards}
@@ -655,7 +664,17 @@ def test_no_job_skips_on_a_tree_another_run_passed():
 def test_sonar_scans_the_graded_revision_without_reading_the_dev_head():
     steps = _jobs()["sonar"]["steps"]
     dev_head = re.compile(r"refs/heads/dev|origin[ /]\+?dev\b|:dev\b|github\.event\.after")
-    assert [step.get("name", step.get("uses")) for step in steps if dev_head.search(json.dumps(step))] == []
+    push_to_dev = "github.ref == 'refs/heads/dev'"
+    expression_fields = ("if", "timeout-minutes")
+    hazards = []
+    for step in steps:
+        scoped = dict(step)
+        for field in expression_fields:
+            if field in scoped and isinstance(scoped[field], str):
+                scoped[field] = scoped[field].replace(push_to_dev, "")
+        if dev_head.search(json.dumps(scoped)):
+            hazards.append(step.get("name", step.get("uses")))
+    assert hazards == []
     assert all("steps.current" not in step.get("if", "") for step in steps)
     scan = next(step for step in steps if step.get("name") == "SonarQube Scan")
     gate = next(step for step in steps if step.get("name") == "SonarQube Quality Gate")
