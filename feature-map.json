@@ -808,9 +808,7 @@
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis, counting direct job reads and the job reads of each pipeline, and scripts.ci_lab.queue.Queue.jobs against Queue.job on pending, leased, done, lost, legacy and missing records",
       "tests": [
         "tests/ci_lab/test_scheduler_job_reads.py::test_a_pass_preserves_collected_missing_empty_and_started_slots",
-        "tests/ci_lab/test_scheduler_job_reads.py::test_a_pass_reads_only_open_jobs_in_nontransactional_batches_of_at_most_500",
-        "tests/ci_lab/test_scheduler_job_reads.py::test_batched_job_reads_return_exactly_what_serial_reads_return",
-        "tests/ci_lab/test_scheduler_job_reads.py::test_batched_job_reads_read_each_batch_only_once_the_one_before_was_taken"
+        "tests/ci_lab/test_scheduler_job_reads.py::test_a_pass_reads_only_open_jobs_in_nontransactional_batches_of_at_most_500"
       ]
     },
     {

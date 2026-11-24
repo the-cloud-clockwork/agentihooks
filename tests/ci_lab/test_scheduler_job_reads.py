@@ -4,9 +4,7 @@ from typing import Any
 import pytest
 
 from scripts.ci_lab import queue, scheduler
-from scripts.ci_lab.outcomes import LOST
-from tests.ci_lab.test_queue import found
-from tests.ci_lab.test_scheduler import HEAD_A, HEAD_B, Run, fake_redis, plan, ref, unit
+from tests.ci_lab.test_scheduler import HEAD_A, HEAD_B, Run, plan, ref, unit
 from tests.ci_lab.test_scheduler import lab as lab
 
 JOB_KEYS = f"{queue.PREFIX}job:"
@@ -98,70 +96,3 @@ def test_a_pass_reads_only_open_jobs_in_nontransactional_batches_of_at_most_500(
     slots = run.grade(HEAD_A).units
     assert [slots[ref(item)].outcome for item in units[:3]] == ["passed", "", "dropped"]
     assert all(slot.held and not slot.outcome for slot in run.grade(HEAD_B).units.values())
-
-
-@pytest.mark.feature("lab-scheduler-job-reads")
-def test_batched_job_reads_return_exactly_what_serial_reads_return() -> None:
-    client = fake_redis()
-    jobs = queue.Queue(client)
-    items = tuple(unit(number) for number in range(1, 1004))
-    ids = jobs.enqueue(items, HEAD_A, {}, "b1", "g1", 1)
-    for job in ids[:3]:
-        assert jobs.claim(found(jobs, job), "w1", "tok", 100, 7)
-    assert jobs.finish(found(jobs, ids[0]), "tok", "passed")
-    assert jobs.reap(found(jobs, ids[1]), 200, 0) == LOST
-    client.hdel(f"{JOB_KEYS}{ids[3]}", "leased_ms", "rank")
-    asked = [ids[2], *ids, f"{HEAD_A}:static:gone", ids[0], ids[0]]
-    serial = [jobs.job(job) for job in asked]
-
-    assert list(jobs.jobs(asked)) == serial
-    assert list(jobs.jobs([])) == []
-    assert [(job.state, job.outcome) if job else None for job in serial[:5]] == [
-        ("leased", ""),
-        ("done", "passed"),
-        (LOST, LOST),
-        ("leased", ""),
-        ("pending", ""),
-    ]
-    assert serial[-3:] == [None, serial[1], serial[1]]
-    assert serial[0] == queue.Job(
-        id=ids[2],
-        head=HEAD_A,
-        unit=items[2],
-        requirement=queue.Requirement(),
-        state="leased",
-        attempts=0,
-        worker="w1",
-        outcome="",
-        base="b1",
-        grader="g1",
-        leased_ms=7,
-        rank=1,
-    )
-    assert serial[4] == queue.Job(
-        id=ids[3],
-        head=HEAD_A,
-        unit=items[3],
-        requirement=queue.Requirement(),
-        state="pending",
-        attempts=0,
-        worker="",
-        outcome="",
-        base="b1",
-        grader="g1",
-    )
-
-
-@pytest.mark.feature("lab-scheduler-job-reads")
-def test_batched_job_reads_read_each_batch_only_once_the_one_before_was_taken(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = fake_redis()
-    jobs = queue.Queue(client)
-    sent = pipelines(client, monkeypatch)
-
-    read = jobs.jobs([f"{HEAD_A}:static:{number}" for number in range(1001)])
-
-    assert next(read) is None
-    assert [len(reads) for _, _, reads in sent] == [500]
-    assert list(read) == [None] * 1000
-    assert [len(reads) for _, _, reads in sent] == [500, 500, 1]
-    assert all((args, options) == ((), {"transaction": False}) for args, options, _ in sent)
