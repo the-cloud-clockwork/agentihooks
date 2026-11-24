@@ -131,3 +131,14 @@ def test_the_summary_of_a_production_sized_ledger_fits_one_reply() -> None:
     assert built["_meta"]["closed"]["tasks"]["ids"] == ["t-gone-0"]
     assert built["_meta"]["closed"]["followups"]["ids"] == []
     assert built["_meta"]["closed"]["tasks"]["hidden"] == 5301 - ledger_closed.KEPT
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_the_summary_crew_holds_only_members_seen_in_the_active_window() -> None:
+    now = 10 * ledger_server.CREW_WINDOW_MS
+    members = {
+        f"agent-{n}": {"role": "member", "last_seen": now - ledger_server.CREW_WINDOW_MS - 1} for n in range(5600)
+    }
+    members["agent-here"] = {"role": "member", "last_seen": now - 5}
+    crew = ledger_server.active_crew({"members": members}, now)
+    assert [row["last_seen"] for row in crew] == [now - 5]

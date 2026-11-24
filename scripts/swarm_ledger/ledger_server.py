@@ -370,6 +370,16 @@ def stream_resources(slug: str) -> dict:
 SUMMARIES: dict[str, tuple[object, dict]] = {}
 
 
+CREW_WINDOW_MS = 2 * 3600 * 1000
+
+
+def active_crew(meta: dict[str, Any], now: int) -> list[dict[str, Any]]:
+    """The crew rows of members seen within the page's active window, the only ones its stats and sync line use."""
+    members: dict[str, Any] = meta.get("members") or {}
+    seen = {name: member for name, member in members.items() if member.get("last_seen", 0) >= now - CREW_WINDOW_MS}
+    return ledger_gate.crew({**meta, "members": seen})
+
+
 def ledger_summary(slug: str) -> dict:
     from scripts.swarm_ledger.api import summary, task_list
 
@@ -379,7 +389,7 @@ def ledger_summary(slug: str) -> dict:
         return held[1]
     parts = repository.read(slug, *summary.READS)
     built = summary.build(parts, stored[2], doctor_holds(slug), PAGE_LIMITS)
-    built["_meta"].update(page_version=served_version(), crew=ledger_gate.crew(parts.get("_meta") or {}))
+    built["_meta"].update(page_version=served_version(), crew=active_crew(parts.get("_meta") or {}, core.now_ms()))
     SUMMARIES[slug] = (stored, built)
     return built
 
