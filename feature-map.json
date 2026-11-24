@@ -9129,7 +9129,7 @@
       "id": "build-gate-repository-named-areas",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2498",
-      "behaviour": "The build gate matches a kept plan area or task territory whose first part names the edited repository, written antoncore/k8s/charts or in the repository colon path form antoncore:k8s/charts, against the path inside that repository, for an Edit, Write, MultiEdit or NotebookEdit call or a git commit in its primary checkout or any worktree; Serena edits carry no repository; a plain area matches as before and an area naming another repository, in either form, does not match.",
+      "behaviour": "The build gate matches a kept plan area or task territory whose first part names the edited repository, written antoncore/k8s/charts or in the repository colon path form antoncore:k8s/charts, against the path inside that repository, for an Edit, Write, MultiEdit or NotebookEdit call or a git commit in its primary checkout or any worktree; a plain area matches as before and an area naming another repository, in either form, does not match.",
       "seam": "scripts.gates.build.within with the edited repository, and BuildGate.touched pairing each path with its repository",
       "tests": [
         "tests/gates/test_build.py::TestRepositoryNamedAreas::test_an_area_naming_the_repository_allows_an_edit_inside_it",
@@ -15430,6 +15430,22 @@
         "tests/ci_lab/test_plant_test_units.py::test_a_plant_unit_job_posts_its_check",
         "tests/ci_lab/test_plant_test_units.py::test_a_plant_frame_keeps_the_unit_job_only_at_the_pull_request_tier",
         "tests/ci_lab/test_plant_test_units.py::test_a_plant_selects_changed_test_modules_whose_tests_are_class_methods"
+      ]
+    },
+    {
+      "id": "build-gate-serena-repository-areas",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2844",
+      "behaviour": "The build gate resolves a Serena edit repository from the worktree the calling agent activated in the Serena router, else the one its parent session activated, else the call working directory git root, matches slash and colon repository prefixed plan and territory areas, preserves plain areas and an unknown repository, refuses outside paths and other repositories, and leaves dry runs exempt.",
+      "seam": "Call.from_payload carrying the hook agent id, and BuildGate.touched repository resolution before within checks plan and territory areas",
+      "tests": [
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_call_directory_supplies_serena_repository",
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_serena_repository_territory_widens_the_plan",
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_active_parent_repository_takes_precedence",
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_a_sub_agent_activation_names_its_own_repository",
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_serena_worktree_uses_the_repository_name",
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_unknown_repository_keeps_the_relative_scope",
+        "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_serena_dry_run_does_not_resolve_a_repository"
       ]
     }
   ],
