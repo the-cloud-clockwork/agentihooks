@@ -246,11 +246,45 @@ def test_an_expired_scan_marker_loads_notes_written_without_the_index(
 
     monkeypatch.setattr(store.redis, "scan_iter", recorded)
     held = memory.scoped("sw", "eng-1@sw")
-    store.redis.delete(f"{memory.learned_index('sw')}:listed")
+    store.redis.delete(f"{memory.learned_index('sw')}:listed", f"{memory.learned_index('sw')}:claim")
     expired = memory.scoped("sw", "eng-1@sw")
     assert [row["text"] for row in held] == ["own note"]
     assert [row["text"] for row in expired] == ["unindexed canon", "own note"]
     assert len(scans) == 1
+
+
+@pytest.mark.feature("swarm-learned-scope")
+def test_a_failed_scan_leaves_the_index_unlisted_and_a_held_claim_reads_the_index(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from scripts.inbox.seats import SeatMemory
+
+    store, _, _ = env
+    memory = SeatMemory(store.redis)
+    index = memory.learned_index("sw")
+    store.memory.learn("eng-1@sw", "previous occupant", "own note", 1, "note")
+    entry = {"occupant": "older release", "text": "unindexed canon", "at": 2, "maturity": "canon"}
+    store.redis.rpush(memory.key("ci-1@sw", "learned"), json.dumps(entry))
+    scan = store.redis.scan_iter
+
+    def lost(**options: Any) -> Any:
+        raise TimeoutError("scan timed out")
+
+    monkeypatch.setattr(store.redis, "scan_iter", lost)
+    with pytest.raises(TimeoutError):
+        memory.scoped("sw", "eng-1@sw")
+    held = memory.scoped("sw", "eng-1@sw")
+    assert not store.redis.exists(f"{index}:listed")
+    assert store.redis.get(f"{index}:claim") == "1"
+    assert [row["text"] for row in held] == ["own note"]
+    store.redis.delete(f"{index}:claim")
+    monkeypatch.setattr(store.redis, "scan_iter", scan)
+    retried = memory.scoped("sw", "eng-1@sw")
+    assert [row["text"] for row in retried] == ["unindexed canon", "own note"]
+    assert store.redis.exists(f"{index}:listed")
 
 
 @pytest.mark.feature("swarm-learned-scope")

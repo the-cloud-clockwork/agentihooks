@@ -17,6 +17,7 @@ PREFIX = f"{ROOT}:seat"
 OCCUPY_ATTEMPTS = 5
 SCAN_PAGE = 1000
 LEARNED_RESCAN_S = 3600  # pragma: no mutate
+LEARNED_CLAIM_S = 60  # pragma: no mutate
 MEMORY_KINDS = ("history", "recaps", "learned")
 MATURITIES = ("data", "note", "insight", "canon")
 DEFAULT_MATURITY = "note"
@@ -225,14 +226,17 @@ class SeatMemory:
 
     def _learned_seats(self, slug: str) -> set[str]:
         """The addresses learn recorded for the swarm, with the seats a keyspace scan finds; one caller per rescan
-        window claims that scan, so notes a writer of an older release adds without the index still load."""
+        window claims that scan and marks the index listed only once its seats are added, so a failed scan is retried
+        after the claim lapses and notes a writer of an older release adds without the index still load."""
         index = self.learned_index(slug)
-        if self.redis.set(f"{index}:listed", 1, nx=True, ex=LEARNED_RESCAN_S):
+        listed = f"{index}:listed"
+        if not self.redis.exists(listed) and self.redis.set(f"{index}:claim", 1, nx=True, ex=LEARNED_CLAIM_S):
             pattern = f"{PREFIX}:*@{slug}:learned"
             found: list[str] = list(self.redis.scan_iter(match=pattern, count=SCAN_PAGE))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             seats = [key[len(PREFIX) + 1 : -len(":learned")] for key in found]
             if seats:
                 self.redis.sadd(index, *seats)
+            self.redis.set(listed, 1, ex=LEARNED_RESCAN_S)
         members: set[str] = self.redis.smembers(index)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         return members
 

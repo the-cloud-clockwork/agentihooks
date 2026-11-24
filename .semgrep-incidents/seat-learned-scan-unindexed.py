@@ -35,6 +35,17 @@ def claimed(redis: Any, slug: str) -> set[Any]:
     return redis.smembers(index)
 
 
+def claimed_after_listed(redis: Any, slug: str) -> set[Any]:
+    index = f"{PREFIX}-learned:{slug}"
+    if not redis.exists(f"{index}:listed") and redis.set(f"{index}:claim", 1, nx=True, ex=60):
+        pattern = f"{PREFIX}:*@{slug}:learned"
+        # ok: seat-learned-scan-unindexed
+        found = list(redis.scan_iter(match=pattern, count=1000))
+        redis.sadd(index, *found)
+        redis.set(f"{index}:listed", 1, ex=3600)
+    return redis.smembers(index)
+
+
 def unclaimed(redis: Any, slug: str) -> list[Any]:
     if redis.set(f"{PREFIX}-learned:{slug}:listed", 1):
         # ruleid: seat-learned-scan-unindexed

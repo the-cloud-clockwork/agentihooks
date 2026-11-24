@@ -30,5 +30,5 @@ rules:
           if not $R2.exists(...):
               ...
       - pattern-not-inside: |
-          if $R2.set(..., nx=True, ...):
+          if <... $R2.set(..., nx=True, ...) ...>:
               ...
