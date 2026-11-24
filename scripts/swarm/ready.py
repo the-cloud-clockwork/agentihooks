@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from scripts.gates import intent
 from scripts.inbox.store import DuplicateItem, InboxStore
@@ -422,10 +422,16 @@ def _journal(run, task_id, url):
     return run.journal(url, context={"swarm": run.slug, "task": task_id, "timer": os.getpid(), "by": "merge watcher"})
 
 
-def _queue(run, row, found):
+def _priority(run: Pass, url: str) -> Callable[[], dict[str, Any] | None]:
+    from scripts.swarm import queue_priority
+
+    return lambda: queue_priority.automatic(cast(RedisStore, run.store), run.slug, url, run.ledger)
+
+
+def _queue(run: Pass, row: dict[str, Any], found: dict[str, Any]) -> list[str]:
     task_id, url = row["id"], found["url"]
     try:
-        run.queue("queue", url, journal=_journal(run, task_id, url))
+        run.queue("queue", url, journal=_journal(run, task_id, url), priority=_priority(run, url))
     except SwarmError as exc:
         if str(exc).startswith(REFUSALS):
             found["refusals"] = found.get("refusals", 0) + 1
@@ -541,7 +547,7 @@ def _recover(run: Pass, row: dict[str, Any], found: dict[str, Any]) -> list[str]
     if fresh.merge_problem or not fresh.resolved:
         return _retry(run, row, found, f"{url} for task {task_id} is not yet mergeable and green; it retries later")
     try:
-        run.queue("queue", url, journal=_journal(run, task_id, url))
+        run.queue("queue", url, journal=_journal(run, task_id, url), priority=_priority(run, url))
     except SwarmError as exc:
         run.ledger.raise_alert(run.slug, ALERT_SOURCE, REQUEUE_FAILED.format(url=url, task=task_id, why=exc))
         return _retry(run, row, found, f"could not requeue {url} for task {task_id}: {exc}")

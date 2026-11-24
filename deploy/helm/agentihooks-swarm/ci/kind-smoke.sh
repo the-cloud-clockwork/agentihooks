@@ -36,6 +36,7 @@ python3 tests/chart_scheduler_state.py "$chart"
 python3 tests/chart_nats.py "$chart"
 python3 tests/chart_scratch_swarms.py "$chart"
 python3 tests/chart_hive_capabilities.py "$chart"
+python3 tests/chart_hive_pinned.py "$chart"
 
 finish() {
   status=$?
@@ -47,7 +48,7 @@ finish() {
   if [[ -n $terminal ]]; then
     wait "$terminal" || true
   fi
-  rm -f "$load_lock" "${ledger_values:-}"
+  rm -f "$load_lock" "${ledger_values:-}" || true
   if [[ -n $route ]]; then
     wait "$route" || true
   fi
@@ -55,7 +56,7 @@ finish() {
     wait "$drain_proof" || true
   fi
   if [[ -n $ca_dir ]]; then
-    rm -rf "$ca_dir"
+    rm -rf "$ca_dir" || true
   fi
   if [[ $status -ne 0 ]]; then
     kubectl get pods -o wide || true
@@ -100,13 +101,12 @@ keep_layers() {
   touch "$KIND_LAYER_CACHE/complete"
 }
 (
-  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm >/dev/null
+  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm >/dev/null
   mapfile -t terminal_layers < <(layers terminal)
   docker build -q "${terminal_layers[@]}" --build-arg IMAGE="$image" --target packages \
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
   packages=$!
   trap 'status=$?; wait "$packages" || true; exit "$status"' EXIT
-  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm >/dev/null
   mapfile -t swarm_layers < <(layers swarm)
   docker build -q -t "$image" "${swarm_layers[@]}" . >/dev/null
   printf 'main fixture image built\n'
@@ -667,7 +667,26 @@ for probe in startup liveness readiness; do
     printf 'the controller %s HTTP probe has path %s port %s host %s\n' "$probe" "$wired" "$port" "$host" >&2
     exit 1
   fi
-  kubectl exec "deployment/$release-controller" -c controller -- env PROBE_URL="http://127.0.0.1:8780$wired" PROBE_HOST="$host" python -c 'import os, urllib.request; request = urllib.request.Request(os.environ["PROBE_URL"], headers={"Host": os.environ["PROBE_HOST"]}); print(urllib.request.urlopen(request, timeout=8).read().decode())'
+  deadline=$((SECONDS + 60))
+  passed=false
+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+    if kubectl exec "deployment/$release-controller" -c controller -- env PROBE_URL="http://127.0.0.1:8780$wired" PROBE_HOST="$host" python -c 'import os, urllib.error, urllib.request
+request = urllib.request.Request(os.environ["PROBE_URL"], headers={"Host": os.environ["PROBE_HOST"]})
+try:
+    print(urllib.request.urlopen(request, timeout=8).read().decode())
+except urllib.error.HTTPError as error:
+    print(error.read().decode(), flush=True)
+    raise'; then
+      passed=true
+      break
+    fi
+    [[ "$probe" == readiness ]] || break
+    sleep 1
+  done
+  if [[ "$passed" != true || "$SECONDS" -ge "$deadline" ]]; then
+    printf 'controller %s HTTP probe failed\n' "$probe" >&2
+    exit 1
+  fi
   printf 'controller %s HTTP probe passed\n' "$probe"
 done
 kubectl wait pod "${controller[@]}" --for=condition=Ready --timeout 2m

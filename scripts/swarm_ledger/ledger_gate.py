@@ -4,6 +4,7 @@ Pure functions over a ledger's `_meta` and document; the CLI, the server and the
 """
 
 import re
+from typing import Any
 
 from scripts.swarm_ledger import ports
 
@@ -28,6 +29,8 @@ WRITE_COMMANDS = (
     "answer",
 )
 WATCH_STALE_SECONDS = 20
+CLOSING = ("phases", "followups")
+CLOSED_FLAGS = ("done", "out_of_scope")
 
 
 def policy(doc):
@@ -77,6 +80,20 @@ def operator_events(meta):
         for index, event in enumerate(meta.get("events", []))
         if event.get("by") == "operator" and event.get("kind") not in IGNORED_KINDS
     ]
+
+
+def task_targets(meta: dict[str, Any], name: str) -> tuple[str, ...]:
+    """The `tasks/<id>` targets of the operator events `name` has not handled, the only tasks owner() reads for it."""
+    resolve_name = ports.swarm().naming.resolve_name
+
+    members: dict[str, dict[str, Any]] = meta.get("members", {})
+    me = members.get(resolve_name(name))
+    if me is None:
+        return ()
+    since = me.get("handled_rev", 0)
+    events: list[tuple[int, dict[str, Any]]] = operator_events(meta)
+    targets = (str(event.get("target")) for _, event in events if event.get("rev", 0) > since)
+    return tuple(dict.fromkeys(target for target in targets if target.startswith("tasks/")))
 
 
 def pending_for(meta, name, events, tasks, owners):

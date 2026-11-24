@@ -368,7 +368,10 @@ def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job: str
     names = [step.get("name") for step in steps]
     take = steps[names.index("Take the helper scripts from the workflow revision")]
     install = steps[names.index("Install dependencies")]
-    fetch = "git fetch --no-tags --depth=1" if job == "mutation-replan" else "git fetch --no-tags"
+    fetch = {
+        "mutation-replan": "git fetch --no-tags --depth=1",
+        "mutation-refine": "git fetch --no-tags --negotiation-tip=HEAD",
+    }.get(job, "git fetch --no-tags")
     assert names.index("Take the helper scripts from the workflow revision") < names.index("Install dependencies")
     assert take.get("if") == install.get("if")
     assert take["run"].splitlines() == [

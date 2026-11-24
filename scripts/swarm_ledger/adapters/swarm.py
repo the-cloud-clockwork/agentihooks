@@ -1,3 +1,5 @@
+from types import ModuleType
+
 from scripts.swarm_ledger import ports
 
 
@@ -43,6 +45,18 @@ class Swarm(ports.Swarm):
         from scripts.swarm import claim_hold
 
         return claim_hold
+
+    @property
+    def focus_check(self) -> ModuleType:
+        from scripts.swarm.health import focus_check
+
+        return focus_check
+
+    @property
+    def order_check(self) -> ModuleType:
+        from scripts.swarm.health import order_check
+
+        return order_check
 
     @property
     def idle(self):

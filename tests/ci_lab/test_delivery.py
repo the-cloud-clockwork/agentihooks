@@ -84,6 +84,9 @@ def test_all_mutants_is_kept(tmp_path: Path) -> None:
         block(check_prefix=""),
         block(authoritative="lint"),
         block(authoritative=["lint", "lint"]),
+        block(queue={"authoritative": "lint"}),
+        block(queue={"authoritative": ["lint", "lint"]}),
+        block(queue={"authoritative": [""]}),
         block(extra=1),
         {"authoritative": []},
     ],
@@ -124,6 +127,32 @@ def test_cutover_refuses_an_unknown_gate(tmp_path: Path, capsys: pytest.CaptureF
     assert delivery.main(["cutover", "--grader-root", str(grader)], {"GITHUB_OUTPUT": str(output)}) == 1
     assert not output.exists()
     assert "ghost" in capsys.readouterr().err
+
+
+def test_queue_cutover_reads_the_grader_queue_gates(tmp_path: Path) -> None:
+    grader = tree(tmp_path / "grader", block(queue={"authoritative": ["unit", "lint"], "full_suite_entries": 3}))
+    tree(tmp_path / "head", block(queue={"authoritative": ["type-gate"]}))
+    assert delivery.queue_cutover(grader, {}) == ["unit", "lint"]
+
+
+@pytest.mark.parametrize("lab", [block(), block(queue={}), block(queue={"full_suite_entries": 3})])
+def test_queue_cutover_is_empty_without_queue_gates(tmp_path: Path, lab: dict[str, object]) -> None:
+    assert delivery.queue_cutover(tree(tmp_path, lab), {}) == []
+
+
+@pytest.mark.parametrize(("value", "skip"), [("true", []), ("false", ["unit"]), ("1", ["unit"]), ("TRUE", ["unit"])])
+def test_lab_off_empties_the_queue_gates(tmp_path: Path, value: str, skip: list[str]) -> None:
+    grader = tree(tmp_path, block(queue={"authoritative": ["unit"]}))
+    assert delivery.queue_cutover(grader, {"AGENTIHOOKS_LAB_OFF": value}) == skip
+
+
+def test_an_unknown_queue_gate_is_an_error(tmp_path: Path) -> None:
+    grader = tree(tmp_path, block(authoritative=["lint"], queue={"authoritative": ["unit", "phantom", "ghost"]}))
+    with pytest.raises(delivery.DeliveryError) as unknown:
+        delivery.queue_cutover(grader, {})
+    assert str(unknown.value) == "lab.queue.authoritative names unknown gates: ghost, phantom"
+    with pytest.raises(delivery.DeliveryError, match="lab.queue.authoritative"):
+        delivery.authoritative(grader)
 
 
 def test_runtime_config_validates() -> None:
@@ -171,6 +200,7 @@ def test_load_runtime_reads_the_mounted_file(tmp_path: Path) -> None:
 
 def test_repository_file_has_an_empty_authoritative_list() -> None:
     assert delivery.authoritative(ROOT) == ()
+    assert delivery.queue_cutover(ROOT, {}) == []
     assert delivery.lab(ROOT)["check_prefix"] == "lab"
 
 

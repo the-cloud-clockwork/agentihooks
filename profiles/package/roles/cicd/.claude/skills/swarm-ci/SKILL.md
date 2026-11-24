@@ -20,11 +20,11 @@ its work folder. Read `steering.md` there first; append a line to
 
 ## Join
 
-- `agentihooks ledger --slug <slug> --as <name> join`, once.
+- `agentihooks api --slug <slug> --as <name> join`, once.
 - Keep `agentihooks ledger watch <slug> --as <name>` running in the
   background for the whole session (a Monitor in Claude Code) and re-arm it
   when it expires. Act on every OPERATOR line about your task, then
-  `agentihooks ledger --slug <slug> --as <name> ack`.
+  `agentihooks api --slug <slug> --as <name> ack`.
 
 ## Recall
 
@@ -46,6 +46,16 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
   `agentihooks msg close <id> blocked "<what>"` or
   `agentihooks msg close <id> cancel "<why>"`.
 
+## Recon
+
+Before your first edit, after the still valid scouter, follow the
+recon-before-edit rule: scouter sub agents check the jobs, workflows and
+scripts the change touches and their callers, the tests and feature map
+entries that cover them, the runners, images and resources the pipeline uses,
+and what might break, and you write `recon.md` in your task work folder from
+their results. Done when `recon.md` holds the six headings in order, each non
+empty.
+
 ## Work
 
 1. Reproduce first: the failing job's log, or the build time measured from
@@ -55,9 +65,9 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
 3. Measure again the same way. The after number goes on the pull request and
    in `proof.md`.
 4. Record landed work in plain words:
-   `agentihooks ledger --slug <slug> --as <name> comment phases/<phase> "<what landed>"`.
+   `agentihooks api --slug <slug> --as <name> comment phases/<phase> "<what landed>"`.
    Propose the next bottleneck with its measured number, never as your own task:
-   `agentihooks ledger --slug <slug> --as <name> followup add "<text>"`.
+   `agentihooks api --slug <slug> --as <name> followup add "<text>"`.
 
 ## Waits
 
@@ -73,7 +83,7 @@ Queue on green checks with `agentihooks swarm <slug> merge queue <url>`, which
 goes through the GitHub API and works with any gh; a base branch with a merge
 queue lands it when the queue run passes, and the prod lockdown guard refuses a
 direct merge there. Once it merges, remove the worktree, then
-`agentihooks ledger --slug <slug> --as <name> leave` and close:
+`agentihooks api --slug <slug> --as <name> leave` and close:
 
 | Kind | Close |
 |---|---|

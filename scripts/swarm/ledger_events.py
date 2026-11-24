@@ -28,7 +28,6 @@ from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
 from scripts.swarm_v2 import masters
-from scripts.tick import pool
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 
@@ -528,18 +527,13 @@ def views(
         'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}}',
         'file(path:".github/workflows"){object{id}}',
     )
-    for start in range(0, len(pending), 20):
-        batch = pending[start : start + 20]
-        fields = [
-            f"p{i}:" + selection.replace("$url", json.dumps(url)).replace("$number", _number(url))
-            for i, url in enumerate(batch)
+    batches = [pending[start : start + 20] for start in range(0, len(pending), 20)]
+    with ThreadPoolExecutor() as workers:
+        reads = [
+            workers.submit(copy_context().run, _views_batch, batch, selection, port, cache, ttl) for batch in batches
         ]
-        query = "{" + " ".join(fields) + "}"
-        data = (
-            github_reads.snapshot(query, time.time(), lambda: _graphql(query, port), ttl)
-            if cache is not None
-            else _graphql(query, port)
-        )
+        documents = [read.result() for read in reads]
+    for batch, data in zip(batches, documents):
         gates = _workflow_gates(data, port, cache)
         for i, url in enumerate(batch):
             raw = data.get(f"p{i}")
@@ -554,6 +548,21 @@ def views(
     return found
 
 
+def _views_batch(
+    batch: list[str], selection: str, port: SourceControl, cache: object | None, ttl: float
+) -> dict[str, Any]:
+    """Return the answer of one document reading up to twenty pull requests in ``batch`` through ``selection``, served
+    from the shared snapshot of the same document for ``ttl`` seconds when ``cache`` is given."""
+    fields = [
+        f"p{i}:" + selection.replace("$url", json.dumps(url)).replace("$number", _number(url))
+        for i, url in enumerate(batch)
+    ]
+    query = "{" + " ".join(fields) + "}"
+    if cache is None:
+        return _graphql(query, port)
+    return github_reads.snapshot(query, time.time(), lambda: _graphql(query, port), ttl)
+
+
 def fresh_reader(
     earlier: Callable[[str], PullRequest | None], cache: object | None = None
 ) -> Callable[[str], PullRequest | None]:
@@ -565,7 +574,7 @@ def fresh_reader(
         known = getattr(earlier, "snapshots", {})
         shared = [target for target, pull in known.items() if pull is not None and pull.state == "OPEN"]
         if not read and shared and not run_wait.backing_off():
-            read.update(views(shared, cache=cache, ttl=0))
+            read.update(timing.timed(views, shared, cache=cache, ttl=0))
         pull = read.get(url)
         return pull if pull is not None else view(url)
 
@@ -608,8 +617,7 @@ def _pull_batch(batch: list[str], port: SourceControl) -> dict[str, dict[str, An
 
 def _graphql(query: str, source: SourceControl, **variables: str) -> dict[str, Any]:
     try:
-        with pool.limit("github"):
-            result = _graph_body(query, source, variables)
+        result = _graph_body(query, source, variables)
         errors = result.get("errors", [])
         data = result["data"]
         if not isinstance(data, dict):
@@ -720,7 +728,7 @@ class Mail:
         self.store.redis.set(marker, 1, ex=SENT_TTL_S)
         return True
 
-    def send(self, key, address, text, ref="", fyi=False):
+    def send(self, key: str, address: str, text: str, ref: str = "", fyi: bool = False) -> list[str]:
         if self.once(key, lambda: self.inbox.send(SENDER, address, text, ref=ref, fyi=fyi)):
             return [f"told {address}: {key}"]
         return []
@@ -898,7 +906,7 @@ def _describe(slug, event, tasks):
         return (
             f"{by} added a follow-up {item} on ledger {slug}: {event.get('text', '')}\n"
             "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
-            f"Close it: agentihooks ledger --slug {slug} followup done {item}"
+            f"Close it: agentihooks api --slug {slug} followup done {item}"
         )
     if kind == "added" and name == "questions":
         return f"{by} asked on ledger {slug}: {event.get('text', '')}\nAnswer it, or raise it to the operator."
@@ -928,7 +936,7 @@ def _followups(mail, doc, events, ledger, now_ms):
                 f"A follow-up {followup['id']} on ledger {mail.slug} is still open fifteen minutes "
                 f"after {event['by']} added it: {followup['text']}\n"
                 "Decide it now, or it goes to the operator's Priorities.\n"
-                f"Close it: agentihooks ledger --slug {mail.slug} followup done {followup['id']}"
+                f"Close it: agentihooks api --slug {mail.slug} followup done {followup['id']}"
             )
             sent += mail.send(f"{target}:raised", mail.owner(target), text, ref=f"{mail.slug}:event:{target}:{now_ms}")
         if age >= FOLLOWUP_OPERATOR_MS:

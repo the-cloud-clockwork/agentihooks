@@ -24,6 +24,8 @@ For publication retries, see [publishing unchanged files](swarm.md#publishing-un
 
 For publication during a swarm panic, see [publishing under panic mode](swarm.md#publishing-under-panic-mode): the registered fix and git config rule publish shares with the panic push guard, the refusal and what it leaves behind, publishing a fix and troubleshooting.
 
+For publication through the CI lab, see [publishing through the lab](swarm.md#publishing-through-the-lab): `--via lab` and `--direct`, the grade before origin, the wait limits, the result's `lab_grade` field, each refusal and a repeat on an unchanged head.
+
 For resumed work, see [publishing after a successor prepares a branch](swarm.md#publishing-after-a-successor-prepares-a-branch): branch selection, restacking, repository configuration and publication retries. See [recording a published upstream branch](swarm.md#recording-a-published-upstream-branch) for successor tracking setup, task metadata and pull request head checks.
 
 For an existing pull request, see [continuing with one push](swarm.md#continue-an-existing-pull-request-with-one-push): retained branch selection, Stop behavior and lease failures.
@@ -55,6 +57,8 @@ See [one tick per machine and leftover tick reaping](swarm.md#one-tick-per-machi
 See [hives](hives.md) for joining machines, roles, placement, launches on a hive, failover and fencing, and [deployment modes](../reference/deployment-modes.md) for where the controller, ledger and Redis run.
 
 See [hive endpoint limits](hives.md#hive-endpoint-limits) for the hive endpoint request, handler and Redis time limits, the 503 it answers when Redis does not reply, and what a client does after it.
+
+See [what an admission reads](hives.md#what-an-admission-reads) for the narrow ledger reads an events hub admission makes instead of the whole export, the order of its local checks and the ledger's claim gate verdict, the tasks selection with its parameters and refusal, the timing marks of its `late:` line, guards and troubleshooting.
 
 See [handoff continuity on admission](hives.md#handoff-continuity-on-admission) for the handoff text, envelope and transfer an events hub admission hands its successor, when the transfer binds, how a reopen or a refused attach hands it back, and how to check it on a live swarm.
 

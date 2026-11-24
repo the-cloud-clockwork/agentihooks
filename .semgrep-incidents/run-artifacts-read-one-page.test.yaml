@@ -1,0 +1,43 @@
+name: fixture
+on: merge_group
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read one page of a run's artifacts
+        # ruleid: run-artifacts-read-one-page
+        run: |
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&status=success&per_page=1" --jq '.workflow_runs[0].id')
+          kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | .name] | join(" ")') "
+          [[ "$kept" == *" durations-merged "* ]]
+
+      - name: Read the default page of a run's artifacts
+        # ruleid: run-artifacts-read-one-page
+        run: gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" --jq '.artifacts[].name'
+
+      - name: Read one page of a run's artifacts over two lines
+        # ruleid: run-artifacts-read-one-page
+        run: |
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '.artifacts[]' > artifacts.jsonl
+
+      - name: Ask for the artifact by name
+        # ok: run-artifacts-read-one-page
+        run: |
+          kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=durations-merged" --jq '[.artifacts[] | select(.expired | not)] | length')
+          [[ "$kept" -gt 0 ]]
+
+      - name: Ask for the artifact by name after the page size
+        # ok: run-artifacts-read-one-page
+        run: gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100&name=coverage-baseline" --jq '.artifacts[].id'
+
+      - name: Read every page of a run's artifacts
+        # ok: run-artifacts-read-one-page
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '.artifacts[]' > artifacts.jsonl
+
+      - name: Read every page of a run's artifacts over two lines
+        # ok: run-artifacts-read-one-page
+        run: |
+          gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '.artifacts[]' > artifacts.jsonl

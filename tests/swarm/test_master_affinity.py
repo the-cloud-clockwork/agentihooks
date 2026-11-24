@@ -19,8 +19,8 @@ from tests.swarm.test_tick import FakeRuntime, masters, tasks
 store, env = test_tick.store, test_cli.env
 
 FRONTIER = {
-    "claude": ["--model", "opus", "--effort", "high"],
-    "codex": ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'],
+    "claude": ["--model", "opus", "--effort", "xhigh"],
+    "codex": ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="xhigh"'],
 }
 OTHER = {"claude": "codex", "codex": "claude"}
 

@@ -1,0 +1,6 @@
+{
+  "scripts/hive/master_notice.py:scripts.hive.master_notice.x__data:5cee0e7eecfc898dcaa5ee25598cb3af9a4d426096eac1e7857a5536c317c9a1": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns exit.data unchanged at run time and never reads its type argument, so _data and its callers ended and lost give identical output."
+  }
+}

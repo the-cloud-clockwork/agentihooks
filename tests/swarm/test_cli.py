@@ -1130,7 +1130,9 @@ def test_timer_ensure_retires_the_alert_intake_service(tmp_path):
     assert [argv for argv, _ in calls if argv[2] in ("disable", "daemon-reload")] == []
 
 
-def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units_alone(tmp_path, monkeypatch):
+def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(timer, "reconcile", real_reconcile)
     calls, failing = [], set()
 
@@ -1144,19 +1146,19 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     calls.clear()
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
     names = [f"agentihooks-{name}" for name in ("scheduler.service", "inbox-waker.service", "quota-prober.service")]
-    names += ["agentihooks-tick-watch.service", "agentihooks-swarm-waits.timer"]
+    names += ["agentihooks-tick-watch.service", "agentihooks-ledger-writer.service", "agentihooks-swarm-waits.timer"]
     assert calls == [(["systemctl", "--user", "is-enabled", "--quiet", name], kw) for name in names]
 
     calls.clear()
     failing.add("is-enabled")
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    assert [call[0][2] for call in calls] == ["is-enabled", *["enable"] * 5]
+    assert [call[0][2] for call in calls] == ["is-enabled", *["enable"] * 6]
 
     calls.clear()
     failing.clear()
     failing.add(names[2])
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run) is False
-    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", "is-enabled", *["enable"] * 5]
+    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", "is-enabled", *["enable"] * 6]
     failing.clear()
 
     calls.clear()
@@ -1184,10 +1186,7 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     assert (tmp_path / "agentihooks-new-intake.service").read_text() == added
     assert calls == [
         (["systemctl", "--user", "daemon-reload"], {**kw, "check": False}),
-        enable("agentihooks-scheduler.service"),
-        enable("agentihooks-inbox-waker.service"),
-        enable("agentihooks-quota-prober.service"),
-        enable("agentihooks-tick-watch.service"),
+        *[enable(name) for name in names[:-1]],
         enable("agentihooks-new-intake.service"),
         enable("agentihooks-swarm-waits.timer"),
     ]
@@ -1781,7 +1780,7 @@ def test_agent_prompt_joins_the_ledger_reads_its_inbox_and_leaves_before_done():
     from scripts.swarm import prompt
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
-    led = "agentihooks ledger --slug sw --as engineer@a1b2c3-0001"
+    led = "agentihooks api --slug sw --as engineer@a1b2c3-0001"
     assert f"{led} join" in text
     assert "ledger watch" not in text and "keep a Monitor" not in text
     assert "inbox" in text
@@ -1800,7 +1799,7 @@ def test_agent_prompt_ends_at_swarm_ready():
     assert merge == (
         "6. Once both reviews closed and the pull request is out of draft, write a short Handoff v2 document with "
         "the handoff skill: what the pull request delivers, how review closed and what a successor fixes if its "
-        "checks go red. Leave the crew with agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave, then "
+        "checks go red. Leave the crew with agentihooks api --slug sw --as engineer@a1b2c3-0001 leave, then "
         "release your seat: agentihooks swarm sw ready <handoff doc>. The swarm watches the checks, queues the "
         "pull request on green, waits for the merge, closes the task and removes your worktree; red checks reopen "
         "the task for the next engineer with your handoff. The swarm then closes this session; stop working."
@@ -1828,7 +1827,7 @@ def test_assist_asks_for_merge_approval_on_the_task_and_waits_through_the_swarm(
     ask = next(line for line in text.splitlines() if line.startswith("6. "))
     assert ask == (
         "6. This swarm runs at assist autonomy. Once checks are green, ask the operator to approve the merge: "
-        'agentihooks ledger --slug sw --as engineer@a1b2c3-0001 comment tasks/t1 "<plain words: what the pull '
+        'agentihooks api --slug sw --as engineer@a1b2c3-0001 comment tasks/t1 "<plain words: what the pull '
         'request does, checks green, waiting for your approval to merge>", then agentihooks swarm sw wait 60 '
         '--reason "operator merge approval"; his answer reaches you as an inbox message. Queue with agentihooks '
         "swarm sw merge queue <pr url> only after an OPERATOR line on the ledger approves it, then agentihooks "
@@ -1852,7 +1851,7 @@ def test_agent_prompt_runs_gates_and_review_before_the_merge_and_ends_with_leave
     assert review < merge
     assert "Standards and Spec" in steps[review] and "three rounds" in steps[review]
     last = steps[-1]
-    assert last.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < last.index(
+    assert last.index("agentihooks api --slug sw --as engineer@a1b2c3-0001 leave") < last.index(
         "agentihooks swarm sw ready <handoff doc>"
     )
 
@@ -2193,7 +2192,7 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
     from scripts.swarm import prompt
 
     text = prompt.build("sw", "/repo", "master", "master@a1b2c3-0002", {"id": "master", "handoff": "caps go to four"})
-    led = "agentihooks ledger --slug sw --as master@a1b2c3-0002"
+    led = "agentihooks api --slug sw --as master@a1b2c3-0002"
     for needle in (
         f"{led} join --role orchestrator",
         f"{led} ack",
@@ -2486,8 +2485,9 @@ def test_assist_still_reports_idle_when_checks_are_failed_or_unknown(
 
 
 @pytest.fixture
-def home(monkeypatch, tmp_path):
+def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(model_catalog, "catalog", lambda *_: {"claude": [{"model": "opus"}, {"model": "sonnet"}]})
     return tmp_path / "home"
 
 
@@ -2529,7 +2529,6 @@ def test_save_then_create_round_trips(
     env: tuple[RedisStore, Any, FakeRuntime], home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store, _, _ = env
-    monkeypatch.setattr(model_catalog, "catalog", Mock(return_value={"claude": [{"model": "sonnet"}], "codex": []}))
     run("sw", "create", "--repo", "/repo", "--template", "codex-ci", "--max-eng-agents", "3")
     run("sw", "set", "eng-model=sonnet", "eng-role=a reviewer", "compact-limit=300")
     assert run("sw", "save-template", "mine") == 0
@@ -2581,7 +2580,7 @@ def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
     env[2].live.update({"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"})
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
-    assert lines["engineer@a1b2c3-0001"][-6] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-6] == "-"
+    assert lines["engineer@a1b2c3-0001"][-7] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-7] == "-"
     run("sw", "status", "--json")
     agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
     assert (agents["engineer@a1b2c3-0001"]["conversation_id"], agents["engineer@a1b2c3-0002"]["conversation_id"]) == (

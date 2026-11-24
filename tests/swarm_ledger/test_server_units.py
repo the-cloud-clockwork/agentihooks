@@ -220,7 +220,7 @@ def test_a_drained_server_writes_the_carry_its_successor_asked_for(
 def test_the_ledger_watch_sleeps_two_seconds_between_passes(monkeypatch):
     slept = []
 
-    def sleep(seconds):
+    def sleep(seconds: float, timeout: float | None = None) -> None:
         slept.append(seconds)
         raise StopIteration
 
@@ -302,7 +302,7 @@ def test_the_shared_follow_reads_every_watched_ledger_each_quarter_second(monkey
         if slug == "broken":
             raise ValueError("unreadable")
 
-    def sleep(seconds):
+    def sleep(seconds: float, timeout: float | None = None) -> None:
         slept.append(seconds)
         raise StopIteration
 
@@ -320,7 +320,7 @@ def test_the_shared_follow_reads_every_watched_ledger_each_quarter_second(monkey
 def test_the_shared_follow_skips_its_pass_while_a_write_holds_the_ledger_lock(monkeypatch):
     read, slept = [], []
 
-    def sleep(seconds):
+    def sleep(seconds: float, timeout: float | None = None) -> None:
         slept.append(seconds)
         raise StopIteration
 

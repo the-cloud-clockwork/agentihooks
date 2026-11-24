@@ -159,27 +159,33 @@
       ],
       "allocation": {
         "ci": {
-          "claude": 1,
-          "codex": 0
+          "claude": 0,
+          "codex": 1
         },
         "eng": {
-          "claude": 2,
-          "codex": 1
+          "claude": 3,
+          "codex": 0
         },
         "plan": {
           "claude": 1,
+          "codex": 0
+        },
+        "review": {
+          "claude": 0,
           "codex": 0
         }
       },
       "configured": {
         "ci": 2,
         "eng": 4,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 2,
         "eng": 4,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 24,
@@ -188,8 +194,8 @@
       "placements": {
         "ci": [
           {
-            "account": "FOXTROT",
-            "harness": "claude",
+            "account": "alpha",
+            "harness": "codex",
             "index": 0
           }
         ],
@@ -200,8 +206,8 @@
             "index": 0
           },
           {
-            "account": "alpha",
-            "harness": "codex",
+            "account": "FOXTROT",
+            "harness": "claude",
             "index": 1
           },
           {
@@ -216,7 +222,8 @@
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed, unknown; Claude has 24 free seats and Codex has 10 free seats"
     },
@@ -328,23 +335,29 @@
           "codex": 1
         },
         "eng": {
-          "claude": 7,
-          "codex": 1
+          "claude": 5,
+          "codex": 3
         },
         "plan": {
           "claude": 1,
+          "codex": 0
+        },
+        "review": {
+          "claude": 0,
           "codex": 0
         }
       },
       "configured": {
         "ci": 3,
         "eng": 8,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 3,
         "eng": 8,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -353,25 +366,25 @@
       "placements": {
         "ci": [
           {
-            "account": "default",
-            "harness": "codex",
+            "account": "ALPHA",
+            "harness": "claude",
             "index": 0
           },
           {
-            "account": "BRAVO",
-            "harness": "claude",
+            "account": "default",
+            "harness": "codex",
             "index": 1
           },
           {
-            "account": "ALPHA",
+            "account": "FOXTROT",
             "harness": "claude",
             "index": 2
           }
         ],
         "eng": [
           {
-            "account": "ALPHA",
-            "harness": "claude",
+            "account": "default",
+            "harness": "codex",
             "index": 0
           },
           {
@@ -380,7 +393,7 @@
             "index": 1
           },
           {
-            "account": "FOXTROT",
+            "account": "BRAVO",
             "harness": "claude",
             "index": 2
           },
@@ -390,23 +403,23 @@
             "index": 3
           },
           {
-            "account": "DELTA",
+            "account": "ALPHA",
             "harness": "claude",
             "index": 4
           },
           {
-            "account": "GOLF",
+            "account": "DELTA",
             "harness": "claude",
             "index": 5
           },
           {
-            "account": "BRAVO",
+            "account": "GOLF",
             "harness": "claude",
             "index": 6
           },
           {
-            "account": "FOXTROT",
-            "harness": "claude",
+            "account": "default",
+            "harness": "codex",
             "index": 7
           }
         ],
@@ -416,7 +429,8 @@
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed; Claude has 28 free seats and Codex has 6 free seats"
     },
@@ -561,10 +575,14 @@
           "codex": 0
         },
         "eng": {
-          "claude": 4,
-          "codex": 0
+          "claude": 2,
+          "codex": 2
         },
         "plan": {
+          "claude": 0,
+          "codex": 0
+        },
+        "review": {
           "claude": 0,
           "codex": 0
         }
@@ -572,12 +590,14 @@
       "configured": {
         "ci": 2,
         "eng": 6,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 1,
         "eng": 4,
-        "plan": 0
+        "plan": 0,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -586,34 +606,35 @@
       "placements": {
         "ci": [
           {
-            "account": "DELTA",
+            "account": "ALPHA",
             "harness": "claude",
             "index": 0
           }
         ],
         "eng": [
           {
-            "account": "ALPHA",
-            "harness": "claude",
+            "account": "alpha",
+            "harness": "codex",
             "index": 0
           },
           {
-            "account": "GOLF",
+            "account": "DELTA",
             "harness": "claude",
             "index": 1
           },
           {
-            "account": "BRAVO",
-            "harness": "claude",
+            "account": "beta",
+            "harness": "codex",
             "index": 2
           },
           {
-            "account": "FOXTROT",
+            "account": "GOLF",
             "harness": "claude",
             "index": 3
           }
         ],
-        "plan": []
+        "plan": [],
+        "review": []
       },
       "reason": "eng, ci and plan have no more ready tasks; accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
@@ -764,17 +785,23 @@
         "plan": {
           "claude": 1,
           "codex": 0
+        },
+        "review": {
+          "claude": 0,
+          "codex": 0
         }
       },
       "configured": {
         "ci": 2,
         "eng": 6,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 2,
         "eng": 6,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -831,7 +858,8 @@
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
@@ -976,23 +1004,29 @@
           "codex": 0
         },
         "eng": {
-          "claude": 3,
-          "codex": 0
+          "claude": 1,
+          "codex": 2
         },
         "plan": {
           "claude": 1,
+          "codex": 0
+        },
+        "review": {
+          "claude": 0,
           "codex": 0
         }
       },
       "configured": {
         "ci": 1,
         "eng": 3,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 1,
         "eng": 3,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -1001,35 +1035,36 @@
       "placements": {
         "ci": [
           {
-            "account": "BRAVO",
+            "account": "ALPHA",
             "harness": "claude",
             "index": 0
           }
         ],
         "eng": [
           {
-            "account": "ALPHA",
-            "harness": "claude",
+            "account": "alpha",
+            "harness": "codex",
             "index": 0
           },
           {
-            "account": "GOLF",
+            "account": "FOXTROT",
             "harness": "claude",
             "index": 1
           },
           {
-            "account": "DELTA",
-            "harness": "claude",
+            "account": "beta",
+            "harness": "codex",
             "index": 2
           }
         ],
         "plan": [
           {
-            "account": "FOXTROT",
+            "account": "BRAVO",
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
@@ -1174,23 +1209,29 @@
           "codex": 0
         },
         "eng": {
-          "claude": 3,
-          "codex": 0
+          "claude": 1,
+          "codex": 2
         },
         "plan": {
           "claude": 1,
+          "codex": 0
+        },
+        "review": {
+          "claude": 0,
           "codex": 0
         }
       },
       "configured": {
         "ci": 1,
         "eng": 3,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 1,
         "eng": 3,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -1199,35 +1240,36 @@
       "placements": {
         "ci": [
           {
-            "account": "DELTA",
+            "account": "ALPHA",
             "harness": "claude",
             "index": 0
           }
         ],
         "eng": [
           {
-            "account": "ALPHA",
-            "harness": "claude",
+            "account": "alpha",
+            "harness": "codex",
             "index": 0
           },
           {
-            "account": "BRAVO",
+            "account": "GOLF",
             "harness": "claude",
             "index": 1
           },
           {
-            "account": "FOXTROT",
-            "harness": "claude",
+            "account": "beta",
+            "harness": "codex",
             "index": 2
           }
         ],
         "plan": [
           {
-            "account": "GOLF",
+            "account": "DELTA",
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     },
@@ -1378,17 +1420,23 @@
         "plan": {
           "claude": 1,
           "codex": 0
+        },
+        "review": {
+          "claude": 0,
+          "codex": 0
         }
       },
       "configured": {
         "ci": 2,
         "eng": 5,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "effective": {
         "ci": 2,
         "eng": 5,
-        "plan": 1
+        "plan": 1,
+        "review": 0
       },
       "placeable": {
         "claude": 28,
@@ -1440,7 +1488,8 @@
             "harness": "claude",
             "index": 0
           }
-        ]
+        ],
+        "review": []
       },
       "reason": "accounts are closed, unknown; Claude has 28 free seats and Codex has 12 free seats"
     }

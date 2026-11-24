@@ -42,6 +42,10 @@ class Bucket:
         assert Bucket == BUCKET
         return {"Contents": [{"Key": name} for name in self.blobs if name.startswith(Prefix)], "IsTruncated": False}
 
+    def delete_object(self, Bucket: str, Key: str) -> None:
+        assert Bucket == BUCKET
+        self.blobs.pop(Key, None)
+
 
 def key(kind: str, seed: str) -> str:
     return f"{kind}-v1-{digests.digest({'seed': seed})}"
@@ -283,6 +287,18 @@ def test_s3_objects_live_under_the_bucket_prefix() -> None:
     assert remote.keys("lab/") == ["lab/a/log.txt"]
 
 
+@pytest.mark.feature("lab-outside-notes-per-commit")
+def test_objects_remove_one_path_and_take_a_missing_one_as_gone(blobs: objects.Objects) -> None:
+    blobs.write_once("lab/a/report.json", b"one")
+    blobs.write_once("lab/b/report.json", b"two")
+
+    blobs.remove("lab/a/report.json")
+    blobs.remove("lab/a/report.json")
+
+    assert blobs.keys("lab/") == ["lab/b/report.json"]
+    assert blobs.read("lab/b/report.json") == b"two"
+
+
 def s3_client() -> Any:
     session = botocore.session.get_session()
     session.set_credentials("lab", "lab")
@@ -320,3 +336,30 @@ def test_local_uploads_name_the_file_the_worker_writes(tmp_path: Path) -> None:
     url = objects.Uploads(objects.LocalObjects(tmp_path)).upload_url("h1:test:k", "report")
 
     assert url == (tmp_path.resolve() / "lab" / "uploads" / "h1:test:k" / "report.json").as_uri()
+
+
+@pytest.mark.feature("lab-flakes-object-once")
+def test_flakes_path_names_the_unit_flakes_object_and_refuses_a_key_of_another_kind() -> None:
+    unit = key("test", "a")
+    path = objects.flakes_path("test", unit)
+
+    assert path == f"lab/flakes/test/{hexdigest(unit)}.jsonl"
+    assert not objects.is_report(path)
+    for bad in (key("mutant", "f"), "test-v1-abc", unit + "x", "test-v-" + hexdigest(unit)):
+        with pytest.raises(ValueError, match=f"^not a test unit key: {bad}$"):
+            objects.flakes_path("test", bad)
+
+
+@pytest.mark.feature("lab-flakes-object-once")
+def test_reindex_counts_only_reports_beside_a_flakes_object(verdicts: store.Store, client: fakeredis.FakeRedis) -> None:
+    flaky = store.Verdict(kind="test", key=key("test", "a"), passed=True, flaky=True, seconds=3.0)
+    flakes = f"lab/flakes/test/{hexdigest(flaky.key)}.jsonl"
+    verdicts.put(flaky, {"flaky": True}, b"ok\n")
+    verdicts.objects.write_once(flakes, b'{"test": "t", "outcome": "flaky"}\n')
+    client.flushall()
+
+    assert verdicts.reindex() == 1
+
+    assert client.keys("*") == [f"agentihooks-ci:verdict:test:{flaky.key}"]
+    assert verdicts.get("test", flaky.key) == flaky
+    assert verdicts.objects.read(flakes) == b'{"test": "t", "outcome": "flaky"}\n'

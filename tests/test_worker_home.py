@@ -374,44 +374,48 @@ def hook(command: str) -> dict:
     return {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}}
 
 
+def with_prefix(text: str) -> str:
+    return text.replace("{prefix}", sys.prefix)
+
+
 @pytest.mark.parametrize(
     ("command", "offending"),
     [
-        (f"PYTHONPATH={sys.prefix}:/etc/shadow python -m hooks", "/etc/shadow"),
+        ("PYTHONPATH={prefix}:/etc/shadow python -m hooks", "/etc/shadow"),
         ("/usr/bin/env:/root/.ssh/id_rsa python -m hooks", "/root/.ssh/id_rsa"),
         ("../../../../home/operator/.venv/bin/python -m hooks", "../../../../home/operator/.venv/bin/python"),
         ("python -c 'import sys' https://brain.svc/x /etc/passwd", "/etc/passwd"),
-        (f"PYTHONPATH={sys.prefix}:file:///etc/shadow python -m hooks", "/etc/shadow"),
+        ("PYTHONPATH={prefix}:file:///etc/shadow python -m hooks", "/etc/shadow"),
         ("python -m hooks --config=file:///etc/x", "/etc/x"),
         ("~/.venv/bin/python -m hooks", "~/.venv/bin/python"),
         ("$HOME/.venv/bin/python -m hooks", "$HOME/.venv/bin/python"),
-        (f"x={sys.prefix}:///etc/shadow python -m hooks", "/etc/shadow"),
-        (f"PYTHONPATH={sys.prefix}://etc/shadow python -m hooks", "/etc/shadow"),
-        (f"{sys.prefix}/$X/etc/shadow -m hooks", f"{sys.prefix}/$X/etc/shadow"),
+        ("x={prefix}:///etc/shadow python -m hooks", "/etc/shadow"),
+        ("PYTHONPATH={prefix}://etc/shadow python -m hooks", "/etc/shadow"),
+        ("{prefix}/$X/etc/shadow -m hooks", "{prefix}/$X/etc/shadow"),
         ("$AGENTIHOOKS_PYTHON -m hooks", "$AGENTIHOOKS_PYTHON"),
         ("~ -m hooks", "~"),
         ("python -m hooks --config=git+file:///etc/x", "/etc/x"),
         ("python -m hooks 'unbalanced /etc/y", "/etc/y"),
     ],
 )
-def test_hidden_or_relative_paths_in_a_hook_are_refused(tmp_path, command, offending):
-    claude_home(tmp_path, hook(command))
+def test_hidden_or_relative_paths_in_a_hook_are_refused(tmp_path: Path, command: str, offending: str) -> None:
+    claude_home(tmp_path, hook(with_prefix(command)))
     with pytest.raises(worker_home.BootstrapError) as error:
         check(tmp_path, "claude")
-    assert str(error.value) == f"claude setting hooks leaves the execution root: {offending}"
+    assert str(error.value) == f"claude setting hooks leaves the execution root: {with_prefix(offending)}"
 
 
 @pytest.mark.parametrize(
     "command",
     [
         "python bin/probe.py https://brain.svc/x/y",
-        f"cd {sys.prefix} && {sys.prefix}/bin/python -m hooks",
-        f"{sys.prefix}/./bin/python",
+        "cd {prefix} && {prefix}/bin/python -m hooks",
+        "{prefix}/./bin/python",
         "python -m hooks --url=http://ledger.svc:8765/x",
     ],
 )
-def test_url_arguments_and_contained_paths_are_admitted(tmp_path, command):
-    claude_home(tmp_path, hook(command) | {"permissions": {"deny": ["Read(~/.ssh/**)", "Read(/etc/**)"]}})
+def test_url_arguments_and_contained_paths_are_admitted(tmp_path: Path, command: str) -> None:
+    claude_home(tmp_path, hook(with_prefix(command)) | {"permissions": {"deny": ["Read(~/.ssh/**)", "Read(/etc/**)"]}})
     check(tmp_path, "claude")
 
 
@@ -1043,6 +1047,36 @@ def test_a_bundle_request_renders_the_bundle_chain_global_layer_and_channels(fix
     sources = json.loads((home.parent / "claude.sources.json").read_text())
     assert "# Fixture bundle global persona" in {row["text"] for row in sources if row["layer"] == "doctrine"}
     assert "# Fixture global rule" in {row["text"] for row in sources if row["layer"] == "rule"}
+
+
+@pytest.mark.feature("bundle-layer-manifest")
+def test_a_bundle_naming_a_layer_renders_the_worker_home_from_it_once(fixture, tmp_path):
+    templates, volume = fixture
+    bundle = tmp_path / "bundle"
+    shutil.copytree(WORKER_BUNDLE, bundle)
+    frontend = bundle / "bundle" / "profiles" / "frontend"
+    (bundle / "bundle" / "bundle.yml").write_text("layer: profiles/frontend\n")
+    (frontend / ".claude" / "CLAUDE.md").write_text("# Frontend layer doctrine\n")
+    stop = [{"hooks": [{"type": "command", "command": "echo frontend-layer"}]}]
+    (frontend / ".claude" / "settings.overrides.json").write_text(
+        json.dumps({"env": {"FIXTURE_FRONTEND": "1"}, "hooks": {"Stop": stop}})
+    )
+    req = request(
+        templates, volume, profiles={"claude": "frontend"}, accounts={"claude": ACCOUNTS["claude"]}, bundle=bundle
+    )
+
+    record = worker_home.bootstrap(req)
+
+    home = volume / "attempt-1" / record["homes"]["claude"] / ".claude"
+    text = (home / "CLAUDE.md").read_text()
+    assert text.count("Frontend layer doctrine") == 1
+    assert text.count("Fixture bundle frontend persona") == 1
+    assert "Fixture bundle global persona" not in text
+    assert not (home / "rules" / "fixture-global-rule.md").exists()
+    settings = json.loads((home / "settings.json").read_text())
+    assert settings["env"]["FIXTURE_FRONTEND"] == "1"
+    assert "FIXTURE_BUNDLE_GLOBAL" not in settings["env"]
+    assert hook_commands(settings).count("echo frontend-layer") == 1
 
 
 def test_the_request_document_names_the_delivered_bundle(fixture):

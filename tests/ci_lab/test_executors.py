@@ -1,19 +1,27 @@
+import dataclasses
 import hashlib
 import json
+import os
 import signal
 import subprocess
+import sys
+import threading
 import time
-from collections.abc import Callable, Iterator
+import urllib.request
+from collections.abc import Callable, Iterator, Mapping
 from functools import partial
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
 from scripts import ci_wiring
-from scripts.ci_lab import contract, executors, run_static, run_tests, static_gates, venvs, worker
+from scripts.ci_lab import contract, executors, metrics, run_static, run_tests, static_gates, venvs, worker
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import CannotRun, Outcome, PortAllocator, PortRange
+from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.worker import Finished, Lease
 from scripts.ci_lab.worktrees import Mirror, Worktrees
@@ -33,10 +41,47 @@ jobs:
 REGISTRY = {"lint/lint-check": {"paths": ["scripts"], "tools": ["ruff"]}}
 OPTIONS = ["-q", "-p", "no:cacheprovider"]
 WHITELIST = {"LANG": "C"}
+LOCK = ".github/test-requirements.lock"
+EXCLUDES = ".github/test-excludes.txt"
+FAKE_UV = """#!{python}
+import json, pathlib, sys
+with open({record!r}, "a") as record:
+    record.write(json.dumps(sys.argv[1:]) + "\\n")
+if sys.argv[1] == "venv":
+    pathlib.Path(sys.argv[-1]).mkdir(parents=True, exist_ok=True)
+"""
 GIT = ("git", "-c", "user.name=lab", "-c", "user.email=lab@example.invalid")
 
 
 CACHED = {"git": {"hits": 1, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
+ROOT = Path(__file__).resolve().parents[2]
+LEASE_CONTEXT = {
+    "inputs.base": "b1",
+    "github.sha": "h1",
+    "github.event.pull_request.head.sha": "h1",
+    "github.event.pull_request.base.sha": "b1",
+    "github.event_name": "pull_request",
+    "github.run_id": "job",
+    "github.run_attempt": "1",
+    "github.run_number": "1",
+}
+REFUSED = {
+    "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": (
+        "no value for 'github.head_ref' in the context"
+    ),
+    "lint/artifact-sanity-checks": "no value for 'github.base_ref' in the context",
+}
+SECRET_WORKFLOW = r"""
+jobs:
+  lint:
+    steps:
+      - name: Keep keywords out of the docs
+        env:
+          KEYWORDS: ${{ secrets.KEYWORDS }}
+          BETA: ${{ secrets.BETA }}
+          ABSENT: x${{ secrets.ABSENT }}x
+        run: python -m scripts.docs_sanity
+"""
 
 
 class FakeWorktrees:
@@ -141,12 +186,12 @@ def venv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Recorder:
 
 @pytest.fixture
 def static_trees(tmp_path: Path) -> FakeWorktrees:
-    head = folder(tmp_path, "head", {"uv.lock": "lock-h"})
-    base = folder(tmp_path, "base", {"uv.lock": "lock-b"})
+    head = folder(tmp_path, "head", {LOCK: "lock-h"})
+    base = folder(tmp_path, "base", {LOCK: "lock-b"})
     grader = folder(
         tmp_path,
         "grader",
-        {".github/workflows/test.yml": WORKFLOW, ".github/input-keys.json": json.dumps(REGISTRY), "uv.lock": "lock-g"},
+        {".github/workflows/test.yml": WORKFLOW, ".github/input-keys.json": json.dumps(REGISTRY), LOCK: "lock-g"},
     )
     return FakeWorktrees({"h1": head, "b1": base, "g1": grader})
 
@@ -171,8 +216,9 @@ def test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_
     assert venv.calls == [
         (hashlib.sha256(b"lock-h").hexdigest(), head, pod.root / "venvs", venvs.Build(pod.ports, WHITELIST, 30.0))
     ]
-    settings = run_static.Settings(pod.runs, tmp_path / "venv", pod.ports, WHITELIST, 30.0, {"inputs.base": "b1"})
+    settings = run_static.Settings(pod.runs, tmp_path / "venv", pod.ports, WHITELIST, 30.0, LEASE_CONTEXT)
     assert ran.calls == [(gates[name], head, base, grader, settings)]
+    assert set(LEASE_CONTEXT) == static_gates.LEASE_FIELDS
     assert finished == Finished(PASSED, finished.report, tmp_path / "log.txt")
     assert report(finished, pod) == {
         "gate": name,
@@ -190,6 +236,40 @@ def test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_
         ("release", "b1"),
         ("release", "g1"),
     ]
+
+
+@pytest.mark.feature("lab-venv-tracked-test-lock")
+def test_a_head_without_a_uv_lock_builds_its_venv_from_the_tracked_test_lock_and_runs_its_unit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    gates = {found.name: found for found in static_gates.discover(WORKFLOW, REGISTRY)}
+    name = sorted(gates)[1]
+    head = folder(tmp_path, "head", {LOCK: "lock-h", EXCLUDES: "excluded\n", "pyproject.toml": "[project]\n"})
+    base = folder(tmp_path, "base", {})
+    grader = folder(
+        tmp_path, "grader", {".github/workflows/test.yml": WORKFLOW, ".github/input-keys.json": json.dumps(REGISTRY)}
+    )
+    record = tmp_path / "uv.jsonl"
+    uv = folder(tmp_path, "bin", {"uv": FAKE_UV.format(python=sys.executable, record=str(record))}) / "uv"
+    uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{uv.parent}{os.pathsep}{os.environ['PATH']}")
+    summary = folder(tmp_path, "run", {"summary.md": "ok\n"}) / "summary.md"
+    ran = Recorder(run_static.Result(name, 0, tmp_path / "log.txt", summary))
+    monkeypatch.setattr(executors.run_static, "run", ran)
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": head, "b1": base, "g1": grader}))
+
+    finished = executors.static(pod, lease("static", "k", (name,)))
+
+    venv = pod.venvs / hashlib.sha256(b"lock-h").hexdigest()
+    install = ["--constraint", str(head / LOCK), "--excludes", str(head / EXCLUDES), "-r", str(head / "pyproject.toml")]
+    assert not (head / "uv.lock").exists()
+    assert [json.loads(line) for line in record.read_text().splitlines()] == [
+        ["venv", "--clear", "--python", sys.executable, str(venv)],
+        ["pip", "install", "--python", str(venv / "bin" / "python"), *install, "--extra", "dev", "--extra", "all"],
+    ]
+    settings = run_static.Settings(pod.runs, venv, pod.ports, WHITELIST, 30.0, LEASE_CONTEXT)
+    assert ran.calls == [(gates[name], head, base, grader, settings)]
+    assert finished.outcome == PASSED
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -237,6 +317,131 @@ def test_static_releases_every_tree_it_leased_when_a_lease_or_the_gate_raises(
     assert static_trees.calls == [("lease", "h1"), ("release", "h1")]
 
 
+@pytest.fixture
+def bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    script = folder / "bwrap"
+    script.write_text('#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n')
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{folder}{os.pathsep}{os.environ['PATH']}")
+
+
+def live_pod(tmp_path: Path, trees: FakeWorktrees, secrets: dict[str, str]) -> executors.Pod:
+    pod = executors.Pod(
+        executors.Trees(cast("Worktrees", trees)),
+        tmp_path / "pod",
+        PortAllocator(41100, 41999, 10),
+        WHITELIST,
+        30.0,
+        secrets=secrets,
+    )
+    pod.runs.mkdir(parents=True)
+    return pod
+
+
+def _graded_on_a_clean_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, job: str
+) -> tuple[dict[str, str], set[str]]:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    discovered = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+    gates = {gate.name: dataclasses.replace(gate, run="true") for gate in discovered if gate.job == job}
+
+    def found(grader: Path, name: str) -> StaticGate:
+        return gates[name]
+
+    monkeypatch.setattr(executors, "gate", found)
+    head = folder(tmp_path, "head", {LOCK: "lock\n"})
+    subprocess.run([*GIT, "init", "-q", str(head)], check=True)
+    subprocess.run([*GIT, "-C", str(head), "add", "."], check=True)
+    subprocess.run([*GIT, "-C", str(head), "commit", "-q", "-m", "tree"], check=True)
+    subprocess.run([*GIT, "-C", str(head), "worktree", "add", "-q", "--detach", str(tmp_path / "base")], check=True)
+    trees = FakeWorktrees({"h1": head, "b1": tmp_path / "base", "g1": ROOT})
+    pod = live_pod(tmp_path, trees, {})
+    graded: dict[str, str] = {}
+    skipped: set[str] = set()
+    for name in gates:
+        try:
+            finished = executors.static(pod, lease("static", "k", (name,)))
+        except ValueError as refused:
+            graded[name] = str(refused)
+            continue
+        graded[name] = finished.outcome
+        if report(finished, pod)["skipped"]:
+            skipped.add(name)
+    return graded, skipped
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_static_grades_every_lint_gate_of_the_real_workflow_on_a_clean_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
+) -> None:
+    graded, _ = _graded_on_a_clean_tree(monkeypatch, tmp_path, "lint")
+    assert graded == {**dict.fromkeys(graded, PASSED), **REFUSED}
+
+
+@pytest.mark.feature("lab-static-test-count-units")
+def test_static_grades_every_test_count_gate_of_the_real_workflow_on_a_clean_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
+) -> None:
+    graded, skipped = _graded_on_a_clean_tree(monkeypatch, tmp_path, "test-count")
+    assert graded == {
+        "test-count/install-dependencies": PASSED,
+        "test-count/fetch-the-base-suite-count-recorded-on-dev": PASSED,
+        "test-count/hold-the-base-revision-s-test-count": PASSED,
+        "test-count/record-the-head-count-for-the-next-queue-group": PASSED,
+    }
+    assert skipped == {
+        "test-count/fetch-the-base-suite-count-recorded-on-dev",
+        "test-count/record-the-head-count-for-the-next-queue-group",
+    }
+
+
+@pytest.mark.feature("lab-static-step-env")
+def test_static_gives_a_step_each_secret_it_reads_by_name_and_writes_no_value_to_its_report_or_log(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
+) -> None:
+    (keywords,) = static_gates.discover(SECRET_WORKFLOW)
+    probe = dataclasses.replace(
+        keywords,
+        run=(
+            'printf "%s %s" "$KEYWORDS" "$ABSENT" > "$GITHUB_WORKSPACE/seen"\n'
+            'echo "keywords $KEYWORDS"\n'
+            'echo "summary $KEYWORDS" >> "$GITHUB_STEP_SUMMARY"\n'
+            "echo ok\n"
+        ),
+    )
+    contexts: list[Mapping[str, str]] = []
+    real = run_static.run
+
+    def found(grader: Path, name: str) -> StaticGate:
+        return probe
+
+    def spied(
+        gate: StaticGate, head: Path, base: Path, grader: Path, settings: run_static.Settings
+    ) -> run_static.Result:
+        contexts.append(settings.context)
+        return real(gate, head, base, grader, settings)
+
+    monkeypatch.setattr(executors, "gate", found)
+    monkeypatch.setattr(executors.run_static, "run", spied)
+    head = folder(tmp_path, "head", {LOCK: "lock\n"})
+    trees = FakeWorktrees({"h1": head, "b1": folder(tmp_path, "base", {}), "g1": folder(tmp_path, "grader", {})})
+    secrets = {"KEYWORDS": "s3cr3t-alpha,s3cr3t-beta", "BETA": "s3cr3t-beta", "UNREAD": "s3cr3t-gamma"}
+    pod = live_pod(tmp_path, trees, secrets)
+
+    finished = executors.static(pod, lease("static", "k", (probe.name,)))
+
+    assert finished.outcome == PASSED
+    assert (head / "seen").read_text() == "s3cr3t-alpha,s3cr3t-beta xx"
+    read = {"secrets.ABSENT": "", "secrets.BETA": "s3cr3t-beta", "secrets.KEYWORDS": "s3cr3t-alpha,s3cr3t-beta"}
+    assert contexts == [{**LEASE_CONTEXT, **read}]
+    assert finished.log.read_text() == "keywords ***\nok\n"
+    assert report(finished, pod)["summary"] == "summary ***\n"
+    assert "s3cr3t" not in finished.report.read_text()
+
+
 def test_gate_refuses_a_name_the_grader_workflow_does_not_run(static_trees: FakeWorktrees) -> None:
     with pytest.raises(KeyError):
         executors.gate(static_trees.trees["g1"], "lint/missing")
@@ -257,7 +462,7 @@ def test_gate_returns_a_gate_of_a_reusable_workflow_the_real_tests_workflow_call
 def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_ledger(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder
 ) -> None:
-    tree = folder(tmp_path, "head", {"uv.lock": "lock-h"})
+    tree = folder(tmp_path, "head", {LOCK: "lock-h"})
     manifest = {"tests": {"tests/a.py::t": {"files": ["scripts/a.py"]}}}
     suite = executors.Suite(
         folder(tmp_path, "in", {"manifest.json": json.dumps(manifest)}) / "manifest.json", tmp_path / "flakes.jsonl"
@@ -270,7 +475,11 @@ def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_l
     trees = FakeWorktrees({"h1": tree})
     pod = pod_of(tmp_path, trees)
 
-    finished = executors.tests(pod, suite, lease("test", "k", ("tests/a.py::t",), slots=3))
+    finished = executors.tests(
+        pod,
+        suite,
+        Lease("job", "tok", "h1", Unit("test", "k", ("tests/a.py::t",), json.dumps(manifest)), 3, 1500, "b1", "g1"),
+    )
 
     assert venv.calls == [
         (hashlib.sha256(b"lock-h").hexdigest(), tree, pod.root / "venvs", venvs.Build(pod.ports, WHITELIST, 30.0))
@@ -285,8 +494,77 @@ def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_l
         "attempts": 2,
         "seconds": 2.5,
         "caches": CACHED,
+        "flakes": [],
     }
     assert trees.calls == [("lease", "h1"), ("release", "h1")]
+
+
+def report_of_tests(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, verdict: run_tests.Verdict) -> dict[str, Any]:
+    tree = folder(tmp_path, "head", {LOCK: "lock-h"})
+    suite = executors.Suite(
+        folder(tmp_path, "in", {"manifest.json": "{}"}) / "manifest.json", tmp_path / "flakes.jsonl"
+    )
+    monkeypatch.setattr(executors.run_tests, "run", Recorder(verdict))
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": tree}))
+    unit = Unit("test", "unit-key", ("tests/a.py::t", "tests/a.py::u"), "{}")
+    return report(executors.tests(pod, suite, Lease("job", "tok", "h1", unit, 1, 1500, "b1", "g1")), pod)
+
+
+@pytest.mark.feature("lab-report-flake-rows")
+def test_tests_reports_a_flaky_batchs_rows_with_the_unit_key_as_run_and_its_attempts_as_run_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder
+) -> None:
+    rows = (
+        {
+            "test": "tests/a.py::t",
+            "run": None,
+            "run_attempt": None,
+            "attempts": 2,
+            "outcome": "flaky",
+            "errors": ["first attempt fails"],
+            "tracebacks": ["Traceback"],
+        },
+        {
+            "test": "tests/a.py::u",
+            "errors": ["pytest exited with code 2"],
+            "tracebacks": [],
+            "attempts": 2,
+            "outcome": "flaky",
+        },
+    )
+    verdict = run_tests.Verdict(PASSED, True, (), {}, 2, tmp_path / "log.txt", tmp_path / "cov", rows)
+
+    flakes = report_of_tests(monkeypatch, tmp_path, verdict)["flakes"]
+
+    assert flakes == [
+        {
+            "test": "tests/a.py::t",
+            "run": "unit-key",
+            "run_attempt": 2,
+            "attempts": 2,
+            "outcome": "flaky",
+            "errors": ["first attempt fails"],
+            "tracebacks": ["Traceback"],
+        },
+        {
+            "test": "tests/a.py::u",
+            "errors": ["pytest exited with code 2"],
+            "tracebacks": [],
+            "attempts": 2,
+            "outcome": "flaky",
+            "run": "unit-key",
+            "run_attempt": 2,
+        },
+    ]
+
+
+@pytest.mark.feature("lab-report-flake-rows")
+def test_tests_reports_no_flake_rows_for_a_red_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder
+) -> None:
+    verdict = run_tests.Verdict(FAILED, False, (), {}, 2, tmp_path / "log.txt", tmp_path / "cov")
+
+    assert report_of_tests(monkeypatch, tmp_path, verdict)["flakes"] == []
 
 
 @pytest.fixture
@@ -298,7 +576,7 @@ def mutation_tree(tmp_path: Path) -> Path:
             "pyproject.toml": '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/pkg"]\n',
             "hooks/pkg/gamma.py": "",
             "hooks/pkgold/delta.py": "",
-            "uv.lock": "lock-m",
+            LOCK: "lock-m",
             "scripts/alpha.py": "def first():\n    return 1\n",
             "scripts/pkg/__init__.py": "",
             "scripts/notes.txt": "",
@@ -551,6 +829,18 @@ def test_settings_read_the_worker_contract_environment(tmp_path: Path) -> None:
     assert (len(ranges), ranges[0], ranges[-1]) == (1000, PortRange(20000, 20009), PortRange(29990, 29999))
 
 
+@pytest.mark.feature("lab-static-step-env")
+def test_settings_keep_each_step_secret_by_its_name_under_the_scoped_prefix(tmp_path: Path) -> None:
+    environ = {
+        **environ_of(tmp_path),
+        "CI_LAB_SECRET_DOCS_SANITY_KEYWORDS": "s3cr3t",
+        "DOCS_SANITY_KEYWORDS": "bare",
+        "CI_LAB_SECRETS": "other",
+    }
+    assert executors.settings(environ)[0].secrets == {"DOCS_SANITY_KEYWORDS": "s3cr3t"}
+    assert executors.settings(environ_of(tmp_path))[0].secrets == {}
+
+
 def test_settings_refuse_a_redis_variable(tmp_path: Path) -> None:
     with pytest.raises(worker.Refused):
         executors.settings({**environ_of(tmp_path), "CI_LAB_REDIS_URL": "redis://x"})
@@ -636,6 +926,7 @@ def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
     monkeypatch.setattr(executors.socket, "gethostname", lambda: "pod-1")
     monkeypatch.setattr(executors.os, "cpu_count", lambda: cpus)
     monkeypatch.setattr(executors.ci_cpu_quota, "quota_cpus", lambda: 2.0)
+    monkeypatch.setattr(executors.contract, "METRICS_PORT", 0)
     environ = environ_of(tmp_path)
 
     assert executors.main([], environ) == 0
@@ -661,3 +952,51 @@ def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
     assert capsys.readouterr().err == (
         "usage: agentihooks ci-lab-worker [-h]\nagentihooks ci-lab-worker: error: unrecognized arguments: --unknown\n"
     )
+
+
+@pytest.mark.feature("lab-worker-metrics")
+def test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_drains(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    served: list[tuple[str, int, ThreadingHTTPServer]] = []
+    scraped: list[tuple[int, str, str]] = []
+    stopped: list[bool] = []
+    handlers: dict[int, Callable[[int, object], None]] = {}
+    bind = metrics.serve_registry
+
+    def serve_registry(host: str, port: int, registry: metrics.Registry) -> ThreadingHTTPServer:
+        server = bind(host, 0, registry)
+        served.append((host, port, server))
+        return server
+
+    def serving(target: Callable[[], None]) -> threading.Thread:
+        if target != served[0][2].serve_forever:
+            pytest.fail(f"main ran {target!r} on its thread instead of the metrics server")
+        return threading.Thread(target=target)
+
+    class Service:
+        def run(self) -> list[Lease]:
+            address = f"http://127.0.0.1:{served[0][2].server_address[1]}/metrics"
+            with urllib.request.urlopen(address, timeout=5) as reply:
+                scraped.append((reply.status, reply.headers["Content-Type"], reply.read().decode()))
+            handlers[signal.SIGTERM](signal.SIGTERM, None)
+            return []
+
+        def stop(self) -> None:
+            stopped.append(True)
+
+    before = set(threading.enumerate())
+    monkeypatch.setattr(metrics, "serve_registry", serve_registry)
+    monkeypatch.setattr(executors, "threading", SimpleNamespace(Thread=serving))
+    monkeypatch.setattr(executors.worker, "build", lambda *args: Service())
+    monkeypatch.setattr(executors.signal, "signal", lambda number, handler: handlers.__setitem__(number, handler))
+
+    assert executors.main([], environ_of(tmp_path)) == 0
+
+    [(host, port, server)] = served
+    assert (host, port, stopped) == ("", contract.METRICS_PORT, [True])
+    assert scraped == [(200, metrics.EXPOSITION, metrics.Registry().render())]
+    assert server.socket.fileno() == -1
+    for thread in set(threading.enumerate()) - before:
+        thread.join(timeout=5)
+        assert not thread.is_alive()

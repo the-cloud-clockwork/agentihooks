@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__edited_files:d0de514e9c91b9cd553b9cc16349d780bccece4cb5e0214fa44bfe2ee459e85a": {
+    "reader": "standards_reader",
+    "reason": "The next() default is discarded, so the iterator advances identically for any default."
+  }
+}

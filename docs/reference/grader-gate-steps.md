@@ -45,10 +45,12 @@ outside that gate.
 Each job fetches one revision and adds it as a detached worktree at
 `$RUNNER_TEMP/grader`. The head stays checked out in `$GITHUB_WORKSPACE`.
 
+{% raw %}
 | Job | Revision | Source |
 | --- | --- | --- |
-| Tests `lint` | `GRADER: ${{ github.event.pull_request.base.sha \|\| needs.reuse.outputs.grader }}` | A pull request uses the base sha its event carries. A manual dispatch uses the revision the `reuse` job records in `Record the protected grader revision`, which is the `dev` tip that job checked out |
+| Tests `lint` | <code>GRADER: ${{ github.event.pull_request.base.sha &#124;&#124; needs.reuse.outputs.grader }}</code> | A pull request uses the base sha its event carries. A manual dispatch uses the revision the `reuse` job records in `Record the protected grader revision`, which is the `dev` tip that job checked out |
 | Semgrep `scan` and `charts` | `BASE: ${{ inputs.base }}`, fetched as `${BASE#origin/}` | The caller's `base` input. The Tests workflow passes `origin/dev` for a pull request into `dev`, so the grader is the `dev` tip when the job runs. Otherwise it passes the pull request base sha, the merge group base sha, the push `before` sha or its own `base` input, in that order. The Proofs workflow's `semgrep` proof passes its `base` input |
+{% endraw %}
 
 The grader checkout step in both workflows:
 
@@ -73,6 +75,7 @@ holds an authoritative verdict for it.
 | Tests `lint` | `Check every pull request job is a need of Gate Required` | `python -m scripts.ci_wiring`, run from `$RUNNER_TEMP/grader` | The workflows under `--root "$GITHUB_WORKSPACE"` |
 | Semgrep `scan` | `Own rules hold on their fixtures and the code` | The rules in the grader's `.semgrep` | The code, scanned with the head's `.semgrep` as well. The head rules' own fixture tests run first |
 | Semgrep `scan` | `Outage rules for tests hold on every test file` | The grader's copy of each rule the step names in `RULES`, when the grader holds it | Every test file under `tests`, scanned with the head's copy of each rule as well. `.semgrepignore` skips `tests/`, so the step passes `--x-ignore-semgrepignore-files`, and any finding fails it |
+| Semgrep `scan` | `New test waits keep a bound of ten seconds or more` | The grader's copy of the test wait bound rule `RULE` names, when the grader holds it | The test files under `tests` that changed since the merge base of the head and the base, scanned past `.semgrepignore` with the head's copy of the rule as well and compared with `--baseline-commit` against that merge base. A wait the merge base already holds passes; a new one fails it |
 | Semgrep `scan` | `Fail on findings new against the base` | The rules in the grader's `.semgrep-incidents` | The code, compared against the merge base with the head's `.semgrep-incidents` and the `p/ci`, `p/secrets` and `p/python` registry rules |
 | Semgrep `charts` | `Guard rules hold on their fixtures and at their computed floors` | `scripts/ci_semgrep_floors.py`, read from the fetched base with `git show`. This step keeps a fallback: when the base has no copy of the script, the head's copy runs | The guard rules and their fixtures |
 | Semgrep `charts` | `A chart version bump leaves every pod template unchanged` | `tests/ci_charts/chart_pod_templates.py` | The charts under `deploy` in `--root "$GITHUB_WORKSPACE"` |
@@ -80,8 +83,9 @@ holds an authoritative verdict for it.
 
 The ruff steps run `python -P`, which keeps the current directory off the
 import path. A head that ships its own `ruff` package therefore cannot stand in
-for the installed one. Every lint gate step carries `if: ${{ !cancelled() }}`,
-so each one reports even after an earlier step turns red.
+for the installed one. Every lint gate step carries
+{% raw %}`if: ${{ !cancelled() }}`{% endraw %}, so each one reports even after
+an earlier step turns red.
 
 The marker vector step compares the head's fixture byte for byte with
 `tests/fixtures/marker-idempotency-vectors.json` from `agentibrain-kernel` on

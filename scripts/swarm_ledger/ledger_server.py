@@ -806,7 +806,7 @@ def refresh_streams(slugs: list[str]) -> None:
         if HUB.has(slug):
             try:
                 publish_ledger(slug, repository.get_document(slug))
-            except Exception as exc:  # the next write to the ledger publishes its view anyway
+            except Exception as exc:
                 sys.stderr.write(f"refresh stream {slug}: {exc}\n")
 
 
@@ -835,14 +835,14 @@ def reloading(environ=os.environ) -> bool:
     return environ.get("SWARM_RELOAD") == "1"
 
 
-def scheduled_wait(interval: float) -> None:
+def scheduled_wait(interval: float, timeout: float | None = None) -> None:
     from redis.exceptions import NoPermissionError
 
     from scripts.scheduler.process_timer import wait
 
     if not SCHEDULER_UNAVAILABLE.is_set():
         try:
-            wait(interval)
+            wait(interval, timeout=timeout)
             return
         except (OSError, NoPermissionError) as exc:
             SCHEDULER_UNAVAILABLE.set()
@@ -949,7 +949,7 @@ def follow_shared(interval: float = FOLLOW_S) -> None:
                 repository.current(slug)
             except Exception as exc:  # one unreadable ledger must not stop the others following
                 sys.stderr.write(f"shared follow {slug}: {exc}\n")
-        scheduled_wait(interval)
+        scheduled_wait(interval, timeout=interval)
 
 
 def retrying(target, sleep=time.sleep, first=1.0, cap=30.0):

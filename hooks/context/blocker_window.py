@@ -3,17 +3,37 @@ window automatically and injects a once-a-minute notice naming each sustained ca
 troubleshooting mode with every tool it needs. A swarm's panic opens the same window for its master and denies the
 pushes, reruns, dispatches and deploys of every other session bound to that swarm; sessions bound to another swarm
 and unbound sessions are never held. A push or dispatch whose every ref is a registered fix branch, or the head branch
-of a registered fix pull request, is spared, and so is a rerun from a checkout whose branch or upstream is one. Swarm
-publish, which pushes from its own process, asks the same panic rule through held_push before it pushes.
+of a registered fix pull request, is spared, and so is a rerun of one run or job whose head branch, read from GitHub,
+is the checkout's branch or upstream and one. Swarm publish, which pushes from its own process, asks the same panic
+rule through held_push before it pushes.
 Fails open on a store error."""
 
 import os
 import re
 import subprocess
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hooks.context import master_coding
+from hooks.context.shell_commands import (
+    _FROZEN_COMMANDS as _FROZEN_COMMANDS,
+)
+from hooks.context.shell_commands import (
+    _GLOBAL_VALUES as _GLOBAL_VALUES,
+)
+from hooks.context.shell_commands import (
+    _command as _command,
+)
+from hooks.context.shell_commands import (
+    _dispatches as _dispatches,
+)
+from hooks.context.shell_commands import (
+    _ref as _ref,
+)
+from hooks.context.shell_commands import (
+    _targets as _targets,
+)
 
 if TYPE_CHECKING:
     from scripts.swarm.blockers import Blocker
@@ -32,131 +52,10 @@ FROZEN = (
     "BLOCKED: panic mode holds swarm {slug} ({reason}). Its sessions' pushes, reruns, dispatches and deploys wait "
     "until the master's fix brings it back to business as usual; agentihooks swarm {slug} panic status shows the level."
 )
-_FROZEN_COMMANDS = (
-    ("git", "push"),
-    ("gh", "run", "rerun"),
-    ("gh", "workflow", "run"),
-    ("kubectl", "apply"),
-    ("kubectl", "rollout"),
-    ("helm", "upgrade"),
-    ("helm", "install"),
-    ("argocd", "app", "sync"),
-)
-_GIT_VALUES = frozenset(
-    {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env", "--attr-source"}
-)
-_PUSH_WIDENS = frozenset({"--all", "--branches", "--mirror", "--tags", "--follow-tags", "--prune", "--repo"})
-_PUSH_VALUES = frozenset({"-o", "--push-option"})
-_REDIRECTION = re.compile(r"([^<>]*)([<>].*)")
-_KUBECTL_VALUES = frozenset(
-    {
-        "-n",
-        "--namespace",
-        "-s",
-        "--server",
-        "-v",
-        "--v",
-        "--as",
-        "--as-group",
-        "--as-uid",
-        "--as-user-extra",
-        "--cache-dir",
-        "--certificate-authority",
-        "--client-certificate",
-        "--client-key",
-        "--cluster",
-        "--context",
-        "--kubeconfig",
-        "--kuberc",
-        "--log-flush-frequency",
-        "--password",
-        "--profile",
-        "--profile-output",
-        "--proxy-url",
-        "--request-timeout",
-        "--tls-server-name",
-        "--token",
-        "--user",
-        "--username",
-        "--vmodule",
-    }
-)
-_HELM_VALUES = frozenset(
-    {
-        "-n",
-        "--namespace",
-        "--burst-limit",
-        "--color",
-        "--colour",
-        "--content-cache",
-        "--kube-apiserver",
-        "--kube-as-group",
-        "--kube-as-user",
-        "--kube-ca-file",
-        "--kube-context",
-        "--kube-tls-server-name",
-        "--kube-token",
-        "--kubeconfig",
-        "--qps",
-        "--registry-config",
-        "--repository-cache",
-        "--repository-config",
-    }
-)
-_ARGOCD_VALUES = frozenset(
-    {
-        "-H",
-        "--header",
-        "--argocd-context",
-        "--auth-token",
-        "--client-crt",
-        "--client-crt-key",
-        "--config",
-        "--controller-name",
-        "--grpc-web-root-path",
-        "--http-retry-max",
-        "--kube-context",
-        "--logformat",
-        "--loglevel",
-        "--port-forward-namespace",
-        "--redis-compress",
-        "--redis-haproxy-name",
-        "--redis-name",
-        "--repo-server-name",
-        "--server",
-        "--server-crt",
-        "--server-name",
-    }
-)
-_GLOBAL_VALUES = {
-    "git": _GIT_VALUES,
-    "gh": frozenset({"-R", "--repo"}),
-    "kubectl": _KUBECTL_VALUES,
-    "helm": _HELM_VALUES,
-    "argocd": _ARGOCD_VALUES,
-}
-_API_VALUES = frozenset(
-    {
-        "-F",
-        "--field",
-        "-f",
-        "--raw-field",
-        "-H",
-        "--header",
-        "-X",
-        "--method",
-        "-q",
-        "--jq",
-        "-t",
-        "--template",
-        "-p",
-        "--preview",
-        "--hostname",
-        "--input",
-        "--cache",
-    }
-)
-_GH_REPO = re.compile(r"-R.*|--repo(=.*)?")
+_RERUN_JOB_FLAGS = frozenset({"--job", "-j"})
+_RERUN_FLAGS = frozenset({"--failed", "-d", "--debug"})
+_RERUN_JOB = re.compile(r"(?:--job=|-j=?)(.+)")
+_RERUN_ID = re.compile(r"(?:runs|jobs)/[0-9]+")
 _GIT_ENVIRONMENT = re.compile(r"\bGIT_(DIR|WORK_TREE|COMMON_DIR|NAMESPACE|CONFIG\w*)=")
 _ROUTED = re.compile(
     r"remote\.origin\.(push|pushurl|mirror)=.*"
@@ -296,136 +195,17 @@ def _directory(cwd: str, folders: list[str]) -> str:
 
 def _spared(tokens: list[str], cwd: str, fixes: tuple[str, ...]) -> bool:
     """Return whether a frozen command writes only registered fix branches of the checkout where it runs: a push or
-    dispatch whose every ref is one, or a rerun from a checkout whose branch or upstream on origin is one; git -C moves
-    that directory, and any other git global option, or a git config that may route the push elsewhere, keeps it
-    frozen."""
+    dispatch whose every ref is one, or a rerun of one run or job whose head is the checkout's branch or its upstream
+    on origin and one; git -C moves that directory, and any other git global option, or a git config that may route
+    the push elsewhere, keeps it frozen."""
     words, options = _command(tokens)
     targets = _targets(words)
     if targets is None or any(option != "-C" for option, _ in options):
         return False
     here = _directory(cwd, [value for _, value in options])
     if words[:3] == ["gh", "run", "rerun"]:
-        return _works_on_fix(here, fixes)
+        return _works_on_fix(here, fixes, words)
     return _on_fix_branch(here, fixes, targets) and not (words[:2] == ["git", "push"] and _routed(here))
-
-
-def _words(tokens: list[str]) -> list[str]:
-    """Return a simple command's tokens without its redirections: a redirection that ends in its operator takes the
-    next token as its target, and text before a < or > stays a word unless it names a file descriptor."""
-    kept = [token for token in tokens if token != "&"]
-    targets = {index + 1 for index, token in enumerate(kept) if token.endswith(("<", ">"))}
-    words: list[str] = []
-    for index, token in enumerate(kept):
-        found = _REDIRECTION.fullmatch(token)
-        if index in targets:
-            continue
-        if found is None:
-            words.append(token)
-        elif found.group(1) and not found.group(1).isdigit():
-            words.append(found.group(1))
-    return words
-
-
-def _command(tokens: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
-    """Return a simple command's words without redirections, its program's base name first, and the global options
-    of git, gh, kubectl, helm or argocd before each subcommand word a frozen command names, taken out of those words
-    as (option, value) pairs."""
-    words = _words(tokens)
-    if not words:
-        return [], []
-    head, rest = [Path(words[0]).name], iter(words[1:])
-    options: list[tuple[str, str]] = []
-    for word in rest:
-        if not _extends(head):
-            return [*head, word, *rest], options
-        if word.startswith("-"):
-            options.append((word, next(rest, "") if word in _GLOBAL_VALUES[head[0]] else ""))
-        else:
-            head.append(word)
-    return head, options
-
-
-def _extends(head: list[str]) -> bool:
-    """Return whether a frozen command names more subcommand words after head."""
-    return any(len(prefix) > len(head) and list(prefix[: len(head)]) == head for prefix in _FROZEN_COMMANDS)
-
-
-def _dispatches(words: list[str]) -> bool:
-    """Return whether a gh api call names a workflow or repository dispatch endpoint: its endpoint, the first word
-    that is neither an option nor an option's value, ends in dispatches."""
-    if words[:2] != ["gh", "api"]:
-        return False
-    rest = iter(words[2:])
-    for word in rest:
-        if word in _API_VALUES:
-            next(rest, None)
-        elif not word.startswith("-"):
-            return word.partition("?")[0].rstrip("/").rpartition("/")[2] == "dispatches"
-    return False
-
-
-def _targets(words: list[str]) -> tuple[str, ...] | None:
-    """Return the refs a command a fix branch session may run writes: none for a rerun or for a push of the checked
-    out branch, a dispatch's ref and a push's refspec destinations; None for any other command, for a gh command
-    aimed at another repository and for a push that may write more than its refspecs."""
-    if words[:1] == ["gh"] and any(_GH_REPO.fullmatch(word) for word in words):
-        return None
-    if words[:3] == ["gh", "run", "rerun"]:
-        return ()
-    if words[:3] == ["gh", "workflow", "run"]:
-        ref = _ref(words[3:])
-        return (ref,) if ref else None
-    if words[:2] == ["git", "push"]:
-        return _pushed(words[2:])
-    return None
-
-
-def _ref(words: list[str]) -> str:
-    """Return the last ref a workflow dispatch names with --ref or -r, or an empty name when it names none and runs
-    on the default branch."""
-    found = ""
-    for index, word in enumerate(words):
-        if word in ("--ref", "-r"):
-            found = words[index + 1] if index + 1 < len(words) else ""
-        elif word.startswith("--ref="):
-            found = word.removeprefix("--ref=")
-        elif word.startswith("-r"):
-            found = word.removeprefix("-r").removeprefix("=")
-    return found
-
-
-def _pushed(words: list[str]) -> tuple[str, ...] | None:
-    """Return the refs a push to origin writes, or None when it names another remote or an option that pushes more
-    than its refspecs; a push with no refspec writes the checked out branch and names none. A push to the lab writes
-    the branches its push options hand the relay, or none, which leaves the checked out branch it grades."""
-    from scripts.ci_lab.remote import checkout
-
-    if any(word.partition("=")[0] in _PUSH_WIDENS for word in words):
-        return None
-    named = _named(words)
-    if named[:1] == [checkout.REMOTE]:
-        return tuple(checkout.relayed(words))
-    if named[:1] not in ([], ["origin"]):
-        return None
-    return _destinations(named[1:])
-
-
-def _named(words: list[str]) -> list[str]:
-    """Return a push's remote and refspecs: its words without options and the values of options that take one."""
-    named: list[str] = []
-    rest = iter(words)
-    for word in rest:
-        if word in _PUSH_VALUES:
-            next(rest, None)
-        elif not word.startswith("-"):
-            named.append(word)
-    return named
-
-
-def _destinations(refspecs: list[str]) -> tuple[str, ...]:
-    """Return the ref each refspec writes; a bare HEAD writes the checked out branch and names none."""
-    parts = [refspec.removeprefix("+").partition(":") for refspec in refspecs]
-    return tuple(target if colon else source for source, colon, target in parts if colon or source != "HEAD")
 
 
 def _routed(cwd: str) -> bool:
@@ -469,13 +249,44 @@ def _on_fix_branch(cwd: str, fixes: tuple[str, ...], targets: tuple[str, ...]) -
     return all(_registered(cwd, fixes, branch) for branch in named)
 
 
-def _works_on_fix(cwd: str, fixes: tuple[str, ...]) -> bool:
-    """Return whether the checked out branch at cwd, or the branch it tracks on origin, is a registered fix of the
-    repository origin names there."""
-    if not (cwd and fixes):
+def _works_on_fix(cwd: str, fixes: tuple[str, ...], words: list[str]) -> bool:
+    """Return whether the one run or job a rerun's words name has its head on the checked out branch at cwd, or on the
+    branch it tracks on origin, and that branch is a registered fix of the repository origin names there; the head is
+    read only for such a branch, from that repository, and a run that cannot be read stays frozen."""
+    from scripts.swarm import panic
+    from scripts.swarm.stack import repo_key
+    from scripts.swarm.store import SwarmError
+
+    resource = _rerun(words)
+    if not (cwd and fixes and resource):
         return False
     branch = _git(cwd, "branch", "--show-current")
-    return _registered(cwd, fixes, branch) or _registered(cwd, fixes, _tracked(cwd, branch))
+    kept = {name for name in (branch, _tracked(cwd, branch)) if _registered(cwd, fixes, name)}
+    if not kept:
+        return False
+    repository = repo_key(_git(cwd, "remote", "get-url", "origin")).removeprefix("github.com/")
+    try:
+        return panic.run_branch(repository, resource) in kept
+    except SwarmError:
+        return False
+
+
+def _rerun(words: list[str]) -> str:
+    """Return the Actions resource of the one run or job a gh run rerun's words name: runs/ID for a run id, jobs/ID for
+    a --job or -j id; an empty string when they name none, more than one, an id that is not a number, or an option
+    other than --failed, -d and --debug."""
+    named: list[str] = []
+    for before, word in pairwise(words[2:]):
+        job = _RERUN_JOB.fullmatch(word)
+        if before in _RERUN_JOB_FLAGS:
+            named[-1] += word
+        elif word in _RERUN_JOB_FLAGS:
+            named.append("jobs/")
+        elif job is not None:
+            named.append(f"jobs/{job[1]}")
+        elif word not in _RERUN_FLAGS:
+            named.append(f"runs/{word}")
+    return named[0] if len(named) == 1 and _RERUN_ID.fullmatch(named[0]) else ""
 
 
 def _tracked(cwd: str, branch: str) -> str:

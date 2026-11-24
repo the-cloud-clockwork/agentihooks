@@ -1,6 +1,7 @@
 import json
 import os
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -484,7 +485,9 @@ def test_a_quota_transfer_continues_its_saved_effort_at_the_equal_rank(tmp_path,
     assert model[model.index(flags[0]) : model.index(flags[0]) + 2] == flags
 
 
-def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_range(tmp_path, monkeypatch):
+def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_range(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
     rt._quota_accounts = [account("old", state="DRAIN"), account("best", "codex", five=10, week=20)]
     seen = []
@@ -502,7 +505,7 @@ def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_ran
         "handoff_envelope": {"reason": "quota", "launch": {**LAUNCH, "effort": "max"}},
     }
     rt.spawn(config, "master", "master@a1b2c3-0002", task)
-    assert 'model_reasoning_effort="high"' in seen[0][seen[0].index("--") + 1 :]
+    assert 'model_reasoning_effort="xhigh"' in seen[0][seen[0].index("--") + 1 :]
 
 
 def test_a_lane_quota_transfer_to_codex_outside_the_range_is_refused(tmp_path, monkeypatch):
@@ -867,3 +870,75 @@ def test_codex_successor_prefers_week_remaining_and_requires_a_week():
     missing = capacity.Account("codex", "c", "OPEN", 0, 90.0, None, 6)
     assert quota_handoff.exclusion(missing, thresholds) == "has no quota reading"
     assert quota_handoff.successor([lesser, better, missing], ("codex",), thresholds) == better
+
+
+def _spoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: list[list[capacity.Account]]
+) -> tuple[runtime.HerdrRuntime, SwarmConfig, list[list[str]], list[bool]]:
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
+    seen: list[list[str]] = []
+    reads: list[bool] = []
+
+    def read(environ: dict[str, str], now: float, *, refresh: bool) -> list[capacity.Account]:
+        reads.append(refresh)
+        return list(rows[-1])
+
+    monkeypatch.setattr(capacity, "accounts", read)
+    monkeypatch.setattr(capacity, "calculate", lambda *_args, **_kwargs: {"allocation": {}, "placements": {}})
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", "claude", "best"),
+    )
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3", scaling="manual")
+    return rt, config, seen, reads
+
+
+def _stale_spoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[runtime.HerdrRuntime, SwarmConfig, list[list[str]]]:
+    rows = [[account("old", state="DRAIN"), account("best", five=10, week=20, sessions=2)]]
+    rt, config, seen, _reads = _spoke(tmp_path, monkeypatch, rows)
+    handoff = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {"reason": "quota", "launch": LAUNCH},
+    }
+    rt.spawn(config, "eng", "engineer@a1b2c3-0002", handoff)
+    assert [(row.name, row.sessions) for row in rt._quota_accounts] == [("old", 1), ("best", 3)]
+    rows.append([account("old", state="DRAIN"), account("best", five=10, week=20, sessions=0)])
+    return rt, config, seen
+
+
+@pytest.mark.feature("hive-spoke-spawn-fresh-quota-rows")
+def test_a_spawn_keeps_the_quota_rows_its_tick_pass_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [[account("best", five=10, week=20, sessions=0)]]
+    rt, config, seen, reads = _spoke(tmp_path, monkeypatch, rows)
+    rt.quota_capacity(config, [], 5.0, {"eng": 2})
+    rows.append([account("best", five=10, week=20, sessions=3)])
+    rt.spawn(config, "eng", "engineer@a1b2c3-0002", {"id": "t1", "title": "x"})
+    rt.spawn(config, "eng", "engineer@a1b2c3-0003", {"id": "t2", "title": "x"})
+    assert reads == [False]
+    assert [_option(argv, "--route") for argv in seen] == ["best", "best"]
+    assert [(row.name, row.sessions) for row in rt._quota_accounts] == [("best", 2)]
+
+
+@pytest.mark.feature("hive-spoke-spawn-fresh-quota-rows")
+def test_a_spoke_spawn_reads_fresh_quota_rows_after_its_first_quota_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rt, config, seen = _stale_spoke(tmp_path, monkeypatch)
+    placed = rt.spawn(config, "eng", "engineer@a1b2c3-0003", {"id": "t1", "title": "x"})
+    assert placed.harness == "claude"
+    assert _option(seen[-1], "--route") == "best"
+
+
+@pytest.mark.feature("hive-spoke-spawn-fresh-quota-rows")
+def test_a_spoke_spawn_still_counts_the_session_it_placed_on_fresh_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rt, config, _seen = _stale_spoke(tmp_path, monkeypatch)
+    rt.spawn(config, "eng", "engineer@a1b2c3-0003", {"id": "t1", "title": "x"})
+    assert [(row.name, row.sessions) for row in rt._quota_accounts] == [("old", 1), ("best", 1)]

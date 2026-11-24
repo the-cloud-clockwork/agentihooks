@@ -2,14 +2,15 @@
 
 A stats unit carries the stats cache identity of its test file. A mutant unit names every mutant
 of one changed function and is keyed only by what decides their verdicts, so line numbers, the
-changed line scope and clearances apply at grade time.
+changed line scope and clearances apply at grade time. A function whose mutants price over the
+sandbox timeout gets several mutant units, each with its own run of them.
 """
 
 import ast
 import hashlib
+import math
 import re
 import subprocess
-import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,9 @@ from mutmut.mutation.file_mutation import group_by_top_level_node
 from mutmut.mutation.trampoline_templates import mangle_function_name
 from mutmut.utils.format_utils import get_mutant_name
 
+from scripts.ci_lab import digests
 from scripts.ci_lab.units import Unit
+from scripts.ci_mutation.plan import MUTANT_SECONDS
 from scripts.ci_mutation.scope import module_name
 from scripts.ci_mutation.selection import created_mutations
 from scripts.ci_mutation.stats_cache import (
@@ -30,7 +33,7 @@ from scripts.ci_mutation.stats_cache import (
     TRACKED,
     UNKEYED,
     StatsInputs,
-    distribution_versions,
+    runtime_digest,
 )
 from scripts.ci_mutation.stats_dependencies import StoredStats, digest  # pyright: ignore[reportUnknownVariableType]
 
@@ -71,7 +74,7 @@ def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -
     paths = tracked(root)
     present = [path for path in paths if (root / path).is_file()]
     sources = {path: file_digest(root / path) for path in present if path in CONFIGURATION or path.startswith(RUNNER)}
-    runtime = [sys.version, sys.platform, distribution_versions(root)]
+    runtime = runtime_digest(root)
     stored = StoredStats(root, root, dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, runtime))), {})
     modules = {module_name(Path(path)): path for path in paths if Path(path).suffix == ".py"}
     inputs = StatsInputs(root, modules, resources_of([path for path in present if path not in UNKEYED]), {})
@@ -79,7 +82,7 @@ def stats_units(root: Path, files: Sequence[str], options: Sequence[str] = ()) -
     for path in files:
         found = inputs.for_test(path, None)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
         key = stored.identity(path, found, stored.scope(found), False, inputs.discovery(found))  # pyright: ignore[reportUnknownMemberType]
-        units.append(Unit("stats", key, (path,)))
+        units.append(Unit("stats", f"stats-v{digests.SCHEMAS['stats']}-{key}", (path,)))
     return tuple(units)
 
 
@@ -108,6 +111,14 @@ def module_digest(source: str) -> str:
     return hashlib.sha256(ast.dump(tree).encode()).hexdigest()
 
 
+def split_members(members: tuple[str, ...], timeout: float) -> list[tuple[str, ...]]:
+    """Split a function's mutants, in order, into the fewest near equal parts whose largest prices within timeout at
+    MUTANT_SECONDS a mutant, one part when all of them do and one mutant a part when even one prices over it."""
+    size = len(members)
+    count = next((parts for parts in range(1, size) if -(-size // parts) * MUTANT_SECONDS <= timeout), size)
+    return [members[index * size // count : (index + 1) * size // count] for index in range(count)]
+
+
 def function_units(
     root: Path,
     path: str,
@@ -115,10 +126,13 @@ def function_units(
     runner: str,
     covering: Mapping[str, Mapping[str, str]],
     unlisted: Mapping[str, str],
+    timeout: float,
 ) -> list[Unit]:
-    """Return one mutant unit for each function mutmut trampolines in path whose lines meet changed."""
+    """Return the mutant units of each function mutmut trampolines in path whose lines meet changed: one, or the parts
+    of split_members keyed by the function key with their own members when its mutants price over timeout. It applies
+    no ignore pattern and reads no mutmut config, as the worker's trampolining does."""
     source = (root / path).read_text()
-    wrapper, graded, _ = created_mutations(path, source)
+    wrapper, graded, _ = created_mutations(path, source, patterns=())
     starts = wrapper.resolve(WhitespaceInclusivePositionProvider)
     ends = wrapper.resolve(PositionProvider)
     parents = wrapper.resolve(ParentNodeProvider)
@@ -134,7 +148,15 @@ def function_units(
         name = get_mutant_name(Path(path), mangle_function_name(name=function.name.value, class_name=class_name))
         text = wrapper.module.code_for_node(function.with_changes(leading_lines=()))
         key = digest([name, text, module, runner, dict(covering.get(name, {})), dict(unlisted)])
-        units.append(Unit("mutant", key, tuple(f"{name}__mutmut_{index}" for index in range(1, len(mutations) + 1))))
+        parts = split_members(tuple(f"{name}__mutmut_{index}" for index in range(1, len(mutations) + 1)), timeout)
+        units.extend(
+            Unit(
+                "mutant",
+                f"mutant-v{digests.SCHEMAS['mutant']}-{key if len(parts) == 1 else digest([key, list(part)])}",
+                part,
+            )
+            for part in parts
+        )
     return units
 
 
@@ -143,19 +165,22 @@ def mutant_units(
     changes: Mapping[str, Iterable[int]],
     covering: Mapping[str, Mapping[str, str]],
     unlisted: Mapping[str, str],
+    *,
+    timeout: float = math.inf,
 ) -> tuple[Unit, ...]:
     """Name every mutant of each changed function and key it by the inputs that decide its verdicts.
 
     changes maps each mutated source file, a Python file present under root, to its changed lines; covering maps a
     qualified mutmut function name to the fingerprints of the tests that cover it; unlisted maps each test module
     under root that holds no manifest test to its hash, together with every file under the measured and test trees
-    while such a module exists, and enters every key, since the mutant runner runs it too.
+    while such a module exists, and enters every key, since the mutant runner runs it too. timeout is the sandbox
+    bound one unit's mutants run under; a function whose mutants price over it gets several units.
     """
     runner = runner_digest(root)
     return tuple(
         unit
         for path in sorted(changes)
-        for unit in function_units(root, path, set(changes[path]), runner, covering, unlisted)
+        for unit in function_units(root, path, set(changes[path]), runner, covering, unlisted, timeout)
     )
 
 

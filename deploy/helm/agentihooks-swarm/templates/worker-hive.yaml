@@ -106,7 +106,11 @@ spec:
       annotations:
         checksum/worktrees: {{ toJson $worktrees | sha256sum }}
         {{- if $root.Values.workers.rollout.enabled }}
-        {{- with $root.Values.workers.rollout.release }}
+        {{- $release := $root.Values.workers.rollout.release }}
+        {{- if and (not $release) (eq (toString $workers.image.tag) "release") (regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+$" (toString $root.Chart.AppVersion)) }}
+        {{- $release = toString $root.Chart.AppVersion }}
+        {{- end }}
+        {{- with $release }}
         agentihooks.io/release: {{ . | quote }}
         {{- end }}
         {{- end }}
@@ -194,6 +198,8 @@ spec:
               value: {{ $workers.prefer | default "" | quote }}
             - name: HIVE_CAPABILITIES
               value: {{ join "," ($workers.capabilities | default list) | quote }}
+            - name: HIVE_PINNED
+              value: {{ ternary "yes" "no" (eq (toString $workers.pinned) "true") | quote }}
             - name: HIVE_REPOSITORIES
               value: {{ $workers.repositories | toJson | quote }}
             - name: HIVE_CREDENTIAL_FILE

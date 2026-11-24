@@ -336,7 +336,7 @@ workers:
     namespace: default
     leaseName: agentihooks-hive-rollout
     drainSeconds: 1200
-    # Optional pod stamp; each new value rolls the hives one at a time.
+    # Pod stamp; each new value rolls the hives one at a time. Empty takes the release chart's version when the worker tag is release.
     release: ""
   excluded: [master]
   # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.
@@ -345,6 +345,8 @@ workers:
   prefer: ""
   # Capabilities this hive declares at every start, such as anton; a hive placement need names one to steer a run here.
   capabilities: []
+  # True for a hive pinned to one release: the hub keeps admitting it after the hub moves to a newer release.
+  pinned: false
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
     tag: dev

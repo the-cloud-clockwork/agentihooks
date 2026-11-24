@@ -398,7 +398,7 @@
   "scripts/hive/spoke.py": 53,
   "scripts/hive/workstation.py": 38,
   "scripts/host_guard/sync.py": 51,
-  "scripts/hub/admission.py": 105,
+  "scripts/hub/admission.py": 104,
   "scripts/hub/claims.py": 12,
   "scripts/hub/github_webhooks.py": 21,
   "scripts/hub/hive_loss.py": 45,

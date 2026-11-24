@@ -1,0 +1,20 @@
+rules:
+  - id: github-pool-port-nested
+    languages: [python]
+    severity: ERROR
+    message: GitHub ports and reads acquire their own pool slot. Call them outside an outer GitHub pool block to avoid exhausting the nonreentrant pool.
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              with pool.limit("github"):
+                  ...
+          - pattern-inside: |
+              with pool.limit("github"), ...:
+                  ...
+          - pattern-inside: |
+              with ..., pool.limit("github"), ...:
+                  ...
+      - pattern-either:
+          - pattern: $PORT.graph(...)
+          - pattern: $PORT.download(...)
+          - pattern: github_reads.rest(...)

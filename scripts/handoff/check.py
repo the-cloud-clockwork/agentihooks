@@ -6,6 +6,7 @@ It checks structure only and never certifies that the content is true.
 
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from hooks import secrets
 
@@ -20,8 +21,9 @@ ADDRESS = re.compile(
     r"|recap:[\w.-]+@[\w.-]+"
     r"|inbox:\w+"
     r"|seat:[\w-]+"
+    r"|mission:[\w.-]+/[0-9a-f]{64}"
 )
-ADDRESS_FORMS = "a GitHub issue or pull request link, ledger:, workspace:, recap:, inbox: or seat:"
+ADDRESS_FORMS = "a GitHub issue or pull request link, ledger:, workspace:, recap:, inbox:, seat: or mission:"
 FILE_EXT = "py|md|json|jsonl|toml|ya?ml|sh|txt|js|ts|tsx|css|html|cfg|ini|lock|rs|go|sql|env|log"
 FILE_NAME = re.compile(rf"[\w.@/-]*\w\.(?:{FILE_EXT})(?::\d+)*")
 PATH_START = ("/", "~/", "./", "../")
@@ -29,27 +31,53 @@ URL = re.compile(r"\w+://\S+")
 TOKEN_SPLIT = re.compile(r"[\s`'\"()\[\]<>,;*]+")
 LINE_NUMBER = re.compile(r"(?i:\blines? \d+)|\bL\d+\b|\.\w+:\d+\b")
 BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
-EVIDENCE = re.compile(
-    r"\w+://\S+|`[^`]+`|#\d+|\brun \d+|\b\d{8,}\b|\b(?:ledger|workspace|recap|inbox):\S+|\bproof\b"
+SHOWN = re.compile(
+    r"\w+://\S+|`[^`]+`|#\d+|\brun \d+|\b\d{8,}\b|\b(?:ledger|workspace|recap|inbox):\S+"
     r"|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b",
     re.IGNORECASE,
 )
+EVIDENCE = re.compile(rf"{SHOWN.pattern}|\bproof\b", re.IGNORECASE)
 HYPOTHESIS = re.compile(r"\bhypothes[ie]s\b", re.IGNORECASE)
+COUNTS = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+COMPLETION = re.compile(r"<!-- \w+ complete -->")
 
 
-def problems(text: str, resolves: Callable[[str], object]) -> list[str]:
-    """Every structural problem in the document, empty when it conforms; resolves(address) says an address exists."""
+@dataclass(frozen=True)
+class Contract:
+    """The shape a document is held to: its title line, its headings in order, the sections whose bullets must each
+    carry evidence, the completion marker that ends it and whether that evidence must be shown. Where it must, a
+    bullet stands only on something to look at (a link, a run, a commit, an address, a backticked command or output):
+    the label hypothesis and the bare word proof do not stand. The check reads the form and cannot tell what a
+    backticked span holds."""
+
+    title: str
+    headings: tuple[str, ...]
+    evidenced: tuple[str, ...] = ("Done",)
+    marker: str = MARKER
+    shown: bool = False
+
+
+V2 = Contract(TITLE, HEADINGS)
+
+
+def problems(text: str, resolves: Callable[[str], object], contract: Contract = V2) -> list[str]:
+    """Every structural problem in the document under the contract, Handoff v2 unless another is given; empty when
+    it conforms. resolves(address) says an address exists."""
     lines = text.splitlines()
-    sections = _sections(lines)
+    sections = _sections(_body(lines))
     bodies = {name: body for name, body in reversed(sections)}
     return [
-        *_title(lines),
-        *_headings([name for name, _ in sections]),
-        *_empty(sections),
-        *_marker(lines),
+        *_title(lines, contract.title),
+        *_headings([name for name, _ in sections], contract.headings),
+        *_empty(sections, contract.headings),
+        *_marker(lines, contract.marker),
         *_read_first(bodies.get("Read first", []), resolves),
         *_wording(text),
-        *_done(bodies.get("Done", [])),
+        *(
+            found
+            for heading in contract.evidenced
+            for found in _evidence(heading, bodies.get(heading, []), contract.shown)
+        ),
     ]
 
 
@@ -57,54 +85,69 @@ def refusal(found: list[str]) -> str:
     return "handoff refused; fix the document and run the command again:\n" + "\n".join(f"- {p}" for p in found)
 
 
-def _sections(lines):
-    sections, fenced = [], False
+def _sections(lines: list[str]) -> list[tuple[str, list[str]]]:
+    sections: list[tuple[str, list[str]]] = []
+    fenced = False
     for line in lines:
         if line.lstrip().startswith("```"):
             fenced = not fenced
         if not fenced and line.startswith("## "):
             sections.append((line[3:].strip(), []))
-        elif sections and line.strip() != MARKER:
+        elif sections:
             sections[-1][1].append(line)
     return sections
 
 
+def _body(lines: list[str]) -> list[str]:
+    """The lines of the document without the completion marker that closes it, whichever document's marker it is. A
+    marker shaped line anywhere else is content."""
+    last = next((at for at in range(len(lines) - 1, -1, -1) if lines[at].strip()), -1)
+    closed = last >= 0 and COMPLETION.fullmatch(lines[last].strip()) is not None
+    return [*lines[:last], *lines[last + 1 :]] if closed else lines
+
+
 def section(text: str, heading: str) -> str:
-    return "\n".join(dict(_sections(text.splitlines())).get(heading, [])).strip()
+    return "\n".join(dict(_sections(_body(text.splitlines()))).get(heading, [])).strip()
 
 
-def _title(lines):
+def _title(lines: list[str], title: str) -> list[str]:
     first = next((line.strip() for line in lines if line.strip()), "")
-    return [] if first == TITLE else [f"the first line must be {TITLE}"]
+    return [] if first == title else [f"the first line must be {title}"]
 
 
-def _headings(names):
+def _counted(headings: tuple[str, ...]) -> str:
+    """How many headings a contract has, in a word up to ten and in digits beyond."""
+    return COUNTS[len(headings)] if len(headings) < len(COUNTS) else str(len(headings))
+
+
+def _headings(names: list[str], headings: tuple[str, ...]) -> list[str]:
+    listed = ", ".join(headings)
     found = [
-        f"## {name} is not one of the six headings: {', '.join(HEADINGS)}" for name in names if name not in HEADINGS
+        f"## {name} is not one of the {_counted(headings)} headings: {listed}" for name in names if name not in headings
     ]
-    for heading in HEADINGS:
+    for heading in headings:
         count = names.count(heading)
         if count == 0:
             found.append(f"## {heading} is missing")
         elif count > 1:
             found.append(f"## {heading} appears more than once")
-    known = list(dict.fromkeys(name for name in names if name in HEADINGS))
-    if known != [heading for heading in HEADINGS if heading in known]:
-        found.append(f"the headings are out of order; keep {', '.join(HEADINGS)}")
+    known = list(dict.fromkeys(name for name in names if name in headings))
+    if known != [heading for heading in headings if heading in known]:
+        found.append(f"the headings are out of order; keep {listed}")
     return found
 
 
-def _empty(sections):
+def _empty(sections: list[tuple[str, list[str]]], headings: tuple[str, ...]) -> list[str]:
     return [
         f"## {name} is empty; write {NONE} when there is nothing to say"
         for name, body in sections
-        if name in HEADINGS and not "".join(body).strip()
+        if name in headings and not "".join(body).strip()
     ]
 
 
-def _marker(lines):
+def _marker(lines: list[str], marker: str) -> list[str]:
     last = next((line.strip() for line in reversed(lines) if line.strip()), "")
-    return [] if last == MARKER else [f"the completion marker {MARKER} must be the last line"]
+    return [] if last == marker else [f"the completion marker {marker} must be the last line"]
 
 
 def _bullets(body):
@@ -137,10 +180,20 @@ def _read_first(body, resolves):
     return found
 
 
-def _wording(text):
-    prose = "\n".join(line for line in text.splitlines() if line.strip() != MARKER)
-    names = secrets.scan(prose, mode="standard")
-    found = [f"credential value found ({', '.join(names)}); refer to it by its variable name"] if names else []
+def headings(text: str) -> list[str]:
+    """The name of every section heading of the document in the order written, a fenced block's lines left out."""
+    return [name for name, _ in _sections(text.splitlines())]
+
+
+def leaks(text: str) -> list[str]:
+    """The problem a credential value in the text raises, whatever secret mode the session runs in."""
+    names = secrets.scan(text, mode="standard")
+    return [f"credential value found ({', '.join(names)}); refer to it by its variable name"] if names else []
+
+
+def _wording(text: str) -> list[str]:
+    prose = "\n".join(_body(text.splitlines()))
+    found = leaks(prose)
     found += [f"file path {path}; name the module, type or command instead" for path in _paths(prose)]
     found += [
         f"line number {where}; name the function or behaviour instead"
@@ -160,11 +213,23 @@ def _paths(prose):
     return list(dict.fromkeys(found))
 
 
-def _done(body):
+def bullets(body: str) -> list[str]:
+    """The bullets of a section body, each one line with its marker left out and its wrapped lines joined."""
+    return _bullets(body.splitlines())
+
+
+def _evidence(heading: str, body: list[str], shown: bool) -> list[str]:
     if _is_none(body):
         return []
-    return [
-        f"Done bullet {number} carries no evidence; add it or label the bullet hypothesis"
-        for number, bullet in enumerate(_bullets(body), 1)
-        if not EVIDENCE.search(bullet) and not HYPOTHESIS.search(bullet)
-    ]
+    found = (_unshown(heading, number, bullet, shown) for number, bullet in enumerate(_bullets(body), 1))
+    return [fault for fault in found if fault]
+
+
+def _unshown(heading: str, number: int, bullet: str, shown: bool) -> str:
+    """Why one bullet of an evidenced section does not stand, empty when it does."""
+    if HYPOTHESIS.search(bullet):
+        return f"{heading} bullet {number} is labelled hypothesis; a proof holds only what was shown" if shown else ""
+    if (SHOWN if shown else EVIDENCE).search(bullet):
+        return ""
+    remedy = "add the run, command or link that shows it" if shown else "add it or label the bullet hypothesis"
+    return f"{heading} bullet {number} carries no evidence; {remedy}"

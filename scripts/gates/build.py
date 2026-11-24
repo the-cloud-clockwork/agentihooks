@@ -20,7 +20,7 @@ from scripts.swarm_ledger import ledger_workspace
 if TYPE_CHECKING:
     from scripts.gates.verdicts import Verdicts
 
-LANES = frozenset({"eng", "ci"})
+LANES = frozenset({"eng", "ci", "review"})
 EDIT_TOOLS = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path"}
 SERENA = "mcp__serena__"
 SERENA_EDITS = frozenset(
@@ -49,14 +49,14 @@ def _area(entry):
 
 
 def within(path: str, areas: list[str], repo: str) -> bool:
-    """True when path, inside repository repo, falls under an area written plain or with repo as its first part."""
+    """True when path, inside repository repo, falls under an area written plain or as repo/area or repo:area."""
     forms = [form for area in map(_area, areas) if area for form in _forms(area, repo)]
     return any(path == form or path.startswith(form + "/") for form in forms)
 
 
 def _forms(area: str, repo: str) -> tuple[str, ...]:
-    """The area as written, and the area inside repo when its first part names repo."""
-    return (area, area.removeprefix(f"{repo}/")) if repo else (area,)
+    """The area as written, and the area inside repo when it opens with repo and a slash or a colon."""
+    return (area, area.removeprefix(f"{repo}/"), _area(area.removeprefix(f"{repo}:"))) if repo else (area,)
 
 
 def git_root(path):
@@ -106,13 +106,22 @@ def _commit_in(rest, directory):
             return
 
 
-def _git_names(directory, everything):
-    out = subprocess.run(
-        ["git", "-C", str(directory), "diff", "--name-only", "-z", "HEAD" if everything else "--cached"],
-        capture_output=True,
-        text=True,
-    )
-    return [name for name in out.stdout.split("\0") if name] if out.returncode == 0 else []
+def _git_names(directory: Path, everything: bool) -> list[str]:
+    """Files a commit in directory records, less those whose content equals a merge head origin/dev holds."""
+    names = _diff_names(directory, "HEAD" if everything else "--cached") or []
+    if _git(directory, "merge-base", "--is-ancestor", "MERGE_HEAD", "origin/dev").returncode == 0:
+        beside_dev = _diff_names(directory, *([] if everything else ["--cached"]), "MERGE_HEAD")
+        names = [name for name in names if beside_dev is None or name in beside_dev]
+    return names
+
+
+def _diff_names(directory: Path, *against: str) -> list[str] | None:
+    out = _git(directory, "diff", "--name-only", "-z", *against)
+    return [name for name in out.stdout.split("\0") if name] if out.returncode == 0 else None
+
+
+def _git(directory: Path, *words: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", "-C", str(directory), *words], capture_output=True, text=True)
 
 
 def _patch_targets(call, key):
@@ -149,7 +158,7 @@ def refusal(who, outside, areas, plan):
     return (
         f"build gate: outside your traced plan: {shown}. Kept areas and territory: {', '.join(areas) or 'none'}. "
         f"If the task needs it, append a piece to {plan}, {trace_plan.FORMAT}, and run "
-        f"agentihooks swarm {who.swarm} trace-plan; otherwise propose it: agentihooks ledger --slug {who.swarm} "
+        f"agentihooks swarm {who.swarm} trace-plan; otherwise propose it: agentihooks api --slug {who.swarm} "
         f'--as {who.name} followup add "<text>"'
     )
 

@@ -47,8 +47,11 @@ from scripts.swarm.health import (
     activity,
     checks,
     early_ends,
+    focus_unclaimed,
+    harness_pin,
     merge_stall,
     night_watch,
+    order_waiting,
     ordering_dependencies,
     prompt_backlog,
     quiet_hives,
@@ -101,20 +104,10 @@ def section_lines(name: str, read: Callable[[], list[str]]) -> list[str]:
 def readable_hives(store: Any) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """The live hives whose pending admission count the Redis role may read, and each live hive it may not read with
     the refusal, so a hive member lists the admission rooms it can read and names the counts it cannot."""
-    from redis.exceptions import NoPermissionError
-
-    from scripts.hive.launch import live_hives
+    from scripts.hive.launch import live_hives, pending_reader
 
     refused: dict[str, str] = {}
-
-    def count(redis: Any, machine: str) -> int:
-        try:
-            return admission.pending(redis, machine)
-        except NoPermissionError as exc:
-            refused[machine] = str(exc)
-            return 0
-
-    live = live_hives(store, count)
+    live = live_hives(store, pending_reader(refused))
     unreadable = {hive["id"]: refused[hive["id"]] for hive in live if hive["id"] in refused}
     return [hive for hive in live if hive["id"] not in unreadable], unreadable
 
@@ -183,12 +176,15 @@ def findings(
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
+        + harness_pin.findings(store, slug, now_ms())
         + step_starvation.findings(store, slug, now_ms())
         + night_watch.findings(store, slug)
         + master_critical.findings(store, slug, now_ms())
         + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + urgent_hold.findings(store, slug)
+        + focus_unclaimed.findings(store, slug)
+        + order_waiting.findings(store, slug)
         + ordering_dependencies.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
@@ -227,7 +223,7 @@ def _health_rows(store, slug, agents, quiet, at):
     return rows
 
 
-def talk_since_outcome(store, slug, rows):
+def talk_since_outcome(store: RedisStore, slug: str, rows: list[dict[str, Any]]) -> dict[str, int]:
     marks = progress.Progress(store.redis, slug)
     held = {row["name"]: marks.read(row["name"]) for row in rows if row.get("lane") in WORKER_LANES}
     return {name: mark.talk if mark.outcome_at else 0 for name, mark in held.items()}
@@ -324,6 +320,15 @@ def observation(store, slug, agent):
 def transport(agent: AgentRecord) -> dict:
     found = capabilities.of_agent(agent)
     return {"push_inbox": found.push_inbox, "native_terminal_attach": found.native_terminal_attach}
+
+
+def wait_label(store: RedisStore, slug: str, agent: AgentRecord) -> str:
+    """The agent's live declared wait as its kind and target, ``bare`` for a bare wait, or ``-`` without one."""
+    held = idle.wait(store.redis, slug, agent.name)
+    if not held:
+        return "-"
+    on = held.get("on")
+    return f"{on['kind']} {on['target']}" if on else "bare"
 
 
 def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord]:

@@ -31,9 +31,17 @@ if name in store.slugs():
 elif repository.exists(name) and ledger_size.size_of(repository.get_document(name)) != "swarm":
     print(json.dumps({"found": "ledger"}))
 else:
+    argv = [name, "create", "--repo", order["repo"], *order["flags"]]
+    try:
+        refused = store.refusal(cli.create_config(cli.build_parser().parse_args(argv)))
+    except cli.SwarmError as error:
+        refused = str(error)
+    if refused:
+        print(f"swarm: {refused}", file=sys.stderr)
+        sys.exit(1)
     repository.create(name, order["content"], "swarm")
     with contextlib.redirect_stdout(io.StringIO()) as told:
-        code = cli.main([name, "create", "--repo", order["repo"], *order["flags"]])
+        code = cli.main(argv)
     print("\\n".join(told.getvalue().splitlines()[:1]))
     sys.exit(code)
 """

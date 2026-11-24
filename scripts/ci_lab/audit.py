@@ -3,12 +3,14 @@
 promotion_audit grades a dev head's whole suite with no store reuse and compares every verdict with the cached one;
 sample regrades a deterministic share of a day's store hits in the backfill class. A mismatch disables reuse of its
 kind, files one ci task per kind on the ledger naming each cached run and the audit run, and raises
-CILabVerdictMismatch. The audit never enables a kind again; that takes a pull request.
+CILabVerdictMismatch. A kind's mismatches stay recorded as unfiled in the store until the ledger takes its task,
+and the next audit files them again. The audit never enables a kind again; that takes a pull request.
 """
 
+import json
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Protocol
 
 from scripts.ci_lab.digests import digest
@@ -31,6 +33,7 @@ __all__ = [
     "mismatches",
     "promotion_audit",
     "sample",
+    "unfiled",
 ]
 
 SHARE = 0.05
@@ -129,6 +132,15 @@ def mismatches(store: Store, units: Sequence[Cached], regrade: Regrade) -> list[
     return found
 
 
+def unfiled(store: Store) -> list[Mismatch]:
+    """Return the mismatches of every kind whose task an earlier audit could not file, by kind."""
+    return [
+        Mismatch(Verdict(**row["cached"]), Verdict(**row["regraded"]), row["cached_run"], row["audit_run"])
+        for _, record in sorted(store.unfiled().items())
+        for row in json.loads(record)
+    ]
+
+
 def _word(verdict: Verdict) -> str:
     return "passed" if verdict.passed else "failed"
 
@@ -165,14 +177,16 @@ def _file(ports: Ports, kind: str, found: Sequence[Mismatch], run: str) -> None:
 
 
 def _audit(ports: Ports, units: Sequence[Cached], tier: Priority) -> Regrade:
-    """Grade the units uncached; stop reuse of every kind whose verdicts differ, then file each kind's task, raise."""
+    """Grade the units uncached; with the unfiled mismatches, disable and record each differing kind, file it, raise."""
     regrade = ports.lab.grade(units, tier)
-    found = mismatches(ports.store, units, regrade)
-    kinds = sorted({mismatch.cached.kind for mismatch in found})
-    for kind in kinds:
+    found = [*unfiled(ports.store), *mismatches(ports.store, units, regrade)]
+    kinds = {kind: [m for m in found if m.cached.kind == kind] for kind in sorted({m.cached.kind for m in found})}
+    for kind, kept in kinds.items():
         ports.store.disable(kind)
-    for kind in kinds:
-        _file(ports, kind, [mismatch for mismatch in found if mismatch.cached.kind == kind], regrade.run)
+        ports.store.keep_unfiled(kind, json.dumps([asdict(mismatch) for mismatch in kept]))
+    for kind, kept in kinds.items():
+        _file(ports, kind, kept, regrade.run)
+        ports.store.filed(kind)
     if found:
         raise CILabVerdictMismatch(found)
     return regrade

@@ -24,10 +24,10 @@ if TYPE_CHECKING:
 
     from scripts.swarm.ledger_events import PullRequest
 
-WORKERS = frozenset({"eng", "ci"})
+WORKERS = frozenset({"eng", "ci", "review"})
 TEMPLATE = (
     "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull request. "
-    "If not, update the issue and the pull request and record progress on the ledger."
+    "If not, update the issue and the pull request and record progress through the swarm API."
 )
 PROGRESS = (
     "Pushed work has no recorded progress since the push. "

@@ -447,6 +447,7 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 |---|---|
 | `--dir`, `--name`, `--prompt` / `--prompt-file` | Directory, session/tab name, opening prompt |
 | `--dry-run` | Print the launch without opening a terminal |
+| `--inbox-channel` | Claude: load the AgentiHooks [inbox channel](codex-inbox-transport.md#three-inbox-paths) and answer Claude's development channels warning in herdr. It first registers the `inbox` MCP server in the Claude config, also on `--dry-run`; see [Claude config lock](#claude-config-lock). The swarm passes it on every Claude agent launch |
 | `--codex-transport legacy\|app_server`, `--seat` | Select the transport and admitted seat for a managed Codex swarm launch; see [Managed Codex terminals](codex-managed-terminal.md) for configuration and viewer behavior |
 | `--start-timeout` | Seconds to wait for the terminal to start (default 30) |
 | `--route-timeout` | Seconds to wait for the new session's route report (default 150) |
@@ -471,6 +472,7 @@ so a herdr pane's own environment cannot point Claude at another file.
 `trust=trusted|marked|untrusted` names the outcome;
 `AGENTIHOOKS_TRUST_LAUNCH_DIR=0` turns marking off. On `untrusted` the launch
 still goes ahead and stderr says the session waits for someone to answer.
+Marking takes the Claude config lock; see [Claude config lock](#claude-config-lock).
 
 Hosts: herdr when installed and not disabled (`state.json` `herdr.enabled`), else
 the native terminal. `--host herdr|native` or `AGENTIHOOKS_TERMINAL_HOST` overrides.
@@ -487,6 +489,107 @@ With `--profile`, the output adds `profile_validation=validated` and
 The launcher starts the session through `agentihooks select-profile NAME
 --home=<recorded home>`, so a pull of `dev` or another code root between
 prepare and launch does not change the home the session mounts.
+
+### Claude config lock
+
+Two launch steps write the Claude config file, `$CLAUDE_CONFIG_DIR/.claude.json`
+(else `$CLAUDE_CODE_HOME_DIR/.claude.json`, else `~/.claude.json`): folder trust
+marking and inbox channel registration. Each takes the lock Claude Code itself
+uses for that file, a `.claude.json.lock` directory beside it, and removes the
+lock when its write ends, so neither writes while a Claude session holds the file.
+
+| Writer | Takes the lock when | Lock still held after 3 seconds |
+|---|---|---|
+| Folder trust marking | A Claude launch goes into a folder the config does not trust yet and marking is on (`AGENTIHOOKS_TRUST_LAUNCH_DIR` is not `0`, `false`, `no` or `off`) | `trust=untrusted`; stderr prints `agentihooks init-agent: Claude does not trust <dir> (<config>.lock is held); the session will wait at Claude's folder trust question until someone answers it in its pane`, and the launch goes ahead |
+| Inbox channel registration | `init-agent --inbox-channel`, and `select-profile` when the Claude arguments carry `--dangerously-load-development-channels=server:inbox` | The launch fails with exit 2: `agentihooks init-agent: <config>.lock is held`, or `agentihooks select-profile: <config>.lock is held`, which also fails a pending launch report |
+
+Registration takes the lock on every such launch and rewrites the file only when
+the stored `inbox` entry under `mcpServers` differs from the current one.
+
+Both writers treat a lock the same way. A lock directory whose modification time
+is `claude_trust.STALE_LOCK_SECONDS` (10 seconds) old or older is abandoned, the
+stale bound of Claude Code's lockfile: the writer removes it through
+`claude_trust._reclaim` and takes the lock at once, with no wait. A younger lock
+belongs to a live holder: the writer checks it again every 0.1 seconds, takes it
+as soon as it is gone or reaches the bound, and gives up after 3 seconds. Reclaim
+removes the directory with `rmdir`, so it removes only an empty one.
+
+A rendered profile home is the Claude config home of every launch of that profile
+on the host. A launch killed while it holds the lock leaves the empty directory
+behind; reclaim lets the next launch remove it, where a plain wait would fail
+every later Claude launch of the profile with `is held`.
+
+#### Check a lock
+
+The lock of the config this shell's launches use, and its age in seconds since
+its modification time, which is what the stale bound reads:
+
+```bash
+lock="${CLAUDE_CONFIG_DIR:-${CLAUDE_CODE_HOME_DIR:-$HOME}}/.claude.json.lock"
+test -d "$lock" && echo "age $(( $(date +%s) - $(stat -c %Y "$lock") ))s" || echo free
+```
+
+Every lock in the rendered profile homes on this host:
+
+```bash
+find ~/.agentihooks/profiles/.homes -name .claude.json.lock -type d -printf '%TY-%Tm-%Td %TH:%TM %p\n'
+```
+
+An empty lock 10 seconds old or older needs no action: the next launch that
+writes the config removes it.
+
+#### Claude config lock troubleshooting
+
+- **`<config>.lock is held`.** The lock stayed younger than 10 seconds for the
+  whole 3 second wait: another writer held it, such as a Claude session writing
+  its config or another launch registering at the same moment. Launch again. A
+  lock whose age resets between checks is being taken again by another writer;
+  leave it in place. A lock directory with files inside also reads as
+  held until it is 10 seconds old.
+- **`[Errno 39] Directory not empty: '<lock>'`** (Linux). The lock is 10 seconds
+  old or older and has files inside, so `rmdir` refuses it: registration fails
+  with this error and trust marking reports `untrusted` with it. Look inside,
+  check by hand that none of the Claude processes `pgrep` lists runs with that
+  config home as its `CLAUDE_CONFIG_DIR`, then remove the lock if it is still
+  10 seconds old or older:
+
+  ```bash
+  lock="${CLAUDE_CONFIG_DIR:-${CLAUDE_CODE_HOME_DIR:-$HOME}}/.claude.json.lock"
+  ls -la "$lock"
+  pgrep -a claude
+  test -d "$lock" && [[ $(( $(date +%s) - $(stat -c %Y "$lock") )) -ge 10 ]] && rm -r "$lock"
+  ```
+
+- **`trust=untrusted` with `is held` and a launch that went ahead.** Only trust
+  marking timed out; answer the trust question in the session's pane, or launch
+  again once the lock is free.
+- **`trust=untrusted` with `AGENTIHOOKS_TRUST_LAUNCH_DIR is off`.** Marking is
+  turned off by `AGENTIHOOKS_TRUST_LAUNCH_DIR` set to `0`, `false`, `no` or `off`
+  in any case, so the launch never takes the lock for trust.
+
+#### Tests and guards
+
+- Feature `inbox-channel-lock-reclaim` in `feature-map.json`.
+  `tests/inbox/test_channel_server.py::test_registration_reclaims_an_abandoned_native_config_lock`
+  registers the channel over a lock half an hour past the bound, removes the lock
+  and never sleeps.
+  `tests/inbox/test_channel_server.py::test_registration_leaves_a_lock_inside_the_stale_bound_to_its_holder`
+  keeps a lock 5 seconds inside the bound, checks it through
+  `claude_trust._reclaim` on every try and fails with `<lock> is held`.
+- Feature `claude-trust-lock-reclaim` guards folder trust marking in
+  `tests/test_claude_trust.py`: an abandoned lock from a killed launch is
+  reclaimed and the folder marked, a live holder still blocks the mark, and the
+  reclaim helper itself reclaims a lock exactly at the bound.
+- Semgrep incident rule `mkdir-lock-without-reclaim`: a `while True` loop that
+  takes a lock with `mkdir` and retries on `FileExistsError` without first calling
+  a reclaim helper and continuing is an error. The Semgrep workflow runs every
+  rule in `.semgrep-incidents/`. Run it by hand with:
+
+```bash
+semgrep scan --config .semgrep-incidents/mkdir-lock-without-reclaim.yml scripts/
+semgrep --test --config .semgrep-incidents/mkdir-lock-without-reclaim.yml \
+  .semgrep-incidents/mkdir-lock-without-reclaim.py
+```
 
 ---
 
@@ -510,7 +613,10 @@ agentihooks select-profile engineer --home="$HOME/.agentihooks/profiles/.homes/e
 | `--home <dir>` | Mount this rendered home instead of rendering; refused unless its binding matches the profile and harness and its persona and sources are unchanged |
 | `--dry-run` | Print the selected environment and `argv=` line without starting the harness |
 
-Arguments after `--` pass through to the harness. A refusal exits 2 with
+Arguments after `--` pass through to the harness. For Claude, when they carry
+`--dangerously-load-development-channels=server:inbox`, the inbox channel is
+registered in the mounted home's `.claude.json` before Claude starts, under the
+[Claude config lock](#claude-config-lock). A refusal exits 2 with
 `agentihooks select-profile: <reason>` and fails a pending launch report. Home
 checks, refusals and troubleshooting: [Profile launch home](profile-launch-home.md).
 
@@ -1337,9 +1443,10 @@ agentihooks bundle <action> [path] [--rebase] [--shared | --user]
 |------------|-------------|
 | `link <path>` | Link a bundle directory. Stores the path in `state.json`. |
 | `unlink` | Unlink the current bundle. |
-| `list` | Show the linked bundle path, linked date, and available profiles. |
+| `list` | Show the linked bundle path, linked date, layer directory, and available profiles. |
 | `pull` | Run `git pull` on the linked bundle directory. |
 | `pull --rebase` | Run `git pull --rebase` on the linked bundle directory. |
+| `layer` | Print the directory the linked bundle ships its content from: the `layer` its `bundle.yml` names, else the bundle root ([Bundle manifest](../bundles.md#bundle-manifest)). |
 
 ### Slots
 
@@ -1349,7 +1456,7 @@ agentihooks bundle <action> [path] [--rebase] [--shared | --user]
 | `--shared` | shared bundle, between the root and the user bundle | `shared_bundle` | `AGENTIHOOKS_SHARED_BUNDLE_PATH` |
 | `--user` | personal user bundle, after the shared bundle | `user_bundle` | `AGENTIHOOKS_USER_BUNDLE_PATH` |
 
-`--shared` and `--user` are mutually exclusive, and one directory fills one slot. Each flag applies to `link`, `unlink`, `list` and `pull`. Unlinking the shared bundle removes the links it generated and keeps every bundle file. `init --force` keeps all three links. Content is later-wins in the order root, shared, user; profile names are first-wins in the same order.
+`--shared` and `--user` are mutually exclusive, and one directory fills one slot. Each flag applies to `link`, `unlink`, `list`, `pull` and `layer`. Unlinking the shared bundle removes the links it generated and keeps every bundle file. `init --force` keeps all three links. Content is later-wins in the order root, shared, user; profile names are first-wins in the same order.
 
 ### Examples
 

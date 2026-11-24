@@ -265,8 +265,10 @@ def measured_plan(
 ) -> dict[str, Any]:
     limit = min(limit, sum(len(names) for names, _ in groups))
     costs, splits, unit_costs = {}, {}, {}
+    untested: set[str] = set()
     for names, results in groups:
         costs.update(measured_costs(names, results, memory, direct))
+        untested.update({function_name(name) for name in names} - function_tests(results)[0].keys())
         group_splits = measured_splits(names, results, limit, memory, direct)
         splits.update(group_splits)
         for name in names:
@@ -278,6 +280,7 @@ def measured_plan(
                 observed = observed_unit(memory, name, split, tests)
                 unit_costs[name].append(observed if observed is not None else split.get("first", fallback))
     plan = plan_shards(costs, limit=limit, splits=splits, unit_costs=unit_costs)
+    plan["untested"] = sorted(untested)
     return {**plan, "probe_shards": probe_shard_count(plan)} if plan["splits"] else plan
 
 
@@ -317,6 +320,20 @@ def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
     }
 
 
+def untested_note(plan: dict[str, Any]) -> str:
+    """Name the functions no test calls in process with the mutants and seconds they hold, or return an empty string."""
+    untested: list[str] = plan.get("untested", [])
+    costs: dict[str, float] = plan["costs"]
+    mutants = [name for name in costs if function_name(name) in untested]
+    if not mutants:
+        return ""
+    total: float = plan["estimated_worker_seconds"]
+    return (
+        f" Functions no test calls in process hold {len(mutants)} of the change's {len(costs)} mutants and"
+        f" {sum(costs[name] for name in mutants):.0f} of its {total:.0f} worker seconds: {', '.join(untested)}."
+    )
+
+
 def budget_overrun(plan: dict[str, Any], budget: float) -> str:
     """Describe a plan whose slowest shard cannot finish within the shard budget, or return an empty string."""
     slowest: float = max(plan["shard_worker_seconds"])
@@ -334,7 +351,7 @@ def budget_overrun(plan: dict[str, Any], budget: float) -> str:
         return (
             f"Mutant {name} alone needs {largest:.0f} worker seconds on one shard, {budgeted}, so no shard count"
             " or pull request split can grade it; shorten or split the tests that cover it."
-        )
+        ) + untested_note(plan)
     total: float = plan["estimated_worker_seconds"]
     capacity = SHARD_CEILING * shard
     parts = max(2, math.ceil(total / capacity))
@@ -343,7 +360,7 @@ def budget_overrun(plan: dict[str, Any], budget: float) -> str:
         f" {workers} workers, {budgeted}. The change needs {total:.0f} worker seconds and {SHARD_CEILING} shards in"
         f" {RUNNER_WAVES} waves of {BATCH_RUNNERS} runners hold at most {capacity:.0f}, so split it into at least"
         f" {parts} pull requests."
-    )
+    ) + untested_note(plan)
 
 
 def main() -> int:

@@ -4,6 +4,7 @@ code over the shared database."""
 import sys
 import urllib.error
 import uuid
+from collections.abc import Iterable
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -117,6 +118,18 @@ def _ledger():
     return ledger
 
 
+def _refusal_detail(slug: str, state: dict[str, Any]) -> str:
+    from scripts.swarm_ledger.ledger import core
+
+    reasons: list[str] = []
+    for warning in state.get("_meta", {}).get("warnings", []):
+        if core.size_warning(warning):
+            print(f"ledger {slug} warning: {warning}", file=sys.stderr)
+        else:
+            reasons.append(warning)
+    return "; ".join(reasons) or str(state["rejected"])
+
+
 @dataclass(frozen=True)
 class FreezeWords:
     """The words and focus queue place a freeze write carries."""
@@ -170,8 +183,7 @@ class LedgerClient:
             error = LedgerRefused if refused else LedgerUnreachable if unreachable else SwarmError
             raise error(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
-            detail = "; ".join(state.get("_meta", {}).get("warnings", [])) or str(state["rejected"])
-            raise LedgerRefused(f"ledger {slug} refused: {detail}")
+            raise LedgerRefused(f"ledger {slug} refused: {_refusal_detail(slug, state)}")
         if ops:
             from scripts.tick import view
 
@@ -196,7 +208,7 @@ class LedgerClient:
     def metadata(self, slug):
         return self._resource(slug, "metadata")
 
-    def tasks(self, slug):
+    def tasks(self, slug: str) -> list[dict[str, Any]]:
         return self._resource(slug, "tasks", collection=True)
 
     def tasks_targeting(self, slug: str, url: str) -> list[dict[str, Any]]:
@@ -220,9 +232,35 @@ class LedgerClient:
         found: list[dict[str, Any]] = [row for row in rows if url in pull_links(row)]
         return found
 
+    def tasks_where(
+        self,
+        slug: str,
+        ids: Iterable[str] = (),
+        states: Iterable[str] = (),
+        pinned: bool = False,
+        branches: Iterable[str] = (),
+        fields: Iterable[str] = (),
+    ) -> list[dict[str, Any]]:
+        """The task rows matching every given filter, read by a narrow query instead of the whole ledger."""
+        query = where_query(ids, states, pinned, branches, fields)
+        rows: list[dict[str, Any]] = self._resource(slug, f"tasks?{urlencode(query)}")
+        return rows
+
     def freezes(self, slug: str) -> list[dict[str, Any]]:
         """The ledger's freeze and focus records, read without its tasks."""
         return self._resource(slug, "freezes", collection=True)
+
+    def focus_verdicts(self, slug: str, target: str) -> dict[str, Any] | None:
+        """The claim gate verdict on every task under a focus or freeze target, or None when no such target exists."""
+        try:
+            return self._resource(slug, f"focus/{target}")
+        except urllib.error.HTTPError as exc:
+            from scripts.swarm_ledger.api.client import failure
+
+            replay, error = failure(exc)
+            if exc.code != 404 or error.get("code") != "resource_missing":
+                raise replay from None
+            return None
 
     def alerts(self, slug: str) -> list[dict[str, Any]]:
         """The ledger's alerts, read without the rest of the ledger."""
@@ -271,6 +309,9 @@ class LedgerClient:
             guard["if_match"] = if_match
         state = self._call(slug, [_op("task_update", by, item=f"tasks/{task_id}", fields=fields, **guard)])
         return next((t for t in state.get("tasks", []) if t["id"] == task_id), {})
+
+    def set_enhancement(self, slug: str, task_id: str, value: str, by: str) -> None:
+        self._call(slug, [_op("task_enhancement", by, item=f"tasks/{task_id}", enhancement=value)])
 
     def rename_agent(self, slug, old, new):
         self._call(slug, [_op("agent_rename", "swarm", old=old, new=new)])
@@ -484,6 +525,24 @@ def pass_state(ledger: Any, slug: str, scope: "live_rows.Scope | None" = None) -
         return doc
     answer = live_rows.answer(doc, scope)
     return {**doc, "tasks": answer.rows, live_rows.FROZEN_IDS: answer.frozen_ids}
+
+
+def where_query(
+    ids: Iterable[str] = (),
+    states: Iterable[str] = (),
+    pinned: bool = False,
+    branches: Iterable[str] = (),
+    fields: Iterable[str] = (),
+) -> dict[str, str]:
+    """The tasks collection query naming only the filters given."""
+    query = {
+        "ids": ",".join(ids),
+        "states": ",".join(states),
+        "pinned": "1" if pinned else "",
+        "branches": ",".join(branches),
+        "fields": ",".join(fields),
+    }
+    return {key: value for key, value in query.items() if value}
 
 
 def _op(kind, by, **fields):

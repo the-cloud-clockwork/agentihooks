@@ -1,0 +1,22 @@
+name: Pattern artifact download
+description: Download every artifact of this run whose name matches a pattern into one folder through the results service, closing each answer before the next try, so the step ends with its download. download-artifact 8.0.2 keeps the socket of an unread non-200 blob answer open for three minutes after it finished.
+inputs:
+  pattern:
+    description: Glob the artifact names match
+    required: true
+  path:
+    description: Folder every matching artifact is extracted into
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Download the matching artifacts through the results service
+      uses: actions/github-script@v7
+      env:
+        FETCH_SCRIPT: ${{ github.action_path }}/fetch.py
+        PATTERN: ${{ inputs.pattern }}
+        DESTINATION: ${{ inputs.path }}
+      with:
+        github-token: none
+        script: |
+          require('child_process').execFileSync('python3', [process.env.FETCH_SCRIPT, process.env.PATTERN, process.env.DESTINATION], {stdio: 'inherit'})

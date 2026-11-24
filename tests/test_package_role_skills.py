@@ -14,11 +14,17 @@ from tests.test_profile_render import world as render_world
 
 world = render_world
 ROLES = Path(__file__).resolve().parents[1] / "profiles" / "package" / "roles"
-ROLE_SKILLS = {"master": "swarm-master", "engineer": "swarm-engineer", "cicd": "swarm-ci", "planner": "swarm-planner"}
+ROLE_SKILLS = {
+    "master": "swarm-master",
+    "engineer": "swarm-engineer",
+    "cicd": "swarm-ci",
+    "planner": "swarm-planner",
+    "reviewer": "swarm-reviewer",
+}
 COMMON = (
-    "agentihooks ledger --slug <slug> --as <name> join",
+    "agentihooks api --slug <slug> --as <name> join",
     "agentihooks ledger watch <slug> --as <name>",
-    "agentihooks ledger --slug <slug> --as <name> ack",
+    "agentihooks api --slug <slug> --as <name> ack",
     "agentihooks msg reply <id>",
     "agentihooks msg close <id>",
     "agentihooks swarm <slug> handoff <doc>",
@@ -33,15 +39,16 @@ LOOP = {
         "--must",
         "agentihooks swarm <slug> restore-decision",
         "<!-- slice: <id> -->",
-        "agentihooks ledger --slug <slug> --as <name> publish-plan",
+        "agentihooks api --slug <slug> --as <name> publish-plan",
         "--plan-slice <id>",
     ),
     "engineer": (*WORKER, "agentihooks swarm <slug> issue <url>", "agentihooks swarm <slug> pr <url>", "--pr <url>"),
     "cicd": (*WORKER, "agentihooks swarm <slug> pr <url>", "--pr <url>", "--command", "--output"),
     "planner": (*WORKER, "publish-plan", "--slice <ids>", "--must", "--check", "--judge"),
+    "reviewer": (*WORKER, "agentihooks msg send <author>", "--finding <url>"),
 }
 PARSERS = {"swarm": lambda argv: swarm_parser().parse_args(argv), "msg": lambda argv: msg_parser().parse_args(argv)}
-PARSERS["ledger"] = lambda argv: ledger_parser().parse_args(argv)
+PARSERS["ledger"] = PARSERS["api"] = lambda argv: ledger_parser().parse_args(argv)
 
 
 def _skill(role: str) -> Path:
@@ -69,13 +76,11 @@ def test_planner_guidance_nests_task_headings_with_slice_anchors():
         ROLES.parent / "skills" / "take-master" / "SKILL.md",
     ],
 )
-def test_plan_publishers_distinguish_full_plans_from_standalone_tasks(guidance):
+def test_plan_publishers_distinguish_full_plans_from_standalone_tasks(guidance: Path) -> None:
     text = " ".join(guidance.read_text().split())
     rules = (
         "A full plan is a plan file a master or planner writes and publishes "
         "to the artifacts; every task built from it carries its slice.",
-        "Follow ups, open questions, operator notes and orders the operator "
-        "types or gives are standalone tasks with no plan and no slice.",
         "A standalone task that a master or planner expands because it grew "
         "wide becomes a plan: write and publish the plan with slice markers, "
         "then add its tasks with their slices.",

@@ -3,7 +3,10 @@ import json
 import subprocess
 import threading
 import zipfile
+from collections.abc import Collection, Mapping
 from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs
 
 import pytest
 
@@ -39,28 +42,45 @@ def _zip(manifest):
     return buffer.getvalue()
 
 
-def _github(monkeypatch, runs, *, manifests, failed=(), uncovered=()):
+def _github(
+    monkeypatch: pytest.MonkeyPatch,
+    runs: list[dict[str, Any]],
+    *,
+    manifests: Mapping[int, dict[str, Any]],
+    failed: Collection[tuple[int, str]] = (),
+    uncovered: Collection[int] = (),
+    fillers: Mapping[int, int] | None = None,
+    copied: Mapping[int, str] | None = None,
+) -> None:
     listing = f"{ACTIONS}/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=10"
 
-    def api(endpoint):
+    def api(endpoint: str) -> bytes:
         if endpoint.startswith(listing):
             page = int(endpoint.removeprefix(listing).removeprefix("&page=") or 1)
             return json.dumps({"workflow_runs": runs[(page - 1) * 10 : page * 10]}).encode()
         assert endpoint.startswith(f"{ACTIONS}/")
-        if endpoint.endswith("/artifacts?per_page=100"):
-            run_id = int(endpoint.split("/runs/")[1].split("/")[0])
+        path, _, query = endpoint.partition("?")
+        if path.endswith("/artifacts"):
+            run_id = int(path.split("/runs/")[1].split("/")[0])
             kept = [{"id": run_id, "name": "dep-manifest", "expired": False}] if run_id in manifests else []
             kept += [
                 {"id": 0, "name": name, "expired": run_id in uncovered and name == "coverage-3.12-12"}
                 for name in sorted(ci_test_plan.COVERAGE)
             ]
-            return json.dumps({"artifacts": [{"id": 0, "name": "durations-merged", "expired": False}, *kept]}).encode()
+            crowd = [{"id": 0, "name": f"filler-{n}", "expired": False} for n in range((fillers or {}).get(run_id, 0))]
+            listed = [{"id": 0, "name": "durations-merged", "expired": False}, *crowd, *kept]
+            fields = parse_qs(query)
+            size = min(int(fields["per_page"][0]), 100)
+            start = (int(fields.get("page", ["1"])[0]) - 1) * size
+            return json.dumps({"total_count": len(listed), "artifacts": listed[start : start + size]}).encode()
         assert endpoint.endswith("/zip")
         return _zip(manifests[int(endpoint.split("/artifacts/")[1].split("/")[0])])
 
     def jobs(endpoint, size=None):
         assert endpoint.startswith(f"{ACTIONS}/runs/") and endpoint.endswith("/attempts/1/jobs")
         run_id = int(endpoint.split("/runs/")[1].split("/")[0])
+        if conclusion := (copied or {}).get(run_id):
+            return [{"name": ci_test_plan.COPY_JOB, "conclusion": conclusion}]
         return [
             {"name": name, "conclusion": "failure" if (run_id, name) in failed else "success"}
             for name in sorted(ci_test_plan.UNIT_JOBS)
@@ -177,6 +197,18 @@ def test_the_newest_dev_run_whose_unit_shards_passed_and_kept_a_manifest_is_the_
     assert manifest["commit"] == f"{1:040d}"
 
 
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+@pytest.mark.parametrize(("conclusion", "record"), [("success", 2), ("failure", 1)])
+def test_a_dev_run_that_copied_its_queue_units_in_one_job_is_a_record_only_when_the_copy_passed(
+    monkeypatch, conclusion, record
+):
+    runs = [_run(2), _run(1)]
+    _github(monkeypatch, runs, manifests={2: _manifest(2), 1: _manifest(1)}, copied={2: conclusion})
+    found = ci_test_plan.find_record(REPOSITORY, LATER)
+    assert found is not None
+    assert found[0]["id"] == record
+
+
 def test_a_record_reads_all_jobs_of_its_run_in_one_request(monkeypatch):
     from scripts.ci_budget import jobs as listing
 
@@ -197,14 +229,14 @@ def test_a_record_reads_all_jobs_of_its_run_in_one_request(monkeypatch):
     assert len(requests) == 1
 
 
-def test_the_candidate_runs_list_their_artifacts_at_the_same_time(monkeypatch):
+def test_the_candidate_runs_list_their_artifacts_at_the_same_time(monkeypatch: pytest.MonkeyPatch) -> None:
     runs = [_run(n) for n in range(ci_test_plan.CANDIDATES, 0, -1)]
     _github(monkeypatch, runs, manifests={1: _manifest(1)})
     api = ci_test_plan._api
     listings = threading.Barrier(len(runs), timeout=10)
 
-    def concurrent(endpoint):
-        if endpoint.endswith("/artifacts?per_page=100"):
+    def concurrent(endpoint: str) -> bytes:
+        if "/artifacts?" in endpoint:
             listings.wait()
         return api(endpoint)
 
@@ -380,18 +412,22 @@ def test_a_usable_record_older_than_ten_cancelled_runs_is_found(monkeypatch):
     ]
 
 
-def test_the_search_stops_at_its_request_budget_and_reports_every_read(monkeypatch, capsys):
+def test_the_search_stops_at_its_request_budget_and_reports_every_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _github(monkeypatch, [_run(n) for n in range(200, 0, -1)], manifests={})
     requests = _counted(monkeypatch)
     assert ci_test_plan.find_record(REPOSITORY, LATER) is None
-    assert len(requests) == 77 <= ci_test_plan.REQUESTS
+    assert len(requests) == 66 <= ci_test_plan.REQUESTS
     assert capsys.readouterr().out == (
-        "Searched 70 dev push runs in 77 of 100 GitHub requests, request budget exhausted:"
-        " 70 kept no manifest or shard coverage, 0 failed unit shards, 0 recorded another commit\n"
+        "Searched 60 dev push runs in 66 of 100 GitHub requests, request budget exhausted:"
+        " 60 kept no manifest or shard coverage, 0 failed unit shards, 0 recorded another commit\n"
     )
 
 
-def test_the_budget_holds_when_every_candidate_reads_its_jobs_and_download(monkeypatch, capsys):
+def test_the_budget_holds_when_every_candidate_reads_its_jobs_and_download(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     runs = [_run(n) for n in range(200, 0, -1)]
     _github(
         monkeypatch,
@@ -401,16 +437,18 @@ def test_the_budget_holds_when_every_candidate_reads_its_jobs_and_download(monke
     )
     requests = _counted(monkeypatch)
     assert ci_test_plan.find_record(REPOSITORY, LATER) is None
-    assert len(requests) == 93 <= ci_test_plan.REQUESTS
+    assert len(requests) == 62 <= ci_test_plan.REQUESTS
     assert capsys.readouterr().out == (
-        "Searched 30 dev push runs in 93 of 100 GitHub requests, request budget exhausted:"
-        " 0 kept no manifest or shard coverage, 30 failed unit shards, 0 recorded another commit\n"
+        "Searched 20 dev push runs in 62 of 100 GitHub requests, request budget exhausted:"
+        " 0 kept no manifest or shard coverage, 20 failed unit shards, 0 recorded another commit\n"
     )
 
 
-def test_a_page_whose_worst_case_exactly_fills_the_budget_is_still_read(monkeypatch, capsys):
+def test_a_page_whose_worst_case_exactly_fills_the_budget_is_still_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     runs = [_run(n) for n in range(200, 0, -1)]
-    costly = [run["id"] for index, run in enumerate(runs[:30]) if index % 5 < 3]
+    costly = [run["id"] for run in runs[:13]]
     _github(
         monkeypatch,
         runs,
@@ -419,10 +457,10 @@ def test_a_page_whose_worst_case_exactly_fills_the_budget_is_still_read(monkeypa
     )
     requests = _counted(monkeypatch)
     assert ci_test_plan.find_record(REPOSITORY, LATER) is None
-    assert len(requests) == 80
+    assert len(requests) == 70
     assert capsys.readouterr().out == (
-        "Searched 40 dev push runs in 80 of 100 GitHub requests, request budget exhausted:"
-        " 22 kept no manifest or shard coverage, 18 failed unit shards, 0 recorded another commit\n"
+        "Searched 40 dev push runs in 70 of 100 GitHub requests, request budget exhausted:"
+        " 27 kept no manifest or shard coverage, 13 failed unit shards, 0 recorded another commit\n"
     )
 
 
@@ -469,12 +507,12 @@ def test_a_failed_listing_of_an_older_page_stays_red(monkeypatch):
         ci_test_plan.find_record(REPOSITORY, LATER)
 
 
-def test_a_run_shifted_onto_the_next_page_is_read_once(monkeypatch):
+def test_a_run_shifted_onto_the_next_page_is_read_once(monkeypatch: pytest.MonkeyPatch) -> None:
     runs = [_run(n) for n in range(20, 10, -1)] + [_run(n) for n in range(11, 0, -1)]
     _github(monkeypatch, runs, manifests={1: _manifest(1)})
     requests = _counted(monkeypatch)
     assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
-    assert requests.count(f"{ACTIONS}/runs/11/artifacts?per_page=100") == 1
+    assert sum(endpoint.startswith(f"{ACTIONS}/runs/11/artifacts?") for endpoint in requests) == 1
 
 
 def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
@@ -653,12 +691,12 @@ def _packed_zip(manifest):
     return buffer.getvalue()
 
 
-def test_a_run_that_kept_the_packed_manifest_is_read_from_it(monkeypatch):
+def test_a_run_that_kept_the_packed_manifest_is_read_from_it(monkeypatch: pytest.MonkeyPatch) -> None:
     full = {**_manifest(1), "lines": {"tests/test_a.py::test_a": {"hooks/a.py": [1, 2]}}}
-    downloads = []
+    downloads: list[str] = []
 
-    def api(endpoint):
-        if endpoint.endswith("/artifacts?per_page=100"):
+    def api(endpoint: str) -> bytes:
+        if "/artifacts?" in endpoint:
             names = ["dep-manifest", ci_test_plan.PACKED, *sorted(ci_test_plan.COVERAGE)]
             listed = [{"id": number, "name": name, "expired": False} for number, name in enumerate(names)]
             return json.dumps({"artifacts": listed}).encode()

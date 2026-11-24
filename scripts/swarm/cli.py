@@ -1,53 +1,21 @@
-"""agentihooks swarm: run a swarm of Claude and Codex agents over a swarm ledger in herdr.
+"""Run a swarm of Claude and Codex agents over a swarm ledger in herdr.
 
 agentihooks swarm list | tick | templates
-agentihooks swarm init NAME [--plan FILE] [--content FILE] [--repo DIR]  the one way to create a swarm and its ledger, paused
-agentihooks swarm names check NAME [--plan FILE]                  valid or invalid against the swarm name rule, with suggestions
-agentihooks swarm <id> create --repo DIR [--template NAME]         proof and demo swarms only; init calls it for every other swarm
-agentihooks swarm <id> start | pause | stop [--now] | status
-agentihooks swarm <id> probe
-agentihooks swarm <id> names [--json]                              the swarm code, its herdr space and every agent name it gave
-agentihooks swarm <id> url                                        print the ledger page link (create and start print it last)
-agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
-agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
-agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
-agentihooks swarm <id> master up [--last | --new | --replace]     from a terminal: bring back the last master's conversation or start a new one
-agentihooks swarm <id> master move --to HIVE                      order the live master to hand off so its successor starts on that hive
-agentihooks swarm <id> set master-move-grace=SECONDS              how long a quiet master hive may stay quiet before the master moves (default 300)
-agentihooks swarm <id> set hive-placement=on|off                  place this swarm's work on hives while a local machine stays local
-agentihooks swarm <id> set local-max-agents=N                     with hive placement on, workers no hive takes run locally below N (default 8)
-agentihooks swarm <id> <profile> up                               from a terminal: any role or overlay profile (planner, engineer, cicd, qa, frontend) in a pane for you, no task
-agentihooks swarm <id> agent-up <profile>                         the same launch in its parser form
-agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
-agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm's state to its folder (stop does too); restore the newest, paused
-agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
-agentihooks swarm <id> set snapshot-minutes=N                      automatic snapshot interval while running (default 30, 0 off)
-agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
-agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, xhigh)
-agentihooks swarm <id> set master-agent=claude|codex              master affinity; a change orders the live master to hand off to that harness
-agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
-agentihooks swarm <id> send-message TEXT                          message to every live agent's inbox
-agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]     master or operator judges a health finding
-agentihooks swarm <id> classify EXECUTION lost|working --reason TEXT  master or operator classifies a suspect execution attempt
-agentihooks swarm <id> terminal EXECUTION                         operator opens the worker terminal of an execution in herdr
-agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
-agentihooks swarm <id> freeze | focus | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
-agentihooks swarm <id> cover STAGE ITEM --reason TEXT              operator, master or dispatcher marks a bottleneck stage owned by an open phases/ID or tasks/ID
-agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
-agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
-agentihooks swarm <id> retire SEAT NUMBER --reason TEXT           master or operator retires a learned note from every later prompt
-agentihooks swarm <id> culture set FILE | show                    the swarm's shared culture, read by every new occupant
-agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
-agentihooks swarm <id> issue URL | pr URL | branch | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
-agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
-agentihooks swarm <id> exit              an agent without a claim ends its own session
-agentihooks swarm <id> park DOC          hold a stacked task on its pushed branch until its open dependencies merge
-agentihooks swarm <id> restack           rebase parked task work onto dev after its dependencies merge
-agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
-agentihooks swarm <id> trace-plan        trace plan.md in the task work folder to task, phase and project intent
-done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
---evidence E with --fix URL or --filed FOLLOWUP; research --finding URL; workflow reads workflow.json and
-verdict.json from the task workspace, and an exhausted workflow blocks the task with the last judge notes
+agentihooks swarm init NAME [--plan FILE] [--content FILE] [--repo DIR]
+agentihooks swarm <id> create --repo DIR [--template NAME]
+agentihooks swarm <id> start | pause | stop [--now] | status | probe | url
+agentihooks swarm <id> close [--note TEXT] [--now] | reopen | remove
+agentihooks swarm <id> snapshot | shutdown | restore [--from FILE]
+agentihooks swarm <id> take-master [--replace] | master up | master move --to HIVE
+agentihooks swarm <id> set KEY=VALUE | autoscale | verdict | freeze | focus | unfreeze
+agentihooks swarm <id> learned [--all]  caller notes and shared guidance; --all lists every seat
+agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]
+agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT | retire SEAT NUMBER --reason TEXT
+agentihooks swarm <id> culture set FILE | culture show
+Agent identity comes from --as or AGENTIHOOKS_AGENT_NAME.
+Agent work: issue URL | pr URL | branch | publish | review | done | block NOTE | progress | wait
+Continuity: handoff DOC | park DOC | ready DOC | restack | confirm-handoff | restore-decision
+Use each command's --help for its arguments.
 """
 
 import argparse
@@ -66,6 +34,7 @@ from contextvars import Token, copy_context
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -79,6 +48,7 @@ from scripts.gates import feature as feature_gate
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
+from scripts.handoff import contracts as handoff_contracts
 from scripts.handoff import envelope as handoff_envelope
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
@@ -86,8 +56,9 @@ from scripts.hive import scope
 from scripts.inbox import exits, outbox
 from scripts.inbox import relay as relay
 from scripts.inbox import wake as wake
-from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
-from scripts.inbox.seats import PREFIX as SEAT_PREFIX
+from scripts.inbox.seats import CANON, SeatError, is_seat, seat_address
+from scripts.inbox.seats import DEFAULT_MATURITY as DEFAULT_MATURITY
+from scripts.inbox.seats import MATURITIES as MATURITIES
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     affinity,
@@ -104,8 +75,12 @@ from scripts.swarm import (
     dispatch_seat,
     doc_report,
     done_gate,
+    enhance_review,
+    expert_commands,
+    expert_launch,
     failed_panes,
     git_https,
+    handoff_commands,
     hive_release,
     idle,
     launch_check,
@@ -123,6 +98,7 @@ from scripts.swarm import (
     phase_planning,
     phase_state,
     phases,
+    plan_cap_floor,
     plan_review,
     prerequisite_wait,
     priming_trace,
@@ -137,6 +113,8 @@ from scripts.swarm import (
     remote_control,
     review_rounds,
     run_window,
+    seat_crons,
+    seat_heads,
     snapshot,
     stack,
     stages,
@@ -153,7 +131,8 @@ from scripts.swarm import (
 from scripts.swarm import ledger_client as ledger_client
 from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
-from scripts.swarm.health import activity, report
+from scripts.swarm.cli_parser import build_parser
+from scripts.swarm.health import activity, focus_check, report
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.pull_head import PULL_SECONDS as PULL_SECONDS
@@ -170,6 +149,7 @@ from scripts.swarm.status import (
     task_counts,
     transport,
     verdict_store,
+    wait_label,
 )
 from scripts.swarm.store import (
     APP_SERVER_TRANSPORT,
@@ -227,6 +207,7 @@ SETTABLE = {
     "max-eng-agents": "max_eng",
     "max-ci-agents": "max_ci",
     "max-plan-agents": "max_plan",
+    "max-review-agents": "max_review",
     "masters-step": "masters_step",
     "compact-limit": "compact_limit",
     "snapshot-minutes": "snapshot_minutes",
@@ -268,7 +249,7 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
     "wrapper commands": (pass_domains("stop"), NONE),
     "wrapper phases": (pass_domains("stop"), hook_domains("doc")),
     "wrapper intent": (pass_domains("stop"), hook_domains("doc", "config")),
-    "wrapper relay": (pass_domains("judged"), hook_domains("view")),
+    "wrapper relay": (pass_domains("judged"), NONE),
     "wrapper view": (pass_domains("agents", "stop"), hook_domains("agents", "doc", "config", "rows")),
     "wrapper metrics": (NONE, hook_domains("count")),
 }
@@ -569,13 +550,12 @@ class _Wrapper:
         return True
 
     def _judged(self) -> bool:
-        """End the tick's scan and keep the intent check's view and checked actions when it stored them; an intent
-        check that raised or overran its budget stored neither and leaves the pass going, and only the pass end raises
-        what it held."""
+        """End the tick's scan and keep the intent check's checked actions when it stored them, leaving its view to
+        the view wait step; an intent check that raised or overran its budget stored neither and leaves the pass
+        going, and only the pass end raises what it held."""
         self.ticks.close()
         if "judged" in self.judging:
-            view, self.checked = self.judging["judged"]
-            self.box["view"] = host_steps.pass_view(self.slug, view)
+            _, self.checked = self.judging["judged"]
         return True
 
     def _reread(self) -> bool:
@@ -989,28 +969,23 @@ def cmd_tick_watch(store, args):
     tick_watch.run(store, now_ms, repair)
 
 
-def cmd_create(store, args):
+def create_config(args: argparse.Namespace) -> SwarmConfig:
+    from scripts.hive.daemon import origin
+
     if not SLUG_RE.match(args.slug):
         raise SwarmError("a swarm id is lowercase letters, digits and dashes, starting with a letter, at most 48 long")
     if WEB_REPO.match(args.repo):
         raise SwarmError(f"--repo takes a folder on this host, not the web address {args.repo}")
     repo = os.path.abspath(os.path.expanduser(args.repo))
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
-    ledger = LedgerClient()
-    tasks = ledger_creator.swarm_tasks(ledger.state(args.slug))
-    refused = ledger_creator.swarm_refusal(os.environ) or (
-        args.template != priming.TEMPLATE and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked)
-    )
-    if refused:
-        raise SwarmError(refused)
-    ledger.mark_swarm(args.slug)
     caps = {key: value.cap for key, value in template.lanes.items()}
-    config = SwarmConfig(
+    return SwarmConfig(
         args.slug,
         repo,
         caps["eng"] if args.max_eng_agents is None else args.max_eng_agents,
         caps["ci"] if args.max_ci_agents is None else args.max_ci_agents,
         max_plan=caps["plan"] if args.max_plan_agents is None else args.max_plan_agents,
+        max_review=caps["review"],
         state="paused",
         compact_limit=template.compact_limit,
         template=args.template,
@@ -1022,8 +997,21 @@ def cmd_create(store, args):
         codex_inbox_transport=APP_SERVER_TRANSPORT,
         masters_step=DEFAULT_MASTERS_STEP,
         engine=EVENTS_ENGINE,
-        repo_origin=_create_origin(repo),
+        repo_origin=origin(Path(repo)),
     )
+
+
+def cmd_create(store: RedisStore, args: argparse.Namespace) -> None:
+    config = create_config(args)
+    ledger = LedgerClient()
+    tasks = ledger_creator.swarm_tasks(ledger.state(args.slug))
+    refused = ledger_creator.swarm_refusal(os.environ) or (
+        args.template != priming.TEMPLATE and ledger_creator.floor_refusal(os.environ, tasks, args.operator_asked)
+    )
+    refused = refused or store.refusal(config)
+    if refused:
+        raise SwarmError(refused)
+    ledger.mark_swarm(args.slug)
     store.create(config)
     from scripts.swarm import commands
 
@@ -1032,7 +1020,7 @@ def cmd_create(store, args):
         json.dumps(
             {
                 "created": args.slug,
-                "repo": repo,
+                "repo": config.repo,
                 "state": "paused",
                 "template": args.template,
                 "scaling": config.scaling,
@@ -1057,12 +1045,14 @@ def _state(store, args, state):
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state}))
 
 
-def cmd_start(store, args):
+def cmd_start(store: RedisStore, args: argparse.Namespace) -> None:
     shape = plan_shape.report(LedgerClient().tasks(args.slug), store.config(args.slug).max_eng)
     print(shape["summary"], flush=True)
     if shape["warning"]:
         print(f"warning: {shape['warning']}", file=sys.stderr, flush=True)
+    plan_cap_floor.restore(store, args.slug)
     _state(store, args, "running")
+    seat_crons.on_start(store, args.slug)
     print(ledger_link.page_line(args.slug))
 
 
@@ -1081,12 +1071,14 @@ def cmd_proof_control(store, args):
     print(json.dumps(result))
 
 
-def cmd_stop(store, args):
+def cmd_stop(store: RedisStore, args: argparse.Namespace) -> None:
     _snapshot(store, args.slug)
     if not args.now:
         _state(store, args, "stopping")
+        seat_crons.on_stop(args.slug)
         return
     config, left = stop_now(store, args.slug, routed(herdr=HerdrRuntime()), LedgerClient())
+    seat_crons.on_stop(args.slug)
     print(json.dumps({"swarm": args.slug, "state": config.state, "still_running": left}))
 
 
@@ -1120,18 +1112,19 @@ def _live_master(store, slug, live):
     return next((a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished" and a.name in live), None)
 
 
-def _retire_each(store, slug, runtime, agents):
-    left = []
+def _retire_each(store: RedisStore, slug: str, runtime: Any, agents: list[AgentRecord]) -> list[str]:
+    left: list[str] = []
     for agent in agents:
         store.release(slug, agent.task, agent.name)
         store.drop_agent(slug, agent.name)
         if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
-            store.put_agent(slug, agent)
+            if not seat_heads.superseded(agent, agents):
+                store.put_agent(slug, agent)
             left.append(agent.name)
     return left
 
 
-def cmd_close(store, args):
+def cmd_close(store: RedisStore, args: argparse.Namespace) -> None:
     store.config(args.slug)
     runtime = routed(herdr=HerdrRuntime())
     live = runtime.live_names()
@@ -1145,6 +1138,7 @@ def cmd_close(store, args):
     ledger.summarize(args.slug, args.note, by)
     path = snapshot.take(store, args.slug, now_ms())
     store.update(args.slug, state="stopping")
+    seat_crons.on_stop(args.slug)
     agents = store.agents(args.slug)
     left = _retire_each(store, args.slug, runtime, [a for a in agents if a.lane != MASTER])
     for row in ledger.tasks(args.slug):
@@ -1238,6 +1232,7 @@ def cmd_agent_up(store, args):
 def cmd_exit(store: RedisStore, args: argparse.Namespace) -> None:
     name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
+    expert_commands.seated(store, args.slug, agent)
     released = agent is not None and agent.lane != MASTER and agent.state == "finished"
     if agent and agent.lane != MASTER and not released and _claimless(store, args.slug, agent):
         _retire(store, args.slug, agent, "finished its session without a claim")
@@ -1364,13 +1359,6 @@ def _engine_origin(config, changes):
     return {**changes, "repo_origin": identity}
 
 
-def _create_origin(repo: str) -> str:
-    """The Git origin of the checkout a new swarm works in, empty when it has none."""
-    from scripts.hive.daemon import origin
-
-    return origin(Path(repo))
-
-
 def on_off(value):
     if value not in ON_OFF:
         raise SwarmError("hive-placement takes on or off")
@@ -1405,7 +1393,7 @@ def _manual_count_step(counts):
     return {"masters_step": 0} if counts else {}
 
 
-def cmd_set(store, args):
+def cmd_set(store: RedisStore, args: argparse.Namespace) -> None:
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     counts, pairs = _split_master_pairs(args.pairs, "masters", masters.count_of)
     changes.update(_manual_count_step(counts))
@@ -1452,7 +1440,8 @@ def cmd_set(store, args):
             )
         changes[SETTABLE[key]] = int(value)
     changes = _engine_origin(store.config(args.slug), changes)
-    config = store.update(args.slug, **{**changes, **_pinned(changes)})
+    restored = plan_cap_floor.restored(store.config(args.slug), changes)
+    config = store.update(args.slug, **{**changes, **_pinned(changes), **restored})
     _store_master_counts(store, args.slug, counts, hives)
     _store_master_rules(store, args.slug, rules)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
@@ -1465,6 +1454,7 @@ def cmd_set(store, args):
                 "max_eng": config.max_eng,
                 "max_ci": config.max_ci,
                 "max_plan": config.max_plan,
+                "max_review": config.max_review,
                 "masters_step": config.masters_step,
                 "compact_limit": config.compact_limit,
                 "focus_weight": config.focus_weight,
@@ -1605,7 +1595,7 @@ def cmd_status(store: Any, args: Any) -> None:
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  masters step {config.masters_step}  scaling {config.scaling}  focus weight {config.focus_weight}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
+        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  review {config.max_review}  masters step {config.masters_step}  scaling {config.scaling}  focus weight {config.focus_weight}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
     )
     print(
         "gate modes  "
@@ -1637,7 +1627,7 @@ def cmd_status(store: Any, args: Any) -> None:
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
         print(promotion)
     print(
-        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence\tHive"
+        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence\tHive\tWait"
     )
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
@@ -1646,6 +1636,7 @@ def cmd_status(store: Any, args: Any) -> None:
         attach = "yes" if can["native_terminal_attach"] else "no"
         print(
             f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}\t{agent_hive(a) or '-'}"
+            f"\t{wait_label(store, args.slug, a)}"
         )
     from scripts.hive import join_report
 
@@ -1688,7 +1679,7 @@ def cmd_cover(store, args):
     print(json.dumps(stage_cover.cover(store, args.slug, doc, request, now_ms())))
 
 
-cmd_focus = cmd_unfreeze = cmd_freeze
+cmd_focus = cmd_unfreeze = focus_check.checked(cmd_freeze, lambda: LedgerClient())
 
 
 def autoscale_lines(config, decision):
@@ -1707,7 +1698,7 @@ def autoscale_lines(config, decision):
 
 
 def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
-    from scripts.hive import admission, launch
+    from scripts.hive import admission
     from scripts.swarm import capacity, local_slots
 
     config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
@@ -1719,11 +1710,11 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     known = args.slug in store.slugs()
     slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
     host: dict[str, Any] = (decision or {})["host"]
-    hives: list[dict[str, Any]] = [] if args.fixture else launch.live_hives(store)
+    hives, refused = readable_hives(store) if not args.fixture else ([], {})
     admitted: list[str] = []
-    if hives:
+    if hives or refused:
         seats = capacity.inputs_seats(inputs)
-        admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]})
+        admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]}, refused)
     if args.json:
         rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
         shown: dict[str, Any] = {"hive_admission": rows, "binding": admitted[-1]} if hives else {}
@@ -1734,7 +1725,7 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
                     "applied": config.scaling == AUTO_SCALING,
                     **(decision or {}),
                     **slots,
-                    **shown,
+                    **shown | ({"admission_unreadable": refused} if refused else {}),
                 },
                 indent=2,
             )
@@ -1852,9 +1843,18 @@ def cmd_blockers(store: RedisStore, args: argparse.Namespace) -> None:
 
 def cmd_panic(store: RedisStore, args: argparse.Namespace) -> None:
     """The panic button: on, pressed by the master or the operator, stops agent starts, cancels CI runs and pauses the
-    lab's pull request grading but the checked fixes and the fixer branches every swarm recorded; off clears it once
-    stable and resumes the lab."""
+    lab's pull request grading but the checked fixes and the fixer branches every swarm recorded; drop, by the master or
+    the operator, removes one registered fix and tells the lab the fixes left; off clears it once stable and resumes the
+    lab."""
     now = now_ms()
+    if args.action == "drop":
+        _master_or_operator(store, args, "only the master or the operator drops a panic fix")
+        if len(args.fix) != 1:
+            raise SwarmError("panic drop takes exactly one --fix")
+        found = panic.drop(store, args.slug, args.fix[0])
+        lab = panic.lab_engage(store, args.slug, found.fixes)
+        print(json.dumps({"panic": "on", "fixes": list(found.fixes), "lab": lab}))
+        return
     if args.action == "on":
         _master_or_operator(store, args, "only the master or the operator presses panic on")
         for fix in args.fix:
@@ -1957,10 +1957,12 @@ def _me(store, args):
     return agent
 
 
-def _worker(store, args):
-    agent = _me(store, args)
+def _worker(store: RedisStore, args: argparse.Namespace) -> AgentRecord:
+    agent: AgentRecord = _me(store, args)
     if agent.lane == MASTER:
         raise SwarmError(f"{agent.name} is the swarm master; the master works no task")
+    if agent.lane == expert_launch.LANE:
+        raise SwarmError(f"{agent.name} is an expert; an expert works its mission and claims no task")
     return agent
 
 
@@ -2021,7 +2023,7 @@ def origin_repo(run=subprocess.run):
 def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
     import syslog
 
-    from scripts.swarm import publish
+    from scripts.swarm import pr_wait, publish
 
     agent = _worker(store, args)
     repo = _local_repo(store, args.slug)
@@ -2033,7 +2035,8 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
             return publish.prepare(args.slug, agent, repo, ledger)
         if args.direct and args.via != publish.LAB:
             raise SwarmError("publish --direct goes with --via lab")
-        lab = publish.LabRoute(agent.task, args.direct) if args.via == publish.LAB else None
+        pushed = partial(pr_wait.lab_pushed, store.redis, args.slug, agent) if args.via == publish.LAB else None
+        lab = publish.LabRoute(agent.task, args.direct, pushed) if args.via == publish.LAB else None
         return publish.publish(args.slug, agent, repo, ledger, args.message, args.files, lab)
     except SwarmError as exc:
         branch = exc.branch if isinstance(exc, publish.PublicationRefusal) else publish.refusal_branch(Path(repo), task)
@@ -2180,10 +2183,12 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
         result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
         hotfix = args.action == "queue" and _hotfix_master(store, args)
-        master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
+        caller = _me(store, args) if args.action != "state" and not hotfix else None
+        master = args.action == "queue" and caller is not None and caller.lane == MASTER
         stalled = master_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
         hotfix = hotfix or stalled is not None
-        agent = _worker(store, args) if args.action != "state" and not hotfix else None
+        tasked = caller is not None and not hotfix and caller.lane != expert_launch.LANE
+        agent = _worker(store, args) if tasked else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
             _require_target(store, args, agent)
@@ -2192,10 +2197,12 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
                 args.action,
                 args.url,
                 admit=lambda head: (
-                    (not hotfix and _queue_intent(store, args, agent, head)) or queue_exit.require_fresh(args.url, head)
+                    (agent is not None and _queue_intent(store, args, agent, head))
+                    or queue_exit.require_fresh(args.url, head)
                 ),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
+                priority=lambda: queue_priority.automatic(store, args.slug, args.url, LedgerClient()),
             )
         else:
             result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))
@@ -2236,8 +2243,10 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
     if refused:
         raise SwarmError(refused)
     _feature_gate(store, args.slug, agent, proven, pull)
+    closing = enhance_review.close(args.slug, row, store.config(args.slug).autonomy)
     fields = {**done_gate.DONE, **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    enhance_review.settle(ledger, InboxStore(store.redis), args.slug, agent.name, closing)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
@@ -2456,18 +2465,18 @@ def cmd_progress(store, args):
     print(json.dumps({"agent": agent.name, "task": agent.task, "progress": line}))
 
 
-def cmd_plan(store, args):
+def cmd_plan(store: RedisStore, args: argparse.Namespace) -> None:
     agent, autonomy = _me(store, args), store.config(args.slug).autonomy
-    decision = plan_review.Decision(args.action, args.note, args.override)
+    decision = plan_review.Decision(args.action, args.note, args.override, args.task)
     result = plan_review.decide(LedgerClient(), args.slug, agent, autonomy, args.phase, decision)
     print(json.dumps(result))
 
 
-def cmd_handoff(store, args):
-    agent = _me(store, args)
+def cmd_handoff(store: RedisStore, args: argparse.Namespace) -> None:
+    agent: AgentRecord = _me(store, args)
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
-    found = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.item))
+    found = handoff_contracts.problems(text, Resolver(args.slug, store.redis, ledger.item), store, args.slug, agent)
     if found:
         raise SwarmError(handoff_check.refusal(found))
     envelope, transfer = _hand_off(store, args.slug, agent, text, args.reason, ledger)
@@ -2493,6 +2502,7 @@ def _hand_off(
     waits.settle_notices(InboxStore(store.redis), agent, "a handoff")
     rows = _own_rows(ledger, slug, agent.task)
     envelope = handoff_envelope.build(store, slug, agent, reason, rows, now_ms())
+    envelope = handoff_envelope.with_orders(envelope, store, ledger, agent)
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
     if hive_release.release(ledger, slug, (rows or [{}])[0], agent.name):
@@ -2561,12 +2571,10 @@ def cmd_restack(store, args):
     print(json.dumps({"task": agent.task, **fields}))
 
 
-def cmd_confirm_handoff(store, args):
+def cmd_confirm_handoff(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _me(store, args)
-    if agent.name not in HerdrRuntime().live_names():
-        raise SwarmError("Only a live successor can confirm its handoff")
-    result = transfers.confirm(store, args.slug, args.transfer, agent, args.next, now_ms())
-    print(json.dumps(result))
+    live = HerdrRuntime().live_names()
+    handoff_commands.confirm(store, args.slug, args.transfer, agent, args.next, live, now_ms())
 
 
 def cmd_restore_decision(store, args):
@@ -2594,9 +2602,10 @@ def _own_rows(ledger, slug, task_id):
     return [row] if row else []
 
 
-def cmd_learned(store, args):
+def cmd_learned(store: Any, args: argparse.Namespace) -> None:
     if not args.text:
-        _list_learned(store, args.slug)
+        seat = "" if args.all else _seat(_me(store, args))
+        _list_learned(store, args.slug, seat, all_seats=args.all)
         return
     agent = _me(store, args)
     if args.maturity == CANON and agent.lane != MASTER:
@@ -2609,16 +2618,10 @@ def cmd_learned(store, args):
     print(json.dumps({"seat": agent.seat, "learned": args.text, "maturity": args.maturity}))
 
 
-def _list_learned(store, slug):
+def _list_learned(store: Any, slug: str, seat: str, *, all_seats: bool) -> None:
     store.config(slug)
-    for key in store.seats.swarm_keys(slug):
-        seat, _, kind = key.removeprefix(f"{SEAT_PREFIX}:").partition(":")
-        if kind != "learned":
-            continue
-        for number, note in enumerate(store.memory.learned(seat), 1):
-            if "retired" in note:
-                continue
-            print(f"{seat}\t{number}\t{note['maturity']}\t{note['text']}")
+    for note in store.memory.scoped(slug, seat, all_seats=all_seats):
+        print(f"{note['seat']}\t{note['number']}\t{note['maturity']}\t{note['text']}")
 
 
 def cmd_promote(store, args):
@@ -2730,184 +2733,6 @@ def cmd_terminal(store, args):
     from scripts.swarm_v2.kubernetes import operator_terminal
 
     print(json.dumps(operator_terminal.command(store, args.slug, args.execution, os.environ, Who.from_env())))
-
-
-def build_parser() -> argparse.ArgumentParser:
-    from scripts.swarm import master_drill, night_watch_drill, tick_report
-
-    parser = argparse.ArgumentParser(
-        prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument("slug")
-    parser.add_argument("--as", dest="name", default="")
-    sub = parser.add_subparsers(dest="command", required=True)
-    create = sub.add_parser("create")
-    create.add_argument("--repo", required=True)
-    create.add_argument("--template", default="")
-    create.add_argument("--max-eng-agents", type=int, default=None)
-    create.add_argument("--max-ci-agents", type=int, default=None)
-    create.add_argument("--max-plan-agents", type=int, default=None)
-    create.add_argument("--operator-asked")
-    drills = {"night-watch-drill": night_watch_drill.command, "master-drill": master_drill.command}
-    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", *drills):
-        sub.add_parser(plain).set_defaults(handler=drills.get(plain))
-    sub.add_parser("restore").add_argument("--from", dest="source", default="")
-    sub.add_parser("stop").add_argument("--now", action="store_true")
-    close = sub.add_parser("close")
-    close.add_argument("--note", default="")
-    close.add_argument("--now", action="store_true")
-    sub.add_parser("take-master").add_argument("--replace", action="store_true")
-    sub.add_parser("proof-control").add_argument("--request", required=True)
-    master_actions = sub.add_parser("master").add_subparsers(dest="action", required=True)
-    master_up = master_actions.add_parser("up")
-    master_actions.add_parser("move").add_argument("--to", required=True)
-    pick = master_up.add_mutually_exclusive_group()
-    pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
-    pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
-    pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
-    pick.add_argument("--forced", dest="choice", action="store_const", const=master_launch.FORCED)
-    sub.add_parser("agent-up").add_argument("profile")
-    sub.add_parser("exit")
-    sub.add_parser("set").add_argument("pairs", nargs="+")
-    sub.add_parser("save-template").add_argument("template_name", metavar="name")
-    sub.add_parser("status").add_argument("--json", action="store_true")
-    sub.add_parser("probe").set_defaults(handler=probe_command)
-    sub.add_parser("tick").set_defaults(handler=cmd_swarm_tick)
-    report = sub.add_parser("tick-report")
-    report.add_argument("--passes", type=tick_report.pass_count, default=100)
-    report.set_defaults(handler=tick_report.command)
-    for verb in ("freeze", "focus", "unfreeze"):
-        frozen = sub.add_parser(verb)
-        frozen.add_argument("target")
-        frozen.add_argument("--reason", default="")
-        frozen.add_argument("--quote", default="")
-        if verb == "focus":
-            frozen.add_argument("--only", action="store_true")
-            place = frozen.add_mutually_exclusive_group()
-            place.add_argument("--top", dest="position", action="store_const", const="top")
-            place.add_argument("--bottom", dest="position", action="store_const", const="bottom")
-    scale = sub.add_parser("autoscale")
-    scale.add_argument("--fixture", default="")
-    scale.add_argument("--json", action="store_true")
-    sub.add_parser("controller").add_argument("action", nargs="?", choices=("release",), default=None)
-    sub.add_parser("names").add_argument("--json", action="store_true")
-    path = sub.add_parser("merge-path")
-    path.add_argument("--hours", type=float, default=24.0)
-    path.add_argument("--json", action="store_true")
-    path.add_argument("--post")
-    verdict = sub.add_parser("verdict")
-    verdict.add_argument("finding")
-    verdict.add_argument("verdict")
-    verdict.add_argument("--note", default="")
-    sub.add_parser("terminal").add_argument("execution")
-    classify = sub.add_parser("classify")
-    classify.add_argument("execution_id")
-    classify.add_argument("ruling", choices=("lost", "working"))
-    classify.add_argument("--reason", required=True)
-    sub.add_parser("send-message").add_argument("text")
-    lift = sub.add_parser("lift")
-    lift.add_argument("agent")
-    lift.add_argument("gate")
-    cover = sub.add_parser("cover")
-    cover.add_argument("stage")
-    cover.add_argument("item")
-    cover.add_argument("--reason", required=True)
-    sub.add_parser("issue").add_argument("url")
-    pr = sub.add_parser("pr")
-    pr.add_argument("url")
-    pr.add_argument("--half", type=int, default=0)
-    declared = pr.add_mutually_exclusive_group()
-    declared.add_argument("--stage")
-    declared.add_argument("--prerequisite")
-    merge = sub.add_parser("merge")
-    merge.add_argument("action", choices=("queue", "dequeue", "state", "priority"))
-    merge.add_argument("url")
-    merge.add_argument(
-        "--lift", action="store_true", help="operator: prioritize immediately despite a running head group"
-    )
-    blockers_cmd = sub.add_parser("blockers")
-    blockers_cmd.add_argument("action", nargs="?", default="list", choices=("list", "clear"))
-    blockers_cmd.add_argument("category", nargs="?", default="")
-    blockers_cmd.set_defaults(handler=cmd_blockers)
-    panic_cmd = sub.add_parser("panic")
-    panic_cmd.add_argument("action", nargs="?", default="status", choices=("on", "off", "status"))
-    panic_cmd.add_argument("--fix", action="append", default=[])
-    panic_cmd.set_defaults(handler=cmd_panic)
-    sub.add_parser("prepare")
-    publish = sub.add_parser("publish")
-    publish.add_argument("--message", "-m", required=True)
-    publish.add_argument("--via", choices=["lab"], default="", help="grade HEAD on the lab remote before origin")
-    publish.add_argument("--direct", action="store_true", help="with --via lab, push origin without the lab grade")
-    publish.add_argument("files", nargs="*")
-    sub.add_parser("branch")
-    sub.add_parser("review")
-    resolve_cmd = sub.add_parser("resolve")
-    resolve_cmd.add_argument("action", choices=("attempt", "critic", "escalate", "status"))
-    resolve_cmd.add_argument("item")
-    for flag in ("--tried", "--output", "--reason", "--evidence"):
-        resolve_cmd.add_argument(flag, default="")
-    resolve_cmd.add_argument("--command", dest="ran", default="")
-    done = sub.add_parser("done")
-    done.add_argument("--pr", default="")
-    for key in ledger_kinds.PROOF_KEYS:
-        done.add_argument("--" + key.replace("_", "-"), dest=f"proof_{key}", default="")
-    block = sub.add_parser("block")
-    block.add_argument("note")
-    block.add_argument("--dev-red", action="store_true")
-    sub.add_parser("trace-plan")
-    plan = sub.add_parser("plan").add_subparsers(dest="action", required=True)
-    for action in plan_review.DECISIONS:
-        decision = plan.add_parser(action)
-        decision.add_argument("phase")
-        decision.add_argument("--note", required=action == "send-back")
-        if action == "approve":
-            decision.add_argument("--override", default="")
-        else:
-            decision.set_defaults(override="")
-    wait = sub.add_parser("wait")
-    wait.add_argument("minutes", type=int, nargs="?")
-    prerequisite_wait.arguments(wait)
-    wait.add_argument("--reason", default="")
-    wait.add_argument("--inbox", action="store_true")
-    reported = sub.add_parser("progress")
-    reported.add_argument("--doing", required=True)
-    reported.add_argument("--ends-when", required=True)
-    sub.add_parser("park").add_argument("doc")
-    sub.add_parser("ready").add_argument("doc")
-    sub.add_parser("restack")
-    handoff = sub.add_parser("handoff")
-    handoff.add_argument("doc")
-    handoff.add_argument("--recap", default="")
-    handoff.add_argument("--reason", choices=handoff_envelope.REASONS, default="recycle")
-    confirm = sub.add_parser("confirm-handoff")
-    confirm.add_argument("transfer")
-    confirm.add_argument("--next", required=True)
-    decision = sub.add_parser("restore-decision")
-    decision.add_argument("agent")
-    decision.add_argument("choice", choices=("resume", "native", "context", "fresh"))
-    learned = sub.add_parser("learned")
-    learned.add_argument("text", nargs="?", default="")
-    learned.add_argument("--maturity", choices=MATURITIES, default=DEFAULT_MATURITY)
-    promote = sub.add_parser("promote")
-    promote.add_argument("seat")
-    promote.add_argument("number", type=int)
-    promote.add_argument("maturity", choices=MATURITIES)
-    promote.add_argument("--reason", required=True)
-    retire = sub.add_parser("retire")
-    retire.add_argument("seat")
-    retire.add_argument("number", type=int)
-    retire.add_argument("--reason", required=True)
-    channel = sub.add_parser("masters-channel").add_subparsers(dest="action", required=True)
-    channel.add_parser("say").add_argument("text")
-    channel.add_parser("read").add_argument("--all", action="store_true")
-    culture = sub.add_parser("culture").add_subparsers(dest="action", required=True)
-    culture.add_parser("set").add_argument("file")
-    culture.add_parser("show")
-    say = sub.add_parser("say")
-    say.add_argument("text")
-    say.add_argument("--to", default="")
-    say.add_argument("--fyi", action="store_true")
-    return parser
 
 
 def _tick_store():
