@@ -31,7 +31,7 @@ ENV_OPTIONS = frozenset({"-C", "--chdir", "-S", "--split-string"})
 KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{"})
 FOLDER_CHANGES = frozenset({"cd", "pushd", "popd"})
 COPIES = frozenset({"cp", "ln", "install", "rsync"})
-WRITERS = frozenset({"mv", "rm", "rmdir", "touch", "mkdir", "chmod", "chown", "truncate", "tee", "unlink"})
+WRITERS = frozenset({"mv", "rm", "rmdir", "touch", "chown", "tee", "unlink"})
 IN_PLACE = frozenset({"sed", "perl"})
 PACKERS = frozenset({"gzip", "gunzip", "bzip2", "bunzip2", "xz", "unxz", "zstd", "unzstd"})
 PACKER_STREAMS = frozenset({"--stdout", "--to-stdout", "--list", "--test"})
@@ -40,9 +40,153 @@ OUTPUT_OPTIONS = frozenset({"-o", "--output"})
 REMOTE_NAMES = frozenset({"-O", "--remote-name", "--remote-name-all"})
 WGET_OUTPUTS = frozenset({"-O", "--output-document"})
 FIND_WRITES = frozenset({"-fprint", "-fprint0", "-fls", "-fprintf"})
-TAR_MODES = frozenset({"--extract", "--get", "--create", "--append", "--update", "--delete", "--concatenate"})
-TAR_WRITES = frozenset("xcruA")
 UNZIP_READS = frozenset({"-l", "-t", "-p", "-v", "-Z", "-z"})
+EMPTY = ""
+NO_LETTERS = ""
+NO_LONG_VALUES: frozenset[str] = frozenset()
+OPERAND = frozenset({EMPTY})
+STREAM = "-"
+HERE = "."
+CHMOD_FLAGS = frozenset(
+    {
+        "-R",
+        "-c",
+        "-f",
+        "-v",
+        "-h",
+        "-H",
+        "-L",
+        "-P",
+        "--recursive",
+        "--changes",
+        "--silent",
+        "--quiet",
+        "--verbose",
+        "--preserve-root",
+        "--no-preserve-root",
+        "--dereference",
+        "--no-dereference",
+    }
+)
+CHMOD_VALUES = frozenset({"--reference"})
+TRUNCATE_LETTERS = "rs"
+TRUNCATE_VALUES = frozenset({"--reference", "--size"})
+MKDIR_LETTERS = "m"
+MKDIR_VALUES = frozenset({"--mode"})
+TAR_LETTERS = "bCfFgHIKLNTVX"
+TAR_VALUES = frozenset(
+    {
+        "--add-file",
+        "--after-date",
+        "--blocking-factor",
+        "--checkpoint-action",
+        "--directory",
+        "--exclude",
+        "--exclude-from",
+        "--exclude-ignore",
+        "--exclude-ignore-recursive",
+        "--exclude-tag",
+        "--exclude-tag-all",
+        "--exclude-tag-under",
+        "--file",
+        "--files-from",
+        "--format",
+        "--group",
+        "--group-map",
+        "--hole-detection",
+        "--index-file",
+        "--info-script",
+        "--label",
+        "--level",
+        "--listed-incremental",
+        "--mode",
+        "--mtime",
+        "--new-volume-script",
+        "--newer",
+        "--newer-mtime",
+        "--no-quote-chars",
+        "--owner",
+        "--owner-map",
+        "--pax-option",
+        "--quote-chars",
+        "--quoting-style",
+        "--record-size",
+        "--rmt-command",
+        "--rsh-command",
+        "--sort",
+        "--sparse-version",
+        "--starting-file",
+        "--strip-components",
+        "--suffix",
+        "--tape-length",
+        "--to-command",
+        "--transform",
+        "--use-compress-program",
+        "--volno-file",
+        "--warning",
+        "--xattrs-exclude",
+        "--xattrs-include",
+        "--xform",
+    }
+)
+TAR_ARCHIVES = frozenset(
+    {"-c", "-r", "-u", "-A", "--create", "--append", "--update", "--delete", "--concatenate", "--catenate"}
+)
+TAR_EXTRACTS = frozenset({"-x", "--extract", "--get"})
+TAR_STREAMS = frozenset({"-O", "--to-stdout"})
+TAR_FOLDERS = frozenset({"-C", "--directory"})
+TAR_FILES = frozenset({"-f", "--file"})
+TAR_RUNS = frozenset(
+    {
+        "-F",
+        "-g",
+        "-I",
+        "-P",
+        "--absolute-names",
+        "--checkpoint-action",
+        "--index-file",
+        "--info-script",
+        "--listed-incremental",
+        "--new-volume-script",
+        "--one-top-level",
+        "--remove-files",
+        "--rmt-command",
+        "--rsh-command",
+        "--set-mtime-command",
+        "--to-command",
+        "--use-compress-program",
+        "--volno-file",
+    }
+)
+TAR_NAMED = TAR_RUNS | TAR_ARCHIVES | TAR_EXTRACTS | TAR_FOLDERS | TAR_FILES
+UNZIP_LETTERS = "dIOP"
+UNZIP_FOLDERS = frozenset({"-d"})
+UNZIP_PARENTS = "-:"
+PATCH_LETTERS = "BdDFgioprVxYz"
+PATCH_VALUES = frozenset(
+    {
+        "--basename-prefix",
+        "--debug",
+        "--directory",
+        "--fuzz",
+        "--get",
+        "--ifdef",
+        "--input",
+        "--output",
+        "--prefix",
+        "--quoting-style",
+        "--read-only",
+        "--reject-file",
+        "--reject-format",
+        "--strip",
+        "--suffix",
+        "--version-control",
+    }
+)
+PATCH_FOLDERS = frozenset({"-d", "--directory"})
+PATCH_OUTPUTS = frozenset({"-o", "--output", "-r", "--reject-file"})
+PATCH_BACKUPS = frozenset({"-B", "-Y", "--prefix", "--basename-prefix"})
+PATCH_NAMED = PATCH_FOLDERS | PATCH_OUTPUTS | PATCH_BACKUPS
 GIT_READS = frozenset(
     {
         "status",
@@ -335,6 +479,74 @@ def _option_values(words: list[str], names: frozenset[str]) -> list[str]:
     return values
 
 
+def _literal(value: str) -> str:
+    """*value* glued to its option, where the shell leaves a leading tilde as a folder name."""
+    return f"./{value}" if value[:1] == "~" else value
+
+
+def _long_option(word: str, valued: frozenset[str], rest: Iterator[str]) -> tuple[str, str]:
+    """The name and value of the long option *word*; a valued option without an equals sign takes the next word."""
+    name, equals, value = word.partition("=")
+    if equals or name not in valued:
+        return name, _literal(value)
+    return name, next(rest, UNKNOWN)
+
+
+def _short_options(word: str, letters: str, rest: Iterator[str]) -> list[tuple[str, str]]:
+    """Each option of the cluster *word*; the first of *letters* in it takes the rest of the word or the next word."""
+    found: list[tuple[str, str]] = []
+    for index, letter in enumerate(word[1:], 2):
+        if letter in letters:
+            glued = word[index:]
+            return [*found, (f"-{letter}", _literal(glued) if glued else next(rest, UNKNOWN))]
+        found.append((f"-{letter}", EMPTY))
+    return found
+
+
+def _options(words: list[str], letters: str, valued: frozenset[str]) -> list[tuple[str, str]]:
+    """Each option after the command name in *words* with its value, and each operand under an empty name, in order."""
+    found: list[tuple[str, str]] = []
+    rest = iter(words[1:])
+    for word in rest:
+        if word == "--":
+            found.extend((EMPTY, operand) for operand in rest)
+        elif word[:2] == "--":
+            found.append(_long_option(word, valued, rest))
+        elif word[:1] == "-" and word != STREAM:
+            found.extend(_short_options(word, letters, rest))
+        else:
+            found.append((EMPTY, word))
+    return found
+
+
+def _named(options: list[tuple[str, str]], names: frozenset[str]) -> list[str]:
+    return [value for name, value in options if name in names]
+
+
+def _abbreviated(options: list[tuple[str, str]], names: frozenset[str]) -> bool:
+    """Whether a long option in *options* shortens one of *names*, which getopt runs as that option."""
+    return any(name[:2] == "--" and name != full and full.startswith(name) for name, _ in options for full in names)
+
+
+def _joined(folder: str, value: str) -> str:
+    """*value* as a path from *folder*, kept whole when it is absolute or starts at the home folder."""
+    if not folder or value.startswith(("/", "~")):
+        return value
+    return f"{folder}/{value}"
+
+
+def _chain(options: list[tuple[str, str]], names: frozenset[str]) -> list[str]:
+    """Each folder the options *names* move to in turn, joined to the folder before it."""
+    folders: list[str] = []
+    for value in _named(options, names):
+        folders.append(_joined(folders[-1] if folders else EMPTY, value))
+    return folders
+
+
+def _folder(path: str) -> str:
+    return path if path.endswith("/") else f"{path}/"
+
+
 def _in_place(word: str) -> bool:
     flags = word.partition("=")[0].partition(".")[0]
     return flags == "--in-place" or (flags[:1] == "-" and flags[1:].isalpha() and "i" in flags)
@@ -367,6 +579,22 @@ def _plain_targets(words: list[str], operands: list[str]) -> list[str]:
     return operands
 
 
+def _chmod_targets(words: list[str], operands: list[str]) -> list[str]:
+    """The files chmod changes: every operand but the first, which is the mode unless a mode option or --reference
+    gave it."""
+    options = _options(words, NO_LETTERS, CHMOD_VALUES)
+    files = _named(options, OPERAND)
+    return files[1:] if all(name in CHMOD_FLAGS for name, _ in options if name) else files
+
+
+def _truncate_targets(words: list[str], operands: list[str]) -> list[str]:
+    return _named(_options(words, TRUNCATE_LETTERS, TRUNCATE_VALUES), OPERAND)
+
+
+def _mkdir_targets(words: list[str], operands: list[str]) -> list[str]:
+    return _named(_options(words, MKDIR_LETTERS, MKDIR_VALUES), OPERAND)
+
+
 def _copy_targets(words: list[str], operands: list[str]) -> list[str]:
     return _option_values(words, TARGET_OPTIONS) or operands[-1:]
 
@@ -380,7 +608,17 @@ def _dd_targets(words: list[str], operands: list[str]) -> list[str]:
 
 
 def _patch_targets(words: list[str], operands: list[str]) -> list[str]:
-    return [] if "--dry-run" in words else [UNKNOWN]
+    """The folder patch writes the files its diff names into, its -d folder or the current one, and the output, reject
+    and patched files named under it."""
+    if "--dry-run" in words:
+        return []
+    options = _options(words, PATCH_LETTERS, PATCH_VALUES)
+    if _named(options, PATCH_BACKUPS) or _abbreviated(options, PATCH_NAMED):
+        return [UNKNOWN]
+    folders = _chain(options, PATCH_FOLDERS)
+    folder = folders[-1] if folders else HERE
+    files = [*_named(options, PATCH_OUTPUTS), *_named(options, OPERAND)[:1]]
+    return [_folder(folder), *(_joined(folder, name) for name in files if name != STREAM)]
 
 
 def _sort_targets(words: list[str], operands: list[str]) -> list[str]:
@@ -412,15 +650,57 @@ def _packer_targets(words: list[str], operands: list[str]) -> list[str]:
     return [] if streams else operands
 
 
+def _tar_words(words: list[str]) -> list[str]:
+    """*words* with an old style first argument spelled out as short options, each followed by its value."""
+    if len(words) < 2 or words[1][:1] == "-":
+        return words
+    values = iter(words[2:])
+    spelled: list[str] = []
+    for letter in words[1]:
+        spelled.append(f"-{letter}")
+        spelled.extend(islice(values, 1 if letter in TAR_LETTERS else 0))
+    return [words[0], *spelled, *values]
+
+
+def _tar_archives(options: list[tuple[str, str]]) -> list[str]:
+    """The archives a tar create, append, update, delete or concatenate writes, each also judged from every -C folder."""
+    named = _named(options, TAR_FILES)
+    archives = [value for value in named if value != STREAM]
+    if not named or any(":" in value.partition("/")[0] for value in archives):
+        return [UNKNOWN]
+    return [*archives, *(_joined(folder, value) for folder in _chain(options, TAR_FOLDERS) for value in archives)]
+
+
+def _tar_extracted(options: list[tuple[str, str]]) -> list[str]:
+    """The folders a tar extract writes into: each -C folder, and the current folder unless a -C precedes every
+    member."""
+    folders = _chain(options, TAR_FOLDERS)
+    leading = takewhile(lambda option: option[0] not in TAR_FOLDERS, options)
+    here = [HERE] if not folders or any(not name for name, _ in leading) else []
+    return [_folder(path) for path in here + folders]
+
+
 def _tar_targets(words: list[str], operands: list[str]) -> list[str]:
-    bare = words[1] if len(words) > 1 and words[1][:1] != "-" else ""
-    clusters = [_short_flags(word) for word in words[1:]] + [bare]
-    writes = any(set(cluster) & TAR_WRITES for cluster in clusters) or bool(TAR_MODES & set(words))
-    return [UNKNOWN] if writes else []
+    options = _options(_tar_words(words), TAR_LETTERS, TAR_VALUES)
+    if _abbreviated(options, TAR_NAMED):
+        return [UNKNOWN]
+    names = {name for name, _ in options}
+    if not names & (TAR_ARCHIVES | TAR_EXTRACTS):
+        return []
+    if names & TAR_RUNS:
+        return [UNKNOWN]
+    archives = _tar_archives(options) if names & TAR_ARCHIVES else []
+    extracted = [] if names & TAR_STREAMS or not names & TAR_EXTRACTS else _tar_extracted(options)
+    return archives + extracted
 
 
 def _unzip_targets(words: list[str], operands: list[str]) -> list[str]:
-    return [] if UNZIP_READS & set(words) else [UNKNOWN]
+    if UNZIP_READS & set(words):
+        return []
+    options = _options(words, UNZIP_LETTERS, NO_LONG_VALUES)
+    if UNZIP_PARENTS in {name for name, _ in options}:
+        return [UNKNOWN]
+    return [_folder(path) for path in _named(options, UNZIP_FOLDERS) or [HERE]]
 
 
 TOOLS: dict[str, Callable[[list[str], list[str]], list[str]]] = {
@@ -428,6 +708,9 @@ TOOLS: dict[str, Callable[[list[str], list[str]], list[str]]] = {
     **dict.fromkeys(COPIES, _copy_targets),
     **dict.fromkeys(IN_PLACE, _edit_targets),
     **dict.fromkeys(PACKERS, _packer_targets),
+    "chmod": _chmod_targets,
+    "truncate": _truncate_targets,
+    "mkdir": _mkdir_targets,
     "dd": _dd_targets,
     "patch": _patch_targets,
     "sort": _sort_targets,
