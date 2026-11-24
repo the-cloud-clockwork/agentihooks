@@ -2504,6 +2504,25 @@
       ]
     },
     {
+      "id": "quota-notice-per-pass-work",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2887",
+      "behaviour": "The quota notice step's readiness sweeps compute the focus queue once per dispatcher guard call and once per readiness snapshot, and its quota requirements resolve each distinct profile's Claude only answer once per call, so its own CPU stops growing with open tasks times task rows and with ready tasks times profile files; on the live rig-grade-swarm view of 7972 rows and 740 ready tasks the body fell from 14.1 to 1.3 CPU seconds.",
+      "seam": "scripts.swarm.dispatcher.guarded, scripts.swarm.readiness.claimable over a readiness.Snapshot, scripts.swarm.claim_hold.holds given a focus queue, and scripts.swarm.runtime.HerdrRuntime.quota_requirements",
+      "tests": [
+        "tests/swarm/test_quota_notice_per_pass.py::test_the_dispatcher_guard_keeps_the_focused_chain_and_drops_held_work",
+        "tests/swarm/test_quota_notice_per_pass.py::test_the_dispatcher_guard_computes_the_focus_queue_once_whatever_the_open_task_count",
+        "tests/swarm/test_quota_notice_per_pass.py::test_claimable_over_a_snapshot_agrees_with_ready_for_every_task",
+        "tests/swarm/test_quota_notice_per_pass.py::test_claimable_computes_the_focus_queue_once_per_snapshot",
+        "tests/swarm/test_quota_notice_per_pass.py::test_claim_hold_uses_the_focus_queue_handed_in",
+        "tests/swarm/test_quota_notice_per_pass.py::test_quota_requirements_keep_each_profile_answer",
+        "tests/swarm/test_quota_notice_per_pass.py::test_quota_requirements_look_up_each_profile_once_per_call"
+      ],
+      "rules": [
+        "tick-claim-gate-without-admitted-queue"
+      ]
+    },
+    {
       "id": "swarm-preempt-claim-view-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-preempt-claim-view-reuse",
