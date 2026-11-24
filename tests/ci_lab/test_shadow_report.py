@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 import scripts.ci_lab.__main__ as cli
-from scripts.ci_lab import shadow, shadow_report
+from scripts.ci_lab import checks, shadow, shadow_report
 
 HEAD = "a" * 40
 OTHER = "b" * 40
@@ -108,6 +108,41 @@ def test_a_head_without_a_lab_verdict_counts_against_presence() -> None:
     three_missing = [graded(HEAD, "pass", None)] * 3 + [graded(HEAD, "pass", "pass")] * 47
     assert shadow_report.holds(shadow_report.tally(three_missing), shadow_report.rule(50)) is False
     assert shadow_report.holds(shadow_report.tally(two_missing[1:]), shadow_report.rule(50)) is False
+
+
+def listed(gate: str, conclusion: str, minute: int, *, run_id: int = 2, slug: str = APP) -> dict[str, Any]:
+    return {**lab(gate, conclusion, minute, run_id=run_id, slug=slug), "name": checks.name(gate, shadow=False)}
+
+
+@pytest.mark.feature("lab-shadow-acceptance-report")
+def test_the_acceptance_report_reads_the_lab_verdict_only_under_the_shadow_name() -> None:
+    runs = [job("lint"), listed("lint", "failure", 5)]
+    assert shadow_report.lab(runs, "lint", APP) is None
+    assert shadow_report.head(HEAD, runs, "lint", LINT) == graded(HEAD, "pass", None)
+    answers = {
+        f"{RUNS}&per_page=100&page=1": {"workflow_runs": [{"head_sha": HEAD}]},
+        f"repos/{REPOSITORY}/commits/{HEAD}/check-runs?filter=latest&per_page=100&page=1": {"check_runs": runs},
+    }
+    collected = shadow_report.collect(answers.__getitem__, REPOSITORY, shadow_report.PULL_REQUEST, "lint", LINT, 1)
+    assert collected == [graded(HEAD, "pass", None)]
+    assert shadow_report.tally(collected) == shadow_report.Tally(1, 0, 0, 0)
+
+
+@pytest.mark.feature("lab-shadow-acceptance-report")
+def test_a_listed_gate_reads_the_newest_lab_verdict_under_either_name() -> None:
+    assert f"{shadow_report.LISTED_NAME}lint" == checks.name("lint", shadow=False) == "lab/lint"
+    assert f"{shadow.LAB_NAME}lint" == checks.name("lint", shadow=True)
+    posted = [listed("lint", "failure", 6, run_id=9), lab("lint", "success", 4, run_id=7)]
+    assert shadow_report.lab(posted, "lint", APP, listed=True) == shadow_report.Verdict("fail", at(6))
+    assert shadow_report.lab(posted, "lint", APP) == shadow_report.Verdict("pass", at(4))
+    older = [listed("lint", "failure", 6, run_id=7), lab("lint", "success", 4, run_id=9)]
+    assert shadow_report.lab(older, "lint", APP, listed=True) == shadow_report.Verdict("pass", at(4))
+    assert shadow_report.lab([listed("type-gate", "failure", 6)], "lint", APP, listed=True) is None
+    assert shadow_report.lab([listed("lint", "failure", 6, slug="another-app")], "lint", APP, listed=True) is None
+    runs = [job("lint"), *posted]
+    assert shadow_report.head(HEAD, runs, "lint", LINT, listed=True) == graded(HEAD, "pass", "fail", 10, 6)
+    assert shadow_report.head(HEAD, runs, "lint", LINT) == graded(HEAD, "pass", "pass", 10, 4)
+    assert shadow_report.head(HEAD, [job("lint", "skipped"), *posted], "lint", LINT, listed=True) is None
 
 
 @pytest.mark.feature("lab-shadow-acceptance-report")
