@@ -30,7 +30,12 @@ def sign(body: bytes, secret: bytes = SECRET) -> str:
 def pull_request(action="opened", state="open", merged=False, head="a1"):
     return {
         "action": action,
-        "pull_request": {"html_url": URL, "state": state, "merged": merged, "head": {"sha": head}},
+        "pull_request": {
+            "html_url": URL,
+            "state": state,
+            "merged": merged,
+            "head": {"sha": head, "ref": "feature", "label": "acme:feature"},
+        },
     }
 
 
@@ -442,7 +447,7 @@ def lab_pull_request(action="opened", head="a1"):
     payload = pull_request(action, head=head)
     payload["repository"] = {"html_url": REPO}
     payload["sender"] = {"login": "nestorcolt"}
-    payload["pull_request"]["base"] = {"sha": "b0"}
+    payload["pull_request"]["base"] = {"sha": "b0", "label": "acme:dev"}
     payload["pull_request"]["user"] = {"login": "agenticore-app[bot]"}
     return payload
 

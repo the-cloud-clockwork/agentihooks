@@ -26,7 +26,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field, fields, replace
+from dataclasses import MISSING, asdict, dataclass, field, fields, replace
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
@@ -138,7 +138,7 @@ MUTANT_JOB = "mutation"
 MANIFEST_KINDS = (expand_tests.KIND, "mutant")
 ALWAYS_SKIPPABLE = frozenset({"unit-lost", "unit-rerun", "queue-baseline", "unit-selected"})
 PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
-HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent))
+HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent) if item.default is MISSING)
 STATIC = "static"
 WHOLE_TREE = "."
 DURATIONS = ".test_durations"
@@ -407,6 +407,7 @@ class Ports:
     checks: Callable[[str], Poster]
     hotfixes: Callable[[], frozenset[str]]
     pods: Pods = unmanaged
+    wanted: Callable[[str], frozenset[str]] | None = None
 
 
 @dataclass(frozen=True)

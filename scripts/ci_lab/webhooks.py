@@ -39,6 +39,7 @@ class HeadEvent:
     base: str
     actor: str
     action: str
+    lane: str = ""
 
 
 def _push(payload: Mapping[str, Any]) -> list[HeadEvent]:

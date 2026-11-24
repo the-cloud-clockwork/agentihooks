@@ -39,7 +39,11 @@ def pull_request(
         "action": action,
         "repository": {"html_url": REPO},
         "sender": {"login": sender},
-        "pull_request": {"head": {"sha": HEAD}, "base": {"sha": BASE}, "user": {"login": author}},
+        "pull_request": {
+            "head": {"sha": HEAD, "ref": "feature", "label": "acme:feature"},
+            "base": {"sha": BASE, "label": "acme:dev"},
+            "user": {"login": author},
+        },
     }
 
 
@@ -65,8 +69,8 @@ def check_run(action: str = "rerequested", name: str = "lab / unit", pulls: bool
     }
 
 
-def head(event: str, actor: str, action: str, base: str = BASE) -> HeadEvent:
-    return HeadEvent(event=event, repo=REPO, head=HEAD, base=base, actor=actor, action=action)
+def head(event: str, actor: str, action: str, base: str = BASE, lane: str = "") -> HeadEvent:
+    return HeadEvent(event=event, repo=REPO, head=HEAD, base=base, actor=actor, action=action, lane=lane)
 
 
 def test_a_push_to_a_branch_is_a_head_event() -> None:
@@ -117,11 +121,11 @@ def test_a_branch_delete_or_a_tag_push_names_no_head(payload: dict[str, Any]) ->
 @pytest.mark.parametrize("action", ["opened", "synchronize", "reopened"])
 def test_a_pull_request_that_moves_its_head_is_a_head_event(action: str) -> None:
     assert webhooks.head_events("pull_request", pull_request(action)) == [
-        head("pull_request", "agenticore-app[bot]", action)
+        head("pull_request", "agenticore-app[bot]", action, lane="feature")
     ]
 
 
-@pytest.mark.parametrize("action", ["closed", "enqueued", "dequeued", "edited", "labeled"])
+@pytest.mark.parametrize("action", ["enqueued", "dequeued", "edited", "labeled"])
 def test_other_pull_request_actions_name_no_head(action: str) -> None:
     assert webhooks.head_events("pull_request", pull_request(action)) == []
 
@@ -320,7 +324,11 @@ def test_a_cached_negative_answers_a_request_unless_it_is_a_rerequested_check() 
 
 
 def open_pull(sha: str, author: str = "agenticore-app[bot]") -> dict[str, Any]:
-    return {"head": {"sha": sha}, "base": {"sha": BASE, "repo": {"html_url": REPO}}, "user": {"login": author}}
+    return {
+        "head": {"sha": sha, "ref": "feature", "label": "acme:feature"},
+        "base": {"sha": BASE, "label": "acme:dev", "repo": {"html_url": REPO}},
+        "user": {"login": author},
+    }
 
 
 def test_reconcile_lists_the_open_heads_without_a_grade() -> None:
@@ -333,8 +341,8 @@ def test_reconcile_lists_the_open_heads_without_a_grade() -> None:
 
     pulls = [open_pull(HEAD), open_pull("c" * 40), open_pull("d" * 40, "nestorcolt")]
     assert intake.reconcile(pulls, has_grade) == [
-        HeadEvent("pull_request", REPO, HEAD, BASE, "agenticore-app[bot]", "reconcile"),
-        HeadEvent("pull_request", REPO, "d" * 40, BASE, "nestorcolt", "reconcile"),
+        HeadEvent("pull_request", REPO, HEAD, BASE, "agenticore-app[bot]", "reconcile", "feature"),
+        HeadEvent("pull_request", REPO, "d" * 40, BASE, "nestorcolt", "reconcile", "feature"),
     ]
     assert seen == [(REPO, HEAD), (REPO, "c" * 40), (REPO, "d" * 40)]
     assert intake.reconcile([], has_grade) == []
