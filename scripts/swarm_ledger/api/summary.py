@@ -51,20 +51,20 @@ def build(parts: dict[str, Any], tasks: list[Any], holds: tuple[str, bool], limi
 
 def referenced(state: dict[str, Any]) -> set[str]:
     """The row ids the page resolves without holding their rows: task dependencies and priority targets."""
-    named = {
-        str(item)
-        for row in state.get("tasks") or []
-        if is_row(row)
-        for key in ("depends_on", "parked_on")
-        for item in row.get(key) or []
-    }
-    named.update(str(row.get("item") or "").partition("/")[2] for row in state.get("priorities") or [] if is_row(row))
+    named: set[str] = set()
+    for row in cast(list[Any], state.get("tasks") or []):
+        if is_row(row):
+            for key in ("depends_on", "parked_on"):
+                named.update(str(item) for item in cast(list[Any], row.get(key) or []))
+    for row in cast(list[Any], state.get("priorities") or []):
+        if is_row(row):
+            named.add(str(row.get("item") or "").partition("/")[2])
     return named
 
 
 def counted(entry: dict[str, Any], named: set[str]) -> dict[str, Any]:
     kept = {key: entry[key] for key in CLOSED_KEPT if key in entry}
-    kept["ids"] = [row_id for row_id in entry.get("ids") or [] if row_id in named]
+    kept["ids"] = [row_id for row_id in cast(list[Any], entry.get("ids") or []) if row_id in named]
     return kept
 
 
