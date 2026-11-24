@@ -260,11 +260,15 @@ def load_contract(path: Path, side: str = "removed") -> tuple[dict[str, int], di
 
 def removal(selectors: Collection[str]) -> str:
     hidden = json.dumps(",".join(selectors) + "{display:none !important}")
+    matches = json.dumps(",".join(selectors))
     return f"""(() => {{
   window.__removed = {json.dumps(list(selectors))};
   const sheet = new CSSStyleSheet();
   sheet.replaceSync({hidden});
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  const hide = () => {{ for (const el of document.querySelectorAll({matches})) if (!el.hidden) el.hidden = true; }};
+  new MutationObserver(hide).observe(document, {{ childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] }});
+  hide();
 }})();"""
 
 
