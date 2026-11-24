@@ -15937,7 +15937,29 @@
         "tests/swarm_ledger/test_summary_read.py::test_a_summary_read_and_an_open_tasks_read_at_once_build_the_summary_once",
         "tests/swarm_ledger/test_summary_read.py::test_the_summary_derives_what_the_page_view_derives",
         "tests/swarm_ledger/test_summary_read.py::test_the_summary_of_a_production_sized_ledger_fits_one_reply",
-        "tests/swarm_ledger/test_summary_read.py::test_the_summary_crew_holds_only_members_seen_in_the_active_window"
+        "tests/swarm_ledger/test_summary_read.py::test_the_summary_crew_holds_only_members_seen_in_the_active_window",
+        "tests/swarm_ledger/test_summary_read.py::test_build_keeps_the_trimmed_view_of_a_collection_outside_paged_sections",
+        "tests/swarm_ledger/test_summary_read.py::test_referenced_names_task_dependencies_parked_tasks_and_priority_targets",
+        "tests/swarm_ledger/test_summary_read.py::test_page_order_sorts_unheld_open_rows_by_their_actual_rank",
+        "tests/swarm_ledger/test_summary_read.py::test_page_order_defaults_a_missing_state_to_open_and_an_unknown_state_last",
+        "tests/swarm_ledger/test_summary_read.py::test_page_order_holds_only_the_rows_whose_task_id_is_frozen",
+        "tests/swarm_ledger/test_summary_read.py::test_view_rows_drops_closed_rows_beyond_the_kept_window",
+        "tests/swarm_ledger/test_summary_read.py::test_rows_holds_its_cached_tasks_object_under_the_ledger_slug",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_page_without_an_explicit_offset_or_limit_uses_the_defaults",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_page_includes_a_single_row_whose_reply_lands_exactly_at_the_reply_limit",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_page_stops_before_an_oversized_second_row_and_returns_the_rows_already_selected",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_page_refuses_an_oversized_first_row_with_resource_too_large",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_read_tasks_path_reads_task_rows_and_folds_in_the_frozen_marks",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_read_non_tasks_path_skips_marks_and_uses_an_empty_frozen_set",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_active_crew_keeps_members_with_future_last_seen_and_drops_those_missing_it_at_the_window_boundary",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_ledger_summary_reuses_the_cached_build_for_unchanged_stored_rows",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_ledger_summary_keeps_a_separate_build_lock_for_each_slug",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_ledger_summary_builds_meta_page_version_crew_and_limits_from_doctor_holds",
+        "tests/swarm_ledger/test_artifact_sanity.py::test_feed_answers_404_for_a_path_it_does_not_recognize",
+        "tests/swarm_ledger/test_artifact_sanity.py::test_feed_routes_a_path_naming_swarm_in_the_middle_to_the_swarm_route",
+        "tests/swarm_ledger/test_artifact_sanity.py::test_swarm_route_answers_the_empty_data_and_collections_body",
+        "tests/swarm_ledger/test_artifact_sanity.py::test_open_page_names_the_section_from_the_last_path_segment_and_numbers_its_rows",
+        "tests/swarm_ledger/test_artifact_sanity.py::test_summary_reads_each_paged_section_by_its_own_name_and_answers_revision_r"
       ]
     },
     {
@@ -15949,7 +15971,14 @@
       "tests": [
         "tests/swarm_ledger/test_hub.py::test_a_connect_without_a_cursor_opens_without_a_ledger_snapshot",
         "tests/swarm_ledger/test_events_stream.py::test_serve_opens_a_cursorless_connect_without_a_snapshot",
-        "tests/swarm_ledger/test_stream.py::test_a_cursorless_connect_opens_without_building_the_page_view"
+        "tests/swarm_ledger/test_stream.py::test_a_cursorless_connect_opens_without_building_the_page_view",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_treats_a_change_without_an_o_key_as_no_rows_changed",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_skips_a_key_whose_after_value_is_not_a_list",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_skips_a_key_whose_after_ids_cannot_be_resolved",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_keeps_reading_later_keys_after_one_key_has_no_ids",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_upserts_the_updated_and_added_rows_when_the_list_was_patched_incrementally",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_upserts_the_whole_after_list_when_the_part_carries_a_full_value",
+        "tests/swarm_ledger/test_watch_ledger.py::test_take_never_applies_a_ledger_patch_whose_frame_carries_a_from_field_while_caught_up"
       ]
     },
     {

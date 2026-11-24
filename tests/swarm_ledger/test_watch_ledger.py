@@ -403,3 +403,12 @@ def test_a_comment_on_a_hidden_done_task_still_reaches_its_claimant(capsys):
     assert [line for line in capsys.readouterr().out.splitlines() if line.startswith("OPERATOR")] == [
         'OPERATOR rev=2 comment added on tasks/t1 [c1]: "look"'
     ]
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_take_never_applies_a_ledger_patch_whose_frame_carries_a_from_field_while_caught_up() -> None:
+    watch = watch_ledger.Watch(args(since_rev=0), "path.json", None)
+    state = ledger(5)
+    watch.take("snapshot", {"ledger": state})
+    watch.take("ledger", {"patch": {"o": {"tasks": {"drop": 0, "add": [{"id": "t1"}], "u": []}}}, "from": 5, "rev": 5})
+    assert watch.state == state

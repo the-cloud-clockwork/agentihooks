@@ -44,7 +44,7 @@ def build(parts: dict[str, Any], tasks: list[Any], holds: tuple[str, bool], limi
     raw: dict[str, Any] = parts.get("_meta") or {}
     meta = {key: value for key, value in raw.items() if key in META_KEPT}
     meta.update(closed=closed, limits=limits, events=(raw.get("events") or [])[-EVENTS_KEPT:])
-    kept = {key: view.get(key, value) for key, value in parts.items() if key not in PAGED and key != "_meta"}
+    kept = {key: view.get(key, value) for key, value in parts.items() if key not in PAGED}
     sections = {name: section(name, state.get(name) or []) for name in PAGED}
     return {**kept, "marks": marks, "phase_status": status, "sections": sections, "_meta": meta}
 
@@ -52,11 +52,14 @@ def build(parts: dict[str, Any], tasks: list[Any], holds: tuple[str, bool], limi
 def referenced(state: dict[str, Any]) -> set[str]:
     """The row ids the page resolves without holding their rows: task dependencies and priority targets."""
     named: set[str] = set()
-    for row in cast(list[Any], state.get("tasks") or []):
+    tasks: list[Any] = state.get("tasks") or []
+    for row in tasks:
         if is_row(row):
             for key in ("depends_on", "parked_on"):
-                named.update(str(item) for item in cast(list[Any], row.get(key) or []))
-    for row in cast(list[Any], state.get("priorities") or []):
+                items: list[Any] = row.get(key) or []
+                named.update(str(item) for item in items)
+    priorities: list[Any] = state.get("priorities") or []
+    for row in priorities:
         if is_row(row):
             named.add(str(row.get("item") or "").partition("/")[2])
     return named
@@ -64,7 +67,8 @@ def referenced(state: dict[str, Any]) -> set[str]:
 
 def counted(entry: dict[str, Any], named: set[str]) -> dict[str, Any]:
     kept = {key: entry[key] for key in CLOSED_KEPT if key in entry}
-    kept["ids"] = [row_id for row_id in cast(list[Any], entry.get("ids") or []) if row_id in named]
+    ids: list[Any] = entry.get("ids") or []
+    kept["ids"] = [row_id for row_id in ids if row_id in named]
     return kept
 
 

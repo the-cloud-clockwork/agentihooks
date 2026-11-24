@@ -6,7 +6,7 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlsplit
 
 SHELL = Path(__file__).resolve().parent / "shell.html"
@@ -221,7 +221,7 @@ def _summary(route: Any, doc: dict[str, Any]) -> None:
 
 
 def _open_page(route: Any, doc: dict[str, Any]) -> None:
-    url: str = cast(str, route.request.url)
+    url: str = route.request.url
     name = urlsplit(url).path.rsplit("/", 1)[1]
     rows: list[dict[str, Any]] = [
         {**row, "position": at} for at, row in enumerate(doc.get(name) or []) if isinstance(row, dict)
@@ -234,7 +234,7 @@ def _swarm(route: Any) -> None:
 
 
 def _feed(route: Any, doc: dict[str, Any]) -> None:
-    url: str = cast(str, route.request.url)
+    url: str = route.request.url
     parts = urlsplit(url)
     if parts.path.endswith("/events"):
         return _events(route, doc)

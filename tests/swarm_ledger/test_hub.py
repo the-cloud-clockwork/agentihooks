@@ -495,3 +495,48 @@ def test_a_drained_hub_answers_closed_at_once():
 
 def test_closed_is_not_expired():
     assert not issubclass(events_hub.Closed, Expired)
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_treats_a_change_without_an_o_key_as_no_rows_changed() -> None:
+    assert events_hub.changed_rows({"tasks": []}, {"tasks": []}, {}) == {}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_skips_a_key_whose_after_value_is_not_a_list() -> None:
+    old = {"tasks": [{"id": "a"}, {"id": "b"}]}
+    new = {"tasks": ({"id": "a"}, {"id": "c"})}
+    change = {"o": {"tasks": {"u": [{"id": "c"}], "add": []}}}
+    assert events_hub.changed_rows(old, new, change) == {}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_skips_a_key_whose_after_ids_cannot_be_resolved() -> None:
+    old = {"tasks": [{"id": "a"}]}
+    new = {"tasks": [1, 2, 3]}
+    change = {"o": {"tasks": {"u": [], "add": []}}}
+    assert events_hub.changed_rows(old, new, change) == {}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_keeps_reading_later_keys_after_one_key_has_no_ids() -> None:
+    old = {"weird": [1, 2], "tasks": [{"id": "a"}]}
+    new = {"weird": [3, 4], "tasks": [{"id": "a"}, {"id": "b"}]}
+    change = {"o": {"weird": {"u": [], "add": []}, "tasks": {"u": [{"id": "b"}], "add": []}}}
+    assert events_hub.changed_rows(old, new, change) == {"tasks": {"u": ["b"], "gone": []}}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_upserts_the_updated_and_added_rows_when_the_list_was_patched_incrementally() -> None:
+    old = {"tasks": [{"id": "a"}]}
+    new = {"tasks": [{"id": "a"}, {"id": "x"}]}
+    change = {"o": {"tasks": {"add": [{"id": "x"}]}}}
+    assert events_hub.changed_rows(old, new, change) == {"tasks": {"u": ["x"], "gone": []}}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_upserts_the_whole_after_list_when_the_part_carries_a_full_value() -> None:
+    old = {"tasks": [{"id": "a"}]}
+    new = {"tasks": [{"id": "z"}]}
+    change = {"o": {"tasks": {"v": [{"id": "z"}], "u": [{"id": "other"}], "add": [{"id": "other2"}]}}}
+    assert events_hub.changed_rows(old, new, change) == {"tasks": {"u": ["z"], "gone": ["a"]}}

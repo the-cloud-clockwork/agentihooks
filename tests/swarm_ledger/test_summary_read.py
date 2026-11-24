@@ -8,7 +8,7 @@ from typing import Any, cast
 import pytest
 
 from scripts.swarm_ledger import ledger_closed, ledger_server
-from scripts.swarm_ledger.api import resources, summary
+from scripts.swarm_ledger.api import resources, summary, task_list
 from tests.swarm_ledger.test_api_v1 import authority_live, live, request, stored
 
 __all__ = ["authority_live", "live"]
@@ -173,3 +173,82 @@ def test_the_summary_crew_holds_only_members_seen_in_the_active_window() -> None
     members["agent-here"] = {"role": "member", "last_seen": now - 5}
     crew = ledger_server.active_crew({"members": members}, now)
     assert [row["last_seen"] for row in crew] == [now - 5]
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_build_keeps_the_trimmed_view_of_a_collection_outside_paged_sections() -> None:
+    state = document()
+    state["questions"] = [
+        {"id": f"q-{n}", "text": "Q", "answers": [{"by": "operator", "text": "A"}]} for n in range(11)
+    ]
+    parts = {key: value for key, value in state.items() if key != "tasks"}
+    built = summary.build(parts, state["tasks"], ("", False), {})
+    assert built["questions"] == state["questions"][1:]
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_referenced_names_task_dependencies_parked_tasks_and_priority_targets() -> None:
+    state = {
+        "tasks": [
+            {"id": "t-1", "depends_on": ["t-dep"], "unrelated": 1},
+            {"id": "t-2", "parked_on": ["t-held"]},
+        ],
+        "priorities": [{"id": "pr-1", "item": "tasks/abc/def"}],
+    }
+    assert summary.referenced(state) == {"t-dep", "t-held", "abc/def"}
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_page_order_sorts_unheld_open_rows_by_their_actual_rank() -> None:
+    rows = [
+        (0, {"id": "low", "rank": "low"}),
+        (1, {"id": "urgent", "rank": "urgent"}),
+        (2, {"id": "normal"}),
+    ]
+    ordered = summary.page_order(rows, frozen=set())
+    assert [row["id"] for _, row in ordered] == ["urgent", "normal", "low"]
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_page_order_defaults_a_missing_state_to_open_and_an_unknown_state_last() -> None:
+    rows = [
+        (0, {"id": "no-state"}),
+        (1, {"id": "blocked", "state": "blocked"}),
+        (2, {"id": "weird", "state": "totally-unknown"}),
+    ]
+    ordered = summary.page_order(rows, frozen=set())
+    assert [row["id"] for _, row in ordered] == ["no-state", "blocked", "weird"]
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_page_order_holds_only_the_rows_whose_task_id_is_frozen() -> None:
+    rows = [
+        (0, {"id": "t-y"}),
+        (1, {"id": "t-x"}),
+    ]
+    ordered = summary.page_order(rows, frozen={"tasks/t-y"})
+    assert [row["id"] for _, row in ordered] == ["t-x", "t-y"]
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_view_rows_drops_closed_rows_beyond_the_kept_window() -> None:
+    rows = [{"id": f"c-{n}", "done": True} for n in range(12)] + [{"id": "open-1"}]
+    kept = summary.view_rows("phases", rows, set())
+    assert [row["id"] for _, row in kept] == [f"c-{n}" for n in range(2, 12)] + ["open-1"]
+
+
+class _FakeTaskRepository:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def task_rows(self, slug: str, cached: object) -> tuple[None, dict[str, int], list[Any]]:
+        self.calls.append(slug)
+        return (None, {"rev": 1}, [])
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_rows_holds_its_cached_tasks_object_under_the_ledger_slug(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(task_list, "HELD", {})
+    repository = _FakeTaskRepository()
+    task_list.rows(repository, "slug-a")
+    assert set(task_list.HELD) == {"slug-a"}

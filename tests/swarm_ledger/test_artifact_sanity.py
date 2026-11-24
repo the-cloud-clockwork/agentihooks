@@ -373,3 +373,57 @@ def test_the_harness_serves_the_page_and_assets_of_the_given_folder(tmp_path: Pa
         "body": "head styles",
         "content_type": "text/css; charset=utf-8",
     }
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_feed_answers_404_for_a_path_it_does_not_recognize() -> None:
+    doc: dict[str, Any] = {"_meta": {"rev": 1}}
+    url = "http://x/api/v1/ledgers/artifact-sanity/unknown"
+    assert answered(lambda r: sanity._feed(r, doc), url) == {"status": 404, "body": "no such route"}
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_feed_routes_a_path_naming_swarm_in_the_middle_to_the_swarm_route() -> None:
+    doc: dict[str, Any] = {"_meta": {"rev": 1}}
+    url = "http://x/api/v1/ledgers/artifact-sanity/swarm/agents"
+    assert answered(lambda r: sanity._feed(r, doc), url) == {"json": {"data": {}, "collections": []}}
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_swarm_route_answers_the_empty_data_and_collections_body() -> None:
+    assert answered(lambda r: sanity._swarm(r)) == {"json": {"data": {}, "collections": []}}
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_open_page_names_the_section_from_the_last_path_segment_and_numbers_its_rows() -> None:
+    doc: dict[str, Any] = {"artifacts": [{"id": "a1"}, {"id": "a2"}]}
+    url = "http://x/api/v1/ledgers/artifact-sanity/artifacts?state=open"
+    assert answered(lambda r: sanity._open_page(r, doc), url) == {
+        "json": {
+            "data": [{"id": "a1", "position": 0}, {"id": "a2", "position": 1}],
+            "revision": "r",
+            "total": 2,
+            "next_offset": None,
+        }
+    }
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_summary_reads_each_paged_section_by_its_own_name_and_answers_revision_r() -> None:
+    doc: dict[str, Any] = {"title": "x", "slices": [{"id": "s1"}], "_meta": {"rev": 1}}
+    assert answered(lambda r: sanity._summary(r, doc))["json"] == {
+        "data": {
+            "title": "x",
+            "_meta": {"rev": 1},
+            "sections": {
+                "tasks": {"open": 0, "states": {}},
+                "phases": {"open": 0, "states": {}},
+                "followups": {"open": 0, "states": {}},
+                "alerts": {"open": 0, "states": {}},
+                "notifications": {"open": 0, "states": {}},
+                "slices": {"open": 1, "states": {"open": 1}},
+                "freezes": {"open": 0, "states": {}},
+            },
+        },
+        "revision": "r",
+    }
