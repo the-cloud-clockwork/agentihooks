@@ -1,10 +1,10 @@
+import fcntl
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from hooks.compat import fcntl
 from scripts.events.bus import StateConflict
 from scripts.events.redis_state import RedisStateStore
 from scripts.swarm import keyspace

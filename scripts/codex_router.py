@@ -7,6 +7,7 @@ environment under its own name; none is printed or written anywhere.
 
 import base64
 import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -20,7 +21,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from hooks.compat import fcntl
 from hooks.context.account_sessions import (
     API_ACCOUNT,
     CODEX_DEFAULT,

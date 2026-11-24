@@ -1,6 +1,7 @@
 """One active writer per ledger folder: a flock lease held for the process lifetime, verified snapshots and restores."""
 
 import argparse
+import fcntl
 import json
 import os
 import socket
@@ -10,8 +11,6 @@ import tempfile
 import time
 from contextlib import suppress
 from pathlib import Path
-
-from hooks.compat import fcntl
 
 LOCK = ".ledger-writer.lock"
 CONFLICTS = ".ledger-writer-conflicts.jsonl"

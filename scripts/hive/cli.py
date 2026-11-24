@@ -2,6 +2,7 @@
 
 import argparse
 import contextlib
+import fcntl
 import json
 import os
 import subprocess
@@ -14,7 +15,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from hooks.compat import fcntl
 from scripts.hive import auth, bundle_origin, registry, server
 from scripts.swarm_ledger import ledger_ca, ledger_link
 

@@ -486,8 +486,9 @@ def shared_directive(bundle_dir: Path | None, native: tuple[str, str] | None = N
 
     if not bundle_dir:
         return ""
-    bundle_md = _persona_source(bundle_dir, native) if native else None
-    bundle_md = bundle_md or doctrine(bundle_dir)
+    bundle_md = doctrine(bundle_dir)
+    if not bundle_md.exists() and native:
+        bundle_md = _persona_source(bundle_dir, native) or bundle_md
     return bundle_md.read_text().strip() if bundle_md.exists() else ""
 
 

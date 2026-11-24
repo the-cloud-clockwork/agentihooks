@@ -1,5 +1,6 @@
 """Ledger JSON and HTML files left in the ledger folder: each is imported once, after a verified backup, then set aside."""
 
+import fcntl
 import json
 import os
 import shutil
@@ -9,7 +10,6 @@ from pathlib import Path
 
 import ledger_core as core
 
-from hooks.compat import fcntl
 from scripts.swarm_ledger import request_metrics
 
 from .sqlite import BEGIN_IMMEDIATE, STORED

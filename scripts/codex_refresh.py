@@ -2,6 +2,7 @@
 
 import argparse
 import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -15,7 +16,6 @@ from pathlib import Path
 from typing import Any, NamedTuple, cast
 
 from hooks import config
-from hooks.compat import fcntl
 from hooks.context.account_sessions import CODEX_TOKEN_PREFIX
 from scripts import aicode_tokens, codex_login, codex_router, openbao_kv, term_colors
 

@@ -1,5 +1,6 @@
 import argparse
 import base64
+import fcntl
 import gzip
 import hashlib
 import hmac
@@ -13,7 +14,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from hooks.compat import fcntl
 from scripts.swarm_ledger import storage
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.api.services import Services

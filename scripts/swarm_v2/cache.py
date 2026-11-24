@@ -1,3 +1,4 @@
+import fcntl
 import hashlib
 import json
 import os
@@ -10,7 +11,6 @@ from dataclasses import asdict, dataclass
 from fnmatch import fnmatch
 from pathlib import Path
 
-from hooks.compat import fcntl
 from scripts.swarm_v2 import filesystem
 from scripts.swarm_v2.filesystem import SEGMENT, Execution
 

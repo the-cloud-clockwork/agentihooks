@@ -1,4 +1,5 @@
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -14,7 +15,6 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
 
-from hooks.compat import fcntl
 from hooks.context import profile_chain
 from hooks.context.profile_chain import BUNDLE_PROFILES
 from scripts.swarm import brain_binding

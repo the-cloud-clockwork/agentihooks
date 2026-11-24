@@ -1,12 +1,12 @@
 """Refresh one ledger's knowledge index as a detached job the tick starts and never waits for."""
 
+import fcntl
 import os
 import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-from hooks.compat import fcntl
 from scripts.ledger_knowledge import cli, embedders, service
 from scripts.ledger_knowledge.index import HASH
 

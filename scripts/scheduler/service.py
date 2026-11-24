@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import fcntl
 import hashlib
 import json
 import os
@@ -14,7 +15,6 @@ from threading import Event
 from typing import TextIO, cast
 from urllib.parse import urlsplit
 
-from hooks.compat import fcntl
 from scripts.scheduler.core import Scheduler
 
 ROOT = Path(__file__).resolve().parents[2]

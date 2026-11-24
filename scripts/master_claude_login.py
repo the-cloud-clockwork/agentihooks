@@ -1,5 +1,6 @@
 """Native Claude is the only refresher of the master login; this module never asks for an OAuth grant."""
 
+import fcntl
 import json
 import os
 import shutil
@@ -10,7 +11,6 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from hooks import config as hooks_config
-from hooks.compat import fcntl
 from hooks.context import profile_chain
 from hooks.context.account_sessions import API_MARKER, INTERACTIVE_PREFIX, TOKEN_PREFIX
 from scripts import aicode_tokens, openbao_kv

@@ -6,6 +6,7 @@ once per lock, and runs a type gate copy with it.
 """
 
 import argparse
+import fcntl
 import hashlib
 import os
 import shutil
@@ -14,7 +15,6 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from hooks.compat import fcntl
 from scripts.type_gate import DIRECT_IMPORTERS
 
 PYTHON = "3.12"

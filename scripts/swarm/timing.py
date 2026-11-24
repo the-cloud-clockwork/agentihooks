@@ -2,6 +2,7 @@ import cProfile
 import json
 import os
 import pstats
+import resource
 import sys
 import time
 import traceback
@@ -15,9 +16,6 @@ from uuid import uuid4
 
 from scripts.swarm import tick_stop
 from scripts.tick import metrics as tick_metrics
-
-if sys.platform != "win32":
-    import resource
 
 HISTORY_LIMIT = 50000
 ABANDONED = "abandoned"

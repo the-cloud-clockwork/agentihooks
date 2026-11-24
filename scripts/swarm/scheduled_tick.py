@@ -1,5 +1,6 @@
 """The swarm minute tick as an agentihooks scheduler cron, run by a holder that keeps one tick per machine."""
 
+import fcntl
 import json
 import os
 import shutil
@@ -13,7 +14,6 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from hooks.compat import fcntl
 from scripts.scheduler.core import Scheduler
 from scripts.scheduler.service import AlreadyRunning, machine_lock, runtime_dir
 

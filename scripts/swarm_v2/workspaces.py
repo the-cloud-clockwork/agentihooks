@@ -1,3 +1,4 @@
+import fcntl
 import hashlib
 import json
 import os
@@ -14,7 +15,6 @@ from functools import partial
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
-from hooks.compat import fcntl
 from scripts.ci_lab.remote import checkout
 from scripts.swarm import naming
 from scripts.swarm_v2.filesystem import SEGMENT, Execution
