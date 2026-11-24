@@ -61,3 +61,39 @@ def test_a_master_without_one_target_never_substitutes_itself_for_the_author(
     caller = AgentRecord("master@a1b2c3-0002", "master", "master")
     with pytest.raises(SwarmError, match="no author recorded"):
         gate.queue_admit(metadata, argparse.Namespace(slug=SLUG, url=URL), None, caller, HEAD, Mock(), None)
+
+
+@pytest.mark.feature("review-queue-gate")
+@pytest.mark.parametrize("claimed", [AUTHOR, None])
+@pytest.mark.parametrize(
+    "url,context,expected",
+    [
+        (URL, {"task": "t7"}, "t7"),
+        (URL, None, "t1"),
+        ("https://github.com/o/r/pull/8", None, ""),
+    ],
+)
+def test_the_author_is_the_claimant_of_the_routed_task_or_the_only_targeting_task(
+    monkeypatch: pytest.MonkeyPatch, claimed: str | None, url: str, context: dict[str, str] | None, expected: str
+) -> None:
+    from scripts.swarm.ledger_client import LedgerClient
+
+    gate = import_module("scripts.review.gate")
+
+    def task(client: LedgerClient, slug: str, task_id: str) -> dict[str, str | None] | None:
+        return {"id": task_id, "claimed_by": claimed} if (slug, task_id) == (SLUG, "t7") else None
+
+    def tasks_targeting(client: LedgerClient, slug: str, target: str) -> list[dict[str, str | None]]:
+        return [{"id": "t1", "claimed_by": claimed}] if (slug, target) == (SLUG, URL) else []
+
+    monkeypatch.setattr(LedgerClient, "task", task)
+    monkeypatch.setattr(LedgerClient, "tasks_targeting", tasks_targeting)
+    review, freshness = Mock(return_value=None), Mock(return_value=None)
+    monkeypatch.setattr(gate, "admit", review)
+    monkeypatch.setattr(gate.queue_exit, "require_fresh", freshness)
+    found, args = store(), argparse.Namespace(slug=SLUG, url=url)
+    caller = AgentRecord("master@a1b2c3-0002", "master", "master")
+    assert gate.queue_admit(found, args, None, caller, HEAD, Mock(), context) is None
+    author = Who(name=claimed or "", swarm=SLUG, task=expected) if expected else Who(swarm=SLUG)
+    assert review.mock_calls == [call(found, SLUG, caller, url, HEAD, author)]
+    assert freshness.mock_calls == [call(url, HEAD)]

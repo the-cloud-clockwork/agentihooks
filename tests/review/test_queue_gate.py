@@ -9,6 +9,11 @@ from scripts.review.record import Finding, Record
 from tests.review.fakes import HEAD, REVIEWER, SLUG, URL
 
 AUTHOR = "engineer@a1b2c3-0001"
+LONG_HEAD = "0123456789abcdef0123456789abcdef01234567"
+UNREAD = (
+    f"1 review findings on head 0123456789ab of {URL} are unread: f1; "
+    f"read each and mark it with agentihooks review read {URL} --slug {SLUG}"
+)
 
 
 @pytest.mark.feature("review-queue-gate")
@@ -113,3 +118,50 @@ def test_a_review_of_an_older_head_cannot_admit_a_new_head(monkeypatch: pytest.M
     author = Who(name=AUTHOR, swarm=SLUG, task="t1")
     with pytest.raises(SwarmError, match="no independent review on head new-head"):
         gate.admit(metadata, SLUG, AgentRecord(AUTHOR, "eng", "t1"), URL, "new-head", author)
+
+
+@pytest.mark.feature("review-queue-gate")
+def test_refusals_quote_twelve_head_characters_and_the_exact_next_step() -> None:
+    gate = import_module("scripts.review.gate")
+    author = Who(name=AUTHOR, swarm=SLUG, task="t1")
+    unread = Record(URL, LONG_HEAD, (Finding("f1", "Finding", "comment", REVIEWER, "r1"),))
+    assert gate.refusal(None, SLUG, URL, LONG_HEAD, Who(task="t1")) == (
+        f"no author recorded for task t1 on head 0123456789ab of {URL}"
+    )
+    assert gate.refusal(None, SLUG, URL, LONG_HEAD, author) == (
+        f"no independent review on head 0123456789ab of {URL}: a reviewer other than {AUTHOR} "
+        "posts its findings with agentihooks review post before this pull request queues"
+    )
+    assert gate.refusal(unread, SLUG, URL, LONG_HEAD, author) == UNREAD
+
+
+@pytest.mark.feature("review-queue-gate")
+def test_admission_reads_the_callers_swarm_mode_and_logs_the_refusal_it_enforces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from scripts.swarm.store import AgentRecord, SwarmError
+    from tests.review.fakes import store
+
+    gate = import_module("scripts.review.gate")
+    metadata = store()
+    configs: list[str] = []
+    logged: list[tuple[str, log.Row]] = []
+
+    def config(slug: str) -> SimpleNamespace:
+        configs.append(slug)
+        return SimpleNamespace(gates={"review": "enforce"})
+
+    unread = Record(URL, LONG_HEAD, (Finding("f1", "Finding", "comment", REVIEWER, "r1"),))
+    monkeypatch.setattr(metadata, "config", config)
+    monkeypatch.setattr(gate.record, "read", lambda *args: unread)
+    monkeypatch.setattr(log, "append", lambda slug, row: logged.append((slug, row)))
+    actor, author = AgentRecord("merge watcher", "system", "t1"), Who(name=AUTHOR, swarm=SLUG, task="t1")
+    with pytest.raises(SwarmError) as refused:
+        gate.admit(metadata, SLUG, actor, URL, LONG_HEAD, author)
+    assert str(refused.value) == UNREAD
+    assert configs == [SLUG]
+    assert [(slug, row.gate, row.kind, row.agent, row.task, row.tool, row.reason) for slug, row in logged] == [
+        (SLUG, "review", "deny", "merge watcher", "t1", "queue", UNREAD)
+    ]

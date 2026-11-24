@@ -59,6 +59,38 @@ def test_ready_first_entries_apply_the_review_gate_to_the_actual_head_and_claima
 
 
 @pytest.mark.feature("review-queue-gate")
+@pytest.mark.parametrize("claimant", [AUTHOR, None])
+def test_the_merge_watcher_admits_as_itself_for_the_task_claimant(
+    monkeypatch: pytest.MonkeyPatch, claimant: str | None
+) -> None:
+    from unittest.mock import Mock, call
+
+    from scripts.gates.base import Who
+    from scripts.swarm.store import AgentRecord
+
+    gate = import_module("scripts.review.gate")
+    metadata = store()
+    admit = Mock(return_value=None)
+    monkeypatch.setattr(gate, "admit", admit)
+    monkeypatch.setattr(ready, "_journal", lambda *args: None)
+    monkeypatch.setattr(ready, "_priority", lambda *args: None)
+
+    def queue(action: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        kwargs["admit"](HEAD)
+        return {}
+
+    ledger = SimpleNamespace(raise_alert=lambda *args: None, notice=lambda *args: None)
+    fresh = SimpleNamespace(head=HEAD, mergeable="MERGEABLE", red=False, merge_problem="", resolved=True)
+    run = ready.Pass(metadata, SLUG, ledger, lambda url: fresh, lambda url: fresh, 1000, queue)
+    row = {"id": "t1"} if claimant is None else {"id": "t1", "claimed_by": claimant}
+    found = {"url": URL, "on": {"head": HEAD}, "retry_at": 0, "recoveries": 0}
+    assert ready._queue(run, row, found) == [f"queued {URL} for task t1"]
+    actor = AgentRecord("merge watcher", "system", "t1")
+    author = Who(name=claimant or "", swarm=SLUG, task="t1")
+    assert admit.mock_calls == [call(metadata, SLUG, actor, URL, HEAD, author)]
+
+
+@pytest.mark.feature("review-queue-gate")
 @pytest.mark.parametrize("route", ["worker", "expert", "hotfix", "delegated"])
 @pytest.mark.parametrize("mode", ["observe", "enforce"])
 @pytest.mark.parametrize(
@@ -93,7 +125,7 @@ def test_each_command_caller_checks_the_task_authors_independent_read(
     owner = "" if scenario == "missing-author" else AUTHOR
     row = {"id": "t1", "claimed_by": owner, "pr_url": URL}
     monkeypatch.setattr(LedgerClient, "task", lambda *args: row)
-    monkeypatch.setattr(LedgerClient, "tasks_targeting", lambda *args: [row])
+    monkeypatch.setattr(LedgerClient, "tasks_targeting", lambda *args: [row] if route == "hotfix" else [])
     by = AUTHOR if scenario == "self-agent" else REVIEWER
     task = "t1" if scenario == "self-task" else "r1"
     state = "open" if scenario == "unread" else "read"
