@@ -215,7 +215,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | yes | Repository URL whose dev runner trust list admits head actors; on the worker, the repository its node mirror holds, which the lab remote URL must name |
 | `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | yes | The lab remote URL a mirror fetches a sha GitHub or the node mirror lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub and the node mirror only. On a workstation or hive the same pair gives workspaces the `lab` remote; see [Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote) |
-| `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
+| `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset. Also the image the lab wants: a worker whose pod names a floating tag and runs another digest is answered `426` on its next lease and restarts in place, see [Worker executors](#worker-executors) |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
 
@@ -997,7 +997,7 @@ and `uv`, the worker waits in `ContainerCreating` while the kubelet retries the 
 | Setting | Value | Effect |
 |---|---|---|
 | `cluster-autoscaler.kubernetes.io/safe-to-evict` | `"false"`, the pod template's only annotation | The cluster autoscaler never removes a node that runs a worker; a CI node goes only after its workers have. A scale down of the Deployment removes idle workers first, see [Worker pod deletion cost](#worker-pod-deletion-cost) |
-| `terminationGracePeriodSeconds` | `worker.terminationGracePeriodSeconds`, `2100` | How long the kubelet waits after SIGTERM before it kills the container. The worker's drain window is fixed in code, `worker.GRACE_SECONDS`, 2100 seconds: a stopping worker stops leasing and drains its running units for up to that long, see [Worker executors](#worker-executors). A Helm value below 2100 kills a worker mid drain |
+| `terminationGracePeriodSeconds` | `worker.terminationGracePeriodSeconds`, `2100` | How long the kubelet waits after SIGTERM before it kills the container. The worker's drain window is fixed in code, `worker.GRACE_SECONDS`, 2100 seconds: a stopping worker stops leasing and drains its running units for up to that long, see [Worker executors](#worker-executors). A Helm value below 2100 kills a worker mid drain. A worker that restarts in place on a `426` lease answer drains within the same window and exits 0 on its own, with no SIGTERM and no grace left unused |
 | `strategy` | `RollingUpdate` with `maxSurge: 0` and `maxUnavailable: 1` | A rollout adds no surge pod, so it asks the autoscaler for no extra node, and takes one worker down at a time; a busy worker holds its step for up to the grace |
 
 ### Network
@@ -1200,7 +1200,8 @@ its done criteria name are not recorded:
 | The worker exits at start with `ci-lab worker refuses` | Its environment holds a `GITHUB_APP_` or `REDIS` variable | Remove the variable from the chart |
 | The worker exits at start with a `KeyError` naming a `CI_LAB_` variable | A required work setting is missing from the pod environment | Compare the pod's `env` with the contract table above |
 | The worker log repeats `ci-lab worker: lease call failed, retrying in <n>s` | The scheduler is not answering on 8800, or answers with a server error: it is rolling, restarting or down. The worker keeps running, retries after a backoff that doubles from 1 up to 10 seconds, and leases again on the first answer | `kubectl -n ci-lab get deploy ci-lab-scheduler` and `kubectl -n ci-lab logs deploy/ci-lab-scheduler --since 10m` |
-| The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
+| The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error other than `426`, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
+| The worker log reads `ci-lab worker: the lab wants another image, restarting` and the container restarts with no crash | `Client.lease` got a `426`: the worker's pod names a floating tag and runs a digest other than `CI_LAB_IMAGE`. It stops leasing, drains within the grace and exits 0, and the kubelet starts the container again on the same pod | Compare the pod's running image digest with `CI_LAB_IMAGE`; expected once per release until the chart rolls that pod |
 | A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
 | A venv build fails with `uv venv for <tree> ended with code` or `uv pip install for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
 | The worker log reads `ci-lab worker: unit <job> crashed: FileNotFoundError(2, 'No such file or directory')` and the traceback's last line names `<tree>/.github/test-requirements.lock` | The head does not track the test requirements lock, so `executors.lockfile_digest` cannot key the unit's venv. The unit never reports, its lease expires, and the [retry policy](#retry-policy) requeues it once and marks it lost on the second expiry | `git ls-tree <head> .github/test-requirements.lock` prints nothing; see [Which venv a unit gets](#which-venv-a-unit-gets) |
@@ -3452,6 +3453,10 @@ Each grade is `scripts.ci_lab.scheduler.summary` of its state:
 from the scheduler and runs each through `scripts.ci_lab.executors`, the adapter its unit kind
 names. Every grant of `POST /lease` carries the job's `head`, `base` and `grader` revisions: the
 scheduler enqueues a grade's misses with the grade's base and its plan's grader revision.
+`POST /lease` answers `426` with no grant, and records no offer, for a worker whose pod runs a
+digest other than `CI_LAB_IMAGE` under a floating tag; a pod pinned by digest is never stale, so a
+release that leaves the chart's tag pinned changes nothing live. Every other request is answered
+as before.
 
 | Kind | Trees | Executor inputs |
 |---|---|---|
@@ -3471,7 +3476,15 @@ termination grace: 2100 seconds, the 30 minute unit time limit (`worker.UNIT_TIM
 which every executor's pod timeout reads) plus the five delivery calls of a unit (two upload
 URLs, two puts and the completion) at the 60 second HTTP timeout. The worker Deployment of the
 deployment repository's `ci-lab` chart sets `worker.terminationGracePeriodSeconds` to the same 2100 seconds, so
-a rollout lets the longest unit finish and deliver before the pod is killed.
+a rollout lets the longest unit finish and deliver before the pod is killed. A `426` lease answer
+stops the worker the same way, without SIGTERM: it stops leasing, drains within the same grace and
+its process exits 0, so the kubelet restarts the container in the same pod and pulls the floating
+tag; its running units finish or are left to reap exactly as on a SIGTERM drain. The entry point
+empties `CI_LAB_WORK_ROOT` first, sealed trees and folders without owner access included, so a
+restarted or freshly scheduled pod always starts from an empty root: the venvs, mutation cache and
+killers a worker built under it are built again after any container restart, a crash included. A
+worker answered `426` again after its restart, because the node has not pulled the wanted digest
+yet, exits again at once; the kubelet's restart backoff is the only pause between those attempts.
 
 Check the wiring offline:
 
