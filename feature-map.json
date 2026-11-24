@@ -3662,6 +3662,21 @@
       ]
     },
     {
+      "id": "swarm-tick-view-held-before-lane-clock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-pass-offcpu-stall",
+      "behaviour": "A tick pass holds its ledger view once, with its delta read and its whole view store, before the step pool starts the sixty second critical lane clock, in a running and in a stopped pass, so a slow store never spends the lane of the steps after it.",
+      "seam": "scripts.swarm.cli.run_tick, the order of _hold_view against scripts.tick.pool.running",
+      "tests": [
+        "tests/swarm/test_pass_view_before_lane.py::test_a_pass_holds_its_ledger_view_exactly_once",
+        "tests/swarm/test_pass_view_before_lane.py::test_the_sites_of_a_running_pass_read_the_view_the_pass_holds",
+        "tests/swarm/test_pass_view_before_lane.py::test_the_pass_holds_its_ledger_view_before_the_step_pool_starts_the_lane_clock"
+      ],
+      "rules": [
+        "tick-pass-holds-view-inside-lane"
+      ]
+    },
+    {
       "id": "swarm-spawn-claim-before-launch",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-claim-write",

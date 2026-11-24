@@ -1,0 +1,17 @@
+rules:
+  - id: tick-pass-holds-view-inside-lane
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Hold the pass's ledger view before entering pool.running, so the delta
+      read and the whole view store never spend the critical lane of the steps
+      after them.
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - tick-pass-holds-view-inside-lane.py
+    patterns:
+      - pattern-inside: |
+          $STACK.enter_context(pool.running(...))
+          ...
+      - pattern: _hold_view(...)
