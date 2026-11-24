@@ -1088,6 +1088,49 @@ def test_a_hive_job_that_gains_the_chart_steps_keeps_the_hive_release_group_its_
         assert any(problem.startswith(f"job {name} ") for problem in found)
 
 
+@pytest.mark.feature("lane-grader-admits-the-gate-required-status-head-group")
+@pytest.mark.parametrize(
+    "change",
+    [None, "steps", "group", "queue", "cancel", "other-job", "if", "untrusted", "trusted-name", "name", "events"],
+)
+def test_only_the_trusted_gate_required_status_report_job_may_queue_on_its_own_head_group(change: str | None) -> None:
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "gate-required.yml").read_text())
+    baseline["concurrency"] = dict(LANED)
+    updated = copy.deepcopy(baseline)
+    updated["concurrency"] = {
+        "group": "${{ format('gate-required-status-{0}', github.event.workflow_run.head_sha) }}",
+        "queue": "max",
+        "cancel-in-progress": False,
+    }
+    name = "copy" if change == "other-job" else "report"
+    if change == "steps":
+        updated["jobs"]["report"]["steps"] = updated["jobs"]["report"]["steps"][:1]
+    elif change == "group":
+        updated["concurrency"]["group"] = "gate-required-status"
+    elif change == "queue":
+        updated["concurrency"]["queue"] = "single"
+    elif change == "cancel":
+        updated["concurrency"]["cancel-in-progress"] = True
+    elif change == "other-job":
+        updated["jobs"]["copy"] = copy.deepcopy(updated["jobs"]["report"])
+    elif change == "if":
+        updated["jobs"]["report"]["if"] = "always()"
+    elif change == "untrusted":
+        baseline = None
+    elif change == "trusted-name":
+        baseline["name"] = updated["name"] = "Other status"
+    elif change == "name":
+        updated["name"] = "Other status"
+    elif change == "events":
+        updated[True] = {"workflow_dispatch": None}
+    found = lanes.problems(updated, baseline)
+    assert bool(found) == (change is not None)
+    if found:
+        assert found == [f"job {name} has no shared hosted lane concurrency group"]
+
+
 def test_a_tests_workflow_whose_trusted_baseline_has_no_jobs_mapping_is_still_graded() -> None:
     baseline = _workflow()
     baseline["name"] = "Tests"
@@ -1103,6 +1146,12 @@ DEDICATED_GROUPS = {
         "proofs.yml",
         tuple(yaml.safe_load((ROOT / lanes.WORKFLOWS / "proofs.yml").read_text())["jobs"]),
         "${{ format('focused-proof-{0}', github.run_id) }}",
+        True,
+    ),
+    "gate_required_status_group": (
+        "gate-required.yml",
+        ("report",),
+        "${{ format('gate-required-status-{0}', github.event.workflow_run.head_sha) }}",
         True,
     ),
     "hive_release_group": ("swarm-node-image.yml", ("hive",), "hive-worker-release", False),
