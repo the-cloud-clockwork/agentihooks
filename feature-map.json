@@ -5273,6 +5273,17 @@
       ]
     },
     {
+      "id": "swarm-stall-watch-answered-alert-not-resent",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2704",
+      "behaviour": "Once the master answers a stall alert, the stall watch sends no new alert for that stall while it lasts: a pass whose alert would carry the answered alert's ref, with the same task, case, stall start and action, sends nothing, while a stall that grows into a new one, such as a new push moving its start, alerts again. The answered ref is dropped on the first pass that no longer holds its task.",
+      "seam": "scripts.swarm.stall_watch.stall_pass alerting on a held pull request after its earlier alert was closed",
+      "tests": [
+        "tests/swarm/test_stall_watch.py::test_an_answered_stall_alert_is_not_sent_again_until_the_stall_grows",
+        "tests/swarm/test_stall_watch.py::test_an_answered_stall_is_forgotten_once_its_task_leaves_review"
+      ]
+    },
+    {
       "id": "hub-conversation-overlays",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-agent-conversation-overlays",
@@ -5693,6 +5704,19 @@
         "tests/swarm/test_freeze.py::test_a_task_under_a_frozen_node_or_matching_a_frozen_selector_is_held",
         "tests/swarm/test_freeze.py::test_a_claimed_task_under_a_new_freeze_keeps_its_agent",
         "tests/swarm/test_freeze.py::test_only_held_work_drains_with_a_notice_naming_the_freezes_and_unfreezing_runs_again"
+      ]
+    },
+    {
+      "id": "swarm-enhancement-frozen-target",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-frozen-hold",
+      "behaviour": "The claim gate holds open plan lane enhancements while their target is frozen by its ancestry, a selector or its explicit flag, releases them after thaw, and leaves unfrozen or missing targets claimable. Repeated claims reuse the task index while task list identity and length stay fixed.",
+      "seam": "scripts.swarm.freeze.claim_gate",
+      "rules": ["enhancement-frozen-hold"],
+      "tests": [
+        "tests/swarm/test_freeze.py::test_claim_gate_holds_a_plan_enhancing_frozen_work",
+        "tests/swarm/test_freeze.py::test_claim_gate_releases_an_enhancement_when_its_target_is_unfrozen",
+        "tests/swarm/test_freeze.py::test_claim_gate_keeps_an_unfrozen_enhancement_claimable"
       ]
     },
     {
@@ -14279,6 +14303,23 @@
       ]
     },
     {
+      "id": "lab-static-baseline-gate-own-tree",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "A CI lab static gate whose step passes --baseline-commit runs with its working directory in a private writable tree of the head, cut for the lease's head and base and dropped when the gate ends or raises, because Semgrep resets its working tree to the baseline commit and back whenever the current scan has a finding. Every other static gate runs in the shared tree of the head, which the worker seals read only and which the units of one head read at once. On 24 November the gate that bounds new test waits ran in that sealed tree, its reset was refused and the lab posted a red semgrep check on a head whose Semgrep jobs passed in Actions.",
+      "seam": "scripts.ci_lab.static_gates.discover over a workflow text, scripts.ci_lab.executors.static over fake worktrees and a recorded gate run, and scripts.ci_lab.worktrees.Worktrees.own over a real git store",
+      "rules": [
+        "lab-static-gate-runs-baseline-scan-in-shared-tree"
+      ],
+      "tests": [
+        "tests/ci_lab/test_static_gates.py::test_a_gate_rewrites_its_tree_exactly_when_its_step_passes_a_baseline_commit",
+        "tests/ci_lab/test_static_gates.py::test_the_real_workflow_s_only_gates_that_rewrite_their_tree_are_its_two_baseline_scans",
+        "tests/ci_lab/test_executors.py::test_static_runs_only_a_gate_that_rewrites_its_tree_in_a_private_tree_of_the_head_and_drops_it",
+        "tests/ci_lab/test_executors.py::test_static_drops_the_private_tree_of_a_gate_that_raises",
+        "tests/ci_lab/test_worktrees.py::test_an_own_copy_takes_a_hard_reset_to_its_base_and_back_while_the_leased_tree_stays_sealed"
+      ]
+    },
+    {
       "id": "lab-static-step-env",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-step-env",
@@ -15835,7 +15876,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-lane-core",
-      "behaviour": "The swarm has a review lane worked by reviewer agents: reviewer names parse to the review lane and review seats are numbered like worker seats; every template carries a review lane with cap 1, the reviewer profile and the review kind; the swarm config stores a review cap that defaults to none for existing swarms, capacity reads it and autoscale leaves it as configured; the ledger stores a review lane task only with the review kind and the review kind only on the review lane; the tick lists an open review task as claimable and a drained swarm resumes for one, a new swarm takes the review cap from its template, and readiness event offers keep to the lanes the event scope carries, while the existing lanes keep their caps and listings.",
+      "behaviour": "The swarm has a review lane worked by reviewer agents: reviewer names parse to the review lane and review seats are numbered like worker seats; every template carries a review lane with cap 1, the reviewer profile and the review kind; the swarm config stores a review cap that defaults to none for existing swarms, capacity reads it and autoscale leaves it as configured while no reviewer is live and no review task waits; the ledger stores a review lane task only with the review kind and the review kind only on the review lane; the tick lists an open review task as claimable and a drained swarm resumes for one, a new swarm takes the review cap from its template, and readiness event offers keep to the lanes the event scope carries, while the existing lanes keep their caps and listings.",
       "seam": "naming types and seat addresses, swarm templates, swarm create and the swarm config review cap, capacity lanes and caps, the tick lane list, readiness event offers filtered to the event scope lanes, and ledger task add lane validation and choices",
       "tests": [
         "tests/swarm/test_review_lane.py::test_reviewer_names_round_trip_to_the_review_lane",
@@ -15972,6 +16013,35 @@
         "tests/hive/test_master_hive_items.py::test_each_master_item_id_names_its_hive_swarm_and_change_so_a_later_release_never_resends_it",
         "tests/hive/test_master_hive_items.py::test_a_drain_tells_the_masters_only_when_the_hive_flag_and_its_newest_drain_entry_both_read_draining",
         "tests/hive/test_master_hive_items.py::test_a_lost_hive_whose_exits_name_no_agent_tells_the_master_none_named"
+      ]
+    },
+    {
+      "id": "swarm-review-affinity-quota",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-affinity-quota",
+      "behaviour": "A review lane pinned to Codex with a named model and xhigh effort is placed only on Codex, waits while Codex is full even when Claude has free seats, launches with that model and effort, and the bottleneck remedy never moves its pin. Under auto scaling, while review tasks wait, the review ceiling is held before the other lanes at one seat above the live reviewers or the review share percent of the total when larger, never past the waiting tasks or the free seats of the lane's harnesses, and capacity writes the review cap from it; with no review task waiting the share is released and the review ceiling keeps only live reviewers. The review share is a swarm setting from 0 to 100, default 20, set with swarm set review-share. Without review work the ceilings and the configured review cap are exactly the old ones.",
+      "seam": "autoscale calculate with the review share, capacity autoscaled and calculate, runtime lane default model and effort, the bottleneck remedy lane move, the swarm config review share and swarm set",
+      "tests": [
+        "tests/swarm/test_review_affinity_quota.py::test_ceilings_without_a_review_share_are_the_old_ceilings",
+        "tests/swarm/test_review_affinity_quota.py::test_a_review_share_without_review_work_leaves_the_old_ceilings",
+        "tests/swarm/test_review_affinity_quota.py::test_waiting_review_tasks_hold_the_review_share_before_the_other_lanes",
+        "tests/swarm/test_review_affinity_quota.py::test_no_waiting_review_task_releases_the_share_to_the_other_lanes",
+        "tests/swarm/test_review_affinity_quota.py::test_live_reviewers_keep_their_seats_with_no_review_task_waiting",
+        "tests/swarm/test_review_affinity_quota.py::test_a_codex_only_review_lane_holds_no_claude_seat",
+        "tests/swarm/test_review_affinity_quota.py::test_the_share_never_holds_more_seats_than_review_tasks_wait",
+        "tests/swarm/test_review_affinity_quota.py::test_the_reason_names_the_held_review_share",
+        "tests/swarm/test_review_affinity_quota.py::test_autoscaled_without_review_work_keeps_the_old_ceilings_and_the_review_cap",
+        "tests/swarm/test_review_affinity_quota.py::test_autoscaled_holds_the_review_share_and_sizes_the_review_cap",
+        "tests/swarm/test_review_affinity_quota.py::test_a_codex_only_review_lane_is_placed_only_on_codex_while_claude_has_room",
+        "tests/swarm/test_review_affinity_quota.py::test_a_codex_only_review_lane_waits_while_codex_is_full",
+        "tests/swarm/test_review_affinity_quota.py::test_an_unpinned_review_lane_still_takes_claude_seats_while_codex_is_full",
+        "tests/swarm/test_review_affinity_quota.py::test_the_review_lane_launches_with_its_codex_model_and_xhigh_effort",
+        "tests/swarm/test_review_affinity_quota.py::test_a_stuck_codex_never_moves_the_review_lane_pin",
+        "tests/swarm/test_review_affinity_quota.py::test_the_review_share_defaults_to_twenty_and_loads_for_existing_swarms",
+        "tests/swarm/test_review_affinity_quota.py::test_a_review_share_outside_zero_to_one_hundred_is_refused",
+        "tests/swarm/test_review_affinity_quota.py::test_a_review_share_of_zero_or_one_hundred_is_kept_and_one_more_is_refused",
+        "tests/swarm/test_review_affinity_quota.py::test_swarm_set_takes_the_review_share"
       ]
     },
     {

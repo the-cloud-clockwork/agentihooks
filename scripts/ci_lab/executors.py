@@ -211,16 +211,21 @@ def _masked(text: bytes, secrets: Sequence[str]) -> bytes:
 
 def static(pod: Pod, lease: Lease) -> Finished:
     """Run the static gate the lease names over its head, with its base and grader trees and the context of its lease
-    fields and the secrets its steps read, on the venv of the head's lockfile; the report counts the git and uv cache
-    lookups it made, and each secret value the steps printed reads *** in the log and the summary, as Actions masks
-    it."""
-    with pod.trees.shared(lease.head, lease.base, lease.grader) as ((head, base, grader), fetched):
+    fields and the secrets its steps read, on the venv of the head's lockfile; a gate whose step rewrites its tree
+    runs in a private tree of the head, dropped when it ends, and every other in the shared one; the report counts
+    the git and uv cache lookups it made, and each secret value the steps printed reads *** in the log and the
+    summary, as Actions masks it."""
+    with (
+        pod.trees.shared(lease.head, lease.base, lease.grader) as ((head, base, grader), fetched),
+        contextlib.ExitStack() as private,
+    ):
         found = gate(grader, lease.unit.members[0])
         venv, built = venvs.venv_for(lockfile_digest(head), head, pod.venvs, pod.build)
         context = _context(lease, found, pod.secrets)
         options = run_static.Settings(pod.runs, venv, pod.ports, pod.whitelist, pod.timeout, context)
+        tree = private.enter_context(pod.trees.owned(lease.head, lease.base))[0] if found.rewrites_tree else head
         started = pod.clock()
-        result = run_static.run(found, head, base, grader, options)
+        result = run_static.run(found, tree, base, grader, options)
         seconds = pod.clock() - started
     secrets = [value for name, value in context.items() if name.startswith(SECRETS) and value]
     if secrets:
