@@ -10,7 +10,7 @@ from scripts.ci_lab.pods import Pods, unmanaged
 from scripts.ci_lab.queue import Queue
 from scripts.ci_lab.units import Unit
 
-__all__ = ["REQUEUES", "Grant", "Leases", "Manifests", "release", "unstored"]
+__all__ = ["REQUEUES", "SOLO", "Grant", "Leases", "Manifests", "release", "solo", "unstored"]
 
 REQUEUES = 1
 
@@ -20,6 +20,14 @@ Manifests = Callable[[Unit], str]
 def unstored(unit: Unit) -> str:
     """The manifests port where no object store holds batch manifests: a lease carries none."""
     return ""
+
+
+SOLO: frozenset[tuple[str, str]] = frozenset()
+
+
+def solo(unit: Unit) -> bool:
+    """Whether a worker runs one such unit at a time."""
+    return (unit.kind, "") in SOLO
 
 
 @dataclass(frozen=True)
