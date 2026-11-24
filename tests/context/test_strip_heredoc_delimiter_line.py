@@ -131,6 +131,8 @@ def test_stripping_drops_a_double_quoted_heredoc_like_a_single_quoted_one() -> N
         ),
         ("cat <<EOF > notes.md\n\ud800\nEOF\ngit status", "cat  > notes.md\ngit status"),
         ("cat <<EOF > out.txt\n${HOME}/notes\nEOF\ngit status", "cat  > out.txt\ngit status"),
+        ("cat <<XEOFX > out.txt\nbody\nXEOFX\ngit status", "cat  > out.txt\ngit status"),
+        ("cat <<EOF > notes.md\nbody\nEOF\necho \ud800", "cat  > notes.md\necho \ud800"),
     ],
 )
 def test_stripping_keeps_exact_text_around_heredocs(command: str, stripped: str) -> None:
@@ -141,8 +143,8 @@ def test_stripping_keeps_exact_text_around_heredocs(command: str, stripped: str)
 @pytest.mark.parametrize(
     "command",
     [
-        "cat <<EOF > out.txt\n${HOME}/notes\ngit push origin main",
-        "cat <<EOF > out.txt\n$(date)x\ngit push origin main",
+        "cat <<EOF > out.txt\n${HOME}/notes\ngit push origin main\n",
+        "cat <<EOF > out.txt\n$(date)x\ngit push origin main\n",
         "cat <<A <<B\ngit push origin main\nA\nb\nB",
         "\n\tEOF<<'EOF'cat\n\nGUARDED<<X\nEOF<<-EOF<<X]${ ",
         "#]1<<2\né<<-EOF\n$(done#GUARDED\n<<EOF(($(X",
