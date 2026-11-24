@@ -129,6 +129,43 @@ def test_an_enhancement_task_passes_the_focus_when_its_target_is_admitted(target
     assert not held(enhancement, record(target, "focus"), tasks=work)
 
 
+@pytest.mark.parametrize("target", ["tasks/t1", "phases/p1", "plans/a", "lane:eng", "kind:code"])
+@pytest.mark.feature("swarm-enhancement-frozen-target")
+def test_claim_gate_holds_a_plan_enhancing_frozen_work(target: str) -> None:
+    work = task(kind="code")
+    plan = task("enhance-t1", lane="plan", kind="plan", phase="p2", enhances="t1")
+    found = doc(record(target), tasks=[work, plan])
+    assert freeze.claim_gate(plan, found, hierarchy.project(found)[0], "")
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.feature("swarm-enhancement-frozen-target")
+def test_claim_gate_releases_an_enhancement_when_its_target_is_unfrozen(explicit: bool) -> None:
+    work = task()
+    if explicit:
+        work["frozen"] = True
+    plan = task("enhance-t1", lane="plan", kind="plan", phase="p2", enhances="t1")
+    found = doc(record("tasks/t1"), tasks=[work, plan])
+    graph = hierarchy.project(found)[0]
+    assert freeze.claim_gate(plan, found, graph, "", None)
+    found["freezes"] = []
+    if explicit:
+        work["frozen"] = False
+    assert not freeze.claim_gate(plan, found, graph, "", None)
+
+
+@pytest.mark.parametrize("fields", [{}, {"lane": "eng"}, {"enhances": ""}, {"enhances": "missing"}, {"enhances": None}])
+@pytest.mark.feature("swarm-enhancement-frozen-target")
+def test_claim_gate_keeps_an_unfrozen_enhancement_claimable(fields: dict[str, Any]) -> None:
+    frozen_work, free_work = task(), task("t2")
+    held_plan = task("enhance-t1", lane="plan", kind="plan", phase="p2", enhances="t1")
+    free_plan = {**task("enhance-t2", lane="plan", kind="plan", phase="p2", enhances="t2"), **fields}
+    found = doc(record("tasks/t1"), tasks=[frozen_work, free_work, held_plan, free_plan])
+    graph = hierarchy.project(found)[0]
+    assert freeze.claim_gate(held_plan, found, graph, "")
+    assert not freeze.claim_gate(free_plan, found, graph, "")
+
+
 @pytest.mark.feature("swarm-focus-plan-work")
 def test_a_focus_still_holds_the_work_beside_the_plan_work_it_admits() -> None:
     focus, focused = record("tasks/t2", "focus"), task("t2")
