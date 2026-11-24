@@ -121,14 +121,11 @@ def ledger_read(services: Services, slug: str, path: str, query: dict[str, Any])
 
 
 def open_read(services: Services, slug: str, path: str, query: dict[str, Any]) -> dict[str, Any]:
-    frozen: set[str] = set()
-    if path == "tasks":
-        rows: list[Any] = task_list.rows(services.repository, slug)[2]
-        marks: dict[str, Any] = services.ledger.summary(slug)["marks"]
-        frozen = set(marks.get("frozen") or [])
-    else:
-        rows = collection(services, slug, path)
-    return resources.open_page(summary.view_rows(path, rows, frozen), query)
+    if path != "tasks":
+        return resources.open_page(summary.view_rows(path, collection(services, slug, path), set()), query)
+    rows: list[Any] = task_list.rows(services.repository, slug)[2]
+    marks: dict[str, Any] = services.ledger.summary(slug)["marks"]
+    return resources.open_page(summary.view_rows(path, rows, set(marks.get("frozen") or [])), query)
 
 
 def collection(services: Services, slug: str, path: str) -> list[Any]:

@@ -385,9 +385,6 @@ def ledger_summary(slug: str) -> dict:
     from scripts.swarm_ledger.api import summary, task_list
 
     stored = task_list.rows(repository, slug)
-    held = SUMMARIES.get(slug)
-    if held is not None and held[0] is stored:
-        return held[1]
     with SUMMARY_BUILDS.setdefault(slug, threading.Lock()):
         held = SUMMARIES.get(slug)
         if held is not None and held[0] is stored:
