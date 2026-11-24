@@ -1,21 +1,30 @@
 import json
+from typing import cast
 
-from .fragments import encoded
+from .fragments import Fragment, encoded
 from .rows import encode
-
-SCALARS = frozenset({str, int, float, bool, type(None)})
+from .tracked import DICTS, LISTS, SCALARS, copied
 
 
 def thawed(value: object) -> object:
     """A fresh copy of value with the containers and keys a JSON round trip would give, sharing immutable scalars."""
     kind = type(value)
-    if kind is list:
-        return [thawed(item) for item in value]
-    if kind is dict and all(type(key) is str for key in value):
-        return {key: thawed(item) for key, item in value.items()}
+    if kind in LISTS:
+        return [thawed(item) for item in cast(list[object], value)]
+    if kind in DICTS and all(type(key) is str for key in cast(dict[object, object], value)):
+        return {key: thawed(item) for key, item in cast(dict[str, object], value).items()}
     if kind in SCALARS:
         return value
     return json.loads(encode(value))
+
+
+def writing(document: Fragment) -> dict[str, object]:
+    parts = cast(dict[str, Fragment], document.parts)
+    meta = {
+        key: dict(cast(dict[str, object], part.value)) if key == "stamps" else copied(part)
+        for key, part in cast(dict[str, Fragment], parts["_meta"].parts).items()
+    }
+    return {key: meta if key == "_meta" else copied(part) for key, part in parts.items()}
 
 
 class Entry:
@@ -38,5 +47,7 @@ class Entry:
         writer, self.writer = self.writer, None
         if writer is not None:
             return writer
+        if self.fragments is not None:
+            return writing(cast(Fragment, self.fragments))
         meta = {key: value.copy() if key == "stamps" else thawed(value) for key, value in self.state["_meta"].items()}
         return {key: meta if key == "_meta" else thawed(value) for key, value in self.state.items()}

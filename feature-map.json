@@ -1815,6 +1815,22 @@
       ]
     },
     {
+      "id": "plan-evidence-phase-less-plan-task",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-seed-empty-phase",
+      "behaviour": "A plan task whose phase is empty or names no phase in the ledger gets plan evidence holding the header and the project intent only, so hub plan lane admission builds its steering seed after the claim instead of raising a KeyError that the hive reads as a slot request missing an empty key.",
+      "seam": "plan_evidence.evidence through ledger_workspace.steering, and Admission._seeds for a plan task",
+      "rules": [
+        "ledger-phase-lookup-unguarded"
+      ],
+      "tests": [
+        "tests/swarm/test_plan_evidence.py::test_plan_evidence_for_a_task_with_no_phase_holds_only_the_project_intent",
+        "tests/swarm/test_plan_evidence.py::test_plan_evidence_for_a_phase_the_ledger_lacks_holds_only_the_project_intent",
+        "tests/hub/test_admission.py::test_a_plan_task_with_no_phase_gets_its_steering_seed",
+        "tests/hub/test_admission_gates.py::test_an_admission_claims_a_plan_task_with_no_phase"
+      ]
+    },
+    {
       "id": "controller-work-folder-admitted-hive",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-folder-mirror-hive",
@@ -2472,6 +2488,25 @@
         "tests/swarm/test_spawn_order_budget.py::test_the_readiness_hold_keeps_the_fix_phase_and_open_dependencies",
         "tests/swarm/test_spawn_order_budget.py::test_ready_by_lane_passes_one_claim_view_and_its_pass_inputs_to_every_lane",
         "tests/tick/steps/test_claim_order.py::test_ready_by_lane_orders_every_lane_from_one_claim_view"
+      ]
+    },
+    {
+      "id": "quota-notice-per-pass-work",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2887",
+      "behaviour": "The quota notice step's readiness sweeps compute the focus queue once per dispatcher guard call and once per readiness snapshot, and its quota requirements resolve each distinct profile's Claude only answer once per call, so its own CPU stops growing with open tasks times task rows and with ready tasks times profile files; on the live rig-grade-swarm view of 7972 rows and 740 ready tasks the body fell from 14.1 to 1.3 CPU seconds.",
+      "seam": "scripts.swarm.dispatcher.guarded, scripts.swarm.readiness.claimable over a readiness.Snapshot, scripts.swarm.claim_hold.holds given a focus queue, and scripts.swarm.runtime.HerdrRuntime.quota_requirements",
+      "tests": [
+        "tests/swarm/test_quota_notice_per_pass.py::test_the_dispatcher_guard_keeps_the_focused_chain_and_drops_held_work",
+        "tests/swarm/test_quota_notice_per_pass.py::test_the_dispatcher_guard_computes_the_focus_queue_once_whatever_the_open_task_count",
+        "tests/swarm/test_quota_notice_per_pass.py::test_claimable_over_a_snapshot_agrees_with_ready_for_every_task",
+        "tests/swarm/test_quota_notice_per_pass.py::test_claimable_computes_the_focus_queue_once_per_snapshot",
+        "tests/swarm/test_quota_notice_per_pass.py::test_claim_hold_uses_the_focus_queue_handed_in",
+        "tests/swarm/test_quota_notice_per_pass.py::test_quota_requirements_keep_each_profile_answer",
+        "tests/swarm/test_quota_notice_per_pass.py::test_quota_requirements_look_up_each_profile_once_per_call"
+      ],
+      "rules": [
+        "tick-claim-gate-without-admitted-queue"
       ]
     },
     {
@@ -3588,6 +3623,38 @@
       ]
     },
     {
+      "id": "ledger-write-partial-rebuild",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2778",
+      "behaviour": "A warm ledger point write rebuilds only the document fragments and writer copy branches its operations change: writer copy leaves are tracked containers that hold the stored fragment they equal until any write method changes them or anything inside them, so untouched leaves keep their stored fragment and writer object without being serialized or compared again, a cold write copy built from stored fragments starts tracked, copies of tracked leaves are plain, and on the recorded operations corpus the warm path stores, publishes and relays byte for byte what a full rebuild does while a write past the write methods turns that comparison red, with less storage write CPU inside the ledger lock.",
+      "seam": "scripts.swarm_ledger.repository.writer_copy.written and detached, scripts.swarm_ledger.repository.fragments.leaf, scripts.swarm_ledger.repository.tracked, scripts.swarm_ledger.repository.entry.Entry.for_write, and the recorded corpus replay through the ledger API write path",
+      "tests": [
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_warm_point_write_serializes_as_many_values_on_four_thousand_untouched_tasks_as_on_two_thousand",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_point_write_from_a_stored_entry_serializes_as_many_values_on_four_thousand_tasks_as_on_two_thousand",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_untouched_tasks_keep_their_stored_fragment_and_writer_object",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_write_that_removes_the_first_task_keeps_every_later_task_fragment_and_writer_object",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_write_copy_built_from_stored_fragments_shares_only_stamp_records_with_the_stored_state",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_warm_point_write_stores_what_a_fresh_encoding_of_the_written_state_stores",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_bound_copy_equals_its_fragment_shares_no_container_and_holds_it",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_reads_leave_a_bound_copy_holding_its_fragment",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_every_dict_write_method_on_the_leaf_or_inside_it_drops_its_fragment",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_every_list_write_method_inside_the_leaf_drops_its_fragment",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_every_dict_and_list_method_a_tracked_leaf_inherits_is_a_read",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_list_leaf_drops_its_fragment_on_a_write_and_keeps_it_on_reads",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_nested_container_never_claims_a_fragment_and_moving_it_drops_the_leaf_it_enters",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_copies_of_a_tracked_leaf_are_plain",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_deep_copy_keeps_the_containers_a_writer_copy_shares",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_write_methods_return_what_the_plain_methods_return",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_leaf_that_no_json_round_trip_keeps_is_bound_after_one",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_scalar_leaf_copy_is_the_scalar_and_holds_nothing",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_writer_copy_of_a_document_keeps_its_structure_plain_and_its_leaves_bound",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_the_warm_write_replay_answers_every_recorded_write",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_warm_writes_store_publish_and_relay_what_the_full_rebuild_does_on_the_recorded_corpus",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_a_write_into_an_untouched_writer_task_past_the_write_methods_turns_the_equivalence_red",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_warm_writes_spend_less_storage_write_cpu_than_the_full_rebuild_on_the_recorded_corpus"
+      ]
+    },
+    {
       "id": "swarm-tick-slow-export",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2161",
@@ -3630,6 +3697,21 @@
         "tests/tick/test_view.py::test_a_renew_after_a_ledger_write_holds_the_patched_view",
         "tests/tick/test_view.py::test_a_renew_after_a_ledger_write_leaves_the_stored_view_at_the_pass_start",
         "tests/tick/test_view.py::test_a_renew_whose_stored_view_no_longer_fits_stores_the_full_read"
+      ]
+    },
+    {
+      "id": "swarm-tick-view-held-before-lane-clock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-pass-offcpu-stall",
+      "behaviour": "A tick pass holds its ledger view once, with its delta read and its whole view store, before the step pool starts the sixty second critical lane clock, in a running and in a stopped pass, so a slow store never spends the lane of the steps after it.",
+      "seam": "scripts.swarm.cli.run_tick, the order of _hold_view against scripts.tick.pool.running",
+      "tests": [
+        "tests/swarm/test_pass_view_before_lane.py::test_a_pass_holds_its_ledger_view_exactly_once",
+        "tests/swarm/test_pass_view_before_lane.py::test_the_sites_of_a_running_pass_start_on_the_view_the_pass_holds",
+        "tests/swarm/test_pass_view_before_lane.py::test_the_pass_holds_its_ledger_view_before_the_step_pool_starts_the_lane_clock"
+      ],
+      "rules": [
+        "tick-pass-holds-view-inside-lane"
       ]
     },
     {
@@ -5003,6 +5085,20 @@
         "tests/swarm/test_handoff_v2_priming.py::test_handoff_derives_the_seat_recap_without_another_file",
         "tests/handoff/test_check.py::test_missing_heading_is_refused",
         "tests/handoff/test_check.py::test_headings_out_of_order_are_refused"
+      ]
+    },
+    {
+      "id": "swarm-read-non-utf8",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-cli-read-non-utf8",
+      "behaviour": "The swarm command line refuses a handoff document or culture file that is not UTF-8 text with one plain error line naming the file and exit 1, and stores nothing, instead of ending in a traceback.",
+      "seam": "agentihooks swarm handoff and agentihooks swarm culture set through scripts.swarm.cli._read",
+      "tests": [
+        "tests/swarm/test_cli_task_reads.py::test_handoff_refuses_a_document_that_is_not_utf8_text_by_name",
+        "tests/swarm/test_quarantine_priming.py::test_culture_set_refuses_a_culture_file_that_is_not_utf8_text_by_name"
+      ],
+      "rules": [
+        "cli-read-text-without-decode-error"
       ]
     },
     {
@@ -9457,6 +9553,18 @@
       ]
     },
     {
+      "id": "page-equivalence-added-outline-section",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-equivalence-added-section",
+      "behaviour": "When the reviewed expected page change contract names an outline section the head adds to the real ledger page, the page replay sets the hidden property on that section and keeps it set, so the page outline signature, the jump list and the outline groups leave it out and the head record is byte equal to the base record, while the same planted section without the contract still differs from the base.",
+      "seam": "page_replay removal and record over a planted copy of the real ledger shell with one added outline section",
+      "tests": [
+        "tests/swarm_ledger/test_page_outline_addition.py::test_a_contract_naming_an_added_outline_section_makes_head_and_base_records_identical",
+        "tests/swarm_ledger/test_page_outline_addition.py::test_the_head_outline_signature_and_jump_list_leave_out_the_hidden_section",
+        "tests/swarm_ledger/test_page_outline_addition.py::test_the_planted_outline_section_without_the_contract_still_differs_from_the_base"
+      ]
+    },
+    {
       "id": "protected-grader-admits-pinned-tool-forms",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-admit",
@@ -10056,10 +10164,13 @@
       "rules": [
         "kept-step-queues-behind-ready-sibling"
       ],
-      "behaviour": "A sweep of the pass scheduler submits its ready kept steps before its other ready steps, so the kept critical steps master down and tick master, ready in the same sweep as quota notice, run first on the pass's one placement worker instead of queueing behind quota notice's whole body and starting twenty to ninety seconds late.",
-      "seam": "engine._eager submission order through engine._kept_first, pool.Pass.placer",
+      "behaviour": "A sweep of the pass scheduler submits its ready kept steps before its other ready steps, so every placing step of the placement site but quota notice and dispatch seat (master down, tick master, master scale, seat alarm, codex hook order and rank pass) is kept and, ready in the same sweep as quota notice, runs first on the pass's one placement worker instead of queueing behind quota notice's whole body and being skipped when the critical lane ends; dispatch seat stays unkept, because its routing check reads the capacity decision quota notice writes each pass, so it starts after quota notice in site order.",
+      "seam": "engine._eager submission order through engine._kept_first, pool.Pass.placer; the kept declaration of CallStep and WriteStep",
       "tests": [
-        "tests/tick/test_placement_worker.py::test_a_kept_lock_taking_step_ready_beside_a_slower_one_ahead_of_it_runs_first_on_the_placement_worker"
+        "tests/tick/test_placement_worker.py::test_a_kept_lock_taking_step_ready_beside_a_slower_one_ahead_of_it_runs_first_on_the_placement_worker",
+        "tests/tick/test_placement_worker.py::test_the_kept_placing_steps_of_the_placement_site_reach_the_placement_worker_ahead_of_quota_notice",
+        "tests/tick/test_placement_worker.py::test_a_write_step_is_kept_only_when_it_declares_kept",
+        "tests/tick/test_master_steps_kept.py::test_the_placing_steps_of_the_place_and_masters_modules_but_quota_notice_and_dispatch_seat_are_kept"
       ]
     },
     {
@@ -15949,6 +16060,11 @@
       "id": "swarm-tick-spawn",
       "reason": "The legacy tick launch engine is removed; every swarm launches through hub events only, covered by swarm-events-only-launch.",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-legacy-events-only"
+    },
+    {
+      "id": "swarm-image-import-pins",
+      "reason": "The swarm image import pin check is reverted because its lock pins put the OpenTelemetry SDK and tree sitter into the swarm image, which the swarm image smoke forbids; the pin check returns in its own task under a new feature id.",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45389865223-0"
     }
   ]
 }

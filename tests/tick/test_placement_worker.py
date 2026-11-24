@@ -177,6 +177,47 @@ def test_a_kept_lock_taking_step_ready_beside_a_slower_one_ahead_of_it_runs_firs
     assert {record.name: record.outcome for record in rows} == {step.name: engine.OK for step in steps}
 
 
+@pytest.mark.feature("kept-placing-steps-first-on-the-placement-worker")
+def test_the_kept_placing_steps_of_the_placement_site_reach_the_placement_worker_ahead_of_quota_notice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    site = (
+        "quota notice",
+        "codex hook order",
+        "master down",
+        "tick master",
+        "master scale",
+        "seat alarm",
+        "dispatch seat",
+        "rank pass",
+    )
+    registered = {step.name: step for wave in registry.waves() for step in wave}
+    started: list[str] = []
+
+    def starts(name: str) -> Callable[[Context], Result]:
+        def run(ctx: Context) -> Result:
+            started.append(name)
+            return Result()
+
+        return run
+
+    for name in site:
+        monkeypatch.setitem(registered[name].__dict__, "run", starts(name))
+    with pool.running(workers=2, critical_s=20.0, slow_s=20.0):
+        rows = engine.run_graph((registered[name] for name in site), Context(View(), Deadline.after(20.0)))
+
+    assert set(started[:6]) == {
+        "codex hook order",
+        "master down",
+        "tick master",
+        "master scale",
+        "seat alarm",
+        "rank pass",
+    }
+    assert started[6:] == ["quota notice", "dispatch seat"]
+    assert {record.name: record.outcome for record in rows} == dict.fromkeys(site, engine.OK)
+
+
 @pytest.mark.feature("placement-lock-steps-on-one-placement-worker")
 def test_a_lock_taking_step_on_the_slow_lane_runs_on_the_placement_worker() -> None:
     order: list[str] = []
@@ -314,6 +355,16 @@ def test_a_write_step_that_declares_the_placement_lock_runs_its_call_holding_it(
     assert seen == [True, False]
     assert (lock.entered, lock.held) == (1, False)
     assert [write.value for write in result.writes] == [["ranked"]]
+
+
+def _ranked(tick: Any, get: Callable[[str], Any]) -> list[str]:
+    return []
+
+
+@pytest.mark.feature("kept-placing-steps-first-on-the-placement-worker")
+def test_a_write_step_is_kept_only_when_it_declares_kept() -> None:
+    assert getattr(WriteStep("rank pass", GROUP, _ranked, kept=True), "kept", False) is True
+    assert getattr(WriteStep("rank pass", GROUP, _ranked), "kept", False) is False
 
 
 @pytest.mark.feature("placement-lock-steps-on-one-placement-worker")
