@@ -7,14 +7,26 @@ from pathlib import Path
 ALIASES = {
     "dotenv": "python-dotenv",
     "jwt": "pyjwt",
+    "markdown_it": "markdown-it-py",
     "nats": "nats-py",
     "opentelemetry": "opentelemetry-api",
+    "opentelemetry.exporter.otlp.proto.common": "opentelemetry-exporter-otlp-proto-common",
+    "opentelemetry.exporter.otlp.proto.grpc": "opentelemetry-exporter-otlp-proto-grpc",
+    "opentelemetry.exporter.otlp.proto.http": "opentelemetry-exporter-otlp-proto-http",
+    "opentelemetry.proto": "opentelemetry-proto",
+    "opentelemetry.sdk": "opentelemetry-sdk",
     "yaml": "pyyaml",
 }
 
 
 def distribution(module: str) -> str:
     return ALIASES.get(module, module).lower().replace("_", "-")
+
+
+def import_name(module: str) -> str:
+    parts = module.split(".")
+    prefixes = (".".join(parts[:end]) for end in range(len(parts), 1, -1))
+    return next((prefix for prefix in prefixes if prefix in ALIASES), parts[0])
 
 
 def local_module(root: Path, path: Path, module: str) -> bool:
@@ -30,9 +42,9 @@ def module_imports(path: Path) -> list[tuple[str, int]]:
     imported: list[tuple[str, int]] = []
     for node in ast.parse(path.read_text(), filename=str(path)).body:
         if isinstance(node, ast.Import):
-            imported.extend((alias.name.split(".")[0], node.lineno) for alias in node.names)
+            imported.extend((alias.name, node.lineno) for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            imported.append((node.module.split(".")[0], node.lineno))
+            imported.extend((f"{node.module}.{alias.name}", node.lineno) for alias in node.names)
     return imported
 
 
@@ -45,8 +57,12 @@ def check(root: Path) -> tuple[dict[str, list[str]], set[str]]:
             raise ValueError(f"No Python sources under {folder}")
         for path in paths:
             for module, line in module_imports(path):
-                if module not in sys.stdlib_module_names and not local_module(root, path, module):
-                    imported.setdefault(module, []).append(f"{path.relative_to(root)}:{line}")
+                top = module.split(".")[0]
+                if top not in sys.stdlib_module_names and not local_module(root, path, top):
+                    location = f"{path.relative_to(root)}:{line}"
+                    locations = imported.setdefault(import_name(module), [])
+                    if location not in locations:
+                        locations.append(location)
     lock = root / "docker" / "swarm" / "requirements.lock"
     pinned = {
         match.group(1).lower().replace("_", "-")
