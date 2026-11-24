@@ -622,7 +622,8 @@ def _plain_targets(words: list[str], operands: list[str]) -> list[str]:
 
 def _chmod_targets(words: list[str], operands: list[str]) -> list[str]:
     """The files chmod changes: every operand but the first, which is the mode unless a mode option or --reference
-    gave it; unknown when it follows links while it recurses."""
+    gave it; unknown with -L or --dereference, which newer coreutils chmod uses to follow links and older chmod
+    rejects."""
     options = _options(words, NO_LETTERS, CHMOD_VALUES)
     if CHMOD_FOLLOWS & {name for name, _ in options}:
         return [UNKNOWN]

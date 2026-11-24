@@ -117,7 +117,7 @@ another file descriptor, such as `2>&1`, writes no file and passes.
 | Command | Target it names |
 |---|---|
 | `mv`, `rm`, `rmdir`, `touch`, `chown`, `tee`, `unlink` | every operand |
-| `chmod` | every operand but the first, which is the mode; every operand when the mode is written as a dash word such as `-w` or given by `--reference`; files named only at run time with `-L` or `--dereference` |
+| `chmod` | every operand but the first, which is the mode; every operand when the mode is written as a dash word such as `-w` or given by `--reference`; files named only at run time with `-L` or `--dereference`, which newer coreutils use to follow links and coreutils 9.1 rejects |
 | `truncate` | every operand; the `-s`, `--size`, `-r` and `--reference` values are values |
 | `mkdir` | every operand; the `-m` or `--mode` value is a value |
 | `cp`, `ln`, `install`, `rsync` | the `-t` or `--target-directory` value, otherwise the last operand |
