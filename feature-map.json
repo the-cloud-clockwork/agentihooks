@@ -4225,6 +4225,36 @@
       ]
     },
     {
+      "id": "cluster-secret-private-env",
+      "origin": "regression",
+      "ordered_at": "2026-11-21",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2760",
+      "behaviour": "A dedicated command copies one namespaced cluster Secret key into a confined private host env file, replacing the variable atomically with mode 0600 and keeping values out of all command output; direct and compound credential reads remain refused.",
+      "seam": "scripts.secret_env.main and scripts.cli_delegates.delegated_cli; hooks.context.credential_guard.decide",
+      "tests": [
+        "tests/test_secret_env.py::test_guard_keeps_the_transfer_and_reader_boundaries",
+        "tests/test_secret_env.py::test_the_cli_delegates_the_transfer",
+        "tests/test_secret_env.py::test_transfer_creates_a_private_file_without_output",
+        "tests/test_secret_env.py::test_transfer_replaces_duplicate_assignments_and_preserves_other_lines",
+        "tests/test_secret_env.py::test_existing_comments_and_plain_values_are_kept",
+        "tests/test_secret_env.py::test_transfer_accepts_mixed_case_keys_and_variables",
+        "tests/test_secret_env.py::test_replacement_is_staged_beside_the_target",
+        "tests/test_secret_env.py::test_transfer_refuses_unsafe_targets_before_reading_the_cluster",
+        "tests/test_secret_env.py::test_transfer_refuses_invalid_identifiers",
+        "tests/test_secret_env.py::test_failed_retrieval_never_writes_or_exposes_values",
+        "tests/test_secret_env.py::test_transfer_appends_to_a_relative_file",
+        "tests/test_secret_env.py::test_transfer_uses_the_default_agentihooks_home",
+        "tests/test_secret_env.py::test_failed_replace_preserves_the_file_and_cleans_the_private_temporary",
+        "tests/test_secret_env.py::test_existing_multiline_values_are_refused_without_changes",
+        "tests/test_secret_env.py::test_apostrophes_round_trip_through_the_host_loader",
+        "tests/test_secret_env.py::test_unrepresentable_values_are_refused_without_changes",
+        "tests/test_secret_env.py::test_ambiguous_existing_content_is_refused_without_changes",
+        "tests/test_secret_env.py::test_unicode_line_separators_are_refused_without_changes",
+        "tests/test_secret_env.py::test_transfer_sets_exact_owner_permissions_despite_umask",
+        "tests/test_secret_env.py::test_usage_is_fixed_and_does_not_read_the_cluster"
+      ]
+    },
+    {
       "id": "credential-guard-get-reads-the-type-operand",
       "origin": "regression",
       "ordered_at": "2026-11-18",
