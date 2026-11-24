@@ -3478,7 +3478,10 @@ stops the worker the same way, without SIGTERM: it stops leasing, drains within 
 its process exits 0, so the kubelet restarts the container in the same pod and pulls the floating
 tag; its running units finish or are left to reap exactly as on a SIGTERM drain. The entry point
 empties `CI_LAB_WORK_ROOT` first, sealed trees and folders without owner access included, so a
-restarted or freshly scheduled pod always starts from an empty root.
+restarted or freshly scheduled pod always starts from an empty root: the venvs, mutation cache and
+killers a worker built under it are built again after any container restart, a crash included. A
+worker answered `426` again after its restart, because the node has not pulled the wanted digest
+yet, exits again at once; the kubelet's restart backoff is the only pause between those attempts.
 
 Check the wiring offline:
 

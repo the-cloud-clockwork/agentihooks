@@ -63,8 +63,7 @@ class Leases:
         found = self.images(worker)
         if found is None or "@" in found.declared:
             return False
-        _, _, running = found.running.partition("@")
-        return running != wanted
+        return not found.running.endswith(f"@{wanted}")
 
     def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[Grant]:
         """Grant fitting pending jobs, polling until some are granted or the wait ends; the worker's offer is its free

@@ -104,7 +104,9 @@ class KubePods:
             running = body["status"]["containerStatuses"][0]["imageID"]
         except (LookupError, TypeError):
             return None
-        return Images(declared, running) if "@" in running else None
+        if not isinstance(declared, str) or not isinstance(running, str) or "@" not in running:
+            return None
+        return Images(declared, running)
 
 
 def pod_images(pods: Pods) -> PodImages:
