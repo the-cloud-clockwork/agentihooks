@@ -140,6 +140,8 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:expert-running",
                     f"~{ROOT}:swarm:*:expert-proofs",
                     f"~{ROOT}:swarm:*:expert-closing",
+                    f"~{ROOT}:swarm:*:review:*",
+                    f"~{ROOT}:swarm:*:review-tasks",
                     f"~{ROOT}:seat:*:recaps",
                     f"~{ROOT}:seat:*:learned",
                     f"~{ROOT}:seat-of:*:exit",
@@ -246,6 +248,35 @@ def test_a_member_writes_the_keys_swarm_block_and_swarm_learned_write():
 
     for key in (dev_red.key("proof"), SeatMemory(None).key("eng-1@proof", "learned")):
         assert any(fnmatchcase(key, pattern) for pattern in patterns), key
+
+
+@pytest.mark.feature("review-record-post")
+@pytest.mark.parametrize("granted", [True, False])
+def test_a_member_reviewer_posts_findings_only_with_the_review_keys(granted: bool) -> None:
+    import fakeredis
+    from redis.exceptions import ResponseError
+
+    from scripts.review import record
+    from tests.review.fakes import HEAD, REVIEWER, URL, FakeForge
+
+    fake_server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=fake_server, decode_responses=True)
+    patterns = [pattern for pattern in auth._acl_keys("m1") if granted or ":review" not in pattern]
+    admin.acl_setuser(
+        "hive-m1", enabled=True, nopass=True, categories=auth.ACL_CATEGORIES, keys=patterns, channels=auth.ACL_PATTERNS
+    )
+    member = fakeredis.FakeRedis(server=fake_server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    host = store.RedisStore(admin)
+    if granted:
+        posted = record.post(store.RedisStore(member), "proof", FakeForge(), URL, REVIEWER, "r1", ["First"])
+        assert record.read(host, "proof", URL, HEAD) == posted
+        assert admin.hgetall(host.key("proof", "review-tasks")) == {"r1": "1"}
+    else:
+        with pytest.raises(ResponseError):
+            record.post(store.RedisStore(member), "proof", FakeForge(), URL, REVIEWER, "r1", ["First"])
+        assert record.read(host, "proof", URL, HEAD) is None
+        assert admin.hgetall(host.key("proof", "review-tasks")) == {}
 
 
 def test_the_grant_sizes_and_member_record(admin, redis_lib):
