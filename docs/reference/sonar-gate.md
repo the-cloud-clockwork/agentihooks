@@ -12,7 +12,7 @@ agentihooks is bound to the `Delivery L2` gate, defined and bound in antoncore's
 | Duplicated lines | above 3 % |
 | Security hotspots reviewed | below 100 % |
 
-When the gate fails, the `SonarQube Quality Gate` step prints its error line and then the unresolved new bugs and vulnerabilities of the branch or pull request it graded, one line each: component, line, rule and message. It prints the first 100 and then how many more there are. Read a red gate's bugs there; the dashboard address in the error line exists only inside the job. The read is best effort: when it is refused, fails or finds nothing, or the server still does not answer once the retry waits reach 30 seconds, the step prints the error line alone.
+When the gate fails, the `SonarQube Quality Gate` step prints its error line, then the unresolved new bugs and vulnerabilities of the branch or pull request it graded, then its new security hotspots still to review, one line each: component, line, rule and message. Each list prints its first 100 and then how many more there are. Read a red gate's bugs and hotspots there; the dashboard address in the error line exists only inside the job. Each read is best effort: when it is refused, fails or finds nothing, or the server still does not answer once its retry waits reach 30 seconds, it prints nothing, and the error line and the red exit stay as they are.
 
 The job's `Hold the Delivery L2 conditions` step runs after the quality gate step and fails when:
 

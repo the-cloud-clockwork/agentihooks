@@ -44,14 +44,21 @@ def _run(step, cwd, bin_dir, **env):
     )
 
 
+def _answer(tmp_path: Path, name: str, answer: dict[str, object] | int) -> str:
+    if isinstance(answer, int):
+        return f'  */{name}/search?*) echo "curl: (22) The requested URL returned error: {answer}" >&2; exit 22 ;;\n'
+    (tmp_path / f"{name}.json").write_text(json.dumps(answer))
+    return f'  */{name}/search?*) cat "{tmp_path}/{name}.json" ;;\n'
+
+
 def _gate(
     tmp_path: Path,
     statuses: list[str],
     gate: str = "OK",
     message: str = "",
     event: str = "push",
-    issues: dict[str, object] | int | None = None,
     dashboard: str = "http://sonar/dash",
+    **searches: dict[str, object] | int,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -60,12 +67,7 @@ def _gate(
     (tmp_path / "statuses").write_text("\n".join(statuses) + "\n")
     task = {"status": "STATUS", "analysisId": "A1", **({"errorMessage": message} if message else {})}
     (tmp_path / "task.json").write_text(json.dumps({"task": task}))
-    found = ""
-    if isinstance(issues, int):
-        found = f'  */issues/search?*) echo "curl: (22) The requested URL returned error: {issues}" >&2; exit 22 ;;\n'
-    elif issues is not None:
-        (tmp_path / "issues.json").write_text(json.dumps(issues))
-        found = f'  */issues/search?*) cat "{tmp_path}/issues.json" ;;\n'
+    found = "".join(_answer(tmp_path, name, answer) for name, answer in searches.items())
     _tool(
         bin_dir,
         "curl",
@@ -154,8 +156,8 @@ _BUGS: dict[str, object] = {
 }
 
 
-def _searches(tmp_path: Path) -> list[str]:
-    return [url for url in (tmp_path / "urls").read_text().splitlines() if "issues/search" in url]
+def _searches(tmp_path: Path, endpoint: str = "issues/search") -> list[str]:
+    return [url for url in (tmp_path / "urls").read_text().splitlines() if endpoint in url]
 
 
 @pytest.mark.parametrize("scope", ["branch=dev", "pullRequest=7"])
@@ -212,6 +214,86 @@ def test_a_passed_gate_reads_no_issues(tmp_path: Path) -> None:
     result, _ = _gate(tmp_path, ["SUCCESS"], issues=_BUGS, dashboard=_BRANCH)
     assert result.returncode == 0, result.stdout + result.stderr
     assert _searches(tmp_path) == []
+
+
+_HOTSPOTS: dict[str, object] = {
+    "paging": {"pageIndex": 1, "pageSize": 100, "total": 2},
+    "hotspots": [
+        {
+            "component": "agentihooks:scripts/example.py",
+            "line": 12,
+            "ruleKey": "python:S5443",
+            "message": "Make sure publicly writable directories are used safely here.",
+        },
+        {
+            "component": "agentihooks:hooks/token.py",
+            "ruleKey": "python:S2245",
+            "message": "Make sure that using this pseudorandom number generator is safe here.",
+        },
+    ],
+}
+_HOTSPOT_LINES = [
+    "agentihooks:scripts/example.py:12 python:S5443 Make sure publicly writable directories are used safely here.",
+    "agentihooks:hooks/token.py:0 python:S2245 Make sure that using this pseudorandom number generator is safe here.",
+]
+
+
+@pytest.mark.parametrize("scope", ["branch=dev", "pullRequest=7"])
+@pytest.mark.feature("sonar-failed-gate-names-new-hotspots")
+def test_a_failed_gate_names_its_unreviewed_hotspots(tmp_path: Path, scope: str) -> None:
+    dashboard = f"http://sonar/dashboard?id=agentihooks&{scope}"
+    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=dashboard, issues=_BUGS, hotspots=_HOTSPOTS)
+    assert result.returncode == 1
+    assert result.stdout.splitlines() == [
+        f"::error::Quality Gate has FAILED (ERROR). Detailed information can be found at: {dashboard}",
+        "agentihooks:scripts/example.py:7 python:S905 Remove or refactor this statement; it has no side effects.",
+        "agentihooks:scripts/other.py:0 python:S5332 Using http protocol is insecure. Use https instead.",
+        *_HOTSPOT_LINES,
+    ]
+    assert _searches(tmp_path, "hotspots/search") == [
+        f"http://127.0.0.1:9000/api/hotspots/search?project=agentihooks&{scope}"
+        "&inNewCodePeriod=true&status=TO_REVIEW&ps=100"
+    ]
+    assert (tmp_path / "output").read_text() == ""
+
+
+@pytest.mark.feature("sonar-failed-gate-names-new-hotspots")
+def test_a_failed_gate_says_how_many_hotspots_it_left_out(tmp_path: Path) -> None:
+    hotspots = {**_HOTSPOTS, "paging": {"pageIndex": 1, "pageSize": 100, "total": 102}}
+    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH, hotspots=hotspots)
+    assert result.returncode == 1
+    assert result.stdout.splitlines() == [_FAILED, *_HOTSPOT_LINES, "100 more hotspots not shown"]
+
+
+@pytest.mark.feature("sonar-failed-gate-names-new-hotspots")
+def test_a_failed_gate_stays_red_when_the_hotspot_read_is_refused(tmp_path: Path) -> None:
+    result, sleeps = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH, hotspots=400)
+    assert result.returncode == 1
+    assert result.stdout.splitlines() == [_FAILED]
+    assert result.stderr == ""
+    assert sleeps == []
+    assert len(_searches(tmp_path, "hotspots/search")) == 1
+    assert (tmp_path / "output").read_text() == ""
+
+
+@pytest.mark.parametrize("status", [503, 403])
+@pytest.mark.feature("sonar-failed-gate-names-new-hotspots")
+def test_a_failed_gate_stays_a_code_verdict_when_the_hotspot_read_meets_an_outage(tmp_path: Path, status: int) -> None:
+    result, sleeps = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH, hotspots=status)
+    assert result.returncode == 1
+    assert result.stdout.splitlines() == [_FAILED]
+    assert result.stderr == ""
+    assert not (tmp_path / "summary").exists()
+    assert 0 < sum(int(wait) for wait in sleeps) <= 30
+    assert (tmp_path / "output").read_text() == ""
+
+
+@pytest.mark.parametrize(("statuses", "message"), [(["SUCCESS"], ""), (["FAILED"], _OLDER)])
+@pytest.mark.feature("sonar-failed-gate-names-new-hotspots")
+def test_a_passed_or_superseded_gate_reads_no_hotspots(tmp_path: Path, statuses: list[str], message: str) -> None:
+    result, _ = _gate(tmp_path, statuses, message=message, dashboard=_BRANCH, hotspots=_HOTSPOTS)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _searches(tmp_path, "hotspots/search") == []
 
 
 def test_a_dev_push_analysis_sonar_refuses_as_older_ends_superseded_and_ungraded(tmp_path):
