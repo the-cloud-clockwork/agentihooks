@@ -4,12 +4,12 @@ pacing its writes, and its dry run prints the thin task count and ids per lane a
 import json
 from dataclasses import dataclass, field, replace
 from importlib import import_module
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from scripts.swarm import cli, enhance_sweep
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm import cli, enhance_sweep, ledger_client
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.tick import registry
 from scripts.tick.adapters.fakes import FakeLedger, fake_tools
@@ -56,6 +56,7 @@ TASKS = [
 ]
 LANES = {"eng": ["t1", "t8", "t9", "t10"], "ci": ["t2"]}
 REPORT = {"eng": {"count": 4, "ids": ["t1", "t8", "t9", "t10"]}, "ci": {"count": 1, "ids": ["t2"]}}
+HELD = _task("t11", phase="p2")
 
 
 @dataclass
@@ -70,13 +71,15 @@ def _calls(ledger: FakeLedger) -> list[tuple[str, tuple[object, ...]]]:
     return [(call.operation, call.args) for call in ledger.calls]
 
 
-def _tick_calls(tasks: list[dict[str, Any]]) -> list[tuple[str, tuple[object, ...]]]:
+def _tick_calls(
+    tasks: list[dict[str, Any]], held: dict[str, list[dict[str, Any]]] | None = None
+) -> list[tuple[str, tuple[object, ...]]]:
     import_module("scripts.tick.steps.thin")
     step = {found.name: found for found in registry.steps()}["thin task pass"]
     assert isinstance(step, CallStep)
     ledger = FakeLedger(dict(ANSWERS))
     values: dict[str, Any] = {
-        "doc": {"tasks": tasks},
+        "doc": {**(held or {}), "tasks": tasks},
         "tools": replace(fake_tools(), ledger=ledger).for_effects(frozenset({"inbox", "ledger"})),
         "deadline": Deadline.after(5),
         "slug": "sw",
@@ -86,6 +89,23 @@ def _tick_calls(tasks: list[dict[str, Any]]) -> list[tuple[str, tuple[object, ..
     return _calls(ledger)
 
 
+def _serve(monkeypatch: pytest.MonkeyPatch, collections: dict[str, list[dict[str, Any]]]) -> None:
+    def resource(slug: str, path: str, collection: bool = False) -> list[dict[str, Any]]:
+        return collections.get(path, []) if (slug, collection) == ("sw", True) else []
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(resource=resource))
+
+
+def _frozen(target: str) -> dict[str, list[dict[str, Any]]]:
+    return {
+        "plans": [{"id": "a", "title": "Claims"}, {"id": "b", "title": "Hives"}],
+        "phases": [{"id": "p1", "title": "Build", "plan": "plans/a"}, {"id": "p2", "title": "Ship", "plan": "plans/b"}],
+        "freezes": [
+            {"id": f"freeze-{target}", "verb": "freeze", "target": target, "by": "operator", "at": 1, "reason": ""}
+        ],
+    }
+
+
 @pytest.fixture
 def swarm(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     import fakeredis
@@ -93,12 +113,8 @@ def swarm(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/home/x/dev/agentihooks", 2, 1))
     pauses: list[float] = []
-
-    def tasks(_: LedgerClient, slug: str) -> list[dict[str, Any]]:
-        return TASKS if slug == "sw" else []
-
     monkeypatch.setattr(cli, "connect", lambda: store)
-    monkeypatch.setattr(LedgerClient, "tasks", tasks)
+    _serve(monkeypatch, {"tasks": TASKS})
     monkeypatch.setattr("time.sleep", pauses.append)
     return pauses
 
@@ -166,3 +182,34 @@ def test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_wri
     assert built == [("sw", "clients of sw")]
     assert swarm == [3.0, 3.0, 3.0, 3.0]
     assert _calls(ledger) == _tick_calls(TASKS)
+
+
+@pytest.mark.feature("swarm-enhance-sweep")
+@pytest.mark.usefixtures("swarm")
+def test_an_unfrozen_thin_task_beside_a_frozen_phase_is_still_listed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _serve(monkeypatch, {"tasks": [_task("t12", phase="p2")], **_frozen("phases/p1")})
+    assert cli.main(["sw", "enhance", "sweep", "--dry-run"]) == 0
+    assert json.loads(capsys.readouterr().out)["lanes"] == {
+        "eng": {"count": 1, "ids": ["t12"]},
+        "ci": {"count": 0, "ids": []},
+    }
+
+
+@pytest.mark.feature("swarm-enhance-sweep")
+@pytest.mark.parametrize(
+    "target", ["tasks/t11", "phases/p2", "plans/b"], ids=["task freeze", "phase freeze", "plan freeze"]
+)
+def test_the_sweep_lists_and_queues_no_thin_task_a_freeze_holds(
+    target: str, swarm: list[float], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ledger = FakeLedger(dict(ANSWERS))
+    held = _frozen(target)
+    _serve(monkeypatch, {"tasks": [*TASKS, HELD], **held})
+    monkeypatch.setattr(enhance_sweep, "ClientLedger", lambda slug, clients: ledger)
+    monkeypatch.setattr(enhance_sweep, "resource_client", lambda slug: slug)
+    assert cli.main(["sw", "enhance", "sweep"]) == 0
+    assert json.loads(capsys.readouterr().out)["lanes"] == REPORT
+    assert swarm == [3.0, 3.0, 3.0, 3.0]
+    assert _calls(ledger) == _tick_calls([*TASKS, HELD], held)
