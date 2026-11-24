@@ -15555,6 +15555,7 @@
       "tests": [
         "tests/swarm_ledger/test_summary_read.py::test_the_summary_answers_without_building_the_whole_page_view",
         "tests/swarm_ledger/test_summary_read.py::test_an_open_first_page_answers_without_building_the_whole_page_view",
+        "tests/swarm_ledger/test_summary_read.py::test_a_summary_read_and_an_open_tasks_read_at_once_build_the_summary_once",
         "tests/swarm_ledger/test_summary_read.py::test_the_summary_derives_what_the_page_view_derives",
         "tests/swarm_ledger/test_summary_read.py::test_the_summary_of_a_production_sized_ledger_fits_one_reply",
         "tests/swarm_ledger/test_summary_read.py::test_the_summary_crew_holds_only_members_seen_in_the_active_window"

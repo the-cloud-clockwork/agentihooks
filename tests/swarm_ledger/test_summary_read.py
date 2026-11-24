@@ -1,6 +1,8 @@
 """The ledger page's first reads answer from narrow reads, never from the whole ledger page view."""
 
 import copy
+import threading
+import time
 from typing import Any, cast
 
 import pytest
@@ -89,6 +91,35 @@ def test_an_open_first_page_answers_without_building_the_whole_page_view(
     assert [row["id"] for row in reply["data"]] == ["p1", "p0"]
     status, reply = request(live, "GET", "followups?state=open&limit=5&q=x")
     assert status == 400
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_a_summary_read_and_an_open_tasks_read_at_once_build_the_summary_once(
+    live: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored(monkeypatch, document())
+    monkeypatch.setattr(ledger_server, "SUMMARIES", {})
+    build = summary.build
+    builds: list[int] = []
+
+    def slow(*args: Any) -> dict[str, Any]:
+        builds.append(len(builds))
+        time.sleep(0.3)
+        return build(*args)
+
+    monkeypatch.setattr(summary, "build", slow)
+    answers: list[int] = []
+
+    def read(path: str) -> None:
+        answers.append(request(live, "GET", path)[0])
+
+    readers = [threading.Thread(target=read, args=(path,)) for path in ("summary", "tasks?state=open&offset=0&limit=2")]
+    for reader in readers:
+        reader.start()
+    for reader in readers:
+        reader.join()
+    assert answers == [200, 200]
+    assert builds == [0]
 
 
 @pytest.mark.feature("ledger-summary-read")
