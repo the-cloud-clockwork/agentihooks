@@ -42,7 +42,7 @@ class Step:
 
 def _reaping(release: Event) -> Callable[[Context], Result]:
     def action(ctx: Context) -> Result:
-        release.wait(3.0)
+        release.wait(10.0)
         return Result((GONE,))
 
     return action
@@ -76,6 +76,7 @@ def test_a_step_still_running_at_its_lane_expiry_is_recorded_cut_with_its_writes
             first = engine.run_graph(
                 steps, Context(View(), Deadline.after(10.0)), {REAPED: _recording(applied)}, later.append
             )
+            release.set()
     finally:
         release.set()
     records = _records(first, later)

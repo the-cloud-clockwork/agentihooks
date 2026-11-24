@@ -1,1 +1,0 @@
-The tick pass engine ends a step that already finished with its real result when its lane expires before the pass collects it, so its writes are applied and its dependents run, instead of recording it cut.
