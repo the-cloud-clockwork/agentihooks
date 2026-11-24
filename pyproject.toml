@@ -37,6 +37,7 @@ dependencies = [
     # Codex-target config.toml writer: round-trip parsing preserves operator
     # hand-edits outside the managed key set (scripts/targets/codex_target.py).
     "tomlkit>=0.12",
+    "tzdata>=2024.1; sys_platform == 'win32'",
     # Span emission (hooks/telemetry.py) is a core capability, not an add-on:
     # brain.marker_write / brain.delivery drive the Broadcast Cortex panel.
     # Kept as an extra, these were never installed anywhere and every span was
