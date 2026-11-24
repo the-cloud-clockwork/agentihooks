@@ -11,12 +11,13 @@ let snapshot = null;
 const latest = { swarm: null };
 
 function onStreamEvent(name, data) {
+  let changed = name === "snapshot" || name === "ledger" || name === "swarm";
   if (name === "open") {
     if ("swarm" in data) {
       latest.swarm = data.swarm;
       receiveSwarm(latest.swarm);
     }
-    receiveOpen(data.rev);
+    changed = receiveOpen(data.rev) || "swarm" in data;
   } else if (name === "snapshot") {
     if (data.swarm) {
       latest.swarm = data.swarm;
@@ -31,7 +32,7 @@ function onStreamEvent(name, data) {
   } else if (name === "heartbeat") {
     resume();
   }
-  if (name === "open" || name === "snapshot" || name === "ledger" || name === "swarm") loadOrders();
+  if (changed) loadOrders();
 }
 
 export async function loadSwarm() {
@@ -67,10 +68,10 @@ async function takeFrame(block) {
   if (!data.length) return;
   try {
     const raw = data.join("\n");
-    if (name === "snapshot" && raw === snapshot) resume();
+    if ((name === "snapshot" || name === "open") && raw === snapshot) resume();
     else {
       onStreamEvent(name, JSON.parse(raw));
-      if (name === "snapshot") snapshot = raw;
+      if (name === "snapshot" || name === "open") snapshot = raw;
       else if (name === "ledger" || name === "swarm") snapshot = null;
     }
   } catch (error) {

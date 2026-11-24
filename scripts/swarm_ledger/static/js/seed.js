@@ -148,9 +148,11 @@ function refreshSummary() {
 }
 
 export function receiveOpen(at) {
-  if (at === null || at === undefined) return;
+  if (at === null || at === undefined) return false;
   newest = Math.max(newest, at);
-  if (held && !seeding && at > heldRev) seed();
+  const behind = held !== null && at > heldRev;
+  if (behind && !seeding) seed();
+  return behind;
 }
 
 export function receiveSnapshot(ledger) {
