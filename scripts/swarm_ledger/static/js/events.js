@@ -3,6 +3,7 @@ import { openEvents } from "./api.js";
 import { applyPatch } from "./patch.js";
 import { disconnected, receiveLedger, resume } from "./sync.js";
 import { receiveSwarm, swarmLost } from "./swarm.js";
+import { loadOrders } from "./orders.js";
 
 let eventCursor = null;
 let snapshot = null;
@@ -22,6 +23,7 @@ function onStreamEvent(name, data) {
   } else if (name === "heartbeat") {
     resume();
   }
+  if (name === "snapshot" || name === "ledger" || name === "swarm") loadOrders();
 }
 
 async function takeFrame(block) {

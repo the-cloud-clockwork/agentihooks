@@ -1,0 +1,21 @@
+rules:
+  - id: tick-claim-gate-without-admitted-queue
+    languages: [python]
+    severity: ERROR
+    message: >-
+      freeze.claim_gate or freeze.held runs once per task inside a loop without the admitted queue, so every call
+      rebuilds the focus queue check over every task row. On 24 November the dispatcher guard made 3507 such calls a
+      pass over 7972 rows and held the quota notice tick step for a median 47.7 seconds. Compute
+      freeze.admitted(doc, graph) once before the loop and pass it as the fifth argument.
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              for $ROW in $ROWS:
+                  ...
+          - pattern-inside: '[$VALUE for $ROW in $ROWS if $TEST]'
+          - pattern-inside: '[$VALUE for $ROW in $ROWS]'
+          - pattern-inside: '{$VALUE for $ROW in $ROWS if $TEST}'
+          - pattern-inside: '{$KEY: $VALUE for $ROW in $ROWS if $TEST}'
+      - pattern-either:
+          - pattern: freeze.claim_gate($TASK, $DOC, $GRAPH, $FIX)
+          - pattern: freeze.held($TASK, $DOC, $GRAPH, $FIX)
