@@ -780,6 +780,7 @@
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_whose_base_no_grade_of_a_shared_lane_carries_ends_nothing",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_with_no_grade_of_its_own_ends_nothing_of_its_branch",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_leaves_the_waiting_head_of_another_base",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_that_names_the_waiting_head_alone_leaves_the_live_grade_of_another_base",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_grade_of_the_same_head_in_another_lane_is_no_other_pull_request_of_the_branch",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_whose_live_grade_lost_its_document_is_still_forgotten",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_the_listing_of_a_repository_url_asks_its_owner_and_name",

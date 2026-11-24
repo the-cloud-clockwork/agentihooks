@@ -289,23 +289,39 @@ def test_a_closed_pull_request_drops_its_waiting_head_and_starts_no_grade(lab: C
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
-@pytest.mark.parametrize("base", [BASE, OTHER_BASE])
-def test_a_closed_pull_request_ends_its_waiting_head_and_its_live_grade_together(
-    lab: Callable[..., Run], base: str
-) -> None:
+def test_a_closed_pull_request_ends_its_waiting_head_and_its_live_grade_together(lab: Callable[..., Run]) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})}, quiet_ms=500)
     _deliver(run, _pull("opened", HEAD_A))
     run.tick(1000)
     run.tick(1600)
     live = run.grade(HEAD_A).run
-    _deliver(run, _pull("synchronize", HEAD_B, base=base))
+    _deliver(run, _pull("synchronize", HEAD_B))
     run.tick(1700)
-    _deliver(run, _pull("closed", HEAD_B, base=base))
+    _deliver(run, _pull("closed", HEAD_B))
     closed = f"closed feature of {REPO}: dropped the waiting head {HEAD_B}, retired {live}, dropped 1 pending units"
     assert run.tick(1800) == [closed]
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
     assert run.engine.queue.pending() == []
     assert run.grades() == []
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_close_that_names_the_waiting_head_alone_leaves_the_live_grade_of_another_base(
+    lab: Callable[..., Run],
+) -> None:
+    first = unit(1)
+    run = lab({HEAD_A: plan({"lint": (first,)}), HEAD_B: plan({"lint": (unit(2),)})}, quiet_ms=500)
+    _deliver(run, _pull("opened", HEAD_A))
+    run.tick(1000)
+    run.tick(1600)
+    live = run.grade(HEAD_A).run
+    _deliver(run, _pull("synchronize", HEAD_B, base=OTHER_BASE))
+    run.tick(1700)
+    _deliver(run, _pull("closed", HEAD_B, base=OTHER_BASE))
+    assert run.tick(1800) == [f"closed feature of {REPO}: dropped the waiting head {HEAD_B}"]
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+    assert [grade.run for grade in run.grades()] == [live]
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, first)]
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
