@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import dispatcher, freeze, readiness
+from scripts.swarm import claim_hold, dispatcher, freeze, readiness
 from scripts.swarm import runtime as runtime_module
 from scripts.swarm.store import SwarmConfig
 from scripts.swarm_ledger.repository import hierarchy
@@ -91,6 +91,18 @@ def test_claimable_computes_the_focus_queue_once_per_snapshot(monkeypatch: pytes
     ready = [row["id"] for lane in ("eng", "ci") for row in found["tasks"] if readiness.claimable(row, lane, view)]
     assert ready == ["f"]
     assert len(calls) == 1
+
+
+@pytest.mark.feature("quota-notice-per-pass-work")
+def test_claim_hold_uses_the_focus_queue_handed_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    found = ledger(5)
+    view = snapshot(found)
+    queue = freeze.admitted(found, view.graph)
+    calls = counted_admitted(monkeypatch)
+    open_rows = [row for row in found["tasks"] if row["state"] == "open"]
+    held = {row["id"]: claim_hold.holds(row, view.rows, found, view.graph, "", queue) for row in open_rows}
+    assert held == {"f": False, "t0": True, "t1": True, "t2": True, "t3": True, "t4": True}
+    assert calls == []
 
 
 @pytest.mark.feature("quota-notice-per-pass-work")
