@@ -862,6 +862,8 @@ def _canonical(features: list[dict[str, object]], ending: str) -> str:
     return (json.dumps(root, indent=2) + "\n").replace("\n", ending)
 
 
+@pytest.mark.feature("feature-map-stable-write")
+@pytest.mark.parametrize("ending", ["\n", "\r\n"], ids=["lf", "crlf"])
 def test_with_entry_keeps_a_canonical_map_canonical(ending: str) -> None:
     old, new = {"id": "a", "tests": ["t::a"]}, {"id": "b", "tests": []}
     grown = {**old, "tests": ["t::a", "t::b"]}
@@ -878,3 +880,13 @@ def test_with_entry_writes_one_line_entries_into_a_one_line_map() -> None:
     assert feature_map.with_entry(text, {"id": "c"}) == inserted
     assert feature_map.with_entry(text, {"id": "b", "x": [1]}) == replaced
     assert feature_map.with_entry('{"features":[]}', {"id": "c"}) == '{"features":[{"id": "c"}]}'
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_with_entry_indents_a_new_entry_like_the_line_of_the_first_entry() -> None:
+    tabbed = '{\n"features": [\n\t{"id": "a"}\n]\n}\n'
+    flush = '{\n"features": [\n{"id": "a"}\n]\n}\n'
+    tabbed_after = '{\n"features": [\n\t{\n\t  "id": "b"\n\t},\n\t{"id": "a"}\n]\n}\n'
+    flush_after = '{\n"features": [\n{\n  "id": "b"\n},\n{"id": "a"}\n]\n}\n'
+    assert feature_map.with_entry(tabbed, {"id": "b"}) == tabbed_after
+    assert feature_map.with_entry(flush, {"id": "b"}) == flush_after
