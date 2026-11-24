@@ -1,4 +1,5 @@
 {
+  "fragments": true,
   "features": [
     {
       "id": "lab-scheduler-access-log-query-redaction",
