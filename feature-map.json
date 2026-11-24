@@ -14788,6 +14788,16 @@
       ]
     },
     {
+      "id": "lane-grader-admits-the-gate-required-status-head-group",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-required-status-lane",
+      "behaviour": "The branch lane grader lets the report job of the trusted Gate Required status workflow leave the shared hosted lanes only for one concurrency group keyed by the head of the Tests run it reports, with queue max and no cancelling. It refuses any other group, queue or cancel setting, another job, an edited report job, a renamed workflow, changed triggers and an untrusted base.",
+      "seam": "ci_branch_lanes.problems and gate_required_status_group",
+      "tests": [
+        "tests/test_ci_branch_lanes.py::test_only_the_trusted_gate_required_status_report_job_may_queue_on_its_own_head_group"
+      ]
+    },
+    {
       "id": "swarm-harness-pin-guard",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-harness-pin-guard",
