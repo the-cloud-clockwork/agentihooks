@@ -12,13 +12,20 @@ __all__ = ["ENHANCE", "THIN_WORDS", "exempt", "section_complete", "thin"]
 THIN_WORDS = 40
 ENHANCE = "enhance-{}"
 EXEMPT = ("planned", "skipped")
-SEAM_WORD = re.compile(r"\bseams?\b", re.I)
 NAMED = re.compile(
-    r"`[^`\n]+`"
-    r"|\b[A-Za-z]\w*\("
+    r"\b[A-Za-z]\w*\("
     r"|\b[a-z][a-z0-9]+(?:[._][a-z0-9]+)+"
-    r"|(?<!\S)/[\w{}-]+(?:/[\w{}-]+)+"
+    r"|(?<![\w/])/[\w{}-]+(?:/[\w{}-]+)*"
     r"|\b(?:agentihooks|python -m)\s+[a-z]"
+    r"|\b(?:command|function|file)\s+(?:`[A-Za-z][\w./-]*`|[A-Za-z][\w./-]*)"
+    r"|\bcommand\s+`[A-Za-z][\w./-]*(?:\s+[^`\n]+)?`",
+    re.I,
+)
+OBSERVED = re.compile(
+    r"\b(?:returns?|responds?|emits?|prints?|writes?|contains?|exits?|rejects?|raises?)\s+\S"
+    r"|\b(?:has|have)\s+status\s+\S"
+    r"|(?<=\))\s*(?:==|!=|<=|>=|<|>)\s*\S",
+    re.I,
 )
 RECON = (
     "What will be built",
@@ -32,11 +39,7 @@ BODY = ("Summary", "Seams", "Tests", "Proof")
 
 
 def thin(task: dict[str, Any]) -> list[str]:
-    """Every rule the task fails, one plain-words line each; none for an exempt task.
-
-    A code or ci task names a seam with the word seam or seams, a backticked name, a call shape, a dotted or snake
-    case name, an endpoint path or an agentihooks or python -m command.
-    """
+    """Every rule the task fails; code and CI seams name a public boundary and observed outcome together."""
     if exempt(task):
         return []
     kind: str = ledger_kinds.kind(task)  # pyright: ignore[reportUnknownMemberType]
@@ -48,9 +51,19 @@ def thin(task: dict[str, Any]) -> list[str]:
         problems.append(f"Task {tid} has no done when sentence.")
     if not task.get("territory"):
         problems.append(f"Task {tid} names no territory.")
-    if kind in CODE_KINDS and not (SEAM_WORD.search(description) or NAMED.search(description)):
+    if kind in CODE_KINDS and not _named_seam(description):
         problems.append(f"Task {tid} is {kind} work that names no seam.")
     return problems
+
+
+def _named_seam(text: str) -> bool:
+    parts = re.split(r"(?<=[.!?])\s+|\n(?=\s*(?:[-*+]|\d+[.)]|#{1,6})\s)|\n\s*\n", text)
+    return any(
+        boundary.end() < observation.start() or observation.end() < boundary.start()
+        for part in parts
+        for boundary in NAMED.finditer(part)
+        for observation in OBSERVED.finditer(part)
+    )
 
 
 def exempt(task: dict[str, Any]) -> bool:
@@ -61,11 +74,11 @@ def exempt(task: dict[str, Any]) -> bool:
 
 
 def section_complete(text: str) -> list[str]:
-    """Every part an enhancement plan section misses: a seam named under its Seams heading, each recon heading, each
+    """Every part an enhancement plan section misses: a boundary and observation under its Seams heading, each recon heading, each
     pull request body section and a done when sentence."""
     found = {name: _section(text, name) for name in (*RECON, *BODY)}
     seams = found["Seams"]
-    problems = ["The section names no seam."] if seams is None or not NAMED.search(seams) else []
+    problems = ["The section names no seam."] if seams is None or not _named_seam(seams) else []
     problems += [f"The section has no {name} heading." for name in RECON if found[name] is None]
     problems += [f"The section has no {name} pull request body section." for name in BODY if found[name] is None]
     if not done_when(text):

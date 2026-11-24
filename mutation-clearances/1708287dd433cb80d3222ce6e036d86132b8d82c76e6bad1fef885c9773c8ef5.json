@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/task_write.py:scripts.swarm_ledger.repository.task_write.x_update:89d45d0c6e09b10a8fecf45ed52179b297c2dcd6dc6f5ae01b67fba9dd6b23ba": {
+    "reader": "standards_reader",
+    "reason": "task_write.update's op is always the single claim-shaped task_update op (the only caller of mutation.narrow from this site). ctx.slug built from this slug argument is never read on that path, so passing None instead of slug changes no output."
+  }
+}

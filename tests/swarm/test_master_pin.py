@@ -40,7 +40,7 @@ def test_a_warned_master_pinned_to_its_declared_account_holds_no_seat(declared, 
     decision = capacity.calculate(
         config, observed, [replace(master, profile=profile)], warned={("claude", "warned"): "week"}
     )
-    assert decision["effective"] == {"eng": expected, "ci": 0, "plan": 0}
+    assert decision["effective"] == {"eng": expected, "ci": 0, "plan": 0, "review": 0}
 
 
 @pytest.mark.parametrize(

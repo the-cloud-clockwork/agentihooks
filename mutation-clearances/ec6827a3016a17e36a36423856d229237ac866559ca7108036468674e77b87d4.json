@@ -1,0 +1,6 @@
+{
+  "scripts/hive/daemon.py:scripts.hive.daemon.x_install:42bcc932c4166690293c7e59a2156997c0c1a31a60411b73c6f5cca0d28faad4": {
+    "reader": "standards-reader",
+    "reason": "changed is only tested for truthiness and is assigned True whenever a unit is written. False and None both skip daemon-reload when no unit changes; neither initial value escapes. Writes, subprocess calls and the returned result are identical."
+  }
+}

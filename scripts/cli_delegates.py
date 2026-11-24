@@ -3,6 +3,7 @@ from collections.abc import Callable
 
 DELEGATED_CLIS = {
     "agents": "scripts.agents.cli",
+    "review": "scripts.review.cli",
     "msg": "scripts.inbox.cli",
     "recall": "scripts.recall.cli",
     "knowledge": "scripts.ledger_knowledge.cli",

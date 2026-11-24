@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_claim:580ce999d13b8fb752430018318dd2e8e600a4e3abddbd34d5a3210329fe7bbc": {
+    "reader": "standards_reader",
+    "reason": "typing.cast is an identity function at runtime; set(cast(Doc, op)) and set(cast(None, op)) both iterate the same dict op unchanged."
+  }
+}

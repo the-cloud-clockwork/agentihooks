@@ -636,7 +636,7 @@ def test_api_and_git_read_their_commands(monkeypatch):
     ]
 
 
-def test_the_workflow_grades_every_branch_push_that_changes_a_workflow_with_the_dev_grader():
+def test_the_workflow_grades_every_branch_push_that_changes_a_workflow_with_the_dev_grader() -> None:
     workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "branch-lanes.yml").read_text())
     assert workflow[True] in (
         {
@@ -654,7 +654,7 @@ def test_the_workflow_grades_every_branch_push_that_changes_a_workflow_with_the_
         "ref": "dev",
         "fetch-depth": 1,
         "sparse-checkout": (
-            "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
+            "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n/.github/ci-tools/\n"
         ),
         "sparse-checkout-cone-mode": False,
         "persist-credentials": False,
@@ -956,53 +956,6 @@ def test_the_superseded_mutation_lanes_are_refused_swapped_or_with_new_events(ch
     "change",
     [
         None,
-        "group",
-        "queue",
-        "cancel",
-        "name",
-        "events",
-        "job",
-        "untrusted",
-        "trusted-name",
-        "trusted-events",
-        "extra-job",
-    ],
-)
-def test_only_the_trusted_chart_release_may_leave_the_shared_proof_lane(change):
-    import copy
-
-    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "chart-release.yml").read_text())
-    baseline["concurrency"] = {"group": lanes.GROUP, "queue": "max", "cancel-in-progress": False}
-    updated = copy.deepcopy(baseline)
-    updated["concurrency"] = {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
-    if change == "group":
-        updated["concurrency"]["group"] = "chart-release-other"
-    elif change == "queue":
-        updated["concurrency"]["queue"] = "single"
-    elif change == "cancel":
-        updated["concurrency"]["cancel-in-progress"] = True
-    elif change == "name":
-        updated["name"] = "Other release"
-    elif change == "events":
-        updated[True]["workflow_dispatch"] = None
-    elif change == "job":
-        updated["jobs"]["publish"]["runs-on"] = "ubuntu-latest"
-    elif change == "untrusted":
-        baseline = None
-    elif change == "trusted-name":
-        baseline["name"] = updated["name"] = "Other release"
-    elif change == "trusted-events":
-        baseline[True] = updated[True] = {"workflow_dispatch": None}
-    elif change == "extra-job":
-        baseline["jobs"]["other"] = updated["jobs"]["other"] = {"runs-on": "ubuntu-latest"}
-    found = lanes.problems(updated, baseline)
-    assert bool(found) == (change is not None)
-
-
-@pytest.mark.parametrize(
-    "change",
-    [
-        None,
         "moved",
         "group",
         "queue",
@@ -1103,6 +1056,81 @@ def test_only_the_trusted_swarm_worker_image_hive_job_may_queue_on_the_hive_rele
         assert any(problem.startswith(f"job {name} ") for problem in found)
 
 
+@pytest.mark.parametrize("change", [None, "group", "queue", "cancel", "other-job", "untrusted", "name", "events"])
+def test_a_hive_job_that_gains_the_chart_steps_keeps_the_hive_release_group_its_base_holds(change: str | None) -> None:
+    import copy
+
+    updated = yaml.safe_load((ROOT / lanes.WORKFLOWS / "swarm-node-image.yml").read_text())
+    baseline = copy.deepcopy(updated)
+    names = [step.get("name") for step in updated["jobs"]["hive"]["steps"]]
+    published = names.index("Publish the hive worker once per release version") + 1
+    assert len(names) > published
+    baseline["jobs"]["hive"]["steps"] = baseline["jobs"]["hive"]["steps"][:published]
+    baseline["jobs"]["hive"]["timeout-minutes"] = 30
+    name = "image" if change == "other-job" else "hive"
+    if change == "group":
+        updated["jobs"]["hive"]["concurrency"]["group"] = "hive-worker-release-chart"
+    elif change == "queue":
+        updated["jobs"]["hive"]["concurrency"]["queue"] = "single"
+    elif change == "cancel":
+        updated["jobs"]["hive"]["concurrency"]["cancel-in-progress"] = True
+    elif change == "other-job":
+        updated["jobs"]["image"]["concurrency"] = dict(updated["jobs"]["hive"]["concurrency"])
+    elif change == "untrusted":
+        baseline = None
+    elif change == "name":
+        updated["name"] = "Other image"
+    elif change == "events":
+        updated[True] = {"workflow_dispatch": None}
+    found = lanes.problems(updated, baseline)
+    assert bool(found) == (change is not None)
+    if found:
+        assert any(problem.startswith(f"job {name} ") for problem in found)
+
+
+@pytest.mark.feature("lane-grader-admits-the-gate-required-status-head-group")
+@pytest.mark.parametrize(
+    "change",
+    [None, "steps", "group", "queue", "cancel", "other-job", "if", "untrusted", "trusted-name", "name", "events"],
+)
+def test_only_the_trusted_gate_required_status_report_job_may_queue_on_its_own_head_group(change: str | None) -> None:
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "gate-required.yml").read_text())
+    baseline["concurrency"] = dict(LANED)
+    updated = copy.deepcopy(baseline)
+    updated["concurrency"] = {
+        "group": "${{ format('gate-required-status-{0}', github.event.workflow_run.head_sha) }}",
+        "queue": "max",
+        "cancel-in-progress": False,
+    }
+    name = "copy" if change == "other-job" else "report"
+    if change == "steps":
+        updated["jobs"]["report"]["steps"] = updated["jobs"]["report"]["steps"][:1]
+    elif change == "group":
+        updated["concurrency"]["group"] = "gate-required-status"
+    elif change == "queue":
+        updated["concurrency"]["queue"] = "single"
+    elif change == "cancel":
+        updated["concurrency"]["cancel-in-progress"] = True
+    elif change == "other-job":
+        updated["jobs"]["copy"] = copy.deepcopy(updated["jobs"]["report"])
+    elif change == "if":
+        updated["jobs"]["report"]["if"] = "always()"
+    elif change == "untrusted":
+        baseline = None
+    elif change == "trusted-name":
+        baseline["name"] = updated["name"] = "Other status"
+    elif change == "name":
+        updated["name"] = "Other status"
+    elif change == "events":
+        updated[True] = {"workflow_dispatch": None}
+    found = lanes.problems(updated, baseline)
+    assert bool(found) == (change is not None)
+    if found:
+        assert found == [f"job {name} has no shared hosted lane concurrency group"]
+
+
 def test_a_tests_workflow_whose_trusted_baseline_has_no_jobs_mapping_is_still_graded() -> None:
     baseline = _workflow()
     baseline["name"] = "Tests"
@@ -1112,23 +1140,18 @@ def test_a_tests_workflow_whose_trusted_baseline_has_no_jobs_mapping_is_still_gr
     assert lanes.problems(workflow, baseline) == ["job a has no shared hosted lane concurrency group"]
 
 
-def test_dedicated_chart_group_without_a_trusted_jobs_mapping_does_not_crash() -> None:
-    trusted = {
-        "name": "Helm chart release",
-        "on": {"workflow_run": {"workflows": ["Swarm worker image"], "types": ["completed"]}},
-    }
-    job = {"runs-on": "ubuntu-latest"}
-    block = {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
-    assert lanes.dedicated_chart_group("package", block, job, trusted) is False
-
-
 DEDICATED_GROUPS = {
-    "dedicated_chart_group": ("chart-release.yml", ("package", "kind", "publish"), "chart-release", True),
     "flake_history_group": ("test.yml", ("flake-budget",), "flake-history", False),
     "focused_proof_group": (
         "proofs.yml",
         tuple(yaml.safe_load((ROOT / lanes.WORKFLOWS / "proofs.yml").read_text())["jobs"]),
         "${{ format('focused-proof-{0}', github.run_id) }}",
+        True,
+    ),
+    "gate_required_status_group": (
+        "gate-required.yml",
+        ("report",),
+        "${{ format('gate-required-status-{0}', github.event.workflow_run.head_sha) }}",
         True,
     ),
     "hive_release_group": ("swarm-node-image.yml", ("hive",), "hive-worker-release", False),

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/enhance_sweep.py:scripts.swarm.enhance_sweep.x__thin:bfe1cfe469a75147da6c2efc9af605f2ff891b24cb865a06421ff4538b29590c": {
+    "reader": "standards-reader",
+    "reason": "The default text only reaches the thin checks through word count, the done when phrase, and the seam or named-reference patterns, and \"XXXX\" and \"\" fail all of them identically. The task kind is read without the description, so the result is the same for every task dict."
+  }
+}

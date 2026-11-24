@@ -46,10 +46,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install build
-        run: pip install build
+        run: pip install --constraint .github/ci-tools/build.lock build==1.6.1
 
       - name: Build wheel + sdist
-        run: python -m build
+        run: python -m build --dependency-constraints-txt .github/ci-tools/build.lock
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

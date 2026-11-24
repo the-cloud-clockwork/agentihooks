@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/enhance_sweep.py:scripts.swarm.enhance_sweep.x__thin:e54f8234945a7d59b020f0a54365fc7f94032655e2da838b65ecbe3ed7bb8cf3": {
+    "reader": "standards_reader",
+    "reason": "The mutant replaces the default \"description\": \"\" with \"XXXX\" in _thin, and the default only matters for rows that carry no description key, since **task overrides it otherwise. thin_task.thin reads the description only through short(description, 40), done_when(description) and _named_seam(description). short counts words with len(text.split()) < 40, which is true for both \"\" and \"XXXX\". done_when matches \\bdone when\\b, which matches neither. _named_seam needs a NAMED match and an OBSERVED match in one part; \"XXXX\" matches no NAMED alternative (no call parenthesis, no dot or underscore separator, no slash path, no agentihooks or python -m prefix) and no OBSERVED keyword, and \"\" matches neither either. exempt and ledger_kinds.kind read only plan_slice, kind and enhancement, never the description. The problem strings interpolate only the task id and constants, so the returned list is identical under both defaults for every row. The mutant changes no output."
+  }
+}
