@@ -37,9 +37,9 @@ def _thin_task_pass(tick: Any, get: Get) -> list[str]:
     queued: list[str] = []
     for task in takewhile(lambda _: not deadline.expired, filter(unfrozen(doc), filter(unchecked, tasks))):
         if problems := thin_task.thin({"description": "", **task}):
-            line, marked = enhance(tools.ledger, deadline, task, problems, ids)
+            line, newly_queued = enhance(tools.ledger, deadline, task, problems, ids)
             lines.append(line)
-            queued += [task["id"]] if marked else []
+            queued += [task["id"]] if newly_queued else []
     if queued:
         get("inbox").send(SENDER, f"master@{get('slug')}", _told(queued), fyi=True)
     return lines
@@ -64,13 +64,15 @@ def enhance(
     ledger: Ledger, deadline: Deadline, task: dict[str, Any], problems: list[str], ids: set[str]
 ) -> tuple[str, bool]:
     """Add the enhancement task of the thin ``task`` unless ``ids`` holds it and mark the task as needing enhancement,
-    both in one ledger write; return the action line and whether the write landed."""
+    both in one ledger write; return the action line and whether the write queued the enhancement task."""
     tid, enhancement = task["id"], thin_task.ENHANCE.format(task["id"])
     added = [] if enhancement in ids else [_addition(task, problems)]
     try:
         ledger.mutate([*added, _marking(task)], deadline=deadline)
     except LedgerRefused as exc:
         return f"refused the enhancement of {tid}: {exc}", False
+    if not added:
+        return f"marked thin task {tid} as needing enhancement by its existing {enhancement}", False
     return f"queued {enhancement} for thin task {tid}", True
 
 
