@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "lab-scheduler-access-log-query-redaction",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2855",
+      "behaviour": "Scheduler access logs retain the request method, path and response status while omitting query strings, including upload lease tokens. Routing receives the complete request target for successful and refused requests.",
+      "seam": "scripts.ci_lab.lease_api.bind HTTP access logging",
+      "tests": [
+        "tests/ci_lab/test_lease_api.py::test_access_logs_omit_upload_query_strings",
+        "tests/ci_lab/test_lease_api.py::test_access_logs_keep_default_status_and_size"
+      ]
+    },
+    {
       "id": "placement-role-census",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-placement-role-census",
@@ -4637,7 +4648,7 @@
       "id": "tick-thin-task-pass",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-tick-step",
-      "behaviour": "Every 120 seconds the thin task pass checks each open engineer or ci task whose enhancement field is empty; a thin one gets one enhancement plan task in its phase, its enhancement set to needed in the same ledger write, and one master notice, and a second pass queues nothing more.",
+      "behaviour": "Every 120 seconds the thin task pass checks each open engineer or ci task whose enhancement field is empty; a thin one gets one enhancement plan task in its phase, its enhancement set to needed in the same ledger write, and one master notice, and a second pass queues nothing more; a task the swarm freeze check reads as frozen, held by a freeze on itself, its phase or its plan, gets no write and no place in the notice.",
       "seam": "scripts.tick.steps.thin._thin_task_pass registered as tick step thin task pass in group wrapper phases",
       "tests": [
         "tests/tick/steps/test_thin_task_pass.py::test_thin_task_pass",
@@ -4652,6 +4663,8 @@
         "tests/tick/steps/test_thin_task_pass.py::test_two_thin_tasks_are_both_queued_and_named_in_one_master_notice",
         "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_with_no_phase_or_description_gets_an_enhancement_task_with_neither",
         "tests/tick/steps/test_thin_task_pass.py::test_a_spent_deadline_takes_no_task",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_held_by_a_freeze_gets_no_enhancement_write",
+        "tests/tick/steps/test_thin_task_pass.py::test_an_unfrozen_thin_task_beside_a_frozen_phase_still_gets_its_enhancement",
         "tests/tick/steps/test_thin_task_pass.py::test_every_write_of_a_pass_is_one_the_ledger_api_accepts"
       ]
     },
@@ -5640,6 +5653,9 @@
       "seam": "scripts.swarm.thin_task.thin and scripts.swarm.thin_task.section_complete",
       "tests": [
         "tests/swarm/test_thin_task.py::test_a_full_task_is_not_thin",
+        "tests/swarm/test_thin_task.py::test_each_seam_shape_names_a_seam",
+        "tests/swarm/test_thin_task.py::test_a_thin_seam_needs_a_boundary_and_observation",
+        "tests/swarm/test_thin_task.py::test_a_section_seam_needs_a_boundary_and_observation",
         "tests/swarm/test_thin_task.py::test_a_description_under_forty_words_is_named_and_forty_pass",
         "tests/swarm/test_thin_task.py::test_a_description_without_a_done_when_sentence_is_named",
         "tests/swarm/test_thin_task.py::test_a_task_without_territory_is_named",
@@ -6345,6 +6361,17 @@
         "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_relay_beside_a_small_ledger_publishes_the_swarm_ledgers_rows_and_leaves_no_unsent_row",
         "tests/swarm_ledger/test_outbox_relay_streams.py::test_rows_no_stream_takes_from_a_ledger_no_longer_stored_are_marked_sent_and_reported",
         "tests/swarm_ledger/test_outbox_relay_streams.py::test_a_row_no_stream_takes_from_a_small_ledger_is_marked_sent_while_a_swarm_ledger_keeps_its_rows"
+      ]
+    },
+    {
+      "id": "ledger-size-small-refused-with-swarm",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2668",
+      "behaviour": "A size change to small on a ledger that a swarm works is refused with a warning naming the swarm and the ledger keeps its size, because a small ledger writes no outbox rows and its swarm would stop receiving ledger events; on a ledger no swarm works the size changes to small.",
+      "seam": "scripts.swarm_ledger.ledger_size.apply through the SQLite ledger repository apply_ops size_set operation, with the swarm store reached through the ledger swarm port",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_size.py::test_size_small_is_refused_on_a_ledger_its_swarm_works_and_the_size_stays_swarm",
+        "tests/swarm_ledger/test_ledger_size.py::test_size_small_is_set_on_a_ledger_no_swarm_works"
       ]
     },
     {
@@ -9202,6 +9229,27 @@
         "tests/test_gate_protected_scm_pin.py::test_the_required_grader_refuses_any_other_equivalence_pin",
         "tests/test_gate_protected_scm_pin.py::test_a_small_equivalence_form_admits_the_install_with_or_without_the_exact_scm_pin",
         "tests/test_gate_protected_scm_pin.py::test_the_scm_pin_form_sets_or_drops_the_pin_on_every_pip_install_step_of_a_copy"
+      ]
+    },
+    {
+      "id": "page-equivalence-reviewed-additions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-page-addition-contract",
+      "behaviour": "The ledger page equivalence check accepts a page change that adds elements or API requests only when the reviewed expected page change contract names each one in its added list with the operator order and exact count. When the head changes the contract, the base replay hides the removed list and the head and fault replays hide each added element with its subtree, drop stored entries keyed by the ids of hidden elements and drop the named requests before the byte compare, while an unnamed addition, a named element or request the base also shows, a wrong count and the planted chat fault still fail and replays without a contract keep identical records.",
+      "seam": "page_replay load_contract, CAPTURE, unnamed and main over a contract with an added list, and the equivalence.sh page step that passes the added list to the head and fault replays",
+      "tests": [
+        "tests/swarm_ledger/test_page_change.py::test_the_page_step_gives_the_base_the_removed_list_and_the_head_and_fault_the_added_list",
+        "tests/swarm_ledger/test_page_change.py::test_the_page_step_still_fails_a_fault_page_equal_to_the_base",
+        "tests/swarm_ledger/test_page_change.py::test_a_capture_keeps_every_stored_entry_of_the_elements_it_shows_as_written",
+        "tests/swarm_ledger/test_page_change.py::test_the_fake_api_records_each_request_and_hands_each_step_its_requests_sorted",
+        "tests/swarm_ledger/test_page_change.py::test_a_contract_naming_each_added_element_makes_head_and_base_identical",
+        "tests/swarm_ledger/test_page_change.py::test_an_added_element_the_contract_does_not_name_still_fails",
+        "tests/swarm_ledger/test_page_change.py::test_naming_an_element_the_base_also_shows_cannot_hide_a_change_to_it",
+        "tests/swarm_ledger/test_page_change.py::test_added_counts_the_head_page_does_not_match_fail_naming_the_head",
+        "tests/swarm_ledger/test_page_change.py::test_named_requests_are_dropped_and_counted_while_the_planted_chat_fault_still_differs",
+        "tests/swarm_ledger/test_page_change.py::test_load_contract_returns_the_selectors_and_requests_of_each_list",
+        "tests/swarm_ledger/test_page_change.py::test_load_contract_refuses_a_malformed_added_list",
+        "tests/swarm_ledger/test_page_change.py::test_main_hides_the_list_its_flag_names_in_that_replay"
       ]
     },
     {
@@ -15225,7 +15273,8 @@
         "tests/tick/steps/test_review_queue.py::test_an_author_task_without_a_phase_gives_the_review_no_phase",
         "tests/tick/steps/test_review_queue.py::test_the_durable_consumer_is_named_by_kind_and_swarm",
         "tests/tick/steps/test_review_queue.py::test_an_event_at_the_edge_of_the_replay_window_still_queues",
-        "tests/tick/steps/test_review_queue.py::test_the_step_opens_the_configured_shared_bus"
+        "tests/tick/steps/test_review_queue.py::test_the_step_opens_the_configured_shared_bus",
+        "tests/tick/steps/test_review_queue.py::test_a_scoped_bus_review_pass_queues_only_its_own_swarm_events"
       ]
     },
     {
