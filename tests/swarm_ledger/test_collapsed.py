@@ -17,6 +17,7 @@ def function_source(name):
 def run_js(names, expr):
     script = (
         "function closedLeft() { return 0; }\n"
+        "function openStates() { return {}; }\n"
         + "".join(function_source(n) + "\n" for n in names)
         + f"process.stdout.write(JSON.stringify({expr}));"
     )

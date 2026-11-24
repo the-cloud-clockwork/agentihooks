@@ -15205,7 +15205,8 @@
       "tests": [
         "tests/swarm_ledger/test_summary_read.py::test_the_summary_answers_without_building_the_whole_page_view",
         "tests/swarm_ledger/test_summary_read.py::test_an_open_first_page_answers_without_building_the_whole_page_view",
-        "tests/swarm_ledger/test_summary_read.py::test_the_summary_derives_what_the_page_view_derives"
+        "tests/swarm_ledger/test_summary_read.py::test_the_summary_derives_what_the_page_view_derives",
+        "tests/swarm_ledger/test_summary_read.py::test_the_summary_of_a_production_sized_ledger_fits_one_reply"
       ]
     },
     {
@@ -15218,6 +15219,16 @@
         "tests/swarm_ledger/test_hub.py::test_a_connect_without_a_cursor_opens_without_a_ledger_snapshot",
         "tests/swarm_ledger/test_events_stream.py::test_serve_opens_a_cursorless_connect_without_a_snapshot",
         "tests/swarm_ledger/test_stream.py::test_a_cursorless_connect_opens_without_building_the_page_view"
+      ]
+    },
+    {
+      "id": "ledger-cold-load",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-load-api",
+      "behaviour": "A browser with empty storage opening a ledger whose document holds about thirty megabytes shows its first task rows within one second of navigation, with under one megabyte transferred before them, at 1920 by 1080.",
+      "seam": "GET /<slug> in Chromium against the live ledger server, timed from navigation start to the first task row",
+      "tests": [
+        "tests/swarm_ledger/test_cold_load.py::test_a_cold_browser_shows_the_first_task_rows_within_a_second_and_a_megabyte"
       ]
     },
     {

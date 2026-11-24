@@ -155,7 +155,10 @@ def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser,
     allowed = {f"{ledger}/{part}" for part in ("events", "summary", "swarm", "swarm/models", "architecture")}
     assert [path for _, path in reads if path.split("?")[0] == f"{ledger}/events"] == [f"{ledger}/events"] * 2
     assert all(
-        path in allowed or path in ("/api/v1/tips", f"/api/{SLUG}/session") or "?state=open&" in path
+        path in allowed
+        or path in ("/api/v1/tips", f"/api/{SLUG}/session")
+        or "?state=open&" in path
+        or (path.startswith(f"{ledger}/swarm/") and "limit=100" in path)
         for _, path in reads
     ), reads
     assert ("GET", ledger) not in reads

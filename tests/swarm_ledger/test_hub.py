@@ -23,13 +23,13 @@ def opened(hub, slug=SLUG, cursor=None, rev=1):
     return hub.open(slug, lambda: {"ledger": ledger(rev), "swarm": None, "workspaces": {}}, cursor)
 
 
-def test_a_first_connection_gets_one_snapshot_at_the_current_cursor():
+def test_a_first_connection_gets_one_open_event_at_the_current_cursor():
     hub = Hub()
     seq, first = opened(hub)
     channel = hub.channels[SLUG]
     assert seq == 0
     assert first == [
-        (0, f"{channel.epoch}.0", "snapshot", {"ledger": ledger(1), "swarm": None, "workspaces": {}}),
+        (0, f"{channel.epoch}.0", "open", {"rev": 1, "swarm": None, "workspaces": {}}),
     ]
     assert hub.watched() == [SLUG]
 
@@ -67,7 +67,7 @@ def test_a_second_connection_reuses_the_loaded_resources():
     calls = []
     seq, first = hub.open(SLUG, lambda: calls.append(1) or {"ledger": ledger(1)})
     assert calls == [] and seq == 1
-    assert first[0][3]["ledger"] == ledger(2)
+    assert first[0][3] == {"rev": 2, "swarm": None, "workspaces": {}}
 
 
 def test_a_publish_appends_a_patch_that_rebuilds_the_new_value():
@@ -446,7 +446,7 @@ def test_a_publish_during_the_first_load_wins_over_the_loaded_copy():
         return {"ledger": ledger(4), "swarm": None}
 
     _, first = hub.open(SLUG, load)
-    assert first[0][3] == {"ledger": ledger(5), "swarm": None}
+    assert first[0][3] == {"rev": 5, "swarm": None}
 
 
 def test_the_default_retention_is_bounded():

@@ -150,23 +150,15 @@ def test_the_code_stamp_of_a_folder_without_code_is_zero(tmp_path):
     assert server.code_stamp([tmp_path]) == 0
 
 
-def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch):
+def test_stream_resources_carries_only_the_swarm_status_without_loading_the_ledger(monkeypatch):
     calls = []
-    state = {"tasks": [], "_meta": {"rev": 7}}
-
-    def get_document(slug):
-        calls.append(("document", slug))
-        return state
-
-    monkeypatch.setattr(server.repository, "get_document", get_document)
-    monkeypatch.setattr(server, "ledger_view", lambda given, *_: {**given, "view": True})
+    monkeypatch.setattr(server.repository, "get_document", lambda slug: calls.append(("document", slug)))
+    monkeypatch.setattr(server, "ledger_view", lambda *a: calls.append(("view", *a)))
     monkeypatch.setattr(
-        server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or {"q": 1, "transfers": {}}
+        server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or {"q": 1, "history": [9]}
     )
-    monkeypatch.setattr(server, "workspace_tails", lambda *a: calls.append(("tails", *a)))
-    view = {**state, "view": True}
-    assert server.stream_resources("s") == {"ledger": view, "swarm": {"q": 1}}
-    assert calls == [("document", "s"), ("swarm", "s", view)]
+    assert server.stream_resources("s") == {"swarm": {"q": 1}}
+    assert calls == [("swarm", "s", None)]
 
 
 def test_the_page_stream_leaves_out_the_swarm_records_the_page_never_reads(monkeypatch):

@@ -64,10 +64,11 @@ def test_a_resource_published_during_initial_loading_owns_its_nested_values(monk
         server.publish_ledger("s", state)
         return {}
 
-    _, first = hub.open("s", load)
+    seq, first = hub.open("s", load)
     state["tasks"][0]["title"] = "changed"
     state["_meta"]["rev"] = 2
-    assert first[0][3]["ledger"]["tasks"] == [{"id": "t1", "title": "first"}]
+    assert first[0][3] == {"rev": 1}
+    assert hub.resource("s", "ledger")["tasks"] == [{"id": "t1", "title": "first"}]
     server.publish_ledger("s", state)
-    events = hub.wait("s", 0, 0)
+    events = hub.wait("s", seq, 0)
     assert events[0][3]["patch"]["o"]["tasks"]["u"] == [{"id": "t1", "title": "changed"}]

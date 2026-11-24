@@ -1,7 +1,7 @@
 import { RETRY_MS } from "./config.js";
 import { openEvents, readSwarm } from "./api.js";
 import { applyPatch } from "./patch.js";
-import { disconnected, receiveChange, receiveOpen, resume } from "./sync.js";
+import { disconnected, receiveChange, receiveOpen, receiveSnapshot, resume } from "./sync.js";
 import { receiveSwarm, swarmLost } from "./swarm.js";
 
 let eventCursor = null;
@@ -14,6 +14,12 @@ function onStreamEvent(name, data) {
       receiveSwarm(latest.swarm);
     }
     receiveOpen(data.rev);
+  } else if (name === "snapshot") {
+    if (data.swarm) {
+      latest.swarm = data.swarm;
+      receiveSwarm(latest.swarm);
+    }
+    if (data.ledger) receiveSnapshot(data.ledger);
   } else if (name === "ledger") {
     receiveChange(data);
   } else if (name === "swarm") {

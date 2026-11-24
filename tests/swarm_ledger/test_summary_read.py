@@ -4,8 +4,8 @@ import copy
 
 import pytest
 
-from scripts.swarm_ledger import ledger_server
-from scripts.swarm_ledger.api import summary
+from scripts.swarm_ledger import ledger_closed, ledger_server
+from scripts.swarm_ledger.api import resources, summary
 from tests.swarm_ledger.test_api_v1 import authority_live, live, request, stored
 
 __all__ = ["authority_live", "live"]
@@ -98,5 +98,33 @@ def test_the_summary_derives_what_the_page_view_derives() -> None:
     built = summary.build(parts, state["tasks"], ("", False), ledger_server.PAGE_LIMITS)
     assert built["marks"] == view["marks"]
     assert built["phase_status"] == view["phase_status"]
-    assert built["_meta"]["closed"] == view["_meta"].get("closed", {})
+    counted = {
+        name: {key: entry[key] for key in summary.CLOSED_KEPT if key in entry}
+        for name, entry in view["_meta"].get("closed", {}).items()
+    }
+    assert built["_meta"]["closed"] == counted
     assert built["_meta"]["limits"] == view["_meta"]["limits"]
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_the_summary_of_a_production_sized_ledger_fits_one_reply() -> None:
+    state = document()
+    state["_meta"].update(
+        stamps={f"tasks/t-{n}/state": {"at": n, "by": "eng", "rev": n, "op": "update"} for n in range(60000)},
+        join_history=[{"by": f"agent-{n}", "at": n, "role": "member"} for n in range(6000)],
+        master_decisions=[{"at": n, "text": "Decided " * 8} for n in range(4000)],
+        events=[
+            {"rev": n, "kind": "sync requested", "by": "operator", "at": n, "text": "x" * 120} for n in range(4700)
+        ],
+    )
+    state["tasks"] += [
+        {"id": f"t-gone-{n}", "title": "Gone", "state": "done", "done": True, "claimed_by": "eng"} for n in range(5300)
+    ]
+    state["followups"] += [{"id": f"f-gone-{n}", "text": "Closed", "done": True} for n in range(5700)]
+    parts = {key: value for key, value in state.items() if key != "tasks"}
+    built = summary.build(parts, state["tasks"], ("", False), ledger_server.PAGE_LIMITS)
+    assert resources.reply_size({"data": built, "revision": resources.revision(built)}) < resources.MAX_REPLY
+    assert not {"stamps", "join_history", "master_decisions", "members"} & set(built["_meta"])
+    assert len(built["_meta"]["events"]) == summary.EVENTS_KEPT
+    assert {key for entry in built["_meta"]["closed"].values() for key in entry} <= set(summary.CLOSED_KEPT)
+    assert built["_meta"]["closed"]["tasks"]["hidden"] == 5301 - ledger_closed.KEPT

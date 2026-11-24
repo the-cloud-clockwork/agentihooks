@@ -1,0 +1,118 @@
+"""A cold browser shows the first task rows of a production sized ledger within a second and a megabyte."""
+
+import json
+import warnings
+from typing import Any
+
+import pytest
+
+from tests.swarm_ledger.ledger_page import chromium
+from tests.swarm_ledger.test_api_v1 import authority_live, live, stored
+from tests.swarm_ledger.test_ledger_authority import SLUG
+
+__all__ = ["authority_live", "live"]
+
+FIRST_ROW = """(() => {
+  new MutationObserver((_, observer) => {
+    if (document.querySelector('[id^="item-tasks-"]')) {
+      window.firstTaskRow = performance.now();
+      observer.disconnect();
+    }
+  }).observe(document, {childList: true, subtree: true});
+})();"""
+OPEN_STATES = ("open", "claimed", "pr", "blocked")
+
+
+def text(size: int, seed: int) -> str:
+    return (f"Step {seed} reads the ledger and writes its result. " * (size // 50 + 1))[:size]
+
+
+def comments(seed: int) -> list[dict[str, Any]]:
+    return [{"id": f"c-{seed}-{n}", "by": "eng", "at": seed + n, "text": text(400, seed)} for n in range(3)]
+
+
+def production_document() -> dict[str, Any]:
+    phases = [{"id": f"p{n}", "title": f"Phase {n}", "description": text(2000, n)} for n in range(177)]
+    tasks = [
+        {
+            "id": f"t-open-{n}",
+            "title": f"Open task {n}",
+            "state": OPEN_STATES[n % len(OPEN_STATES)],
+            "phase": f"p{n % 177}",
+            "description": text(12000, n),
+            "comments": comments(n),
+        }
+        for n in range(1415)
+    ]
+    tasks += [
+        {
+            "id": f"t-done-{n}",
+            "title": f"Done task {n}",
+            "state": "done",
+            "done": True,
+            "phase": f"p{n % 177}",
+            "description": text(1500, n),
+        }
+        for n in range(3000)
+    ]
+    return {
+        "title": "Production sized",
+        "overview": text(600, 0),
+        "sources": [],
+        "priorities": [],
+        "plans": [],
+        "slices": [],
+        "freezes": [],
+        "questions": [],
+        "phases": phases,
+        "tasks": tasks,
+        "followups": [{"id": f"f-{n}", "text": text(300, n), "done": n >= 16} for n in range(5715)],
+        "alerts": [{"id": f"a-{n}", "text": text(300, n)} for n in range(222)],
+        "notifications": [{"id": f"n-{n}", "text": text(300, n)} for n in range(1496)],
+        "_meta": {
+            "rev": 4697,
+            "updated_at": 4697,
+            "created_at": 1,
+            "members": {f"agent-{n}": {"role": "member", "joined_at": n} for n in range(5604)},
+            "events": [{"rev": n, "kind": "sync requested", "by": "operator", "at": n} for n in range(4697)],
+            "stamps": {f"tasks/t-open-{n}/state": {"at": n, "by": "eng", "rev": n} for n in range(60000)},
+        },
+    }
+
+
+def received_bytes(totals: dict[str, int], event: dict[str, Any], finished: bool) -> None:
+    key = event["requestId"]
+    length = int(event["encodedDataLength"])
+    totals[key] = max(totals.get(key, 0), length) if finished else totals.get(key, 0) + length
+
+
+@pytest.mark.wall_clock
+@pytest.mark.feature("ledger-cold-load")
+def test_a_cold_browser_shows_the_first_task_rows_within_a_second_and_a_megabyte(
+    live: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = production_document()
+    size = len(json.dumps(document))
+    assert size > 28_000_000
+    stored(monkeypatch, document)
+    with chromium() as browser:
+        context = browser.new_context(viewport={"width": 1920, "height": 1080})
+        context.add_cookies(
+            [{"name": f"ledger-session-{SLUG}", "value": f"page:{live['admin']}", "url": f"http://{live['host']}"}]
+        )
+        page = context.new_page()
+        page.add_init_script(FIRST_ROW)
+        totals: dict[str, int] = {}
+        cdp = context.new_cdp_session(page)
+        cdp.send("Network.enable")
+        cdp.on("Network.dataReceived", lambda event: received_bytes(totals, event, False))
+        cdp.on("Network.loadingFinished", lambda event: received_bytes(totals, event, True))
+        page.goto(f"http://{live['host']}/{SLUG}", wait_until="commit")
+        page.wait_for_function("() => window.firstTaskRow !== undefined", timeout=30000)
+        transferred = sum(totals.values())
+        first_row = float(page.evaluate("window.firstTaskRow"))
+        context.close()
+    report = f"COLD LOAD document_bytes={size} first_task_row_ms={first_row:.0f} bytes_before_first_row={transferred}"
+    warnings.warn(report, stacklevel=1)
+    assert first_row < 1000, report
+    assert transferred < 1_000_000, report

@@ -97,29 +97,30 @@ def test_a_cursorless_connect_opens_without_building_the_page_view(live, monkeyp
     conn.close()
 
 
-def test_a_stream_starts_with_a_snapshot_then_sends_only_patches(live):
+def test_a_stream_opens_without_a_ledger_then_announces_it_and_sends_patches(live):
     port, token = live
     conn, response = connect(port, token)
     assert response.status == 200
     assert response.getheader("Content-Type") == "text/event-stream; charset=utf-8"
     assert response.getheader("Cache-Control") == "no-store"
     reader = frames(response)
-    _, snapshot, cursor = next_of(reader, {"snapshot"})
+    _, first, cursor = next_of(reader, {"open"})
     assert cursor
-    assert snapshot["swarm"] == {"config": {"state": "running"}}
-    assert set(snapshot) == {"ledger", "swarm"}
-    ledger = snapshot["ledger"]
-    assert "seeds" not in ledger["_meta"] and "api_operations" not in ledger["_meta"]
-    assert ledger["_meta"]["page_version"] == core.page_version()
-    assert "crew" in ledger["_meta"]
+    assert first == {"rev": None, "swarm": {"config": {"state": "running"}}}
     server.repository.apply_ops(SLUG, ops=[comment(1)])
-    _, change, cursor2 = next_of(reader, {"ledger"})
+    _, born, cursor2 = next_of(reader, {"open"})
+    assert cursor2 != cursor
+    ledger = server.HUB.resource(SLUG, "ledger")
+    assert born == {"rev": ledger["_meta"]["rev"]}
+    assert ledger["notes"][-1]["text"] == "note 1"
+    server.repository.apply_ops(SLUG, ops=[comment(2)])
+    _, change, cursor3 = next_of(reader, {"ledger"})
     assert change["rev"] == ledger["_meta"]["rev"] + 1
     assert set(change["patch"]["o"]) <= {"notes", "_meta", "notifications", "priorities", "alerts"}
     ledger = apply(ledger, change["patch"])
-    assert ledger["notes"][-1]["text"] == "note 1"
+    assert ledger["notes"][-1]["text"] == "note 2"
     assert ledger == server.HUB.resource(SLUG, "ledger")
-    assert cursor2 != cursor
+    assert cursor3 != cursor2
     reread = server.ledger_view(server.repository.get_document(SLUG))
     if reread != ledger:
         _, same, _ = next_of(reader, {"ledger"})
@@ -132,19 +133,21 @@ def test_a_stream_starts_with_a_snapshot_then_sends_only_patches(live):
 def test_a_reconnect_replays_the_changes_it_missed_and_nothing_else(live):
     port, token = live
     conn, response = connect(port, token)
-    _, snapshot, cursor = next_of(frames(response), {"snapshot"})
+    _, _, cursor = next_of(frames(response), {"open"})
     conn.close()
     server.repository.apply_ops(SLUG, ops=[comment(2)])
     server.repository.drain(5)
+    baseline = server.HUB.resource(SLUG, "ledger")
     server.repository.apply_ops(SLUG, ops=[comment(3)])
     server.repository.drain(5)
     conn, response = connect(port, token, cursor)
     assert response.status == 200
     reader = frames(response)
-    first = next_of(reader, {"ledger", "snapshot"})
-    second = next_of(reader, {"ledger", "snapshot"})
-    assert [first[0], second[0]] == ["ledger", "ledger"]
-    ledger = apply(apply(snapshot["ledger"], first[1]["patch"]), second[1]["patch"])
+    first = next_of(reader, {"ledger", "open"})
+    second = next_of(reader, {"ledger", "open"})
+    assert [first[0], second[0]] == ["open", "ledger"]
+    assert first[1]["rev"] == baseline["_meta"]["rev"]
+    ledger = apply(baseline, second[1]["patch"])
     assert [n["text"] for n in ledger["notes"]][-2:] == ["note 2", "note 3"]
     assert next_of(reader, {"ledger", "heartbeat"})[0] == "heartbeat"
     conn.close()
@@ -157,7 +160,7 @@ def test_an_expired_cursor_answers_410_and_a_fresh_connection_reloads(live):
     assert json.loads(response.read())["error"]["code"] == "cursor_expired"
     conn.close()
     conn, response = connect(port, token)
-    assert next_of(frames(response), {"snapshot"})[0] == "snapshot"
+    assert next_of(frames(response), {"open"})[0] == "open"
     conn.close()
 
 
@@ -187,7 +190,7 @@ def test_an_idle_stream_sends_heartbeats(live):
     port, token = live
     conn, response = connect(port, token)
     reader = frames(response)
-    next_of(reader, {"snapshot"})
+    next_of(reader, {"open"})
     assert next_of(reader, {"heartbeat", "ledger"})[0] == "heartbeat"
     conn.close()
 
@@ -195,7 +198,7 @@ def test_an_idle_stream_sends_heartbeats(live):
 def test_a_closed_stream_unsubscribes_and_stops_sampling(live):
     port, token = live
     conn, response = connect(port, token)
-    next_of(frames(response), {"snapshot"})
+    next_of(frames(response), {"open"})
     assert server.HUB.watched() == [SLUG]
     response.close()
     conn.close()
@@ -211,7 +214,9 @@ def test_sampling_publishes_swarm_changes_only_for_watched_ledgers(live, monkeyp
     port, token = live
     conn, response = connect(port, token)
     reader = frames(response)
-    next_of(reader, {"snapshot"})
+    next_of(reader, {"open"})
+    server.repository.apply_ops(SLUG, ops=[comment(1)])
+    next_of(reader, {"open"})
     monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: {"config": {"state": "paused"}})
     seen = []
     monkeypatch.setattr(server.HUB, "evict", lambda: seen.append("evict"))
@@ -228,8 +233,11 @@ def test_two_tabs_share_one_channel_and_both_receive_a_change(live):
     two, second = connect(port, token)
     readers = [frames(first), frames(second)]
     for reader in readers:
-        next_of(reader, {"snapshot"})
+        next_of(reader, {"open"})
     server.repository.apply_ops(SLUG, ops=[comment(4)])
+    for reader in readers:
+        next_of(reader, {"open"})
+    server.repository.apply_ops(SLUG, ops=[comment(5)])
     assert [next_of(reader, {"ledger"})[1]["rev"] for reader in readers] == [
         server.HUB.resource(SLUG, "ledger")["_meta"]["rev"]
     ] * 2

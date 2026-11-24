@@ -116,12 +116,12 @@ def live(monkeypatch):
     assert server.HUB.watched() == []
 
 
-def test_stream_reads_the_snapshot_with_the_header_credential(live):
+def test_stream_reads_the_open_event_with_the_header_credential(live):
     frames = watch_ledger.stream(SLUG)
     name, data, cursor = next(frames)
     frames.close()
-    assert name == "snapshot" and cursor
-    assert data["ledger"]["_meta"]["rev"] == repository.get_document(SLUG)["_meta"]["rev"]
+    assert name == "open" and cursor
+    assert data == {"rev": None, "swarm": None}
 
 
 def test_stream_raises_expired_for_a_lost_cursor(live):

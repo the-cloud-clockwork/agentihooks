@@ -83,15 +83,15 @@ def test_parse_drops_an_unfinished_frame():
     assert list(stream.parse(["event: ledger\n", "data: {}\n"])) == []
 
 
-def test_serve_sends_the_snapshot_then_heartbeats_until_the_client_goes(monkeypatch):
+def test_serve_sends_an_open_event_then_heartbeats_until_the_client_goes(monkeypatch):
     monkeypatch.setattr(stream, "HEARTBEAT_S", 0.01)
     hub = Hub()
     handler = Handler(Sink(3))
     assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)})[0] is None
-    snapshot = stream.frame("snapshot", {"ledger": ledger(1)}, Hub.cursor(hub.channels[SLUG], 0))
+    opened = stream.frame("open", {"rev": 1}, Hub.cursor(hub.channels[SLUG], 0))
     heartbeat = stream.frame("heartbeat", {})
-    assert handler.wfile.getvalue() == snapshot + heartbeat + heartbeat
-    assert handler.wfile.marks == [len(snapshot), len(snapshot + heartbeat), len(snapshot + heartbeat * 2)]
+    assert handler.wfile.getvalue() == opened + heartbeat + heartbeat
+    assert handler.wfile.marks == [len(opened), len(opened + heartbeat), len(opened + heartbeat * 2)]
     assert handler.sent == [
         200,
         ("Content-Type", "text/event-stream; charset=utf-8"),
@@ -144,7 +144,7 @@ def test_serve_raises_expired_before_sending_anything():
     assert hub.channels[SLUG].subscribers == 1
 
 
-def test_serve_sends_one_recovery_snapshot_then_heartbeats_when_the_writer_stops(monkeypatch):
+def test_serve_sends_one_recovery_open_event_then_heartbeats_when_the_writer_stops(monkeypatch):
     monkeypatch.setattr(stream, "HEARTBEAT_S", 0.01)
     hub = Hub(retained=1)
 
@@ -156,8 +156,8 @@ def test_serve_sends_one_recovery_snapshot_then_heartbeats_when_the_writer_stops
     handler = Handler(Sink(5, flood))
     assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)})[0] is None
     events = list(stream.parse(handler.wfile.getvalue().decode().splitlines()))
-    assert [name for name, _, _ in events] == ["snapshot", "snapshot", "heartbeat", "heartbeat", "heartbeat"]
-    assert events[1][1] == {"ledger": ledger(4)}
+    assert [name for name, _, _ in events] == ["open", "open", "heartbeat", "heartbeat", "heartbeat"]
+    assert events[1][1] == {"rev": 4}
     assert hub.watched() == []
 
 
@@ -175,8 +175,8 @@ def test_serve_resets_a_lagging_reader_once_and_resumes_patches(monkeypatch):
     handler = Handler(Sink(3, publish))
     assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)})[0] is None
     events = list(stream.parse(handler.wfile.getvalue().decode().splitlines()))
-    assert [name for name, _, _ in events] == ["snapshot", "snapshot", "ledger"]
-    assert events[1][1] == {"ledger": ledger(4)}
+    assert [name for name, _, _ in events] == ["open", "open", "ledger"]
+    assert events[1][1] == {"rev": 4}
     assert events[2][1]["rev"] == 5
     assert len(handler.wfile.marks) == 3
     assert hub.watched() == []
@@ -193,5 +193,5 @@ def test_serve_ends_the_response_cleanly_when_the_hub_drains(monkeypatch):
     handler = Handler(Sink(5, drain))
     assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)}, limit=10)[0] is None
     events = list(stream.parse(handler.wfile.getvalue().decode().splitlines()))
-    assert [name for name, _, _ in events] == ["snapshot"]
+    assert [name for name, _, _ in events] == ["open"]
     assert hub.watched() == []

@@ -281,11 +281,20 @@ def test_the_harness_serves_each_asset_with_its_type_and_refuses_an_unknown_one(
     }
 
 
-def test_the_harness_streams_the_ledger_as_one_snapshot():
-    assert answered(lambda r: sanity._events(r, {"title": "t"})) == {
-        "body": 'id: c0\nevent: snapshot\ndata: {"ledger": {"title": "t"}, "swarm": null}\n\n',
+def test_the_harness_streams_the_ledger_revision_as_an_open_frame():
+    assert answered(lambda r: sanity._events(r, {"_meta": {"rev": 1}})) == {
+        "body": 'id: c0\nevent: open\ndata: {"rev": 1, "swarm": null}\n\n',
         "content_type": "text/event-stream",
     }
+
+
+def test_the_harness_answers_the_summary_and_an_open_page_from_the_sanity_doc():
+    doc = sanity.ledger_doc([])
+    summary = answered(lambda r: sanity._summary(r, doc))["json"]
+    assert summary["data"]["title"] == "Artifact sanity"
+    assert summary["data"]["sections"]["tasks"] == {"open": 0, "states": {}}
+    page = answered(lambda r: sanity._open_page(r, doc), "http://x/api/v1/ledgers/artifact-sanity/tasks?state=open")
+    assert page["json"] == {"data": [], "revision": "r", "total": 0, "next_offset": None}
 
 
 def test_the_harness_shell_fills_every_placeholder_with_the_sanity_values():
@@ -328,8 +337,12 @@ def test_the_harness_routes_the_page_its_assets_and_its_stream_then_closes_the_t
     }
     css = "http://127.0.0.1:9/static/000000000000/css/home.css"
     assert answered(tab.routes["**/static/*/**"], css)["body"] == sanity.assets()["css/home.css"].read_text()
-    snapshot = answered(tab.routes["**/api/v1/ledgers/*/events"])["body"]
-    assert json.loads(snapshot.split("data: ", 1)[1]) == {"ledger": sanity.ledger_doc([]), "swarm": None}
+    events_url = "http://127.0.0.1:9/api/v1/ledgers/artifact-sanity/events"
+    opened = answered(tab.routes["**/api/v1/ledgers/**"], events_url)["body"]
+    assert json.loads(opened.split("data: ", 1)[1]) == {"rev": 1, "swarm": None}
+    summary_url = "http://127.0.0.1:9/api/v1/ledgers/artifact-sanity/summary"
+    summary = answered(tab.routes["**/api/v1/ledgers/**"], summary_url)["json"]
+    assert summary["data"]["title"] == "Artifact sanity"
 
 
 def test_the_pages_option_reads_the_shell_and_every_asset_from_the_given_folder(tmp_path: Path) -> None:

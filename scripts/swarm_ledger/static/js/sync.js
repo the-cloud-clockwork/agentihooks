@@ -117,6 +117,7 @@ export function closedLeftIn(name, key) {
 
 function keepDropped(previous, next) {
   for (const name of Object.keys(pulled)) {
+    if (!((next.closed || {})[name] || {}).ids) continue;
     const gone = hiddenDone(next, name);
     const have = new Set([...next[name], ...(older[name] || [])].map((i) => i.id));
     const dropped = previous[name].filter((i) => gone.has(i.id) && !have.has(i.id)).reverse();
@@ -277,7 +278,6 @@ export function receiveLedger(state) {
   if (inflight) return;
   if (staleAndIdle(state._meta.page_version)) return location.reload();
   applyServer(state);
-  resume();
 }
 
 export function loadSaved() {
@@ -307,6 +307,7 @@ let sections = {};
 let summaryTimer = null;
 const openRead = {};
 const positions = {};
+const loadedStates = {};
 const remote = {};
 
 async function answer(resp) {
@@ -333,27 +334,40 @@ function same(older, newer) {
   });
 }
 
+function countLoaded(name, row) {
+  const state = openState(name, row);
+  if (!state) return;
+  const bucket = loadedStates[name] || (loadedStates[name] = {});
+  bucket[state] = (bucket[state] || 0) + 1;
+}
+
 async function seedOnce() {
   const summary = readSummary().then(answer);
   const pages = Object.entries(FIRST).map(([name, limit]) => openPage(name, 0, limit).then((reply) => [name, reply.data]));
-  const { data } = await summary;
-  const newestPages = Object.entries(NEWEST).map(([name, limit]) => {
-    const offset = Math.max(0, ((data.sections || {})[name] || { open: 0 }).open - limit);
-    return openPage(name, offset, limit).then((reply) => [name, reply.data]);
-  });
-  const server = { ...data };
-  delete server.sections;
-  for (const [name, rows] of [...(await Promise.all(pages)), ...(await Promise.all(newestPages))]) {
-    positions[name] = new Map();
-    server[name] = same(held && held[name], placed(name, [], rows));
-    openRead[name] = rows.length;
+  try {
+    const { data } = await summary;
+    const newestPages = Object.entries(NEWEST).map(([name, limit]) => {
+      const offset = Math.max(0, ((data.sections || {})[name] || { open: 0 }).open - limit);
+      return openPage(name, offset, limit).then((reply) => [name, reply.data]);
+    });
+    const server = { ...data };
+    delete server.sections;
+    for (const [name, rows] of [...(await Promise.all(pages)), ...(await Promise.all(newestPages))]) {
+      positions[name] = new Map();
+      loadedStates[name] = {};
+      server[name] = same(held && held[name], placed(name, [], rows));
+      openRead[name] = rows.length;
+    }
+    sections = data.sections || {};
+    held = server;
+    heldRev = server._meta.rev;
+    newest = Math.max(newest, heldRev);
+    receiveLedger(held);
+    for (const name of COMPLETE) completeOpen(name).catch(() => null);
+  } catch (error) {
+    await Promise.allSettled(pages);
+    throw error;
   }
-  sections = data.sections || {};
-  held = server;
-  heldRev = server._meta.rev;
-  newest = Math.max(newest, heldRev);
-  receiveLedger(held);
-  for (const name of COMPLETE) completeOpen(name).catch(() => null);
 }
 
 export function seed() {
@@ -385,6 +399,7 @@ function placed(name, kept, read) {
   const at = positions[name] || (positions[name] = new Map());
   const rows = read.map(({ position, ...row }) => {
     if (Number.isInteger(position)) at.set(row.id, position);
+    countLoaded(name, row);
     return row;
   });
   const order = (row) => (at.has(row.id) ? at.get(row.id) : Infinity);
@@ -406,12 +421,8 @@ function openState(name, row) {
 
 export function openStates(name) {
   const section = sections[name];
-  if (!section || !doc) return {};
-  const loaded = {};
-  for (const row of doc[name] || []) {
-    const state = openState(name, row);
-    if (state) loaded[state] = (loaded[state] || 0) + 1;
-  }
+  if (!section) return {};
+  const loaded = loadedStates[name] || {};
   return Object.fromEntries(Object.entries(section.states).map(([state, n]) => [state, Math.max(0, n - (loaded[state] || 0))]));
 }
 
@@ -441,6 +452,15 @@ export function receiveOpen(at) {
   if (held && !seeding && at > heldRev) seed();
 }
 
+export function receiveSnapshot(ledger) {
+  if (!ledger || !ledger._meta) return;
+  sections = {};
+  held = ledger;
+  heldRev = ledger._meta.rev;
+  newest = Math.max(newest, heldRev);
+  receiveLedger(held);
+}
+
 export function receiveChange(change) {
   newest = Math.max(newest, change.rev);
   if (!held || seeding || heldRev >= change.rev) return;
@@ -457,7 +477,9 @@ export function receiveChange(change) {
     const gone = new Set(ids.gone);
     const list = (held[name] || []).filter((row) => !gone.has(row.id)).map((row) => bodies.get(row.id) || row);
     const known = new Set(list.map((row) => row.id));
-    next[name] = [...list, ...ids.u.filter((id) => !known.has(id) && bodies.has(id)).map((id) => bodies.get(id))];
+    const added = ids.u.filter((id) => !known.has(id) && bodies.has(id)).map((id) => bodies.get(id));
+    for (const row of added) countLoaded(name, row);
+    next[name] = [...list, ...added];
   }
   next._meta = { ...held._meta, rev: change.rev };
   held = next;

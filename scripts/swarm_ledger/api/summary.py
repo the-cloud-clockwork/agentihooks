@@ -26,8 +26,9 @@ READS = (
     "size",
     "_meta",
 )
-META_DROPPED = ("seeds", "api_operations", "members", "events")
-EVENTS_KEPT = 300
+META_KEPT = ("rev", "updated_at", "created_at", "time_left", "stats_refresh", "seed_error", "warnings", "task_revision")
+CLOSED_KEPT = ("hidden", "kept", "groups")
+EVENTS_KEPT = 150
 TASK_STATES = {"pr": 0, "claimed": 1, "open": 2, "blocked": 3}
 RANKS = ("urgent", "high", "normal", "low")
 
@@ -37,11 +38,12 @@ def build(parts: dict[str, Any], tasks: list[Any], holds: tuple[str, bool], limi
     swarm = ports.swarm()
     marks = swarm.freeze.marks(state, GRAPH.project(state)[0], *holds)
     status = swarm.phase_state.status(state)
-    closed = CLOSING.trimmed(state)[1]
+    view, hidden = CLOSING.trimmed(state)
+    closed = {name: {key: entry[key] for key in CLOSED_KEPT if key in entry} for name, entry in hidden.items()}
     raw: dict[str, Any] = parts.get("_meta") or {}
-    meta = {key: value for key, value in raw.items() if key not in META_DROPPED}
+    meta = {key: value for key, value in raw.items() if key in META_KEPT}
     meta.update(closed=closed, limits=limits, events=(raw.get("events") or [])[-EVENTS_KEPT:])
-    kept = {key: value for key, value in parts.items() if key not in PAGED and key != "_meta"}
+    kept = {key: view.get(key, value) for key, value in parts.items() if key not in PAGED and key != "_meta"}
     sections = {name: section(name, state.get(name) or []) for name in PAGED}
     return {**kept, "marks": marks, "phase_status": status, "sections": sections, "_meta": meta}
 
