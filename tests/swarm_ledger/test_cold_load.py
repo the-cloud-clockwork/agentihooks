@@ -108,6 +108,7 @@ def test_a_cold_browser_shows_the_first_task_rows_within_a_second_and_a_megabyte
         cdp.on("Network.loadingFinished", lambda event: received_bytes(totals, event, True))
         refused: list[str] = []
         page.on("pageerror", lambda error: refused.append(str(error)))
+        page.on("console", lambda line: refused.append(f"console {line.text}") if line.type == "error" else None)
         page.on(
             "response", lambda answer: refused.append(f"{answer.status} {answer.url}") if answer.ok is False else None
         )
@@ -115,7 +116,8 @@ def test_a_cold_browser_shows_the_first_task_rows_within_a_second_and_a_megabyte
         try:
             page.wait_for_function("() => window.firstTaskRow !== undefined", timeout=30000)
         except Exception as exc:
-            raise AssertionError(f"no task row shown; refused or failed: {refused}") from exc
+            shown = page.evaluate("() => (document.getElementById('tasks') || document.body).outerHTML.slice(0, 3000)")
+            raise AssertionError(f"no task row shown; refused or failed: {refused}; tasks: {shown}") from exc
         transferred = sum(totals.values())
         first_row = float(page.evaluate("window.firstTaskRow"))
         context.close()
