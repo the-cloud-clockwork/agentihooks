@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from scripts import serena_router_daemon
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
@@ -24,9 +25,10 @@ SLUG = "sw"
 
 
 @pytest.fixture
-def episode() -> Iterator[Any]:
+def episode(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     import fakeredis
 
+    monkeypatch.setattr(serena_router_daemon, "ensure", lambda: True)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=1, engine="events"))
     found = doc([task("lower"), task("higher", rank="high"), task("urgent", rank="urgent"), task("other")])
