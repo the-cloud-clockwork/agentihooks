@@ -3006,6 +3006,15 @@ jobs:
           python -P -m ruff check --config "$RUNNER_TEMP/grader/pyproject.toml" hooks/ scripts/ tests/
           python -P -m ruff check hooks/ scripts/ tests/
 
+      # dev's copy grades the head, so a pull request cannot loosen the check it must pass; only the pull request that introduces it meets a base without one.
+      - name: Require swarm image pins for every third party module import
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_swarm_imports.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.ci_swarm_imports --root "$GITHUB_WORKSPACE"
+
       - name: Format check
         if: ${{ !cancelled() }}
         run: python -P -m ruff format --check --config "$RUNNER_TEMP/grader/pyproject.toml" hooks/ scripts/ tests/
