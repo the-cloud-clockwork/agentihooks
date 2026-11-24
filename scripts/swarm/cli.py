@@ -42,7 +42,9 @@ from urllib.parse import urlsplit
 import scripts.tick.steps.report  # noqa: F401
 from hooks.classifier import settings as classifier_settings
 from hooks.context import injection_trace, quarantine
+from scripts import review
 from scripts.doctor import priming
+from scripts.forge.remote import CHANGE_LINK
 from scripts.gates import Who, catalog, intent, lift, modes, quiet
 from scripts.gates import feature as feature_gate
 from scripts.gates import log as gate_log
@@ -104,7 +106,6 @@ from scripts.swarm import (
     priming_trace,
     prompt,
     pull_head,
-    queue_exit,
     queue_priority,
     queue_record,
     ready,
@@ -129,6 +130,9 @@ from scripts.swarm import (
     waits,
 )
 from scripts.swarm import ledger_client as ledger_client
+from scripts.swarm import (
+    queue_exit as queue_exit,
+)
 from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.cli_parser import build_parser
@@ -257,7 +261,11 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
 PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
 PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) for site in PASS_SITES[1:]}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
-WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"judged"}), "wrapper view": frozenset({"agents"})}
+WRAPPER_HOOK_READS = {
+    "wrapper phases": frozenset({"doc"}),
+    "wrapper relay": frozenset({"judged"}),
+    "wrapper view": frozenset({"agents"}),
+}
 ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
 LEDGER_HOOKS = frozenset({"wrapper commands", "wrapper phases", "wrapper intent", "wrapper view"})
 CONFIG_KEYS = {
@@ -686,6 +694,7 @@ def run_tick(
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
         beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner, ledger, runtime)))
+        _hold_view(beating, slug, ledger)
         beating.enter_context(
             pool.running(
                 mode=store.config(slug).tick_mode,
@@ -696,14 +705,12 @@ def run_tick(
         budgets.resolve(store, slug)
         run_group("before")
         if store.config(slug).state == "stopped":
-            _hold_view(beating, slug, ledger)
             actions, doc = _stopped_tick(store, slug, ledger, held)
             return actions
         state = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         state |= {"inbox": InboxStore(store.redis), "scheduled": scheduled}
         ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
         wrapper = _Wrapper(held, beating, state, box, ticks)
-        _hold_view(beating, slug, ledger)
         gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen, sites=PASS_SITES)
         try:
             records = run_sites(PASS_SITES, state, box, gate, ticks.apply, PASS_HOOK_KEYS, PASS_SHUT_KEYS)
@@ -2087,7 +2094,7 @@ def cmd_pr(store: RedisStore, args: argparse.Namespace) -> None:
     keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
     head, repo, number, sha, body = PullHead(*pull_branch(args.url))
     pull_head.refuse_other_branch(row, args, PullHead(head, repo))
-    if not keeps_main:
+    if not keeps_main and not pull_head.gitlab_link(args.url):
         linked_issues.refuse_unnamed(args.url, body, row, lambda member: ledger.task(args.slug, member))
     branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
     confirmed = {"pr_number": number, "pr_head": sha} if number and not keeps_main else {}
@@ -2135,10 +2142,7 @@ def _split_binding(row, url, half):
     return {"split_pulls": [*pulls, url]}
 
 
-PULL_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
-
-
-def _pull_scope(row, args):
+def _pull_scope(row: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     scopes = row.get("pull_scopes") or {}
     kind = "stage" if args.stage is not None else "prerequisite" if args.prerequisite is not None else ""
     if not kind:
@@ -2146,8 +2150,8 @@ def _pull_scope(row, args):
     scope = getattr(args, kind).strip()
     if not scope:
         raise SwarmError(f"--{kind} needs the scope this pull request delivers")
-    if not PULL_URL.fullmatch(args.url):
-        raise SwarmError(f"--{kind} needs a GitHub pull request URL, not {args.url}")
+    if not CHANGE_LINK.fullmatch(args.url):
+        raise SwarmError(f"--{kind} needs a GitHub pull request or GitLab merge request URL, not {args.url}")
     return {"pull_scopes": {**scopes, args.url: {"kind": kind, "scope": scope}}}
 
 
@@ -2177,6 +2181,8 @@ def _require_target(store: object, args: argparse.Namespace, agent: AgentRecord)
 
 
 def cmd_merge(store: Any, args: argparse.Namespace) -> None:
+    from scripts.review import gate as review
+
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
@@ -2198,9 +2204,8 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: (
-                    (agent is not None and _queue_intent(store, args, agent, head))
-                    or queue_exit.require_fresh(args.url, head)
+                admit=lambda head: review.queue_admit(
+                    store, args, agent, _me(store, args), head, _queue_intent, stalled
                 ),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
@@ -2224,6 +2229,7 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
             return
         proof.update(found)
     proven = {**row, "proof": {**(row.get("proof") or {}), **proof}}
+    review.require_done(store, args.slug, ledger_kinds.kind(row), agent.lane, agent.task)
     missing = ledger_kinds.unmet(proven)
     if missing:
         raise SwarmError(_unproven(ledger_kinds.kind(row), missing))
@@ -2687,11 +2693,13 @@ def cmd_masters_channel(store, args):
     print(json.dumps([asdict(post) for post in posts]))
 
 
-def _read(path, what):
+def _read(path: str, what: str) -> str:
     try:
         return Path(path).expanduser().read_text(encoding="utf-8")
     except OSError as exc:
         raise SwarmError(f"cannot read the {what} {path}: {exc.strerror}") from exc
+    except UnicodeDecodeError as exc:
+        raise SwarmError(f"cannot read the {what} {path}: it is not UTF-8 text") from exc
 
 
 def _seat(agent):

@@ -13,7 +13,7 @@ from scripts.hive import admission, ceiling, headroom, orders, placement, placem
 from scripts.hive import config as hive_config
 from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.quota_state import CLOSED
-from scripts.routing.reservation import LaunchSlots, master_five_floor, primary_reserve_pct
+from scripts.routing.reservation import LaunchSlots, master_five_floor, master_week_floor
 from scripts.routing.slots import account_key
 from scripts.swarm import capacity, launch_endings, lease, profile_choice
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -189,9 +189,9 @@ def _master_closed(row: capacity.Account) -> bool:
 
 
 def _master_floor(row: capacity.Account) -> tuple[str, float] | None:
-    """The window and percent left at which ``row`` sits at the master floor: its week at or under the primary login
-    reserve, or its five hour window at or under the hard five hour handoff."""
-    if row.week_left is not None and row.week_left <= primary_reserve_pct(os.environ):
+    """The window and percent left at which ``row`` sits at the master floor: its week at or under the master week
+    floor, or its five hour window at or under the hard five hour handoff."""
+    if row.week_left is not None and row.week_left <= master_week_floor(os.environ):
         return "week", row.week_left
     if row.five_left is not None and row.five_left <= master_five_floor():
         return "five hour window", row.five_left

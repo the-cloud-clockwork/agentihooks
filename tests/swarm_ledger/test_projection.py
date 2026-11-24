@@ -92,7 +92,8 @@ class TimeLeft(unittest.TestCase):
         from tests.swarm_ledger.test_fold import function_source
 
         script = """
-const nodes = {}; const $ = id => nodes[id] ||= {replaceChildren: (...rows) => {nodes[id].textContent = rows.join(" · ");}};
+const nodes = {}; const $ = id => nodes[id] ||= {children: [], replaceChildren: (...rows) => {nodes[id].textContent = rows.join(" · ");}};
+const place = (box, rows) => box.replaceChildren(...rows);
 const h = (tag, attrs, ...children) => attrs.text || children.filter(Boolean).join(" ");
 const when = () => "";
 const inScope = list => list;

@@ -21,6 +21,7 @@ DELEGATED_CLIS = {
     "swarm-jump": "scripts.swarm_v2.kubernetes.jump",
     "accounts": "scripts.account_env",
     "access": "scripts.access_env",
+    "secret-env": "scripts.secret_env",
     "timer": "scripts.scheduler.cli:timer",
     "stopwatch": "scripts.scheduler.cli:stopwatch",
     "cron": "scripts.scheduler.cli:cron",

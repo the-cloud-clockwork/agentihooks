@@ -215,7 +215,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | yes | Repository URL whose dev runner trust list admits head actors; on the worker, the repository its node mirror holds, which the lab remote URL must name |
 | `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | yes | The lab remote URL a mirror fetches a sha GitHub or the node mirror lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub and the node mirror only. On a workstation or hive the same pair gives workspaces the `lab` remote; see [Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote) |
-| `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
+| `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset. Also the image the lab wants: a worker whose pod names a floating tag and runs another digest is answered `426` on its next lease and restarts in place, see [Worker executors](#worker-executors) |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
 
@@ -997,7 +997,7 @@ and `uv`, the worker waits in `ContainerCreating` while the kubelet retries the 
 | Setting | Value | Effect |
 |---|---|---|
 | `cluster-autoscaler.kubernetes.io/safe-to-evict` | `"false"`, the pod template's only annotation | The cluster autoscaler never removes a node that runs a worker; a CI node goes only after its workers have. A scale down of the Deployment removes idle workers first, see [Worker pod deletion cost](#worker-pod-deletion-cost) |
-| `terminationGracePeriodSeconds` | `worker.terminationGracePeriodSeconds`, `2100` | How long the kubelet waits after SIGTERM before it kills the container. The worker's drain window is fixed in code, `worker.GRACE_SECONDS`, 2100 seconds: a stopping worker stops leasing and drains its running units for up to that long, see [Worker executors](#worker-executors). A Helm value below 2100 kills a worker mid drain |
+| `terminationGracePeriodSeconds` | `worker.terminationGracePeriodSeconds`, `2100` | How long the kubelet waits after SIGTERM before it kills the container. The worker's drain window is fixed in code, `worker.GRACE_SECONDS`, 2100 seconds: a stopping worker stops leasing and drains its running units for up to that long, see [Worker executors](#worker-executors). A Helm value below 2100 kills a worker mid drain. A worker that restarts in place on a `426` lease answer drains within the same window and exits 0 on its own, with no SIGTERM and no grace left unused |
 | `strategy` | `RollingUpdate` with `maxSurge: 0` and `maxUnavailable: 1` | A rollout adds no surge pod, so it asks the autoscaler for no extra node, and takes one worker down at a time; a busy worker holds its step for up to the grace |
 
 ### Network
@@ -1200,7 +1200,8 @@ its done criteria name are not recorded:
 | The worker exits at start with `ci-lab worker refuses` | Its environment holds a `GITHUB_APP_` or `REDIS` variable | Remove the variable from the chart |
 | The worker exits at start with a `KeyError` naming a `CI_LAB_` variable | A required work setting is missing from the pod environment | Compare the pod's `env` with the contract table above |
 | The worker log repeats `ci-lab worker: lease call failed, retrying in <n>s` | The scheduler is not answering on 8800, or answers with a server error: it is rolling, restarting or down. The worker keeps running, retries after a backoff that doubles from 1 up to 10 seconds, and leases again on the first answer | `kubectl -n ci-lab get deploy ci-lab-scheduler` and `kubectl -n ci-lab logs deploy/ci-lab-scheduler --since 10m` |
-| The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
+| The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error other than `426`, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
+| The worker log reads `ci-lab worker: the lab wants another image, restarting` and the container restarts with no crash | `Client.lease` got a `426`: the worker's pod names a floating tag and runs a digest other than `CI_LAB_IMAGE`. It stops leasing, drains within the grace and exits 0, and the kubelet starts the container again on the same pod | Compare the pod's running image digest with `CI_LAB_IMAGE`; expected once per release until the chart rolls that pod |
 | A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
 | A venv build fails with `uv venv for <tree> ended with code` or `uv pip install for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
 | The worker log reads `ci-lab worker: unit <job> crashed: FileNotFoundError(2, 'No such file or directory')` and the traceback's last line names `<tree>/.github/test-requirements.lock` | The head does not track the test requirements lock, so `executors.lockfile_digest` cannot key the unit's venv. The unit never reports, its lease expires, and the [retry policy](#retry-policy) requeues it once and marks it lost on the second expiry | `git ls-tree <head> .github/test-requirements.lock` prints nothing; see [Which venv a unit gets](#which-venv-a-unit-gets) |
@@ -1930,9 +1931,10 @@ yields a name and that name equals the name of the checkout's `origin`. When the
 an owner, the part before the repository name in the path of a URL with a scheme or of an scp
 address such as `git@host:owner/repo.git`, that owner must equal the origin's owner, in lowercase.
 A lab URL with the repository at the root of its path, a local path and a `file://` URL name no
-owner and match on the name alone. The host is not compared. `wt.sh` compares the name alone.
+owner and match on the name alone. The host is not compared. These rules apply to both the Python
+checkout helper and `wt.sh`.
 
-| `AGENTIHOOKS_LAB_REMOTE` | `origin` | Gets `lab` |
+| `AGENTIHOOKS_LAB_REMOTE` | `origin` | Gets `lab` in Python and `wt.sh` |
 |---|---|---|
 | `http://<lab host>/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name `agentihooks` and the lab URL names no owner |
 | `http://<lab host>/the-cloud-clockwork/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name the owner `the-cloud-clockwork` and `agentihooks` |
@@ -1979,7 +1981,7 @@ holds the token, without printing it.
 
 | Symptom | Cause | Check |
 |---|---|---|
-| `git remote -v` lists no `lab` | The process that made the workspace had no `AGENTIHOOKS_LAB_REMOTE`, or the URL names another repository | `test -n "${AGENTIHOOKS_LAB_REMOTE:-}" && echo set \|\| echo unset` in that process's environment, then compare the last part of the lab URL, and the owner before it when the URL names one, with `git remote get-url origin` |
+| `git remote -v` lists no `lab` | The process that made the workspace had no `AGENTIHOOKS_LAB_REMOTE`, or the URL names another repository | <code>test -n "${AGENTIHOOKS_LAB_REMOTE:-}" && echo set &#124;&#124; echo unset</code> in that process's environment, then compare the last part of the lab URL, and the owner before it when the URL names one, with `git remote get-url origin` |
 | A hive checkout lacks `lab` while a fresh worktree has it | The checkout was cloned after the daemon started, or the daemon started without the variable | Restart the daemon, or run `wt.sh new` against that checkout |
 | `lab` points at an old URL | The workspace was carried before the URL changed | The next `wt.sh new`, `publish --via lab` or daemon start sets the new URL; the old URL's helper entry stays and is unused |
 | A push to `lab` fails authentication | The pushing shell has no `AGENTIHOOKS_LAB_REMOTE_TOKEN`, so the helper sends an empty password, or it holds another value than the lab expects | The third verify command; set the variable in the environment the agent runs in |
@@ -2926,8 +2928,10 @@ runs each fetch off the scheduler pass through
 unchanged, so the next pass reads the finished fetch and a manifest request GitHub never answers
 holds no pass from reaping leases or advancing grades. Until the fetch finishes each pass repeats the
 head's expansion up to the manifest, its git reads included; the mirror's `git fetch` of a missing
-sha still runs on the pass. A failed fetch answers once; any other answers every call for `FRESH_S`
-(300 seconds) after the fetch started. The dev push artifact is kept 7 days, so a commit older
+sha still runs on the pass. A failed fetch answers once; one that found a manifest answers every
+call for `FRESH_S` (300 seconds) after the fetch started, and one that found none answers for
+`ABSENT_S` (3600 seconds), so a search that passes one commit per pass keeps its first answers until
+it has passed the last commit of its depth. The dev push artifact is kept 7 days, so a commit older
 than that is answered only from the store. A head that needs test units and finds none fails with
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
@@ -3125,14 +3129,33 @@ expansion still reads the mirror with `git ls-tree` and `git show`:
 | Job | Units |
 |---|---|
 | `mutation` | One `mutant` unit per function the head changes against its base, naming every mutant of that function, or several when those mutants price over the sandbox timeout |
-| `mutation-stats` | One `stats` unit per test file present at the head that holds a test running such a function, with the worker's stats options |
+| `mutation-stats` | One `stats` unit per test file the head's mutant units trace, with the worker's stats options |
 
 The changed lines are `scripts.ci_mutation.scope.changes_since` of the base and head, the lines the
 pull request mutation gate grades. `expand_mutation.covering` maps each function to the fingerprint
 of every dependency manifest test that ran it or a function nested in it, and those fingerprints
-enter the mutant key, so a changed covering test rekeys the unit. The stats units warm the stats
-cache the worker's mutant runner reads before it runs the mutants. The manifest only names the tests
-of the base, while the mutant runner runs every test module of the head, so
+enter the mutant key, so a changed covering test rekeys the unit.
+
+Every mutant unit of a head traces the same test files, and the scheduler names them on the unit as
+its manifest, a JSON list:
+
+- the test files present at the head that hold a dependency manifest test running a changed
+  function;
+- each test module of the head that holds no manifest test (`expand_tests.unlisted_modules`);
+- each test module the head changes against its base and still holds
+  (`expand_mutation.changed_tests`).
+
+The manifest is stored once under the unit's key, like a test unit's, and the lease carries it. It
+is outside the key. One stats unit is planned per traced file, and none for a head that changes no
+function. A test in a listed test module the head leaves as it was, which reaches a changed function
+only at the head and ran no changed function when the manifest was recorded, is not traced. The
+hash of each test module the head changes enters every mutant key of that head, with the hashes
+described below, so a head that edits a test module rekeys its mutant units, also when none of that
+module's manifest tests ran the function.
+
+The stats units warm the stats cache the worker's mutant runner reads before it runs the mutants.
+The manifest only names the tests of the base, while the mutant runner also runs every test module
+the manifest lists no test of, so
 `expand_tests.unlisted_test_hashes` hashes each test module of the head that holds no manifest test,
 with every conftest pytest loads for it and every test tree module either imports, and those hashes
 enter every mutant key too: a head that adds or edits such a module rekeys its units. The manifest
@@ -3168,15 +3191,16 @@ A head with no kept line gets neither mutation job, and its grade folds on its o
 
 | Input | Where | Without it |
 |---|---|---|
-| `[tool.mutmut]` `source_paths` | The head's `pyproject.toml` | The worker cannot trampoline its copy of the head, so the executor raises a `KeyError` before the runner starts |
 | A quoted `mutmut==<version>` requirement | The head's `pyproject.toml`, such as the `dev` extra of `[project.optional-dependencies]` | Expansion raises `<checkout>/pyproject.toml pins no mutmut version` |
 | A dependency manifest stored at or before the base | The lab store, fetched as [Test units](#test-units) describes | Expansion raises `no dependency manifest at or before <base>` before any mutation unit is built |
 | `CI_LAB_MIRROR_STORE` | The scheduler's [environment](#environment) | The scheduler does not start |
 | `CI_LAB_MUTATION_CACHE`, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` | The worker's [environment](#environment) | The worker does not start |
 
-The lab reads no other mutmut setting. The scheduler names the mutants and the worker trampolines
-them in their own processes without loading mutmut's config, so neither depends on its working
-directory. A head's `do_not_mutate_patterns` are not applied; its `# pragma: no mutate` lines are.
+The lab reads no mutmut setting, `source_paths` included: the changed files come from
+`scope.changes_since`, which looks under `hooks/` and `scripts/`. The scheduler names the mutants
+and the worker trampolines them in their own processes without loading mutmut's config, so neither
+depends on its working directory. A head's `do_not_mutate_patterns` are not applied; its
+`# pragma: no mutate` lines are.
 
 This repository's `pyproject.toml` holds both:
 
@@ -3226,16 +3250,29 @@ refuses a key of that form with `ValueError: not a <kind> unit key: <key>`, so t
 
 #### How a worker runs them
 
-Both kinds run through `scripts.ci_lab.executors.mutation` in the private trampolined copy,
-as [Worker executors](#worker-executors) describes:
+Both kinds run through `scripts.ci_lab.executors.mutation` in a private copy of the head, as
+[Worker executors](#worker-executors) describes. The executor first makes the lease's base present
+in the pod's store and puts behind trampolines only the functions the head changes against that
+base: for each file `scope.changes_since` names, `run_mutation.trampoline` rewrites the functions
+whose lines meet the changed lines, from `expand_mutation.changed_functions`, the selection the
+scheduler names the mutant units from. No other file of the copy is rewritten, so the step's memory
+and time follow the size of the change.
 
 | Kind | Runner requests | Passes when |
 |---|---|---|
 | `stats` | One stats request over the unit's test file, with the copy as root and `CI_LAB_MUTATION_CACHE` | The runner exits 0 |
-| `mutant` | A stats request over every tracked `test_*.py` under `tests/` of the copy with the same cache, then a mutant request with the unit's mutant names, the tests those stats records show reaching its function with their seconds, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET` and `CI_LAB_MUTATION_CAP` | The runner exits 0 and every row reads `killed` |
+| `mutant` | A stats request over the test files the unit's manifest names with the same cache, then a mutant request with the unit's mutant names, the tests those stats records show reaching its function with their seconds, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET` and `CI_LAB_MUTATION_CAP` | The runner exits 0 and every row reads `killed` |
+
+A mutant unit whose lease carries no manifest raises `mutant unit <key> carries no manifest of the
+test files to trace`, and one with a member the copy holds behind no trampoline raises `mutant unit
+<key> names mutants its tree holds behind no trampoline`, both before the runner starts: the
+scheduler and the worker disagree on the change, which must not grade as a surviving mutant.
 
 The stats request of a mutant unit reuses every record in `CI_LAB_MUTATION_CACHE` whose inputs
 still match, such as those the grade's stats units stored, and measures only the other test files.
+A stats collection over test files that collect no test, such as a traced test module that holds no
+test, ends as a record with status 0 and no test: `run_mutation.collected_status` reads pytest's no
+tests collected exit code as 0 and keeps every other code, which still fails the collection.
 Each mutant row has a status:
 
 | Status | Meaning |
@@ -3416,13 +3453,17 @@ Each grade is `scripts.ci_lab.scheduler.summary` of its state:
 from the scheduler and runs each through `scripts.ci_lab.executors`, the adapter its unit kind
 names. Every grant of `POST /lease` carries the job's `head`, `base` and `grader` revisions: the
 scheduler enqueues a grade's misses with the grade's base and its plan's grader revision.
+`POST /lease` answers `426` with no grant, and records no offer, for a worker whose pod runs a
+digest other than `CI_LAB_IMAGE` under a floating tag; a pod pinned by digest is never stale, so a
+release that leaves the chart's tag pinned changes nothing live. Every other request is answered
+as before.
 
 | Kind | Trees | Executor inputs |
 |---|---|---|
 | `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
 | `test` | head, read only | the batch and its selected manifest records, read from the object store into its lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
-| `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
-| `mutant` | the same private trampolined copy | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
+| `stats` | a private copy of the head with the functions the head changes against the lease's base behind their trampolines, and the base present in the pod's store | the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
+| `mutant` | the same private trampolined copy | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of the test files its manifest names show reaching the mutant's function, with their seconds |
 
 The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
 from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
@@ -3435,7 +3476,15 @@ termination grace: 2100 seconds, the 30 minute unit time limit (`worker.UNIT_TIM
 which every executor's pod timeout reads) plus the five delivery calls of a unit (two upload
 URLs, two puts and the completion) at the 60 second HTTP timeout. The worker Deployment of the
 deployment repository's `ci-lab` chart sets `worker.terminationGracePeriodSeconds` to the same 2100 seconds, so
-a rollout lets the longest unit finish and deliver before the pod is killed.
+a rollout lets the longest unit finish and deliver before the pod is killed. A `426` lease answer
+stops the worker the same way, without SIGTERM: it stops leasing, drains within the same grace and
+its process exits 0, so the kubelet restarts the container in the same pod and pulls the floating
+tag; its running units finish or are left to reap exactly as on a SIGTERM drain. The entry point
+empties `CI_LAB_WORK_ROOT` first, sealed trees and folders without owner access included, so a
+restarted or freshly scheduled pod always starts from an empty root: the venvs, mutation cache and
+killers a worker built under it are built again after any container restart, a crash included. A
+worker answered `426` again after its restart, because the node has not pulled the wanted digest
+yet, exits again at once; the kubelet's restart backoff is the only pause between those attempts.
 
 Check the wiring offline:
 
@@ -4487,8 +4536,11 @@ verdict.
 - `PATH` is `settings.venv/bin`, then `/usr/local/bin`, where the worker image installs semgrep
   and helm, then `/bin:/usr/bin`. `RUFF_CACHE_DIR` is the `ruff` folder inside `RUNNER_TEMP`,
   since the worker seals the leased head tree and ruff would otherwise write `.ruff_cache` into
-  it. `settings.whitelist` and the step's own `env` values, with their `${{ }}` expressions read
-  from `settings.context`, come after both and can replace them. Neither can replace
+  it. `AGENTIHOOKS_TYPE_WORKERS` is `1`, so the type gate runs one basedpyright checker at a
+  time: a worker's memory holds one beside its other units, and the lease grants a worker one
+  static gate of the job `type-gate` at a time, whatever its free slots.
+  `settings.whitelist` and the step's own `env` values, with their `${{ }}` expressions read
+  from `settings.context`, come after these and can replace them. Neither can replace
   `RUNNER_TEMP`, `GITHUB_WORKSPACE` or `GITHUB_STEP_SUMMARY`.
 
 The bind applies to the real tree paths, so a write through `$RUNNER_TEMP/grader/...` or

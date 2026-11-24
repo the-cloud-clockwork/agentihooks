@@ -382,3 +382,78 @@ def test_a_hold_entered_on_another_thread_closes_on_this_one_without_raising() -
     stack.close()
     assert view.HELD.get() is None
     assert view.REFRESH.get() is None
+
+
+EVENTFUL = {**STATE, "_meta": {"rev": 4, "events": [{"rev": 3}]}}
+
+
+def held_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *replies: dict[str, object]
+) -> tuple[Path, list[tuple[object, ...]]]:
+    from scripts.scheduler import service
+    from scripts.swarm import ledger_client
+
+    answers = list(replies)
+    calls: list[tuple[object, ...]] = []
+    ledger = SimpleNamespace(
+        base=lambda slug: f"http://ledger/{slug}",
+        client=lambda slug, timeout: api.ResourceClient(f"http://ledger/{slug}", {}, timeout),
+        REQUEST_TIMEOUT=4,
+    )
+
+    def changes(*args: object) -> dict[str, object]:
+        calls.append(args[1:])
+        return answers.pop(0)
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
+    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(api.ResourceClient, "changes", changes)
+    return view.view_file("http://ledger/sw", "sw", tmp_path), calls
+
+
+def renewed_after_a_write(stored: Path) -> view.LedgerView | None:
+    with view.holding():
+        view.start("sw")
+        kept = view.HELD.get()
+        assert kept is not None and kept.path == stored
+        view.wrote()
+        return view.current()
+
+
+@pytest.mark.feature("swarm-tick-renew-keeps-stored-view")
+def test_a_pass_start_stores_the_view_its_delta_read_moved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    stored, _ = held_ledger(tmp_path, monkeypatch, changed(12))
+    api.write_export_file(stored, 11, STATE)
+    with view.holding():
+        started = view.start("sw")
+    assert started is not None and started.generation == 12
+    assert api.read_export_file(stored) == (12, {**STATE, "_meta": {"rev": 5, "events": []}})
+
+
+@pytest.mark.feature("swarm-tick-renew-keeps-stored-view")
+def test_a_renew_after_a_ledger_write_holds_the_patched_view(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    stored, calls = held_ledger(tmp_path, monkeypatch, {"generation": 11, "data": EVENTFUL}, changed(12))
+    renewed = renewed_after_a_write(stored)
+    assert renewed is not None
+    assert (renewed.generation, renewed.tasks, renewed.meta) == (12, STATE["tasks"], {"rev": 5, "events": [{"rev": 3}]})
+    assert calls == [("sw", 0, view.PARTS, view.TICK_SCOPE, None), ("sw", 11, view.PARTS, view.TICK_SCOPE, 3)]
+
+
+@pytest.mark.feature("swarm-tick-renew-keeps-stored-view")
+def test_a_renew_after_a_ledger_write_leaves_the_stored_view_at_the_pass_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored, _ = held_ledger(tmp_path, monkeypatch, {"generation": 11, "data": STATE}, changed(12))
+    renewed_after_a_write(stored)
+    assert api.read_export_file(stored) == (11, STATE)
+
+
+@pytest.mark.feature("swarm-tick-renew-keeps-stored-view")
+def test_a_renew_whose_stored_view_no_longer_fits_stores_the_full_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unfit = {"generation": 11, "data": {"tasks": []}}
+    stored, _ = held_ledger(tmp_path, monkeypatch, unfit, changed(12), {"generation": 12, "data": STATE})
+    renewed = renewed_after_a_write(stored)
+    assert renewed is not None and (renewed.generation, renewed.tasks) == (12, STATE["tasks"])
+    assert api.read_export_file(stored) == (12, STATE)

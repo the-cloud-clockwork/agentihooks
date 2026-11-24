@@ -1,0 +1,20 @@
+rules:
+  - id: build-gate-serena-repository
+    languages: [python]
+    severity: ERROR
+    message: Serena edits must carry their activated or working directory repository before area matching.
+    paths:
+      include:
+        - /scripts/gates/build.py
+        - build-gate-serena-repository.py
+    patterns:
+      - pattern-inside: |
+          def $FUNCTION(...):
+              ...
+              if $CALL.tool.startswith(SERENA):
+                  ...
+      - pattern-either:
+          - pattern: return [] if $DRY else [(NO_VALUE, _area($SCOPE))]
+          - pattern: return [(NO_VALUE, _area($SCOPE))]
+          - pattern: return [] if $DRY else [("", _area($SCOPE))]
+          - pattern: return [("", _area($SCOPE))]

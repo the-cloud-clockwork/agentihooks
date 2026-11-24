@@ -1,0 +1,6 @@
+{
+  "scripts/secret_env.py:scripts.secret_env.x__write_variable:c4f8adba16d5f6174fb45b7cc51fe63e263b2ac554835bd8862a24a1224c00e5": {
+    "reader": "standards_reader",
+    "reason": "os.fdopen resolves the codec through codecs.lookup, which is case-insensitive, so the same UTF-8 codec writes the same bytes; only stream.encoding differs and the code never reads it."
+  }
+}
