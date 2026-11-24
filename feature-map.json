@@ -15325,6 +15325,20 @@
       ]
     },
     {
+      "id": "guard-stripping-reads-heredocs-from-the-bash-parse",
+      "origin": "regression",
+      "ordered_at": "2026-11-24",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2809",
+      "behaviour": "The shared command stripping finds heredocs in the tree-sitter bash parse, so a << shift outside double parentheses never opens one and branch guard refuses a push on the line after it. The text around a heredoc stays exact. A heredoc is cut only when its terminator holds the delimiter word, so a double quoted delimiter keeps its body as before, and a command the parse reads with an error keeps every heredoc.",
+      "seam": "hooks.context._strip.strip_non_command_content, observed through hooks.context.branch_guard.check_branch_guard on Bash payloads",
+      "tests": [
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_the_line_after_any_arithmetic_shift",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_after_any_arithmetic_shift",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_exact_text_around_heredocs",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_a_heredoc_the_parse_cannot_close"
+      ]
+    },
+    {
       "id": "swarm-successor-keeps-predecessor-tracked",
       "origin": "regression",
       "ordered_at": "2026-11-20",
