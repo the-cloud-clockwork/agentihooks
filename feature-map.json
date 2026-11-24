@@ -1805,6 +1805,16 @@
       ]
     },
     {
+      "id": "swarm-remove-deletes-hive-task-copies",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-remove-task-copies",
+      "behaviour": "Removing a swarm deletes every hive's task copy of that swarm and its work folder pointers, scanning its own keys and the task copy keys of every hive with the scan page size and deleting them in chunks of that size, never listing keys, while another swarm's copies stay, including a swarm whose name starts with the removed one, and each hive's own files key stays.",
+      "seam": "agentihooks swarm remove through RedisStore.remove, and ledger_workspace.task_files_key with a wildcard hive and task",
+      "tests": [
+        "tests/swarm/test_swarm_remove.py::test_remove_deletes_the_swarm_task_copies_on_every_hive_by_scanning_pages_and_keeps_other_swarms"
+      ]
+    },
+    {
       "id": "hub-admission-hive-max-agents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-hive-max-agents",
@@ -4262,6 +4272,18 @@
         "tests/tick/test_slow_lane_deadline.py::test_a_later_slow_step_finishes_after_the_former_lane_deadline",
         "tests/tick/test_slow_lane_deadline.py::test_live_slow_budgets_keep_the_pass_join_inside_its_original_window",
         "tests/tick/test_slow_lane_deadline.py::test_slow_dependents_and_finished_records_survive_the_pass_exit"
+      ]
+    },
+    {
+      "id": "swarm-tick-scan-closes-in-its-own-context",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-slow-lane-reaper-reset",
+      "behaviour": "A tick pass's process scan ends only in the context that opened it: a close from another context, such as the slow lane thread opening the wrapper relay hook, leaves that context as it is and raises nothing, so the slow lane keeps running its steps and hands their records back, and the pass that opened the scan puts back the value it replaced when it closes.",
+      "seam": "scripts.tick.sites.TickSites start hook and close, called directly from a slow lane thread and through scripts.tick.engine.run_graph with a SiteGate whose relay hook the slow lane opens",
+      "rules": ["contextvar-token-kept-on-object"],
+      "tests": [
+        "tests/tick/test_scan_close_context.py::test_a_scan_closed_from_the_slow_lane_context_stays_open_until_the_pass_that_opened_it_closes",
+        "tests/tick/test_scan_close_context.py::test_the_slow_lane_survives_opening_the_relay_hook_that_closes_the_pass_scan"
       ]
     },
     {
@@ -8145,7 +8167,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-21",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-sweep-spares-chart-release",
-      "behaviour": "The panic cancel sweep, from the panic button and from the tick pass, leaves the release workflow runs on main running: the Helm chart release workflow run, the PyPI publish and Release dispatches and a push run on main such as Pages. It still cancels the runs on the panicking swarm's agent branches and the workflow run event runs whose title names one of those branches.",
+      "behaviour": "The panic cancel sweep, from the panic button and from the tick pass, leaves the release workflow runs on main running: workflow run event runs on main, the PyPI publish and Release dispatches and a push run on main such as Pages. It still cancels the runs on the panicking swarm's agent branches and the workflow run event runs whose title names one of those branches.",
       "seam": "swarm panic on and the tick pass panic sweep",
       "tests": [
         "tests/swarm/test_panic_scope.py::test_the_panic_button_leaves_release_runs_on_main_running",
@@ -8917,6 +8939,18 @@
       "seam": "hive-rollout.yaml hook Job container image and the chart release package appVersion",
       "tests": [
         "tests/test_swarm_chart_hive_rollout_release.py::test_the_rollout_hooks_run_the_hive_worker_tag_the_chart_release_stamps"
+      ]
+    },
+    {
+      "id": "release-chart-proven-and-pushed-by-the-hive-job",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-chart-proof-same-runner",
+      "behaviour": "A published release packages its Helm chart, installs that archive in kind and pushes the same archive to the registry from the hive job of the worker image release, on the runner that job already holds after the hive worker publish, and pushes nothing when the checksum, packaging or kind check fails.",
+      "seam": "swarm-node-image.yml hive job chart steps after the hive worker publish and the archive folder they share",
+      "tests": [
+        "tests/contracts/promotion/test_chart_release.py::test_the_hive_job_proves_and_pushes_the_release_chart_on_its_own_runner",
+        "tests/contracts/promotion/test_chart_release.py::test_the_chart_publishes_only_after_kind_installs_the_packaged_archive",
+        "tests/contracts/promotion/test_chart_release.py::test_a_failed_checksum_package_kind_check_or_registry_step_stops_publication"
       ]
     },
     {
@@ -14578,6 +14612,34 @@
         "tests/tick/steps/test_order_waiting.py::test_the_step_notes_the_orders_of_the_pass_state",
         "tests/tick/steps/test_order_waiting.py::test_the_finding_is_in_the_swarm_status_findings_and_goes_to_the_master_inbox",
         "tests/tick/steps/test_order_waiting.py::test_a_view_without_slices_counts_every_task_filed_under_a_slice"
+      ]
+    },
+    {
+      "id": "health-kept-state-one-helper",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "A health check that keeps state between tick passes stores it as one JSON text under its own key of the swarm, the time of the pass first and its rows after it. One helper reads and writes it; the focus unclaimed and order waiting checks call it and keep the same text they always kept, apart from each other and from another swarm, and an absent value reads as empty. The helper refuses rows kept under the name of the time. A health check that gets or sets a key of the swarm on its own, inline or through a name, is refused, and the checks excused from that only shrink.",
+      "seam": "scripts.swarm.health.kept read and write, and focus_unclaimed and order_waiting observe and read over a Redis store",
+      "semgrep_rule": "feature-health-kept-state-one-helper",
+      "tests": [
+        "tests/tick/steps/test_kept_health_state.py::test_the_focus_check_keeps_its_counts_as_one_text_under_its_key",
+        "tests/tick/steps/test_kept_health_state.py::test_the_order_check_keeps_its_waits_as_one_text_under_its_key",
+        "tests/tick/steps/test_kept_health_state.py::test_each_check_keeps_its_state_apart_from_the_other_and_from_another_swarm",
+        "tests/tick/steps/test_kept_health_state.py::test_the_helper_reads_empty_then_what_it_wrote_under_the_key_of_that_swarm",
+        "tests/tick/steps/test_kept_health_state.py::test_the_helper_refuses_rows_kept_under_the_name_of_the_time_of_the_pass",
+        "tests/tick/steps/test_kept_health_state.py::test_the_rule_excuses_only_checks_that_still_keep_state_on_their_own_and_did_before_the_helper"
+      ]
+    },
+    {
+      "id": "health-kept-key-own-module",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "The value a health check keeps between tick passes belongs to that check's module alone: its observe half writes it in the check's step and its findings half reads it in the health findings step, both through the helper under the module's own key. No other module calls the helper with a key that is not its own or names another check's key; a value another module reads is a declared domain written through a port.",
+      "seam": "every module under scripts and hooks against the key of each health check that keeps state through scripts.swarm.health.kept, found in the tree",
+      "semgrep_rule": "feature-health-kept-key-own-module",
+      "tests": [
+        "tests/tick/steps/test_kept_health_state.py::test_the_checks_that_keep_state_through_the_helper_are_found_in_the_tree",
+        "tests/tick/steps/test_kept_health_state.py::test_only_the_check_names_the_key_of_the_state_it_keeps"
       ]
     },
     {
