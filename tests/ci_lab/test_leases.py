@@ -582,6 +582,7 @@ def test_a_lease_whose_record_vanished_holds_no_type_gate_unit(jobs: queue.Queue
 @pytest.mark.feature("lab-type-gate-one-per-worker")
 def test_only_a_static_gate_of_a_named_job_is_a_unit_a_worker_runs_one_at_a_time() -> None:
     assert leases.solo(gate(TYPE_GATE))
+    assert leases.solo(gate("type-gate/checker/hold-the-errors-of-a-called-workflow"))
     assert not leases.solo(gate(FORMAT_GATE))
     assert not leases.solo(Unit(kind="test", key="a", members=(TYPE_GATE,)))
     assert not leases.solo(Unit(kind="static", key="bare", members=()))
