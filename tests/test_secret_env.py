@@ -96,6 +96,42 @@ def test_transfer_replaces_duplicate_assignments_and_preserves_other_lines(
     assert capsys.readouterr() == ("", "")
 
 
+@pytest.mark.feature("cluster-secret-private-env")
+def test_existing_comments_and_plain_values_are_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    target = tmp_path / "private.env"
+    target.write_text("OTHER=Xkeep # it's (kept)\n")
+    _cluster(monkeypatch, "replacement")
+    assert secret_env.main(_args(target)) == 0
+    assert target.read_text() == "OTHER=Xkeep # it's (kept)\nSERVICE_TOKEN=replacement\n"
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.feature("cluster-secret-private-env")
+def test_transfer_accepts_mixed_case_keys_and_variables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    target = tmp_path / "private.env"
+    run = _cluster(monkeypatch, "synthetic-value")
+    assert secret_env.main(["example", "service", "Token.KEY", "service_Token", str(target)]) == 0
+    assert target.read_text() == "service_Token=synthetic-value\n"
+    assert run.call_args.args[0][-1] == 'go-template={{index .data "Token.KEY"}}'
+
+
+@pytest.mark.feature("cluster-secret-private-env")
+def test_replacement_is_staged_beside_the_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    target = tmp_path / "private.env"
+    _cluster(monkeypatch, "synthetic-value")
+    replace = Mock(wraps=secret_env.os.replace)
+    monkeypatch.setattr(secret_env.os, "replace", replace)
+    assert secret_env.main(_args(target)) == 0
+    staged, destination = replace.call_args.args
+    assert Path(staged).parent == tmp_path
+    assert destination == target
+
+
 @pytest.mark.parametrize(
     "kind",
     [
@@ -154,7 +190,7 @@ def test_transfer_refuses_invalid_identifiers(
     assert capsys.readouterr() == ("", "Secret transfer failed.\n")
 
 
-@pytest.mark.parametrize("failure", ["nonzero", "timeout", "missing", "invalid", "multiline", "nul"])
+@pytest.mark.parametrize("failure", ["nonzero", "timeout", "missing", "invalid", "lenient", "multiline", "nul"])
 @pytest.mark.feature("cluster-secret-private-env")
 def test_failed_retrieval_never_writes_or_exposes_values(
     failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -165,10 +201,9 @@ def test_failed_retrieval_never_writes_or_exposes_values(
     run = _cluster(monkeypatch, "synthetic-value", 1 if failure == "nonzero" else 0)
     if failure == "timeout":
         run.side_effect = subprocess.TimeoutExpired("kubectl", 30, b"synthetic-value", b"synthetic-value")
-    elif failure in {"missing", "invalid"}:
-        run.return_value = subprocess.CompletedProcess(
-            [], 0, b"<no value>" if failure == "missing" else b"!invalid", b""
-        )
+    elif failure in {"missing", "invalid", "lenient"}:
+        output = {"missing": b"<no value>", "invalid": b"!invalid", "lenient": b"c3ludGhldGlj!"}[failure]
+        run.return_value = subprocess.CompletedProcess([], 0, output, b"")
     elif failure in {"multiline", "nul"}:
         value = "synthetic\nvalue" if failure == "multiline" else "synthetic\x00value"
         run.return_value = subprocess.CompletedProcess([], 0, base64.b64encode(value.encode()), b"")
@@ -240,18 +275,19 @@ def test_existing_multiline_values_are_refused_without_changes(
     assert capsys.readouterr() == ("", "Secret transfer failed.\n")
 
 
+@pytest.mark.parametrize("value", ["synthetic 'value'", "X's synthetic"])
 @pytest.mark.feature("cluster-secret-private-env")
 def test_apostrophes_round_trip_through_the_host_loader(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     monkeypatch.delenv("SERVICE_TOKEN", raising=False)
     target = tmp_path / "private.env"
-    _cluster(monkeypatch, "synthetic 'value'")
+    _cluster(monkeypatch, value)
     assert secret_env.main(_args(target)) == 0
-    assert target.read_text() == "SERVICE_TOKEN=\"synthetic 'value'\"\n"
+    assert target.read_text() == f'SERVICE_TOKEN="{value}"\n'
     assert config._parse_env_file(target) == set()
-    assert secret_env.os.environ["SERVICE_TOKEN"] == "synthetic 'value'"
+    assert secret_env.os.environ["SERVICE_TOKEN"] == value
     assert capsys.readouterr() == ("", "")
 
 
@@ -287,6 +323,7 @@ def test_unrepresentable_values_are_refused_without_changes(
         "OTHER=$(echo\nSERVICE_TOKEN=inside\nSERVICE_TOKEN=old)\n",
         'OTHER="$(printf "\nSERVICE_TOKEN=inside\nSERVICE_TOKEN=")"\nSERVICE_TOKEN=old\n',
         "OTHER=" + chr(96) + "echo\nSERVICE_TOKEN=inside\nSERVICE_TOKEN=old" + chr(96) + "\n",
+        "# note\n\nnot-an-assignment\nSERVICE_TOKEN=old\n",
     ],
     ids=[
         "escaped-quote",
@@ -296,6 +333,7 @@ def test_unrepresentable_values_are_refused_without_changes(
         "command-substitution",
         "quoted-substitution",
         "backticks",
+        "after-comment",
     ],
 )
 @pytest.mark.feature("cluster-secret-private-env")
