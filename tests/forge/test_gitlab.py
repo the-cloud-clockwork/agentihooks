@@ -254,6 +254,16 @@ def test_a_github_pull_link_raises_a_fetch_error_before_any_request() -> None:
 
 
 @pytest.mark.feature("forge-gitlab-merge-request-state")
+def test_a_link_of_no_forge_raises_a_fetch_error_before_any_request() -> None:
+    sent = Sent()
+    foreign = "https://example.com/group/repo/-/merge_requests/3"
+    with pytest.raises(gitlab.FetchError, match=f"^not a GitLab merge request link: {re.escape(foreign)}$") as raised:
+        gitlab.merge_request_state(foreign, "fake-token", sent)
+    assert isinstance(raised.value.__cause__, ValueError)
+    assert sent.calls == []
+
+
+@pytest.mark.feature("forge-gitlab-merge-request-state")
 def test_the_state_read_sends_through_urlopen_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     answered = Answered()
     monkeypatch.setattr(gitlab, "urlopen", answered)

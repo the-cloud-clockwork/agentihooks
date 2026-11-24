@@ -134,7 +134,10 @@ def merge_request_state(url: str, token: str | None, send: Transport = urlopen_t
     """
     from scripts.forge.remote import change_link
 
-    link = change_link(url)
+    try:
+        link = change_link(url)
+    except ValueError as error:
+        raise FetchError(f"not a GitLab merge request link: {url}") from error
     if link.kind != "gitlab":
         raise FetchError(f"not a GitLab merge request link: {url}")
     if not token:

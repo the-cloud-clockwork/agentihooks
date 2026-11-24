@@ -6445,6 +6445,7 @@
         "tests/forge/test_gitlab.py::test_another_http_error_reaches_the_caller_as_it_came",
         "tests/forge/test_gitlab.py::test_a_missing_token_raises_a_fetch_error_before_any_request",
         "tests/forge/test_gitlab.py::test_a_github_pull_link_raises_a_fetch_error_before_any_request",
+        "tests/forge/test_gitlab.py::test_a_link_of_no_forge_raises_a_fetch_error_before_any_request",
         "tests/forge/test_gitlab.py::test_the_state_read_sends_through_urlopen_by_default"
       ]
     },
