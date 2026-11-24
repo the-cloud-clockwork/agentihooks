@@ -1,9 +1,11 @@
 import json
 import subprocess
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from scripts.swarm import queue_exit
 from scripts.swarm.store import SwarmError
@@ -217,6 +219,14 @@ def test_a_head_whose_cancelled_last_group_had_a_failed_unit_shard_is_still_refu
         SwarmError, match=r"failed its last merge group run \(Tests https://github.com/o/r/actions/runs/5\)"
     ):
         queue_exit.require_fresh(URL, "abc", run)
+
+
+@pytest.mark.feature("merge-queue-cancel-skips-gate-summary")
+def test_queue_exit_skips_the_job_name_the_tests_workflow_gives_gate_required_on_merge_groups() -> None:
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/test.yml").read_text())
+    assert (
+        f"github.event_name == 'merge_group' && '{queue_exit.SUMMARY}' ||" in workflow["jobs"]["gate-required"]["name"]
+    )
 
 
 def test_an_older_failed_group_does_not_refuse_a_clean_last_group():
