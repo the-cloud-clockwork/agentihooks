@@ -46,7 +46,7 @@ def unified(item: dict[str, Any]) -> str:
 
 
 class FetchError(ForgeError):
-    """A GitLab merge request state could not be read; the tracker counts it as a failed fetch, never a closed pull."""
+    """A GitLab merge request state could not be read: no token, no GitLab link, a 404 or a state outside STATES."""
 
 
 @dataclass(frozen=True)
@@ -129,8 +129,8 @@ class GitLabForge:
 def merge_request_state(url: str, token: str | None, send: Transport = urlopen_transport) -> MergeRequestState:
     """Read the tracker state of the GitLab merge request at ``url``.
 
-    The link parser is imported here because the remote module imports this one. A link of another forge or a missing
-    token raises FetchError before any request, so the GitLab token never goes to another host.
+    The link parser is imported here because the remote module imports this one. A link that is no GitLab merge request
+    link or a missing token raises FetchError before any request, so the GitLab token never goes to a GitHub host.
     """
     from scripts.forge.remote import change_link
 

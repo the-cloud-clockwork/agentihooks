@@ -6432,7 +6432,7 @@
       "id": "forge-gitlab-merge-request-state",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-gl-mr-state",
-      "behaviour": "A GitLab merge request link reads over REST into the fields the hub pull tracker builds from GitHub: opened, closed and merged map to open, closed and merged, the head commit, queued false, and a finished head pipeline as one completed suite in GitHub conclusion words keyed by the pipeline id with the pipeline commit as checks head; a running pipeline or none gives no suite. A missing token, a 404, a foreign link or another state raises FetchError instead of reading as a closed merge request.",
+      "behaviour": "A GitLab merge request link reads over REST into the fields the hub pull tracker builds from GitHub: opened, closed and merged map to open, closed and merged, the head commit, queued false, and a finished head pipeline as one completed suite in GitHub conclusion words keyed by the pipeline id with the pipeline commit as checks head; a running pipeline or none gives no suite. A missing token, a 404, a link that is no GitLab merge request or another state raises FetchError instead of reading as a closed merge request.",
       "seam": "scripts.forge.gitlab.merge_request_state(url, token, send) returns a MergeRequestState or raises FetchError through an injected transport; scripts.forge.gitlab.GitLabForge.state reads one merge request by number",
       "tests": [
         "tests/forge/test_gitlab.py::test_an_opened_merge_request_reads_open_with_its_failed_pipeline_as_one_suite",
