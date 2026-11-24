@@ -117,3 +117,23 @@ def test_the_bumped_copy_of_a_read_only_chart_carries_the_probe_version(
     assert (copy / "ci/required-values.yaml").read_text() == "{}\n"
     assert (chart / "Chart.yaml").read_text() == "name: chart\nversion: 1.2.3\n"
     assert not (chart / "Chart.yaml").stat().st_mode & stat.S_IWUSR
+
+
+@pytest.mark.feature("chart-grader-sealed-head")
+def test_the_pod_template_grader_renders_a_read_only_tree_and_leaves_no_scratch_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    timers, pods = _graders(monkeypatch)
+    head = tmp_path / "head"
+    chart = _chart(head, required=True)
+    (chart / "Chart.yaml").write_text("name: chart\nversion: 1.2.3\n")
+    _sealed(head)
+    seen = _recorded(monkeypatch, timers)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(pods.tempfile, "tempdir", str(scratch))
+
+    pods.main(["--root", str(head)])
+
+    assert [command[3] == str(chart) for command in seen] == [True, False, True, False]
+    assert list(scratch.iterdir()) == []
