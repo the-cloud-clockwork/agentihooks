@@ -12844,6 +12844,7 @@
       "tests": [
         "tests/ci_lab/test_manifests.py::test_background_raises_pending_while_a_fetch_runs_and_answers_it_until_it_goes_stale",
         "tests/ci_lab/test_manifests.py::test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next_call",
+        "tests/ci_lab/test_manifests.py::test_background_forgets_a_failed_fetch_nobody_asked_again_once_its_fresh_window_ends",
         "tests/ci_lab/test_manifests.py::test_background_runs_at_most_four_fetches_at_once",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_still_fetches_keeps_its_window_and_each_pass_reads_the_fetch_again",
         "tests/ci_lab/test_scheduler_manifest_fetch.py::test_a_pass_reaps_leases_and_advances_grades_while_a_manifest_fetch_github_never_answers"

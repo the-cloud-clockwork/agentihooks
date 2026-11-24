@@ -403,6 +403,27 @@ def test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next
 
 
 @pytest.mark.feature("lab-manifest-fetch-off-pass")
+def test_background_forgets_a_failed_fetch_nobody_asked_again_once_its_fresh_window_ends() -> None:
+    held = Held({COMMIT: FetchUnanswered("GET runs answered 502"), OTHER: None})
+    clock = Clock()
+    background = manifests.Background(held, clock=clock)
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    held.release.set()
+    finished(background.fetches)
+    held.release.clear()
+    clock.now = 299.0
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", OTHER)
+    assert sorted(background.fetches) == [("example/repo", COMMIT), ("example/repo", OTHER)]
+    clock.now = 300.0
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", OTHER)
+    assert list(background.fetches) == [("example/repo", OTHER)]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
 def test_background_runs_at_most_four_fetches_at_once() -> None:
     commits = [f"{number:040x}" for number in range(5)]
     held = Held({commit: None for commit in commits})
