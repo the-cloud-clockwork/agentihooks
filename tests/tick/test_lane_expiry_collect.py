@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import Event
-from time import sleep
+from time import monotonic, sleep
 
 import pytest
 
@@ -86,29 +86,37 @@ def test_a_step_still_running_at_its_lane_expiry_is_recorded_cut_with_its_writes
     assert records["orphans"].skipped
 
 
-@pytest.mark.feature("tick-finished-step-ends-at-lane-expiry")
 def test_a_step_that_finished_before_its_lane_expired_but_was_collected_after_keeps_its_result() -> None:
     release = Event()
     applied: list[Write] = []
+    ended: list[float] = []
 
     def busy(write: Write) -> list[str]:
         release.set()
         sleep(0.6)
         return []
 
+    def reap(ctx: Context) -> Result:
+        release.wait(10.0)
+        ended.append(monotonic())
+        return Result((GONE,))
+
     steps = (
         Step("busy", "lane end", lambda ctx: Result((Write(Domain("busy"), "pass", 1),))),
-        Step("reap", "lane end", _reaping(release), writes=frozenset({REAPED})),
+        Step("reap", "lane end", reap, writes=frozenset({REAPED})),
         Step("orphans", "lane end", needs=frozenset({"reap"}), lane=Lane("slow")),
     )
     later: list[tuple[engine.StepRecord, ...]] = []
     apply = {Domain("busy"): busy, REAPED: _recording(applied)}
+    began = monotonic()
     try:
         with pool.running(critical_s=0.3, slow_s=5.0, reserves={}):
             first = engine.run_graph(steps, Context(View(), Deadline.after(10.0)), apply, later.append)
     finally:
         release.set()
     records = _records(first, later)
+    assert ended[0] - began < 0.3
+    assert records["busy"].outcome == engine.OK
     assert records["reap"].outcome == engine.OK
     assert records["reap"].applied == ("reaped agent",)
     assert applied == [GONE]
