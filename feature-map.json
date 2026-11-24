@@ -4531,6 +4531,17 @@
       ]
     },
     {
+      "id": "tick-finished-step-ends-at-lane-expiry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2893",
+      "behaviour": "When a tick lane expires, the pass engine ends every submitted step whose run already finished through the normal apply path with its real result, before it records any step cut or skipped: a step that finished inside its lane but was collected only after the lane ended keeps its outcome, its writes are applied and a dependent in a lane that has not expired runs. A step still running at the lane end is recorded cut, its writes are never applied and that dependent is dropped. Recording a step cut at a lane end without checking that its run is still going is the Semgrep incident cut-finished-step-at-lane-expiry.",
+      "seam": "tick.engine.run_graph in a parallel pass with appliers and a finished callback; semgrep incident rule cut-finished-step-at-lane-expiry",
+      "tests": [
+        "tests/tick/test_lane_expiry_collect.py::test_a_step_still_running_at_its_lane_expiry_is_recorded_cut_with_its_writes_and_dependent_dropped",
+        "tests/tick/test_lane_expiry_collect.py::test_a_step_that_finished_before_its_lane_expired_but_was_collected_after_keeps_its_result"
+      ]
+    },
+    {
       "id": "semgrep-feature-tests",
       "origin": "operator",
       "operator_words": "We need to put a fucking feature semgrep test. You know semgrep? We're going to start to establish testing for features. We're going to start establishing the use of semgrep for features and we're going to establish a system for semgrep. Semgrep is going to fucking put a feature test so that if it fails again we know that we had a regression.",
