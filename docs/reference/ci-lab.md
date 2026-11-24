@@ -2926,8 +2926,10 @@ runs each fetch off the scheduler pass through
 unchanged, so the next pass reads the finished fetch and a manifest request GitHub never answers
 holds no pass from reaping leases or advancing grades. Until the fetch finishes each pass repeats the
 head's expansion up to the manifest, its git reads included; the mirror's `git fetch` of a missing
-sha still runs on the pass. A failed fetch answers once; any other answers every call for `FRESH_S`
-(300 seconds) after the fetch started. The dev push artifact is kept 7 days, so a commit older
+sha still runs on the pass. A failed fetch answers once; one that found a manifest answers every
+call for `FRESH_S` (300 seconds) after the fetch started, and one that found none answers for
+`ABSENT_S` (3600 seconds), so a search that passes one commit per pass keeps its first answers until
+it has passed the last commit of its depth. The dev push artifact is kept 7 days, so a commit older
 than that is answered only from the store. A head that needs test units and finds none fails with
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
