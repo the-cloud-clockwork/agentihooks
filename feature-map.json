@@ -1985,6 +1985,22 @@
       ]
     },
     {
+      "id": "controller-expired-codex-closed",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-view-expired-codex",
+      "behaviour": "The deployed controller counts a Codex login that a live hive reports expired as a closed account with zero free seats, so the capacity decision places no seat on it and the stall watch raises no free seat alert for it. An unexpired hive reading keeps its week band.",
+      "seam": "swarm_v2.quota._hive_reading and QuotaObservations.reading through kubernetes.approved.AccountRoute and FleetAccounts; swarm.capacity.calculate; swarm.stall_watch.stall_pass",
+      "tests": [
+        "tests/test_swarm_v2_approved_accounts.py::test_a_codex_key_with_a_live_unexpired_hive_reading_is_an_open_row_at_its_week_band",
+        "tests/test_swarm_v2_approved_accounts.py::test_an_expired_codex_hive_entry_reads_expired_with_no_cap",
+        "tests/test_swarm_v2_approved_accounts.py::test_the_controller_closes_an_expired_codex_key_with_no_free_seat",
+        "tests/test_swarm_v2_approved_accounts.py::test_the_stall_watch_fed_an_expired_codex_decision_raises_no_free_seat_alert"
+      ],
+      "rules": [
+        "hive-quota-reading-drops-expired"
+      ]
+    },
+    {
       "id": "nats-withdraw-gone-message",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-withdraw-gone-message",
