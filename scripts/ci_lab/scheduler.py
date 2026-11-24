@@ -1706,7 +1706,7 @@ class MirrorExpander:
         return {path: found[blob] for path, blob in files.items()}
 
 
-class _Unshipped:
+class _Unshipped(metrics.Sink):
     """The table sink of the scheduler's shadow recorder: the scheduler runs no metrics outbox, so lab_shadow table rows
     are dropped while each shadow row still lands in Redis and the object store."""
 

@@ -118,7 +118,12 @@ def test_the_built_scheduler_counts_a_lab_verdict_that_disagrees_with_actions_on
 ) -> None:
     monkeypatch.setattr(scheduler.MirrorExpander, "trusted", lambda self, repo: frozenset({ACTOR}))
     monkeypatch.setattr(scheduler.MirrorExpander, "retries", lambda self, repo: Policy())
-    monkeypatch.setattr(scheduler.MirrorExpander, "static_jobs", lambda self, repo: frozenset({"lint"}))
+
+    def static_jobs(_self: scheduler.MirrorExpander, repo: str) -> frozenset[str]:
+        assert repo == f"{GITHUB}.git"
+        return frozenset({"lint"})
+
+    monkeypatch.setattr(scheduler.MirrorExpander, "static_jobs", static_jobs)
     monkeypatch.setattr(scheduler, "worker_pods", lambda found: FakeKube())
     environ = {
         scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
