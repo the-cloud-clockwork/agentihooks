@@ -3,12 +3,14 @@
 import copy
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 
 from scripts.swarm_ledger import ledger_closed, ledger_server
-from scripts.swarm_ledger.api import resources, summary, task_list
+from scripts.swarm_ledger.api import resources, routes, summary, task_list
 from tests.swarm_ledger.test_api_v1 import authority_live, live, request, stored
 
 __all__ = ["authority_live", "live"]
@@ -63,6 +65,7 @@ def test_the_summary_answers_without_building_the_whole_page_view(live: dict, mo
     status, reply = request(live, "GET", "summary")
     assert status == 200
     data = reply["data"]
+    assert reply["revision"] == resources.revision(data)
     assert (data["title"], data["overview"], data["sources"]) == ("Report", "Intent", ["plan.md"])
     assert data["_meta"]["rev"] == 9
     assert data["sections"]["tasks"] == {"open": 3, "states": {"open": 1, "claimed": 1, "pr": 1}}
@@ -91,6 +94,10 @@ def test_an_open_first_page_answers_without_building_the_whole_page_view(
     assert [row["id"] for row in reply["data"]] == ["p1", "p0"]
     status, reply = request(live, "GET", "followups?state=open&limit=5&q=x")
     assert status == 400
+    assert reply == {"error": {"code": "schema_invalid", "message": routes.OPEN_ONLY}}
+    status, reply = request(live, "GET", "tasks?state=open&cursor=x")
+    assert status == 400
+    assert reply == {"error": {"code": "schema_invalid", "message": routes.OPEN_ONLY}}
 
 
 @pytest.mark.feature("ledger-summary-read")
@@ -252,3 +259,74 @@ def test_rows_holds_its_cached_tasks_object_under_the_ledger_slug(monkeypatch: p
     repository = _FakeTaskRepository()
     task_list.rows(repository, "slug-a")
     assert set(task_list.HELD) == {"slug-a"}
+
+
+@pytest.mark.feature("ledger-summary-read")
+@pytest.mark.parametrize(
+    ("path", "closed_row"),
+    [
+        ("tasks", {"id": "closed", "state": "done", "done": True}),
+        ("questions", {"id": "closed", "answers": [{"text": "Answered"}]}),
+    ],
+)
+def test_done_reads_select_only_the_requested_repository_rows(path: str, closed_row: dict[str, Any]) -> None:
+    repository = Mock()
+    rows = [{"id": "open"}, closed_row]
+    repository.task_rows.return_value = (None, {"rev": 7}, rows)
+    repository.read.return_value = {path: rows}
+    repository.current.side_effect = AssertionError("A closed read must not load the whole ledger")
+    services = cast(Any, SimpleNamespace(repository=repository))
+    query = {"state": "done"}
+    reply = routes.ledger_read(services, "selected-ledger", path, query)
+    assert reply == resources.closed_page({path: rows}, path, query)
+    assert [row["id"] for row in reply["data"]] == ["closed"]
+    repository.current.assert_not_called()
+    if path == "tasks":
+        repository.task_rows.assert_called_once_with("selected-ledger", None)
+        repository.read.assert_not_called()
+    else:
+        repository.read.assert_called_once_with("selected-ledger", path)
+        repository.task_rows.assert_not_called()
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_a_cursor_read_uses_only_the_requested_repository_record() -> None:
+    doc = {"tasks": [{"id": "t1", "comments": [{"id": "first", "text": "One"}, {"id": "second", "text": "Two"}]}]}
+    path = "tasks/t1/comments"
+    first = resources.read(doc, path, {"limit": 1})
+    query = {"limit": 1, "cursor": first["next_cursor"]}
+    repository = Mock()
+    repository.read.return_value = doc
+    repository.current.side_effect = AssertionError("A cursor read must not load the whole ledger")
+    services = cast(Any, SimpleNamespace(repository=repository))
+    reply = routes.ledger_read(services, "selected-ledger", path, query)
+    assert reply == resources.read(doc, path, query)
+    assert [row["id"] for row in reply["data"]] == ["second"]
+    assert reply["next_cursor"] is None
+    repository.read.assert_called_once_with("selected-ledger", "tasks/t1")
+    repository.current.assert_not_called()
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_summary_sections_apply_collection_specific_closure() -> None:
+    assert summary.section("questions", [{"id": "answered", "answers": [{"text": "Yes"}]}, {"id": "unanswered"}]) == {
+        "open": 1,
+        "states": {"open": 1},
+    }
+    assert summary.section("alerts", [{"id": "open", "done": True}, {"id": "closed", "state": "done"}]) == {
+        "open": 1,
+        "states": {"open": 1},
+    }
+
+
+@pytest.mark.feature("ledger-summary-read")
+def test_summary_sections_count_repeated_states_and_exclude_deleted_rows() -> None:
+    rows = [
+        {"id": "first", "state": "open"},
+        {"id": "second", "state": "open"},
+        {"id": "missing-state"},
+        {"id": "outside", "out_of_scope": True},
+        {"id": "deleted", "deleted": True},
+        {"id": "done", "done": True},
+    ]
+    assert summary.section("tasks", rows) == {"open": 4, "states": {"open": 3, "out": 1}}
