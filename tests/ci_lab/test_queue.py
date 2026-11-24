@@ -98,6 +98,24 @@ def test_supersede_drops_pending_and_keeps_leased(jobs: queue.Queue) -> None:
     assert jobs.supersede("old") == []
 
 
+@pytest.mark.feature("lab-retire-gone-merge-groups")
+def test_drop_removes_the_pending_jobs_of_a_head_and_keeps_its_leased_ones(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a"), unit("b"), unit("c")], "old", {})
+    jobs.enqueue([unit("a")], "new", {})
+    assert take(jobs, "old:test:b")
+
+    assert jobs.drop("old") == ["old:test:a", "old:test:c"]
+
+    assert jobs.pending() == ["new:test:a"]
+    assert jobs.job("old:test:a") is None
+    assert jobs.job("old:test:c") is None
+    assert found(jobs, "old:test:b").state == "leased"
+    assert jobs.members("old", "pending") == set()
+    assert jobs.members("old", "leased") == {"old:test:b"}
+    assert jobs.members("new", "pending") == {"new:test:a"}
+    assert jobs.drop("old") == []
+
+
 def test_claim_is_won_once(jobs: queue.Queue) -> None:
     jobs.enqueue([unit("a")], "h1", {})
     record = found(jobs, "h1:test:a")
@@ -430,3 +448,24 @@ def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_s
     jobs.offer("w3", 5, 1300)
     assert jobs.prune(1201) == 1
     assert jobs.offers(0) == {"w3": (5, 1300)}
+
+
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
+def test_states_reads_each_job_state_in_order_through_plain_pipelines_and_a_missing_job_reads_none(
+    jobs: queue.Queue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ids = jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
+    assert jobs.claim(found(jobs, ids[1]), "w1", "t1", 900, 0)
+    assert jobs.claim(found(jobs, ids[2]), "w1", "t2", 900, 0)
+    assert jobs.finish(found(jobs, ids[2]), "t2", "passed")
+    opened: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    pipeline = jobs.client.pipeline
+
+    def piped(*args: object, **options: object) -> object:
+        opened.append((args, options))
+        return pipeline(*args, **options)
+
+    monkeypatch.setattr(jobs.client, "pipeline", piped)
+    assert jobs.states([ids[2], "h1:test:none", ids[0], ids[1]]) == ["done", None, "pending", "leased"]
+    assert jobs.states([]) == []
+    assert opened == [((), {"transaction": False})] * 2
