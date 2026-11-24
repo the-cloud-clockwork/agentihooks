@@ -159,6 +159,35 @@ TAR_RUNS = frozenset(
     }
 )
 TAR_NAMED = TAR_RUNS | TAR_ARCHIVES | TAR_EXTRACTS | TAR_FOLDERS | TAR_FILES
+TAR_LONG_OPTIONS = frozenset(
+    (
+        "--absolute-names --acls --add-file --after-date --anchored --append --atime-preserve --auto-compress "
+        "--backup --block-number --blocking-factor --bzip2 --catenate --check-device --check-links --checkpoint "
+        "--checkpoint-action --clamp-mtime --compare --compress --concatenate --confirmation --create "
+        "--delay-directory-restore --delete --dereference --diff --directory --exclude --exclude-backups "
+        "--exclude-caches --exclude-caches-all --exclude-caches-under --exclude-from --exclude-ignore "
+        "--exclude-ignore-recursive --exclude-tag --exclude-tag-all --exclude-tag-under --exclude-vcs "
+        "--exclude-vcs-ignores --extract --file --files-from --force-local --format --full-time --get --group "
+        "--group-map --gunzip --gzip --hard-dereference --help --hole-detection --ignore-case "
+        "--ignore-command-error --ignore-failed-read --ignore-zeros --incremental --index-file --info-script "
+        "--interactive --keep-directory-symlink --keep-newer-files --keep-old-files --label --level --list "
+        "--listed-incremental --lzip --lzma --lzop --mode --mtime --multi-volume --new-volume-script --newer "
+        "--newer-mtime --no-acls --no-anchored --no-auto-compress --no-check-device --no-delay-directory-restore "
+        "--no-ignore-case --no-ignore-command-error --no-null --no-overwrite-dir --no-quote-chars --no-recursion "
+        "--no-same-owner --no-same-permissions --no-seek --no-selinux --no-unquote --no-verbatim-files-from "
+        "--no-wildcards --no-wildcards-match-slash --no-xattrs --null --numeric-owner --occurrence --old-archive "
+        "--one-file-system --one-top-level --overwrite --overwrite-dir --owner --owner-map --pax-option "
+        "--portability --posix --preserve-order --preserve-permissions --quote-chars --quoting-style "
+        "--read-full-records --record-size --recursion --recursive-unlink --remove-files --restrict --rmt-command "
+        "--rsh-command --same-order --same-owner --same-permissions --seek --selinux --set-mtime-command "
+        "--set-mtime-format --show-defaults --show-omitted-dirs --show-snapshot-field-ranges --show-stored-names "
+        "--show-transformed-names --skip-old-files --sort --sparse --sparse-version --starting-file "
+        "--strip-components --suffix --tape-length --test-label --to-command --to-stdout --totals --touch "
+        "--transform --uncompress --ungzip --unlink-first --unquote --update --usage --use-compress-program --utc "
+        "--verbatim-files-from --verbose --verify --version --volno-file --warning --wildcards "
+        "--wildcards-match-slash --xattrs --xattrs-exclude --xattrs-include --xform --xz --zstd"
+    ).split()
+)
 UNZIP_LETTERS = "dIOP"
 UNZIP_FOLDERS = frozenset({"-d"})
 UNZIP_PARENTS = "-:"
@@ -523,9 +552,12 @@ def _named(options: list[tuple[str, str]], names: frozenset[str]) -> list[str]:
     return [value for name, value in options if name in names]
 
 
-def _abbreviated(options: list[tuple[str, str]], names: frozenset[str]) -> bool:
-    """Whether a long option in *options* shortens one of *names*, which getopt runs as that option."""
-    return any(name[:2] == "--" and name != full and full.startswith(name) for name, _ in options for full in names)
+def _abbreviated(options: list[tuple[str, str]], names: frozenset[str], known: frozenset[str]) -> bool:
+    """Whether a long option in *options* that is not itself one of *known* starts one of *names*, which getopt
+    runs as that option."""
+    return any(
+        name[:2] == "--" and name not in known and full.startswith(name) for name, _ in options for full in names
+    )
 
 
 def _joined(folder: str, value: str) -> str:
@@ -613,7 +645,7 @@ def _patch_targets(words: list[str], operands: list[str]) -> list[str]:
     if "--dry-run" in words:
         return []
     options = _options(words, PATCH_LETTERS, PATCH_VALUES)
-    if _named(options, PATCH_BACKUPS) or _abbreviated(options, PATCH_NAMED):
+    if _named(options, PATCH_BACKUPS) or _abbreviated(options, PATCH_NAMED, PATCH_NAMED):
         return [UNKNOWN]
     folders = _chain(options, PATCH_FOLDERS)
     folder = folders[-1] if folders else HERE
@@ -682,7 +714,7 @@ def _tar_extracted(options: list[tuple[str, str]]) -> list[str]:
 
 def _tar_targets(words: list[str], operands: list[str]) -> list[str]:
     options = _options(_tar_words(words), TAR_LETTERS, TAR_VALUES)
-    if _abbreviated(options, TAR_NAMED):
+    if _abbreviated(options, TAR_NAMED, TAR_LONG_OPTIONS):
         return [UNKNOWN]
     names = {name for name, _ in options}
     if not names & (TAR_ARCHIVES | TAR_EXTRACTS):

@@ -607,6 +607,7 @@ def test_a_read_only_seat_runs_each_tool_inside_its_folders(tmp_path: Path, role
         "tar -xOf a.tar member",
         "tar -xf a.tar --to-stdout",
         "tar -czf ~/scratchpad/out.tgz src",
+        "tar --checkpoint -czf ~/scratchpad/out.tgz src",
         "tar -czf ~/scratchpad/x:y.tgz src",
         "tar -C /repo -czf ~/scratchpad/a.tgz src",
         "tar -cf - src | gzip > ~/scratchpad/src.tar.gz",
