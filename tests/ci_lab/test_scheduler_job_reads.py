@@ -12,6 +12,11 @@ from tests.ci_lab.test_scheduler import lab as lab
 JOB_KEYS = f"{queue.PREFIX}job:"
 
 
+def job_read(command: tuple[Any, ...]) -> bool:
+    """Whether a Redis command reads a whole queue job record."""
+    return command[0] == "HGETALL" and str(command[1]).startswith(JOB_KEYS)
+
+
 def pipelines(client: Any, monkeypatch: pytest.MonkeyPatch) -> list[tuple[tuple[Any, ...], dict[str, Any], list[Any]]]:
     """Record the arguments and the queued commands of every pipeline the client executes, in order."""
     pipeline = client.pipeline
@@ -75,7 +80,7 @@ def test_a_pass_reads_only_open_jobs_in_nontransactional_batches_of_at_most_500(
     direct_reads: list[tuple[Any, ...]] = []
 
     def direct(*args: Any, **options: Any) -> Any:
-        if args[0] == "HGETALL" and str(args[1]).startswith(JOB_KEYS):
+        if job_read(args):
             direct_reads.append(args)
         return command(*args, **options)
 
@@ -84,10 +89,7 @@ def test_a_pass_reads_only_open_jobs_in_nontransactional_batches_of_at_most_500(
 
     run.tick(1100)
 
-    batches = [
-        (args, options, [read[1] for read in reads if read[0] == "HGETALL" and str(read[1]).startswith(JOB_KEYS)])
-        for args, options, reads in sent
-    ]
+    batches = [(args, options, [read[1] for read in reads if job_read(read)]) for args, options, reads in sent]
     batches = [batch for batch in batches if batch[2]]
     assert direct_reads == []
     assert [len(keys) for _, _, keys in batches] == [500, 500, 3]
