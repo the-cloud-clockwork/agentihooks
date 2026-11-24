@@ -15408,6 +15408,20 @@
       ]
     },
     {
+      "id": "mutation-stats-per-node-dependencies",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-bucket-no-deps",
+      "behaviour": "A mutation stats bucket records each test's dependencies from its own setup, run and teardown coverage contexts plus the modules the bucket loads and covers outside any test, keeps test modules only for the tests that run them, and records no dependencies when none of its tests has a coverage context.",
+      "seam": "scripts.ci_mutation.stats_dependencies.measured_dependencies and scripts.ci_mutation.selection.collect_shard_stats",
+      "tests": [
+        "tests/test_ci_mutation_stats.py::test_measured_dependencies_include_collection_phases_and_preloaded_modules",
+        "tests/test_ci_mutation_stats.py::test_measured_dependencies_keep_only_the_test_modules_a_node_runs",
+        "tests/test_ci_mutation_stats.py::test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled",
+        "tests/test_ci_mutation_stats.py::test_measured_dependencies_give_a_node_without_a_context_the_shared_modules",
+        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_with_a_test_skipped_by_a_mark_records_dependencies_for_every_test"
+      ]
+    },
+    {
       "id": "mutation-stats-lookup-digests",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2728",
@@ -16116,20 +16130,6 @@
       "tests": [
         "tests/ci_lab/test_budget_docs.py::test_the_published_lab_budget_docs_match_the_shed_thresholds_in_code",
         "tests/ci_lab/test_budget_docs.py::test_a_docs_copy_with_the_thresholds_swapped_fails_the_check"
-      ]
-    },
-    {
-      "id": "mutation-stats-per-node-dependencies",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-stats-bucket-no-deps",
-      "behaviour": "A mutation stats bucket records each test's dependencies from its own setup, run and teardown coverage contexts plus the modules the bucket loads and covers outside any test, keeps test modules only for the tests that run them, and records no dependencies when none of its tests has a coverage context.",
-      "seam": "scripts.ci_mutation.stats_dependencies.measured_dependencies and scripts.ci_mutation.selection.collect_shard_stats",
-      "tests": [
-        "tests/test_ci_mutation_stats.py::test_measured_dependencies_include_collection_phases_and_preloaded_modules",
-        "tests/test_ci_mutation_stats.py::test_measured_dependencies_keep_only_the_test_modules_a_node_runs",
-        "tests/test_ci_mutation_stats.py::test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled",
-        "tests/test_ci_mutation_stats.py::test_measured_dependencies_give_a_node_without_a_context_the_shared_modules",
-        "tests/test_ci_mutation_stats.py::test_a_stats_bucket_with_a_test_skipped_by_a_mark_records_dependencies_for_every_test"
       ]
     }
   ],
