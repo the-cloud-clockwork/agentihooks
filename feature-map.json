@@ -11257,6 +11257,23 @@
       ]
     },
     {
+      "id": "merge-queue-cancel-skips-gate-summary",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-merge-queue-requeue-cancel",
+      "behaviour": "A merge group run GitHub cancelled, for a regroup or the checks timeout, counts as the pull request's own failure only when a job other than the always run Queue gate summary concluded failure, timed out or startup failure, so swarm merge queue lets the head queue again and the ready requeue path requeues it, while a cancelled run with a failed unit shard still refuses.",
+      "seam": "scripts.swarm.queue_exit.require_fresh and scripts.swarm.queue_exit.own_failures over a fake gh api runner",
+      "rules": [
+        "queue-exit-counts-gate-summary"
+      ],
+      "tests": [
+        "tests/swarm/test_queue_exit.py::test_a_cancelled_own_run_whose_only_failed_job_is_the_queue_gate_summary_is_no_failure",
+        "tests/swarm/test_queue_exit.py::test_a_cancelled_own_run_with_a_failed_unit_shard_and_summary_is_a_failure",
+        "tests/swarm/test_queue_exit.py::test_a_head_whose_last_group_was_cancelled_with_only_the_queue_gate_summary_failed_may_queue",
+        "tests/swarm/test_queue_exit.py::test_a_head_whose_cancelled_last_group_had_a_failed_unit_shard_is_still_refused",
+        "tests/swarm/test_queue_exit.py::test_queue_exit_skips_the_job_name_the_tests_workflow_gives_gate_required_on_merge_groups"
+      ]
+    },
+    {
       "id": "branch-rule-empty-read",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2717",
