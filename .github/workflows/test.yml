@@ -3122,9 +3122,7 @@ jobs:
       - name: Refuse a command substitution as a for loop word list
         if: ${{ !cancelled() }}
         run: |
-          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_for_substitution.py" ]]; then
-            cd "$RUNNER_TEMP/grader"
-          fi
+          cd "$RUNNER_TEMP/grader"
           python -m scripts.ci_for_substitution --root "$GITHUB_WORKSPACE"
 
       - name: Refuse changelog fragments named off the branch or opening without a section heading
