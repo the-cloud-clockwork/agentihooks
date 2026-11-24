@@ -784,19 +784,33 @@ def test_links_round_trip_and_an_old_config_reads_as_none(store):
     assert store.config("smoke").links == []
 
 
-def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store):
-    from scripts.swarm.store import DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW, DEFAULT_MEMORY_PER_AGENT_MB
+def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store: RedisStore) -> None:
+    from scripts.swarm.store import (
+        DEFAULT_LOAD_HIGH,
+        DEFAULT_LOAD_LOW,
+        DEFAULT_MEMORY_PER_AGENT_MB,
+        DEFAULT_REVIEW_SHARE,
+    )
 
-    store.create(config(scaling="manual", load_high=1.5, load_low=0.5, memory_per_agent_mb=900))
+    store.create(config(scaling="manual", load_high=1.5, load_low=0.5, memory_per_agent_mb=900, review_share=100))
     read = store.config("smoke")
-    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb) == ("manual", 1.5, 0.5, 900)
-    store.redis.hdel(store.key("smoke", "config"), "scaling", "load_high", "load_low", "memory_per_agent_mb")
+    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb, read.review_share) == (
+        "manual",
+        1.5,
+        0.5,
+        900,
+        100,
+    )
+    store.redis.hdel(
+        store.key("smoke", "config"), "scaling", "load_high", "load_low", "memory_per_agent_mb", "review_share"
+    )
     read = store.config("smoke")
-    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb) == (
+    assert (read.scaling, read.load_high, read.load_low, read.memory_per_agent_mb, read.review_share) == (
         "auto",
         DEFAULT_LOAD_HIGH,
         DEFAULT_LOAD_LOW,
         DEFAULT_MEMORY_PER_AGENT_MB,
+        DEFAULT_REVIEW_SHARE,
     )
     assert DEFAULT_LOAD_LOW < DEFAULT_LOAD_HIGH
 
@@ -885,11 +899,11 @@ def test_create_refuses_memory_that_cannot_round_trip(store, memory):
     assert store.slugs() == []
 
 
-def test_scaling_boundaries_round_trip_and_manual_preserves_lane_caps(store):
+def test_scaling_boundaries_round_trip_and_manual_preserves_lane_caps(store: RedisStore) -> None:
     store.create(config())
-    stored = store.update("smoke", scaling="manual", load_low=10, load_high=10, memory_per_agent_mb=1)
+    stored = store.update("smoke", scaling="manual", load_low=10, load_high=10, memory_per_agent_mb=1, review_share=0)
     assert store.config("smoke") == stored
-    assert (stored.max_eng, stored.max_ci, stored.max_plan) == (2, 1, 1)
+    assert (stored.max_eng, stored.max_ci, stored.max_plan, stored.review_share) == (2, 1, 1, 0)
 
 
 def test_scaling_update_explains_the_allowed_modes(store):

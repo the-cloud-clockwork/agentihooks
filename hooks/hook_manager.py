@@ -25,6 +25,7 @@ import os
 import re
 import sys
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -331,9 +332,7 @@ def on_session_start(payload: dict) -> None:
     )
 
     _request_trace_flush(payload, "start")
-    from hooks.context import documentation_session
-
-    documentation_session.start(payload)
+    _start_documentation_session(payload)
 
     tracer = otel.get_tracer()
     if tracer:
@@ -1063,7 +1062,39 @@ def _confirm_inbox(session_id: str) -> None:
         log("inbox confirmation failed", {"error": str(e)})
 
 
+def _start_documentation_session(payload: dict) -> None:
+    """Start the documentation session; on Windows it is skipped, because it reaches the swarm ledger."""
+    if sys.platform == "win32":
+        return
+    from hooks.context import documentation_session
+
+    documentation_session.start(payload)
+
+
+def _recycle_directive(session_id: str) -> str | None:
+    """The context recycle directive; none on Windows, which runs no quota routing."""
+    if sys.platform == "win32":
+        return None
+    from hooks.context.context_recycle import directive
+
+    return directive(session_id)
+
+
+def _stop_block_for(payload: dict) -> str | None:
+    """The condition that blocks this Stop, then the operator-mode refusal, which Windows does not run."""
+    from hooks.context import conditions
+
+    block = conditions.stop_block(payload) or None
+    if block is None and sys.platform != "win32":
+        from hooks.context import operator_mode
+
+        block = operator_mode.reply_refusal(payload) or None
+    return block
+
+
 def _inject_after_tool(payload: dict) -> None:
+    if sys.platform == "win32":
+        return
     from hooks.common import inject_context
     from hooks.context.quota_policy import posttool_context
 
@@ -1347,6 +1378,17 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
         log("plan_read_guard failed", {"error": str(e)})
 
 
+@contextmanager
+def _shell_guard(name: str) -> Iterator[None]:
+    try:
+        yield
+    except BlockAction:
+        raise
+    except Exception as e:
+        log(f"{name} check failed", {"error": str(e)})
+        print(f"WARNING: {name} check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+
+
 def _check_shell_guards(payload: dict[str, Any]) -> None:
     from hooks.context.approval_guard import check_approval
     from hooks.context.local_test_guard import check_local_tests
@@ -1361,21 +1403,23 @@ def _check_shell_guards(payload: dict[str, Any]) -> None:
         raise BlockAction(_blocker_block)
     if payload.get("tool_name") != "Bash":
         return
-    try:
-        from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
-        from hooks.context.master_coding import protection_refusal
-        from hooks.context.venv_guard import check_venv_guard
+    with _shell_guard("branch_guard"):
+        from hooks.context.branch_guard import check_branch_guard
 
         check_branch_guard(payload)
+    with _shell_guard("commit_on_main"):
+        from hooks.context.branch_guard import check_commit_on_main
+
         check_commit_on_main(payload)
+    with _shell_guard("master_coding"):
+        from hooks.context.master_coding import protection_refusal
+
         if refusal := protection_refusal(payload):
             raise BlockAction(refusal)
+    with _shell_guard("venv_guard"):
+        from hooks.context.venv_guard import check_venv_guard
+
         check_venv_guard(payload)
-    except BlockAction:
-        raise
-    except Exception as e:
-        log("branch_guard check failed", {"error": str(e)})
-        print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
 
 
 def _fit_pretool(blocks: list[tuple[str, str]]) -> str:
@@ -1969,7 +2013,6 @@ def on_post_tool_use(payload: dict) -> None:
         if not can_inject_context("PreToolUse"):
             from hooks.common import inject_context
             from hooks.config import BROADCAST_ENABLED
-            from hooks.context.context_recycle import directive as _recycle_directive
 
             recycle_context = _recycle_directive(_trace_session_id)
             if recycle_context:
@@ -2253,9 +2296,7 @@ def on_stop(payload: dict) -> None:
     """
     _stop_block = None
     try:
-        from hooks.context import conditions, operator_mode
-
-        _stop_block = conditions.stop_block(payload) or operator_mode.reply_refusal(payload) or None
+        _stop_block = _stop_block_for(payload)
     except Exception as e:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:

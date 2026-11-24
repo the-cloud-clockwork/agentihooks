@@ -2336,6 +2336,15 @@ def test_a_plan_task_steering_carries_its_phase_evidence(rig: SimpleNamespace) -
     assert seeds["steering.md"] != ledger_workspace.steering(planned, None)
 
 
+@pytest.mark.feature("plan-evidence-phase-less-plan-task")
+def test_a_plan_task_with_no_phase_gets_its_steering_seed(rig: SimpleNamespace) -> None:
+    planned = {**rig.rows["t1"], "kind": "plan", "phase": ""}
+
+    seeds = rig.admitter._seeds(SLUG, planned, rig.found, "eng@sw-0009")  # pyright: ignore[reportPrivateUsage]
+
+    assert seeds == {"steering.md": "# t1: title t1\n\nPlan evidence\n\nProject intent\no\n"}
+
+
 @pytest.mark.feature("hub-admission-claim-context")
 def test_the_seeds_are_built_from_the_ledger_document_the_offer_was_read_against(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch

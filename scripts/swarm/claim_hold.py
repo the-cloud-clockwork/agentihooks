@@ -37,19 +37,26 @@ def hold(task: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], graph:
     return verification(task) or phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows) or thin(task)
 
 
-def holds(task: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix: str) -> bool:
+def holds(
+    task: dict[str, Any],
+    rows: dict[str, Any],
+    doc: dict[str, Any],
+    graph: dict[str, Any],
+    fix: str,
+    admitted_queue: Any = freeze.UNCACHED,
+) -> bool:
     """Whether ``hold`` names a reason, without building the freeze reason text."""
     return (
         bool(verification(task) or phased(task, doc))
-        or freeze.claim_gate(task, doc, graph, fix)  # pyright: ignore[reportUnknownMemberType]
+        or freeze.claim_gate(task, doc, graph, fix, admitted_queue)  # pyright: ignore[reportUnknownMemberType]
         or bool(waits(task, rows) or thin(task))
     )
 
 
 def thin(task: dict[str, Any]) -> str:
     """Why the thin check holds an eng or ci task back: it needs enhancement until its plan task closes and marks it
-    planned, even once the planner has given it a plan slice."""
-    if task.get("enhancement") != "needed" or task.get("lane", LAB_LANE) not in THIN_LANES:
+    planned, even once the planner has given it a plan slice, unless it carries a pull request link of earlier work."""
+    if task.get("enhancement") != "needed" or task.get("pr_url") or task.get("lane", LAB_LANE) not in THIN_LANES:
         return ""
     return THIN.format(thin_task.ENHANCE.format(task["id"]))
 

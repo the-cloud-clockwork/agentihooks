@@ -26,8 +26,16 @@ export function byId(list, id) {
   return at === undefined ? undefined : list[at];
 }
 
+const ownIndexes = new WeakMap();
+
 export function ownFreeze(d, key) {
-  return d.freezes.find((r) => r.verb === "freeze" && r.target === key);
+  let index = ownIndexes.get(d.freezes);
+  if (!index || index.size !== d.freezes.length) {
+    index = { size: d.freezes.length, own: new Map() };
+    for (const r of d.freezes) if (r.verb === "freeze" && !index.own.has(r.target)) index.own.set(r.target, r);
+    ownIndexes.set(d.freezes, index);
+  }
+  return index.own.get(key);
 }
 
 const markSets = new WeakMap();
@@ -52,7 +60,7 @@ export function snowflakeState(d, key) {
 
 export function setFreeze(d, op, at) {
   if (d.freezes.some((r) => r.verb === op.verb && r.target === op.target)) return;
-  d.freezes.push({ id: op.id, verb: op.verb, target: op.target, by: "operator", at, reason: op.reason || "" });
+  d.freezes = [...d.freezes, { id: op.id, verb: op.verb, target: op.target, by: "operator", at, reason: op.reason || "" }];
   if (op.verb === "freeze" && !d.marks.frozen.includes(op.target)) d.marks.frozen.push(op.target);
 }
 

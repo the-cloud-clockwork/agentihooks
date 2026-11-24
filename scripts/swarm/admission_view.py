@@ -14,6 +14,34 @@ NAMES = ("depends_on", "parked_on", "group_members")
 LINKS = ("enhances", "merged_into")
 RUNNING = ("claimed", "pr")
 BRANCH_FIELDS = ("branch", "branch_repo", "pr_url")
+RUNNING_FIELDS = ("state", "claimed_by", "awaiting", "done", "territory", "branch", "branch_repo", "pr_url")
+WAITING_FIELDS = (
+    "after_release",
+    "applied_at",
+    "awaiting",
+    "branch",
+    "claimed_by",
+    "contract",
+    "depends_on",
+    "enhancement",
+    "enhances",
+    "frozen",
+    "group_members",
+    "hive",
+    "kind",
+    "lane",
+    "merged_into",
+    "needs",
+    "out_of_scope",
+    "parked_on",
+    "phase",
+    "pr_url",
+    "rank",
+    "slice",
+    "state",
+    "workstation",
+)
+RELATED_FIELDS = tuple(sorted({*RUNNING_FIELDS, *WAITING_FIELDS, "title", "description"}))
 GONE = "the task is gone"
 DONE = "it is done"
 Mark = Callable[[str], None]
@@ -94,9 +122,9 @@ class Narrow:
         row: dict[str, Any] | None = self._ledger.task(slug, task_id)
         mark("row")
         found = [row] if row else []
-        rows = self._related(slug, found)
-        rows.update({each["id"]: each for each in self._ledger.tasks_where(slug, states=RUNNING)})
-        rows.update({each["id"]: each for each in found})
+        related = self._related(slug, found)
+        running: list[dict[str, Any]] = self._ledger.tasks_where(slug, states=RUNNING, fields=RUNNING_FIELDS)
+        rows = {each["id"]: each for each in running} | related | {each["id"]: each for each in found}
         mark("rows")
         doc = self._doc(slug, row, rows)
         mark("parts")
@@ -104,7 +132,9 @@ class Narrow:
 
     def waiting(self, slug: str, capabilities: Callable[[], Iterable[str]]) -> int:
         """The swarm's open tasks only the root hive takes and can place that its claim gate would let start now."""
-        pinned: list[dict[str, Any]] = self._ledger.tasks_where(slug, states=("open",), pinned=True)
+        pinned: list[dict[str, Any]] = self._ledger.tasks_where(
+            slug, states=("open",), pinned=True, fields=WAITING_FIELDS
+        )
         candidates: list[dict[str, Any]] = [row for row in pinned if readiness.root_only(row)]
         if not candidates:
             return 0
@@ -128,7 +158,7 @@ class Narrow:
 
     def _related(self, slug: str, found: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         wanted = sorted(named(found) - {row["id"] for row in found})
-        rows: list[dict[str, Any]] = self._ledger.tasks_where(slug, ids=wanted) if wanted else []
+        rows: list[dict[str, Any]] = self._ledger.tasks_where(slug, ids=wanted, fields=RELATED_FIELDS) if wanted else []
         return {row["id"]: row for row in rows}
 
     def _doc(self, slug: str, row: dict[str, Any] | None, rows: dict[str, Any]) -> dict[str, Any]:
