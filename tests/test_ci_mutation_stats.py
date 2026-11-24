@@ -176,6 +176,35 @@ def test_measured_dependencies_keep_only_the_test_modules_a_node_runs(
     }
 
 
+@pytest.mark.feature("mutation-stats-per-node-dependencies")
+def test_measured_dependencies_give_a_node_without_a_context_the_shared_modules(tmp_path: Path) -> None:
+    from coverage import CoverageData
+
+    from scripts.ci_mutation.stats_dependencies import measured_dependencies
+
+    root = tmp_path / "source"
+    work = tmp_path / "mutants"
+    paths = {"shared.py", "run.py", "tests/test_running.py", "tests/test_skipped.py"}
+    for path in paths:
+        for prefix in (root, work):
+            (prefix / path).parent.mkdir(parents=True, exist_ok=True)
+            (prefix / path).write_text("value = 1\n")
+    first = "tests/test_running.py::test_running"
+    second = "tests/test_skipped.py::test_skipped"
+    coverage_file = tmp_path / "coverage"
+    data = CoverageData(basename=str(coverage_file))
+    data.set_context("")
+    data.add_lines({str(work / "shared.py"): {1}, str(work / "tests/test_skipped.py"): {1}})
+    data.set_context(first + "|run")
+    data.add_lines({str(work / "run.py"): {1}, str(work / "tests/test_running.py"): {1}})
+    data.write()
+
+    assert measured_dependencies(coverage_file, work, root, [first, second], paths) == {
+        first: ["run.py", "shared.py", "tests/test_running.py"],
+        second: ["shared.py"],
+    }
+
+
 def place_flake_ledger(tests: Path) -> None:
     (tests / "__init__.py").touch()
     shutil.copy(Path(__file__).with_name("flake_ledger.py"), tests)
@@ -265,6 +294,81 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     assert "scripts/sample.py" in result["dependencies"][node]
     assert "tests/test_sample.py" in result["dependencies"][node]
     assert "scripts/untracked.py" not in result["dependencies"][node]
+
+
+@pytest.mark.feature("mutation-stats-per-node-dependencies")
+def test_a_stats_bucket_with_a_test_skipped_by_a_mark_records_dependencies_for_every_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import collect_shard_stats
+
+    original = tmp_path / "original"
+    work = tmp_path / "work"
+    running = "tests/test_sample.py::test_value"
+    skipped = "tests/test_sample.py::test_skipped"
+    files = {
+        "scripts/sample.py": "def value() -> int:\n    return 1\n",
+        "scripts/shared.py": "value = 2\n",
+        "tests/test_sample.py": (
+            "import pytest\n"
+            "from scripts import shared\n"
+            "from scripts.sample import value\n"
+            "def test_value() -> None:\n"
+            "    assert value() == 1\n"
+            '@pytest.mark.skip(reason="stats context regression")\n'
+            "def test_skipped() -> None:\n"
+            "    assert shared.value == 2\n"
+        ),
+    }
+    for root in (original, work / "mutants"):
+        for name, text in files.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(text)
+    place_flake_ledger(work / "mutants" / "tests")
+    subprocess.run(["git", "init", "-q", str(original)], check=True)
+    subprocess.run(["git", "add", *files], cwd=original, check=True)
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("MUTATION_STATS_ROOT", str(original))
+    monkeypatch.delenv("COVERAGE_FILE", raising=False)
+    engine = SimpleNamespace(
+        tests_by_mangled_function_name={"scripts.sample.x_value": {running}},
+        duration_by_test={running: 1, skipped: 0},
+    )
+
+    class Runner:
+        _pytest_add_cli_args: list[str] = []
+
+        def run_stats(self, *, tests: list[str]) -> int:
+            done = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", *self._pytest_add_cli_args, *tests],
+                cwd=work / "mutants",
+                env=dict(os.environ),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert done.returncode == 0, done.stdout + done.stderr
+            return done.returncode
+
+    output = tmp_path / "part.json"
+    collect_shard_stats(
+        SimpleNamespace(mutmut=engine), Runner(), ["tests/test_sample.py"], output, str(tmp_path / "base")
+    )
+    result = json.loads(output.read_text())
+    assert result["status"] == 0
+    assert result["durations"] == {running: 1, skipped: 0}
+    assert result["dependencies"] == {
+        running: ["scripts/sample.py", "scripts/shared.py", "tests/test_sample.py"],
+        skipped: ["scripts/sample.py", "scripts/shared.py"],
+    }
 
 
 def test_a_stats_bucket_of_only_wall_clock_tests_collects_nothing_and_succeeds(
