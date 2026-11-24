@@ -3,6 +3,8 @@
 from collections.abc import Callable
 from typing import Any
 
+from hooks.common import log
+
 
 def closing_denied(
     handler: Callable[[dict[str, Any]], None],
@@ -16,5 +18,6 @@ def closing_denied(
         try:
             end(payload)
         except Exception as error:
+            log("denied call end failed", {"error": str(error)})
             raise block from error
         raise

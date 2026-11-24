@@ -39,13 +39,20 @@ def test_other_errors_leave_the_call_open():
 
 
 @pytest.mark.feature("rerun-budget-counts-admitted-reruns")
-def test_a_failing_end_keeps_the_block_and_chains_its_error() -> None:
+def test_a_failing_end_keeps_the_block_and_chains_its_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    logged: list[tuple[str, dict[str, str] | None]] = []
+
     def handler(seen: object) -> None:
         raise Blocked("denied")
 
     def end(seen: object) -> None:
         raise OSError("end failed")
 
+    def record(message: str, payload: dict[str, str] | None = None) -> None:
+        logged.append((message, payload))
+
+    monkeypatch.setattr(tool_end, "log", record)
     with pytest.raises(Blocked, match="denied") as raised:
         tool_end.closing_denied(handler, {"tool_use_id": "toolu_denied"}, Blocked, end)
     assert isinstance(raised.value.__cause__, OSError)
+    assert logged == [("denied call end failed", {"error": "end failed"})]

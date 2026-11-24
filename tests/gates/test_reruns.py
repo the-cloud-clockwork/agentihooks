@@ -231,7 +231,9 @@ def test_a_rerun_panic_refuses_leaves_both_reruns_of_the_head_unspent(
 
 
 @pytest.mark.feature("rerun-budget-counts-admitted-reruns")
-def test_a_rerun_every_guard_admits_keeps_its_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_rerun_the_pre_tool_use_handler_admits_keeps_its_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from hooks import hook_manager
 
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "ah"))
