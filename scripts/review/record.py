@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, NamedTuple, Protocol
 from urllib.parse import urlsplit
@@ -43,17 +43,28 @@ def _redis(store: RedisStore) -> _Redis:
     return store.redis  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
 
+def _stored(item: Finding) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "body": item.body,
+        "comment": item.comment,
+        "by": item.by,
+        "task": item.task,
+        "state": item.state,
+        "answer": item.answer,
+        "read_by": list(item.read_by),
+    }
+
+
 def document(found: Record) -> dict[str, Any]:
-    return {"url": found.url, "head": found.head, "findings": [asdict(item) for item in found.findings]}
+    return {"url": found.url, "head": found.head, "findings": [_stored(item) for item in found.findings]}
 
 
 def _key(store: RedisStore, slug: str, url: str) -> str:
-    return store.key(slug, "review", sha256(url.encode()).hexdigest()[:16])
+    return store.key(slug, "review", sha256(url.rstrip("/").encode()).hexdigest()[:16])
 
 
-def _decode(raw: str | None, url: str, head: str) -> Record:
-    if raw is None:
-        return Record(url, head)
+def _decode(raw: str) -> Record:
     data = json.loads(raw)
     return Record(
         data["url"],
@@ -76,7 +87,7 @@ def _decode(raw: str | None, url: str, head: str) -> Record:
 
 def read(store: RedisStore, slug: str, url: str, head: str) -> Record | None:
     raw = _redis(store).hget(_key(store, slug, url), head)
-    return None if raw is None else _decode(raw, url, head)
+    return None if raw is None else _decode(raw)
 
 
 def _write(store: RedisStore, slug: str, url: str, head: str, update: Callable[[Record], Record], task: str) -> Record:
@@ -84,11 +95,12 @@ def _write(store: RedisStore, slug: str, url: str, head: str, update: Callable[[
     tasks = store.key(slug, "review-tasks")
 
     def change(pipe: Any) -> Record:
-        found = update(_decode(pipe.hget(key, head), url, head))
+        stored = pipe.hget(key, head)
+        found = update(Record(url, head) if stored is None else _decode(stored))
         pipe.multi()
         pipe.hset(key, head, json.dumps(document(found)))
         if task:
-            pipe.hincrby(tasks, task, 1)
+            pipe.hincrby(tasks, task)
         pipe.expire(key, TTL_SEC)
         pipe.expire(tasks, TTL_SEC)
         return found
@@ -98,7 +110,7 @@ def _write(store: RedisStore, slug: str, url: str, head: str, update: Callable[[
 
 def number_of(url: str) -> int:
     try:
-        return int(urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1])
+        return int(urlsplit(url).path.rstrip("/").rpartition("/")[2])
     except ValueError:
         raise SwarmError(f"not a change request URL: {url}") from None
 
@@ -111,10 +123,11 @@ def _head(forge: Forge, url: str) -> str:
 
 
 def _post_one(store: RedisStore, forge: Forge, target: Record, who: Who, body: str) -> Record:
-    finding = Finding("", body, forge.post(number_of(target.url), body), who.name, who.task)
+    comment = forge.post(number_of(target.url), body)
 
     def append(found: Record) -> Record:
-        return found._replace(findings=(*found.findings, replace(finding, id=f"f{len(found.findings) + 1}")))
+        finding = Finding(f"f{len(found.findings) + 1}", body, comment, who.name, who.task)
+        return found._replace(findings=(*found.findings, finding))
 
     return _write(store, who.swarm, target.url, target.head, append, who.task)
 

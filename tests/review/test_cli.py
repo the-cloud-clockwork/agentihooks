@@ -68,6 +68,30 @@ def test_a_forge_failure_prints_its_reason_and_returns_one(
 
 
 @pytest.mark.feature("review-record-post")
+def test_a_forge_without_a_usable_remote_or_token_prints_its_reason_and_returns_one(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _wired(monkeypatch)
+    monkeypatch.setattr(cli, "_forge", Mock(side_effect=ValueError("GITHUB_TOKEN is not set")))
+    assert cli.main(["post", URL, "--slug", SLUG, "--finding", "First"]) == 1
+    assert capsys.readouterr() == ("", "review: GITHUB_TOKEN is not set\n")
+
+
+@pytest.mark.feature("review-record-post")
+def test_a_redis_refusal_prints_its_reason_and_returns_one(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from redis.exceptions import NoPermissionError
+
+    _wired(monkeypatch)
+    monkeypatch.setattr(
+        cli.record, "post", Mock(side_effect=NoPermissionError("NOPERM no permissions to access a key"))
+    )
+    assert cli.main(["post", URL, "--slug", SLUG, "--finding", "First"]) == 1
+    assert capsys.readouterr() == ("", "review: NOPERM no permissions to access a key\n")
+
+
+@pytest.mark.feature("review-record-post")
 def test_a_session_outside_the_swarm_is_refused(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -123,7 +147,8 @@ def test_review_post_requires_a_url_and_swarm(args: list[str], capsys: pytest.Ca
     assert error.value.code == 2
     message = capsys.readouterr().err
     assert message.startswith("usage: agentihooks review ")
-    assert ("action" if not args else "url" if args == ["post"] else "--slug") in message
+    missing = "action" if not args else "url, --slug" if args == ["post"] else "--slug"
+    assert message.endswith(f"error: the following arguments are required: {missing}\n")
 
 
 @pytest.mark.feature("review-record-post")
@@ -135,4 +160,6 @@ def test_post_help_runs_and_names_the_post_arguments(capsys: pytest.CaptureFixtu
     assert help_text.startswith("usage: agentihooks review post ")
     assert "--slug SLUG" in help_text
     assert "--finding FINDING" in help_text
-    assert "post findings on the change request head through the forge" in " ".join(cli.parser().format_help().split())
+    assert " {post} post post findings on the change request head through the forge options: " in " ".join(
+        cli.parser().format_help().split()
+    )

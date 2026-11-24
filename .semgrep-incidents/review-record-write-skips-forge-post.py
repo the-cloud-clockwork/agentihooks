@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from scripts.forge.model import Forge
 from scripts.review.record import Finding
 
@@ -10,6 +12,22 @@ def posted(forge: Forge, number: int, body: str, by: str, task: str) -> Finding:
 def posted_by_keyword(forge: Forge, number: int, body: str) -> Finding:
     # ok: review-record-write-skips-forge-post
     return Finding(id="", body=body, comment=forge.post(number, body), by="r", task="t")
+
+
+def posted_before_the_write(forge: Forge, number: int, body: str, by: str, task: str) -> Callable[[int], Finding]:
+    comment = forge.post(number, body)
+
+    def append(count: int) -> Finding:
+        # ok: review-record-write-skips-forge-post
+        return Finding(f"f{count + 1}", body, comment, by, task)
+
+    return append
+
+
+def posted_another_comment(forge: Forge, number: int, body: str, other: str) -> Finding:
+    comment = forge.post(number, body)
+    # ruleid: review-record-write-skips-forge-post
+    return Finding(comment, body, other, "r", "t")
 
 
 def unposted(body: str, by: str, task: str) -> Finding:

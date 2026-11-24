@@ -46,7 +46,7 @@ def test_a_saved_record_reads_back_from_its_hash_field() -> None:
                 "task": "r1",
                 "state": "answered",
                 "answer": "Fixed",
-                "read_by": ("engineer@x",),
+                "read_by": ["engineer@x"],
             }
         ],
     }
@@ -61,12 +61,47 @@ def test_trailing_slashes_do_not_change_the_forge_target(requested: str, reporte
 
 
 @pytest.mark.feature("review-record-post")
+def test_both_spellings_of_a_change_request_url_share_one_record() -> None:
+    found = store()
+    record.post(found, SLUG, FakeForge(), URL, REVIEWER, "r1", ["First"])
+    posted = record.post(found, SLUG, FakeForge(), URL + "/", REVIEWER, "r1", ["Second"])
+    assert [(item.id, item.body) for item in posted.findings] == [("f1", "First"), ("f2", "Second")]
+    assert len([key for key in found.redis.keys("*") if ":review:" in key]) == 1
+    for url in (URL, URL + "/"):
+        saved = record.read(found, SLUG, url, HEAD)
+        assert saved is not None
+        assert [item.body for item in saved.findings] == ["First", "Second"]
+
+
+@pytest.mark.feature("review-record-post")
 def test_a_forge_url_with_a_suffix_is_a_different_request() -> None:
     forge = FakeForge(url=URL + "X")
     with pytest.raises(SwarmError) as error:
         record.post(store(), SLUG, forge, URL, REVIEWER, "r1", ["First"])
     assert str(error.value) == f"change request {URL} does not match forge target {URL}X"
     assert forge.posts == []
+
+
+@pytest.mark.feature("review-record-post")
+def test_a_forge_url_missing_the_last_character_of_the_request_is_a_different_request() -> None:
+    requested = URL + "?view=X"
+    forge = FakeForge(url=URL + "?view=")
+    with pytest.raises(SwarmError) as error:
+        record.post(store(), SLUG, forge, requested, REVIEWER, "r1", ["First"])
+    assert str(error.value) == f"change request {requested} does not match forge target {URL}?view="
+    assert (forge.reads, forge.posts) == ([7], [])
+
+
+@pytest.mark.feature("review-record-post")
+def test_urls_that_differ_only_in_a_last_character_keep_separate_records() -> None:
+    found = store()
+    for url in (URL + "?view=X", URL + "?view="):
+        record.post(found, SLUG, FakeForge(url=url), url, REVIEWER, "r1", [url])
+    assert len([key for key in found.redis.keys("*") if ":review:" in key]) == 2
+    for url in (URL + "?view=X", URL + "?view="):
+        saved = record.read(found, SLUG, url, HEAD)
+        assert saved is not None
+        assert [item.body for item in saved.findings] == [url]
 
 
 @pytest.mark.feature("review-record-post")

@@ -46,7 +46,7 @@ def main(argv: list[str]) -> int:
         found = connect()
         agent = _agent(found, args.slug)
         result = record.post(found, args.slug, _forge(), args.url, agent.name, agent.task, args.finding)
-    except (SwarmError, ForgeError) as error:
+    except (SwarmError, ForgeError, ValueError, *swarm_store.store_errors()) as error:
         print(f"review: {error}", file=sys.stderr)
         return 1
     print(json.dumps(record.document(result)))

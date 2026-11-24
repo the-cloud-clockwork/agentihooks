@@ -101,9 +101,13 @@ Its ceiling calculation does not allocate an automatic reviewer share. Quota
 output combines the fixed review ceiling with the autoscaled ceilings of the
 other lanes and can still read decisions saved before review was added.
 
-No `--max-review-agents` creation flag or `max-review-agents` setting
-exists. Configure the review cap in the template used for
-new swarm creation; changing a template file does not change a running swarm.
+Set the review cap of a running swarm with
+`agentihooks swarm <slug> set max-review-agents=N` (or the bare pair
+`agentihooks swarm <slug> max-review-agents=N`), a whole number stored as
+`max_review` beside the other lane caps; it applies at the next tick and does
+not pin the autoscaled caps. `swarm <slug> status` shows it as `review N`.
+No `--max-review-agents` creation flag exists: a new swarm takes its review cap
+from the template, and changing a template file does not change a running swarm.
 
 ## Add and inspect a review task
 
@@ -252,7 +256,7 @@ and autoscale has no reviewer share.
 | Task creation says review tasks must use the review lane | Supply `--lane review --kind review` together. A review kind on another lane, or another kind on the review lane, is refused. |
 | `swarm done` says a review task is done only after it posts at least one finding | The task has no finding counted for this swarm and task. Post the findings with `agentihooks review post <url> --slug <slug> --finding <text>` as the reviewer seat, then repeat `done`. |
 | A template has no visible review entry | Check the installed version and the configuration home used by `swarm templates`. Parsed templates include review even when the JSON omits it. |
-| An older swarm has zero reviewer capacity | Configurations missing `max_review` default to zero. Editing a template or repeating `init` does not migrate that stored cap. |
+| An older swarm has zero reviewer capacity | Configurations missing `max_review` default to zero. Editing a template or repeating `init` does not migrate that stored cap; raise it with `agentihooks swarm <slug> set max-review-agents=N`. |
 | Autoscale changes the other ceilings but leaves review unchanged | Review retains its configured cap; autoscale has no reviewer share. |
 | Review capacity is below its configured ceiling | Inspect account capacity, host room and claimable review demand. A cap permits capacity but does not reserve an account or force placement. |
 | A review task is listed but no reviewer starts | Check that the review cap is above zero and the reviewer profile is installed where the launch lands. On the `events` engine, check that a hive logs `hive spoke for swarm <slug> lane review takes swarm.<slug>.ready.review`; a hive whose `HIVE_EXCLUDED` names `review` runs no review spoke. |
