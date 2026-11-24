@@ -667,8 +667,8 @@ jobs:
               if ! jq -s -e '
                 [.[] | select(.name | startswith("unit ("))] as $units |
                 ($units | length > 0 and all(.[]; .conclusion == "success") and
-                  (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
-                    group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)]))) and
+                  (map(.name) == ["unit (3.12, copy)"] or (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
+                    group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)])))) and
                 any(.[];
                   .name == "coverage-baseline" and .conclusion == "success" and
                   any(.steps[]?; .name == "Compute the coverage baseline" and .conclusion == "success") and
@@ -1502,7 +1502,7 @@ jobs:
       matrix:
         python-version: ["3.12"]
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
-        include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '[]') }}
+        include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || needs.split.outputs.source != '' && '[{"python-version":"3.12","shard":"copy"}]' || '[]') }}
         # The queue plan's include adds back every leg above its floor of twelve that the queue split asks for.
         exclude:
           - {python-version: &queue-floor "${{ github.event_name == 'merge_group' && '3.12' || '' }}", shard: 13}
@@ -1513,6 +1513,7 @@ jobs:
           - {python-version: *queue-floor, shard: 18}
           - {python-version: *queue-floor, shard: 19}
           - {python-version: *queue-floor, shard: 20}
+          - {python-version: "${{ needs.split.outputs.source != '' && '3.12' || '' }}"}
     steps: &unit-steps
       # The action retries git fetch but not the lazy blob fetch inside git checkout; a silent connection there held a shard ten minutes.
       - name: Check out the graded commit
@@ -1695,173 +1696,94 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
 
-      - name: Restore queue shard durations
+      - name: Restore every queue leg
         if: needs.split.outputs.source != ''
-        id: restore-queue-shard-durations
+        id: restore-queue-legs
         continue-on-error: true
         uses: actions/download-artifact@v8.0.2
-        with: &unit-restore-queue-shard-durations
-          name: durations-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
+        with: &unit-restore-queue-legs
+          pattern: "{durations,flakes,coverage}-${{ matrix.python-version }}-*"
+          path: ${{ runner.temp }}/queue-legs
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
-      - name: Restore queue shard durations, wait before attempt 2
-        if: steps.restore-queue-shard-durations.outcome == 'failure'
+      - name: Restore every queue leg, wait before attempt 2
+        if: steps.restore-queue-legs.outcome == 'failure'
         shell: bash
         run: |
-          echo "::warning::Restore queue shard durations failed, as an artifact service outage does; retrying it once in 30 seconds."
+          echo "::warning::Restore every queue leg failed, as an artifact service outage does; retrying it once in 30 seconds."
           sleep 30
 
-      - name: Restore queue shard durations, attempt 2
-        if: steps.restore-queue-shard-durations.outcome == 'failure'
-        id: restore-queue-shard-durations-attempt-2
+      - name: Restore every queue leg, attempt 2
+        if: steps.restore-queue-legs.outcome == 'failure'
+        id: restore-queue-legs-attempt-2
         uses: actions/download-artifact@v8.0.2
-        with: *unit-restore-queue-shard-durations
+        with: *unit-restore-queue-legs
 
-      - name: Restore torn queue shard durations again
-        if: &unfinished-queue-durations needs.split.outputs.source != '' && steps.restore-queue-shard-durations.outputs.download-path == '' && steps.restore-queue-shard-durations-attempt-2.outputs.download-path == ''
-        id: restore-torn-queue-shard-durations
+      - name: Restore torn queue legs again
+        if: &unfinished-queue-legs needs.split.outputs.source != '' && steps.restore-queue-legs.outputs.download-path == '' && steps.restore-queue-legs-attempt-2.outputs.download-path == ''
+        id: restore-torn-queue-legs
         continue-on-error: true
         uses: actions/download-artifact@v8.0.2
-        with: *unit-restore-queue-shard-durations
+        with: *unit-restore-queue-legs
 
-      - name: Restore torn queue shard durations again, wait before attempt 2
-        if: steps.restore-torn-queue-shard-durations.outcome == 'failure'
+      - name: Restore torn queue legs again, wait before attempt 2
+        if: steps.restore-torn-queue-legs.outcome == 'failure'
         shell: bash
         run: |
-          echo "::warning::Restore torn queue shard durations again failed, as an artifact service outage does; retrying it once in 30 seconds."
+          echo "::warning::Restore torn queue legs again failed, as an artifact service outage does; retrying it once in 30 seconds."
           sleep 30
 
-      - name: Restore torn queue shard durations again, attempt 2
-        if: steps.restore-torn-queue-shard-durations.outcome == 'failure'
-        id: restore-torn-queue-shard-durations-attempt-2
+      - name: Restore torn queue legs again, attempt 2
+        if: steps.restore-torn-queue-legs.outcome == 'failure'
+        id: restore-torn-queue-legs-attempt-2
         uses: actions/download-artifact@v8.0.2
-        with: *unit-restore-queue-shard-durations
+        with: *unit-restore-queue-legs
 
-      - name: Check the queue shard durations restored again
-        if: *unfinished-queue-durations
+      - name: Check the queue legs restored again
+        if: *unfinished-queue-legs
         env:
-          RESTORED: ${{ steps.restore-torn-queue-shard-durations.outputs.download-path }}${{ steps.restore-torn-queue-shard-durations-attempt-2.outputs.download-path }}
+          RESTORED: ${{ steps.restore-torn-queue-legs.outputs.download-path }}${{ steps.restore-torn-queue-legs-attempt-2.outputs.download-path }}
         run: |
           if [[ -z "$RESTORED" ]]; then
-            echo "::error::Restoring the queue shard durations again also stopped before the download finished; the restored durations are incomplete."
+            echo "::error::Restoring the queue legs again also stopped before the download finished; the restored legs are incomplete."
             exit 1
           fi
-          echo "::warning::Restore queue shard durations stopped before the download finished, so its partial files were restored again in full."
+          echo "::warning::Restore every queue leg stopped before the download finished, so its partial files were restored again in full."
 
-      - name: Restore queue shard flakes
-        if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard
-        id: restore-queue-shard-flakes
-        continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
-        with: &unit-restore-queue-shard-flakes
-          name: flakes-${{ matrix.python-version }}-${{ matrix.shard }}
-          run-id: ${{ needs.split.outputs.source }}
-          github-token: ${{ steps.unit-token.outputs.token }}
-
-      - name: Restore queue shard flakes, wait before attempt 2
-        if: steps.restore-queue-shard-flakes.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Restore queue shard flakes failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Restore queue shard flakes, attempt 2
-        if: steps.restore-queue-shard-flakes.outcome == 'failure'
-        id: restore-queue-shard-flakes-attempt-2
-        uses: actions/download-artifact@v8.0.2
-        with: *unit-restore-queue-shard-flakes
-
-      - name: Restore torn queue shard flakes again
-        if: &unfinished-queue-flakes needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] == matrix.shard && steps.restore-queue-shard-flakes.outputs.download-path == '' && steps.restore-queue-shard-flakes-attempt-2.outputs.download-path == ''
-        id: restore-torn-queue-shard-flakes
-        continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
-        with: *unit-restore-queue-shard-flakes
-
-      - name: Restore torn queue shard flakes again, wait before attempt 2
-        if: steps.restore-torn-queue-shard-flakes.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Restore torn queue shard flakes again failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Restore torn queue shard flakes again, attempt 2
-        if: steps.restore-torn-queue-shard-flakes.outcome == 'failure'
-        id: restore-torn-queue-shard-flakes-attempt-2
-        uses: actions/download-artifact@v8.0.2
-        with: *unit-restore-queue-shard-flakes
-
-      - name: Check the queue shard flakes restored again
-        if: *unfinished-queue-flakes
+      - name: Lay out every push leg from its queue leg
+        if: needs.split.outputs.source != ''
         env:
-          RESTORED: ${{ steps.restore-torn-queue-shard-flakes.outputs.download-path }}${{ steps.restore-torn-queue-shard-flakes-attempt-2.outputs.download-path }}
-        run: |
-          if [[ -z "$RESTORED" ]]; then
-            echo "::error::Restoring the queue shard flakes again also stopped before the download finished; the restored flakes are incomplete."
-            exit 1
-          fi
-          echo "::warning::Restore queue shard flakes stopped before the download finished, so its partial files were restored again in full."
+          QUEUE_LEGS: ${{ needs.split.outputs.queue_legs }}
+        run: python -m scripts.ci_unit_copy layout --queue "$RUNNER_TEMP/queue-legs" --legs "$QUEUE_LEGS" --out "$RUNNER_TEMP/push-legs"
 
-      - name: Restore queue shard coverage
-        if: needs.split.outputs.source != '' && matrix.python-version == '3.12'
-        id: restore-queue-shard-coverage
-        continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
-        with: &unit-restore-queue-shard-coverage
-          name: coverage-${{ matrix.python-version }}-${{ fromJSON(needs.split.outputs.queue_legs)[format('{0}', matrix.shard)] }}
-          run-id: ${{ needs.split.outputs.source }}
-          github-token: ${{ steps.unit-token.outputs.token }}
-
-      - name: Restore queue shard coverage, wait before attempt 2
-        if: steps.restore-queue-shard-coverage.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Restore queue shard coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Restore queue shard coverage, attempt 2
-        if: steps.restore-queue-shard-coverage.outcome == 'failure'
-        id: restore-queue-shard-coverage-attempt-2
-        uses: actions/download-artifact@v8.0.2
-        with: *unit-restore-queue-shard-coverage
-
-      - name: Restore torn queue shard coverage again
-        if: &unfinished-queue-coverage needs.split.outputs.source != '' && matrix.python-version == '3.12' && steps.restore-queue-shard-coverage.outputs.download-path == '' && steps.restore-queue-shard-coverage-attempt-2.outputs.download-path == ''
-        id: restore-torn-queue-shard-coverage
-        continue-on-error: true
-        uses: actions/download-artifact@v8.0.2
-        with: *unit-restore-queue-shard-coverage
-
-      - name: Restore torn queue shard coverage again, wait before attempt 2
-        if: steps.restore-torn-queue-shard-coverage.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::Restore torn queue shard coverage again failed, as an artifact service outage does; retrying it once in 30 seconds."
-          sleep 30
-
-      - name: Restore torn queue shard coverage again, attempt 2
-        if: steps.restore-torn-queue-shard-coverage.outcome == 'failure'
-        id: restore-torn-queue-shard-coverage-attempt-2
-        uses: actions/download-artifact@v8.0.2
-        with: *unit-restore-queue-shard-coverage
-
-      - name: Check the queue shard coverage restored again
-        if: *unfinished-queue-coverage
+      - name: Check and summarize every push leg's coverage
+        if: needs.split.outputs.source != ''
         env:
-          RESTORED: ${{ steps.restore-torn-queue-shard-coverage.outputs.download-path }}${{ steps.restore-torn-queue-shard-coverage-attempt-2.outputs.download-path }}
+          PUSH_LEGS: ${{ runner.temp }}/push-legs
+          PYTHONPATH: ${{ github.workspace }}
         run: |
-          if [[ -z "$RESTORED" ]]; then
-            echo "::error::Restoring the queue shard coverage again also stopped before the download finished; the restored coverage is incomplete."
-            exit 1
-          fi
-          echo "::warning::Restore queue shard coverage stopped before the download finished, so its partial files were restored again in full."
+          summarize() {
+            cd "$PUSH_LEGS/coverage-3.12-$1"
+            databases=(.coverage)
+            if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
+            python -m scripts.coverage_check "${databases[@]}"
+            lines="$PUSH_LEGS/executed-lines-3.12-$1"
+            python -m tests.coverage_summary --out "$lines/executed-lines.json" "${databases[@]}" \
+              --statements "$lines/statement-lines.json" --slice "$1/20" --head "$GITHUB_WORKSPACE"
+          }
+          export -f summarize
+          seq 1 20 | xargs -P "$(python -m scripts.ci_cpu_quota)" -I {} bash -e -c 'summarize {}'
 
-      - name: Empty the test reports of a leg above the queue's shard count
-        if: needs.split.outputs.source != '' && fromJSON(needs.split.outputs.queue_legs || '{}')[format('{0}', matrix.shard)] != matrix.shard
-        run: |
-          echo '{}' > durations.json
-          rm -f elapsed.json
+      - name: Upload every push leg
+        if: needs.split.outputs.source != ''
+        uses: actions/github-script@v7
+        env:
+          PUSH_LEGS: ${{ runner.temp }}/push-legs
+        with:
+          github-token: none
+          script: |
+            require('child_process').execFileSync('python', ['-m', 'scripts.ci_unit_copy', 'upload', '--out', process.env.PUSH_LEGS], {stdio: 'inherit', cwd: process.env.GITHUB_WORKSPACE})
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
@@ -1915,14 +1837,14 @@ jobs:
           after-cancel: true
 
       - name: Check the coverage database
-        if: matrix.python-version == '3.12'
+        if: needs.split.outputs.source == '' && matrix.python-version == '3.12'
         run: |
           databases=(.coverage)
           if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
           python -m scripts.coverage_check "${databases[@]}"
 
       - name: Upload coverage
-        if: matrix.python-version == '3.12'
+        if: needs.split.outputs.source == '' && matrix.python-version == '3.12'
         uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
@@ -1936,7 +1858,7 @@ jobs:
           retention-days: 7
 
       - name: Record flaky tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.split.outputs.source == '' }}
         shell: bash
         run: |
           touch flakes.jsonl
@@ -1946,7 +1868,7 @@ jobs:
           jq -r 'select(.crashes) | "::warning title=Worker crash::\(.test) crashed its worker \(.crashes) time(s) in run \(.run)"' flakes.jsonl
 
       - name: Upload the flake report
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.split.outputs.source == '' }}
         uses: ./.github/actions/retry-upload
         with:
           name: flakes-${{ matrix.python-version }}-${{ matrix.shard }}
@@ -1955,7 +1877,7 @@ jobs:
           retention-days: 14
 
       - name: Summarize the executed lines
-        if: matrix.python-version == '3.12'
+        if: needs.split.outputs.source == '' && matrix.python-version == '3.12'
         run: |
           databases=(.coverage)
           if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
@@ -1965,7 +1887,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
 
       - name: Upload the executed lines summary
-        if: matrix.python-version == '3.12'
+        if: needs.split.outputs.source == '' && matrix.python-version == '3.12'
         uses: ./.github/actions/retry-upload
         with:
           name: executed-lines-${{ matrix.python-version }}-${{ matrix.shard }}
@@ -2363,6 +2285,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           QUEUE_PLAN: ${{ github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '' }}
+          COPIED: ${{ needs.split.outputs.source }}
+          UNIT: ${{ needs.unit.result }}
         run: |
           if [[ -n "$QUEUE_PLAN" ]]; then
             SHARDS="$(jq -ce '[.[].shard]' <<< "$QUEUE_PLAN")"
@@ -2371,7 +2295,11 @@ jobs:
           fi
           export SHARDS
           echo "SHARDS=$SHARDS" >> "$GITHUB_ENV"
-          python -m scripts.ci_gate_shards
+          if [[ -n "$COPIED" ]]; then
+            [[ "$UNIT" == success ]] || { echo "::error::The unit job that copies queue run $COPIED into every leg ended $UNIT."; exit 1; }
+          else
+            python -m scripts.ci_gate_shards
+          fi
 
       # The artifact service download spends none of the App installation's hourly REST budget.
       - name: Download shard reports
@@ -2454,7 +2382,7 @@ jobs:
 
   sonar:
     if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && needs.select.outputs.sonar != 'skip' && fromJSON(needs.lab-verdict.outputs.authoritative || '{}')['sonar'] != true }}
-    needs: [select, reuse, admission, lab-verdict]
+    needs: [select, reuse, admission, lab-verdict, test-count]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 90 || 60 }}
     outputs:
@@ -3585,19 +3513,12 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BASE: ${{ steps.base.outputs.commit }}
         run: |
-          ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...dev" --jq .status)
-          [[ "$ancestry" == ahead || "$ancestry" == identical ]] || { echo "::error::Base $BASE is outside dev history."; exit 1; }
-          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE&per_page=20" --jq '.workflow_runs[] | select((.event == "push" and .head_branch == "dev") or (.event == "merge_group" and (.head_branch | startswith("gh-readonly-queue/dev/")))) | "\(.id) \(.event)"')
-          while read -r run event; do
-            [[ -n "$run" ]] || continue
-            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
-            [[ "$kept" -gt 0 ]] || continue
-            jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
-            if ! jq -s -e --arg event "$event" '
+          measured() {
+            jq -s -e --arg event "$1" '
               [.[] | select(.name | startswith("unit ("))] as $units |
               (($units | length > 0 and all(.[]; .conclusion == "success") and
-                (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
-                  group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)]))) or
+                (map(.name) == ["unit (3.12, copy)"] or (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
+                  group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)])))) or
                ($event == "merge_group" and
                 all(.[] | select(.name == "unit" or (.name | startswith("unit ("))); .conclusion == "skipped") and
                 any(.[]; .name == "reuse" and .conclusion == "success" and
@@ -3610,13 +3531,32 @@ jobs:
                 .name == "queue-baseline" and
                 any(.steps[]?; .name == "Record this run\u0027s coverage baseline" and .conclusion == "success") and
                 any(.steps[]?; .name == "Publish this run\u0027s coverage baseline" and .conclusion == "success")
-              end)' <<< "$jobs" > /dev/null; then
-              continue
-            fi
+              end)' > /dev/null
+          }
+          ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...dev" --jq .status)
+          [[ "$ancestry" == ahead || "$ancestry" == identical ]] || { echo "::error::Base $BASE is outside dev history."; exit 1; }
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE&per_page=20" --jq '.workflow_runs[] | select((.event == "push" and .head_branch == "dev") or (.event == "merge_group" and (.head_branch | startswith("gh-readonly-queue/dev/")))) | "\(.id) \(.event)"')
+          while read -r run event; do
+            [[ -n "$run" ]] || continue
+            kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
+            [[ "$kept" -gt 0 ]] || continue
+            jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
+            measured "$event" <<< "$jobs" || continue
             echo "Restoring the coverage baseline of base $BASE from measured run $run"
             echo "id=$run" >> "$GITHUB_OUTPUT"
             exit 0
           done <<< "$runs"
+          published=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=coverage-baseline&per_page=100" --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "dev") | [.workflow_run.head_sha, .workflow_run.id]]')
+          candidates=$(git rev-list --first-parent --skip=1 --max-count=1000 "$BASE" -- | jq -R -r --argjson published "$published" '. as $commit | $published[] | select(.[0] == $commit) | "\(.[0]) \(.[1])"')
+          while read -r commit run; do
+            [[ -n "$run" ]] || continue
+            jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
+            measured push <<< "$jobs" || continue
+            echo "Restoring the coverage baseline of base $BASE from measured run $run of its nearest measured first parent ancestor $commit, because no run of the base kept one"
+            echo "id=$run" >> "$GITHUB_OUTPUT"
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
+            exit 0
+          done <<< "$candidates"
           echo "::error::No measured Tests run on base $BASE kept a live coverage-baseline artifact with successful measuring and publishing jobs."
           exit 1
 
@@ -3668,7 +3608,7 @@ jobs:
       - name: Check out the base grader
         id: grader
         env:
-          BASE: ${{ steps.restored.outputs.commit || steps.base.outputs.commit }}
+          BASE: ${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}
         run: |
           git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
           if [[ ! -f "$RUNNER_TEMP/base/tests/coverage_ratchet.py" ]]; then
@@ -3725,7 +3665,7 @@ jobs:
 
       - name: Hold every line the base ran
         env:
-          BASE: ${{ steps.restored.outputs.commit || steps.base.outputs.commit }}
+          BASE: ${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}
           HEAD_INPUT: ${{ steps.grader.outputs.input }}
         run: |
           base="$BASE"

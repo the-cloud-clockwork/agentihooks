@@ -45,7 +45,7 @@ PARTS = (
 
 
 def section(*missing: str) -> str:
-    rows = ["### Seams", "The close calls `enhance_review.close` from swarm done."]
+    rows = ["### Seams", "The tests observe swarm done exits zero after `enhance_review.close`."]
     for name in PARTS:
         if name not in missing:
             rows += [f"### {name}", f"Plain words about {name.lower()}."]

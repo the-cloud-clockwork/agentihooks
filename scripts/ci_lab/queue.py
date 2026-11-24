@@ -221,6 +221,16 @@ class Queue:
         keys = [_key("pending"), _head(head, "pending")]
         return [job for job in self.pending() if job in mine and self._drop(keys=[_job(job), *keys], args=[job])]
 
+    def drop(self, head: str) -> list[str]:
+        """Remove the head's pending jobs and return them by name; its leased jobs run to completion. The jobs are
+        read from the head's own pending set and dropped in one pipeline, so the whole pending order is never read."""
+        jobs = sorted(self.members(head, "pending"))
+        keys = [_key("pending"), _head(head, "pending")]
+        pipe = self.client.pipeline()
+        for job in jobs:
+            self._drop(keys=[_job(job), *keys], args=[job], client=pipe)
+        return [job for job, dropped in zip(jobs, pipe.execute()) if dropped]
+
     def pending(self) -> list[str]:
         return list(self.client.zrange(_key("pending"), 0, -1))
 
@@ -271,6 +281,14 @@ class Queue:
             for job, (slots, leased) in zip(jobs, pipe.execute())
             if slots is not None
         }
+
+    def states(self, jobs: Sequence[str]) -> list[str | None]:
+        """Return each job's state in order, None for a job whose record is gone, read with HGET in one pipeline that
+        opens no transaction and builds no job."""
+        pipe = self.client.pipeline(transaction=False)
+        for job in jobs:
+            pipe.hget(_job(job), "state")
+        return pipe.execute()
 
     def token(self, job: str) -> str:
         return str(self.client.hget(_job(job), "token") or "")
