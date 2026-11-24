@@ -1,4 +1,3 @@
-import fcntl
 import json
 import re
 from collections import Counter
@@ -7,6 +6,8 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 from referencing import Registry, Resource
+
+from hooks.compat import fcntl
 
 SCHEMAS = Path(__file__).resolve().parents[2] / "docs" / "swarm-v2" / "schemas"
 

@@ -1,7 +1,6 @@
 """Where a quick swarm keeps its state: one scratchpad folder with the registry, culture, room and seat folders."""
 
 import contextlib
-import fcntl
 import json
 import os
 import re
@@ -9,6 +8,7 @@ from collections.abc import Generator, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from hooks.compat import fcntl
 from scripts import herdr_host
 from scripts.quick.guard import QuickError
 

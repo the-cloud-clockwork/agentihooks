@@ -1,10 +1,11 @@
 import json
 import os
-import pwd
 import shutil
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from hooks.compat import real_home
 
 if TYPE_CHECKING:
     from scripts.events.bus import StateStore
@@ -23,7 +24,7 @@ def _unit_dir(home: Path) -> Path:
 
 
 def _account_home() -> Path:
-    return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    return real_home()
 
 
 def _live(home: Path) -> bool:

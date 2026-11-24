@@ -1,10 +1,10 @@
 """The quick swarm room: a file of chat lines between seats that do not share a native messaging channel."""
 
-import fcntl
 import json
 from pathlib import Path
 from typing import Any
 
+from hooks.compat import fcntl
 from scripts.quick import paths
 
 Line = dict[str, Any]

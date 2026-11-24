@@ -1,5 +1,4 @@
 import argparse
-import fcntl
 import functools
 import os
 import pty
@@ -17,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from hooks.compat import fcntl
 from hooks.context.account_sessions import TOKEN_PREFIX
 from scripts import aicode_tokens, openbao_kv, openbao_step, term_colors
 from scripts.openbao_step import Console, StoreRefused

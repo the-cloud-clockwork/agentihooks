@@ -2,7 +2,6 @@
 
 import argparse
 import contextlib
-import fcntl
 import json
 import os
 import subprocess
@@ -17,6 +16,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from hooks.compat import fcntl
 from hooks.context.account_sessions import API_ACCOUNT
 from scripts import operator_env, session_bands
 from scripts.claude_config import claude_home

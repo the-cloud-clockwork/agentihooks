@@ -1,4 +1,3 @@
-import fcntl
 import json
 import os
 from collections import Counter
@@ -7,6 +6,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
+from hooks.compat import fcntl
 from scripts.swarm_v2.herdr.capabilities import Incompatible, Qualifier, Unreachable
 from scripts.swarm_v2.herdr.catalog import REMOTE_SESSION, Catalog, Machine
 from scripts.swarm_v2.herdr.endpoints import Endpoint, EndpointRefused

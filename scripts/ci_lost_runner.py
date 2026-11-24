@@ -1,5 +1,4 @@
 import argparse
-import fcntl
 import json
 import subprocess
 import time
@@ -11,6 +10,7 @@ from urllib.parse import quote
 
 import yaml
 
+from hooks.compat import fcntl
 from scripts.ci_queue_retry import _api, base_name, dependents, job_names, polling_jobs
 
 WORKFLOWS = Path(".github/workflows")

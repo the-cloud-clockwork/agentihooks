@@ -1,6 +1,5 @@
 """Advance one workflow in a detached process holding its workspace lock."""
 
-import fcntl
 import json
 import os
 import subprocess
@@ -9,6 +8,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from hooks.compat import fcntl
 from scripts.inbox.store import connect
 from scripts.swarm import workflow_runner
 

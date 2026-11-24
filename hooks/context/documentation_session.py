@@ -1,4 +1,3 @@
-import fcntl
 import hashlib
 import json
 import os
@@ -8,6 +7,7 @@ from pathlib import Path
 
 from hooks._async import fork_and_call
 from hooks.common import inject_context, log
+from hooks.compat import fcntl
 from hooks.config import AGENTIHOOKS_HOME as HOME
 from hooks.context import documentation, documentation_evidence
 from scripts.swarm.ledger_client import LedgerClient

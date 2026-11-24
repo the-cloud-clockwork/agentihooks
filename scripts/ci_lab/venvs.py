@@ -2,7 +2,6 @@
 built by uv from the head's tracked test requirements lock inside the lab sandbox with only its whitelisted
 environment."""
 
-import fcntl
 import os
 import shutil
 import sys
@@ -10,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from hooks.compat import fcntl
 from scripts.ci_lab.sandbox import CannotRun, PortAllocator, Sandbox
 from scripts.ci_mutation.stats_cache import EXCLUDES, LOCKFILE
 

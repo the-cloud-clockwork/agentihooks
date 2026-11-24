@@ -7,7 +7,6 @@ Without a token variable the credential is the gh config folder, so a gh auth sw
 the previous login's entry.
 """
 
-import fcntl
 import hashlib
 import json
 import os
@@ -21,6 +20,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
+from hooks.compat import fcntl
 from scripts.swarm.lost_runner import home as _agentihooks_home
 from scripts.tick import pool
 from scripts.tick.adapters import github as _github

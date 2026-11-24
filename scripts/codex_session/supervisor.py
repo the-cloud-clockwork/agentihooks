@@ -1,7 +1,6 @@
 """One supervised Codex app-server per admitted execution: admit, spawn, connect, bind, then open exactly once."""
 
 import contextlib
-import fcntl
 import json
 import os
 import shutil
@@ -14,6 +13,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from hooks.compat import fcntl
 from hooks.context import profile_chain
 from hooks.observability.trace_flush import start_time
 from scripts.codex_session import protocol

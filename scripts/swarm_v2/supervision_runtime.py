@@ -1,4 +1,3 @@
-import fcntl
 import hashlib
 import json
 import os
@@ -13,6 +12,7 @@ from pathlib import Path
 from types import FrameType
 from typing import cast
 
+from hooks.compat import fcntl
 from hooks.proc import _process
 from scripts.account_names import oauth_env
 from scripts.swarm_v2 import filesystem

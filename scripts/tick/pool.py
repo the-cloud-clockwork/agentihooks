@@ -1,6 +1,5 @@
 """Per pass tick executor: tick mode, two lane deadlines, the critical heartbeat, per agent fan out and call caps."""
 
-import fcntl
 from collections.abc import Callable, Generator, Iterable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
@@ -12,6 +11,7 @@ from time import monotonic
 from types import MappingProxyType
 from typing import IO, TypeVar
 
+from hooks.compat import fcntl
 from scripts.tick.deadline import Deadline
 
 __all__ = [

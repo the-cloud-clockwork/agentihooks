@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import os
-import pwd
 import re
 import shutil
 import subprocess
@@ -14,6 +13,8 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+
+from hooks.compat import real_home
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -55,7 +56,7 @@ def rendered_root() -> Path:
 
 
 def live_root() -> Path:
-    return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".agentihooks" / "profiles"
+    return real_home() / ".agentihooks" / "profiles"
 
 
 def _refuse_live_render_from_another_checkout(name: str) -> None:

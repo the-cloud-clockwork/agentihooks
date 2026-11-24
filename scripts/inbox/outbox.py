@@ -5,7 +5,6 @@ Each destination replays in order once it returns, independent of the other.
 A record names the item it writes, so a replay never writes twice; a full outbox refuses and never drops a record.
 """
 
-import fcntl
 import hashlib
 import json
 import os
@@ -16,6 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from hooks.compat import fcntl
 from scripts.inbox.store import Contended, DuplicateItem, InboxError, new_item_id
 
 NAME = "inbox-outbox.jsonl"

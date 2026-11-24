@@ -9,7 +9,6 @@ Nothing here reads Redis, the swarm tick or the Anton controller.
 
 import argparse
 import contextlib
-import fcntl
 import json
 import os
 import shutil
@@ -20,6 +19,8 @@ from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+
+from hooks.compat import fcntl
 
 TEXT = "Safety Nudge: In case the main tick or controller is down"
 REGISTRY = "master-registry.json"

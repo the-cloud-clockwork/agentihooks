@@ -1,7 +1,6 @@
 """Spend counters a budget gate keeps per subject: gates/<gate>/counts/<subject>/<counter>, one number inside."""
 
-import fcntl
-
+from hooks.compat import fcntl
 from scripts.gates.log import gates_dir, safe_name
 
 

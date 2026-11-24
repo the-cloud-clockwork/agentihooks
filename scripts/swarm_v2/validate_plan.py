@@ -1,5 +1,4 @@
 import argparse
-import fcntl
 import hashlib
 import json
 import re
@@ -9,6 +8,7 @@ from contextlib import contextmanager
 from functools import partial
 from pathlib import Path, PurePosixPath
 
+from hooks.compat import fcntl
 from scripts.swarm_v2.records import _replayed as _replay
 from scripts.swarm_v2.records import _write, digest
 

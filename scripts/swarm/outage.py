@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fcntl
 import json
 import sys
 from collections.abc import Callable
@@ -10,6 +9,7 @@ from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from hooks.compat import fcntl
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2.records import _write
 

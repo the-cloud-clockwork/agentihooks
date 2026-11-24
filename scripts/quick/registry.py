@@ -2,13 +2,14 @@
 
 import contextlib
 import dataclasses
-import fcntl
 import json
 import os
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from hooks.compat import fcntl
 
 FILE = "seats.json"
 READY = "ready"
