@@ -691,7 +691,7 @@ def _tar_words(words: list[str]) -> list[str]:
     for letter in words[1]:
         spelled.append(f"-{letter}")
         spelled.extend(islice(values, 1 if letter in TAR_LETTERS else 0))
-    return [words[0], *spelled, *values]
+    return [*words[:1], *spelled, *values]
 
 
 def _tar_archives(options: list[tuple[str, str]]) -> list[str]:
@@ -714,12 +714,8 @@ def _tar_extracted(options: list[tuple[str, str]]) -> list[str]:
 
 def _tar_targets(words: list[str], operands: list[str]) -> list[str]:
     options = _options(_tar_words(words), TAR_LETTERS, TAR_VALUES)
-    if _abbreviated(options, TAR_NAMED, TAR_LONG_OPTIONS):
-        return [UNKNOWN]
     names = {name for name, _ in options}
-    if not names & (TAR_ARCHIVES | TAR_EXTRACTS):
-        return []
-    if names & TAR_RUNS:
+    if names & TAR_RUNS or _abbreviated(options, TAR_NAMED, TAR_LONG_OPTIONS):
         return [UNKNOWN]
     archives = _tar_archives(options) if names & TAR_ARCHIVES else []
     extracted = [] if names & TAR_STREAMS or not names & TAR_EXTRACTS else _tar_extracted(options)
