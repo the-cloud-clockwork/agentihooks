@@ -43,12 +43,14 @@ class Reactor:
 
 
 class Registry:
-    def __init__(self, reactors: Iterable[Reactor] = ()):
+    def __init__(self, reactors: Iterable[Reactor] = (), own_loop: Iterable[Reactor] = ()) -> None:
         self._reactors: dict[str, Reactor] = {}
-        for reactor in reactors:
+        looped = list(own_loop)
+        for reactor in [*reactors, *looped]:
             if reactor.name in self._reactors:
                 raise ValueError(f"reactor {reactor.name!r} is declared twice")
             self._reactors[reactor.name] = reactor
+        self.own_loop = frozenset(reactor.name for reactor in looped)
 
     def __iter__(self) -> Iterator[Reactor]:
         return iter(self._reactors.values())

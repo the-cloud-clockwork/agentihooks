@@ -2550,6 +2550,19 @@
       ]
     },
     {
+      "id": "hub-wait-ends-own-loop",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2898",
+      "behaviour": "The hub serves the six wait ends reactors on their own loop thread for as long as a pass of the other reactors runs, so a wait end event published while another reactor's poll is held is handled within seconds and the pass reports both lanes in one result; that loop rests the idle wait after a round of only standby or failed passes, the rule the hub loop also idles on, and reports a reactor that stayed on standby once.",
+      "seam": "scripts.hub.runner.HubRunner.run_once with a scripts.hub.registry.Registry own loop, the hub loop idle rule in scripts.hub.runner._run, and the own loop reactors scripts.hub.registry.configured passes",
+      "tests": [
+        "tests/hub/test_runner.py::test_the_hub_loop_idles_after_a_pass_in_which_a_reactor_failed",
+        "tests/hub/test_runner.py::test_a_held_poll_never_holds_a_wait_end_delivery",
+        "tests/hub/test_runner.py::test_an_own_loop_reactor_on_standby_reports_standby_once_across_its_rests",
+        "tests/hub/test_wait_ends.py::test_the_hub_registry_serves_every_wait_end_reactor_on_its_own_loop"
+      ]
+    },
+    {
       "id": "dependency-closed-notice",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-wake-on-task-and-reply",
