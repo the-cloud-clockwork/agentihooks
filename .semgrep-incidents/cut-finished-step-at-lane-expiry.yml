@@ -1,0 +1,21 @@
+rules:
+  - id: cut-finished-step-at-lane-expiry
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tick step is recorded cut at its lane end without checking that its run is still going, so a step that
+      finished but was not yet collected by the scheduling thread loses its result, its writes and its dependents.
+      End every step whose future is done through the apply path first, and record cut only a step whose future is
+      not done.
+    paths:
+      include:
+        - /scripts/tick/
+        - cut-finished-step-at-lane-expiry.py
+    patterns:
+      - pattern-inside: |
+          if $LANE.expired:
+              ...
+      - pattern: StepRecord(..., cut=True, ...)
+      - pattern-not-inside: |
+          if <... $FUTURE.done() ...>:
+              ...
