@@ -41,12 +41,15 @@ def _lint(name: str) -> str:
     return _steps("test.yml", "lint")[name]["run"]
 
 
-def _run(command: str, head: Path, runner: Path, grader: Path = ROOT) -> subprocess.CompletedProcess[str]:
+def _run(
+    command: str, head: Path, runner: Path, grader: Path = ROOT, *, no_site: bool = False
+) -> subprocess.CompletedProcess[str]:
     tools = runner / "bin"
     if not tools.exists():
         tools.mkdir(parents=True)
         (runner / "grader").symlink_to(grader)
-        (tools / "python").write_text(f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n')
+        flags = "-S " if no_site else ""
+        (tools / "python").write_text(f'#!/usr/bin/env bash\nexec "{sys.executable}" {flags}"$@"\n')
         (tools / "python").chmod(0o755)
     env = {
         **os.environ,
@@ -264,7 +267,7 @@ def test_a_stale_base_fails_the_for_loop_check_closed_and_a_planted_head_copy_ne
     (head / "scripts/__init__.py").write_text("")
     (head / "scripts/ci_for_substitution.py").write_text(PLANTED)
     grader = _stale_grader(tmp_path, "scripts/__init__.py", "")
-    graded = _run(_lint(FOR_LOOP), head, tmp_path / "runner", grader)
+    graded = _run(_lint(FOR_LOOP), head, tmp_path / "runner", grader, no_site=True)
     assert graded.returncode == 1, graded.stdout + graded.stderr
     assert "No module named scripts.ci_for_substitution" in graded.stderr
     assert "planted head copy ran" not in graded.stdout
