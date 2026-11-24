@@ -739,10 +739,14 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
       "behaviour": "The CI lab ends the work of pull request heads nobody wants graded any more: a pull request head travels with a lane naming its head branch, owner and branch for a fork, so a newer head of the pull request drops the pending and held units of the older one, and a head already graded still takes its lane; a closed pull request retires its lane in the pull request class, dropping its waiting head and the pending units of its live head unless another live grade grades that head, and posts nothing; and the first pass of a scheduler retires every live pull request grade with no grade ref whose head is neither an open pull request head nor a plant branch head, from one paged listing a repository, retiring nothing of a repository whose listing fails. Hotfix, queue, promotion and backfill grades and grades pushed to a grade ref are left alone.",
       "seam": "scripts.ci_lab.webhooks.head_events and envelope over pull request deliveries, scripts.ci_lab.scheduler.BusInbox.heads and Scheduler.tick over fakeredis with a listing fake, and scripts.ci_lab.stale_heads.OpenHeads over a fake GitHub",
+      "rules": [
+        "lab-pull-request-head-without-lane"
+      ],
       "tests": [
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_pull_request_delivery_names_its_head_branch_as_its_lane",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_pull_request_from_a_fork_names_its_owner_and_branch_as_its_lane",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_the_envelope_of_a_pull_request_head_carries_its_lane_beside_the_six_head_fields",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_envelope_of_a_head_that_names_no_lane_holds_the_six_head_fields_only",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_the_bus_inbox_reads_the_lane_key_then_the_branch_then_the_head",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_newer_head_of_a_pull_request_drops_the_pending_units_of_its_older_head",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_drops_its_pending_units_and_forgets_its_run",

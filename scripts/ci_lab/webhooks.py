@@ -23,7 +23,8 @@ PUSHED = "pushed"
 CHECK_PREFIX = "lab"
 BRANCHES = "refs/heads/"
 PLANT_PREFIX = "refs/heads/diffcheck/lab-plant-"
-PULL_ACTIONS = frozenset({"opened", "synchronize", "reopened"})
+CLOSED = "closed"
+PULL_ACTIONS = frozenset({"opened", "synchronize", "reopened", CLOSED})
 NOTICE_FIELDS = ("repo", "head", "base", "actor")
 NOTICE_SECRET_ENV = "AGENTIHOOKS_CI_LAB_NOTICE_SECRET"
 NO_NOTICE_SECRET = f"{NOTICE_SECRET_ENV} must be set to verify lab head notices"
@@ -31,7 +32,9 @@ NO_NOTICE_SECRET = f"{NOTICE_SECRET_ENV} must be set to verify lab head notices"
 
 @dataclass(frozen=True)
 class HeadEvent:
-    """One head the lab may grade: the event and action that named it, its repository, head and base, and the actor."""
+    """One head the lab may grade: the event and action that named it, its repository, head and base, and the actor.
+    A pull request head also names its lane, the pull request's head branch, and a closed pull request names the lane
+    whose work ends."""
 
     event: str
     repo: str
@@ -53,12 +56,19 @@ def _push(payload: Mapping[str, Any]) -> list[HeadEvent]:
     return [HeadEvent("push", repo, payload["after"], payload["before"], actor, PUSHED)]
 
 
+def pull_lane(pull: Mapping[str, Any]) -> str:
+    """Return the lane of a pull request: its head branch, or owner and branch for a pull request from a fork."""
+    head, base = pull["head"], pull["base"]
+    forked = head["label"].partition(":")[0] != base["label"].partition(":")[0]
+    return head["label"] if forked else head["ref"]
+
+
 def _pull_request(payload: Mapping[str, Any]) -> list[HeadEvent]:
     if payload["action"] not in PULL_ACTIONS:
         return []
     pull, repo = payload["pull_request"], payload["repository"]["html_url"]
     head, base, author = pull["head"]["sha"], pull["base"]["sha"], pull["user"]["login"]
-    return [HeadEvent("pull_request", repo, head, base, author, payload["action"])]
+    return [HeadEvent("pull_request", repo, head, base, author, payload["action"], pull_lane(pull))]
 
 
 def _merge_group(payload: Mapping[str, Any]) -> list[HeadEvent]:
@@ -109,10 +119,17 @@ def notice_event(payload: Mapping[str, Any]) -> HeadEvent:
     return HeadEvent(NOTICE, repo, head, base, actor, PUSHED)
 
 
+def head_data(event: HeadEvent) -> dict[str, str]:
+    """Return the envelope data of a head: its six fields and, for a head that names one, its lane."""
+    data = asdict(event)
+    return data if event.lane else {name: value for name, value in data.items() if name != "lane"}
+
+
 def envelope(event: HeadEvent) -> Envelope:
     """Return the envelope recording a head, typed with its bus subject; one head event always has one id, so a resend is dropped."""
+    data = head_data(event)
     return Envelope(
-        id=hashlib.sha256(json.dumps(asdict(event)).encode()).hexdigest(),
+        id=hashlib.sha256(json.dumps(data).encode()).hexdigest(),
         type=f"{HEAD_SUBJECT}.{event.event}",
         swarm=LAB,
         entity=ENTITY,
@@ -120,7 +137,7 @@ def envelope(event: HeadEvent) -> Envelope:
         version=0,
         time=time.time_ns() // 1_000_000,
         author=event.actor,
-        data=asdict(event),
+        data=data,
     )
 
 

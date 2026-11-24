@@ -1,0 +1,16 @@
+rules:
+  - id: lab-pull-request-head-without-lane
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A pull request head event built without its lane takes its own sha as lane, so a newer head of the pull request
+      supersedes nothing and the lab keeps grading every stale head. Pass the pull request's lane, pull_lane(pull), as
+      the last argument.
+    paths:
+      include:
+        - /scripts/ci_lab/
+        - /scripts/hub/
+        - lab-pull-request-head-without-lane.py
+    pattern-either:
+      - pattern: HeadEvent("pull_request", $REPO, $HEAD, $BASE, $ACTOR, $ACTION)
+      - pattern: HeadEvent(PULL_REQUEST, $REPO, $HEAD, $BASE, $ACTOR, $ACTION)

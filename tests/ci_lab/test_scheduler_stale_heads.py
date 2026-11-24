@@ -5,6 +5,7 @@ pull request retires its lane; and the first pass of a scheduler retires the liv
 neither an open pull request head nor a plant branch head, from one listing a repository.
 """
 
+import hashlib
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -182,6 +183,16 @@ def test_the_envelope_of_a_pull_request_head_carries_its_lane_beside_the_six_hea
         "action": "opened",
         "lane": "feature",
     }
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_the_envelope_of_a_head_that_names_no_lane_holds_the_six_head_fields_only() -> None:
+    event = HeadEvent("notice", REPO, HEAD_A, BASE, ACTOR, "pushed")
+    six = {"event": "notice", "repo": REPO, "head": HEAD_A, "base": BASE, "actor": ACTOR, "action": "pushed"}
+    sealed = envelope(event)
+    assert sealed.data == six
+    assert sealed.id == hashlib.sha256(json.dumps(six).encode()).hexdigest()
+    assert envelope(replace(event, lane="feature")).id != sealed.id
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
