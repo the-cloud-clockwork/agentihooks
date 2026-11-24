@@ -1,6 +1,7 @@
 """Swarm agents as herdr panes: spawn through init-agent, find live ones by name, retire by the process recorded at
 spawn."""
 
+import functools
 import json
 import os
 import shutil
@@ -490,6 +491,7 @@ class HerdrRuntime:
         self._quota_handoffs = {}
         self._quota_preferred = {}
         requirements = {}
+        claude_only = functools.cache(plugins.claude_only)
         for lane, tasks in ready.items():
             options = []
             for task in tasks:
@@ -508,7 +510,7 @@ class HerdrRuntime:
                     options.append((task["requires_harness"],))
                 elif requested:
                     options.append((requested,))
-                elif plugins.claude_only(profile):
+                elif claude_only(profile):
                     options.append(("claude",))
                 elif (
                     saved.get("harness") in agent_choice.AGENTS

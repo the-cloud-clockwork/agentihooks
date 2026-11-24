@@ -168,7 +168,8 @@ def _merged(task, known):
 
 def guarded(doc: dict, fix: str) -> set[str]:
     graph, known, deferred = hierarchy.project(doc)[0], {t["id"]: t for t in doc["tasks"]}, _deferred(doc)
-    depth = chains({**doc, "tasks": [t for t in doc["tasks"] if not freeze.claim_gate(t, doc, graph, fix)]})
+    queue = freeze.admitted(doc, graph)
+    depth = chains({**doc, "tasks": [t for t in doc["tasks"] if not freeze.claim_gate(t, doc, graph, fix, queue)]})
     longest = depth and max(depth.values())
     return {
         task_id

@@ -95,4 +95,12 @@ spec:
             periodSeconds: 2
           resources:
             {{- toYaml $hub.resources | nindent 12 }}
+          volumeMounts:
+            - name: cache
+              mountPath: /home/swarm/.agentihooks
+      volumes:
+        - name: cache
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $hub.cache.sizeLimit | quote }}
 {{- end }}

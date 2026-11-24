@@ -97,9 +97,9 @@ def test_atomic_refusal_restores_stamps_after_an_earlier_operation_wrote_one(tmp
 
 
 def containers(value: object, found: dict) -> dict:
-    if type(value) in (dict, list):
+    if isinstance(value, (dict, list)):
         found[id(value)] = value
-        for item in value.values() if type(value) is dict else value:
+        for item in value.values() if isinstance(value, dict) else value:
             containers(item, found)
     return found
 
