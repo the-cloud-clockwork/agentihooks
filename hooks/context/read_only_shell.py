@@ -112,6 +112,7 @@ TAR_VALUES = frozenset(
         "--record-size",
         "--rmt-command",
         "--rsh-command",
+        "--set-mtime-format",
         "--sort",
         "--sparse-version",
         "--starting-file",

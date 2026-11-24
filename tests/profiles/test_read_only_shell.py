@@ -655,6 +655,7 @@ def test_a_reviewer_reads_each_tool_destination_inside_its_folders(home: Path, c
         ("tar -cf host:/x.tar src", UNKNOWN),
         ("tar -cf ~/scratchpad/a.tar -f host:x src", UNKNOWN),
         ("tar --suf -C ~/scratchpad -xf ~/scratchpad/a.tar app.py", UNKNOWN),
+        ("tar --set-mtime-format -C ~/scratchpad -xf ~/scratchpad/a.tar app.py", "./"),
         ("tar -xf a.tar -C ~/scratchpad/o --transform=s,^,x/,", UNKNOWN),
         ("tar -xf a.tar -C ~/scratchpad/o --xform s,^,x/,", UNKNOWN),
         ("tar -xf ~/scratchpad/a.tar --to-command=sh -C ~/scratchpad/o", UNKNOWN),
