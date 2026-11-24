@@ -854,3 +854,27 @@ def test_feature_fragment_filename_must_match_its_id(mapped_repo: tuple[Path, Pa
     (directory / "wrong.json").write_text(json.dumps(entry))
     with pytest.raises(ValueError, match="filename does not match id"):
         feature_map.load(path)
+
+
+def _canonical(features: list[dict[str, object]], ending: str) -> str:
+    """A feature map with metadata around ``features`` in the layout of an indent two dump, lines ended by ``ending``."""
+    root = {"head": [1], "features": features, "after": {"id": "x"}}
+    return (json.dumps(root, indent=2) + "\n").replace("\n", ending)
+
+
+def test_with_entry_keeps_a_canonical_map_canonical(ending: str) -> None:
+    old, new = {"id": "a", "tests": ["t::a"]}, {"id": "b", "tests": []}
+    grown = {**old, "tests": ["t::a", "t::b"]}
+    assert feature_map.with_entry(_canonical([], ending), old) == _canonical([old], ending)
+    assert feature_map.with_entry(_canonical([old], ending), new) == _canonical([new, old], ending)
+    assert feature_map.with_entry(_canonical([new, old], ending), grown) == _canonical([new, grown], ending)
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_with_entry_writes_one_line_entries_into_a_one_line_map() -> None:
+    text = '{"head":[1],"features":[{"id":"a"},{"id":"b","x":[]}],"after":{"id":"x"}}'
+    inserted = '{"head":[1],"features":[{"id": "c"},{"id":"a"},{"id":"b","x":[]}],"after":{"id":"x"}}'
+    replaced = '{"head":[1],"features":[{"id":"a"},{"id": "b", "x": [1]}],"after":{"id":"x"}}'
+    assert feature_map.with_entry(text, {"id": "c"}) == inserted
+    assert feature_map.with_entry(text, {"id": "b", "x": [1]}) == replaced
+    assert feature_map.with_entry('{"features":[]}', {"id": "c"}) == '{"features":[{"id": "c"}]}'

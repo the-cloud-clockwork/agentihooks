@@ -320,7 +320,7 @@ def test_a_mapped_feature_without_tests_gains_the_new_test_and_keeps_its_text(tr
     (tree / "feature-map.json").write_text(json.dumps({"features": [entry]}))
     assert scaffold(tree, STEP) == 0
     mapped = {"features": [{**entry, "tests": ["tests/tick/steps/test_probe_widgets.py::test_probe_widgets"]}]}
-    assert (tree / "feature-map.json").read_text() == json.dumps(mapped, indent=2) + "\n"
+    assert (tree / "feature-map.json").read_text() == json.dumps(mapped)
 
 
 def test_the_command_names_itself_and_what_a_step_needs(tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -465,3 +465,12 @@ def test_scaffold_updates_only_the_selected_entry(tree: Path) -> None:
         "behaviour": "Widgets — counted",
         "tests": ["old::test", "tests/tick/steps/test_probe_widgets.py::test_probe_widgets"],
     }
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_scaffold_keeps_a_canonical_map_canonical(tree: Path) -> None:
+    assert scaffold(tree, STEP) == 0
+    assert scaffold(tree, OTHER) == 0
+    text = (tree / "feature-map.json").read_text()
+    assert text == json.dumps(json.loads(text), indent=2) + "\n"
+    assert len(json.loads(text)["features"][0]["tests"]) == 2

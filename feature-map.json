@@ -7764,7 +7764,10 @@
       "tests": [
         "tests/tick/test_new_step.py::test_scaffold_adds_to_the_real_map_without_changing_any_existing_line",
         "tests/tick/test_new_step.py::test_scaffold_inserts_one_entry_and_keeps_all_surrounding_bytes",
-        "tests/tick/test_new_step.py::test_scaffold_updates_only_the_selected_entry"
+        "tests/tick/test_new_step.py::test_scaffold_updates_only_the_selected_entry",
+        "tests/tick/test_new_step.py::test_scaffold_keeps_a_canonical_map_canonical",
+        "tests/test_feature_map.py::test_with_entry_keeps_a_canonical_map_canonical",
+        "tests/test_feature_map.py::test_with_entry_writes_one_line_entries_into_a_one_line_map"
       ]
     },
     {
