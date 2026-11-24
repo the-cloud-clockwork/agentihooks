@@ -44,11 +44,20 @@ def _run(step, cwd, bin_dir, **env):
     )
 
 
-def _answer(tmp_path: Path, name: str, answer: dict[str, object] | int) -> str:
+def _answer(
+    tmp_path: Path,
+    name: str,
+    answer: dict[str, object] | int | list[dict[str, object] | int],
+    page: int = 1,
+) -> str:
+    if isinstance(answer, list):
+        later = "".join(_answer(tmp_path, name, value, index) for index, value in enumerate(answer[1:], 2))
+        return later + f"  */{name}/search?*\\&p=*) exit 22 ;;\n" + _answer(tmp_path, name, answer[0])
+    pattern = f"*/{name}/search?*" + (f"\\&p={page}" if page > 1 else "")
     if isinstance(answer, int):
-        return f'  */{name}/search?*) echo "curl: (22) The requested URL returned error: {answer}" >&2; exit 22 ;;\n'
-    (tmp_path / f"{name}.json").write_text(json.dumps(answer))
-    return f'  */{name}/search?*) cat "{tmp_path}/{name}.json" ;;\n'
+        return f'  {pattern}) echo "curl: (22) The requested URL returned error: {answer}" >&2; exit 22 ;;\n'
+    (tmp_path / f"{name}-{page}.json").write_text(json.dumps(answer))
+    return f'  {pattern}) cat "{tmp_path}/{name}-{page}.json" ;;\n'
 
 
 def _gate(
@@ -58,7 +67,7 @@ def _gate(
     message: str = "",
     event: str = "push",
     dashboard: str = "http://sonar/dash",
-    **searches: dict[str, object] | int,
+    **searches: dict[str, object] | int | list[dict[str, object] | int],
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -67,6 +76,9 @@ def _gate(
     (tmp_path / "statuses").write_text("\n".join(statuses) + "\n")
     task = {"status": "STATUS", "analysisId": "A1", **({"errorMessage": message} if message else {})}
     (tmp_path / "task.json").write_text(json.dumps({"task": task}))
+    timeout = searches.pop("timeout", None)
+    if isinstance(timeout, int):
+        _tool(bin_dir, "timeout", f'printf "%s\\n" timeout "$@" >> "{tmp_path}/timeout"; exit {timeout}')
     found = "".join(_answer(tmp_path, name, answer) for name, answer in searches.items())
     _tool(
         bin_dir,
@@ -191,7 +203,7 @@ def test_a_failed_gate_stays_red_when_the_bug_read_is_refused(tmp_path: Path) ->
 
 @pytest.mark.feature("sonar-failed-gate-names-new-bugs")
 def test_a_failed_gate_says_how_many_new_bugs_it_left_out(tmp_path: Path) -> None:
-    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", issues={**_BUGS, "total": 102}, dashboard=_BRANCH)
+    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", issues=[{**_BUGS, "total": 102}, 400], dashboard=_BRANCH)
     assert result.returncode == 1
     assert len(result.stdout.splitlines()) == 4
     assert result.stdout.splitlines()[-1] == "100 more not shown"
@@ -260,7 +272,7 @@ def test_a_failed_gate_names_its_unreviewed_hotspots(tmp_path: Path, scope: str)
 @pytest.mark.feature("sonar-failed-gate-names-new-hotspots")
 def test_a_failed_gate_says_how_many_hotspots_it_left_out(tmp_path: Path) -> None:
     hotspots = {**_HOTSPOTS, "paging": {"pageIndex": 1, "pageSize": 100, "total": 102}}
-    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH, hotspots=hotspots)
+    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH, hotspots=[hotspots, 400])
     assert result.returncode == 1
     assert result.stdout.splitlines() == [_FAILED, *_HOTSPOT_LINES, "100 more hotspots not shown"]
 
@@ -324,6 +336,82 @@ def test_the_gate_step_replaces_the_quality_gate_action():
     assert "if" not in gate
     assert gate["timeout-minutes"] == 5
     assert not gate.get("continue-on-error")
+
+
+@pytest.mark.parametrize("name", ["issues", "hotspots"])
+@pytest.mark.parametrize("scope", ["branch=dev", "pullRequest=7"])
+@pytest.mark.feature("sonar-failed-gate-lists-every-page")
+def test_a_failed_gate_lists_every_finding_page(tmp_path: Path, name: str, scope: str) -> None:
+    findings = [
+        {
+            "component": "agentihooks:scripts/page.py",
+            "line": line,
+            "rule": "python:S905",
+            "ruleKey": "python:S905",
+            "message": f"Finding {line}",
+        }
+        for line in range(1, 102)
+    ]
+    pages = [
+        {name: findings[:100], "total": 101, "paging": {"pageIndex": 1, "pageSize": 100, "total": 101}},
+        {name: findings[100:], "total": 101, "paging": {"pageIndex": 2, "pageSize": 100, "total": 101}},
+    ]
+    dashboard = f"http://sonar/dashboard?id=agentihooks&{scope}"
+    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=dashboard, **{name: pages})
+    assert result.returncode == 1
+    assert result.stdout.splitlines() == [
+        f"::error::Quality Gate has FAILED (ERROR). Detailed information can be found at: {dashboard}",
+        *[f"agentihooks:scripts/page.py:{line} python:S905 Finding {line}" for line in range(1, 102)],
+    ]
+    requests = _searches(tmp_path, f"{name}/search")
+    assert len(requests) == 2
+    assert f"&{scope}&" in requests[0]
+    assert requests[1] == requests[0] + "&p=2"
+    assert result.stderr == ""
+    assert (tmp_path / "output").read_text() == ""
+
+
+@pytest.mark.parametrize("name", ["issues", "hotspots"])
+@pytest.mark.parametrize("last_page", [400, {"paging": {"total": 103}}], ids=["refused", "empty"])
+@pytest.mark.feature("sonar-failed-gate-lists-every-page")
+def test_a_later_finding_page_cannot_lose_printed_findings(
+    tmp_path: Path, name: str, last_page: dict[str, object] | int
+) -> None:
+    first = {
+        "component": "agentihooks:scripts/page.py",
+        "rule": "python:S905",
+        "ruleKey": "python:S905",
+        "message": "First page",
+    }
+    final = {**last_page, name: []} if isinstance(last_page, dict) else last_page
+    pages = [{name: [first], "total": 103, "paging": {"total": 103}}, final]
+    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH, **{name: pages})
+    assert result.returncode == 1
+    suffix = "hotspots " if name == "hotspots" else ""
+    assert result.stdout.splitlines() == [
+        _FAILED,
+        "agentihooks:scripts/page.py:0 python:S905 First page",
+        f"102 more {suffix}not shown",
+    ]
+    assert len(_searches(tmp_path, f"{name}/search")) == 2
+    assert result.stderr == ""
+    assert not (tmp_path / "summary").exists()
+    assert (tmp_path / "output").read_text() == ""
+
+
+@pytest.mark.feature("sonar-failed-gate-lists-every-page")
+def test_all_finding_pages_share_one_diagnostic_timeout(tmp_path: Path) -> None:
+    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH, timeout=124)
+    assert result.returncode == 1
+    assert result.stdout.splitlines() == [_FAILED]
+    assert result.stderr == ""
+    assert not (tmp_path / "summary").exists()
+    assert (tmp_path / "output").read_text() == ""
+    arguments = (tmp_path / "timeout").read_text().splitlines()
+    assert arguments.count("timeout") == 1
+    assert "30s" in arguments
+    assert _searches(tmp_path) == []
+    assert _searches(tmp_path, "hotspots/search") == []
 
 
 def _scanner_zip(path):
