@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/lab.py:scripts.doctor.lab.x_mismatches:86cd6925b063e7e86e95e00c7a73fe115268f58ae14da3267e61040eedc8474d": {
+    "reader": "standards_reader",
+    "reason": "mismatches passes sha to _differs, which returns the same bool for any sha because mismatch reads only the two verdict outcomes, and mismatches returns a dict of those sums. The reads are unchanged because heads_of and check_runs are called with the same arguments, so the mutant changes no return value, finding, read or exception."
+  }
+}
