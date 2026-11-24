@@ -5483,7 +5483,7 @@
       "id": "swarm-enhance-sweep",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-sweep",
-      "behaviour": "agentihooks swarm <slug> enhance sweep reads every task of the swarm through the ledger API, selects per lane the open eng and ci tasks the thin task pass would queue, and queues each through the thin task pass writer with the same ledger writes, under its own thirty second deadline and three seconds after the previous one; with --dry-run it prints the thin task count and ids per lane and builds no ledger writer.",
+      "behaviour": "agentihooks swarm <slug> enhance sweep reads every task of the swarm through the ledger API, selects per lane the open eng and ci tasks the thin task pass would queue, and queues each through the thin task pass writer with the same ledger writes, under its own thirty second deadline and three seconds after the previous one; it prints and flushes each thin task's action line as its write ends, counts a write that times out as failed and a refused write as skipped and goes on to the next task, and ends with one JSON summary of the per lane report and the queued, failed and skipped counts; with --dry-run it prints only that summary, every count zero, and builds no ledger writer.",
       "seam": "agentihooks swarm <slug> enhance sweep [--dry-run] through scripts.swarm.cli.main into scripts.swarm.enhance_sweep.command, thin_by_lane and sweep",
       "tests": [
         "tests/swarm/test_enhance_sweep.py::test_the_sweep_selects_per_lane_the_thin_tasks_the_tick_step_would",

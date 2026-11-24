@@ -15,6 +15,7 @@ from scripts.tick.steps import thin
 
 BUDGET = 30.0
 PAUSE = 3.0
+OUTCOMES = ("queued", "failed", "skipped")
 
 
 def _thin(tasks: list[dict[str, Any]]) -> list[tuple[dict[str, Any], list[str]]]:
@@ -31,21 +32,46 @@ def thin_by_lane(tasks: list[dict[str, Any]]) -> dict[str, list[str]]:
     return lanes
 
 
-def sweep(tasks: list[dict[str, Any]], ledger: Ledger, *, pause: Callable[[float], None]) -> list[str]:
-    """Queue enhancement for every thin task through the thin task pass writer; return its action lines."""
+def _say(line: str) -> None:
+    """Print one action line and flush it, so it shows before the next thin task's write starts."""
+    print(line, flush=True)
+
+
+def _enhance(ledger: Ledger, task: dict[str, Any], problems: list[str], ids: set[str]) -> tuple[str, str]:
+    """Write one thin task's enhancement under its own deadline; return its action line and outcome, where a write
+    that times out has failed and a write the ledger refused is skipped."""
+    try:
+        line, landed = thin.enhance(ledger, Deadline.after(BUDGET), task, problems, ids)
+    except TimeoutError as exc:
+        return f"failed the enhancement of {task['id']}: {exc}", "failed"
+    return line, "queued" if landed else "skipped"
+
+
+def sweep(
+    tasks: list[dict[str, Any]],
+    ledger: Ledger,
+    *,
+    pause: Callable[[float], None],
+    report: Callable[[str], None] = _say,
+) -> dict[str, int]:
+    """Queue enhancement for every thin task through the thin task pass writer, reporting each task's action line as
+    its write ends; return how many thin tasks were queued, failed and skipped."""
     ids = {task["id"] for task in tasks}
-    lines: list[str] = []
+    counts = dict.fromkeys(OUTCOMES, 0)
     for index, (task, problems) in enumerate(_thin(tasks)):
         if index:
             pause(PAUSE)
-        lines.append(thin.enhance(ledger, Deadline.after(BUDGET), task, problems, ids)[0])
-    return lines
+        line, outcome = _enhance(ledger, task, problems, ids)
+        report(line)
+        counts[outcome] += 1
+    return counts
 
 
 def command(store: Any, args: argparse.Namespace) -> None:
-    """Print the thin tasks per lane of swarm ``args.slug`` and, unless a dry run, queue their enhancement."""
+    """Print the thin tasks per lane of swarm ``args.slug`` and, unless a dry run, queue their enhancement, printing
+    each task's line as its write ends and then the counts."""
     tasks = ledger_client.LedgerClient().tasks(args.slug)
     lanes = {lane: {"count": len(ids), "ids": ids} for lane, ids in thin_by_lane(tasks).items()}
     ledger = None if args.dry_run else ClientLedger(args.slug, resource_client(args.slug))
-    actions = [] if ledger is None else sweep(tasks, ledger, pause=time.sleep)
-    print(json.dumps({"dry_run": args.dry_run, "lanes": lanes, "actions": actions}))
+    counts = dict.fromkeys(OUTCOMES, 0) if ledger is None else sweep(tasks, ledger, pause=time.sleep)
+    print(json.dumps({"dry_run": args.dry_run, "lanes": lanes, "counts": counts}))
