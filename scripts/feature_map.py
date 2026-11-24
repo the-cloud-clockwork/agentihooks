@@ -66,7 +66,7 @@ def _encoded(text: str, index: int, value: object) -> str:
     if not line:
         return json.dumps(value)
     ending = "\r\n" if text[line - 2 : line] == "\r\n" else "\n"
-    return json.dumps(value, indent=2).replace("\n", ending + next(_LEAD.finditer(text, line, index)).group())
+    return json.dumps(value, indent=2).replace("\n", ending + next(_LEAD.finditer(text, line)).group())
 
 
 def with_entry(text: str, entry: dict[str, Any]) -> str:

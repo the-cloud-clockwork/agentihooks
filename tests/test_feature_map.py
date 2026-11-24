@@ -934,3 +934,9 @@ def test_with_entry_indents_a_new_entry_like_the_line_of_the_first_entry() -> No
     flush_after = '{\n"features": [\n{\n  "id": "b"\n},\n{"id": "a"}\n]\n}\n'
     assert feature_map.with_entry(tabbed, {"id": "b"}) == tabbed_after
     assert feature_map.with_entry(flush, {"id": "b"}) == flush_after
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_with_entry_keeps_whitespace_before_the_root() -> None:
+    old, new = {"id": "a"}, {"id": "b"}
+    assert feature_map.with_entry("\n " + _canonical([old], "\n"), new) == "\n " + _canonical([new, old], "\n")
