@@ -5266,7 +5266,7 @@
       "id": "swarm-stall-watch-answered-alert-not-resent",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2704",
-      "behaviour": "Once the master answers a stall alert, the stall watch sends no new alert for that stall while it lasts: a pass whose alert would carry the answered alert's ref, with the same task, case, stall start and action, sends nothing, while a stall that grows into a new one, such as a new push moving its start, alerts again.",
+      "behaviour": "Once the master answers a stall alert, the stall watch sends no new alert for that stall while it lasts: a pass whose alert would carry the answered alert's ref, with the same task, case, stall start and action, sends nothing, while a stall that grows into a new one, such as a new push moving its start, alerts again. The answered ref is dropped on the first pass that no longer holds its task.",
       "seam": "scripts.swarm.stall_watch.stall_pass alerting on a held pull request after its earlier alert was closed",
       "tests": [
         "tests/swarm/test_stall_watch.py::test_an_answered_stall_alert_is_not_sent_again_until_the_stall_grows",
