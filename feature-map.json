@@ -1821,7 +1821,8 @@
       "tests": [
         "tests/swarm/test_plan_evidence.py::test_plan_evidence_for_a_task_with_no_phase_holds_only_the_project_intent",
         "tests/swarm/test_plan_evidence.py::test_plan_evidence_for_a_phase_the_ledger_lacks_holds_only_the_project_intent",
-        "tests/hub/test_admission.py::test_a_plan_task_with_no_phase_gets_its_steering_seed"
+        "tests/hub/test_admission.py::test_a_plan_task_with_no_phase_gets_its_steering_seed",
+        "tests/hub/test_admission_gates.py::test_an_admission_claims_a_plan_task_with_no_phase"
       ]
     },
     {

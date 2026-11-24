@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.swarm_ledger import ledger_workspace
+from scripts.swarm_ledger import ledger_workspace, plan_evidence
 
 
 def test_planner_steering_carries_transitive_evidence(tmp_path, monkeypatch):
@@ -160,7 +160,7 @@ def test_plan_evidence_without_dependencies_or_review_note():
 def test_plan_evidence_for_a_task_with_no_phase_holds_only_the_project_intent() -> None:
     task = {"id": "plan", "title": "Slice", "kind": "plan", "phase": ""}
     doc = {"overview": "Intent", "phases": [{"id": "current", "title": "Current"}], "tasks": []}
-    assert ledger_workspace.steering(task, doc) == "# plan: Slice\n\nPlan evidence\n\nProject intent\nIntent\n"
+    assert plan_evidence.evidence(task, doc) == "Plan evidence\n\nProject intent\nIntent\n"
 
 
 @pytest.mark.feature("plan-evidence-phase-less-plan-task")

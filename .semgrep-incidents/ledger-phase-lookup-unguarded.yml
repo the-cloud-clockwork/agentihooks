@@ -3,10 +3,9 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A ledger phases map is indexed by a task's phase with no guard. The ledger stores a task with no phase as an
-      empty phase, so a phase less task raises KeyError with an empty key; hub plan lane admission crashed this way
-      after its claim and the hive read it as a slot request missing an empty key. Read the phase with get and handle a
-      task whose phase is empty or not in the ledger.
+      A ledger phases map is indexed by a task's phase field with no guard, so a task whose phase is empty or not in
+      the ledger raises KeyError. Read the phase with get and handle a missing phase. The rule covers lookups by a
+      task's phase field only; lookups by a phase id the ledger already validated are out of its scope.
     paths:
       include:
         - /scripts/
@@ -17,6 +16,12 @@ rules:
               $PHASES = {$P["id"]: $P for $P in $DOC["phases"]}
               ...
           - pattern-inside: |
+              $PHASES: $TYPE = {$P["id"]: $P for $P in $DOC["phases"]}
+              ...
+          - pattern-inside: |
               $PHASES = {$P["id"]: $P for $P in $DOC.get("phases", ...)}
+              ...
+      - pattern-not-inside: |
+          if $T["phase"] in $PHASES:
               ...
       - pattern: $PHASES[$T["phase"]]
