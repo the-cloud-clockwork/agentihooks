@@ -235,6 +235,24 @@ def test_a_task_that_is_not_an_unmarked_thin_open_engineer_task_gets_no_write(ta
     assert (found.lines, found.calls(), found.inbox.sent) == ([], [], [])
 
 
+@pytest.mark.feature("thin-skip-open-pr")
+@pytest.mark.parametrize(
+    ("fields", "checked"),
+    [
+        ({"pr_url": "https://github.com/o/r/pull/7"}, False),
+        ({"branch": "engineer-1"}, False),
+        ({"pr_url": "", "branch": ""}, True),
+    ],
+    ids=["pull request", "branch", "empty"],
+)
+def test_an_open_task_with_a_pull_request_or_branch_gets_no_thin_mark(fields: dict[str, Any], checked: bool) -> None:
+    """A thin open task that carries a pull request link or a branch gets no enhancement write, while empty values
+    still leave it checked and marked."""
+    held = {**THIN, **fields}
+    found = _run([held])
+    assert (thin.unchecked(held), bool(_operations(found)), bool(found.lines)) == (checked, checked, checked)
+
+
 @pytest.mark.feature("tick-thin-task-pass")
 @pytest.mark.parametrize("lane", [{"lane": "ci", "kind": "ci"}, {"lane": "eng"}, {}], ids=["ci", "eng", "no lane"])
 def test_a_thin_ci_or_engineer_task_is_queued_whatever_its_lane_field(lane: dict[str, str]) -> None:

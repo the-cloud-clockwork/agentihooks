@@ -79,6 +79,23 @@ def test_an_eng_or_ci_task_needing_enhancement_is_held_from_its_lane_claim(lane:
     assert readiness.claimable(found["tasks"][1], lane, view(found)) is True
 
 
+@pytest.mark.feature("thin-skip-open-pr")
+@pytest.mark.parametrize("lane", ["eng", "ci"])
+def test_a_task_needing_enhancement_with_a_pull_request_is_released_to_its_lane_claim(lane: str) -> None:
+    found = doc(task("a", lane=lane, enhancement="needed", pr_url="https://github.com/o/r/pull/7"))
+    assert claim_hold.thin(found["tasks"][0]) == ""
+    assert reasons(found, "a") == ("", False, "")
+    assert readiness.claimable(found["tasks"][0], lane, view(found)) is True
+
+
+@pytest.mark.feature("thin-skip-open-pr")
+def test_a_task_needing_enhancement_with_an_empty_pull_request_stays_held() -> None:
+    found = doc(task("a", enhancement="needed", pr_url="", branch=""))
+    assert claim_hold.thin(found["tasks"][0]) == HELD
+    assert reasons(found, "a") == (HELD, True, HELD)
+    assert readiness.claimable(found["tasks"][0], "eng", view(found)) is False
+
+
 @pytest.mark.feature("swarm-thin-hold")
 def test_a_task_without_a_lane_reads_as_eng_for_the_thin_hold() -> None:
     bare = {k: v for k, v in task("a", enhancement="needed").items() if k != "lane"}
