@@ -2510,6 +2510,18 @@
       ]
     },
     {
+      "id": "hub-preemption-suppresses-relaunch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-preempt-suppress-relaunch",
+      "behaviour": "One urgent task keeps its handoff suppression across refused runtime launches, claim generation changes and lower task relaunches until its handoff and recent launch window end.",
+      "seam": "Hub preemption through Admission and Spoke runtime refusal, reopening and successful start",
+      "tests": [
+        "tests/hub/test_preemption_relaunch.py::test_a_refused_urgent_spawn_keeps_one_ask_after_its_claim_generation_advances",
+        "tests/hub/test_preemption_relaunch.py::test_the_relaunched_lower_task_is_not_asked_again_for_the_same_urgent_task",
+        "tests/hub/test_preemption_relaunch.py::test_the_urgent_task_starts_on_the_freed_seat_after_one_handoff"
+      ]
+    },
+    {
       "id": "swarm-preempt-claim-view-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-preempt-claim-view-reuse",
