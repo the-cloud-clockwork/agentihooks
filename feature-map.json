@@ -11101,6 +11101,21 @@
       ]
     },
     {
+      "id": "read-only-roles-tool-writes-inside-own-folders",
+      "origin": "regression",
+      "ordered_at": "2026-11-24",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2856",
+      "behaviour": "A qa or reviewer session runs chmod, truncate, mkdir, tar, unzip and patch when every place they write is inside its scratchpad or its own swarm task folder, and refuses them when any place is outside. chmod's mode operand, truncate's size and reference values and mkdir's mode value are values, never targets. tar writes its -f archives in create, append, update, delete and concatenate modes, also judged under each -C folder, and on extract writes into its chained -C folders and the current folder unless a -C precedes every member, nothing for -O; it is refused with no archive, a remote archive, a command running or side file option such as --to-command, -I, -P or --remove-files, or an abbreviated mode, file or folder option. unzip writes into its -d folders or the current folder and is refused with -:. patch writes into its last chained -d folder or the current folder plus its output, reject and patched files named under it, and is refused with a backup prefix or an abbreviated destination option. A value glued to its option keeps a leading tilde as a folder name.",
+      "seam": "hooks.context.read_only_shell.write_reason through the chmod, truncate, mkdir, tar, unzip and patch target readers, called by profiles.package.roles._guards.no_code_edits.deny_reason for Bash payloads, run by the qa and reviewer pre-bash-no_shell_writes condition shims",
+      "tests": [
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_refuses_each_tool_writing_outside_its_folders",
+        "tests/profiles/test_read_only_shell.py::test_a_read_only_seat_runs_each_tool_inside_its_folders",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_reads_each_tool_destination_inside_its_folders",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_reads_each_tool_destination_outside_its_folders",
+        "tests/profiles/test_read_only_shell.py::test_a_reviewer_judges_tool_destinations_from_its_scratchpad"
+      ]
+    },
+    {
       "id": "reviewer-role-renders-read-only-for-claude-and-codex",
       "origin": "regression",
       "ordered_at": "2026-11-21",
