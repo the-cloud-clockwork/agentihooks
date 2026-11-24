@@ -16,6 +16,15 @@ rules:
           - pattern-either:
               - pattern: $BUS.events.consumer(..., subject(...), ...)
               - pattern: $BUS.events.consumer(..., subjects.subject(...), ...)
+              - patterns:
+                  - pattern-either:
+                      - pattern-inside: |
+                          $S = subject(...)
+                          ...
+                      - pattern-inside: |
+                          $S = subjects.subject(...)
+                          ...
+                  - pattern: $BUS.events.consumer(..., $S, ...)
           - pattern-not: $B.for_swarm(...).events.consumer(...)
           - pattern-not-inside: |
               $BUS = $B.for_swarm(...)

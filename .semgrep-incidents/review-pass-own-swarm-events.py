@@ -20,6 +20,24 @@ def review_through_a_routed_log_variable(bus: Any, slug: str) -> Any:
     return log.consumer(f"review-rel-{slug}", subject(slug, "release", "published"))
 
 
+def review_with_a_subject_variable(bus: Any, slug: str) -> Any:
+    named = subject(slug, "pull", "opened")
+    # ruleid: review-pass-own-swarm-events
+    return bus.events.consumer(f"review-pr-{slug}", named)
+
+
+def review_on_the_routed_log_beside_a_swarm_view(bus: Any, slug: str) -> Any:
+    view = bus.for_swarm(slug)
+    # ruleid: review-pass-own-swarm-events
+    return view, bus.events.consumer(f"review-pr-{slug}", subject(slug, "pull", "opened"))
+
+
+def review_with_a_subject_variable_on_the_swarm_log(bus: Any, slug: str) -> Any:
+    named = subject(slug, "pull", "opened")
+    # ok: review-pass-own-swarm-events
+    return bus.for_swarm(slug).events.consumer(f"review-pr-{slug}", named)
+
+
 def review_on_the_swarm_log(bus: Any, slug: str) -> Any:
     # ok: review-pass-own-swarm-events
     return bus.for_swarm(slug).events.consumer(f"review-pr-{slug}", subject(slug, "pull", "opened"))

@@ -104,7 +104,7 @@ def test_a_scoped_bus_review_pass_queues_only_its_own_swarm_events() -> None:
     }
     for swarm, changes in events.items():
         for kind, data in changes:
-            publish(bus, kind, data, swarm, swarm=swarm)
+            publish(bus, kind, data, key=swarm, swarm=swarm)
     for swarm, changes in events.items():
         ledger = Ledger()
         assert len(review().review_pass(bus, swarm, doc(), ledger, NOW)) == 3
