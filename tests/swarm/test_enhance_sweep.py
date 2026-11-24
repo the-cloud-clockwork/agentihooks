@@ -135,7 +135,7 @@ def test_the_sweep_skips_a_thin_task_that_carries_a_pull_request_or_a_branch() -
         _task("t2", lane="ci", branch="engineer-1"),
         _task("t3", pr_url="", branch=""),
     ]
-    assert enhance_sweep.thin_by_lane(tasks) == {"eng": ["t3"], "ci": []}
+    assert enhance_sweep.thin_by_lane(tasks, thin.unfrozen({"tasks": tasks})) == {"eng": ["t3"], "ci": []}
 
 
 @pytest.mark.feature("swarm-enhance-sweep")
