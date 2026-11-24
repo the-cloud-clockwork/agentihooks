@@ -154,7 +154,9 @@ def test_claim_gate_releases_an_enhancement_when_its_target_is_unfrozen(explicit
     assert not freeze.claim_gate(plan, found, graph, "", None)
 
 
-@pytest.mark.parametrize("fields", [{}, {"lane": "eng"}, {"enhances": ""}, {"enhances": "missing"}, {"enhances": None}])
+@pytest.mark.parametrize(
+    "fields", [{}, {"lane": "eng", "enhances": "t1"}, {"enhances": ""}, {"enhances": "missing"}, {"enhances": None}]
+)
 @pytest.mark.feature("swarm-enhancement-frozen-target")
 def test_claim_gate_keeps_an_unfrozen_enhancement_claimable(fields: dict[str, Any]) -> None:
     frozen_work, free_work = task(), task("t2")
@@ -164,6 +166,13 @@ def test_claim_gate_keeps_an_unfrozen_enhancement_claimable(fields: dict[str, An
     graph = hierarchy.project(found)[0]
     assert freeze.claim_gate(held_plan, found, graph, "")
     assert not freeze.claim_gate(free_plan, found, graph, "")
+    new_plan = task("enhance-t3", lane="plan", kind="plan", phase="p2", enhances="t3")
+    found["tasks"].extend([task("t3", frozen=True), new_plan])
+    assert freeze.claim_gate(new_plan, found, hierarchy.project(found)[0], "", None)
+    found["tasks"] = [dict(row) for row in found["tasks"]]
+    assert freeze.claim_gate(new_plan, found, hierarchy.project(found)[0], "", None)
+    found["tasks"][-2]["frozen"] = False
+    assert not freeze.claim_gate(new_plan, found, hierarchy.project(found)[0], "", None)
 
 
 @pytest.mark.feature("swarm-focus-plan-work")

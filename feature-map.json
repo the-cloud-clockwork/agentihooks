@@ -5592,6 +5592,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-frozen-hold",
       "behaviour": "The claim gate holds open plan lane enhancements while their target is frozen by its ancestry, a selector or its explicit flag, releases them after thaw, and leaves unfrozen or missing targets claimable.",
       "seam": "scripts.swarm.freeze.claim_gate",
+      "rules": ["enhancement-frozen-hold"],
       "tests": [
         "tests/swarm/test_freeze.py::test_claim_gate_holds_a_plan_enhancing_frozen_work",
         "tests/swarm/test_freeze.py::test_claim_gate_releases_an_enhancement_when_its_target_is_unfrozen",
