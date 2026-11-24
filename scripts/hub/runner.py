@@ -74,6 +74,8 @@ class HubRunner:
     ):
         self._bus = bus
         self._reactors = list(reactors)
+        self._main = [reactor for reactor in self._reactors if reactor.name not in reactors.own_loop]
+        self._looped = [reactor for reactor in self._reactors if reactor.name in reactors.own_loop]
         self._versions = bus.state(VERSIONS)
         self._consumers = {
             r.name: bus.events.consumer(registry.durable(r), r.subject, r.policy) for r in self._reactors
@@ -89,8 +91,34 @@ class HubRunner:
         self.stopped = threading.Event()
 
     def run_once(self, batch: int = BATCH, timeout_ms: int = FETCH_TIMEOUT_MS) -> dict[str, list[str]]:
+        ended = threading.Event()
+        served: dict[str, list[str]] = {}
+        loop = threading.Thread(target=self._serve, args=(ended, served, batch, timeout_ms))
+        loop.start()
+        try:
+            passes = self._round(self._main, batch, timeout_ms)
+        finally:
+            ended.set()
+            loop.join()
+        return {**passes, **served}
+
+    def _serve(self, ended: threading.Event, served: dict[str, list[str]], batch: int, timeout_ms: int) -> None:
+        """Serve the own loop reactors round after round until the main lane has ended.
+
+        A round of only standby or failed passes rests the idle wait first, and a reactor that stays on standby is
+        reported once.
+        """
+        while True:
+            passes = self._round(self._looped, batch, timeout_ms)
+            for name, outcomes in passes.items():
+                if name not in served or outcomes != ["standby"]:
+                    served.setdefault(name, []).extend(outcomes)
+            if ended.wait(IDLE_S * _resting(passes)):
+                return
+
+    def _round(self, reactors: list[Reactor], batch: int, timeout_ms: int) -> dict[str, list[str]]:
         passes = {}
-        for reactor in self._reactors:
+        for reactor in reactors:
             try:
                 passes[reactor.name] = self._pass(reactor, batch, timeout_ms)
             except Exception:
@@ -172,6 +200,12 @@ class HubRunner:
         return "handled"
 
 
+def _resting(passes: dict[str, list[str]]) -> bool:
+    return all(outcomes == ["standby"] for outcomes in passes.values()) or any(
+        "failed" in outcomes for outcomes in passes.values()
+    )
+
+
 def _idle(outage: redis_grace.Outage) -> None:
     try:
         scheduled_wait(IDLE_S)
@@ -196,9 +230,7 @@ def _run(hub: HubRunner, once: bool) -> int:
                 print(f"{name}: {outcome}")
         if once:
             return 0
-        if all(outcomes == ["standby"] for outcomes in passes.values()) or any(
-            "failed" in outcomes for outcomes in passes.values()
-        ):
+        if _resting(passes):
             _idle(outage)
         else:
             outage.ended()

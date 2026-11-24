@@ -91,6 +91,6 @@ def configured(bus: Bus, clock: lease.Clock = lease.wall_ms, source: "readiness.
             Preemption(clock=clock, source=source).reactor(),
             Pulls(bus, clock=clock).reactor(),
             LaunchChecks(bus, clock=clock).reactor(),
-            *WaitEnds(clock=clock).reactors(),
-        ]
+        ],
+        own_loop=WaitEnds(clock=clock).reactors(),
     )
