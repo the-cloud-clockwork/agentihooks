@@ -5665,12 +5665,13 @@
       "id": "thin-skip-open-pr",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-skip-open-pr",
-      "behaviour": "An open eng or ci task that carries a pull request link or a branch is never selected by the thin check, so the thin task pass and the enhance sweep never mark it needing enhancement, and an eng or ci task already marked needed that carries a pull request link is released from the thin hold to its lane claim; empty pull request and branch values keep the thin selection and the thin hold.",
+      "behaviour": "An open eng or ci task that carries a pull request link or a branch is never selected by the thin check, so the thin task pass and the enhance sweep never mark it needing enhancement, and an eng or ci task already marked needed that carries a pull request link is released from the thin hold to its lane claim; empty pull request and branch values keep the thin selection, and a task needing enhancement with no pull request link stays held even when it carries a branch.",
       "seam": "scripts.tick.steps.thin.unchecked and scripts.swarm.claim_hold.thin, read by the thin task pass, the enhance sweep and scripts.swarm.readiness.claimable",
       "tests": [
-        "tests/tick/steps/test_thin_task_pass.py::test_an_open_task_with_a_pull_request_or_branch_gets_no_thin_mark",
+        "tests/tick/steps/test_thin_task_pass.py::test_only_an_open_task_without_a_pull_request_or_branch_gets_the_thin_mark",
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_skips_a_thin_task_that_carries_a_pull_request_or_a_branch",
         "tests/swarm/test_thin_hold.py::test_a_task_needing_enhancement_with_a_pull_request_is_released_to_its_lane_claim",
-        "tests/swarm/test_thin_hold.py::test_a_task_needing_enhancement_with_an_empty_pull_request_stays_held"
+        "tests/swarm/test_thin_hold.py::test_a_task_needing_enhancement_without_a_pull_request_stays_held"
       ]
     },
     {

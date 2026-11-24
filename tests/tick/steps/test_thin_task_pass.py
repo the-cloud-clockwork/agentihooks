@@ -245,7 +245,9 @@ def test_a_task_that_is_not_an_unmarked_thin_open_engineer_task_gets_no_write(ta
     ],
     ids=["pull request", "branch", "empty"],
 )
-def test_an_open_task_with_a_pull_request_or_branch_gets_no_thin_mark(fields: dict[str, Any], checked: bool) -> None:
+def test_only_an_open_task_without_a_pull_request_or_branch_gets_the_thin_mark(
+    fields: dict[str, Any], checked: bool
+) -> None:
     """A thin open task that carries a pull request link or a branch gets no enhancement write, while empty values
     still leave it checked and marked."""
     held = {**THIN, **fields}

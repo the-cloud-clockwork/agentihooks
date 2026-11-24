@@ -89,8 +89,9 @@ def test_a_task_needing_enhancement_with_a_pull_request_is_released_to_its_lane_
 
 
 @pytest.mark.feature("thin-skip-open-pr")
-def test_a_task_needing_enhancement_with_an_empty_pull_request_stays_held() -> None:
-    found = doc(task("a", enhancement="needed", pr_url="", branch=""))
+@pytest.mark.parametrize("branch", ["", "engineer-1"], ids=["no branch", "branch only"])
+def test_a_task_needing_enhancement_without_a_pull_request_stays_held(branch: str) -> None:
+    found = doc(task("a", enhancement="needed", pr_url="", branch=branch))
     assert claim_hold.thin(found["tasks"][0]) == HELD
     assert reasons(found, "a") == (HELD, True, HELD)
     assert readiness.claimable(found["tasks"][0], "eng", view(found)) is False
