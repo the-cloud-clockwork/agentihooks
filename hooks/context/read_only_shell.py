@@ -68,6 +68,7 @@ CHMOD_FLAGS = frozenset(
 )
 CHMOD_FOLLOWS = frozenset({"-L", "--dereference"})
 CHMOD_VALUES = frozenset({"--reference"})
+CHMOD_LONG_OPTIONS = CHMOD_FLAGS | CHMOD_FOLLOWS | CHMOD_VALUES | frozenset({"--help", "--version"})
 TRUNCATE_LETTERS = "rs"
 TRUNCATE_VALUES = frozenset({"--reference", "--size"})
 MKDIR_LETTERS = "m"
@@ -112,7 +113,6 @@ TAR_VALUES = frozenset(
         "--record-size",
         "--rmt-command",
         "--rsh-command",
-        "--set-mtime-format",
         "--sort",
         "--sparse-version",
         "--starting-file",
@@ -152,7 +152,6 @@ TAR_RUNS = frozenset(
         "--remove-files",
         "--rmt-command",
         "--rsh-command",
-        "--set-mtime-command",
         "--to-command",
         "--transform",
         "--use-compress-program",
@@ -180,8 +179,8 @@ TAR_LONG_OPTIONS = frozenset(
         "--one-file-system --one-top-level --overwrite --overwrite-dir --owner --owner-map --pax-option "
         "--portability --posix --preserve-order --preserve-permissions --quote-chars --quoting-style "
         "--read-full-records --record-size --recursion --recursive-unlink --remove-files --restrict --rmt-command "
-        "--rsh-command --same-order --same-owner --same-permissions --seek --selinux --set-mtime-command "
-        "--set-mtime-format --show-defaults --show-omitted-dirs --show-snapshot-field-ranges --show-stored-names "
+        "--rsh-command --same-order --same-owner --same-permissions --seek --selinux "
+        "--show-defaults --show-omitted-dirs --show-snapshot-field-ranges --show-stored-names "
         "--show-transformed-names --skip-old-files --sort --sparse --sparse-version --starting-file "
         "--strip-components --suffix --tape-length --test-label --to-command --to-stdout --totals --touch "
         "--transform --uncompress --ungzip --unlink-first --unquote --update --usage --use-compress-program --utc "
@@ -623,9 +622,9 @@ def _plain_targets(words: list[str], operands: list[str]) -> list[str]:
 def _chmod_targets(words: list[str], operands: list[str]) -> list[str]:
     """The files chmod changes: every operand but the first, which is the mode unless a mode option or --reference
     gave it; unknown with -L or --dereference, which newer coreutils chmod uses to follow links and older chmod
-    rejects."""
+    rejects, or with a long option that is abbreviated or not chmod's own."""
     options = _options(words, NO_LETTERS, CHMOD_VALUES)
-    if CHMOD_FOLLOWS & {name for name, _ in options}:
+    if CHMOD_FOLLOWS & {name for name, _ in options} or _unknown_long(options, CHMOD_LONG_OPTIONS):
         return [UNKNOWN]
     files = _named(options, OPERAND)
     return files[1:] if all(name in CHMOD_FLAGS for name, _ in options if name) else files
