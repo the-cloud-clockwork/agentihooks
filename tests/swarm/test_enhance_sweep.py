@@ -2,16 +2,18 @@
 pacing its writes, and its dry run prints the thin task count and ids per lane and writes nothing."""
 
 import json
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from importlib import import_module
 from types import SimpleNamespace
 from typing import Any
+from urllib.error import URLError
 
 import pytest
 
 from scripts.swarm import cli, enhance_sweep, ledger_client
-from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm.ledger_client import LedgerOffline, LedgerRefused, LedgerUnreachable
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.tick import registry
 from scripts.tick.adapters.fakes import FakeLedger, fake_tools
@@ -82,10 +84,12 @@ class SecondWriteFails(FakeLedger):
     )
     writes: int = 0
     log: list[str] = field(default_factory=list[str])
+    deadlines: list[Deadline] = field(default_factory=list[Deadline])
 
     def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> object:
         self.writes += 1
         self.log.append(f"write {self.writes}")
+        self.deadlines.append(deadline)
         if self.writes == 2:
             raise self.error
         return super().mutate(operations, deadline=deadline)
@@ -191,7 +195,14 @@ def test_the_dry_run_prints_the_thin_task_count_and_ids_per_lane_and_writes_noth
     built: list[str] = []
     monkeypatch.setattr(enhance_sweep, "ClientLedger", lambda slug, clients: built.append(slug))
     assert cli.main(["sw", "enhance", "sweep", "--dry-run"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"dry_run": True, "lanes": REPORT, "actions": []}
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {
+        "dry_run": True,
+        "lanes": REPORT,
+        "actions": [],
+        "counts": {"queued": 0, "failed": 0, "skipped": 0},
+    }
+    assert captured.err == ""
     assert (built, swarm) == ([], [])
 
 
@@ -209,11 +220,15 @@ def test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_wri
     monkeypatch.setattr(enhance_sweep, "ClientLedger", client_ledger)
     monkeypatch.setattr(enhance_sweep, "resource_client", lambda slug: f"clients of {slug}")
     assert cli.main(["sw", "enhance", "sweep"]) == 0
-    assert json.loads(capsys.readouterr().out) == {
+    captured = capsys.readouterr()
+    lines = [f"queued enhance-{tid} for thin task {tid}" for tid in ("t1", "t2", "t8", "t9", "t10")]
+    assert json.loads(captured.out) == {
         "dry_run": False,
         "lanes": REPORT,
-        "actions": [f"queued enhance-{tid} for thin task {tid}" for tid in ("t1", "t2", "t8", "t9", "t10")],
+        "actions": lines,
+        "counts": {"queued": 5, "failed": 0, "skipped": 0},
     }
+    assert captured.err.splitlines() == lines
     assert built == [("sw", "clients of sw")]
     assert swarm == [3.0, 3.0, 3.0, 3.0]
     assert _calls(ledger) == _tick_calls(TASKS)
@@ -281,3 +296,132 @@ def test_a_sweep_where_every_write_lands_reports_one_queued_line_per_thin_task_i
     assert cli.main(["sw", "enhance", "sweep"]) == 0
     actions = json.loads(capsys.readouterr().out)["actions"]
     assert actions == [f"queued enhance-{tid} for thin task {tid}" for tid in ("a", "b", "c")]
+
+
+@pytest.mark.feature("swarm-enhance-sweep-continues-past-timeout")
+@pytest.mark.parametrize(
+    ("error", "failure"),
+    [
+        pytest.param(TimeoutError("no answer"), "failed the enhancement of b: TimeoutError no answer", id="timeout"),
+        pytest.param(
+            OSError("connection lost"), "failed the enhancement of b: OSError connection lost", id="transport"
+        ),
+        pytest.param(URLError("no route"), "failed the enhancement of b: URLError <urlopen error no route>", id="url"),
+        pytest.param(
+            LedgerUnreachable("unreachable"),
+            "failed the enhancement of b: LedgerUnreachable unreachable",
+            id="unreachable",
+        ),
+        pytest.param(LedgerOffline("offline"), "failed the enhancement of b: LedgerOffline offline", id="offline"),
+        pytest.param(LedgerRefused("the task changed"), "refused the enhancement of b: the task changed", id="refused"),
+    ],
+)
+def test_a_failed_second_write_is_counted_and_the_sweep_continues(error: Exception, failure: str) -> None:
+    ledger = SecondWriteFails(dict(ANSWERS), error=error)
+    pauses: list[float] = []
+    result = enhance_sweep.sweep(THREE, UNFROZEN, ledger, pause=pauses.append)
+    assert getattr(result, "lines") == (
+        "queued enhance-a for thin task a",
+        failure,
+        "queued enhance-c for thin task c",
+    )
+    assert getattr(result, "counts") == {"queued": 2, "failed": 1, "skipped": 0}
+    assert ledger.log == ["write 1", "write 2", "write 3"]
+    assert len(ledger.calls) == 2
+    assert pauses == [3.0, 3.0]
+    assert len({id(deadline) for deadline in ledger.deadlines}) == 3
+    assert all(29 < deadline.remaining <= 30 for deadline in ledger.deadlines)
+
+
+@pytest.mark.feature("swarm-enhance-sweep-continues-past-timeout")
+@pytest.mark.parametrize("error", [ValueError("bad task"), KeyError("missing field")])
+def test_the_sweep_leaves_programming_errors_visible(error: Exception) -> None:
+    ledger = SecondWriteFails(dict(ANSWERS), error=error)
+    with pytest.raises(type(error), match=str(error)):
+        enhance_sweep.sweep(THREE, UNFROZEN, ledger, pause=lambda _: None)
+    assert ledger.log == ["write 1", "write 2"]
+
+
+@pytest.mark.feature("swarm-enhance-sweep-continues-past-timeout")
+def test_a_frozen_thin_task_is_reported_in_order_without_a_write_or_extra_pause() -> None:
+    tasks = [_task("a"), _task("b", phase="p2"), _task("c")]
+    held = _frozen("phases/p2")
+    unfrozen = thin.unfrozen({"tasks": tasks, **held})
+    ledger = FakeLedger(dict(ANSWERS))
+    pauses: list[float] = []
+    result = enhance_sweep.sweep(tasks, unfrozen, ledger, pause=pauses.append)
+    assert getattr(result, "lines") == (
+        "queued enhance-a for thin task a",
+        "skipped thin task b: held by a freeze",
+        "queued enhance-c for thin task c",
+    )
+    assert getattr(result, "counts") == {"queued": 2, "failed": 0, "skipped": 1}
+    assert _calls(ledger) == _tick_calls(tasks, held)
+    assert pauses == [3.0]
+
+
+@pytest.mark.feature("swarm-enhance-sweep-continues-past-timeout")
+def test_the_command_flushes_each_outcome_to_stderr_before_the_next_write(
+    swarm: list[float], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ledger = SecondWriteFails(dict(ANSWERS), error=TimeoutError("no answer"))
+    _serve(monkeypatch, {"tasks": THREE})
+    monkeypatch.setattr(enhance_sweep, "ClientLedger", lambda slug, clients: ledger)
+    monkeypatch.setattr(enhance_sweep, "resource_client", lambda slug: slug)
+    real_print = print
+
+    def printed(*values: object, **options: Any) -> None:
+        if options.get("file") is sys.stderr:
+            assert options.get("flush") is True
+            ledger.log.append(str(values[0]))
+        real_print(*values, **options)
+
+    monkeypatch.setattr("builtins.print", printed)
+    assert cli.main(["sw", "enhance", "sweep"]) == 0
+    captured = capsys.readouterr()
+    lines = [
+        "queued enhance-a for thin task a",
+        "failed the enhancement of b: TimeoutError no answer",
+        "queued enhance-c for thin task c",
+    ]
+    assert captured.err.splitlines() == lines
+    assert captured.out.count("\n") == 1
+    assert json.loads(captured.out) == {
+        "dry_run": False,
+        "lanes": {"eng": {"count": 3, "ids": ["a", "b", "c"]}, "ci": {"count": 0, "ids": []}},
+        "actions": lines,
+        "counts": {"queued": 2, "failed": 1, "skipped": 0},
+    }
+    assert ledger.log == ["write 1", lines[0], "write 2", lines[1], "write 3", lines[2]]
+    assert swarm == [3.0, 3.0]
+
+
+@pytest.mark.feature("swarm-enhance-sweep-continues-past-timeout")
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_the_command_reports_frozen_skips_without_constructing_a_writer_in_a_dry_run(
+    dry_run: bool, swarm: list[float], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tasks = [_task("b", phase="p2")]
+    _serve(monkeypatch, {"tasks": tasks, **_frozen("phases/p2")})
+    built: list[str] = []
+    ledger = FakeLedger(dict(ANSWERS))
+
+    def client_ledger(slug: str, clients: object) -> FakeLedger:
+        built.append(slug)
+        return ledger
+
+    monkeypatch.setattr(enhance_sweep, "ClientLedger", client_ledger)
+    monkeypatch.setattr(enhance_sweep, "resource_client", lambda slug: slug)
+    assert cli.main(["sw", "enhance", "sweep", *(["--dry-run"] if dry_run else [])]) == 0
+    captured = capsys.readouterr()
+    line = "skipped thin task b: held by a freeze"
+    assert captured.err == line + "\n"
+    assert json.loads(captured.out) == {
+        "dry_run": dry_run,
+        "lanes": {"eng": {"count": 0, "ids": []}, "ci": {"count": 0, "ids": []}},
+        "actions": [line],
+        "counts": {"queued": 0, "failed": 0, "skipped": 1},
+    }
+    assert built == ([] if dry_run else ["sw"])
+    assert ledger.calls == []
+    assert swarm == []
