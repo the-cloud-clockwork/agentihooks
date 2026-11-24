@@ -914,54 +914,79 @@ class Scheduler:
         return f"received {request.head} on {lane}"
 
     def _close(self, closed: HeadEvent, lane: str) -> str:
-        """End the pull request class work of a closed pull request's lane: its waiting head is dropped and its live
-        grade forgotten, with the pending jobs of that grade's head unless another live grade of any repository
-        grades the head, since a job names its head alone. Nothing is posted. A waiting head or a grade pushed to a
-        grade ref stays, and so does the same lane of the hotfix class. While another pull request of the same head
-        branch holds a live grade of that head in the lane, one grade ends, the one graded against the closed pull
-        request's base when a grade is, and the lane keeps its waiting head and names the grade that stays."""
+        """End what a closed pull request holds in its lane of the pull request class, told by its base, which
+        GitHub sets at a pull request's last head and repeats when it closes: the waiting head of that base and the
+        live grades of the lane's head, with the pending jobs of that head unless another live grade of any
+        repository grades it, since a job names its head alone. Nothing is posted. A waiting head or a grade pushed
+        to a grade ref stays, so does the same lane of the hotfix class, and so does what carries another base, the
+        work of another pull request of the same head branch: while the lane holds live grades of one head against
+        two bases, a close ends the grades of its own base only and the lane keeps its waiting head."""
         repo = closed.repo
         name = f"{repo}|{lane}|{int(Priority.PULL_REQUEST)}"
         origins = self._origins()
         run = self.client.get(f"{LANES}{name}")
         origin = None if run is None else origins.get(run)
         if run is None or origin is None or origin["ref"]:
-            return f"closed {lane} of {repo}: {', '.join(self._unwait(name)) or 'nothing held'}"
-        twins = self._twins(run, lane, origins)
-        if twins:
-            gone, stays = stale_heads.parting(run, twins, closed.base)
-            self._forget(gone)
-            self.client.set(f"{LANES}{name}", stays)
-            return f"closed {lane} of {repo}: retired {gone}, {stays} still grades {origin['head']}"
-        ended = self._unwait(name)
-        kept = {other["head"] for live, other in origins.items() if live != run}
-        dropped = [] if origin["head"] in kept else self.queue.drop(origin["head"])
-        self._forget(run)
-        ended.append(f"retired {run}, dropped {len(dropped)} pending units")
-        return f"closed {lane} of {repo}: {', '.join(ended)}"
+            ended = self._unwait(name, closed.base)
+        else:
+            bases = self._bases(run, lane, origins)
+            shared = len(set(bases.values())) > 1
+            ended = (
+                self._part(name, run, bases, closed.base, origin["head"])
+                if shared
+                else self._end(name, run, bases, closed.base, origins)
+            )
+        return f"closed {lane} of {repo}: {', '.join(ended) or 'nothing held'}"
 
-    def _unwait(self, name: str) -> list[str]:
-        """Drop a lane's waiting head, unless it was pushed to a grade ref, and name what was dropped."""
-        held = self.client.hget(WAITING, name)
-        waiting = None if held is None else json.loads(held)
-        if waiting is None or waiting.get("ref"):
-            return []
-        self.client.hdel(WAITING, name)
-        return [f"dropped the waiting head {waiting['request']['head']}"]
-
-    def _twins(self, run: str, lane: str, origins: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
-        """Return, by run, the base of every other live pull request grade of a run's head that names the same lane
-        and another base: the grades of the other pull requests of one head branch."""
-        mine = self.grade(run)
-        if mine is None:
-            return {}
-        same = [name for name in sorted(origins) if name != run and stale_heads.twin(origins[run], origins[name])]
+    def _bases(self, run: str, lane: str, origins: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
+        """Return the base of a lane's run and of every other live pull request grade of its head that names the
+        lane, by run; a run whose grade document is gone is left out."""
+        same = [name for name in sorted(origins) if name == run or stale_heads.twin(origins[run], origins[name])]
         grades = {name: self.grade(name) for name in same}
         return {
             name: grade.base
             for name, grade in grades.items()
-            if grade is not None and grade.lane == lane and grade.base != mine.base
+            if grade is not None and (name == run or grade.lane == lane)
         }
+
+    def _part(self, name: str, run: str, bases: Mapping[str, str], base: str, head: str) -> list[str]:
+        """End the grades of the closed pull request's base in a lane that holds one head against two bases, and
+        name the grade that keeps the lane; no grade of that base ends nothing."""
+        gone, stay = stale_heads.closing(bases, base)
+        if not gone:
+            return []
+        for each in gone:
+            self._forget(each)
+        if run in gone:
+            self.client.set(f"{LANES}{name}", stay[0])
+        return [f"retired {', '.join(gone)}, {stay[0]} still grades {head}"]
+
+    def _end(
+        self, name: str, run: str, bases: Mapping[str, str], base: str, origins: Mapping[str, Mapping[str, Any]]
+    ) -> list[str]:
+        """End a lane that holds one pull request's work, when the close names the base of its live grade or of its
+        waiting head, or its live grade lost its document: the waiting head of that base, every grade of the lane's
+        head in the lane and the pending jobs of that head unless another live grade grades it."""
+        ended = self._unwait(name, base)
+        if run in bases and base != bases[run] and not ended:
+            return []
+        gone = sorted({run, *bases})
+        head = origins[run]["head"]
+        kept = {origin["head"] for live, origin in origins.items() if live not in gone}
+        dropped = [] if head in kept else self.queue.drop(head)
+        for each in gone:
+            self._forget(each)
+        return [*ended, f"retired {', '.join(gone)}, dropped {len(dropped)} pending units"]
+
+    def _unwait(self, name: str, base: str) -> list[str]:
+        """Drop a lane's waiting head when it carries the given base and was pushed to no grade ref, and name what
+        was dropped."""
+        held = self.client.hget(WAITING, name)
+        waiting = None if held is None else json.loads(held)
+        if waiting is None or waiting.get("ref") or waiting["request"]["base"] != base:
+            return []
+        self.client.hdel(WAITING, name)
+        return [f"dropped the waiting head {waiting['request']['head']}"]
 
     def _release(self, now_ms: int) -> list[str]:
         """Start at most `STARTS_PER_PASS` held heads whose quiet window ended, except one a pause of its class holds:

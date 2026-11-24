@@ -3,8 +3,8 @@
 `OpenHeads` is the scheduler's listing port, read from GitHub through the lab App: the head of every open pull
 request and of every plant branch of a repository, from paged listings read until two readings in a row agree and
 never one head at a time. `repositories` names the repositories the first pass of a scheduler lists, `stale` the
-grades it then retires and `listed` the line that counts them. `parting` names the grade a closed pull request ends
-when another pull request of its head branch still holds a live grade of the same head.
+grades it then retires and `listed` the line that counts them. `closing` splits the live grades a lane holds of one
+head into those a closed pull request's base ends and those that stay.
 """
 
 from collections.abc import Callable, Mapping
@@ -113,15 +113,11 @@ def twin(origin: Mapping[str, Any], other: Mapping[str, Any]) -> bool:
     return _plain(other) and other["repo"] == origin["repo"] and other["head"] == origin["head"]
 
 
-def parting(run: str, twins: Mapping[str, str], base: str) -> tuple[str, str]:
-    """Return the grade a closed pull request ends and the grade its lane names afterwards, given the lane's run and
-    the base of each twin grade another pull request of the same head branch holds: the twin graded against the
-    closed pull request's base ends and the lane keeps its run, else the lane's run ends and its first twin takes
-    the lane."""
-    for name in sorted(twins):
-        if twins[name] == base:
-            return name, run
-    return run, min(twins)
+def closing(bases: Mapping[str, str], base: str) -> tuple[list[str], list[str]]:
+    """Return, of the live grades one lane holds of one head by base, the runs a closed pull request of the given
+    base ends and the runs that stay, each in run order."""
+    gone = sorted(run for run, held in bases.items() if held == base)
+    return gone, sorted(bases.keys() - set(gone))
 
 
 def listed(repo: str, heads: int, origins: Origins, gone: Mapping[str, tuple[str, str]], dropped: int) -> str:

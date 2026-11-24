@@ -2602,15 +2602,19 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   one. A head whose grade already exists still takes its lane: the lane's older head is
   superseded and the lane names the existing run, so a head first graded outside its pull request
   lane holds that lane afterwards.
-- A `closed` pull request head starts no grade. `Scheduler._close` drops the waiting head of its
-  lane in the pull request class and forgets the lane's live grade, with the pending jobs of that
-  grade's head unless another live grade grades the head. Nothing is posted. A waiting head or a
-  grade pushed to a grade ref stays, and so does the same lane of the hotfix class. The pass prints
-  `closed <lane> of <repo>:` and what it ended, or `nothing held`. Two open pull requests from one
-  head branch share a lane and hold two live grades of one head against two bases. Closing one of
-  them ends one grade only: the one graded against the closed pull request's base, else the one
-  the lane names. The waiting head and the pending jobs stay, the lane names the grade that
-  stays, and the pass prints `retired <run>, <run> still grades <head>`.
+- A `closed` pull request head starts no grade. `Scheduler._close` ends what the closed pull
+  request holds in its lane of the pull request class, told by its base: GitHub sets a pull
+  request's base commit at its last head and repeats it when the pull request closes. It drops
+  the waiting head of that base and forgets the lane's live grade when the close names that
+  grade's base or the base of the waiting head it dropped, with every other grade of the same
+  head, base and lane and with the pending jobs of that head unless another live grade grades
+  the head. Nothing is posted. A waiting head or a grade pushed to a grade ref stays, and so does
+  the same lane of the hotfix class. The pass prints `closed <lane> of <repo>:` and what it
+  ended, or `nothing held`. A waiting head or a live grade of another base is the work of another
+  pull request of the same head branch and stays. While the lane holds live grades of one head
+  against two bases, a close ends the grades of its own base only: the waiting head and the
+  pending jobs stay, the lane names a grade that stays, and the pass prints `retired <run>,
+  <run> still grades <head>`.
 - On its first pass a scheduler retires the stale grades a restart finds live. For each repository
   with a live pull request grade that has no grade ref, `scripts.ci_lab.stale_heads.OpenHeads`
   reads the open pull request heads and the heads of the plant branches through the lab App: two
@@ -2634,7 +2638,10 @@ Known limits: a rerequested check run and a signed notice name no lane, so such 
 its own sha until its pull request delivers it; two open pull requests from two branches whose
 heads are one commit graded against one base share a single grade, so closing one of them, or
 pushing a newer head to it, ends the pending units of that commit for both until the other is
-pushed or reopened; expansion keys static gates, test units
+pushed or reopened; of two pull requests from one head branch whose heads arrive in one quiet
+window only the first is graded, so closing that one ends the grade the other reads; a pull
+request whose base was edited after its last head closes with a base no grade carries, so its
+live grade stays until it finishes or the scheduler restarts; expansion keys static gates, test units
 and mutation units only, so the other jobs the lab does not run yet pass by their frame; a
 rerequested grade reuses the finished jobs of its own head.
 
