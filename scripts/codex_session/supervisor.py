@@ -22,6 +22,7 @@ from scripts.profiles import binding
 from scripts.routing import envs
 from scripts.swarm import launch_endings
 from scripts.swarm.store import APP_SERVER_TRANSPORT, MASTER, AgentRecord, RedisStore
+from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2 import masters
 
 if TYPE_CHECKING:
@@ -188,7 +189,9 @@ def admit(store: RedisStore, launch: Launch, deps: Deps) -> AgentRecord:
     if launch.execution_id:
         return adopt(store, launch, chosen, hive_id())
     agent = replace(launch.agent, harness="codex", transport=chosen, hive=hive_id(), runtime_target=target)
-    return store.start_execution(launch.slug, agent, launch.previous_execution_id)
+    started = store.start_execution(launch.slug, agent, launch.previous_execution_id)
+    ledger_workspace.launched_on(store, launch.slug, started.task, started.hive)
+    return started
 
 
 def _adoption_failure(

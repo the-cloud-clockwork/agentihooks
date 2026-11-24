@@ -76,8 +76,11 @@ def test_hook_event_is_exported_before_the_hook_process_exits(collector, tmp_pat
     assert "/v1/logs" in paths
 
 
+@pytest.mark.feature("tokens-gauges-hive-daemon")
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_native_token_measurements_reach_collector(collector, tmp_path, target):
+def test_native_token_measurements_stay_in_the_seen_record_and_leave_the_hook_process_unsent(
+    collector, tmp_path, target
+):
     endpoint, paths = collector
     codex_home = tmp_path / "codex"
     sessions = codex_home / "sessions" / "2026" / "10" / "07"
@@ -141,22 +144,17 @@ def test_native_token_measurements_reach_collector(collector, tmp_path, target):
         timeout=60,
     )
     assert result.returncode == 0, result.stderr
-    gauges = [
-        metric for metric in paths if not isinstance(metric, str) and metric.name == "agentihooks.tokens.fill_pct"
-    ]
-    assert gauges
-    point = gauges[0].gauge.data_points[0]
-    assert point.as_double == 25.0
-    attributes = {item.key: item.value.string_value for item in point.attributes}
-    from hooks.observability.agent_trace import trace_id
-
-    assert attributes["session.id"] == "native-" + target
-    assert attributes["agentihooks.correlation.session.id"] == "native-" + target
-    assert attributes["agentihooks.correlation.trace.id"] == format(trace_id("native-" + target), "032x")
-    assert attributes["agentihooks.correlation.profile.resolved"] == "engineer"
-    assert attributes["agentihooks.correlation.agent.name"] == "proof-life"
-    assert attributes["agentihooks.correlation.agent.life.state"] == "unsupported"
-    assert attributes["agentihooks.correlation.seat.state"] == "unsupported"
+    names = {metric.name for metric in paths if not isinstance(metric, str)}
+    assert not names & {"agentihooks.tokens.fill_pct", "agentihooks.tokens.burn_rate"}
+    if target == "codex":
+        assert "agentihooks.presence.agent" in names
+    record = json.loads((tmp_path / "home" / "telemetry" / "presence" / f"native-{target}.json").read_text())
+    assert record["tokens"]["session_id"] == "native-" + target
+    assert record["tokens"]["fill_pct"] == 25.0
+    assert record["tokens"]["correlation"] == {
+        "agentihooks.correlation.agent.name": "proof-life",
+        "agentihooks.correlation.profile.resolved": "engineer",
+    }
 
 
 def test_flush_drains_every_provider(monkeypatch):

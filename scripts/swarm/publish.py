@@ -7,8 +7,9 @@ import subprocess
 import sys
 import time
 import urllib.request
+from collections.abc import Callable
 from contextlib import redirect_stderr
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +41,11 @@ LAB_READ_TIMEOUT_S = 10
 
 @dataclass(frozen=True)
 class LabRoute:
-    """A publish through the lab: the task whose grade ref it pushes, and whether origin follows without the grade."""
+    """A publish through the lab, with an optional recorder for each accepted grade push."""
 
     task: str
     direct: bool
+    pushed: Callable[[str, str], None] | None = field(default=None, compare=False)
 
 
 def route_flags(lab: LabRoute | None) -> list[str]:
@@ -93,9 +95,11 @@ def lab_push(root: Path, task: str, branch: str) -> str:
     return found[1]
 
 
-def through_lab(root: Path, route: LabRoute, fields: dict[str, str]) -> None:
+def through_lab(root: Path, route: LabRoute, fields: dict[str, str], head: str) -> None:
     """Grade HEAD on the lab before origin: push it there and, unless the route is direct, wait for a green grade."""
     url = fields["lab_grade"] = lab_push(root, route.task, fields["branch"])
+    if route.pushed is not None:
+        route.pushed(head, url)
     verdict = GREEN if route.direct else lab_conclusion(url)
     if verdict != GREEN:
         raise SwarmError(f"the lab grade {url} concluded {verdict}; origin was not pushed")
@@ -113,7 +117,7 @@ def git(root: Path, *args: str) -> str:
     return output if "-z" in args else output.strip()
 
 
-def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
+def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict[str, Any]:
     task = ledger.task(slug, agent.task) or {}
     if task.get("claimed_by") != agent.name or task.get("state") not in ("claimed", "pr"):
         raise SwarmError("publication requires this agent's claimed task")
@@ -235,8 +239,10 @@ def continuation_task(repo: Path, task: dict, scoped: dict, branch: str) -> dict
     return {**scoped, "branch": recorded}
 
 
-def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | None, Path, dict]:
-    current = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+def publishing_root(
+    repo: str, task: dict[str, Any], agent: AgentRecord, cwd: Path | None = None
+) -> tuple[Path | None, Path, dict[str, Any]]:
+    current = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, cwd=cwd)
     root = None
     if current.returncode == 0 and (Path(current.stdout.strip()) / ".git").is_file():
         root = Path(current.stdout.strip())
@@ -261,6 +267,21 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         return root, primary, scoped
     except SwarmError as exc:
         raise PublicationRefusal(primary, refusal_branch(primary, task), str(exc)) from exc
+
+
+def session_root(slug: str, cwd: Path) -> Path | None:
+    """The root publishing_root selects from *cwd* for this session's claimed task, or None on any failure."""
+    try:
+        from scripts.swarm.runtime import REPO_VARIABLE
+
+        environ = os.environ
+        agent = AgentRecord(
+            environ["AGENTIHOOKS_AGENT_NAME"], environ["AGENTIHOOKS_SWARM_LANE"], environ["AGENTIHOOKS_SWARM_TASK"]
+        )
+        task = task_row(slug, agent, LedgerClient())
+        return publishing_root(environ.get(REPO_VARIABLE) or str(cwd), task, agent, cwd)[0]
+    except Exception:
+        return None
 
 
 def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
@@ -523,7 +544,7 @@ def grade_and_push(
     ref = f"refs/heads/{fields['branch']}"
     publish_queue.require_unqueued(git(root, "remote", "get-url", "--push", "origin"), fields["branch"])
     if route is not None:
-        through_lab(root, route, fields)
+        through_lab(root, route, fields, head)
     git(root, "push", "-u", "origin", f"HEAD:{ref}")
     notify_lab(root, fields, head)
 

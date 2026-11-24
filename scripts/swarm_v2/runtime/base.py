@@ -12,7 +12,7 @@ LOCAL = "local"
 BACKEND_VARIABLE = "AGENTIHOOKS_RUNTIME_BACKEND"
 DISABLED_VARIABLE = "AGENTIHOOKS_RUNTIME_DISABLED"
 LOCAL_PROFILES = frozenset(("frontend",))
-HIVE_LANES = frozenset(("eng", "ci", "plan", "dispatch"))
+HIVE_LANES = frozenset(("eng", "ci", "review", "plan", "dispatch", "expert"))
 
 
 class Capability(StrEnum):
@@ -57,7 +57,7 @@ class SpawnRequest:
 @dataclass(frozen=True)
 class Placement:
     backend: str
-    lanes: frozenset[str] = frozenset(("eng", "ci"))
+    lanes: frozenset[str] = frozenset(("eng", "ci", "review"))
     local_profiles: frozenset[str] = LOCAL_PROFILES
     master_seats: Callable[[], frozenset[str]] = frozenset
 

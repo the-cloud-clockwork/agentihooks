@@ -182,11 +182,12 @@ def test_a_launch_is_reported_to_the_hub_with_its_harness_profile_and_account(hu
 @pytest.mark.parametrize(
     ("excluded", "taken"),
     [
-        (None, ("eng", "ci", "plan")),
-        ("", ("eng", "ci", "plan")),
-        ("master", ("eng", "ci", "plan")),
-        ("master,ci", ("eng", "plan")),
-        ("eng,ci,plan", ()),
+        (None, ("eng", "ci", "review", "plan")),
+        ("", ("eng", "ci", "review", "plan")),
+        ("master", ("eng", "ci", "review", "plan")),
+        ("master,ci", ("eng", "review", "plan")),
+        ("eng,ci,plan", ("review",)),
+        ("eng,ci,review,plan", ()),
     ],
 )
 def test_a_hive_runs_every_lane_spoke_it_does_not_exclude(excluded, taken):
@@ -636,7 +637,7 @@ def test_the_lane_loop_binds_the_bus_from_its_environment_and_runs_as_this_hive(
 
     assert [(c.backend, c.url, c.provision) for c in configs] == [("nats", "nats://bus:4222", False)]
     [(seen_store, seen_bus, runtime, hive, taken)] = served
-    assert (seen_store, seen_bus, hive, taken) == ("swarm store", bus, "hive-a", ("eng", "plan"))
+    assert (seen_store, seen_bus, hive, taken) == ("swarm store", bus, "hive-a", ("eng", "review", "plan"))
     assert (type(runtime).__name__, runtime.herdr) == ("LocalHerdrRuntime", "herdr")
     bus.close.assert_called_once_with()
 

@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.x__hydrate_dead:c015c57b952c2a5f2dd3dd737ce5701f7c99bd9a57ed5eaff9015554a7d21b9b": {
+    "reader": "standards-reader",
+    "reason": "Equivalent for the bus contract: only the ValueError diagnostic argument changes. NatsConsumer catches this exception without reading its message and follows the same raw-message dead-letter and settlement path. Part validation still rejects the same cases."
+  }
+}

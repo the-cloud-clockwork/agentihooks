@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from math import inf, isfinite, isnan
+from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -22,12 +23,16 @@ __all__ = [
     "LEDGER",
     "UNITS",
     "GradeRecord",
+    "Latest",
     "Metric",
     "Registry",
     "UnitRecord",
     "expose",
     "grade_row",
+    "observe_age",
     "observe_load",
+    "observe_mirror",
+    "observe_rate",
     "observe_unit",
     "record",
     "respond",
@@ -40,6 +45,8 @@ LEDGER = "ci-lab"
 JSON = "application/json"
 EXPOSITION = "text/plain; version=0.0.4; charset=utf-8"
 ROUTES = ("/capacity", "/metrics")
+FETCHED_AT = "fetched-at"
+RATE_REMAINING = "x-ratelimit-remaining"
 
 
 @dataclass(frozen=True)
@@ -73,6 +80,7 @@ HELP = {
     contract.WORKERS_READY: "Workers holding a live heartbeat.",
     contract.GITHUB_RATE_REMAINING: "GitHub API calls left in the window.",
     contract.VERDICT_MISMATCH_TOTAL: "Shadow verdicts that differ from Actions.",
+    contract.LOAD_AGE_SECONDS: "Age of the load snapshot the metrics port serves.",
 }
 COUNTERS = frozenset(
     {
@@ -173,6 +181,11 @@ class Registry:
         with self.lock:
             self.values[name][key] = self.values[name].get(key, 0.0) + float(value)
 
+    def clear(self, name: str) -> None:
+        """Drop every sample of a metric, so the exposition holds none for it until the next write."""
+        with self.lock:
+            self.values[name].clear()
+
     def render(self) -> str:
         """Prometheus text exposition: HELP and TYPE for every contract metric, samples only once observed."""
         lines: list[str] = []
@@ -215,6 +228,31 @@ def observe_unit(registry: Registry, priority: str, kind: str, slots: int, repor
     for cache, (hits, misses) in caches.read(report).items():
         registry.inc(contract.CACHE_HITS_TOTAL, hits, {"cache": cache})
         registry.inc(contract.CACHE_MISSES_TOTAL, misses, {"cache": cache})
+
+
+def observe_mirror(registry: Registry, mirror: Path, now_ms: int) -> None:
+    """Set the mirror age to the seconds since the epoch second the node mirror's fetched-at stamp holds, never
+    below zero, and drop the sample while the stamp is missing or holds no whole number."""
+    try:
+        fetched = int((mirror / FETCHED_AT).read_text())
+    except (OSError, ValueError):
+        registry.clear(contract.MIRROR_AGE_SECONDS)
+        return
+    registry.set(contract.MIRROR_AGE_SECONDS, max(0.0, now_ms / 1000 - fetched))
+
+
+def observe_age(registry: Registry, built_ms: int, now_ms: int) -> None:
+    """Set the load age to the seconds since the build of the load snapshot the metrics port serves started, never
+    below zero."""
+    registry.set(contract.LOAD_AGE_SECONDS, max(0.0, (now_ms - built_ms) / 1000))
+
+
+def observe_rate(registry: Registry, headers: Mapping[str, str]) -> None:
+    """Set the GitHub calls left in the rate window from an answer's x-ratelimit-remaining header when it holds a
+    whole number."""
+    remaining = headers.get(RATE_REMAINING)
+    if remaining is not None and remaining.isdecimal():
+        registry.set(contract.GITHUB_RATE_REMAINING, int(remaining))
 
 
 @dataclass(frozen=True)
@@ -301,8 +339,70 @@ def record(sink: Sink, units: Iterable[UnitRecord], grades: Iterable[GradeRecord
         sink.append(GRADES, grade_rows)
 
 
-def respond(snapshot: Callable[[], Load], registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:
-    """Answer GET /capacity with the capacity document and GET /metrics with the exposition."""
+class Latest:
+    """The load snapshot the scheduler ports serve, with the clock reading its build started at. ``start`` builds the
+    first one in the background and ``peek`` answers at once with the last finished build, or None before the first
+    one finishes. A ``read`` before any build builds it and reads that meet that build wait for it; every later read
+    answers at once with the last finished build. ``refresh``, which the metrics port's serve loop runs between
+    requests, starts one background build once the last build started at least ``refresh_ms`` ago and none runs, so
+    a failed build keeps the last snapshot and the next starts an interval after it."""
+
+    def __init__(self, build: Callable[[int], Load], clock: Callable[[], int], refresh_ms: int) -> None:
+        self.build = build
+        self.clock = clock
+        self.refresh_ms = refresh_ms
+        self.building = threading.Lock()
+        self.started_ms: int | None = None
+        self.built: tuple[Load, int] | None = None
+
+    def read(self) -> tuple[Load, int]:
+        """The last finished load snapshot and the clock reading its build started at, building the first one."""
+        built = self.built
+        if built is not None:
+            return built
+        with self.building:
+            return self.built or self._rebuild()
+
+    def peek(self) -> tuple[Load, int] | None:
+        """The last finished load snapshot and the clock reading its build started at, or None before the first build
+        finishes; it never waits and never builds."""
+        return self.built
+
+    def start(self) -> None:
+        """Start the first build in the background unless a build has started or one runs."""
+        if self.started_ms is None:
+            self._begin_build()
+
+    def refresh(self) -> None:
+        """Start one background build once a build has started, the last one started at least ``refresh_ms`` ago and
+        none runs."""
+        started = self.started_ms
+        if started is None or self.clock() - started < self.refresh_ms:
+            return
+        self._begin_build()
+
+    def _begin_build(self) -> None:
+        if self.building.acquire(blocking=False):
+            threading.Thread(target=self._background, name="ci-lab-load-refresh", daemon=True).start()
+
+    def _rebuild(self) -> tuple[Load, int]:
+        started = self.clock()
+        self.started_ms = started
+        self.built = (self.build(started), started)
+        return self.built
+
+    def _background(self) -> None:
+        try:
+            self._rebuild()
+        finally:
+            self.building.release()
+
+
+def respond(
+    snapshot: Callable[[], Load | None], registry: Registry, method: str, target: str
+) -> tuple[int, str, bytes]:
+    """Answer GET /capacity with the capacity document and GET /metrics with the exposition; before the first load
+    snapshot is built, capacity answers 503 and metrics answers the registry alone."""
     path = urlsplit(target).path
     if path not in ROUTES:
         return 404, JSON, b'{"error": "not found"}'
@@ -310,12 +410,36 @@ def respond(snapshot: Callable[[], Load], registry: Registry, method: str, targe
         return 405, JSON, b'{"error": "method not allowed"}'
     load = snapshot()
     if path == "/capacity":
+        if load is None:
+            return 503, JSON, b'{"error": "the load snapshot is not built yet"}'
         return 200, JSON, json.dumps(document(load)).encode()
-    observe_load(registry, load)
+    if load is not None:
+        observe_load(registry, load)
     return 200, EXPOSITION, registry.render().encode()
 
 
-def _bind(host: str, port: int, reply: Callable[[str, str], tuple[int, str, bytes]]) -> ThreadingHTTPServer:
+def _idle() -> None:
+    """Run nothing between requests."""
+
+
+class _Port(ThreadingHTTPServer):
+    """A threading HTTP server whose serve loop runs its actions after every request and every poll."""
+
+    def __init__(
+        self, address: tuple[str, int], handler: type[BaseHTTPRequestHandler], actions: Callable[[], None]
+    ) -> None:
+        self.actions = actions
+        super().__init__(address, handler)
+
+    def service_actions(self) -> None:
+        """Run the base server's actions, then the port's actions."""
+        super().service_actions()
+        self.actions()
+
+
+def _bind(
+    host: str, port: int, reply: Callable[[str, str], tuple[int, str, bytes]], actions: Callable[[], None] = _idle
+) -> ThreadingHTTPServer:
     def answer(request: BaseHTTPRequestHandler) -> None:
         status, content_type, data = reply(request.command, request.path)
         request.send_response(status)
@@ -325,12 +449,15 @@ def _bind(host: str, port: int, reply: Callable[[str, str], tuple[int, str, byte
         request.wfile.write(data)
 
     handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": answer, "do_POST": answer})
-    return ThreadingHTTPServer((host, port), handler)
+    return _Port((host, port), handler, actions)
 
 
-def serve(host: str, port: int, snapshot: Callable[[], Load], registry: Registry) -> ThreadingHTTPServer:
-    """Bind the capacity and metrics routes on host and port; the caller runs serve_forever."""
-    return _bind(host, port, partial(respond, snapshot, registry))
+def serve(
+    host: str, port: int, snapshot: Callable[[], Load | None], registry: Registry, actions: Callable[[], None] = _idle
+) -> ThreadingHTTPServer:
+    """Bind the capacity and metrics routes on host and port, running actions between requests; the caller runs
+    serve_forever."""
+    return _bind(host, port, partial(respond, snapshot, registry), actions)
 
 
 def expose(registry: Registry, method: str, target: str) -> tuple[int, str, bytes]:

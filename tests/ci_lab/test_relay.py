@@ -558,6 +558,109 @@ def test_a_failing_git_call_keeps_its_head_pending_and_the_next_head_still_relay
     assert client.hget(relay.PENDING, f"{OTHER} engineer-2") is None
 
 
+GADGETS = "https://github.com/acme/gadgets"
+REFUSAL = "GitHub App cannot supply scoped contents write and workflows write credentials: GitHub answered 422"
+REFUSALS = {
+    "push": REFUSAL,
+    "post": "GitHub App cannot supply scoped checks write credentials: GitHub answered 422",
+    "open": "GitHub App cannot supply scoped pull_requests write credentials: GitHub answered 422",
+}
+
+
+class Unminted(Calls):
+    """Fake relay ports whose App refuses the token of one relay call, the push by default, for the widgets
+    repository while refusing is set."""
+
+    def __init__(self, call: str = "push") -> None:
+        super().__init__()
+        self.call = call
+        self.repo = ""
+        self.refusing = True
+
+    def pusher(self, repo: str) -> "Calls":
+        """Return the pusher of a repository and remember the repository."""
+        self.repo = repo
+        return super().pusher(repo)
+
+    def refuse(self, call: str) -> None:
+        """Refuse the widgets repository's token for the call while refusing is set and the call is the refused one."""
+        if self.refusing and call == self.call and self.repo == REPO:
+            raise github_app.GitAuthRefused(REFUSALS[call], status_code=422)
+
+    def push(self, sha: str, branch: str) -> None:
+        """Refuse the push token or keep the push."""
+        self.refuse("push")
+        super().push(sha, branch)
+
+    def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
+        """Refuse the check runs token or keep the post."""
+        self.refuse("post")
+        return super().post(head, gate, status, conclusion, output, shadow)
+
+    def open(self, branch: str, title: str, body: str) -> str:
+        """Refuse the pull requests token or keep the pull request call."""
+        self.refuse("open")
+        return super().open(branch, title, body)
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+def test_a_relay_whose_app_token_is_refused_stays_pending_and_another_repository_still_relays() -> None:
+    client, calls = fake_redis(), Unminted()
+    first = relay.Pending(REPO, HEAD, REF, BRANCH)
+    second = relay.Pending(GADGETS, OTHER, "refs/grade/t2", "engineer-2")
+    found = {HEAD: [grade("success")], OTHER: [replace(grade("success"), repo=GADGETS, head=OTHER)]}
+    engine = relay.Relay(client, Notices([first, second]), found.__getitem__, calls.ports(), LAB)
+    actions = engine.tick()
+    assert actions[2:4] == [f"held {HEAD} for {BRANCH} for a later pass: {REFUSAL}", f"pushed {OTHER} to engineer-2"]
+    assert actions[-1] == f"opened {PULL}"
+    assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{HEAD} {BRANCH}"))) == first
+    assert client.hget(relay.PENDING, f"{OTHER} engineer-2") is None
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+def test_a_refused_repository_relays_nothing_until_the_post_hold_ends_while_another_repository_relays() -> None:
+    client, calls = fake_redis(), Unminted()
+    start = 1000.0
+    clock = Mock(return_value=start)
+    first = relay.Pending(REPO, HEAD, REF, BRANCH)
+    second = relay.Pending(GADGETS, OTHER, "refs/grade/t2", "engineer-2")
+    found = {HEAD: [grade("success")], OTHER: [replace(grade("success"), repo=GADGETS, head=OTHER)]}
+    ports = replace(calls.ports(), clock=clock)
+    engine = relay.Relay(client, Notices([first], [second]), found.__getitem__, ports, LAB)
+    assert engine.tick() == [f"pending {HEAD} for {BRANCH}", f"held {HEAD} for {BRANCH} for a later pass: {REFUSAL}"]
+    calls.refusing = False
+    calls.log.clear()
+    clock.return_value = start + scheduler_module.POST_HOLD_MS / 1000 - 0.001
+    assert engine.tick()[:2] == [f"pending {OTHER} for engineer-2", f"pushed {OTHER} to engineer-2"]
+    assert ("pusher", REPO) not in calls.log
+    assert relay.Pending(**json.loads(client.hget(relay.PENDING, f"{HEAD} {BRANCH}"))) == first
+    clock.return_value = start + scheduler_module.POST_HOLD_MS / 1000
+    actions = engine.tick()
+    assert actions[0] == f"pushed {HEAD} to {BRANCH}"
+    assert actions[-1] == f"opened {PULL}"
+    assert client.hgetall(relay.PENDING) == {}
+
+
+@pytest.mark.feature("lab-relay-app-refusal")
+@pytest.mark.parametrize("call", ["post", "open"])
+def test_a_token_refused_after_the_push_relays_again_after_the_hold_posting_each_check_run_once(call: str) -> None:
+    client, calls = fake_redis(), Unminted(call)
+    start = 1000.0
+    clock = Mock(return_value=start)
+    found = {HEAD: [grade("success")]}
+    ports = replace(calls.ports(), clock=clock)
+    engine = relay.Relay(client, Notices([relay.Pending(REPO, HEAD, REF, BRANCH)]), found.__getitem__, ports, LAB)
+    held = f"held {HEAD} for {BRANCH} for a later pass: {REFUSALS[call]}"
+    assert engine.tick() == [f"pending {HEAD} for {BRANCH}", held]
+    calls.refusing = False
+    clock.return_value = start + scheduler_module.POST_HOLD_MS / 1000
+    actions = engine.tick()
+    assert (actions[0], actions[-1]) == (f"pushed {HEAD} to {BRANCH}", f"opened {PULL}")
+    assert [entry[2] for entry in calls.log if entry[0] == "post"] == ["lint", "unit", "required"]
+    assert calls.log.count(("push", HEAD, BRANCH)) == 2
+    assert client.hgetall(relay.PENDING) == {}
+
+
 def test_bus_notices_keep_trusted_grade_ref_heads_with_a_branch_and_acknowledge_every_envelope() -> None:
     bus = open_bus(BusConfig())
     consumer = bus.lab_heads.consumer(relay.DURABLE, relay.SUBJECT)
@@ -735,6 +838,7 @@ def test_build_gives_the_pusher_mirror_the_lab_remote_the_environment_names(
     assert pusher.mirror == Mirror(tmp_path / "node", tmp_path / "stores" / "acme--widgets", REPO, found)
 
 
+@pytest.mark.feature("lab-relay-build-wiring")
 def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -762,6 +866,7 @@ def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_ur
     assert (tmp_path / "deep" / "stores").is_dir()
     assert cast(relay.PullRequests, engine.ports.pulls(SLUG)).slug == SLUG
     assert cast(relay.Checks, engine.ports.checks(SLUG)).repo == SLUG
+    assert cast(relay.Checks, engine.ports.checks(SLUG)).registry is scheduler.registry
     assert engine.ports.checks(SLUG) is engine.ports.checks(SLUG)
     assert cast(relay.Checks, engine.ports.checks("acme/other")).repo == "acme/other"
     assert engine.grades(HEAD) == []

@@ -18,6 +18,8 @@ def _self_plant_changed(tmp_path: Path, edited: str) -> str:
     (repo / "scripts/ci_mutation/__init__.py").write_text("x = 1\n")
     (repo / "docs").mkdir()
     (repo / "docs/guide.md").write_text("old\n")
+    (repo / ".github").mkdir()
+    (repo / ".github/test-requirements.lock").write_text("old\n")
     git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     subprocess.run([*git, "add", "."], check=True)
@@ -39,3 +41,8 @@ def test_a_docs_only_diff_reports_no_mutation_gate_change(tmp_path: Path) -> Non
 
 def test_a_mutation_gate_source_change_still_plants(tmp_path: Path) -> None:
     assert _self_plant_changed(tmp_path, "scripts/ci_mutation/__init__.py") == "changed=true\n"
+
+
+@pytest.mark.feature("tracked-test-lock-cache-keys")
+def test_a_test_requirements_lock_change_still_plants(tmp_path: Path) -> None:
+    assert _self_plant_changed(tmp_path, ".github/test-requirements.lock") == "changed=true\n"

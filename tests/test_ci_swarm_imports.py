@@ -40,19 +40,45 @@ def test_pinned_imports_include_aliases_and_dotted_names(
 ) -> None:
     root = source_tree(
         tmp_path,
-        "import jwt, yaml.loader\nfrom packaging.version import Version\nimport tree_sitter_bash\nfrom dotenv import load_dotenv\nfrom opentelemetry import trace\n",
-        "PyJWT==2.15.1\nPyYAML==6.0.3\npackaging==26.3 \\\n    --hash=sha256:abc\ntree_sitter_bash==0.25.1\npython-dotenv==1.2.4\nopentelemetry-api==1.42.0\n",
+        "import jwt, yaml.loader\nfrom packaging.version import Version\nimport tree_sitter_bash\nfrom dotenv import load_dotenv\nfrom opentelemetry import trace\nfrom markdown_it import MarkdownIt\n",
+        "PyJWT==2.15.1\nPyYAML==6.0.3\npackaging==26.3 \\\n    --hash=sha256:abc\ntree_sitter_bash==0.25.1\npython-dotenv==1.2.4\nopentelemetry-api==1.42.0\nmarkdown-it-py==4.2.0\n",
     )
     monkeypatch.chdir(root)
     assert ci_swarm_imports.main([]) == 0
     assert capsys.readouterr().out.splitlines() == [
         "PINNED dotenv (python-dotenv): hooks/probe.py:4",
         "PINNED jwt (pyjwt): hooks/probe.py:1",
+        "PINNED markdown_it (markdown-it-py): hooks/probe.py:6",
         "PINNED opentelemetry (opentelemetry-api): hooks/probe.py:5",
         "PINNED packaging (packaging): hooks/probe.py:2",
         "PINNED tree_sitter_bash (tree-sitter-bash): hooks/probe.py:3",
         "PINNED yaml (pyyaml): hooks/probe.py:1",
-        "6 third party imports; 0 unpinned",
+        "7 third party imports; 0 unpinned",
+    ]
+
+
+@pytest.mark.feature("swarm-image-import-pins")
+def test_dotted_imports_resolve_to_the_distribution_of_their_longest_alias_prefix(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = source_tree(
+        tmp_path,
+        "from opentelemetry import trace\n"
+        "from opentelemetry.sdk.metrics import Counter, Histogram\n"
+        "from opentelemetry import sdk\n"
+        "import opentelemetry.exporter.otlp.proto.http.metric_exporter\n"
+        "from opentelemetry.exporter.otlp.proto import grpc\n"
+        "import yaml.loader, yaml\n",
+        "opentelemetry-api==1.45.1\nopentelemetry-sdk==1.45.1\nPyYAML==6.0.3\n",
+    )
+    assert ci_swarm_imports.main(["--root", str(root)]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "PINNED opentelemetry (opentelemetry-api): hooks/probe.py:1",
+        "UNPINNED opentelemetry.exporter.otlp.proto.grpc (opentelemetry-exporter-otlp-proto-grpc): hooks/probe.py:5",
+        "UNPINNED opentelemetry.exporter.otlp.proto.http (opentelemetry-exporter-otlp-proto-http): hooks/probe.py:4",
+        "PINNED opentelemetry.sdk (opentelemetry-sdk): hooks/probe.py:2, hooks/probe.py:3",
+        "PINNED yaml (pyyaml): hooks/probe.py:6",
+        "5 third party imports; 2 unpinned",
     ]
 
 

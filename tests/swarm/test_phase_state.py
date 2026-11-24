@@ -58,6 +58,33 @@ def test_admits_only_building_tasks_and_the_planning_plan_task(task, admitted):
     assert phase_state.admits(task, doc(phases, [task, plan("slice")])) is admitted
 
 
+def enhancement(phase: str, state: str = "open") -> dict[str, str]:
+    return {"id": f"enhance-{phase}", "phase": phase, "kind": "plan", "lane": "plan", "state": state, "enhances": "t"}
+
+
+@pytest.mark.feature("swarm-phase-admits-enhancement")
+@pytest.mark.parametrize(("phase", "admitted"), [("build", True), ("slice", True), ("wait", False), ("done", False)])
+def test_an_enhancement_task_is_admitted_while_its_phase_plans_or_builds(phase: str, admitted: bool) -> None:
+    """A plan kind task carrying enhances is admitted while its phase is planning or building, so the planner that
+    enhances a thin task in a building phase can claim it; a waiting or finished phase still holds it."""
+    phases = [
+        {"id": "build"},
+        {"id": "wait", "depends_on": ["build"]},
+        {"id": "done", "done": True},
+        {"id": "slice", "planning": "auto"},
+    ]
+    task = enhancement(phase)
+    assert phase_state.admits(task, doc(phases, [task, plan("slice")])) is admitted
+
+
+@pytest.mark.feature("swarm-phase-admits-enhancement")
+def test_an_enhancement_task_is_never_taken_for_its_phase_plan_task() -> None:
+    """An enhancement plan task in an automatic phase leaves the phase lifecycle to the phase's own plan task."""
+    phases = [{"id": "slice", "planning": "auto"}]
+    assert phase_state.lifecycle(phases[0], doc(phases, [enhancement("slice", "done")])) == "to_plan"
+    assert phase_state.lifecycle(phases[0], doc(phases, [enhancement("slice", "done"), plan("slice")])) == "planning"
+
+
 def test_a_ledger_without_a_phases_list_holds_nothing():
     old = {"tasks": [{"id": "t", "phase": "p1", "state": "open"}]}
     assert phase_state.lifecycle({"id": "p1", "depends_on": ["p0"]}, old) == "waiting"

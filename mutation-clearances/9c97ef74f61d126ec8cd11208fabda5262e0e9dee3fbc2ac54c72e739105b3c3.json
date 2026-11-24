@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/plant_grade.py:scripts.ci_lab.plant_grade.x_prove:7cc58fde17ab1bafece451a628323dc9f463140101731e866cc7e16baddbdf52": {
+    "reader": "Standards",
+    "reason": "The matching reader admits only checks whose external_id equals the computed grade key and the completed grade reader returns that list unchanged. A successful verdict requires distinct required and named gate checks, so at least two rows exist. Rows zero and one therefore hold the same external_id and report identical run identifiers. An unsuccessful grade raises before either row is indexed."
+  }
+}

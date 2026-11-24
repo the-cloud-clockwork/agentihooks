@@ -37,9 +37,11 @@ import orjson
 
 from scripts.swarm_ledger import (
     ledger_blockers,
+    ledger_enhancement,
     ledger_freezes,
     ledger_groups,
     ledger_locks,
+    ledger_orders,
     ledger_phases,
     ledger_plans,
     ledger_rank,
@@ -94,6 +96,7 @@ EXTENSION_OPS = {
         ledger_notifications,
         ledger_tasks,
         ledger_rank,
+        ledger_enhancement,
         ledger_groups,
         ledger_splits,
         ledger_title,
@@ -111,6 +114,7 @@ EXTENSION_OPS = {
         ledger_freezes,
         ledger_events_ack,
         ledger_blockers,
+        ledger_orders,
         ledger_watchdog_copy,
     )
     for name in module.OPS

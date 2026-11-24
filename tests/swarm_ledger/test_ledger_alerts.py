@@ -726,9 +726,20 @@ def test_a_raised_release_alert_opens_one_alert_for_the_master():
     assert [(a["source"], a["target"], a["state"]) for a in state["alerts"]] == [("release", "master", "open")]
 
 
+@pytest.mark.feature("swarm-autoscaler-scale-up-alert")
+def test_a_raised_autoscaler_alert_opens_one_alert_for_the_master() -> None:
+    make_ledger()
+    text = "Cluster autoscaler node group pool has 2 failed scale ups in a row"
+    state, rejected = sync(ops=[{**raise_promotion("r1", text), "source": "autoscaler"}])
+    assert rejected == []
+    assert [(a["source"], a["target"], a["state"], a["text"]) for a in state["alerts"]] == [
+        ("autoscaler", "master", "open", text)
+    ]
+
+
 RAISE_REFUSED = (
-    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge', 'inbox', 'setup'), "
-    "a text of up to 2000 characters and, for inbox and setup, an item"
+    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge', 'inbox', 'setup', "
+    "'autoscaler'), a text of up to 2000 characters and, for inbox and setup, an item"
 )
 
 
