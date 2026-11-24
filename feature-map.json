@@ -4599,9 +4599,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-slow-lane-reaper-reset",
       "behaviour": "A tick pass's process scan ends only in the context that opened it: a close from another context, such as the slow lane thread opening the wrapper relay hook, leaves that context as it is and raises nothing, so the slow lane keeps running its steps and hands their records back, and the pass that opened the scan puts back the value it replaced when it closes.",
       "seam": "scripts.tick.sites.TickSites start hook and close, called directly from a slow lane thread and through scripts.tick.engine.run_graph with a SiteGate whose relay hook the slow lane opens",
-      "rules": [
-        "contextvar-token-kept-on-object"
-      ],
+      "rules": ["contextvar-token-kept-on-object"],
       "tests": [
         "tests/tick/test_scan_close_context.py::test_a_scan_closed_from_the_slow_lane_context_stays_open_until_the_pass_that_opened_it_closes",
         "tests/tick/test_scan_close_context.py::test_the_slow_lane_survives_opening_the_relay_hook_that_closes_the_pass_scan"
@@ -5733,9 +5731,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-frozen-hold",
       "behaviour": "The claim gate holds open plan lane enhancements while their target is frozen by its ancestry, a selector or its explicit flag, releases them after thaw, and leaves unfrozen or missing targets claimable. Repeated claims reuse the task index while task list identity and length stay fixed.",
       "seam": "scripts.swarm.freeze.claim_gate",
-      "rules": [
-        "enhancement-frozen-hold"
-      ],
+      "rules": ["enhancement-frozen-hold"],
       "tests": [
         "tests/swarm/test_freeze.py::test_claim_gate_holds_a_plan_enhancing_frozen_work",
         "tests/swarm/test_freeze.py::test_claim_gate_releases_an_enhancement_when_its_target_is_unfrozen",
@@ -9240,9 +9236,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2764",
       "behaviour": "Worker startup recovers configured existing primary checkouts with a stale garbage collection log by pruning unreachable objects older than two weeks, removing the log only after successful pruning, then running full garbage collection with cruft packs that preserve younger unreachable objects. Checkouts without a log and unconfigured repositories remain untouched.",
       "seam": "configured repository startup loop through scripts.hive.repo_maintenance.recover",
-      "rules": [
-        "hive-prune-needs-expiry"
-      ],
+      "rules": ["hive-prune-needs-expiry"],
       "tests": [
         "tests/hive/test_repo_maintenance.py::test_startup_recovers_only_configured_existing_checkouts_with_a_gc_log",
         "tests/hive/test_repo_maintenance.py::test_failed_pruning_keeps_the_gc_log_and_does_not_start_gc",
@@ -11065,9 +11059,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-queue-gate",
       "behaviour": "Every first queue entry checks an independent review of the exact observed head that the task claimant has read. The gate logs by default and refuses only with the swarm review enforce mode. Master and automatic callers keep the claimant as author.",
       "seam": "scripts.review.gate through swarm cmd_merge, ready first admission and recovery, and status gate modes",
-      "rules": [
-        "merge-queue-admit-skips-review"
-      ],
+      "rules": ["merge-queue-admit-skips-review"],
       "tests": [
         "tests/review/test_queue_gate.py::test_review_defaults_to_log_only_and_enforces_only_from_swarm_configuration",
         "tests/review/test_queue_gate.py::test_refusal_requires_independence_and_the_actual_authors_read",
@@ -12682,23 +12674,23 @@
         "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_the_narrow_write_cannot_prove_falls_back_with_nothing_written",
         "tests/swarm_ledger/test_task_update_narrow_write.py::test_only_a_single_guarded_hub_claim_takes_the_narrow_path",
         "tests/swarm_ledger/test_task_update_narrow_write.py::test_publishing_refreshes_only_a_published_ledger_after_a_narrow_write",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_reads_its_dependencies_and_keeps_stored_size_warnings",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_its_gate_refuses_is_rejected_and_trims_events_as_the_whole_write_does",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_on_a_ledger_without_a_task_revision_stores_the_previous_revision",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_on_a_settled_task_or_one_that_changes_a_priority_line_falls_back",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_ledger_missing_a_part_the_whole_write_creates_falls_back",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_on_a_missing_ledger_names_it",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_adopts_only_its_own_legacy_ledger",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_locks_and_begins_its_own_ledger_and_times_its_write_steps",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_row_written_outside_the_read_keeps_its_stored_key_and_position",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_reads_the_rows_operator_events_and_open_alerts_name_since_the_oldest_held_revision",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_leaves_the_written_state_alone_when_nothing_it_names_is_missing",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_adds_a_named_phase_to_a_written_state_without_phases",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_the_narrow_fold_names_a_refused_claim_and_keeps_only_the_stored_size_warnings",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_stored_warnings_reads_only_the_stored_warning_list",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_refused_hub_claim_answers_with_the_stored_warnings_and_the_refusal",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_with_a_stale_guard_is_refused_by_its_write_gate",
-        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_hands_its_hooks_the_task_an_operator_wrote_since_a_held_revision",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_reads_its_dependencies_and_keeps_stored_size_warnings",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_its_gate_refuses_is_rejected_and_trims_events_as_the_whole_write_does",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_on_a_ledger_without_a_task_revision_stores_the_previous_revision",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_on_a_settled_task_or_one_that_changes_a_priority_line_falls_back",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_ledger_missing_a_part_the_whole_write_creates_falls_back",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_on_a_missing_ledger_names_it",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_adopts_only_its_own_legacy_ledger",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_locks_and_begins_its_own_ledger_and_times_its_write_steps",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_row_written_outside_the_read_keeps_its_stored_key_and_position",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_reads_the_rows_operator_events_and_open_alerts_name_since_the_oldest_held_revision",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_leaves_the_written_state_alone_when_nothing_it_names_is_missing",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_adds_a_named_phase_to_a_written_state_without_phases",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_the_narrow_fold_names_a_refused_claim_and_keeps_only_the_stored_size_warnings",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_stored_warnings_reads_only_the_stored_warning_list",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_refused_hub_claim_answers_with_the_stored_warnings_and_the_refusal",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_with_a_stale_guard_is_refused_by_its_write_gate",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_hands_its_hooks_the_task_an_operator_wrote_since_a_held_revision",
         "tests/swarm/test_ledger_client_task_guard.py::test_a_narrow_claim_reply_holding_only_the_claimed_row_returns_that_row"
       ]
     },
