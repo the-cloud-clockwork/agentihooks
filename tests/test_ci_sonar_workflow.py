@@ -40,6 +40,13 @@ def test_sonar_remains_required_during_promotion_trigger_rollout() -> None:
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission", "lab-verdict"]
 
 
+@pytest.mark.feature("sonar-reads-the-reused-plan-after-test-count-uploads-it")
+def test_sonar_runs_when_test_count_is_skipped_or_failed() -> None:
+    condition = _workflow()["jobs"]["sonar"]["if"]
+    assert condition.startswith("${{ !cancelled() && ")
+    assert "needs.test-count" not in condition
+
+
 def test_sonar_gives_dev_push_runs_ninety_minutes_and_keeps_sixty_elsewhere() -> None:
     assert (
         _workflow()["jobs"]["sonar"]["timeout-minutes"]

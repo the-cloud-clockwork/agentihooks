@@ -22,12 +22,13 @@ MUTATION = ("workflows/test.yml", "mutation", "mutation-report-*")
 REPLAY = ("workflows/mutation-replay.yml", "verify", "mutation-replay-grade-*")
 LONE_FOLDER = {MUTATION, REPLAY}
 ROOT_READ = {("workflows/test.yml", "test-summary", "{durations,flakes}-3.*")}
+REUSED_PLAN = ("workflows/test.yml", "sonar", "{reused-branch,reused}-3.12")
 UNAFFECTED = {
     ("workflows/hierarchy-cpu.yml", "grade", "load-pair-*"),
     ("workflows/hierarchy-cpu.yml", "grade", "hierarchy-pair-*"),
     ("workflows/ledger-load.yml", "compare-grade", "compare-pair-*"),
     ("workflows/test.yml", "shard-check", "{durations,flakes}-${{ matrix.python-version }}-*"),
-    ("workflows/test.yml", "sonar", "{reused-branch,reused}-3.12"),
+    REUSED_PLAN,
     ("workflows/test.yml", "dep-manifest", "coverage-3.12-*"),
     ("workflows/test.yml", "coverage-ratchet", "executed-lines-3.12-*"),
     ("workflows/test.yml", "coverage-ratchet", "coverage-3.12-*"),
@@ -35,7 +36,6 @@ UNAFFECTED = {
     ("workflows/test.yml", "flake-budget", "flakes-3.*"),
     ("workflows/test.yml", "coverage-baseline", "executed-lines-3.12-*"),
 }
-REUSED_PLAN = ("workflows/test.yml", "sonar", "{reused-branch,reused}-3.12")
 
 
 def _jobs(path: Path) -> list[tuple[str, list[dict[str, Any]]]]:
@@ -213,9 +213,13 @@ def test_the_gate_summary_counts_a_lone_report_that_lands_at_the_folder_root(tmp
 
 @pytest.mark.feature("sonar-reads-the-reused-plan-after-test-count-uploads-it")
 def test_sonar_lists_the_reused_test_plan_only_after_every_job_that_uploads_it_finished() -> None:
-    file, job, pattern = REUSED_PLAN
+    file, job, _ = REUSED_PLAN
     jobs = yaml.safe_load((GITHUB / file).read_text())["jobs"]
-    uploaders = _uploaders(file, pattern)
-    assert REUSED_PLAN in _pattern_downloads()
-    assert uploaders == {"test-count"}
-    assert uploaders <= _waits_on(jobs, job), f"{job} can list {pattern} before {sorted(uploaders)} uploads it"
+    downloads = [
+        key for key, step in _pattern_downloads().items() if key[:2] == (file, job) and "run-id" not in step["with"]
+    ]
+    assert REUSED_PLAN in downloads
+    for _, _, pattern in downloads:
+        uploaders = _uploaders(file, pattern)
+        assert uploaders, f"no job in {file} uploads {pattern}"
+        assert uploaders <= _waits_on(jobs, job), f"{job} can list {pattern} before {sorted(uploaders)} uploads it"
