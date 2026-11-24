@@ -196,7 +196,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `AGENTIHOOKS_BUS*` | yes | yes | Event bus connection settings |
 | `CI_LAB_MINIO_*` | yes | yes | Object store endpoint, bucket and credentials, passed by reference |
 | `CI_LAB_SECRET_*` | no | yes | A secret a static unit's step reads by name: `CI_LAB_SECRET_<NAME>` is `${{ secrets.<NAME> }}`, passed by reference and given only to a step whose env reads it (see [What a gate's steps read](#what-a-gates-steps-read)) |
-| `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs and read dev push manifest artifacts; the App needs checks write and actions read |
+| `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs, send the relay's `lab-check` repository dispatches and read dev push manifest artifacts; the App needs checks write, contents write and actions read |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
 | `CI_LAB_REINDEX_ON_START` | yes | no | Only the literal string `true` rebuilds missing verdict index entries from report objects before the listeners start and prints `reindexed N verdicts`; unset or any other value skips it. See [Recovery](#recovery) |
 | `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config the scheduler reads at start, before it connects anywhere; its budget sets the budget fraction and shed classes of `/capacity` and `/metrics`; `python -m scripts.ci_lab runtime <path>` validates it |
@@ -293,7 +293,7 @@ the served load's age and the GitHub calls left, on one `scripts.ci_lab.metrics.
 | `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | Each expired lease a pass requeues or marks lost |
 | `ci_lab_mirror_age_seconds` | `metrics.observe_mirror` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the epoch second in the `fetched-at` stamp under `CI_LAB_GIT_MIRROR`, never below zero; no sample while the stamp is missing or holds no whole number. The node cache writes that stamp; the scheduler's own fetch writes none |
 | `ci_lab_load_age_seconds` | `metrics.observe_age` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the build of the load snapshot the port serves started, never below zero; see [Capacity document](#capacity-document) |
-| `ci_lab_github_rate_remaining` | `metrics.observe_rate` on every check runs answer the scheduler's and the relay's `Checks` posters get, retries and refusals included: its `x-ratelimit-remaining` header when that holds a whole number; an answer without one keeps the last value |
+| `ci_lab_github_rate_remaining` | `metrics.observe_rate` on every check runs answer the scheduler's `Checks` poster gets and every dispatch answer the relay's `Dispatches` poster gets, retries and refusals included: its `x-ratelimit-remaining` header when that holds a whole number; an answer without one keeps the last value |
 
 A worker unit's report carries `caches` from `scripts.ci_lab.caches.report`: per revision it
 leased, a git hit when the pod store already held the commit and a miss when `Mirror.fetch`
@@ -700,7 +700,7 @@ lines of a metric with no sample, so Prometheus stores no series for it until th
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | No service. `shadow.Shadow` counts it on the registry its caller passes, and no service builds a `Shadow`, so the alert cannot fire and the panel stays empty |
 | `ci_lab_mirror_age_seconds` | No alert or panel | `metrics.observe_mirror`, on every scheduler scrape, from its local mirror's `fetched-at` stamp. A missing or invalid stamp removes the sample |
 | `ci_lab_load_age_seconds` | No alert or panel | `metrics.observe_age`, on every scheduler scrape, from the start of the build of the load snapshot the port serves |
-| `ci_lab_github_rate_remaining` | No alert or panel | `metrics.observe_rate`, called by `Checks._request` with each check runs response. A valid `x-ratelimit-remaining` header sets the sample; a missing or invalid header leaves the previous sample unchanged |
+| `ci_lab_github_rate_remaining` | No alert or panel | `metrics.observe_rate`, called by `Checks._request` with each check runs response and `Dispatches._request` with each dispatch response. A valid `x-ratelimit-remaining` header sets the sample; a missing or invalid header leaves the previous sample unchanged |
 
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the
 `ci-lab-scheduler` and `ci-lab-worker` Deployments, the worker pods, and the KEDA ScaledObject
@@ -1893,9 +1893,33 @@ Git gets `AGENTIHOOKS_LAB_REMOTE_TOKEN` as the basic password of the user `lab` 
 through its environment config, and no store or log keeps it. Worker units run with the sandbox
 whitelist alone, so no unit sees the token. A grade of a head pushed
 to a `refs/grade/*` ref keeps the ref and records each check's status and conclusion. It posts no
-GitHub check run; the relay posts them once it has pushed the head. The relay's push token asks
+GitHub check run; the relay has them posted once it has pushed the head. The relay's push token asks
 for contents write and workflows write, so a relayed branch that changes workflow files is
 accepted.
+
+The relay sends each check run as a `lab-check` repository dispatch with an App token holding
+contents write, because the lab's App holds no checks write. The dispatch carries the head sha, the
+check run name, its status, conclusion, details link and output. The output takes at most half of
+GitHub's check run text limit, counted as the characters it takes in the JSON body with its escapes,
+and its failed unit log tails at most half of that, because GitHub refuses a dispatch body of 64 KB
+or more and a full limit listing of a large grade, or log tails full of escaped characters, passes
+it. The `Lab check` workflow
+(`.github/workflows/lab-check.yml`) runs on that dispatch with `checks: write` and `contents: read`
+and runs `python -m scripts.ci_lab.checks`. That entry reads the dispatch from the event file,
+refuses a head that is not a full sha, a name outside `lab/` and `lab-shadow/` and a bad status or
+conclusion, and posts with the workflow token. `Checks` takes `GITHUB_TOKEN` whenever
+`GITHUB_ACTIONS` is `true` and keeps the App token everywhere else. The post is an upsert: it lists
+the head's check runs of that name and advances the one whose external id is `lab:<sha>`, else
+creates it, stamping a completed run with its completed time. Every dispatch and every rerun for one
+head and name therefore leaves one check run, and the workflow's concurrency group per head sha
+queues runs of that head behind each other without cancelling any. Its post job also waits on the
+shared hosted lane group, as the branch lane gate requires of every new workflow job. GitHub runs a repository
+dispatch workflow only from the default branch, so a change to the workflow or the entry takes
+effect once promotion carries it to `main`.
+
+```bash
+gh api "repos/<owner>/<repo>/commits/<sha>/check-runs?check_name=lab/<gate>" --jq '.total_count'
+```
 
 | Name | Meaning |
 |---|---|
@@ -2552,13 +2576,13 @@ prints the relay's actions after the pass's own. `main` builds the relay once at
 lab heads consumer, the `ci-lab-relay` durable filtered to `ci.lab.head.notice`, which bus
 provisioning creates beside the scheduler's `ci-lab-scheduler` durable. A green grade of a pushed
 `refs/grade/<task>` head with a `branch` option then reaches that branch, its check runs and its
-draft pull request. The relay keeps the id of each check run it creates on the grade's state under
-the check run's name as GitHub answers and seeds its poster with those ids before it posts, so a
-relay retried after the service restarts, such as one whose pull request call failed after its
-posts, creates no second completed check run. The ids the scheduler keeps under gate names for its
+draft pull request. The relay keeps a mark for each check run it dispatches on the grade's state
+under the check run's name as GitHub accepts the dispatch and seeds its poster with those marks
+before it posts, so a relay retried after the service restarts, such as one whose pull request call
+failed after its posts, sends no second dispatch. The ids the scheduler keeps under gate names for its
 own posts, such as shadow check runs of the same grade, never seed the relay. A relay whose git or
 HTTP call fails is named `retry <head> for <branch>: <error>` and stays pending for the next tick.
-A relay whose push, check runs or pull requests token the App refuses is named
+A relay whose push, dispatch or pull requests token the App refuses is named
 `held <head> for <branch> for a later pass: <refusal>`, stays pending and holds every pending head
 of its repository for `POST_HOLD_MS`; the heads of other repositories still relay in the same
 tick, and the first tick after the hold relays the held heads again. The hold lives in the relay's

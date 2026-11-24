@@ -12997,11 +12997,12 @@
       "id": "lab-scheduler-mirror-age-and-github-rate",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2683",
-      "behaviour": "The lab scheduler's GET /metrics on 9108 reports ci_lab_mirror_age_seconds as the seconds since the epoch second in the node mirror's fetched-at stamp, read at each scrape with the scheduler's millisecond clock and never below zero, and holds no sample while the stamp is missing or holds no whole number; it reports ci_lab_github_rate_remaining as the x-ratelimit-remaining header of the latest check runs answer that carries a number, rate limited and refused answers included, from the posters the scheduler and the relay build over the scheduler's registry.",
-      "seam": "scripts.ci_lab.scheduler.listen with the node mirror path main passes, read through GET /metrics over fakeredis; scripts.ci_lab.checks.Checks over a stubbed requests.request with the scheduler's registry; scripts.ci_lab.scheduler.build and scripts.ci_lab.relay.build poster wiring",
+      "behaviour": "The lab scheduler's GET /metrics on 9108 reports ci_lab_mirror_age_seconds as the seconds since the epoch second in the node mirror's fetched-at stamp, read at each scrape with the scheduler's millisecond clock and never below zero, and holds no sample while the stamp is missing or holds no whole number; it reports ci_lab_github_rate_remaining as the x-ratelimit-remaining header of the latest check runs or dispatch answer that carries a number, rate limited and refused answers included, from the check runs poster the scheduler builds and the dispatch poster the relay builds over the scheduler's registry.",
+      "seam": "scripts.ci_lab.scheduler.listen with the node mirror path main passes, read through GET /metrics over fakeredis; scripts.ci_lab.checks.Checks and scripts.ci_lab.checks.Dispatches over a stubbed requests.request with the scheduler's registry; scripts.ci_lab.scheduler.build and scripts.ci_lab.relay.build poster wiring",
       "tests": [
         "tests/ci_lab/test_scheduler_gauges.py::test_the_exposition_reports_the_node_mirror_age_from_its_fetched_at_stamp",
-        "tests/ci_lab/test_scheduler_gauges.py::test_the_exposition_reports_the_github_calls_left_from_each_check_runs_answer"
+        "tests/ci_lab/test_scheduler_gauges.py::test_the_exposition_reports_the_github_calls_left_from_each_check_runs_answer",
+        "tests/ci_lab/test_checks.py::test_a_dispatch_poster_with_a_registry_sets_the_github_calls_left_from_each_answer"
       ]
     },
     {
@@ -13125,11 +13126,78 @@
       "id": "lab-relay-check-run-restart",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-relay-run-id-seed",
-      "behaviour": "The CI lab relay posts each relayed check run of a grade ref head once across a restart of the scheduler process that hosts it: it saves the id of each check run it creates on the grade's state in Redis under that check run's name as soon as GitHub answers, and before it tests whether a check run was posted it seeds the repository's poster with the id it saved under that name, so a relay retried after a restart, such as one whose pull request call failed after its posts, opens no second completed check run; the ids the scheduler stores under gate names for its own posts never seed it, so a grade the scheduler posted shadow check runs for still gets every lab check run.",
-      "seam": "scripts.ci_lab.relay.build over a real scripts.ci_lab.scheduler.Scheduler on fakeredis with a real scripts.ci_lab.checks.Checks on mocked requests, built again over the same Redis as a restart, ticked through scripts.ci_lab.relay.Relay.tick, and scripts.ci_lab.relay.relay over recording ports",
+      "behaviour": "The CI lab relay posts each relayed check run of a grade ref head once across a restart of the scheduler process that hosts it: it saves a mark for each check run it dispatches on the grade's state in Redis under that check run's name as soon as GitHub accepts the dispatch, and before it tests whether a check run was posted it seeds the repository's poster with the mark it saved under that name, so a relay retried after a restart, such as one whose pull request call failed after its posts, opens no second completed check run; the ids the scheduler stores under gate names for its own posts never seed it, so a grade the scheduler posted shadow check runs for still gets every lab check run.",
+      "seam": "scripts.ci_lab.relay.build over a real scripts.ci_lab.scheduler.Scheduler on fakeredis with a real scripts.ci_lab.checks.Dispatches on mocked requests, built again over the same Redis as a restart, ticked through scripts.ci_lab.relay.Relay.tick, and scripts.ci_lab.relay.relay over recording ports",
       "tests": [
         "tests/ci_lab/test_relay.py::test_a_restarted_relay_posts_no_second_completed_check_run",
         "tests/ci_lab/test_relay.py::test_a_relayed_grade_holding_the_scheduler_s_own_check_run_ids_still_posts_every_lab_check_run"
+      ]
+    },
+    {
+      "id": "lab-check-actions-token",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2678",
+      "behaviour": "The CI lab check run poster sends the workflow token GitHub Actions hands a run as its bearer when GITHUB_ACTIONS is true and GITHUB_TOKEN is set, and mints no App token there; in any other environment, outside Actions or without a workflow token, it keeps the App token scoped to the repository with checks write.",
+      "seam": "scripts.ci_lab.checks.token and scripts.ci_lab.checks.Checks built without an auth on mocked requests",
+      "tests": [
+        "tests/ci_lab/test_checks.py::test_inside_actions_the_poster_sends_the_workflow_token_and_mints_no_app_token",
+        "tests/ci_lab/test_checks.py::test_outside_actions_or_without_a_workflow_token_the_poster_keeps_the_app_token_with_checks_write"
+      ]
+    },
+    {
+      "id": "lab-check-upsert",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2678",
+      "behaviour": "A lab check run posted from the Lab check workflow lands once per head and name: Checks.upsert lists the head's check runs of that name and advances the one whose external id is the head's, else creates it, so a rerun on the same sha keeps one check run and moves its completed time.",
+      "seam": "scripts.ci_lab.checks.Checks.upsert on mocked requests that answer as GitHub's check runs API over one head",
+      "tests": [
+        "tests/ci_lab/test_checks.py::test_an_upsert_advances_the_head_s_check_run_of_that_name_and_external_id",
+        "tests/ci_lab/test_checks.py::test_an_upsert_creates_the_check_run_when_the_head_has_none_with_that_external_id",
+        "tests/ci_lab/test_checks.py::test_a_rerun_upsert_of_one_head_and_name_keeps_one_check_run_and_moves_its_completed_time"
+      ]
+    },
+    {
+      "id": "lab-check-dispatch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2678",
+      "behaviour": "Where the lab's App lacks checks write, the Dispatches poster sends each check run move once as a lab-check repository dispatch with a token holding contents write, carrying the head sha, check run name, status, conclusion, details link and the output rendered within half of GitHub's check run text limit counted in JSON encoded characters, its log tails within half of that, so the dispatch body stays under GitHub's 64 KB dispatch limit whatever characters the logs hold, refuses a move that is not forward or was seeded, waits out rate limits like the CI budget, and raises PostRefused on any answer but 204.",
+      "seam": "scripts.ci_lab.checks.Dispatches.post and seed on mocked requests",
+      "tests": [
+        "tests/ci_lab/test_checks.py::test_a_dispatch_carries_the_check_run_move_once_with_the_contents_write_token",
+        "tests/ci_lab/test_checks.py::test_a_shadow_move_without_a_conclusion_dispatches_its_own_name_and_no_conclusion",
+        "tests/ci_lab/test_checks.py::test_a_dispatch_of_a_large_grade_lists_the_unit_keys_within_half_the_check_run_text_limit",
+        "tests/ci_lab/test_checks.py::test_escaped_log_tails_leave_half_the_dispatch_text_to_the_unit_keys_and_keep_the_body_under_64_kb",
+        "tests/ci_lab/test_checks.py::test_a_seeded_dispatch_is_not_sent_again",
+        "tests/ci_lab/test_checks.py::test_a_dispatch_github_does_not_accept_raises_and_records_no_status",
+        "tests/ci_lab/test_checks.py::test_a_rate_limited_dispatch_waits_like_the_ci_budget_then_sends",
+        "tests/ci_lab/test_checks.py::test_the_dispatch_token_request_carries_only_contents_write"
+      ]
+    },
+    {
+      "id": "lab-check-actions-entry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2678",
+      "behaviour": "python -m scripts.ci_lab.checks reads the lab-check dispatch from the event file GitHub Actions names, refuses a head that is not a full sha, a name outside lab and lab-shadow check runs and a bad status or conclusion, stamps a completed run with its completed time in UTC, and upserts it on the repository the environment names under the head's external id, with the workflow token inside Actions and the repository's App token with checks write elsewhere.",
+      "seam": "scripts.ci_lab.checks.dispatched and scripts.ci_lab.checks.main over a written event file and mocked requests",
+      "tests": [
+        "tests/ci_lab/test_checks.py::test_a_dispatched_payload_becomes_the_check_run_body_of_its_head",
+        "tests/ci_lab/test_checks.py::test_a_dispatch_payload_with_a_bad_head_name_status_or_conclusion_is_refused",
+        "tests/ci_lab/test_checks.py::test_the_entry_posts_the_dispatched_check_run_with_the_workflow_token",
+        "tests/ci_lab/test_checks.py::test_the_entry_outside_actions_posts_with_the_app_token_of_its_repository"
+      ]
+    },
+    {
+      "id": "lab-check-workflow",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2678",
+      "behaviour": "The Lab check workflow runs only on the lab-check repository dispatch, grants checks write and contents read to its one post job, queues every run of one head sha behind the last without cancelling any, holds its post job on the shared hosted lane so the branch lane gate passes it, and runs the check poster entry with the workflow token.",
+      "seam": ".github/workflows/lab-check.yml parsed as YAML and graded by scripts.ci_branch_lanes.grade",
+      "tests": [
+        "tests/test_ci_lab_check.py::test_the_lab_check_workflow_runs_only_on_the_lab_check_dispatch",
+        "tests/test_ci_lab_check.py::test_the_post_job_alone_holds_checks_write_beside_contents_read",
+        "tests/test_ci_lab_check.py::test_runs_for_one_head_queue_behind_each_other_and_none_is_cancelled",
+        "tests/test_ci_lab_check.py::test_the_post_job_waits_on_the_shared_hosted_lane_and_the_branch_lane_gate_passes_it",
+        "tests/test_ci_lab_check.py::test_the_post_step_runs_the_poster_entry_with_the_workflow_token"
       ]
     },
     {
@@ -15512,6 +15580,18 @@
       "seam": "Proofs workflow concurrency group",
       "tests": [
         "tests/test_ci_hosted_lanes.py::test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane"
+      ]
+    },
+    {
+      "id": "hosted-lane-users-pinned",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2678",
+      "behaviour": "Every workflow or job that holds a shared hosted lane is a pinned lane user listed in the CI timing guide, every lane run queues and is never cancelled, and any other group that queues every run, such as the Lab check group per head sha, is a named serial group with its reason.",
+      "seam": "concurrency blocks of the workflows under .github/workflows, resolved for each trigger, and the lane user table of the CI timing guide",
+      "tests": [
+        "tests/test_ci_hosted_lanes.py::test_every_non_required_trigger_is_on_a_lane_or_excluded_with_a_reason",
+        "tests/test_ci_hosted_lanes.py::test_a_run_on_a_lane_queues_and_is_never_cancelled",
+        "tests/test_ci_hosted_lanes.py::test_the_ci_timing_guide_lists_every_pinned_lane_user"
       ]
     },
     {
