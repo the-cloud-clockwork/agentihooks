@@ -13372,7 +13372,7 @@
       "id": "lab-worker-executors",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2533",
-      "behaviour": "The CI lab queue stores the base and grader revision of every job a grade enqueues and the lease reply carries both; agentihooks ci-lab-worker builds the worker from the worker contract environment and runs each leased unit through the adapter of its kind: a static unit runs the gate it names from the grader tree's workflow over the head with the base and grader trees and inputs.base, a test unit runs its batch on the venv of the head's lockfile digest with the manifest and flake ledger, and a stats or mutant unit runs the mutation runner in the sandbox from a private tree of the head that holds behind trampolines the functions the head changes against the lease's base, with the stats cache, kill memory, budget, cap and the tests the stats records of the test files the mutant unit's manifest names show reaching the mutant's function; each adapter answers a JSON report with the unit's seconds and releases every tree it cut, and SIGTERM stops the worker.",
+      "behaviour": "The CI lab queue stores the base and grader revision of every job a grade enqueues and the lease reply carries both; agentihooks ci-lab-worker builds the worker from the worker contract environment and runs each leased unit through the adapter of its kind: a static unit runs the gate it names from the grader tree's workflow over the head with the base and grader trees and inputs.base, a test unit runs its batch on the venv of the head's lockfile digest with the manifest and flake ledger, and a stats or mutant unit runs the grader tree's copy of the mutation runner in the sandbox, the grader bound read only, over a private tree of the head that holds behind trampolines the functions the head changes against the lease's base, with the stats cache, kill memory, budget, cap and the tests the stats records of the test files the mutant unit's manifest names show reaching the mutant's function; each adapter answers a JSON report with the unit's seconds and releases every tree it cut, and SIGTERM stops the worker.",
       "seam": "scripts.ci_lab.queue Queue.enqueue and job, scripts.ci_lab.leases Leases.lease, scripts.ci_lab.lease_api POST /lease, scripts.ci_lab.worker Client.lease, scripts.ci_lab.executors static, tests, mutation, executors, settings and main, and scripts.ci_lab.contract worker",
       "tests": [
         "tests/ci_lab/test_queue.py::test_enqueue_stores_the_base_and_grader_revision_each_job_reads",
@@ -13445,6 +13445,20 @@
         "tests/ci_lab/test_run_mutation.py::test_the_warm_runner_grades_every_corpus_mutant_as_the_selection_gate_does",
         "tests/ci_lab/test_run_mutation.py::test_a_runner_that_grades_a_killable_mutant_survived_fails_the_equivalence",
         "tests/ci_lab/test_run_mutation.py::test_the_fixed_cost_per_mutant_is_a_fraction_of_the_one_collection"
+      ]
+    },
+    {
+      "id": "lab-mutation-protected-runner",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-mutation-grader-runner",
+      "behaviour": "A lab stats or mutant unit is graded by the grader revision's copy of the mutation runner, started in the sandbox from the grader tree bound read only over the worker's private trampolined tree of the head: a head runner that forges kills, fails or answers other stats changes neither the unit's verdict nor its report, and a failing grader runner fails the unit.",
+      "seam": "scripts.ci_lab.executors mutation and _run over a lease's head and grader trees, through the real Sandbox and a runner subprocess, and scripts.ci_lab.run_mutation under_test, which runs each pytest session in the tree a request names",
+      "tests": [
+        "tests/ci_lab/test_executors.py::test_mutation_answers_the_verdict_and_rows_of_the_runner_process_it_starts",
+        "tests/ci_lab/test_executors.py::test_the_grader_trees_runner_decides_a_mutant_unit_whatever_the_head_runner_answers",
+        "tests/ci_lab/test_executors.py::test_the_grader_trees_runner_answers_a_stats_unit_whatever_the_head_runner_answers",
+        "tests/ci_lab/test_run_mutation.py::test_a_session_runs_in_its_tree_with_its_package_then_hands_the_runner_back_its_own",
+        "tests/ci_lab/test_run_mutation.py::test_a_runner_started_from_another_tree_grades_the_tree_it_names_as_the_selection_gate_does"
       ]
     },
     {
