@@ -207,8 +207,8 @@ shell, so its argument is not read as a shell script.
 | Which variable names does this shell define? | `awk 'BEGIN{for(k in ENVIRON) if(k ~ /^[A-Za-z_][A-Za-z0-9_]*$/) print k; else n++; print "malformed names: " n+0}'` |
 | Which names does a pod's shell define? | the same `awk` listing as the pod's command: `kubectl exec -n ns pod -- awk '…'` |
 | How many variables are set? | `env \| wc -l` |
-| Is one variable set? | `test -n "${REDIS_URL:-}" && echo set \|\| echo unset` |
-| Is one variable set in a pod? | `kubectl exec -n ns pod -- sh -c 'test -n "${REDIS_URL:-}" && echo set \|\| echo unset'` |
+| Is one variable set? | <code>test -n "${REDIS_URL:-}" && echo set &#124;&#124; echo unset</code> |
+| Is one variable set in a pod? | <code>kubectl exec -n ns pod -- sh -c 'test -n "${REDIS_URL:-}" && echo set &#124;&#124; echo unset'</code> |
 | How do I pass a value to a command? | reference it, as in `curl -H "Authorization: Bearer $API_TOKEN" …` |
 
 The name listing prints only names that are valid identifiers and counts the

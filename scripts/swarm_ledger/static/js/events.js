@@ -4,6 +4,7 @@ import { applyPatch } from "./patch.js";
 import { disconnected, resume } from "./sync.js";
 import { receiveChange, receiveOpen, receiveSnapshot } from "./seed.js";
 import { receiveSwarm, swarmLost } from "./swarm.js";
+import { loadOrders } from "./orders.js";
 
 let eventCursor = null;
 let snapshot = null;
@@ -30,6 +31,7 @@ function onStreamEvent(name, data) {
   } else if (name === "heartbeat") {
     resume();
   }
+  if (name === "open" || name === "snapshot" || name === "ledger" || name === "swarm") loadOrders();
 }
 
 export async function loadSwarm() {

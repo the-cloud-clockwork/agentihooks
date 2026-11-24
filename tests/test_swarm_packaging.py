@@ -32,6 +32,12 @@ def test_swarm_image_installs_every_ledger_dependency_from_its_hashed_lock():
     assert "!docker/swarm/requirements.lock" in (root / ".dockerignore").read_text().splitlines()
 
 
+def test_the_swarm_image_lock_pins_none_of_the_packages_the_swarm_smoke_refuses() -> None:
+    lock = (Path(__file__).parents[1] / "docker/swarm/requirements.lock").read_text()
+    pinned = {line.split("==")[0].lower() for line in lock.splitlines() if "==" in line and not line.startswith(" ")}
+    assert not pinned & {"playwright", "tree-sitter", "opentelemetry-sdk"}
+
+
 def _module_file(root: Path, module: str) -> Path | None:
     """Return the source file of a repository module, or None when it is not one."""
     base = root.joinpath(*module.split("."))

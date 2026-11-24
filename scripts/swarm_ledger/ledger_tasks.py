@@ -7,6 +7,7 @@ from typing import Any, TypeGuard
 import ledger_comments
 import ledger_kinds
 
+from scripts.forge.remote import CHANGE_LINK
 from scripts.swarm_ledger import ledger_plans, ledger_rank, ports, task_dependencies
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -100,7 +101,6 @@ RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
 APPLIED_RE = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)?")
 OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes", "watchdog", "review_rounds")
 PULL_SCOPE_KINDS = ("stage", "prerequisite")
-PULL_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
@@ -335,7 +335,7 @@ def check_repository_branches(fields: dict) -> None:
 def check_pull_scopes(fields: dict) -> None:
     scopes = fields.get("pull_scopes", {})
     if not isinstance(scopes, dict) or not all(
-        PULL_URL_RE.fullmatch(url)
+        CHANGE_LINK.fullmatch(url)
         and isinstance(declared, dict)
         and set(declared) == {"kind", "scope"}
         and declared["kind"] in PULL_SCOPE_KINDS

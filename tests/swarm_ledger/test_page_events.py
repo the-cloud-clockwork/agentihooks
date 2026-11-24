@@ -3,6 +3,7 @@ import threading
 import time
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
@@ -75,7 +76,8 @@ def stub_page(browser, answers):
     return context, page, seen
 
 
-def test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410(browser):
+@pytest.mark.feature("ledger-orders-panel")
+def test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410(browser: Any) -> None:
     doc = {**DOC, "_meta": {"rev": 3}}
     context, page, seen = stub_page(browser, [(doc, SWARM, "first"), 410, (doc, SWARM, "second")])
     page.wait_for_function("() => document.querySelector('#swarm-state').textContent === 'running'")
@@ -92,6 +94,7 @@ def test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410(
         "http://ledger.test/api/__LEDGER_SLUG__/session",
         "http://ledger.test/api/v1/layout",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/architecture",
+        "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/orders",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/swarm",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/swarm/models",
     ]
@@ -133,7 +136,8 @@ def note(n):
     return {"op": "add", "thread": "notes", "id": f"n-{n}", "text": f"streamed note {n}"}
 
 
-def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser, live):
+@pytest.mark.feature("ledger-orders-panel")
+def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser: Any, live: Any) -> None:
     base, status = live
     context = browser.new_context(viewport={"width": 1440, "height": 900})
     requests = []
@@ -150,7 +154,15 @@ def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser,
         tab.wait_for_function("() => document.body.textContent.includes('streamed note 1')", timeout=5000)
         tab.wait_for_function("() => document.querySelector('#swarm-state').textContent === 'paused'", timeout=5000)
     time.sleep(3)
-    reads = [(method, path) for method, path in requests if path.startswith("/api/") and path != "/api/v1/layout"]
+    orders_path = f"/api/v1/ledgers/{SLUG}/orders"
+    orders_reads = [method for method, path in requests if path == orders_path]
+    assert 2 <= len(orders_reads) <= 6
+    assert set(orders_reads) == {"GET"}
+    reads = [
+        (method, path)
+        for method, path in requests
+        if path.startswith("/api/") and path not in ("/api/v1/layout", orders_path)
+    ]
     ledger = f"/api/v1/ledgers/{SLUG}"
     allowed = {f"{ledger}/{part}" for part in ("events", "summary", "swarm", "swarm/models", "architecture")}
     assert [path for _, path in reads if path.split("?")[0] == f"{ledger}/events"] == [f"{ledger}/events"] * 2
