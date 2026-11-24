@@ -71,7 +71,7 @@ class HubRunner:
         holder: str,
         clock: lease.Clock = lease.wall_ms,
         lease_ttl_ms: int = LEASE_TTL_MS,
-    ):
+    ) -> None:
         self._bus = bus
         self._reactors = list(reactors)
         self._main = [reactor for reactor in self._reactors if reactor.name not in reactors.own_loop]
@@ -91,6 +91,8 @@ class HubRunner:
         self.stopped = threading.Event()
 
     def run_once(self, batch: int = BATCH, timeout_ms: int = FETCH_TIMEOUT_MS) -> dict[str, list[str]]:
+        if not self._looped:
+            return self._round(self._main, batch, timeout_ms)
         ended = threading.Event()
         served: dict[str, list[str]] = {}
         loop = threading.Thread(target=self._serve, args=(ended, served, batch, timeout_ms))
@@ -113,7 +115,7 @@ class HubRunner:
             for name, outcomes in passes.items():
                 if name not in served or outcomes != ["standby"]:
                     served.setdefault(name, []).extend(outcomes)
-            if ended.wait(IDLE_S * _resting(passes)):
+            if _rested(ended, passes):
                 return
 
     def _round(self, reactors: list[Reactor], batch: int, timeout_ms: int) -> dict[str, list[str]]:
@@ -204,6 +206,10 @@ def _resting(passes: dict[str, list[str]]) -> bool:
     return all(outcomes == ["standby"] for outcomes in passes.values()) or any(
         "failed" in outcomes for outcomes in passes.values()
     )
+
+
+def _rested(ended: threading.Event, passes: dict[str, list[str]]) -> bool:
+    return ended.wait(IDLE_S * _resting(passes))
 
 
 def _idle(outage: redis_grace.Outage) -> None:

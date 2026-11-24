@@ -19,8 +19,6 @@ def configured(pulls: Any, clock: Any) -> Registry:
     return Registry([pulls, *WaitEnds(clock=clock).reactors()])
 
 
-class Looped:
-    @staticmethod
-    def configured(pulls: Any, clock: Any) -> Registry:
-        # ok: hub-wait-ends-off-own-loop
-        return Registry([pulls], own_loop=WaitEnds(clock=clock).reactors())
+def configured_on_its_own_loop(pulls: Any, clock: Any) -> Registry:
+    # ok: hub-wait-ends-off-own-loop
+    return Registry([pulls], own_loop=WaitEnds(clock=clock).reactors())
