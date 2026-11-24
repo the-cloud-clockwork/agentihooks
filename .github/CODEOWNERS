@@ -3,6 +3,7 @@
 /.semgrep-guards/ @nestorcolt
 /.semgrep-incidents/ @nestorcolt
 /scripts/ci_mutation/ @nestorcolt
+/scripts/ci_lab/__init__.py @nestorcolt
 /scripts/ci_budget/rate_limit.py @nestorcolt
 /scripts/ci_*.py @nestorcolt
 /scripts/feature_map.py @nestorcolt
@@ -20,11 +21,15 @@
 /scripts/type_gate.py @nestorcolt
 /tests/test_type_gate.py @nestorcolt
 /scripts/no_comments.py @nestorcolt
+/scripts/pr_body.py @nestorcolt
 /tests/COMMENT_FREE_PATHS.json @nestorcolt
 /tests/test_no_comments.py @nestorcolt
 /scripts/no_whole_ledger.py @nestorcolt
 /tests/WHOLE_LEDGER_ALLOWLIST.json @nestorcolt
 /tests/test_no_whole_ledger.py @nestorcolt
+/scripts/no_ledger_write_doctrine.py @nestorcolt
+/tests/LEDGER_WRITE_DOCTRINE_ALLOWLIST.json @nestorcolt
+/tests/test_no_ledger_write_doctrine.py @nestorcolt
 /scripts/tick_pattern.py @nestorcolt
 /scripts/tick/catalogue.py @nestorcolt
 /scripts/tick/new_step.py @nestorcolt

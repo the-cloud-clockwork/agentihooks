@@ -5,7 +5,7 @@ description: Folds open swarm ledger tasks that change the same code into one gr
 
 # Fold Tasks
 
-`SLUG` is the ledger and `NAME` this session's agent name, as in every `agentihooks ledger` call. Every command below is `agentihooks ledger --slug SLUG --as NAME fold ...`. A fold makes the lead task carry each folded task's change as a numbered seam; the members leave the claim queue and return to it if the lead's agent stops.
+`SLUG` is the ledger and `NAME` this session's agent name, as in every `agentihooks ledger` call. Every command below is `agentihooks api --slug SLUG --as NAME fold ...`. A fold makes the lead task carry each folded task's change as a numbered seam; the members leave the claim queue and return to it if the lead's agent stops.
 
 ## Steps
 

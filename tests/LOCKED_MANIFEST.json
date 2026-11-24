@@ -993,6 +993,83 @@
    "8701db235e2e771b"
   ]
  },
+ "tests/test_credential_guard.py::test_a_brace_in_the_last_segment_of_a_proc_environ_path_is_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 4,
+  "texts": [
+   "1190c020f6602f17"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_credential_read_after_a_heredoc_delimiter_is_refused": {
+  "assertions": 2,
+  "calls": 4,
+  "cases": 4,
+  "texts": [
+   "5f14a71b0f82deae",
+   "c8255937adffc2e6"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_credential_read_in_a_balanced_command_substitution_is_refused": {
+  "assertions": 2,
+  "calls": 4,
+  "cases": 20,
+  "texts": [
+   "41f1fcd984f7eef3",
+   "c8255937adffc2e6"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_credential_read_in_a_balanced_heredoc_substitution_is_refused": {
+  "assertions": 2,
+  "calls": 4,
+  "cases": 14,
+  "texts": [
+   "41f1fcd984f7eef3",
+   "c8255937adffc2e6"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_credential_read_in_a_heredoc_a_shell_runs_is_refused": {
+  "assertions": 2,
+  "calls": 4,
+  "cases": 34,
+  "texts": [
+   "5f14a71b0f82deae",
+   "c8255937adffc2e6"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_glob_shaped_unlike_a_proc_environ_path_passes": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 7,
+  "texts": [
+   "a76f47343f702669"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_heredoc_a_shell_runs_keeps_the_credential_tree_scan": {
+  "assertions": 1,
+  "calls": 5,
+  "cases": 1,
+  "texts": [
+   "92cabe404cef90f9"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_heredoc_substitution_keeps_the_credential_tree_scan": {
+  "assertions": 2,
+  "calls": 5,
+  "cases": 1,
+  "texts": [
+   "92cabe404cef90f9",
+   "f1b3e9c9ef115feb"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_heredoc_that_reads_no_credential_passes": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 11,
+  "texts": [
+   "a76f47343f702669"
+  ]
+ },
  "tests/test_credential_guard.py::test_a_hidden_describe_type_after_any_flag_is_refused": {
   "assertions": 1,
   "calls": 2,
@@ -1009,6 +1086,78 @@
    "0c85cd31a58dff89"
   ]
  },
+ "tests/test_credential_guard.py::test_a_pod_environment_dump_without_a_shell_is_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 5,
+  "texts": [
+   "c4b74481ca248577"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_pod_environment_name_listing_passes": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 6,
+  "texts": [
+   "a76f47343f702669"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_proc_environ_path_shape_is_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 26,
+  "texts": [
+   "1190c020f6602f17"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_quoted_heredoc_balanced_substitution_stays_literal": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 14,
+  "texts": [
+   "7ae99a9d56a258d4"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_quoted_heredoc_credential_substitution_stays_literal": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 12,
+  "texts": [
+   "7ae99a9d56a258d4"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_read_after_a_leading_input_redirection_in_a_substitution_is_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 3,
+  "texts": [
+   "81399c0b796a08b7"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_rewrite_after_a_heredoc_delimiter_keeps_the_heredoc": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 1,
+  "texts": [
+   "c7f501cce4cdddbe"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_set_test_inside_a_shell_script_passes": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 9,
+  "texts": [
+   "a76f47343f702669"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_set_test_of_another_form_is_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 3,
+  "texts": [
+   "b238e950a52a96f5"
+  ]
+ },
  "tests/test_credential_guard.py::test_a_shell_script_keeps_the_credential_tree_scan": {
   "assertions": 1,
   "calls": 4,
@@ -1023,6 +1172,48 @@
   "cases": 9,
   "texts": [
    "a76f47343f702669"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_shell_script_that_prints_the_value_is_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 18,
+  "texts": [
+   "f47e01a44b139db3"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_spelled_heredoc_token_hides_no_later_heredoc_body": {
+  "assertions": 2,
+  "calls": 4,
+  "cases": 1,
+  "texts": [
+   "41f1fcd984f7eef3",
+   "c8255937adffc2e6"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_substitution_after_a_cd_scans_the_tree_the_cd_entered": {
+  "assertions": 1,
+  "calls": 7,
+  "cases": 1,
+  "texts": [
+   "499b473391896046"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_substitution_that_reads_no_credential_passes": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 9,
+  "texts": [
+   "a76f47343f702669"
+  ]
+ },
+ "tests/test_credential_guard.py::test_a_token_print_in_a_balanced_command_substitution_is_refused": {
+  "assertions": 2,
+  "calls": 4,
+  "cases": 1,
+  "texts": [
+   "6399b437b7ded001",
+   "c8255937adffc2e6"
   ]
  },
  "tests/test_credential_guard.py::test_access_env_block_names_the_token_and_the_eval_form": {
@@ -1057,6 +1248,39 @@
   "cases": 10,
   "texts": [
    "c4b74481ca248577"
+  ]
+ },
+ "tests/test_credential_guard.py::test_an_unbalanced_substitution_read_stays_refused": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 3,
+  "texts": [
+   "fc7f089cafcb4076"
+  ]
+ },
+ "tests/test_credential_guard.py::test_an_unquoted_heredoc_credential_substitution_is_refused": {
+  "assertions": 2,
+  "calls": 4,
+  "cases": 18,
+  "texts": [
+   "41f1fcd984f7eef3",
+   "c8255937adffc2e6"
+  ]
+ },
+ "tests/test_credential_guard.py::test_an_unquoted_heredoc_substitution_that_reads_no_credential_passes": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 8,
+  "texts": [
+   "7ae99a9d56a258d4"
+  ]
+ },
+ "tests/test_credential_guard.py::test_an_unquoted_heredoc_without_a_credential_substitution_passes": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 7,
+  "texts": [
+   "a9c2abff226539e3"
   ]
  },
  "tests/test_credential_guard.py::test_get_secret_refusal_offers_the_key_listing_and_not_describe": {
@@ -1143,6 +1367,30 @@
   "cases": 14,
   "texts": [
    "6ca0fa9dca6fdbd0"
+  ]
+ },
+ "tests/test_credential_guard.py::test_stripping_heredocs_keeps_the_rest_of_the_delimiter_line": {
+  "assertions": 1,
+  "calls": 1,
+  "cases": 1,
+  "texts": [
+   "7e3f6b952270e45d"
+  ]
+ },
+ "tests/test_credential_guard.py::test_substitutions_nested_past_the_limit_are_refused": {
+  "assertions": 1,
+  "calls": 3,
+  "cases": 4,
+  "texts": [
+   "571f797b3313dd30"
+  ]
+ },
+ "tests/test_credential_guard.py::test_substitutions_nested_to_the_limit_pass": {
+  "assertions": 1,
+  "calls": 2,
+  "cases": 2,
+  "texts": [
+   "97f13ce19c8e7d12"
   ]
  },
  "tests/test_kubectl_mutation_guard.py::test_allowed_commands_are_not_blocked": {

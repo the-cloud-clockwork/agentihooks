@@ -79,17 +79,19 @@ class Mirror:
         fetched."""
         if not self.store.exists():
             _git(self.store.parent, "init", "--quiet", "--bare", str(self.store))
-            (self.store / "objects/info/alternates").write_text(f"{self.node / 'objects'}\n")
+            if (self.node / "objects").is_dir():
+                (self.store / "objects/info/alternates").write_text(f"{self.node / 'objects'}\n")
         found = subprocess.run(["git", "-C", str(self.store), "cat-file", "-t", sha], capture_output=True, text=True)
         if found.stdout == "commit\n":
             return False
+        ref = f"{sha}:refs/lab/{sha}"
         try:
-            _git(self.store, "fetch", "--no-write-fetch-head", self.remote, sha)
+            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.remote, ref)
         except subprocess.CalledProcessError:
             origin = self.remote if self.repository is None else self.repository
             if self.lab is None or not checkout.serves(self.lab.url, origin):
                 raise
-            _git(self.store, "fetch", "--no-write-fetch-head", self.lab.url, sha, env=self.lab.environ())
+            _git(self.store, "fetch", "--quiet", "--no-write-fetch-head", self.lab.url, ref, env=self.lab.environ())
         return True
 
 
@@ -124,9 +126,11 @@ class Worktrees:
         self.live[head] -= 1
         self._evict()
 
-    def own(self, head: str) -> tuple[Path, bool]:
-        """Cut a private writable worktree of head for a mutation unit and say whether the store fetched head for it."""
+    def own(self, head: str, base: str) -> tuple[Path, bool]:
+        """Cut a private writable worktree of head for a mutation unit, with base present in the store for the
+        comparison the unit makes, and say whether the store fetched head for it."""
         fetched = self.mirror.fetch(head)
+        self.mirror.fetch(base)
         self.root.mkdir(parents=True, exist_ok=True)
         tree = Path(tempfile.mkdtemp(prefix=f"{head}.", dir=self.root))
         _git(self.mirror.store, "worktree", "add", "--quiet", str(tree), head)

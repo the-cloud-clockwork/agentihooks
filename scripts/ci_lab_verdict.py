@@ -1,10 +1,11 @@
 """The lab-verdict job: the base branch's lab authority and the lab App's verdict on each authoritative gate.
 
 `authority` reads the gates the lab grades from the protected grader's delivery.yaml, so a pull request head can
-never widen them, and AGENTIHOOKS_LAB_OFF empties them; off pull request events it publishes nothing. `verdict` waits
-for the head's completed `lab/<gate>` check run from the lab App named by AGENTIHOOKS_LAB_APP and publishes
-`lab_<gate>` for each authoritative gate: success or skipped as posted, so the lab marks a gate this pull request does
-not run as skipped, and failure for any other conclusion or a verdict absent or pending at the deadline.
+never widen them, and AGENTIHOOKS_LAB_OFF empties them: lab.authoritative on pull requests, lab.queue.authoritative on
+merge groups and nothing on any other event. `verdict` waits for the head's completed `lab/<gate>` check run from the
+lab App named by AGENTIHOOKS_LAB_APP and publishes `lab_<gate>` for each authoritative gate: success or skipped as
+posted, so the lab marks a gate this pull request does not run as skipped, and failure for any other conclusion or a
+verdict absent or pending at the deadline.
 """
 
 import json
@@ -18,11 +19,12 @@ from typing import Any, cast
 from urllib.parse import quote
 
 import scripts.ci_budget.rate_limit
-from scripts.ci_lab.delivery import OUTPUT, cutover, lab
+from scripts.ci_lab.delivery import OUTPUT, cutover, lab, queue_cutover
 
 gh_api = cast("Callable[..., subprocess.CompletedProcess[str]]", scripts.ci_budget.rate_limit.gh_api)
 
 PULL_REQUEST = "pull_request"
+MERGE_GROUP = "merge_group"
 COMPLETED = "completed"
 PASSED = ("success", "skipped")
 FAILURE = "failure"
@@ -34,10 +36,13 @@ Fetch = Callable[[str], list[dict[str, Any]]]
 
 
 def authority(grader_root: Path, event: str, environ: Mapping[str, str]) -> dict[str, str]:
-    """Return the authoritative output: the base's gates as a JSON object on pull requests, nothing elsewhere."""
-    if event != PULL_REQUEST:
+    """Return the authoritative output: the base's gates as a JSON object on pull requests and merge groups, nothing
+    elsewhere."""
+    readers = {PULL_REQUEST: cutover, MERGE_GROUP: queue_cutover}
+    if event not in readers:
         return {}
-    return {"authoritative": json.dumps({gate: True for gate in cutover(grader_root, environ)}, sort_keys=True)}
+    gates = readers[event](grader_root, environ)
+    return {"authoritative": json.dumps({gate: True for gate in gates}, sort_keys=True)}
 
 
 def conclusion(runs: Sequence[Mapping[str, Any]], app: str) -> str | None:

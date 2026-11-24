@@ -1,4 +1,5 @@
-"""Why the tick may not claim an open task: its phase, a freeze or focus, an open dependency, or a lab behind on grading.
+"""Why the tick may not claim an open task: its phase, a freeze or focus, an open dependency, a thin task waiting for
+its enhancement plan, or a lab behind on grading.
 
 Every claim filter asks here, so the urgent hold health finding reports exactly what keeps a task from a seat.
 """
@@ -10,7 +11,7 @@ from typing import Any
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import freeze, phase_state
+from scripts.swarm import freeze, phase_state, thin_task
 from scripts.swarm.store import MASTER
 from scripts.swarm_ledger import task_dependencies
 
@@ -28,10 +29,12 @@ LAB_LANE = "eng"
 LAB_CLASS = "pull_request"
 LAB_FRESH_MS = 600_000
 LAB_BEHIND = "the lab is {minutes} minutes behind on pull request grading"
+THIN_LANES = ("eng", "ci")
+THIN = "it waits for its enhancement plan task {}"
 
 
-def hold(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> str:
-    return verification(task) or phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows)
+def hold(task: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix: str) -> str:
+    return verification(task) or phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows) or thin(task)
 
 
 def holds(task: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix: str) -> bool:
@@ -39,8 +42,16 @@ def holds(task: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], graph
     return (
         bool(verification(task) or phased(task, doc))
         or freeze.claim_gate(task, doc, graph, fix)  # pyright: ignore[reportUnknownMemberType]
-        or bool(waits(task, rows))
+        or bool(waits(task, rows) or thin(task))
     )
+
+
+def thin(task: dict[str, Any]) -> str:
+    """Why the thin check holds an eng or ci task back: it needs enhancement until its plan task closes and marks it
+    planned, even once the planner has given it a plan slice, unless it carries a pull request link of earlier work."""
+    if task.get("enhancement") != "needed" or task.get("pr_url") or task.get("lane", LAB_LANE) not in THIN_LANES:
+        return ""
+    return THIN.format(thin_task.ENHANCE.format(task["id"]))
 
 
 def verification(task: dict) -> str:
@@ -73,7 +84,7 @@ def verification_notices(slug: str, store: object, doc: dict, at: int) -> list[s
         text = (
             f"Task {task_id} ({task.get('title') or task_id}) awaits verification without a proof window "
             "for more than an hour. Set contract.after_at to its proof time, or reopen it with "
-            f"agentihooks ledger --slug {slug} --as master task set {task_id} awaiting="
+            f"agentihooks api --slug {slug} --as master task set {task_id} awaiting="
         )
         InboxStore(store.redis).send("swarm", seat_address(slug, MASTER), text)
         store.redis.set(notice_key, at)
@@ -103,8 +114,8 @@ def freezes(task: dict, doc: dict, graph: dict) -> str:
     return ""
 
 
-def urgent(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> str:
-    return phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows)
+def urgent(task: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix: str) -> str:
+    return phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows) or thin(task)
 
 
 def waits(task: dict, rows: dict) -> str:

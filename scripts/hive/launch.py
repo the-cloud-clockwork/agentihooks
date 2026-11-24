@@ -13,17 +13,18 @@ from scripts.hive import admission, ceiling, headroom, orders, placement, placem
 from scripts.hive import config as hive_config
 from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.quota_state import CLOSED
-from scripts.routing.reservation import LaunchSlots, master_five_floor, primary_reserve_pct
+from scripts.routing.reservation import LaunchSlots, master_five_floor, master_week_floor
 from scripts.routing.slots import account_key
-from scripts.swarm import capacity, lease, profile_choice
+from scripts.swarm import capacity, launch_endings, lease, profile_choice
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import ACK_LATER, Placed
+from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.kubernetes import approved
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
 
 HIVE = "hive"
-ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "planner": "plan", "dispatcher": "dispatch"}
+ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "reviewer": "review", "planner": "plan", "dispatcher": "dispatch"}
 TTL_MS = 300000
 LAUNCH_MS = 75000
 ORDERS = "controller-launch-orders"
@@ -75,15 +76,17 @@ def loaded_hives(
     agents than the live worker records any swarm places on it. ``reservations`` reads a hive's pending admission
     count."""
     agents = [agent for slug in store.slugs() for agent in store.agents(slug)]
+    masters = {agent.execution_id for agent in agents if agent.lane == "master"}
     hives, now = registry.hives(store.redis), lease.now_ms(store)
     for hive in hives:
         counts = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
         executions = counts.get("_executions", {})
         seen = {execution for ids in executions.values() for execution in ids}
         reported = {
-            key: count for key, count in counts.items() if key != "_executions" and not key.startswith("interactive:")
+            key: max(0, count - max(counts.get(f"interactive:{key}", 0), len(set(executions.get(key, [])) & masters)))
+            for key, count in counts.items()
+            if key != "_executions" and not key.startswith("interactive:")
         }
-        masters = sum(count for key, count in counts.items() if key.startswith("interactive:"))
         spellings = {account_key(key): key for key in reported}
         pending: dict[str, int] = {}
         recorded = 0
@@ -95,10 +98,12 @@ def loaded_hives(
                     slot = spellings.get(account_key(slot), slot)
                     pending[slot] = pending.get(slot, 0) + 1
         unclaimed = {
-            slot: max(0, reported.get(slot, 0) - counts.get(f"interactive:{slot}", 0) - len(executions.get(slot, [])))
+            slot: max(
+                0, reported.get(slot, 0) - sum(execution not in masters for execution in executions.get(slot, []))
+            )
             for slot in pending
         }
-        hive["agents"] = max(0, sum(reported.values()) - masters) + sum(
+        hive["agents"] = sum(reported.values()) + sum(
             max(0, count - unclaimed[slot]) for slot, count in pending.items()
         )
         hive["agents"] = max(hive["agents"], recorded)
@@ -132,6 +137,21 @@ def live_hives(store: RedisStore, reservations: Callable[[Any, str], int] = admi
     loaded = loaded_hives(store, reservations)
     now = lease.now_ms(store)
     return [hive for hive in loaded if registry.live(hive, now)]
+
+
+def pending_reader(refused: dict[str, str]) -> Callable[[Any, str], int]:
+    """A pending admission count reader that reads zero for each hive whose count the Redis role refuses and records
+    that hive's refusal in ``refused``, so one refused count never fails a reader of every hive."""
+    from redis.exceptions import NoPermissionError
+
+    def count(redis: Any, machine: str) -> int:
+        try:
+            return admission.pending(redis, machine)
+        except NoPermissionError as exc:
+            refused[machine] = str(exc)
+            return 0
+
+    return count
 
 
 def hosted_profiles(redis: Any, hives: list[dict[str, Any]]) -> dict[str, frozenset[str]]:
@@ -169,9 +189,9 @@ def _master_closed(row: capacity.Account) -> bool:
 
 
 def _master_floor(row: capacity.Account) -> tuple[str, float] | None:
-    """The window and percent left at which ``row`` sits at the master floor: its week at or under the primary login
-    reserve, or its five hour window at or under the hard five hour handoff."""
-    if row.week_left is not None and row.week_left <= primary_reserve_pct(os.environ):
+    """The window and percent left at which ``row`` sits at the master floor: its week at or under the master week
+    floor, or its five hour window at or under the hard five hour handoff."""
+    if row.week_left is not None and row.week_left <= master_week_floor(os.environ):
         return "week", row.week_left
     if row.five_left is not None and row.five_left <= master_five_floor():
         return "five hour window", row.five_left
@@ -863,7 +883,7 @@ class HiveLaunch:
         previous = self.store.execution_occupants(self.slug).get(agent.seat)
         ended = previous and (
             previous.state in ("ended", "finished")
-            or self.store.redis.hexists(self.store.key(self.slug, ENDINGS), previous.execution_id)
+            or launch_endings.terminal(self.store, self.slug, previous.execution_id)
         )
         with lease.fencing(self.held.epoch):
             return self.store.start_execution(self.slug, agent, previous.execution_id if ended else "")
@@ -915,6 +935,7 @@ class HiveLaunch:
             self.end(agent, LATE)
             self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             return Outcome("spawn", Status.REFUSED, HIVE, detail=LATE)
+        ledger_workspace.launched_on(self.store, self.slug, order.task, order.hive)
         placed = Placed(
             agent.pane_id,
             agent.harness,

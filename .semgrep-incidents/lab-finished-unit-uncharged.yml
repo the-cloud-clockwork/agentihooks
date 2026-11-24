@@ -1,0 +1,20 @@
+rules:
+  - id: lab-finished-unit-uncharged
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A finished lab unit is counted in the core seconds metric without charging the day's core budget. Budget.charge
+      had no caller outside tests, so the daily spent counter stayed zero, admission never shed a class and the
+      budget did nothing. Charge the budget with the same slots and report seconds where the unit is counted.
+    patterns:
+      - pattern: metrics.observe_unit(...)
+      - pattern-not-inside: |
+          metrics.observe_unit(...)
+          ...
+          if $SPENDING is not None:
+              ...
+              $SPENDING.charge(...)
+      - pattern-not-inside: |
+          metrics.observe_unit(...)
+          ...
+          $SPENDING.charge(...)

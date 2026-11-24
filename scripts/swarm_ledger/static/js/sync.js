@@ -21,7 +21,9 @@ let firstState;
 export const loaded = new Promise((done) => { firstState = done; });
 
 function lastSync(kind) {
-  return [...(meta.events || [])].reverse().find((e) => e.kind === kind);
+  const events = meta.events || [];
+  for (let i = events.length - 1; i >= 0; i--) if (events[i].kind === kind) return events[i];
+  return undefined;
 }
 
 function statsCheck(events, local, refresh, ticked) {
@@ -50,9 +52,9 @@ export function renderSync() {
   const crew = meta.crew || [];
   const pending = last ? crew.filter((m) => (m.handled_rev || 0) < last.rev).length : 0;
   const wait = cooldown("sync", "sync requested");
-  $("sync").disabled = !!wait;
-  $("sync-badge").hidden = !pending;
-  $("sync-badge").textContent = String(pending);
+  if ($("sync").disabled !== !!wait) $("sync").disabled = !!wait;
+  if ($("sync-badge").hidden !== !pending) $("sync-badge").hidden = !pending;
+  if ($("sync-badge").textContent !== String(pending)) $("sync-badge").textContent = String(pending);
   const waiting = pending ? `${pending} of ${crew.length} agents have not synced yet` : "";
   $("sync").ariaLabel = [waiting, wait ? `Sync ${wait}` : "Sync the crew"].filter(Boolean).join(" · ");
   const statsWait = cooldown("stats_sync", "stats sync requested");
@@ -106,11 +108,14 @@ export function closedLeft(name) {
   return closed ? Math.max(0, closed.hidden - (pulled[name] || 0)) : 0;
 }
 
+const planKeys = new WeakMap();
+
 export function closedLeftIn(name, key) {
   const closed = (meta.closed || {})[name];
   const field = { phases: "plan", tasks: "slice" }[name];
   if (!closed || !closed.groups || !field) return 0;
-  const plans = new Set(doc.plans.map((p) => `plans/${p.id}`));
+  if (!planKeys.has(doc.plans)) planKeys.set(doc.plans, new Set(doc.plans.map((p) => `plans/${p.id}`)));
+  const plans = planKeys.get(doc.plans);
   const group = (i) => (name === "phases" && !plans.has(i.plan) ? "unplanned" : i[field]);
   return Math.max(0, (closed.groups[key] || 0) - (older[name] || []).filter((i) => group(i) === key).length);
 }
@@ -211,7 +216,7 @@ function applyServer(server) {
   applyChecks(doc);
   banner([meta.seed_error]);
   const appliedRev = rev;
-  Promise.resolve(render(null, true)).then(() => {
+  Promise.resolve(render(null, true, true)).then(() => {
     if (rev !== appliedRev) return;
     if (!performance.getEntriesByName("ledger-rendered").length) performance.mark("ledger-rendered");
     lsWrite();

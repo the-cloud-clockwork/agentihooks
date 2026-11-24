@@ -1,9 +1,12 @@
 """Tests of the CI lab worker pod loop against the real lease API over fakeredis and a presigned upload sink."""
 
+import email.message
+import http.client
 import threading
 import time
 import urllib.error
 from collections.abc import Iterator
+from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,6 +19,7 @@ from scripts.ci_lab.units import Unit
 CAPABILITIES = frozenset({"net", "browser"})
 UNIT_A = Unit(kind="test", key="a", members=("tests/a.py::t",))
 UNIT_B = Unit(kind="test", key="b", members=("tests/b.py::t",))
+EXPECTED_GRACE_SECONDS = 2_100.0
 
 
 class Clock:
@@ -50,6 +54,27 @@ class Counted(leases.Leases):
         return super().owns(job, token)
 
 
+@dataclass(frozen=True)
+class Calls(worker.Client):
+    calls: list[str] = field(default_factory=list[str])
+
+    def upload_url(self, job: str, token: str, name: str) -> str | None:
+        self.calls.append("upload_url")
+        return super().upload_url(job, token, name)
+
+    def put(self, url: str, path: Path) -> None:
+        self.calls.append("put")
+        super().put(url, path)
+
+    def complete(self, job: str, token: str, outcome: str) -> bool:
+        self.calls.append("complete")
+        return super().complete(job, token, outcome)
+
+
+class SinkServer(ThreadingHTTPServer):
+    request_queue_size = 40
+
+
 class Sink:
     def __init__(self) -> None:
         self.bodies: dict[str, bytes] = {}
@@ -61,7 +86,7 @@ class Sink:
             request.end_headers()
 
         handler = type("SinkHandler", (BaseHTTPRequestHandler,), {"do_PUT": put})
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.server = SinkServer(("127.0.0.1", 0), handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
 
@@ -88,6 +113,16 @@ class Slow:
         handler = type("SlowHandler", (BaseHTTPRequestHandler,), {"do_GET": hold, "do_POST": hold, "do_PUT": hold})
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+
+class Paced(threading.Event):
+    def __init__(self) -> None:
+        super().__init__()
+        self.waits: list[float | None] = []
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.waits.append(timeout)
+        return self.is_set()
 
 
 def _serving(server: ThreadingHTTPServer) -> threading.Thread:
@@ -134,10 +169,7 @@ def slow() -> Iterator[Slow]:
 
 @pytest.fixture
 def scheduler(lab: Counted, sink: Sink) -> Iterator[str]:
-    import fakeredis
-
-    routes = lease_api.ControlRoutes(fakeredis.FakeRedis(decode_responses=True), "", lambda: 0)
-    server = lease_api.serve("127.0.0.1", 0, lab, Signer(sink.url), routes)
+    server = lease_api.serve("127.0.0.1", 0, lab, Signer(sink.url))
     _serving(server)
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()
@@ -222,6 +254,23 @@ def test_every_slot_runs_a_unit_at_once(scheduler: str, jobs: queue.Queue, tmp_p
     assert [found(jobs, f"h1:test:{key}").outcome for key in keys] == ["passed"] * 40
 
 
+@pytest.mark.feature("lab-worker-sink-backlog")
+def test_the_sink_listens_with_room_for_forty_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
+    backlogs: list[int] = []
+    activate = ThreadingHTTPServer.server_activate
+
+    def observed(server: ThreadingHTTPServer) -> None:
+        backlogs.append(server.request_queue_size)
+        activate(server)
+
+    monkeypatch.setattr(ThreadingHTTPServer, "server_activate", observed)
+    upload = Sink()
+    upload.server.server_close()
+
+    assert len(backlogs) == 1
+    assert backlogs[0] >= 40
+
+
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_a_full_pod_waits_for_its_first_unit_to_end_while_the_second_still_runs(
     scheduler: str, lab: Counted, jobs: queue.Queue, tmp_path: Path
@@ -271,6 +320,30 @@ def test_a_crash_stops_the_heartbeat_and_the_lease_reaps(
     assert "ci-lab worker: unit h1:test:a crashed: RuntimeError('unit process crashed')\n" in capsys.readouterr().err
     clock.now += lab.ttl_ms + 1
     assert lab.reap(clock.now) == [("h1:test:a", "pending")]
+
+
+@pytest.mark.feature("lab-worker-crash-traceback")
+def test_a_crash_logs_the_traceback_naming_the_missing_path(
+    scheduler: str, jobs: queue.Queue, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    missing = tmp_path / "tree" / "uv.lock"
+
+    def crash(lease: worker.Lease) -> worker.Finished:
+        missing.read_bytes()
+        return finished(tmp_path, lease)
+
+    crashing = pod(scheduler, {"test": crash})
+
+    crashing.run_once()
+
+    assert crashing.drain() == []
+    line = "ci-lab worker: unit h1:test:a crashed: FileNotFoundError(2, 'No such file or directory')\n"
+    _, crashed, trace = capsys.readouterr().err.partition(line)
+    assert crashed == line
+    assert trace.startswith("Traceback (most recent call last):\n")
+    assert ", in crash\n" in trace
+    assert trace.endswith(f"FileNotFoundError: [Errno 2] No such file or directory: {str(missing)!r}\n")
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
@@ -329,6 +402,34 @@ def test_a_heartbeat_that_cannot_reach_the_scheduler_is_skipped_and_the_unit_del
     flaky.run_once()
 
     assert flaky.drain() == []
+    assert failed == ["h1:test:a"]
+    assert len(lab.beats) >= 1
+    assert found(jobs, "h1:test:a").outcome == "passed"
+    assert sink.bodies == {"/h1:test:a/report": b'{"key": "a"}', "/h1:test:a/log": b"log of h1"}
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_a_heartbeat_whose_reply_is_cut_short_is_skipped_and_the_unit_delivered(
+    scheduler: str, lab: Counted, jobs: queue.Queue, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    failed: list[str] = []
+
+    class Cut(worker.Client):
+        def heartbeat(self, job: str, token: str) -> int | None:
+            if not failed:
+                failed.append(job)
+                raise http.client.IncompleteRead(b"{")
+            return super().heartbeat(job, token)
+
+    def held(lease: worker.Lease) -> worker.Finished:
+        beating(lab, 1)
+        return finished(tmp_path, lease)
+
+    cut = worker.Worker(Cut(scheduler), {"test": held}, "pod-1", 1, wait_ms=0, heartbeat_s=0.01)
+    cut.run_once()
+
+    assert cut.drain() == []
     assert failed == ["h1:test:a"]
     assert len(lab.beats) >= 1
     assert found(jobs, "h1:test:a").outcome == "passed"
@@ -413,6 +514,59 @@ def test_a_unit_past_the_termination_grace_is_left_to_reap(
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
+def test_a_built_worker_waits_out_its_longest_unit_and_its_delivery_after_stop(
+    scheduler: str, jobs: queue.Queue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    release = threading.Event()
+    waits: list[float | None] = []
+
+    def held(lease: worker.Lease) -> worker.Finished:
+        release.wait(10)
+        return finished(tmp_path, lease)
+
+    def virtual(
+        futures: list[Future[None]], timeout: float | None = None
+    ) -> tuple[set[Future[None]], set[Future[None]]]:
+        waits.append(timeout)
+        if timeout is not None and timeout >= EXPECTED_GRACE_SECONDS:
+            release.set()
+            return wait(futures, timeout=10)
+        return wait(futures, timeout=0)
+
+    monkeypatch.setattr(worker, "wait", virtual)
+    built = worker.build({"CI_LAB_SCHEDULER_URL": scheduler}, {"test": held}, "pod-1", 1, None)
+
+    assert len(built.run_once()) == 1
+    built.stop()
+    left = built.run()
+    release.set()
+
+    assert left == []
+    assert waits == [EXPECTED_GRACE_SECONDS]
+    assert found(jobs, "h1:test:a").outcome == "passed"
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_the_termination_grace_counts_every_delivery_call_of_a_unit(
+    scheduler: str, jobs: queue.Queue, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    client = Calls(scheduler)
+
+    def done(lease: worker.Lease) -> worker.Finished:
+        return finished(tmp_path, lease)
+
+    one = worker.Worker(client, {"test": done}, "pod-1", 1, wait_ms=0, grace_s=10)
+    one.run_once()
+
+    assert one.drain() == []
+    assert client.calls == ["upload_url", "put", "upload_url", "put", "complete"]
+    assert len(client.calls) == worker.DELIVERY_CALLS
+    assert client.timeout == 60.0
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
 def test_run_leases_again_as_a_unit_frees_its_slot(
     scheduler: str, lab: Counted, jobs: queue.Queue, tmp_path: Path
 ) -> None:
@@ -435,6 +589,93 @@ def test_run_leases_again_as_a_unit_frees_its_slot(
     assert [found(jobs, job).outcome for job in ("h1:test:a", "h2:test:b")] == ["passed", "passed"]
     assert len(lab.asked) >= 2
     assert {free for _, free, _, _ in lab.asked} == {1}
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_a_lease_call_the_scheduler_does_not_answer_backs_off_and_leases_again(
+    scheduler: str, jobs: queue.Queue, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    jobs.enqueue([UNIT_B], "h2", {})
+    refused = urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+    failed = urllib.error.HTTPError(f"{scheduler}/lease", 500, "Internal Server Error", email.message.Message(), None)
+    unanswered: list[Exception | None] = [
+        refused,
+        http.client.RemoteDisconnected("Remote end closed connection without response"),
+        ConnectionResetError(104, "Connection reset by peer"),
+        http.client.IncompleteRead(b"{"),
+        TimeoutError("timed out"),
+        failed,
+        None,
+        refused,
+        None,
+    ]
+
+    class Rolling(worker.Client):
+        def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[worker.Lease]:
+            if unanswered and (error := unanswered.pop(0)) is not None:
+                raise error
+            return super().lease(worker, free_slots, capabilities, wait_ms)
+
+    executors: dict[str, worker.Executor] = {}
+    paced = Paced()
+    rolling = worker.Worker(Rolling(scheduler), executors, "pod-1", 1, wait_ms=0, stopping=paced)
+
+    def last(lease: worker.Lease) -> worker.Finished:
+        if lease.head == "h2":
+            rolling.stop()
+        return finished(tmp_path, lease)
+
+    executors["test"] = last
+    guard = threading.Timer(10, rolling.stop)
+    guard.start()
+
+    assert rolling.run_once() == []
+    assert rolling.run() == []
+    guard.cancel()
+    assert unanswered == []
+    assert paced.waits == [1.0, 2.0, 4.0, 8.0, 10.0, 10.0, 1.0]
+    assert [found(jobs, job).outcome for job in ("h1:test:a", "h2:test:b")] == ["passed", "passed"]
+    assert [line for line in capsys.readouterr().err.splitlines() if line.startswith("ci-lab worker:")] == [
+        "ci-lab worker: lease call failed, retrying in 1s: URLError(ConnectionRefusedError(111, 'Connection refused'))",
+        "ci-lab worker: lease call failed, retrying in 2s: RemoteDisconnected('Remote end closed connection without response')",
+        "ci-lab worker: lease call failed, retrying in 4s: ConnectionResetError(104, 'Connection reset by peer')",
+        "ci-lab worker: lease call failed, retrying in 8s: IncompleteRead(1 bytes read)",
+        "ci-lab worker: lease call failed, retrying in 10s: TimeoutError('timed out')",
+        "ci-lab worker: lease call failed, retrying in 10s: <HTTPError 500: 'Internal Server Error'>",
+        "ci-lab worker: lease call failed, retrying in 1s: URLError(ConnectionRefusedError(111, 'Connection refused'))",
+    ]
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_a_lease_call_the_scheduler_answers_with_a_client_error_still_raises(
+    scheduler: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    paced = Paced()
+    misrouted = worker.Worker(worker.Client(f"{scheduler}/elsewhere"), {}, "pod-1", 1, wait_ms=0, stopping=paced)
+
+    with pytest.raises(urllib.error.HTTPError) as error:
+        misrouted.run_once()
+
+    assert error.value.code == 404
+    assert paced.waits == []
+    assert "lease call failed" not in capsys.readouterr().err
+
+
+@pytest.mark.wall_clock
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_stop_ends_a_lease_backoff_at_once() -> None:
+    class Down(worker.Client):
+        def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[worker.Lease]:
+            threading.Timer(0.1, down.stop).start()
+            raise ConnectionRefusedError(111, "Connection refused")
+
+    down = worker.Worker(Down("http://scheduler:8800"), {}, "pod-1", 1, wait_ms=0)
+    down.backoff_s = 60.0
+    began = time.monotonic()
+
+    assert down.run() == []
+    assert time.monotonic() - began < 30
 
 
 @pytest.mark.feature("lab-worker-pod-loop")

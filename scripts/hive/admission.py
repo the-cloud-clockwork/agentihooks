@@ -3,6 +3,8 @@ for fifteen minutes until the controller collects the hive's answer to its launc
 used and pod load readings carry a launched agent's own load from the next heartbeat on, while the five minute load a
 hive without a CPU used reading falls back to takes up to five minutes to show it."""
 
+import math
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -19,7 +21,9 @@ HIVE_ADMISSION = "hive admission"
 REASONS = (CPU, RAM, DISK, QUOTA, PLACEMENT, NODE_CAP, MAX_AGENTS, MISSING)
 HOST_PERCENT = 80
 SWARM_PERCENT = 40
-AGENT_CPU = 0.5
+AGENT_CENTI = 50
+AGENT_CPU_ENV = "AGENTIHOOKS_HIVE_AGENT_CPU"
+CPU_STEP = 5
 AGENT_MB = 850
 PENDING_MS = 900_000
 NO_READING = "no fresh headroom reading"
@@ -63,6 +67,12 @@ class Room:
     detail: str
 
 
+@dataclass(frozen=True)
+class AgentCpu:
+    centi: int
+    source: str
+
+
 class Held(RuntimeError):
     """The hub kept an offer pending because the asking hive is at its max agents; another hive may take it."""
 
@@ -72,10 +82,37 @@ class Unanswered(TimeoutError):
     the offer was still in progress; it may hold an admission the next ask receives."""
 
 
-def _host(measured: dict[str, Any], pending: int) -> list[tuple[int, str, str]]:
+def agent_cpu(measured: dict[str, Any]) -> AgentCpu:
+    """CPU per agent in hundredths of a CPU and where it comes from: AGENTIHOOKS_HIVE_AGENT_CPU when set, else the
+    reading's pod load over the agents it counts, rounded up to the next 0.05 and never below AGENT_CENTI, else
+    AGENT_CENTI."""
+    setting = _setting()
+    if setting:
+        return AgentCpu(setting, f"set by {AGENT_CPU_ENV}")
+    agents = sum(measured.get("agents", {}).values())
+    load = measured.get("pod_load")
+    if load is None or not agents:
+        return AgentCpu(AGENT_CENTI, "by default")
+    centi = CPU_STEP * math.ceil(round(100 * load) / (CPU_STEP * agents))
+    return AgentCpu(max(AGENT_CENTI, centi), f"measured from pod load {load:.2f} over {agents} agents")
+
+
+def _setting() -> int:
+    """AGENTIHOOKS_HIVE_AGENT_CPU in hundredths of a CPU, 0 when it is unset, not a number or rounds to no CPU."""
+    try:
+        return max(0, round(100 * float(os.environ[AGENT_CPU_ENV])))
+    except (KeyError, ValueError, OverflowError):
+        return 0
+
+
+def _per_agent(figure: AgentCpu) -> str:
+    return f"{figure.centi / 100:g} CPU per agent {figure.source}"
+
+
+def _host(measured: dict[str, Any], pending: int, figure: AgentCpu) -> list[tuple[int, str, str]]:
     cpus, load5 = measured["cpus"], measured["load5"]
     held = _held(pending)
-    limits = [_host_cpu(cpus, load5, measured.get("used_cpus"), pending)]
+    limits = [_host_cpu(cpus, load5, measured.get("used_cpus"), measured.get("pod_load"), pending, figure)]
     if all(field in measured for field in RAM_FIELDS):
         available, total = measured["available_mb"], measured["total_mb"]
         limits.append(
@@ -88,46 +125,53 @@ def _host(measured: dict[str, Any], pending: int) -> list[tuple[int, str, str]]:
     return limits
 
 
-def _host_cpu(cpus: float, load5: float, used: float | None, pending: int) -> tuple[int, str, str]:
+def _host_cpu(
+    cpus: float, load5: float, used: float | None, pod_load: float | None, pending: int, figure: AgentCpu
+) -> tuple[int, str, str]:
     """The node CPU line: CPU used when the hive reads it, the five minute load only as a fallback and a guard that
-    binds while used CPU is at or above the swarm share."""
+    binds while the hive's own CPU, its pod load when it runs in a pod and else the node's CPU used, is at or above
+    the swarm share."""
     held = _held(pending)
     loaded = f"five minute load {load5:.2f} on {cpus} CPUs"
     if used is None:
         return (
-            _cpu_room(cpus, load5, pending),
+            _cpu_room(cpus, load5, pending, figure),
             CPU,
-            f"{loaded}, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {LINE}",
+            f"{loaded}, {_per_agent(figure)}{held}, fits {{}} more {LINE}",
         )
     shown = f"{used:.2f} of {cpus} CPUs used, {loaded}"
-    if 100 * load5 > HOST_PERCENT * cpus and 100 * used >= SWARM_PERCENT * cpus:
-        return 0, CPU, f"{shown} with CPU used at or above the {SWARM_PERCENT} percent swarm share, fits {{}} more"
-    return _cpu_room(cpus, used, pending), CPU, f"{shown}, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {LINE}"
+    own, measure = (used, "CPU used") if pod_load is None else (pod_load, f"pod load {pod_load:.2f}")
+    if 100 * load5 > HOST_PERCENT * cpus and 100 * own >= SWARM_PERCENT * cpus:
+        return 0, CPU, f"{shown} with {measure} at or above the {SWARM_PERCENT} percent swarm share, fits {{}} more"
+    return (
+        _cpu_room(cpus, used, pending, figure),
+        CPU,
+        f"{shown}, {_per_agent(figure)}{held}, fits {{}} more {LINE}",
+    )
 
 
 def _held(pending: int) -> str:
     return f" with {pending} pending launches" if pending else ""
 
 
-def _cpu_room(cpus: float, load: float, pending: int) -> int:
-    return int((HOST_PERCENT * cpus - 100 * load) // (100 * AGENT_CPU)) - pending
+def _cpu_room(cpus: float, load: float, pending: int, figure: AgentCpu) -> int:
+    return int((HOST_PERCENT * cpus - 100 * load) // figure.centi) - pending
 
 
 def _ram_room(available: int, total: int, pending: int) -> int:
     return (available * 100 - (100 - HOST_PERCENT) * total) // (100 * AGENT_MB) - pending
 
 
-def _pod(measured: dict, pending: int) -> list[tuple[int, str, str]]:
+def _pod(measured: dict[str, Any], pending: int, figure: AgentCpu) -> list[tuple[int, str, str]]:
     held = _held(pending)
     limits = []
     if all(field in measured for field in POD_CPU_FIELDS):
         cpus, load = measured["pod_cpus"], measured["pod_load"]
         limits.append(
             (
-                _cpu_room(cpus, load, pending),
+                _cpu_room(cpus, load, pending, figure),
                 CPU,
-                f"pod load {load:.2f} on a {cpus:g} CPU limit, {AGENT_CPU:g} CPU per agent{held}, "
-                f"fits {{}} more {LINE}",
+                f"pod load {load:.2f} on a {cpus:g} CPU limit, {_per_agent(figure)}{held}, fits {{}} more {LINE}",
             )
         )
     if all(field in measured for field in POD_RAM_FIELDS):
@@ -158,13 +202,16 @@ def _first(measured: dict, pending: int) -> list[tuple[int, str, str]]:
     return limits or [(0, MISSING, "no memory reading")]
 
 
-def _swarm(measured: dict, agents: int, max_agents: int | None) -> list[tuple[int, str, str]]:
+def _swarm(
+    measured: dict[str, Any], agents: int, max_agents: int | None, figure: AgentCpu
+) -> list[tuple[int, str, str]]:
     cpus, total = measured["cpus"], measured["total_mb"]
-    cpu = int(SWARM_PERCENT * cpus / (100 * AGENT_CPU)) - agents
+    cpu = int(SWARM_PERCENT * cpus / figure.centi) - agents
     ram = SWARM_PERCENT * total // (100 * AGENT_MB) - agents
     share = f"under the {SWARM_PERCENT} percent swarm share"
+    each = f"{figure.centi / 100:g} CPU each {figure.source}"
     limits = [
-        (cpu, CPU, f"{agents} swarm agents at {AGENT_CPU:g} CPU each on {cpus} CPUs, fits {{}} more {share}"),
+        (cpu, CPU, f"{agents} swarm agents at {each} on {cpus} CPUs, fits {{}} more {share}"),
         (ram, RAM, f"{agents} swarm agents at {AGENT_MB} MB each in {total} MB, fits {{}} more {share}"),
     ]
     if max_agents is None:
@@ -173,7 +220,7 @@ def _swarm(measured: dict, agents: int, max_agents: int | None) -> list[tuple[in
 
 
 def room(
-    measured: dict | None,
+    measured: dict[str, Any] | None,
     swarm_agents: int | None = None,
     pending: int = 0,
     max_agents: int | None = None,
@@ -184,11 +231,12 @@ def room(
     free, floor = measured.get("disk_free_gb"), measured.get("disk_floor_gb")
     if free is not None and floor is not None and free < floor:
         return Room(0, DISK, f"{free} GB free on the agent home, below the {floor} GB worktree floor")
-    limits = _host(measured, pending) + _pod(measured, pending)
+    figure = agent_cpu(measured)
+    limits = _host(measured, pending, figure) + _pod(measured, pending, figure)
     if first:
         limits = _first(measured, pending) + [limit for limit in limits if limit[1] == CPU]
     if swarm_agents is not None and all(field in measured for field in RAM_FIELDS):
-        limits += _swarm(measured, swarm_agents, max_agents)
+        limits += _swarm(measured, swarm_agents, max_agents, figure)
     count, reason, detail = min(limits, key=lambda limit: limit[0])
     count = max(0, count)
     return Room(count, reason, detail.format(count))

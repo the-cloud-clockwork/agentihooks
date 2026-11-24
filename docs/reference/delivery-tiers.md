@@ -24,7 +24,7 @@ Removing the queue tier, so that a pull request merges on its pull request verdi
 
 ## Lab authority and back pressure
 
-The CI lab grades pull request heads from content addressed units and a verdict cache ([CI lab service contract](ci-lab.md)). A gate moves to the lab only when the base branch's `delivery.yaml` names it under `lab.authoritative`. On a `pull_request` run the `lab-verdict` job reads that list, the Actions job of each named gate is skipped, and `lab-verdict` waits for the lab's check run for that gate instead. An empty list keeps every pull request gate on Actions. The queue and promotion tiers still run on Actions. The lab grades their heads too: a merge group head gets its [test units](ci-lab.md#test-units), and a promotion or backfill head its test units and [mutation units](ci-lab.md#mutation-units).
+The CI lab grades pull request heads from content addressed units and a verdict cache ([CI lab service contract](ci-lab.md)). A gate moves to the lab only when the base branch's `delivery.yaml` names it under `lab.authoritative`. On a `pull_request` run the `lab-verdict` job reads that list, the Actions job of each named gate is skipped, and `lab-verdict` waits for the lab's check run for that gate instead. An empty list keeps every pull request gate on Actions. `lab.queue.authoritative` names the gates the lab is to grade on merge groups. Each name must be a workflow job, and `scripts.ci_wiring` requires a `lab/<gate>` lab gate in `.github/gate-wiring.json` for it. `AGENTIHOOKS_LAB_OFF=true` empties the list, and `python -m scripts.ci_lab_verdict authority <grader root> merge_group` publishes it. An absent key is an empty list. `delivery.yaml` leaves the key out until the deployed lab scheduler runs a release whose delivery schema accepts it, because the scheduler validates dev's `delivery.yaml` against its own schema when it starts and the merge group base's on each merge group grade. No workflow reads that merge group output yet, so the queue and promotion tiers run on Actions whatever the list holds. The lab grades their heads too: a merge group head gets its [test units](ci-lab.md#test-units), and a promotion or backfill head its test units and [mutation units](ci-lab.md#mutation-units).
 
 A long lab wait is back pressure, never a red. Each tick pass reads the lab's capacity document. When its predicted pull request wait exceeds `AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES` (default 20), the swarm holds new claims of eng tasks outside the fix phase and raises the standing `lab_wait` finding. A reading older than ten minutes holds nothing, and the finding clears once the wait falls back. Nobody retries or dispatches to catch up. [Lab wait and capacity](../ci-timing.md#lab-wait-and-capacity) shows how to read the wait.
 
@@ -62,7 +62,7 @@ records, a ledger view of 6 thousand tasks and 30 live Kubernetes executions
 holding claimed tasks. It then runs three scheduled passes of the tick
 command against it. The ledger view is served from memory, so the gate
 measures the tick's cost of using the view, not the ledger server's read. Every step on the spawn chain (the steps `SPAWN_NEEDS`
-names, then `spawn`) and the `tick view` must end ok within its
+names) and the `tick view` must end ok within its
 `budgets.FLOORS` floor on every pass it runs. A step that is cut off,
 abandoned, does not end ok or never runs fails the gate. Unit fixtures hold a
 few rows, so they cannot catch a step whose cost grows with stored data.
@@ -74,7 +74,9 @@ On `diffcheck/tick-scale-plant` it first applies the planted fault in
 execution archive and rewrites every record it loaded. This planted fault must
 turn the gate red. In the reference proof run it drove `reap` to 25 seconds
 against its 22 second floor. On `diffcheck/tick-scale-profile` the gate profiles
-`track outages`, `reap`, `spawn` and `tick view` with cProfile. The profiled
+`track outages`, `reap`, `master scale` and `tick view` with cProfile. The
+`master scale` step launches agents into empty master seats. A workflow contract
+checks that every profiled name is registered and includes that launcher. The profiled
 walls are evidence only. The action takes the same choices as its `plant`
 and `profile` inputs.
 
@@ -208,6 +210,8 @@ until it passes does not repair it.
 | `semgrep` | runs | skipped | skipped |
 | `test-count` (3.12) | runs | runs | skipped |
 | `unit` and `shard-check` (3.12) | runs | runs | runs |
+
+The size and complexity limits `lint` holds on the pull request head are graded again on the merge group's combined tree by the unit test `test_the_checked_out_tree_holds_the_size_limits` in `tests/test_size_limits.py`. It measures the checked out tree with `scripts.size_limits` against that tree's own `tests/SIZE_ALLOWLIST.json` and fails on a unit over a limit without an allowance, a unit grown past its allowance, or an allowlist that differs from the measurement. Two pull requests can each keep a file under the cap and still merge it over: on 20 November pull request 12249 passed `lint` with `tests/ci_lab/test_scheduler.py` at 2943 lines, the merge group combined it with eight later merges into 3077 lines, and every branch cut from `dev` then failed its prepush size step. The test starts `git` and `ruff`, so its dependency record escapes, and the queue planner reruns it whenever a `tests/`, `hooks/`, `scripts/` or `.github/workflows/` path or a global input changed ([Slice 5 as delivered](ci-result-cache.md#slice-5-as-delivered)).
 | `sonar` | runs | skipped | runs |
 
 Every job runs Python 3.12 only. `sonar` stays on the push: the promotion tier runs the integration scan. The skip removed about 284 runner seconds from each dev push: `lint` 64 s, `semgrep` 42 s and `test-count` 88 s and 90 s for its two Python legs, as measured over the ten dev pushes before the change and recorded in pull request 3517. Delivered by pull request [3517](https://github.com/the-cloud-clockwork/agentihooks/pull/3517), after [3486](https://github.com/the-cloud-clockwork/agentihooks/pull/3486) taught the protected gate check (`gate-protected.yml`, `scripts.gate_protected`) to accept the `promotion` form of the gate step. The check runs the base branch's own `scripts.gate_protected`, whose `_aggregator_problems` accepts a head's `Gate — Required` steps only when they equal one of twelve renderings of `scripts.ci_reuse.gate_steps`: the keyword sets none, `selected`, `queue_tier`, `queue_tier` with `promotion`, `queue_tier` with `consolidated`, and all three of `queue_tier`, `promotion` and `consolidated`, each with `summary` false and true. `dev` now carries the form rendered with `queue_tier=True, promotion=True, consolidated=True, summary=True`. `tests/contracts/ci_tiers/test_workflow.py` pins the push job set.
@@ -383,20 +387,74 @@ The master or the operator moves a green critical pull request ahead of the wait
 agentihooks swarm <slug> merge priority https://github.com/<owner>/<repo>/pull/<number>
 ```
 
-The priority applies when the command runs, also while a merge group's Tests run is building. The swarm stores no deferred priority and replays none.
+The priority applies when the command runs, also while a merge group's Tests run is building. Without `--lift` it moves only the entries still waiting, so the groups already under test finish and no Tests run is cancelled; the pull request joins the next group. This deferred priority is the default. The swarm stores no priority for later and replays none. A pull request of an urgent or focused task gets the same priority by code when it enters the queue ([Automatic priority on queue entry](#automatic-priority-on-queue-entry)).
 
 The command:
 
 1. Refuses every caller but the swarm's master seat and the operator with `only the master or the operator prioritizes the merge queue`.
 2. Takes the swarm's priority lock, the `queue-priority-active` key, for at most an hour. A holder on the same hive whose process has ended is cleared first. While another priority or the refresh requeue holds the lock, the command fails with `another merge queue priority is running; try again when it ends`.
 3. Reads the pull request and refuses, in this order: `queue priority requires an open pull request into dev`, `queue priority requires a ready pull request`, `queue priority requires a dev merge queue`, `staged compatibility: <reason>`, and `required checks on the current pull request head must pass before queueing`. A refused priority moves nothing and writes no journal record.
-4. Dequeues, tail first, every waiting (`QUEUED`) entry ahead of the pull request, and every waiting entry behind it when it is already queued. Entries whose merge group is building stay in place.
+4. Dequeues, tail first, every waiting (`QUEUED`) entry ahead of the pull request, and every waiting entry behind it when it is already queued. Each entry is read again just before its dequeue, and one that started building since stays in place. Entries whose merge group is building stay in place unless the operator passed `--lift`.
 5. Queues the pull request at its head when it is not in the queue. After a failed dequeue it does so only for a pull request that was queued when the command started and that the queue ejected during the pass. It then queues each displaced entry again at the head it had, in its original order, after that entry's own staged compatibility check. Restoring stops at the first refused entry.
 6. Marks the pull request head hotfix in the swarm's [CI lab](ci-lab.md#control-routes), even when a queue step failed, and writes the `priority` record with the queue steps and the lab's reply to the [queue journal](#the-queue-journal).
 7. Sends an information only inbox notice to the owner of each restored entry still working its task ([Merge priority owner notices](../pillars/swarm.md#merge-priority-owner-notices)).
 8. When a step failed, requeues the entries still left out at once, as below, and fails with the step errors joined by `; `.
 
-`--lift` is the operator's only; any other caller gets `only the operator lifts a running merge group priority hold`. It writes a `priority-lift` journal record before taking the lock, so a busy or refused priority can still leave one, then runs the same steps. The reorder is the same as without it: no building group leaves the queue.
+`--lift` is the operator's only; any other caller gets `only the operator lifts a running merge group priority hold`. It writes a `priority-lift` journal record before taking the lock, so a busy or refused priority can still leave one, then runs the same steps with one difference: step 4 also dequeues every entry ahead of the pull request that is under test, and behind it when it is already queued. Step 5 restores those entries with the waiting ones, behind the pull request and in their original order. Their merge groups are discarded, so the Tests runs already spent on them are lost, and each restored entry is tested again in a new group behind the pull request ([Queue rebuild records](#queue-rebuild-records)). The queue builds up to five entries at a time, each with its own unit suite run, so one lift can lose up to five of those runs. Use it only for a blocker that has agents stopped:
+
+```bash
+agentihooks swarm <slug> merge priority https://github.com/<owner>/<repo>/pull/<number> --lift
+```
+
+For a queue holding a group under test A, then the waiting entries B and C, then the critical pull request P, the two forms send:
+
+| Command | Dequeued, tail first | Queue after the pass |
+|---|---|---|
+| `merge priority <P>` | C, B | A (still testing), P, B, C |
+| `merge priority <P> --lift` | C, B, A | P, A, B, C |
+
+The `priority` journal record lists those dequeues and the `restore` steps in the order sent.
+
+#### Automatic priority on queue entry
+
+A pull request of an urgent or focused task gets the priority by code when it enters the `dev` merge queue, with nobody running `merge priority`. Three paths queue a pull request and then apply it:
+
+- `agentihooks swarm <slug> merge queue <url>`, for every caller the command admits.
+- The `ready` merge pass, when it queues the green head of a released task.
+- The `ready` merge pass requeue after a transient unmergeable exit.
+
+It runs only after a new enqueue into a repository with a `dev` merge queue. A pull request already in the queue, a repository with no merge queue (which takes the squash merge), `merge dequeue` and `merge state` skip it.
+
+The swarm reads the tasks that name the pull request and applies the priority when one of them:
+
+- has rank `urgent`, whether or not it is frozen, or
+- sits under a focus record, unless a freeze on a node nearer the task holds it, the same precedence claims follow ([Freeze and focus](../pillars/swarm.md#freeze-and-focus)).
+
+Any other pull request keeps its first in, first out place.
+
+The move is the reorder above without `--lift`, so the groups under test keep running and the pull request joins the next group. It takes the same lock as step 2, runs the pull request refusals of step 3, moves the waiting entries ahead of the new entry behind it, marks the head hotfix in the CI lab, writes the `priority` journal record and sends the owner notices with the sender `swarm`. It never writes `priority-lift`.
+
+The pull request stays queued whatever the priority does. The `merge queue` output reports the outcome under `priority`:
+
+```bash
+agentihooks swarm <slug> merge queue https://github.com/<owner>/<repo>/pull/<number> \
+  | jq -c 'with_entries(select(.key == "queued" or .key == "priority"))'
+```
+
+| `priority` | Meaning |
+|---|---|
+| absent | No priority was tried: the pull request was already queued, or the repository has no merge queue |
+| `null` | No task naming the pull request is urgent or focused |
+| `{"url", "displaced", "errors", "lab"}` | The priority ran; `displaced` lists the entries it moved behind the pull request |
+| `{"url", "errors"}` | The priority was refused or a step failed, for example `another merge queue priority is running; try again when it ends`. Entries it left out are requeued as below |
+
+The merge watcher does not read that outcome and never retries a refused priority, because its next pass finds the pull request already queued. The master or the operator can then run `merge priority <url>`.
+
+| Symptom | Check and response |
+|---|---|
+| A focused task's pull request entered the queue and did not move | Read `priority` in the `merge queue` output, or the last `priority` journal record for the pull request. `null` means no task naming it was urgent or focused, or a nearer freeze holds it |
+| `priority.errors` names the busy lock | Another priority held the lock. Run `merge priority <url>` once it ends |
+| Groups under test were cancelled | Only `--lift` dequeues them. Look for a `priority-lift` record in the queue journal |
 
 #### Entries an interrupted priority left out
 
@@ -411,7 +469,7 @@ An entry the priority dequeued and could not queue again stays in the swarm's di
 
 While a priority holds the lock, the refresh job reports `merge queue priority waits: another merge queue priority is running; try again when it ends` and retries on its next run.
 
-`tests/swarm/test_merge_queue_priority.py` and `tests/swarm/test_queue_priority.py` pin this behaviour. [Pull request 11818](https://github.com/the-cloud-clockwork/agentihooks/pull/11818) made the priority move the waiting entries at once, and [pull request 12065](https://github.com/the-cloud-clockwork/agentihooks/pull/12065) retired the replay of deferred priorities from the refresh.
+`tests/swarm/test_merge_queue_priority.py`, `tests/swarm/test_queue_priority.py` and `tests/swarm/test_queue_entry_priority.py` pin this behaviour, under the feature map entries `merge-priority-moves-waiting-entries-at-once`, `merge-priority-operator-lift` and `merge-priority-automatic-entry`. [Pull request 11818](https://github.com/the-cloud-clockwork/agentihooks/pull/11818) made the priority move the waiting entries at once, and [pull request 12065](https://github.com/the-cloud-clockwork/agentihooks/pull/12065) retired the replay of deferred priorities from the refresh. [Pull request 12346](https://github.com/the-cloud-clockwork/agentihooks/pull/12346) made `--lift` remove the groups under test and added the automatic priority on queue entry. Before it, Tests run [44454738193](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44454738193) failed `test_operator_lift_is_journaled` because the entry under test was never dequeued, and Proofs run [44641100197](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44641100197) failed the queue entry tests; Proofs run [44655372293](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/44655372293) passed the focused set.
 
 ## Lab merge group interaction rule
 
@@ -424,7 +482,7 @@ For a `merge_group` head, the lab scheduler calls `scripts.ci_lab.interaction.de
 | `overlap` | two entries change a common Python module; a shared file that is no module, such as `feature-map.json`, does not count | each entry's changes |
 | `cache` | more than half the manifest's test units have no cached verdict | the store lookups for the group head |
 
-When no clause holds, the result is the union of `scripts.dep_manifest.invalidated` over the entries. An entry that changes a global input of the manifest, such as `uv.lock`, invalidates every unit, so the set is then the whole manifest. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
+When no clause holds, the result is the union of `scripts.dep_manifest.invalidated` over the entries. An entry that changes a global input of the manifest, such as `.github/test-requirements.lock`, invalidates every unit, so the set is then the whole manifest. `tests/ci_lab/test_interaction.py` holds the property cases for each clause and its boundary.
 
 ### How the scheduler derives each entry's changes
 
@@ -432,7 +490,7 @@ When no clause holds, the result is the union of `scripts.dep_manifest.invalidat
 
 ### Test files the manifest does not know
 
-The manifest lists only the tests of the `dev` commit it was stored for, so `scripts.dep_manifest.invalidated` never names a test module an entry adds. For a `merge_group` head the scheduler therefore also adds one test unit per test module in the entries' changes that the head tree holds and the manifest lists no test of, whether the rule chose a unit set or `FULL`. Each such unit's member is the module's path, and `scripts.ci_lab.expand_tests.unlisted_units` keys it as a broad test: on every file under `hooks/`, `scripts/` and `tests/`, the inputs every test shares, the invocation and the toolchain. `scripts.ci_lab.run_tests.outside` records no manifest files for such a member, so it reports every file the module opens except the inputs the executor treats as shared, a narrower set than the key's. `StoredManifests` merges an outside note only into a test the manifest lists, so until a `dev` manifest lists the module its key does not cover files it opened outside those trees and shared inputs.
+The manifest lists only the tests of the `dev` commit it was stored for, so `scripts.dep_manifest.invalidated` never names a test module an entry adds. For a `merge_group` head the scheduler therefore also adds one test unit per test module in the entries' changes that the head tree holds and the manifest lists no test of, whether the rule chose a unit set or `FULL`. Each such unit's member is the module's path, and `scripts.ci_lab.expand_tests.unlisted_units` keys it as a broad test: on every file under `hooks/`, `scripts/` and `tests/`, the inputs every test shares, the invocation and the toolchain. `scripts.ci_lab.run_tests.outside` records no manifest files for such a member, so it reports every file the module opens except the inputs the executor treats as shared, a narrower set than the key's. `StoredManifests` keeps a note that names such a module apart from the test records, under the manifest's `unlisted` mapping, and `unlisted_units` adds the noted files to that module's key, so a change to a file the module opened outside those trees and shared inputs, or its removal, rekeys the module's next unit.
 
 ## Queue shard sizing
 
@@ -1119,8 +1177,8 @@ Issue 5456 also records two diagnostic gaps: the rebuild cause reader reported `
 {% raw %}
 | Job key | `name:` in `test.yml` | Constant in `scripts.ci_gate_queue` | Name on `merge_group` | Name on other events |
 |---|---|---|---|---|
-| `queue-fail-fast` | `${{ github.event_name == 'merge_group' && 'Gate — Required' \|\| 'queue-fail-fast' }}` | `GATE_NAME` | `Gate — Required` | `queue-fail-fast` |
-| `gate-required` | `${{ github.event_name == 'merge_group' && 'Queue gate summary' \|\| 'Gate — Required' }}` | `SUMMARY_NAME` | `Queue gate summary` | `Gate — Required` |
+| `queue-fail-fast` | <code>${{ github.event_name == 'merge_group' && 'Gate — Required' &#124;&#124; 'queue-fail-fast' }}</code> | `GATE_NAME` | `Gate — Required` | `queue-fail-fast` |
+| `gate-required` | <code>${{ github.event_name == 'merge_group' && 'Queue gate summary' &#124;&#124; 'Gate — Required' }}</code> | `SUMMARY_NAME` | `Queue gate summary` | `Gate — Required` |
 {% endraw %}
 
 `gate_protected.grade` first runs `_pinned_names`. For every base workflow job whose `name` equals `GATE_NAME` or `SUMMARY_NAME`, the head job with the same workflow file and job key must carry the same `name` string, character for character. Each job that differs adds one problem:
@@ -1139,7 +1197,7 @@ After the pin, `scripts.ci_gate_queue.normalize` checks the early gate in each w
 |---|---|
 | Exactly two jobs carry the expression form, `gate-required` is named `SUMMARY_NAME`, and `queue-fail-fast` equals `scripts.ci_gate_queue.watcher` rendered with `gate-required`'s `runs-on`, with or without `deferred=True` | `The early queue gate must use the exact reviewed context pair and verifier` |
 | The `reuse` job's `if` is `github.event_name != 'merge_group' && github.event_name != 'pull_request'` | `The early queue gate requires the existing whole queue reuse exclusion` |
-| `gate-required`'s `needs`, ignoring `lab-verdict`, equal the reviewed inventory, or the reviewed inventory plus `ANNOUNCED` | `The early queue gate must preserve the reviewed graded inventory` |
+| `gate-required`'s `needs`, ignoring `lab-verdict`, equal the reviewed inventory, the reviewed inventory plus `ANNOUNCED`, or that plus `SPLIT` | `The early queue gate must preserve the reviewed graded inventory` |
 
 The reviewed inventory joins `REQUIRED`, `SKIPPED` and four unit and watcher jobs:
 
@@ -1149,9 +1207,12 @@ The reviewed inventory joins `REQUIRED`, `SKIPPED` and four unit and watcher job
 | `SKIPPED` | `unit-selected`, `coverage-ratchet`, `lint`, `docs`, `sonar`, `mutation-plan`, `mutation-stats`, `mutation`, `swarm-image`, `worker-image`, `brain-smoke`, `writer-lock`, `install-smoke`, `kind-due`, `helm-kind`, `semgrep`, `ledger-load`, `stage-budget`, `reuse`, `dep-manifest` |
 | Unit and watcher jobs | `unit`, `unit-lost`, `unit-rerun`, `queue-fail-fast` |
 | `ANNOUNCED` | `install-smoke`, `dep-manifest`, `type-gate` |
+| `SPLIT` | `collect`, `lint-actions` |
 | `LAB_VERDICT` | `lab-verdict`, ignored in the comparison |
 
 The comparison is between sets, so need order does not matter, and a missing need is refused like an added one. `install-smoke` and `dep-manifest` already belong to the inventory, so `type-gate` is the one need that `ANNOUNCED` adds. `dev`'s `gate-required` already lists `type-gate` and grades green only because `ANNOUNCED` admits it.
+
+`SPLIT` names the two jobs split out of `test-count` and `lint`: `collect`, which holds the early collection and the test plan, and `lint-actions`, which holds the lint steps only Actions can run. The needs are accepted with both or with neither, never with one, and the protected grader refuses a head that names one of them whatever its steps. A head whose needs name both must also render its aggregation with `scripts.ci_reuse.split_required`, which requires both jobs to succeed on pull requests, `collect` to succeed and `lint-actions` to be skipped on merge groups, and lets both be skipped on a `dev` push. `split_required` raises unless the aggregation holds the pull request, merge group and `dev` push job lists once each, so a rendering without those lists has no split form and is refused for such a head.
 
 When every check passes, `normalize` renames the pair to plain `Gate — Required` and `queue-fail-fast` in its copy, so the rest of the grade sees one job named `Gate — Required`. A refusal from `normalize` ends the grade: the result is the pin problems followed by that refusal.
 
@@ -1436,6 +1497,10 @@ Replace the example run ID with the intended run. Repeat `--run-id` to select se
 | `action: error` with timestamps | Recovery began and an API operation failed. Attempted cancel times and any observed completion survive the error, including a failed rerun request. Read `reason`; a request timestamp does not prove GitHub accepted it. |
 | No timing fields | Older records and decisions made before recovery, including early read errors, have no recovery timings. A run rerun meanwhile is also left alone without these fields. Do not fill gaps with zero or `updated_at`. |
 
+### Stale queued runs
+
+GitHub can leave a run queued for months with no jobs and no update: on 19 November agentihooks held 64 such runs, 61 of them created on 11 November between 20:28 and 20:52 UTC. They take no runner, because every ARC listener scaled on zero assigned jobs while they stayed queued, but they stay in every queued run listing until something removes them. GitHub refuses `cancel` and `force-cancel` on such a run with HTTP 409, "Cannot cancel a workflow run that has not been queued yet.", while `DELETE` of the run answers 204. Before its watch, the Lost runner workflow runs `python -m scripts.ci_stale_runs --repo <owner>/<repo>` with the same App token. A queued run is stale once its `updated_at` is at least 24 hours old, the time GitHub lets a job wait in the queue, so a rerun of an old run is never stale. For each stale run the sweep prints its workflow, branch, times and job states by runner labels, then deletes the run when it holds no job and posts `cancel` when it holds one. A stale run still queued thirty seconds later gets a `::warning::` annotation without failing the step. The watch step runs whenever the token minted, so a sweep that fails on a GitHub read still leaves the watch running.
+
 ## Queue rebuild records
 
 GitHub rebuilds a merge group whenever an entry ahead of it changes: an enqueue or priority insertion ahead, a dequeue, a requeue, a removal ahead or a push to the base. The rebuilt group gets a new head commit, and the Tests run still building the old head is cancelled. On 16 October a priority insertion rebuilt three group chains and cancelled 195.550 runner minutes, and no record named the action that caused it ([issue 4282](https://github.com/the-cloud-clockwork/agentihooks/issues/4282)). The **queue journal**, written on the machine running the swarm tooling for every queue mutation that tooling performs, keeps that link. It does not change what the queue does. It was delivered by [pull request 4355](https://github.com/the-cloud-clockwork/agentihooks/pull/4355).
@@ -1448,8 +1513,8 @@ Every record is one JSON line appended to `merge-queue-events.jsonl` in the Agen
 |---|---|---|
 | `queue` | `agentihooks swarm <slug> merge queue <url>`, the `ready` merge pass and the requeue sweep `python -m scripts.ci_requeue` | yes |
 | `dequeue` | `agentihooks swarm <slug> merge dequeue <url>` and the `ready` merge pass | yes |
-| `priority` | `agentihooks swarm <slug> merge priority <url>` once the pull request passes every [refusal](#merge-priority), even when a queue step then fails | yes |
-| `priority-lift` | `merge priority --lift`, before the same reorder, which writes its own `priority` record | no |
+| `priority` | `agentihooks swarm <slug> merge priority <url>` once the pull request passes every [refusal](#merge-priority), even when a queue step then fails, and the [automatic priority](#automatic-priority-on-queue-entry) a new queue entry of an urgent or focused task gets | yes |
+| `priority-lift` | `merge priority --lift`, before the reorder that also dequeues the groups under test, which writes its own `priority` record | no |
 | `priority-requeue` | `merge priority` after a failed step, and the swarm refresh job the tick starts, requeuing an entry an interrupted priority left out | no |
 | `priority-requeue-skipped` | The same two writers leaving such an entry out because it became a draft, its head moved or it conflicts with `dev` | no |
 
@@ -1584,7 +1649,7 @@ Of the 36 own job failures, 15 failed in `Run tests` and 11 in `Install dependen
 
 The queue timelines, a separate count from the run table above, recorded 20 removals with reason `failed_checks`; 19 of them were queued again at an unchanged head. Pull request 5129 entered at head `527d01a7` and was queued again six times with no new commit. Eight merge group runs at that head failed the same code owner test after those requeues: runs [39396055512](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39396055512), [39404264587](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39404264587), [39408630475](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39408630475), [39412887866](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39412887866), [39413818395](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39413818395), [39427751037](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39427751037), [39436310682](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39436310682) and [39448639696](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39448639696). These re-failures cost 809 runner minutes, and the 10 rebuilds they caused behind them another 216.
 
-The cause was in the swarm's queue exit judgment. `queue-fail-fast` cancels its own run on the first failed job, so a failing entry's run ends `cancelled`, never `failure`. The merge pass counted a `cancelled` run as clean, read the exit as having no failure of its own and queued the same head again.
+The cause was in the swarm's queue exit judgment. `queue-fail-fast` cancels its own run on the first failed job, so a failing entry's run usually ends `cancelled`, and it can also end `failure`. In the [post merge testing](../research/post-merge-testing.md) window 4 merge group runs ended `failure`. In three of them, runs [42404741735](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/42404741735), [42403236647](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/42403236647) and [42396908025](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/42396908025), a unit shard failed while `Gate — Required`, by then the queue verifier, passed and skipped `Cancel a rejected queue run`. The merge pass counted a `cancelled` run as clean, read the exit as having no failure of its own and queued the same head again.
 
 ### Fixes it led to
 
@@ -1683,7 +1748,8 @@ The coverage ratchet fails a run when a line the base tree ran is no longer run 
 - **Grading on a dev push.** The ratchet takes the push's `before` commit as its base and resolves its baseline in this order:
   1. the cache entry for the base tree, `coverage-baseline-<tree>`;
   2. the newest `coverage-baseline-` cache entry, used only when the commit recorded in its `baseline.json` is an ancestor of the pushed head. This covers a base whose own push run was cancelled by a newer push before it published. The log line reads `Grading from the newest dev baseline at <commit>`, and the ratchet checks out that commit as its base;
-  3. the live `coverage-baseline` artifact of a dev push run on the base commit whose unit shards and baseline publishing steps passed, even if another gate of that run was red, found through the API with the `tcc main ci` App token, when the cache has no usable entry.
+  3. the live `coverage-baseline` artifact of a dev push run on the base commit whose unit shards and baseline publishing steps passed, even if another gate of that run was red, found through the API with the `tcc main ci` App token, when the cache has no usable entry;
+  4. the live `coverage-baseline` artifact of the base's nearest first parent ancestor whose dev push run passed the same checks, read from one page of the repository's newest `coverage-baseline` artifacts, when no run of the base kept one. This covers a base whose own push run was replaced before it published while the cache holds no usable entry. The log line reads `Restoring the coverage baseline of base <sha> from measured run <id> of its nearest measured first parent ancestor <commit>`, and the ratchet checks out that ancestor as its base. The hold then covers the lines that ancestor ran, so a line first run by the unmeasured commits after it is not held for this push. A base older than the newest hundred published baselines, such as a rerun of an old dev push, finds no ancestor this way.
 - **Grading on a dispatch.** The `durations` job finds the measured dev push run of the dispatched base and republishes its baseline as `queue-coverage-baseline`; the ratchet grades against that.
 
 The ratchet always runs `tests/coverage_ratchet.py` from the base checkout, never from the head under test, and uploads its findings as the `coverage-ratchet` artifact (`report.txt`, kept 7 days).
@@ -1694,7 +1760,7 @@ The disabled `queue-baseline` job is gone: pull request [3517](https://github.co
 
 | Message in the `coverage-ratchet` log | Cause | Action |
 |---|---|---|
-| `No measured Tests run on base <sha> kept a live coverage-baseline artifact with successful measuring and publishing jobs.` | No cache entry fit and no dev push run of the base kept a live artifact with passed unit shards and publishing steps. | Rerun the failed jobs once the next dev push publishes a baseline, or dispatch the Tests workflow against a measured base. |
+| `No measured Tests run on base <sha> kept a live coverage-baseline artifact with successful measuring and publishing jobs.` | No cache entry fit, no dev push run of the base kept a live artifact with passed unit shards and publishing steps, and no first parent ancestor on the newest page of live `coverage-baseline` artifacts had such a run. | Rerun the failed jobs once the next dev push publishes a baseline, or dispatch the Tests workflow against a measured base. |
 | `Base <sha> is outside dev history.` | The base commit is not on `dev`. | Dispatch the Tests workflow with a `base` on `dev`. |
 | `The base carries no tests/coverage_ratchet.py, so nothing trusted can grade.` | The base predates the ratchet. | Dispatch the Tests workflow with a newer `base` input. |
 | `<n> lines the base ran are no longer run by any head test; see the coverage-ratchet report.` | A merged change removed or rerouted the only test reaching those lines, listed by file and line in `report.txt`, so promotion is red while the queue keeps merging. | Follow [Clearing a lost line](#clearing-a-lost-line); never lower the ratchet or exclude the line. |

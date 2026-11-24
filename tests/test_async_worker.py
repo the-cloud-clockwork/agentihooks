@@ -98,7 +98,7 @@ def _exited(pid: int) -> bool:
     try:
         with open(f"/proc/{pid}/stat") as handle:
             return handle.read().rsplit(")", 1)[1].split()[0] in ("Z", "X")
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return True
 
 

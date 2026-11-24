@@ -22,7 +22,7 @@ import yaml
 
 MODULE = "<module>"
 MEASURED = ("hooks/", "scripts/")
-GLOBAL_FILES = {"pyproject.toml", "uv.lock"}
+GLOBAL_FILES = {"pyproject.toml", ".github/test-requirements.lock"}
 GLOBAL_PREFIXES = (".github/", ".test_durations")
 
 

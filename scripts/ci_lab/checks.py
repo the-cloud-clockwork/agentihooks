@@ -6,6 +6,7 @@ completed. `Checks.batch` folds one scheduler pass to the last transition of eac
 answer backs off with the limits of the CI budget's GitHub API wrapper.
 """
 
+import re
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from typing import Any, Protocol
 import requests
 
 from scripts.ci_budget.rate_limit import LIMITED, MAX_WAIT, SECONDARY_WAIT, WAITS
+from scripts.ci_lab import metrics
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.webhooks import CHECK_PREFIX
 from scripts.github_app import GitHubAppAuth
@@ -42,6 +44,8 @@ PERMISSIONS = {"checks": "write"}
 STATUSES = ("queued", "in_progress", "completed")
 CONCLUSIONS = frozenset({"action_required", "cancelled", "failure", "neutral", "skipped", "success", "timed_out"})
 TEXT_LIMIT = 65535
+LOG_TAIL = 4096
+LOGS_LIMIT = TEXT_LIMIT // 2
 TIMEOUT = 30
 ACCEPTED = (200, 201)
 LIMITED_STATUSES = (403, 429)
@@ -64,7 +68,8 @@ class Token(Protocol):
 
 @dataclass(frozen=True)
 class Output:
-    """What a check run shows: title, summary, the grade's units, run id, grader revision and details link."""
+    """What a check run shows: title, summary, the grade's units, run id, grader revision, details link and the log
+    of each failed unit whose tail it shows."""
 
     title: str
     summary: str
@@ -72,6 +77,7 @@ class Output:
     run: str
     grader: str
     details: str
+    logs: tuple[tuple[Unit, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -92,25 +98,46 @@ def name(gate: str, shadow: bool) -> str:
 
 
 def render(output: Output) -> dict[str, str]:
-    """Return the check run output: the run id, grader revision and details link, and every unit key."""
-    text, listed = _listing(output)
+    """Return the check run output: the run id, grader revision and details link, the log tail of each failed unit
+    and every unit key."""
+    logs = _logs(output)
+    text, listed = _listing(output, TEXT_LIMIT - len(logs))
     facts = [
         f"Run: {output.run}",
         f"Grader revision: {output.grader}",
         f"Details: {output.details}",
         f"Unit keys: {listed} of {len(output.units)} listed",
     ]
-    return {"title": output.title, "summary": "\n".join([output.summary, "", *facts]), "text": text}
+    return {"title": output.title, "summary": "\n".join([output.summary, "", *facts]), "text": logs + text}
 
 
-def _listing(output: Output) -> tuple[str, int]:
-    """Return a line per unit key and the count listed; past GitHub's limit, the lines that fit and a pointer."""
+def _logs(output: Output) -> str:
+    """Return a block per unit log holding its last LOG_TAIL characters, within LOGS_LIMIT so the unit key listing
+    keeps the rest of GitHub's limit; past it, the blocks that fit and a note that the later ones are left out."""
+    blocks = [_block(unit, log[-LOG_TAIL:]) for unit, log in output.logs]
+    note = f"Log tails of {len(blocks)} failed units exceed half of GitHub's limit; the later ones are left out.\n"
+    return _fitting(blocks, LOGS_LIMIT, note)[0]
+
+
+def _block(unit: Unit, tail: str) -> str:
+    """Return a log tail fenced under its unit key, the fence one backtick longer than any backtick run in the tail."""
+    fence = "`" * max([3, *(len(run) + 1 for run in re.findall("`+", tail))])
+    return f"Log tail of {unit.kind} `{unit.key}`:\n{fence}\n{tail}\n{fence}\n"
+
+
+def _listing(output: Output, limit: int) -> tuple[str, int]:
+    """Return a line per unit key and the count listed; past the limit, the lines that fit and a pointer."""
     lines = [f"- {unit.kind} `{unit.key}`\n" for unit in output.units]
-    if sum(map(len, lines)) <= TEXT_LIMIT:
-        return "".join(lines), len(lines)
-    tail = f"The full list of {len(lines)} unit keys is at {output.details}"
-    fits = sum(1 for size in accumulate(map(len, lines)) if size + len(tail) <= TEXT_LIMIT)
-    return "".join(lines[:fits]) + tail, fits
+    return _fitting(lines, limit, f"The full list of {len(lines)} unit keys is at {output.details}")
+
+
+def _fitting(parts: list[str], limit: int, note: str) -> tuple[str, int]:
+    """Return every part and their count when all fit in the limit; past it, the leading parts that fit beside the
+    note, then the note, and their count."""
+    if sum(map(len, parts)) <= limit:
+        return "".join(parts), len(parts)
+    fits = sum(1 for size in accumulate(map(len, parts)) if size + len(note) <= limit)
+    return "".join(parts[:fits]) + note, fits
 
 
 def _advance(before: str | None, status: str, conclusion: str | None) -> None:
@@ -154,11 +181,13 @@ class Checks:
         *,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.time,
+        registry: metrics.Registry | None = None,
     ) -> None:
         self.repo = repo
         self.auth: Token = auth if auth is not None else GitHubAppAuth(f"github.com/{repo}", permissions=PERMISSIONS)
         self.sleep = sleep
         self.clock = clock
+        self.registry = registry
         self.runs: dict[Key, tuple[int, str]] = {}
 
     def status(self, key: Key) -> str | None:
@@ -213,11 +242,15 @@ class Checks:
         return _json(self._request(method, path, body), method, path)
 
     def _request(self, method: str, path: str, body: Mapping[str, Any]) -> requests.Response:
-        """Send one check runs request with a fresh token."""
-        return requests.request(
+        """Send one check runs request with a fresh token, setting the registry's GitHub calls left from its answer
+        when the poster has a registry."""
+        response = requests.request(
             method,
             f"{API}/repos/{self.repo}/{path}",
             headers={"Authorization": f"Bearer {self.auth.get_token()}", **HEADERS},
             json=body,
             timeout=TIMEOUT,
         )
+        if self.registry is not None:
+            metrics.observe_rate(self.registry, response.headers)
+        return response

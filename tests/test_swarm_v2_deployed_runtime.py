@@ -267,6 +267,7 @@ def proof_controller(tmp_path, monkeypatch):
         ("proof-123abc-t1-1", "ci", "hive"),
         ("proof-123abc-t1-1", "plan", "hive"),
         ("proof-123abc-t1-1", "dispatch", "hive"),
+        ("proof-123abc-t1-1", "expert", "hive"),
     ],
 )
 def test_proof_engineer_placement_preserves_other_swarms_and_lanes(
@@ -520,7 +521,7 @@ def test_a_controller_with_no_local_accounts_sizes_engineer_and_ci_lanes_from_fl
     finally:
         service.stop()
 
-    assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}
+    assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0, "review": 0}
     assert decision["placeable"] == {"claude": 3, "codex": 0}
     assert [(row["name"], row["sessions"], row["cap"]) for row in decision["accounts"]] == [
         (ACCOUNT, 1, 2),

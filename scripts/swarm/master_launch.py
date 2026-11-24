@@ -18,6 +18,7 @@ from scripts.swarm import (
     master_lock,
     master_start,
     model_pick,
+    seat_heads,
     seat_spawn,
     take_master,
 )
@@ -155,7 +156,7 @@ def _resume(store: RedisStore, slug: str, runtime: Any, at: int, previous: Previ
             launched_at=at,
             idle_ticks=0,
         )
-        store.put_agent(slug, record)
+        store.revive_agent(slug, record)
     except Exception:
         runtime.retire(replace(agent, pane_id=placed.pane_id))
         store.seats.record_exit(agent.name, seat, "its resumed record was refused")
@@ -171,7 +172,7 @@ def fill(saved, config):
     kept = {key: value for key, value in saved.items() if value}
     if harness not in effort_range.EFFORTS:
         return {**defaults, **kept}
-    pick = model_pick.frontier(harness)
+    pick = model_pick.master(config, harness)
     effort = effort_range.clamp(harness, kept.get("effort", pick.effort), effort_range.bounds(config, MASTER))
     return {**defaults, "harness": harness, "model": pick.model, **kept, "effort": effort}
 
@@ -230,8 +231,11 @@ def _new(store: RedisStore, slug: str, runtime: Any, at: int, forced: bool) -> L
     return Launched(name, record.pane_id, record.seat, FORCED if forced else NEW)
 
 
-def _front_doors(store, slug, live):
-    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.name in live]
+def _front_doors(store: RedisStore, slug: str, live: set[str]) -> list[AgentRecord]:
+    listed = store.agents(slug)
+    return [
+        a for a in listed if master_seats.is_lead(slug, a) and a.name in live and not seat_heads.superseded(a, listed)
+    ]
 
 
 def _starting_leads(store, slug):

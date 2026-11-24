@@ -89,12 +89,21 @@ SECRETISH_NAME = re.compile(
     r"(?i)(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|APIKEY|CREDENTIAL"
     r"|PRIVATE_?KEY|ACCESS_?KEY|SESSION_?KEY|AUTH)"
 )
+SET_TEST = re.compile(
+    r"\s*(?:test|\[\[?)\s+-[nz]\s+"
+    r"\"\$(?:\{[A-Za-z_][A-Za-z0-9_]*(?::?-)?\}|[A-Za-z_][A-Za-z0-9_]*)\"(?:\s+\]\]?)?\s*"
+)
+XTRACE = re.compile(r"\s-[A-Za-z]*x|\bxtrace\b")
 
 QUOTING = re.compile(r"[\"'\\]")
 PROC_DIR = re.compile(r"/proc\b")
 SHELL_WORD_BREAK = re.compile(r"[\s;|&()<>]+")
 CD_OPERAND = re.compile(r"\b(?:cd|pushd)(?:\s+-\S*)*\s+(\S+)")
 BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
+PID_NAMES = frozenset({"self", "thread-self"})
+DEPTH_SHIFTING_SEGMENTS = frozenset({".", "..", "**"})
+LINK_SEGMENTS = ("cwd", "root", "fd")
+EXPANDING_SEGMENT = re.compile(r"[$`{]")
 
 
 READER_VERBS = {
@@ -190,10 +199,34 @@ NAME_STAGE = (
 NEUTRAL_STAGE = re.compile(r"^\s*(sort|uniq|column|tr)\b")
 
 
-HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1.*?^\s*\2\s*$", re.S | re.M)
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1([^\n]*)\n(.*?)^\s*\2\s*$", re.S | re.M)
+HEREDOC_TOKEN = re.compile(r"<<AHHEREDOC(\d+)([^\n]*)")
+SCRIPT_RUNNERS = SHELLS | SOURCERS | {"eval", "su", "ksh", "mksh", "ash", "fish", "csh", "tcsh"}
+LAUNCHERS = {
+    "sudo",
+    "doas",
+    "env",
+    "command",
+    "exec",
+    "time",
+    "nohup",
+    "nice",
+    "timeout",
+    "xargs",
+    "stdbuf",
+    "setsid",
+    "busybox",
+}
 SEGMENT_DELIM = re.compile(r"&&|\|\||;|\n")
 STAGE_DELIM = re.compile(r"(?<!\|)\|(?!\|)")
-SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`|<\(([^()]*)\)")
+SUBSTITUTION_OPEN = re.compile(r"\$\(|<\(|`")
+BODY_SUBSTITUTION_OPEN = re.compile(r"\\.|\$\(|`", re.S)
+BACKTICK = re.compile("`")
+FIRST_CLOSE = re.compile(r"[^()]*\)")
+PAREN_OPENERS = ("$(", "<(")
+NESTED_OPENS = ("(", "'", '"', "`")
+CLOSERS = {"(": ")", "'": "'", '"': '"', "`": "`"}
+MAX_SUBSTITUTION_DEPTH = 8
 VERB_PREFIX = re.compile(
     r"^(\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:sudo\s+(?:-\S+\s+)*|command\s+)?(?:\S*/)?(grep|egrep|fgrep|rg))(?=\s)"
 )
@@ -225,24 +258,86 @@ def split_outside_quotes(delim, text):
     return parts
 
 
-def strip_heredocs(cmd):
-    """Drop heredoc bodies — they are data fed to a command, not commands."""
-    return HEREDOC.sub("<<HEREDOC", cmd)
+def scan_step(stack: list[str], text: str, i: int) -> int:
+    """Apply text[i] to the stack of open parentheses and quotes; the number of characters it consumes."""
+    ch, top = text[i], stack[-1]
+    if ch == "\\" and top != "'":
+        return 2
+    if ch == CLOSERS[top]:
+        stack.pop()
+    elif top == "(" and ch in NESTED_OPENS:
+        stack.append(ch)
+    elif top == '"' and text.startswith("$(", i):
+        stack.append("(")
+        return 2
+    return 1
 
 
-def mask_heredocs(cmd):
+def paren_close(text: str, start: int) -> int | None:
+    """Index of the parenthesis balancing the one opened just before start, quoted and escaped text skipped, or None."""
+    stack = ["("]
+    positions = iter(range(start, len(text)))
+    for i in positions:
+        for _ in range(scan_step(stack, text, i) - 1):
+            next(positions, None)
+        if not stack:
+            return i
+    return None
+
+
+def substitution_close(text: str, opened: re.Match[str]) -> int | None:
+    """Index closing the substitution an opener starts: its balanced parenthesis, else its first one, or next backtick."""
+    if opened.group() == "`":
+        close = BACKTICK.search(text, opened.end())
+        return close.start() if close else None
+    if opened.group() not in PAREN_OPENERS:
+        return None
+    balanced = paren_close(text, opened.end())
+    if balanced is not None:
+        return balanced
+    first = FIRST_CLOSE.match(text, opened.end())
+    return first.end() - 1 if first else None
+
+
+def substitutions(text: str, opener: re.Pattern[str] = SUBSTITUTION_OPEN) -> list[str]:
+    """The body of each outermost command or process substitution in the text, read to its close."""
+    bodies: list[str] = []
+    end = 0
+    for opened in opener.finditer(text):
+        if opened.start() < end:
+            continue
+        close = substitution_close(text, opened)
+        if close is not None:
+            bodies.append(text[opened.end() : close])
+            end = close + 1
+    return bodies
+
+
+def strip_heredocs(cmd: str) -> str:
+    """Drop heredoc bodies — they are data fed to a command, not commands; the delimiter line stays."""
+    return HEREDOC.sub(lambda m: "<<HEREDOC" + m.group(3), cmd)
+
+
+def mask_heredocs(cmd: str) -> tuple[str, list[re.Match[str]]]:
     """``strip_heredocs`` that can be undone: (masked command, original heredocs)."""
-    kept = []
+    kept: list[re.Match[str]] = []
 
-    def _keep(match):
-        kept.append(match.group(0))
-        return f"<<AHHEREDOC{len(kept) - 1}"
+    def _keep(match: re.Match[str]) -> str:
+        kept.append(match)
+        return f"<<AHHEREDOC{len(kept) - 1}{match.group(3)}"
 
     return HEREDOC.sub(_keep, cmd), kept
 
 
-def unmask_heredocs(cmd, kept):
-    return re.sub(r"<<AHHEREDOC(\d+)", lambda m: kept[int(m.group(1))], cmd)
+def unmask_heredocs(cmd: str, kept: list[re.Match[str]]) -> str:
+    """The masked command with each heredoc's opener and body put back around its delimiter line."""
+
+    def _restore(token: re.Match[str]) -> str:
+        heredoc = kept[int(token.group(1))]
+        line_start, line_end = heredoc.span(3)
+        return heredoc.string[heredoc.start() : line_start] + token.group(2) + heredoc.string[line_end : heredoc.end()]
+
+    return HEREDOC_TOKEN.sub(_restore, cmd)
 
 
 def split_commands(cmd):
@@ -260,13 +355,61 @@ def tokens_of(text):
         return text.split()
 
 
-def verb_index(tokens):
-    for i, tok in enumerate(tokens):
-        if tok in ("sudo", "command", "env") and len(tokens) > i + 1:
+WRAPPER_VALUE_FLAGS = {
+    "sudo": {
+        "-u",
+        "--user",
+        "-g",
+        "--group",
+        "-h",
+        "--host",
+        "-p",
+        "--prompt",
+        "-C",
+        "--close-from",
+        "-D",
+        "--chdir",
+        "-R",
+        "--chroot",
+        "-T",
+        "--command-timeout",
+        "-r",
+        "--role",
+        "-t",
+        "--type",
+        "-U",
+        "--other-user",
+    },
+    "env": {"-u", "--unset", "-C", "--chdir"},
+}
+
+
+def wrapper_option_takes_value(wrapper: str, option: str) -> bool:
+    flags = WRAPPER_VALUE_FLAGS[wrapper]
+    if option.startswith("--"):
+        return option in flags
+    for i, char in enumerate(option[1:], 1):
+        if f"-{char}" in flags:
+            return i == len(option) - 1
+    return False
+
+
+def verb_index(tokens: list[str]) -> int:
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in ("sudo", "command", "env") and i + 1 < len(tokens):
+            i += 1
+            if tok != "command":
+                while i < len(tokens) and tokens[i].startswith("-"):
+                    option = tokens[i]
+                    i += 1
+                    if option == "--":
+                        break
+                    i += int(wrapper_option_takes_value(tok, option) and i < len(tokens))
             continue
-        if ASSIGNMENT.match(tok) and len(tokens) > i + 1:
-            continue
-        if tok.startswith("-") and i > 0 and tokens[i - 1] == "sudo":
+        if ASSIGNMENT.match(tok) and i + 1 < len(tokens):
+            i += 1
             continue
         return i
     return len(tokens)
@@ -411,11 +554,19 @@ def counts_only(stage):
     return False
 
 
-def env_dump_verdict(command):
+def pod_command(toks: list[str]) -> list[str]:
+    """The words after -- of a kubectl exec stage, the command the pod runs; the tokens themselves otherwise."""
+    if verb_of(toks) != "kubectl" or "--" not in toks:
+        return toks
+    end = toks.index("--")
+    return toks[end + 1 :] if "exec" in toks[:end] else toks
+
+
+def env_dump_verdict(command: str) -> str | None:
     stages = split_stages(command)
     if not stages:
         return None
-    toks = tokens_of(stages[0])
+    toks = pod_command(tokens_of(stages[0]))
     if not toks:
         return None
     verb = verb_of(toks)
@@ -460,27 +611,62 @@ def proc_environ_verdict(command, cwd):
     return None
 
 
-def path_reads_environ(word):
-    *dirs, leaf = word.split("/")
-    if any(fnmatch.fnmatchcase("proc", d) for d in dirs[:-1]):
-        return leaf_names_environ(leaf)
-    return any("$" in d for d in dirs) and fnmatch.fnmatchcase("environ", leaf)
+def path_reads_environ(word: str) -> bool:
+    segments = word.split("/")
+    *dirs, leaf = segments
+    if any("$" in d for d in dirs) and fnmatch.fnmatchcase("environ", leaf):
+        return True
+    parts = [p for p in segments if p]
+    return any(fnmatch.fnmatchcase("proc", p) and proc_tail_reads_environ(parts[i + 1 :]) for i, p in enumerate(parts))
 
 
-def leaf_names_environ(leaf):
-    return "$" in leaf or "`" in leaf or fnmatch.fnmatchcase("environ", leaf)
+def proc_tail_reads_environ(tail: list[str]) -> bool:
+    if not tail or not leaf_names_environ(tail[-1]):
+        return False
+    middle = tail[:-1]
+    if middle and any(s in DEPTH_SHIFTING_SEGMENTS or EXPANDING_SEGMENT.search(s) for s in tail):
+        return True
+    if middle and names_pid(middle[0]) and any(names_link(s) for s in middle[1:]):
+        return True
+    if len(middle) == 3:
+        return names_pid(middle[0]) and fnmatch.fnmatchcase("task", middle[1]) and names_pid(middle[2])
+    return len(middle) == 1 and names_pid(middle[0])
 
 
-def echo_secret_verdict(command):
+def names_link(segment: str) -> bool:
+    return any(fnmatch.fnmatchcase(link, segment) for link in LINK_SEGMENTS)
+
+
+def names_pid(segment: str) -> bool:
+    return segment.isdigit() or segment in PID_NAMES or bool(GLOB_CHARS.search(segment))
+
+
+def leaf_names_environ(leaf: str) -> bool:
+    return "$" in leaf or "`" in leaf or "}" in leaf or fnmatch.fnmatchcase("environ", leaf)
+
+
+def echo_secret_verdict(command: str) -> str | None:
     if not re.search(r"\b(echo|printf)\b", command):
         return None
-    for name in re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", command):
-        if SECRETISH_NAME.search(name):
-            return block(
-                "printing ${} to stdout".format(name),
-                KIND_ENVIRONMENT,
-            )
+    for piece in [command] if XTRACE.search(command) else untested_pieces(command):
+        for name in re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", piece):
+            if SECRETISH_NAME.search(name):
+                return block(f"printing ${name} to stdout", KIND_ENVIRONMENT)
     return None
+
+
+def untested_pieces(command: str) -> list[str]:
+    """The command's text with every part of a single quoted -c script that is only a set test left out."""
+    pieces: list[str] = []
+    rest = command
+    for stage in split_outside_quotes(STAGE_DELIM, command)[::2]:
+        for script in shell_scripts(tokens_of(stage)):
+            head, quoted, tail = rest.partition(f"'{script}'")
+            if quoted:
+                parts = split_outside_quotes(SEGMENT_DELIM, script)
+                pieces += [head, *(part for part in parts if not SET_TEST.fullmatch(part))]
+                rest = tail
+    return [*pieces, rest]
 
 
 def awk_environ_verdict(command: str) -> str | None:
@@ -754,8 +940,8 @@ def prints_gh_token(toks):
     return False
 
 
-def gh_token_verdict(command):
-    inner = [next(g for g in m.groups() if g is not None) for m in SUBSTITUTION.finditer(command)]
+def gh_token_verdict(command: str) -> str | None:
+    inner = substitutions(command)
     if any(prints_gh_token(tokens_of(text)) for text in split_stages(command) + inner):
         return (
             block("printing the GitHub token (gh auth status or gh auth token)", KIND_ENVIRONMENT)
@@ -975,9 +1161,9 @@ def rewrite_stage(stage_text, verb):
     return VERB_PREFIX.sub(lambda m: m.group(1) + " " + excludes, stage_text, count=1)
 
 
-def stage_verdict(stage_text, ctx):
-    for m in SUBSTITUTION.finditer(stage_text):
-        inner = next(g for g in m.groups() if g is not None).strip()
+def stage_verdict(stage_text: str, ctx: Context) -> Verdict:
+    for body in substitutions(stage_text):
+        inner = body.strip()
         if inner.startswith("<"):
             tok, kind = first_sensitive([inner[1:].strip()])
             if kind:
@@ -1022,7 +1208,7 @@ def stage_verdict(stage_text, ctx):
     if verb in INTERPRETERS:
         tok, kind = first_sensitive(operands_of(toks, verb))
         if not kind:
-            tok, kind = first_sensitive(SENSITIVE_FRAGMENT.findall(stage_text))
+            tok, kind = first_sensitive(SENSITIVE_FRAGMENT.findall(" ".join(toks[verb_index(toks) :])))
         return read_block(tok, kind) if kind else ALLOW
 
     if verb not in READER_VERBS:
@@ -1081,6 +1267,42 @@ def script_verdict(stage_text: str, ctx: Context) -> Verdict:
     return stage_verdict(stage_text, ctx)
 
 
+def runs_input_script(stage_text: str) -> bool:
+    """Whether the stage, its wrapped or launched command or a substitution in it runs a shell, source or eval."""
+    for inner in substitutions(stage_text):
+        if runs_input_script(inner):
+            return True
+    toks = tokens_of(stage_text)
+    if verb_of(toks) in WRAPPERS:
+        toks = inner_command([word for tok in toks for word in tok.split()]) or []
+    words = [tok.split("/")[-1] for tok in toks if not ASSIGNMENT.match(tok)]
+    if words and words[0] in LAUNCHERS:
+        return any(word in SCRIPT_RUNNERS for word in words)
+    return verb_of(toks) in SCRIPT_RUNNERS
+
+
+def heredoc_verdict(segment: str, heredocs: list[re.Match[str]], ctx: Context) -> Verdict:
+    """The verdict on each heredoc body of the segment, checked as a command once a stage of it runs a shell."""
+    runs_script = any(runs_input_script(stage) for stage in split_outside_quotes(STAGE_DELIM, segment)[::2])
+    for token in HEREDOC_TOKEN.finditer(segment):
+        index = int(token.group(1))
+        if index >= len(heredocs):
+            continue
+        v = heredoc_body_verdict(heredocs[index], runs_script, ctx)
+        if v.block:
+            return v
+    return ALLOW
+
+
+def heredoc_body_verdict(heredoc: re.Match[str], runs_script: bool, ctx: Context) -> Verdict:
+    """A body a shell runs is judged as a command; an unquoted body's command substitutions are judged as stages."""
+    if runs_script:
+        return decide_bash({"command": heredoc.group(4)}, Context(ctx.cwd, ctx.recursive))
+    if heredoc.group(1):
+        return ALLOW
+    return substitutions_verdict(heredoc.group(4), ctx, BODY_SUBSTITUTION_OPEN)
+
+
 def segment_verdict(segment: str, ctx: Context) -> Verdict:
     ctx.find_filters = None
     parts = split_outside_quotes(STAGE_DELIM, segment)
@@ -1097,6 +1319,33 @@ def segment_verdict(segment: str, ctx: Context) -> Verdict:
     return Verdict(rewrite="".join(parts)) if changed else ALLOW
 
 
+def substitutions_verdict(
+    text: str, ctx: Context, opener: re.Pattern[str] = SUBSTITUTION_OPEN, depth: int = 0
+) -> Verdict:
+    """The first refusal among the substitution bodies in the text, each judged as a command; too deep a nest is refused."""
+    bodies = substitutions(text, opener)
+    if bodies and depth >= MAX_SUBSTITUTION_DEPTH:
+        return Verdict(block=block(f"command substitutions nested over {MAX_SUBSTITUTION_DEPTH} deep", KIND_DOTENV))
+    for body in bodies:
+        v = body_verdict(body, ctx, depth + 1)
+        if v.block:
+            return v
+    return ALLOW
+
+
+def body_verdict(body: str, ctx: Context, depth: int) -> Verdict:
+    """A substitution body at a nesting depth judged as a command: its own substitutions first, then each segment."""
+    inner = Context(ctx.cwd, ctx.recursive)
+    v = substitutions_verdict(body, inner, depth=depth)
+    if v.block:
+        return v
+    for segment in split_outside_quotes(SEGMENT_DELIM, body)[::2]:
+        v = segment_verdict(segment, inner)
+        if v.block:
+            return v
+    return ALLOW
+
+
 def decide_bash(tool_input: Mapping[str, object], ctx: Context | None = None) -> Verdict:
     command = tool_input.get("command") or ""
     if not command:
@@ -1106,6 +1355,9 @@ def decide_bash(tool_input: Mapping[str, object], ctx: Context | None = None) ->
     if reason:
         return Verdict(block=reason)
     command, heredocs = mask_heredocs(command)
+    v = substitutions_verdict(command, ctx)
+    if v.block:
+        return v
     parts = split_outside_quotes(SEGMENT_DELIM, command)
     changed = False
     for i in range(0, len(parts), 2):
@@ -1116,7 +1368,9 @@ def decide_bash(tool_input: Mapping[str, object], ctx: Context | None = None) ->
             reason = check(seg)
             if reason:
                 return Verdict(block=reason)
-        v = segment_verdict(seg, ctx)
+        v = heredoc_verdict(seg, heredocs, ctx)
+        if not v.block:
+            v = segment_verdict(seg, ctx)
         if v.block:
             return v
         if v.rewrite:

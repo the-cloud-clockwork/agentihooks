@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/expert_lineage.py:scripts.swarm.expert_lineage.x_stop:ea0180470364e6594babe8dcddd01df062802c4341fc59a6f5b6c0f8c21d8baf": {
+    "reader": "standards_reader",
+    "reason": "_end reads proof only in `if proof:`, and \"\" and None are both falsy, so nothing is written to PROOFS and every write, return value and error is unchanged."
+  }
+}

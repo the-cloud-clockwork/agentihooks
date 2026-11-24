@@ -1,5 +1,6 @@
 import json
 import uuid
+from typing import Any
 
 from scripts.swarm_ledger import api_service
 from tests.swarm_ledger.test_ledger_authority import SLUG, send, server
@@ -768,6 +769,24 @@ def test_item_revision_uses_canonical_utf8_content(live, monkeypatch):
     )
 
 
+@pytest.mark.feature("swarm-focus-read")
+def test_the_focus_read_serves_every_focus_and_one_target(live: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    focus = {"id": "f1", "verb": "focus", "target": "tasks/t1", "by": "operator", "at": 0, "reason": ""}
+    tasks = [{"id": "t1", "lane": "eng", "state": "open"}, {"id": "t2", "lane": "eng", "state": "done"}]
+    stored(monkeypatch, {"tasks": tasks, "phases": [], "freezes": [focus], "_meta": {"rev": 1}})
+    monkeypatch.setattr(routes, "fix_phase", lambda services, slug: "")
+    status, reply = request(live, "GET", "focus")
+    assert status == 200 and reply["next_cursor"] is None
+    [row] = reply["data"]
+    assert (row["target"], row["claimable"], row["done"]) == ("tasks/t1", 1, [])
+    assert row["tasks"] == [{"id": "t1", "lane": "eng", "state": "open", "verdict": "claimable"}]
+    assert row["unclaimed_minutes"] >= 0
+    status, reply = request(live, "GET", "focus/tasks/t2")
+    assert (status, reply["data"]["done"], reply["data"]["tasks"]) == (200, ["t2"], [])
+    status, reply = request(live, "GET", "focus/tasks/nope")
+    assert (status, reply["error"]["code"]) == (404, "resource_missing")
+
+
 def test_metadata_resource_reports_its_named_fields(live, monkeypatch):
     document = {
         "title": "Report",
@@ -1400,10 +1419,11 @@ def test_upload_refusals_remain_json_and_do_not_mutate(live):
 
 @pytest.mark.parametrize("error", [OSError("Backend failure"), ValueError("Invalid stored task")])
 def test_storage_errors_have_a_stable_bounded_envelope(live, monkeypatch, caplog, error):
-    def unreadable(slug, **kwargs):
+    def unreadable(slug: str, *keys: str, **kwargs: object) -> None:
         raise error
 
     monkeypatch.setattr(server.repository, "current", unreadable)
+    monkeypatch.setattr(server.repository, "read", unreadable)
     assert request(live, "GET", "metadata") == (
         500,
         {
@@ -2503,6 +2523,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         plan="",
         plan_slice="",
         not_duplicate="",
+        covers_job="",
         scaffold=False,
         description="",
         phase="",

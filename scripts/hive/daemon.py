@@ -256,8 +256,9 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
 
 
 def emit_presence(redis: "Redis", local_id: str, now_ms: int) -> None:
-    """Marks this hive seen over OpenTelemetry with its name, headed flag, release and agent processes by harness."""
-    from hooks.observability import presence
+    """Marks this hive seen over OpenTelemetry with its name, headed flag, release and agent processes by harness, then
+    exports the agent sessions seen on this home and their last token fill and burn rate."""
+    from hooks.observability import presence, token_monitor
 
     shown = registry.show(redis, local_id) or {}
     agents = {harness: len(pids) for harness, pids in account_sessions.local_processes().items()}
@@ -269,6 +270,8 @@ def emit_presence(redis: "Redis", local_id: str, now_ms: int) -> None:
         agents,
         now_ms / 1000,
     )
+    presence.export_agents(now_ms / 1000)
+    token_monitor.export_tokens(now_ms / 1000)
 
 
 def _headroom_wait_failed(exc: Exception, stop: threading.Event) -> None:
@@ -414,18 +417,28 @@ def install(
     unit_dir: Path | None = None,
     run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run,
 ) -> bool:
+    from scripts.swarm import timer
+
     binary = binary or shutil.which("agentihooks")
     if not binary:
         raise registry.HiveError("agentihooks executable not found")
     unit_dir = unit_dir or Path.home() / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
-    path = unit_dir / UNIT
-    text = unit(binary)
-    if not path.exists() or path.read_text() != text:
-        path.write_text(text)
+    writer = "agentihooks-ledger-writer.service"
+    units = {UNIT: unit(binary), writer: timer.units(binary)[writer]}
+    changed = False
+    for name, text in units.items():
+        path = unit_dir / name
+        if not path.exists() or path.read_text() != text:
+            path.write_text(text)
+            changed = True
+    if changed:
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=True)
-    result = run(["systemctl", "--user", "enable", "--now", UNIT], capture_output=True, text=True, timeout=30)
-    return result.returncode == 0
+    results = [
+        run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
+        for name in units
+    ]
+    return all(result.returncode == 0 for result in results)
 
 
 def restart(run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> bool:
@@ -723,6 +736,7 @@ def _pane_ids(herdr: "HerdrRuntime") -> list[str] | None:
 def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> dict:
     from dataclasses import asdict
 
+    from scripts.swarm import live_binding
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(redis)
@@ -734,18 +748,22 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
     report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
     report["observed_at"] = int(time.time() * 1000)
     report["started_at"] = started_ms()
-    admitted = {
-        agent.execution_id: {"generation": agent.generation, "pane": asdict(herdr.observe(agent))}
-        for _, agent in records
-        if not agent.runtime_target and agent.hive == local_id
-    }
+    admitted = [agent for _, agent in records if not agent.runtime_target and agent.hive == local_id]
     if admitted:
-        report["admitted"] = admitted
+        bound = live_binding.observed(herdr.bindings(admitted))
+        report["admitted"] = {
+            agent.execution_id: {
+                "generation": agent.generation,
+                "pane": asdict(herdr.observe(agent)),
+                "binding": bound.get(agent.name),
+            }
+            for agent in admitted
+        }
     if not hosted:
         return report
     report["process_namespace"] = local_namespace()
     report["pane_ids"] = _pane_ids(herdr)
-    facts = herdr.bindings([agent for _, agent in hosted])
+    facts = live_binding.observed(herdr.bindings([agent for _, agent in hosted]))
     report["panes"] = herdr.conversations() or {}
     for slug, agent in hosted:
         report["executions"][agent.execution_id] = {

@@ -1,0 +1,14 @@
+rules:
+  - id: master-effort-below-xhigh
+    languages: [python]
+    severity: ERROR
+    message: The shared master effort floor must be at least xhigh for launch, handoff and restore.
+    paths:
+      include:
+        - /scripts/swarm/effort_range.py
+        - master-effort-below-xhigh.py
+    pattern-either:
+      - pattern: MASTER_FLOOR = "off"
+      - pattern: MASTER_FLOOR = "low"
+      - pattern: MASTER_FLOOR = "medium"
+      - pattern: MASTER_FLOOR = "high"

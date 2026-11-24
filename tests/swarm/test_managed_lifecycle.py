@@ -551,3 +551,100 @@ def test_the_binding_pass_keeps_a_record_from_another_host_or_with_unknown_liven
     from scripts.swarm import live_binding
 
     assert live_binding.settle(rig.store, rig.agent, None) is None
+
+
+@pytest.mark.feature("managed-process-owner-observation")
+def test_a_foreign_managed_server_has_unknown_process_liveness(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("socket.gethostname", lambda: "observer")
+    rig.bindings.put(SLUG, replace(rig.record, host_id="owner", state=CONNECTED))
+    local_start = Mock(side_effect=AssertionError("foreign process inspected locally"))
+    monkeypatch.setattr(supervisor, "start_time", local_start)
+    rig.runner.hive = SimpleNamespace(holder=lambda name: "owner")
+    reader = Mock(side_effect=AssertionError("foreign binding inspected locally"))
+    monkeypatch.setattr(live_binding, "read", reader)
+
+    facts = rig.runner.bindings([rig.agent])
+
+    assert rig.agent.runtime_target == {}
+    assert facts == {rig.agent.name: {"process": None}}
+    assert live_binding.record(rig.store, SLUG, rig.agent, facts[rig.agent.name], 1000) == {}
+    assert live_binding.findings(rig.store, SLUG) == []
+    local_start.assert_not_called()
+    reader.assert_not_called()
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == CONNECTED
+
+
+@pytest.mark.feature("managed-process-owner-observation")
+def test_a_local_managed_server_keeps_its_matching_binding(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("socket.gethostname", lambda: "observer")
+    rig.bindings.put(SLUG, replace(rig.record, host_id="observer", state=CONNECTED))
+    observed = {**live_binding.assignment(rig.agent), "hooks": True}
+    reader = Mock(return_value=observed)
+    monkeypatch.setattr(live_binding, "read", reader)
+
+    facts = rig.runner.bindings([rig.agent])
+
+    assert facts == {rig.agent.name: observed}
+    reader.assert_called_once_with(rig.agent, 123)
+    assert live_binding.record(rig.store, SLUG, rig.agent, facts[rig.agent.name], 1000) == {}
+    assert live_binding.findings(rig.store, SLUG) == []
+
+
+@pytest.mark.feature("managed-process-owner-observation")
+def test_a_dead_local_managed_server_still_has_a_process_mismatch(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("socket.gethostname", lambda: "observer")
+    rig.bindings.put(SLUG, replace(rig.record, host_id="observer", state=CONNECTED))
+    monkeypatch.setattr(supervisor, "start_time", lambda pid: None)
+    reader = Mock(side_effect=AssertionError("dead binding inspected"))
+    monkeypatch.setattr(live_binding, "read", reader)
+
+    facts = rig.runner.bindings([rig.agent])
+
+    assert facts == {rig.agent.name: {"process": False}}
+    assert live_binding.record(rig.store, SLUG, rig.agent, facts[rig.agent.name], 1000) == {
+        "process": {
+            "expected": True,
+            "actual": False,
+            "observer": "observer",
+            "owner": {"transport": "codex_app_server", "host": "observer"},
+        }
+    }
+    assert [finding.id for finding in live_binding.findings(rig.store, SLUG)] == [
+        f"live-binding/{rig.agent.name}/process"
+    ]
+    reader.assert_not_called()
+
+
+@pytest.mark.feature("live-binding-process-provenance")
+def test_a_process_absence_another_hive_observed_keeps_that_hive_and_the_transport_owner(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("socket.gethostname", lambda: "controller")
+    rig.bindings.put(SLUG, replace(rig.record, host_id="root", state=CONNECTED))
+    process = {
+        "expected": True,
+        "actual": False,
+        "observer": "hive-one",
+        "owner": {"transport": "codex_app_server", "host": "root"},
+    }
+
+    differences = live_binding.record(rig.store, SLUG, rig.agent, {"process": False, "observer": "hive-one"}, 1000)
+
+    assert differences == {"process": process}
+    stored = json.loads(rig.store.redis.hget(rig.store.key(SLUG, "live-bindings"), rig.agent.name))
+    assert stored == {"agent": rig.agent.name, "at": 1000, "state": "mismatched", "differences": {"process": process}}
+    assert [finding.as_dict() for finding in live_binding.findings(rig.store, SLUG)] == [
+        {
+            "kind": "live binding",
+            "subject": f"{rig.agent.name}/process",
+            "summary": f"{rig.agent.name} differs in process",
+            "evidence": ["expected True; observed False", "observed by hive-one", "owned by codex_app_server on root"],
+            "threshold": "assigned launch must match",
+        }
+    ]

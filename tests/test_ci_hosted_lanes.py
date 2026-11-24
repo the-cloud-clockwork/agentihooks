@@ -1,3 +1,4 @@
+import re
 from functools import cache
 from itertools import product
 from pathlib import Path
@@ -40,12 +41,10 @@ LANE_USERS = {
     "mutation-line-selection-proof.yml",
     "mutation-refinement-proof.yml",
     "test.yml",
-    "proofs.yml",
     "test-leaks.yml",
     "swarm-node-image.yml",
     "hive-worker.yml",
     "lost-runner.yml",
-    "chart-release.yml",
     "ci-lab-image.yml",
     "gate-required.yml",
     "changelog.yml",
@@ -66,9 +65,10 @@ EXCLUDED = {
     "codex-cache.yml": "main push, six hourly and manual, one short job that seeds the Codex and nats server caches, no pull request trigger",
     "coverage-stability.yml": "a manual dispatch runs one short job that only reads dev run data",
     "pages.yml": "a rare manual docs build and deploy; the github-pages environment decides which branches deploy",
+    "proofs.yml": "each proof dispatch runs in its own focused proof group and never waits behind a Tests dispatch",
     "publish-pypi.yml": "operator release path from main",
     "release.yml": "operator release path; a dry run tags and pushes nothing",
-    "swarm-image.yml": "a manual dispatch runs no job; its jobs are gated to a dev push",
+    "swarm-image.yml": "a manual dispatch runs no job; its jobs are gated to a dev push or a published release",
 }
 if (_WORKFLOWS / "access-audit.yml").exists():
     EXCLUDED["access-audit.yml"] = "dev push, weekly and manual, one short read only job, no pull request trigger"
@@ -211,7 +211,7 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled() -> None:
                 seen.add(where)
                 assert resolved["queue"] == "max", (where, github)
                 assert not resolved["cancel-in-progress"], (where, github)
-            elif (where, resolved["group"]) in SERIAL:
+            elif (where, resolved["group"]) in {*SERIAL, ("proofs.yml", f"focused-proof-{github['run_id']}")}:
                 assert resolved["queue"] == "max" and not resolved["cancel-in-progress"], (where, github)
             else:
                 dev_push = (github["event_name"], github["ref"]) == ("push", "refs/heads/dev")
@@ -229,23 +229,21 @@ def test_no_required_run_or_its_callee_ever_reaches_a_lane():
     assert checked
 
 
-def test_the_run_id_last_digit_spreads_runs_over_three_lanes():
-    block = _block("proofs.yml")
-    lanes = [_resolve(block, run_id=run_id)["group"] for run_id in range(1000, 1010)]
+def test_the_run_id_last_digit_spreads_runs_over_three_lanes() -> None:
+    block = _block("test.yml")
+    lanes = [_resolve(block, event_name="workflow_dispatch", run_id=run_id)["group"] for run_id in range(1000, 1010)]
     assert lanes == ["hosted-lane-a"] * 3 + ["hosted-lane-b"] * 3 + ["hosted-lane-c"] * 4
 
 
-def test_a_focused_tests_proof_never_waits_on_a_lane_and_every_other_proof_keeps_one():
+@pytest.mark.feature("focused-proofs-never-wait-on-a-lane")
+def test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_waits_on_a_lane() -> None:
     block = _block("proofs.yml")
     options = _workflow("proofs.yml")[True]["workflow_dispatch"]["inputs"]["proof"]["options"]
-    assert "tests" in options
+    assert {"semgrep", "tests"} <= set(options)
     github = {"event_name": "workflow_dispatch", "ref": "refs/heads/diffcheck/plant", "workflow": "Proofs"}
     for run_id, proof in product(range(1000, 1010), options):
         resolved = _resolve(block, inputs={"proof": proof}, run_id=run_id, **github)
-        if proof == "tests":
-            assert resolved == {"group": f"focused-proof-{run_id}", "queue": "max", "cancel-in-progress": False}
-        else:
-            assert _is_lane(resolved["group"]), (proof, run_id)
+        assert resolved == {"group": f"focused-proof-{run_id}", "queue": "max", "cancel-in-progress": False}, proof
 
 
 def test_a_pull_request_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait_on() -> None:
@@ -267,15 +265,15 @@ def test_a_pull_request_mutation_job_never_holds_a_lane_that_proofs_or_dispatche
     assert not mutation & shared
 
 
-@pytest.mark.parametrize("caller", ["Tests", "Proofs"])
-def test_a_called_workflow_never_waits_on_its_callers_lane(caller):
+@pytest.mark.parametrize(("caller", "held"), [("Tests", "hosted-lane-a"), ("Proofs", "focused-proof-1000")])
+def test_a_called_workflow_never_waits_on_its_callers_group(caller: str, held: str) -> None:
     github = {
         "event_name": "workflow_dispatch",
         "ref": "refs/heads/diffcheck/plant",
         "workflow": caller,
         "run_id": 1000,
     }
-    assert _is_lane(_resolve(_block("test.yml" if caller == "Tests" else "proofs.yml"), **github)["group"])
+    assert _resolve(_block("test.yml" if caller == "Tests" else "proofs.yml"), **github)["group"] == held
     for name, (_, own) in DIRECT.items():
         assert _resolve(_block(name), **github) == {
             "group": f"{own}-1000",
@@ -325,3 +323,13 @@ def test_only_the_dev_push_worker_image_build_stays_uncapped_because_it_publishe
 def test_lane_titles_match_the_workflow_names():
     for name, (title, _) in DIRECT.items():
         assert _workflow(name)["name"] == title, name
+
+
+def _guide_lane_users() -> set[str]:
+    section = (_ROOT / "docs/ci-timing.md").read_text().split("\n## Proof dispatch lanes\n", 1)[1].split("\n## ", 1)[0]
+    table = section.split("| Lane user | Workflow file | Runs on a lane |\n|---|---|---|\n", 1)[1].split("\n\n", 1)[0]
+    return {":".join(re.findall(r"`([^`]+)`", row.split(" | ")[1])) for row in table.splitlines()}
+
+
+def test_the_ci_timing_guide_lists_every_pinned_lane_user() -> None:
+    assert _guide_lane_users() == LANE_USERS

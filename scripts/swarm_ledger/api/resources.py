@@ -18,30 +18,30 @@ def reply_size(reply: object) -> int:
     return len(json.dumps(reply, ensure_ascii=False).encode())
 
 
-def bounded(reply: dict) -> dict:
+def bounded(reply: dict, message: str = "Use the explicit export operation for this resource") -> dict:
     if reply_size(reply) > MAX_REPLY:
-        raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
+        raise APIError(413, "resource_too_large", message)
     return reply
 
 
+METADATA_FIELDS = (
+    "size",
+    "title",
+    "overview",
+    "orchestrator",
+    "chat_instructions",
+    "policy",
+    "time_left_minutes",
+    "closed_at",
+    "summary",
+)
+METADATA_META = ("rev", "updated_at", "created_at", "size", "seed_error")
+METADATA_KEYS = (*METADATA_FIELDS, *(f"_meta.{key}" for key in METADATA_META))
+
+
 def metadata(doc: dict) -> dict:
-    fields = (
-        "size",
-        "title",
-        "overview",
-        "orchestrator",
-        "chat_instructions",
-        "policy",
-        "time_left_minutes",
-        "closed_at",
-        "summary",
-    )
-    result = {key: doc[key] for key in fields if key in doc}
-    result["_meta"] = {
-        key: doc["_meta"][key]
-        for key in ("rev", "updated_at", "created_at", "size", "seed_error")
-        if key in doc["_meta"]
-    }
+    result = {key: doc[key] for key in METADATA_FIELDS if key in doc}
+    result["_meta"] = {key: doc["_meta"][key] for key in METADATA_META if key in doc["_meta"]}
     return result
 
 

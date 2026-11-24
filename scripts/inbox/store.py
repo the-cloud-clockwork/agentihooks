@@ -509,7 +509,7 @@ class InboxStore:
         items = [item for address in addresses for item in read(address)]
         return sorted({item.id: item for item in items}.values(), key=_order)
 
-    def acts_for(self, by, address, pipe=None):
+    def acts_for(self, by: str, address: str, pipe: Any = None) -> bool:
         by, address = self.names.resolve(by, pipe), self.names.resolve(address, pipe)
         if by == address:
             return True
@@ -517,6 +517,12 @@ class InboxStore:
             return False
         held = self.seats.watch(pipe, address) if pipe is not None else self.seats.occupant(address)
         return self.names.resolve(held.occupant, pipe) == by
+
+    def reached_through_pool(self, item: Item, replier: str) -> bool:
+        """Whether item reached replier through the master pool: it still sits at the seat that claimed it from the
+        pool and replier acts for that seat."""
+        holder = self.redis.hget(self.key("item", item.id), POOL_HOLDER)
+        return holder == item.address and self.acts_for(replier, item.address)
 
     def history(self, item_id):
         return [json.loads(entry) for entry in self.redis.lrange(self.key("history", item_id), 0, -1)]

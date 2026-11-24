@@ -44,26 +44,26 @@ stuck jobs, size the worker pool, and decide whether to replace the queue
 library. Phases: p1 find the cause, p2 fix and tune, p3 decide.
 
 ```bash
-agentihooks ledger --slug <slug> task add t1 "Find why the gateway returns 502 under load" --lane eng --phase p1 \
+agentihooks api --slug <slug> task add t1 "Find why the gateway returns 502 under load" --lane eng --phase p1 \
   --description "Symptom: 502s from the gateway above 200 requests a second. Done when the cause is shown by evidence and fixed or filed." \
   --kind troubleshoot --must "The cause of the 502s is shown by evidence and fixed by a merged pull request or filed as a task" \
   --check "The load test that reproduced the 502s runs clean, or the filed task names the cause" --judge master
-agentihooks ledger --slug <slug> task add t2 "Retry idempotent upstream calls in the gateway client" --lane eng --phase p2 \
+agentihooks api --slug <slug> task add t2 "Retry idempotent upstream calls in the gateway client" --lane eng --phase p2 \
   --description "Seam: the gateway client's upstream call. Done when a failed idempotent call is retried once, merged into dev." \
   --depends-on t1 --territory gateway/client
-agentihooks ledger --slug <slug> task add t3 "Drain the stuck jobs from the gateway queue" --lane eng --phase p2 \
+agentihooks api --slug <slug> task add t3 "Drain the stuck jobs from the gateway queue" --lane eng --phase p2 \
   --description "System: the gateway job queue. Done when no job older than an hour is left." \
   --kind ops --must "The gateway queue holds no job older than one hour" \
   --check "The queue depth by age query on the gateway dashboard" --judge master
-agentihooks ledger --slug <slug> task add t4 "Size the gateway worker pool for p95 under 300 ms" --lane eng --phase p2 \
+agentihooks api --slug <slug> task add t4 "Size the gateway worker pool for p95 under 300 ms" --lane eng --phase p2 \
   --description "Number: gateway p95 latency at 200 requests a second. Done when it is under 300 ms." \
   --kind tune --depends-on t2 --must "Gateway p95 latency is under 300 ms at 200 requests a second" \
   --check "The p95 latency query on the gateway dashboard over 15 minutes of the load test, before and after" --judge master
-agentihooks ledger --slug <slug> task add t5 "Compare the queue library with two replacements" --lane eng --phase p3 \
+agentihooks api --slug <slug> task add t5 "Compare the queue library with two replacements" --lane eng --phase p3 \
   --description "Question: keep or replace the gateway queue library. Done when a recommendation is written with its sources." \
   --kind research --must "A written recommendation weighs the current library against two others on throughput, operations and cost" \
   --check "The finding linked on the task names the sources behind each claim" --judge operator
-agentihooks ledger --slug <slug> task add t6 "Build and judge the queue replacement prototype" --lane eng --phase p3 \
+agentihooks api --slug <slug> task add t6 "Build and judge the queue replacement prototype" --lane eng --phase p3 \
   --description "Loop: the simple workflow builds the prototype and its judge grades it. Done when the workflow passes with a pass verdict." \
   --kind workflow --workflow simple-workflow --must "The prototype passes the simple workflow with a pass verdict from its judge" \
   --check "The workflow state and verdict files in the task workspace" --judge master
@@ -78,7 +78,7 @@ When the operator marks a directive wrong (`agentihooks trace <session> --wrong
 <source>`), one `troubleshoot` task cleans it out of every layer:
 
 ```bash
-agentihooks ledger --slug <slug> task add <id> "Sweep the corrected directive <source> out of every layer" --lane eng --phase <phase> \
+agentihooks api --slug <slug> task add <id> "Sweep the corrected directive <source> out of every layer" --lane eng --phase <phase> \
   --description "Symptom: directive <source> still reaches sessions it is wrong for. Run agentihooks trace sweep, then agentihooks trace sweep --apply --ledger <slug>; open each pull request the plan names with the dev cycle. Done when a fresh sweep closes the correction." \
   --kind troubleshoot --must "A fresh agentihooks trace sweep prints a closed row for the correction and no plan row for it" \
   --check "agentihooks trace sweep" --judge master

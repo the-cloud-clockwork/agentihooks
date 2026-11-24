@@ -1,0 +1,6 @@
+{
+  "scripts/hive/join_report.py:scripts.hive.join_report.x_end_restarted:7cdc5dd2dc5c9cea53a92dee46947c8a934ea6772a773f191d66dc8fb3588b7a": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: replacing the missing members default {} with None, including the implicit None from removing the default argument, changes no output. The value is used only by the members truthiness guard; both defaults are false, so the membership branch is skipped and the same reports are retained. Existing member values are unchanged. Ruled by the independent Standards reader on head 8395f6a4f0."
+  }
+}

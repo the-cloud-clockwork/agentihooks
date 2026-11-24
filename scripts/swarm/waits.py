@@ -9,15 +9,16 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.hive import scope
 from scripts.inbox.store import CLOSED, Gone, InboxError, InboxStore
-from scripts.swarm import idle, lab_wait, merge_queue, run_wait
+from scripts.swarm import idle, lab_wait, merge_queue, run_wait, timing
 from scripts.swarm.ledger_events import PullRequest
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import AgentRecord, SwarmError
 
 KINDS = ("checks", "merge", "reply", "task", "intent", "lab")
 BARE_MAX_MINUTES = 60
@@ -71,7 +72,7 @@ def checks_resolution(held, github, reread=None):
         return ""
     if not current.resolved or (current.unpassed_gate and not current.failed):
         return ""
-    if not current.red and not required_green(target, current.head):
+    if not current.red and not timing.timed(required_green, target, current.head):
         return ""
     outcome = f"checks on {target}, now {'red' if current.red else 'green'}"
     if current.red and current.failed:
@@ -80,13 +81,20 @@ def checks_resolution(held, github, reread=None):
 
 
 def required_green(target: str, head: str) -> bool:
-    """Whether GitHub reads every required check of ``target`` passed on ``head``; logs the error a failed read holds on."""
+    """Whether GitHub reads every required check of ``target`` passed on ``head``; logs a failed or empty read."""
     try:
         pull = merge_queue.required_view(target, subprocess.run)
     except (SwarmError, KeyError, TypeError) as exc:
         print(f"required checks of {target} unread: {exc}", file=sys.stderr)
         return False
-    return pull is not None and pull.head == head and pull.resolved and not pull.red
+    if pull is None:
+        print(
+            f"required checks of {target} unread: empty pull request read; "
+            "GitHub backoff or rate limiting may be active",
+            file=sys.stderr,
+        )
+        return False
+    return pull.head == head and pull.resolved and not pull.red
 
 
 def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
@@ -216,6 +224,54 @@ def resolution(
     return f"message {target}, now {item.state}" if item.state in CLOSED else ""
 
 
+@dataclass(frozen=True)
+class Reads:
+    """What ending one checked wait reads: the ledger task rows, the inbox, the pull request readers and the intent
+    verdicts."""
+
+    rows: dict[str, dict[str, Any]]
+    inbox: Any
+    github: Callable[[str], PullRequest | None]
+    reread: Callable[[str], PullRequest | None]
+    verdicts: Verdicts | None = None
+
+
+def end_one(store: Any, slug: str, agent: AgentRecord, held: dict[str, Any], reads: Reads, now_ms: int) -> str:
+    """End ``agent``'s checked wait ``held`` when its target resolved, telling its holder; return what ended it, or ''
+    while it holds or another writer changed the wait first."""
+    previous = json.dumps(held)
+    with timing.acting(agent.name):
+        outcome = timing.timed(
+            resolution,
+            held["on"],
+            reads.rows,
+            reads.inbox,
+            reads.github,
+            reads.reread,
+            now_ms - held["at"] < FRESH_MS,
+            reads.verdicts,
+        )
+        outcome = (
+            ""
+            if outcome
+            and agent.task in reads.rows
+            and timing.timed(dependency, held["on"], reads.rows[agent.task], reads.rows, reads.reread)
+            else outcome
+        )
+        if (outcome or json.dumps(held) != previous) and not timing.timed(
+            _save_wait, store.redis, slug, agent.name, previous, held, outcome, now_ms
+        ):
+            return ""
+        if not outcome:
+            return ""
+        text = (
+            f"Your wait on {outcome} has ended.{_pick_up(agent.task)} agentihooks swarm {slug} done, block, "
+            "or wait on the next thing."
+        )
+        timing.timed(reads.inbox.send, SENDER, agent.seat or agent.name, text)
+    return outcome
+
+
 def end_pass(
     store: Any, slug: str, rows: dict[str, Any], inbox: Any, github: Any, now_ms: int, reread: Any
 ) -> list[str]:
@@ -223,27 +279,18 @@ def end_pass(
     ran, as the time of the last completed pass, which the idle count trusts."""
     from scripts.swarm import pr_wait
 
-    ended, verdicts = pr_wait.enforce_pass(store, slug, rows, github, now_ms), Verdicts(slug, intent.NAME)
+    ended = timing.timed(pr_wait.enforce_pass, store, slug, rows, github, now_ms)
+    reads = Reads(rows, inbox, github, reread, Verdicts(slug, intent.NAME))
     for agent in store.agents(slug):
-        held = idle.wait(store.redis, slug, agent.name)
-        if agent.state == "finished" or not (held and held.get("on")):
-            continue
-        previous = json.dumps(held)
-        outcome = resolution(held["on"], rows, inbox, github, reread, now_ms - held["at"] < FRESH_MS, verdicts)
-        if outcome and agent.task in rows and dependency(held["on"], rows[agent.task], rows, reread):
-            outcome = ""
-        if (outcome or json.dumps(held) != previous) and not _save_wait(
-            store.redis, slug, agent.name, previous, held, outcome, now_ms
-        ):
-            continue
-        if not outcome:
-            continue
-        text = (
-            f"Your wait on {outcome} has ended.{_pick_up(agent.task)} agentihooks swarm {slug} done, block, "
-            "or wait on the next thing."
-        )
-        inbox.send(SENDER, agent.seat or agent.name, text)
-        ended.append(f"ended the wait of {agent.name}: {outcome}")
+        try:
+            held = idle.wait(store.redis, slug, agent.name)
+            if agent.state == "finished" or not (held and held.get("on")):
+                continue
+            outcome = end_one(store, slug, agent, held, reads, now_ms)
+            if outcome:
+                ended.append(f"ended the wait of {agent.name}: {outcome}")
+        except Exception as exc:
+            print(f"wait of {agent.name} failed: {exc}", file=sys.stderr)
     mark_ended(store, slug, now_ms)
     return ended
 

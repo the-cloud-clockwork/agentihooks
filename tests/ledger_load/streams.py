@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import math
 import os
 import socket
 import subprocess
@@ -22,6 +23,8 @@ SECONDS = 30
 WRITES_PER_SECOND = 2
 PUBLISH_MARGIN_S = 1.0
 FOLLOW_PASS_S = PASS_S + FOLLOW_S + POLL_S + PUBLISH_MARGIN_S
+DELIVERY_MARGIN_S = 0.25
+DELIVERY_BOUND_S = FOLLOW_S + DELIVERY_MARGIN_S
 DELIVERY_POLL_S = 0.05
 
 
@@ -76,6 +79,11 @@ def serving(
             gate.stop_server(write_process)
 
 
+def delivery_delays(arrivals: list[tuple[int, float]], written: list[tuple[int, float]]) -> list[float]:
+    """Each write's delay from its reply to the first patch at or past its revision, infinite when none came."""
+    return [next((at - stored for rev, at in arrivals if rev >= wrote), math.inf) for wrote, stored in written]
+
+
 def consume(base: str, token: str, ready: threading.Event, stop: threading.Event, result: dict) -> None:
     request = urllib.request.Request(
         f"{base}/api/v1/ledgers/{gate.SLUG}/events",
@@ -90,6 +98,7 @@ def consume(base: str, token: str, ready: threading.Event, stop: threading.Event
                 elif name == "ledger":
                     result["patches"] += 1
                     result["patch_bytes"] += len(json.dumps(data).encode("utf-8"))
+                    result["arrivals"].append((data["rev"], time.monotonic()))
                 if stop.is_set():
                     return
     except (OSError, ValueError) as exc:
@@ -104,14 +113,14 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
     token = gate.store(folder, doc)
     write_port, read_port = gate.free_port(), gate.free_port()
     write_base, read_base = f"http://127.0.0.1:{write_port}", f"http://127.0.0.1:{read_port}"
-    consumers = [{"snapshots": 0, "patches": 0, "patch_bytes": 0, "errors": []} for _ in range(streams)]
+    consumers = [{"snapshots": 0, "patches": 0, "patch_bytes": 0, "errors": [], "arrivals": []} for _ in range(streams)]
     ready = [threading.Event() for _ in consumers]
     stop = threading.Event()
     threads = [
         threading.Thread(target=consume, args=(read_base, token, event, stop, result), daemon=True)
         for event, result in zip(ready, consumers, strict=True)
     ]
-    writes = []
+    writes, written = [], []
     with serving(source, folder, write_port, read_port) as (write_server, read_server):
         credentials = {
             "X-Ledger-Token": gate.authority.agent_token(token, gate.SLUG, "ci@ab0000-0000"),
@@ -126,6 +135,7 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
                 if not event.wait(gate.SERVER_WAIT_S) or result["snapshots"] != 1:
                     raise RuntimeError(f"stream did not receive its snapshot: {result}")
             began, initial_cpu = time.monotonic(), gate.cpu_seconds(write_server.pid)
+            initial_read_cpu = gate.cpu_seconds(read_server.pid)
             for n in range(SECONDS * WRITES_PER_SECOND):
                 time.sleep(max(0, began + n / WRITES_PER_SECOND - time.monotonic()))
                 sent = time.monotonic()
@@ -143,18 +153,24 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
                 )
                 if (reply.get("data") or reply).get("rejected"):
                     raise RuntimeError(f"write {n} was rejected")
-                writes.append(time.monotonic() - sent)
+                returned = time.monotonic()
+                writes.append(returned - sent)
+                written.append(((reply.get("data") or reply)["_meta"]["rev"], returned))
             last_write = time.monotonic() - began
             time.sleep(max(0, began + SECONDS - time.monotonic()))
             elapsed = time.monotonic() - began
             cpu = gate.cpu_seconds(write_server.pid) - initial_cpu
+            read_cpu = gate.cpu_seconds(read_server.pid) - initial_read_cpu
             deadline = time.monotonic() + gate.TIMEOUT_S
             while time.monotonic() < deadline and any(
-                result["patches"] < len(writes) and not result["errors"] for result in consumers
+                math.inf in delivery_delays(result["arrivals"], written) and not result["errors"]
+                for result in consumers
             ):
                 time.sleep(DELIVERY_POLL_S)
             delivered = time.monotonic() - began
-            if any(result["patches"] != len(writes) or result["errors"] for result in consumers):
+            if any(
+                math.inf in delivery_delays(result["arrivals"], written) or result["errors"] for result in consumers
+            ):
                 raise RuntimeError(
                     f"streams did not receive every write {gate.TIMEOUT_S:g} s after the window, last write at"
                     f" {last_write:.2f} s, waited to {delivered:.2f} s: {consumers}"
@@ -164,16 +180,22 @@ def measure(source: Path, folder: Path, doc: dict, streams: int) -> dict:
                     f"streams received the last write {delivered - last_write:.2f} s after it, last write at"
                     f" {last_write:.2f} s, delivered at {delivered:.2f} s, past one follow pass of {FOLLOW_PASS_S:g} s"
                 )
+            delays = [delay for result in consumers for delay in delivery_delays(list(result["arrivals"]), written)]
             return {
                 "streams": streams,
                 "writes": len(writes),
                 "seconds": elapsed,
                 "cpu_seconds": cpu,
                 "cpu_cores": cpu / elapsed,
+                "read_cpu_cores": read_cpu / elapsed,
                 "write_p95_s": gate.p95(writes),
                 "last_write_s": last_write,
                 "delivered_s": delivered,
-                "consumers": consumers,
+                "delivery_p95_s": gate.p95(delays),
+                "delivery_max_s": max(delays),
+                "consumers": [
+                    {key: value for key, value in result.items() if key != "arrivals"} for result in consumers
+                ],
             }
         finally:
             stop.set()
@@ -205,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     args.folder.mkdir(parents=True, exist_ok=True)
     result = compare(args.base.resolve(), args.head.resolve(), args.folder)
     (args.folder / "streams.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    return int(any(case["after"]["cpu_cores"] >= case["before"]["cpu_cores"] for case in result["cases"]))
+    return int(any(case["after"]["delivery_max_s"] > DELIVERY_BOUND_S for case in result["cases"]))
 
 
 if __name__ == "__main__":

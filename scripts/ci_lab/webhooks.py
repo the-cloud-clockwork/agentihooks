@@ -18,9 +18,11 @@ HEAD_SUBJECT = "ci.lab.head"
 LAB = "ci-lab"
 ENTITY = "head"
 NOTICE = "notice"
+PLANT = "plant"
 PUSHED = "pushed"
 CHECK_PREFIX = "lab"
 BRANCHES = "refs/heads/"
+PLANT_PREFIX = "refs/heads/diffcheck/lab-plant-"
 PULL_ACTIONS = frozenset({"opened", "synchronize", "reopened"})
 NOTICE_FIELDS = ("repo", "head", "base", "actor")
 NOTICE_SECRET_ENV = "AGENTIHOOKS_CI_LAB_NOTICE_SECRET"
@@ -43,6 +45,10 @@ def _push(payload: Mapping[str, Any]) -> list[HeadEvent]:
     if payload["deleted"] or not str(payload["ref"]).startswith(BRANCHES):
         return []
     repo, actor = payload["repository"]["html_url"], payload["sender"]["login"]
+    if str(payload["ref"]).startswith(PLANT_PREFIX):
+        return [HeadEvent(PLANT, repo, payload["after"], "", actor, PUSHED)]
+    if payload["before"] == "0" * 40:
+        return []
     return [HeadEvent("push", repo, payload["after"], payload["before"], actor, PUSHED)]
 
 
@@ -84,7 +90,9 @@ def head_events(name: str | None, payload: Mapping[str, Any]) -> list[HeadEvent]
 
     A pull request head's actor is the pull request's author, as `reconcile` reads it, so a trusted
     sender reopening an untrusted author's pull request admits nothing; every other head's actor is
-    the delivery's sender. A rerequested check run with no pull request has no base.
+    the delivery's sender. A rerequested check run with no pull request has no base. A push to a
+    branch under `PLANT_PREFIX` names a plant head with no base, whatever its before, which the
+    scheduler bases on the head's merge base with dev.
     """
     if name is None or name not in HEADS:
         return []

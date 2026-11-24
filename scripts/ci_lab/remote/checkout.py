@@ -15,6 +15,8 @@ HELPER = '!f() { if test "$1" = get; then printf "username=lab\\npassword=%s\\n"
 
 GIT_TIMEOUT_S = 60
 RELAYED = re.compile(r"(?:^| )(?:-o ?|--push-option[ =])branch=(\S+)")
+SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*://")
+SCP = re.compile(r"^[^/:]+:(.*)")
 
 Git = Callable[..., "subprocess.CompletedProcess[str]"]
 
@@ -33,10 +35,29 @@ def name(url: str) -> str:
     return re.split(r"[/:]", url.strip().rstrip("/"))[-1].removesuffix(".git").lower()
 
 
+def owner(url: str) -> str:
+    """Return the lowercase owner a remote URL or scp address names before its repository, or an empty string for a
+    local path, a `file://` URL or an address whose repository sits at its root."""
+    address = url.strip().lower()
+    scheme = SCHEME.match(address)
+    if scheme:
+        if scheme.group() == "file://":
+            return ""
+        path = address[scheme.end() :].partition("/")[2]
+    elif scp := SCP.match(address):
+        path = scp[1]
+    else:
+        return ""
+    segments = [segment for segment in path.split("/") if segment]
+    return segments[-2] if len(segments) > 1 else ""
+
+
 def serves(lab: str, origin: str) -> bool:
-    """Return whether the lab URL names a repository and it is the one the origin URL names."""
+    """Return whether the lab URL names a repository and it is the one the origin URL names, owner included when the
+    lab URL names an owner."""
     found = name(lab)
-    return bool(found) and found == name(origin)
+    held = owner(lab)
+    return bool(found) and found == name(origin) and (not held or held == owner(origin))
 
 
 def carry(git: Git, environ: Mapping[str, str]) -> bool:

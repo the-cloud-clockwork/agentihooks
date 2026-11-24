@@ -1360,11 +1360,13 @@ def _shell_guard(name: str) -> Iterator[None]:
 
 
 def _check_shell_guards(payload: dict[str, Any]) -> None:
+    from hooks.context.approval_guard import check_approval
     from hooks.context.local_test_guard import check_local_tests
     from hooks.context.swarm_wait_nudge import check_github_watch
 
     check_local_tests(payload)
     check_github_watch(payload)
+    check_approval(payload)
     from hooks.context.blocker_window import checked as _blocker_checked
 
     if _blocker_block := _blocker_checked(payload):
@@ -1851,9 +1853,9 @@ def on_pre_tool_use(payload: dict) -> None:
     _pretool_context = _fit_pretool(_pretool_blocks)
 
     _cond_decision = _conditions.decision if _conditions is not None else None
-    if _input_patch or _cond_decision in ("allow", "ask"):
+    _rewritten = bool(_input_patch) or (_conditions is not None and _conditions.rewrite is not None)
+    if _rewritten or _cond_decision in ("allow", "ask"):
         _updated, _note, _own = _input_patch or ({}, "", _cond_decision)
-        _rewritten = bool(_input_patch) or (_conditions is not None and _conditions.rewrite is not None)
         emit_permission_decision(
             "PreToolUse",
             _cond_decision if _cond_decision in ("allow", "ask") else _own,

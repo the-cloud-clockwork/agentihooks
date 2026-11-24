@@ -5,7 +5,7 @@ cd "$(dirname "$0")/../.."
 export COMPOSE_PROJECT_NAME="$(python3 -c 'import uuid; print("hive-launch-" + uuid.uuid4().hex[:12])')"
 fixture=tests/integration/hive_launch/compose.yaml
 cleanup() {
-  docker compose -f "$fixture" down --volumes --remove-orphans
+  docker compose -f "$fixture" down --volumes --remove-orphans || true
 }
 trap cleanup EXIT
 bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_lane:7e99e8824b78e6bf8258ba446f62292208334a308d88dae664245ae87b45f74c": {
+    "reader": "Standards",
+    "reason": "Missing-lane fallback None compares false to every paired lane (plan, review), identically to eng; present lanes are unchanged."
+  }
+}

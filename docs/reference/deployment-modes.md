@@ -44,14 +44,14 @@ The event driven design has three parts:
 - a NATS server with JetStream;
 - hives that pull offered work (see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub)).
 
-Each swarm picks its engine with its `engine` setting, `legacy` or `events`; see
+Every swarm runs the `events` engine, the only value its `engine` setting takes; see
 [Event driven engine](../pillars/swarm.md#event-driven-engine).
 
 | Mode | Engine | Bus | Hub |
 |---|---|---|---|
-| `local` | `legacy`; `events` only with a hub on the same bus | `memory` unless the bus settings name NATS | None runs by default. The hub's `readiness` reactor offers nothing on the `memory` bus, so an `events` swarm needs a hub on a NATS bus. |
-| `compose` | `legacy`; `events` only with a hub on the same bus | The stack's `nats` service: `AGENTIHOOKS_BUS=nats` at `nats://nats:4222`, changed only through the stack settings `SWARM_BUS` and `SWARM_BUS_URL`; the `controller` and `hive` services take their mode only from `SWARM_DEPLOYMENT`, and the base stack services their scheduler state backend only from `SWARM_SCHEDULER_STATE_BACKEND` | No hub service. The Compose task smoke runs `agentihooks hub run --once` in the `swarm` service to settle a task end to end. |
-| `distributed` | `events` through the hub; a `legacy` swarm is ticked by the chart's controller, never by the workstation | NATS with JetStream from the `agentihooks-swarm` chart (`nats.enabled`, JetStream on) | The chart's `<release>-hub` Deployment, with `hub.enabled: true` and 2 replicas by default. It runs `agentihooks hub run`, scheduled only on nodes without the `anton.io/capacity-type` label. |
+| `local` | `events`; agents start only with a hub on the same bus | `memory` unless the bus settings name NATS | None runs by default. The hub's `readiness` reactor offers nothing on the `memory` bus, so an `events` swarm needs a hub on a NATS bus. |
+| `compose` | `events`; agents start only with a hub on the same bus | The stack's `nats` service: `AGENTIHOOKS_BUS=nats` at `nats://nats:4222`, changed only through the stack settings `SWARM_BUS` and `SWARM_BUS_URL`; the `controller` and `hive` services take their mode only from `SWARM_DEPLOYMENT`, and the base stack services their scheduler state backend only from `SWARM_SCHEDULER_STATE_BACKEND` | No hub service. The Compose task smoke runs `agentihooks hub run --once` in the `swarm` service to settle a task end to end. |
+| `distributed` | `events` through the hub | NATS with JetStream from the `agentihooks-swarm` chart (`nats.enabled`, JetStream on) | The chart's `<release>-hub` Deployment, with `hub.enabled: true` and 2 replicas by default. It runs `agentihooks hub run`, scheduled only on nodes without the `anton.io/capacity-type` label. Each pod turns ready only once it has subscribed to slot requests (see [Hub readiness and rollouts](#hub-readiness-and-rollouts)). |
 
 ### Hub reactors
 
@@ -65,15 +65,141 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 |---|---|---|
 | `timers` | `swarm.*.deadline.*` | Keeps scheduled deadlines and publishes `deadline.expired` when one is due. |
 | `inbox-wake` | `swarm.*.inbox-wake.requested` and a poll | Schedules the wake deadline for an inbox item and relays queued wake items onto the seat inbox. |
-| `inbox-wake-expiry` | `swarm.*.deadline.expired` | When the deadline expires, redelivers or wakes the item and schedules its next deadline. |
+| `inbox-wake-expiry` | `swarm.*.deadline.expired` | When the deadline expires, redelivers or wakes the item and schedules its next deadline. Sends no wake while an outage the tick published is open (see [Outage holds for agents the hub started](../pillars/hives.md#outage-holds-for-agents-the-hub-started)). |
 | `hive-loss` | `swarm.*.execution.started` | Publishes `execution.exited` for executions on a lost hive. |
 | `claim-lives` | `swarm.*.execution.started` | Counts each successful spoke launch once toward the task's three started lives cap. |
 | `lifecycle` | `swarm.*.execution.exited` | Orders the hive of an agent whose pane died to reopen its own conversation in its seat, up to three times, before it drops the agent (see [Resuming a dead agent the hub started](../pillars/hives.md#resuming-a-dead-agent-the-hub-started)). Refunds a started life on a park, quota handoff or operator preemption, releases the slot and claim, and settles the task. An exit a hive reports after an execution stop carries reason `stopped` and the stop's `stop_reason`, such as `ended` for an agent whose work ended (see [Stopping an agent whose work ended](../pillars/hives.md#stopping-an-agent-whose-work-ended)). |
 | `reconciler` | A five minute poll; it also subscribes to `swarm.*.reconcile.requested`, which nothing publishes yet | Rebuilds missing starts and ends executions that are gone. |
 | `readiness` | A poll; it also subscribes to `swarm.*.readiness.requested`, which nothing publishes yet | Offers the claimable tasks of every `events` swarm to the lane work queues. |
-| `preemption` | A one minute poll; it also subscribes to `swarm.*.preemption.requested`, which nothing publishes yet | Asks the lowest ranked holder of a full lane to hand off when an urgent or focused task of a running `events` swarm still waits one poll later, as the legacy tick does. |
+| `preemption` | A one minute poll; it also subscribes to `swarm.*.preemption.requested`, which nothing publishes yet | Asks the lowest ranked holder of a full lane to hand off when an urgent or focused task of a running `events` swarm still waits one poll later. |
 | `pulls` | `swarm.*.task.*` and a poll | Publishes pull request, merge queue and check events, also fed by `agentihooks github-webhook`. |
 | `launch-checks` | A ten second poll; it also subscribes to `swarm.*.launch-checks.requested`, which nothing publishes yet | Judges the launch check of each worker the hub admitted, from the launch time its execution started write records. A worker whose hive reports no launch fails 300 seconds after admission. A failed worker is stopped on its hive, and its task relaunches once. |
+| `wait-ends-merged` | `swarm.*.pull.merged` | Re-checks every checks or merge wait on the merged pull request through the waits pass's own resolution and ends a resolved one at once, with the same ended item, woke key and wait history the polled pass writes. With no such wait it reads nothing from GitHub; the minute tick pass still ends what no event names. |
+| `wait-ends-closed` | `swarm.*.pull.closed` | The same re-check for a pull request closed unmerged. |
+| `wait-ends-dequeued` | `swarm.*.merge.dequeued` | The same re-check for a pull request that left the merge queue. |
+| `wait-ends-checks` | `swarm.*.checks.completed` | The same re-check when a check suite on the pull request completes. |
+| `task-wait-ends` | `swarm.*.task.*` | On a task changed event to done or blocked, re-reads that task and ends every task wait naming it through the same single wait end. When the task is done, it also sends the live holder of every claimed open task whose `depends_on` names it one inbox item naming the closed dependency, once per dependency and dependent. |
+| `reply-wait-ends` | `swarm.*.inbox-wake.requested` | When the woken inbox item is a reply, ends every reply wait on the item it answers through the same single wait end. A send that answers nothing ends no wait. |
+
+### Hub readiness and rollouts
+
+A chart hub pod turns ready only once its replica has subscribed to slot requests. Every hive asks the hub for an account slot
+on `slots.<swarm>.<hive>`, and the hub answers in queue group `hub-slots` (see
+[Hub slot requests and the hive binding](swarm-bus-scope.md#hub-slot-requests-and-the-hive-binding)). A request
+that reaches NATS while no hub replica subscribes fails at once on the hive with
+`TimeoutError: no responders for 'slots.<swarm>.<hive>'`. Without a readiness
+probe, Kubernetes counts a hub pod ready as soon as its container starts, so a rollout could end the last old hub
+pod before the new one subscribes and leave the swarm with no slots responder.
+
+#### How the hub marks itself serving
+
+`agentihooks hub run` reads a file path from `AGENTIHOOKS_HUB_SERVING_FILE` and handles it in this order:
+
+1. At start it deletes the file, so a file left by an earlier run never reads as serving.
+2. It issues its service credential when the ledger is remote, opens the bus and creates the hive buckets.
+3. It subscribes its `slots.*.*` responder (queue group `hub-slots`) and its `exits.*.*` responder (queue group
+   `hub-exits`).
+4. It creates the file, then starts its reactors.
+
+The hub never deletes the file while it runs or when it stops. With the variable unset or empty, the hub creates no
+file and runs the same way. A hosted hub that refuses to start for want of the shared database exits before step 2,
+so its file stays absent. Readiness reports only that the hub subscribed once: the file stays while the process
+runs, so a replica that later loses NATS stays ready.
+
+#### What the chart sets
+
+| Value | Default | Effect |
+|---|---|---|
+| `hub.servingFile` | `/tmp/hub.serving` | The path the chart sets as `AGENTIHOOKS_HUB_SERVING_FILE` on the hub container and the file its readiness probe tests. Required: an empty value fails the render. Its folder must exist and be writable by the hub, because the hub creates only the file. |
+| `hub.replicas` | `2` | Above 1, the hub Deployment rolls with `maxSurge: 0` and `maxUnavailable: 1`. At 1 the chart sets no strategy and the Kubernetes default applies, which starts the new pod beside the old one and ends the old one once the new one is ready. |
+
+The chart renders the hub Deployment, and with it the variable and the probe, only when `hub.enabled` is true and
+`hiveOnly` is false. The rendered hub container carries the variable and the probe on the same path:
+
+```yaml
+env:
+  - name: AGENTIHOOKS_HUB_SERVING_FILE
+    value: "/tmp/hub.serving"
+readinessProbe:
+  exec:
+    command: [test, -f, "/tmp/hub.serving"]
+  periodSeconds: 2
+```
+
+The probe sets only its period, so the Kubernetes defaults hold for the rest: a 1 second timeout, one passing test
+to turn ready and three failed tests to turn unready. The hub has no liveness or startup probe, so a pod that never
+creates the file stays unready and is never restarted for it.
+
+With two replicas, Kubernetes ends one old pod, starts its replacement, and ends the second old pod only once the
+replacement is ready. Ready means the replacement has subscribed its slots responder, so at least one replica
+answers slot requests through the whole rollout. A replacement that never turns ready holds the rollout: the second
+old pod keeps serving, and after the default progress deadline of ten minutes `kubectl rollout status` reports that
+the Deployment exceeded it.
+
+#### Setting another path
+
+The chart writes `AGENTIHOOKS_HUB_SERVING_FILE` after every `hub.env` and `hub.secretEnv` entry. When one container
+lists a variable twice, Kubernetes uses the last value, so a `hub.env` entry of that name cannot move the hub off the
+file its probe tests. Change the path through `hub.servingFile`, which moves both:
+
+```yaml
+hub:
+  enabled: true
+  servingFile: /tmp/agentihooks-hub.serving
+```
+
+An empty or null `hub.servingFile` stops the render, so neither `helm template` nor `helm upgrade` produces a hub
+whose probe could never pass:
+
+```bash
+helm template agentihooks-swarm deploy/helm/agentihooks-swarm \
+  --set hub.enabled=true --set hub.bus.url=nats://nats.swarm:4222 --set hub.servingFile=
+```
+
+Helm exits with an error carrying the chart's message:
+
+```text
+hub.servingFile is required: the hub creates that file once it answers slots requests, and its readiness probe waits for it
+```
+
+#### Hub readiness and image tags
+
+The hub change that creates the file merged into dev before the chart change that adds the probe, so every release
+whose chart has the probe ships a hub image that creates the file. A chart with the probe, run with `image.tag`
+pinned to an older image, gives hub pods that never turn ready. Run the hub on the image of its chart's release.
+
+#### Checking hub readiness
+
+The examples use the release name `agentihooks-swarm` in namespace `agentihooks`:
+
+```bash
+kubectl -n agentihooks rollout status deployment/agentihooks-swarm-hub
+kubectl -n agentihooks get pods -l app.kubernetes.io/instance=agentihooks-swarm,app.kubernetes.io/component=hub
+kubectl -n agentihooks get deployment agentihooks-swarm-hub \
+  -o jsonpath='{.spec.template.spec.containers[0].readinessProbe.exec.command}'
+kubectl -n agentihooks exec <hub pod> -- test -f /tmp/hub.serving && echo serving
+```
+
+The rollout reports `successfully rolled out` once every hub pod serves. Each serving pod shows `1/1` in the `READY`
+column, the probe command names `test -f /tmp/hub.serving`, and the last command prints `serving`.
+
+#### Hub readiness troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| A new hub pod stays `Running` at `0/1` ready and the rollout does not finish | The hub has not subscribed its slot responders. Read `kubectl -n agentihooks logs <hub pod>`: a bus connection error points at `hub.bus.url` or the NATS server, as in [Bus settings](#bus-settings). The old pod keeps serving meanwhile. |
+| A new hub pod restarts in `CrashLoopBackOff` | The hub exited before it served. A hosted hub without the shared database logs `hub: a hosted hub writes task claims in process over the shared database and needs AGENTIHOOKS_SWARM_DATABASE_URL`; give the hub that setting. A missing folder for `hub.servingFile` logs a traceback ending in `FileNotFoundError` on that path; point `hub.servingFile` at a folder that exists. |
+| `helm upgrade` fails with `hub.servingFile is required` | The values set `hub.servingFile` empty or null. Remove that override or set a path. |
+| Every new hub pod stays `0/1` and `test -f` on the serving file keeps failing | `image.tag` pins an image older than the chart, whose hub never creates the file. Compare `kubectl -n agentihooks get deployment agentihooks-swarm-hub -o jsonpath='{.spec.template.spec.containers[0].image}'` with the chart version and run the image of the chart's release, as in [Hub readiness and image tags](#hub-readiness-and-image-tags). |
+| Hives time out on slot requests while every hub pod is ready | Look in the hub log for requests dropped after waiting in the serve queue; see [How the hub serves requests](swarm-bus-scope.md#how-the-hub-serves-requests) for the log line and the limits. |
+
+#### Hub readiness regression guards
+
+| Guard | What it holds |
+|---|---|
+| `tests/hub/test_runner.py::test_the_hub_marks_itself_serving_only_after_its_slots_and_exits_responders_subscribe`, feature `hub-serving-readiness` | The hub deletes a stale file at start and creates the file only after its slots and exits responders subscribe. |
+| `tests/test_swarm_chart_hub_readiness.py::test_the_hub_turns_ready_only_once_its_serving_file_exists`, feature `hub-ready-only-when-serving` | The hub template sets the variable after the `hub.env` and `hub.secretEnv` entries, the probe tests `hub.servingFile`, and the default sits under `/tmp`. |
+| `tests/chart_hub.py`, run by `deploy/helm/agentihooks-swarm/ci/kind-smoke.sh` in the Helm chart in kind workflow | The rendered hub probe tests the same path as its variable, an empty `hub.servingFile` fails the render, and `hub.env.AGENTIHOOKS_HUB_SERVING_FILE=/elsewhere` leaves the variable and the probe on one file. |
 
 ### Bus settings
 
@@ -371,8 +497,8 @@ moved the gate onto the shared client mode rule.
 
 A workstation swarm can run its engineer and CI work on a Kubernetes cluster while its master, planners and
 dispatcher stay on the workstation. The swarm first moves to the hosted ledger, which hands its controller lease to
-the cluster's controller; the chart's controller then serves that swarm and launches only its `eng` and `ci` lanes
-as worker Pods. The Anton deployment runs `rig-grade-swarm` this way; the values and names below are Anton's.
+the cluster's controller; the chart's controller then serves that swarm and launches only its `eng`, `ci` and
+`review` lanes as worker Pods. The Anton deployment runs `rig-grade-swarm` this way; the values and names below are Anton's.
 
 ### Move the swarm to the hosted ledger
 
@@ -475,7 +601,7 @@ The routed runtime places each launch by lane and profile:
 
 | Work | Where it runs |
 |---|---|
-| `eng` and `ci` lanes | A worker Pod on the cluster. |
+| `eng`, `ci` and `review` lanes | A worker Pod on the cluster. |
 | A task whose profile is `frontend`, on any lane | The workstation. |
 | Master seats owned by the controller's own hive | A worker Pod on the cluster. |
 | Master seats owned by the workstation, planners (`plan`) and the dispatcher (`dispatch`) | The workstation. |
@@ -483,7 +609,7 @@ The routed runtime places each launch by lane and profile:
 `controller.workers.cap` is the launch cap per approved account: each account the worker route offers takes at most
 that many live workers. With one approved account and `cap: 1`, as on Anton, one worker runs at a time. The swarm's
 own caps (`max-eng-agents`, `max-ci-agents`) still apply on top. With hive placement on, worker hive Pods take
-`eng`, `ci`, `plan` and `dispatch` as described on the [Hives](../pillars/hives.md#placement) page instead.
+`eng`, `ci`, `review`, `plan` and `dispatch` as described on the [Hives](../pillars/hives.md#placement) page instead.
 
 ### The hive endpoint on Anton and its render checks
 

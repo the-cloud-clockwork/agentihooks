@@ -2,8 +2,10 @@
 
 import io
 import json
+import threading
 import zipfile
 from collections.abc import Mapping
+from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import Mock, call
@@ -245,6 +247,58 @@ def test_actions_marks_a_request_github_never_answered_or_answered_with_a_server
     assert not isinstance(unreadable.value, FetchUnanswered)
 
 
+@pytest.mark.feature("lab-token-mint-status")
+@pytest.mark.parametrize(
+    ("status", "refusal"), [(403, FetchRefused), (499, FetchRefused), (500, FetchUnanswered), (599, FetchUnanswered)]
+)
+def test_actions_classifies_the_real_token_mint_refusal_by_its_http_status(
+    monkeypatch: pytest.MonkeyPatch, status: int, refusal: type[FetchRefused]
+) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "fixture")
+    monkeypatch.setattr(github_app.jwt, "encode", Mock(return_value="signed"))
+    mint = Mock(return_value=answer(status))
+    monkeypatch.setattr(requests, "post", mint)
+    get = Mock()
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(refusal) as refused:
+        Actions("example/repo").archive(zipped(9))
+    assert type(refused.value) is refusal
+    assert str(refused.value) == (
+        "GET actions/artifacts/9/zip token mint failed: GitHub App cannot supply scoped actions read credentials: "
+        f"GitHub answered {status}"
+    )
+    assert isinstance(refused.value.__cause__, github_app.GitAuthRefused)
+    assert refused.value.__cause__.status_code == status
+    get.assert_not_called()
+    assert mint.call_count == 1
+
+
+@pytest.mark.feature("lab-token-mint-status")
+def test_actions_keeps_a_mint_scope_refusal_permanent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "fixture")
+    monkeypatch.setattr(github_app.jwt, "encode", Mock(return_value="signed"))
+    mint = Mock(
+        return_value=answer(201, {"repositories": [{"full_name": "example/repo"}], "permissions": {"actions": "write"}})
+    )
+    monkeypatch.setattr(requests, "post", mint)
+    get = Mock()
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(FetchRefused) as refused:
+        Actions("example/repo").json(COMMIT_RUNS_PATH)
+    assert type(refused.value) is FetchRefused
+    assert str(refused.value) == (
+        f"GET {COMMIT_RUNS_PATH} token mint failed: GitHub App cannot supply scoped actions read credentials: "
+        "GitHub answered 201 with a token outside that scope"
+    )
+    assert isinstance(refused.value.__cause__, github_app.GitAuthRefused)
+    assert refused.value.__cause__.status_code is None
+    get.assert_not_called()
+
+
 @pytest.mark.feature("lab-dev-manifest-fetch")
 def test_the_fetcher_reads_each_repository_through_one_reader_of_its_own() -> None:
     made: list[str] = []
@@ -259,3 +313,107 @@ def test_the_fetcher_reads_each_repository_through_one_reader_of_its_own() -> No
     assert fetcher("other/repo", COMMIT) is None
     assert made == ["example/repo", "other/repo"]
     assert Fetcher().reader is Actions
+
+
+WAIT_S = 10.0
+
+
+@dataclass
+class Clock:
+    """A clock the test sets."""
+
+    now: float = 0.0
+
+    def __call__(self) -> float:
+        """Return the set time."""
+        return self.now
+
+
+@dataclass
+class Held:
+    """A manifest fetch that records its start, then answers its commit's canned answer once released."""
+
+    answers: dict[str, bytes | None | FetchRefused]
+    release: threading.Event = field(default_factory=threading.Event)
+    started: threading.Semaphore = field(default_factory=lambda: threading.Semaphore(0))
+    asked: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+
+    def __call__(self, slug: str, commit: str) -> bytes | None:
+        """Record the fetch, wait for its release and answer it."""
+        self.asked.append((slug, commit))
+        self.started.release()
+        self.release.wait(WAIT_S)
+        answer = self.answers[commit]
+        if isinstance(answer, FetchRefused):
+            raise answer
+        return answer
+
+
+def finished(fetches: Mapping[tuple[str, str], tuple[float, Future[bytes | None]]]) -> None:
+    """Wait until every fetch a background holds has finished."""
+    wait([future for _, future in fetches.values()])
+
+
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+def test_background_raises_pending_while_a_fetch_runs_and_answers_it_until_it_goes_stale() -> None:
+    held = Held({COMMIT: packed(COMMIT), OTHER: None})
+    clock = Clock()
+    background = manifests.Background(held, clock=clock)
+    for _ in range(2):
+        with pytest.raises(manifests.FetchPending, match=f"^example/repo manifest of {COMMIT} is still fetching$"):
+            background("example/repo", COMMIT)
+    clock.now = 1.0
+    with pytest.raises(manifests.FetchPending, match=f"^example/repo manifest of {OTHER} is still fetching$"):
+        background("example/repo", OTHER)
+    held.release.set()
+    finished(background.fetches)
+    clock.now = 299.0
+    assert background("example/repo", COMMIT) == packed(COMMIT)
+    assert background("example/repo", COMMIT) == packed(COMMIT)
+    assert background("example/repo", OTHER) is None
+    assert sorted(held.asked) == [("example/repo", COMMIT), ("example/repo", OTHER)]
+    clock.now = 300.0
+    assert background("example/repo", OTHER) is None
+    assert list(background.fetches) == [("example/repo", OTHER)]
+    held.release.clear()
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    assert all(held.started.acquire(timeout=WAIT_S) for _ in range(3))
+    assert sorted(held.asked) == [("example/repo", COMMIT), ("example/repo", COMMIT), ("example/repo", OTHER)]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+def test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next_call() -> None:
+    held = Held({COMMIT: FetchUnanswered("GET runs answered 502")})
+    background = manifests.Background(held)
+    with pytest.raises(manifests.FetchPending) as pending:
+        background("example/repo", COMMIT)
+    assert isinstance(pending.value, FetchUnanswered)
+    held.release.set()
+    finished(background.fetches)
+    with pytest.raises(FetchUnanswered, match="^GET runs answered 502$"):
+        background("example/repo", COMMIT)
+    held.release.clear()
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    assert all(held.started.acquire(timeout=WAIT_S) for _ in range(2))
+    assert held.asked == [("example/repo", COMMIT), ("example/repo", COMMIT)]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+def test_background_runs_at_most_four_fetches_at_once() -> None:
+    commits = [f"{number:040x}" for number in range(5)]
+    held = Held({commit: None for commit in commits})
+    background = manifests.Background(held)
+    for commit in commits:
+        with pytest.raises(manifests.FetchPending):
+            background("example/repo", commit)
+    assert all(held.started.acquire(timeout=WAIT_S) for _ in range(4))
+    assert not held.started.acquire(timeout=0.2)
+    held.release.set()
+    assert held.started.acquire(timeout=WAIT_S)
+    finished(background.fetches)
+    assert [background("example/repo", commit) for commit in commits] == [None] * 5
+    assert sorted(held.asked) == [("example/repo", commit) for commit in commits]

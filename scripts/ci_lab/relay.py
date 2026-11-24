@@ -5,15 +5,19 @@
 head and branch, until a grade of that head closes. A green grade pushes the sha, fetched from the lab remote when
 GitHub lacks it, to `origin refs/heads/<branch>` with an App token holding contents and workflows write, never forced,
 posts the `lab/<gate>` check run of every gate and the required check, completed, with the grade's run and verdicts,
-and opens the branch's draft pull request into dev with a token holding pull requests write, or names the open one the
-push updated. A red grade relays nothing and names its failed units. A head whose grades were all superseded is
-dropped, and a relay GitHub refuses is named and dropped.
+once across restarts by keeping each check run's id on the grade's state, and opens the branch's draft pull request
+into dev with a token holding pull requests write, or names the open one the push updated. A red grade relays nothing
+and names its failed units. A head whose grades were all superseded is dropped, and a relay GitHub refuses is named
+and dropped. A relay whose App token GitHub refuses is named held, stays pending and holds every relay of its
+repository for the scheduler's post hold.
 """
 
 import base64
 import json
 import os
 import subprocess
+import time
+from collections import defaultdict
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import asdict, dataclass
 from functools import partial
@@ -28,13 +32,13 @@ from scripts.ci_lab.checks import API, HEADERS, Checks, Key, Output, PostRefused
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import PASSED
 from scripts.ci_lab.remote.post_receive import BRANCH, GRADE_REFS, LAB_URL
-from scripts.ci_lab.scheduler import BATCH, FETCH_MS, MIRROR_STORE, REQUIRED, Scheduler, State
+from scripts.ci_lab.scheduler import BATCH, FETCH_MS, MIRROR_STORE, POST_HOLD_MS, REQUIRED, Scheduler, State
 from scripts.ci_lab.store import PREFIX
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.webhooks import HEAD_SUBJECT, NOTICE
 from scripts.ci_lab.worktrees import Mirror
 from scripts.events.bus import Consumer
-from scripts.github_app import GitHubAppAuth
+from scripts.github_app import GitAuthRefused, GitHubAppAuth
 
 __all__ = [
     "DURABLE",
@@ -102,7 +106,12 @@ class Pulls(Protocol):
 
 
 class CheckRuns(Protocol):
-    """Where relayed check runs go: `Checks`, which remembers the last status of each run it posted."""
+    """Where relayed check runs go: `Checks`, which remembers the last status of each run it posted or was seeded
+    with."""
+
+    def seed(self, head: str, gate: str, run: str, run_id: int, status: str, shadow: bool) -> None:
+        """Remember a check run posted before this poster existed, so it is not created again."""
+        ...
 
     def status(self, key: Key) -> str | None:
         """Return the last status posted for a check run, or None before its first post."""
@@ -123,11 +132,14 @@ class Notices(Protocol):
 
 @dataclass(frozen=True)
 class Ports:
-    """The relay's outside world: a pusher per repository URL, and check runs and pull requests per owner/name."""
+    """The relay's outside world: a pusher per repository URL, check runs and pull requests per owner/name, where a
+    grade's state is saved, and the wall clock in seconds."""
 
     pusher: Callable[[str], Pusher]
     checks: Callable[[str], CheckRuns]
     pulls: Callable[[str], Pulls]
+    save: Callable[[State], None]
+    clock: Callable[[], float] = time.time
 
 
 def _slug(repo: str) -> str:
@@ -150,8 +162,9 @@ def failed(state: State) -> list[str]:
 
 
 def output(state: State, check: str, lab: str) -> Output:
-    """Return a relayed check run's output: the check's units, the grade run, the grader revision and the grade page."""
-    refs = list(state.units) if check == REQUIRED else state.gates[check]
+    """Return a relayed check run's output: the check's units, none for a skipped authoritative gate, the grade run,
+    the grader revision and the grade page."""
+    refs = list(state.units) if check == REQUIRED else state.gates.get(check, [])
     units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in (state.units[ref] for ref in refs))
     summary = f"{len(units)} units of {check} on {state.head} against {state.base}, relayed from the lab grade"
     details = f"{lab}/grades/{state.head}"
@@ -160,7 +173,10 @@ def output(state: State, check: str, lab: str) -> Output:
 
 def relay(state: State, branch: str, ports: Ports, lab: str) -> list[str]:
     """Relay a closed grade: a green one pushes the sha to the branch, posts every check run completed that is not
-    already, and opens the draft pull request, in that order; a red one relays nothing and names its failed units."""
+    already, and opens the draft pull request, in that order; a red one relays nothing and names its failed units. Each
+    check run the relay posts is saved on the grade's state under its check run name as GitHub answers, and seeds the
+    poster before the next relay of the grade, so a relay retried after a restart creates no second check run; the ids
+    the scheduler stores under gate names for its own posts never seed it."""
     if state.conclusion != SUCCESS:
         units = ", ".join(failed(state)) or "none"
         return [f"held {state.head} for {branch}: grade {state.run} is {state.conclusion}, failed units {units}"]
@@ -169,9 +185,15 @@ def relay(state: State, branch: str, ports: Ports, lab: str) -> list[str]:
     actions = [f"pushed {state.head} to {branch}"]
     poster = ports.checks(slug)
     for check, (_, conclusion) in state.posted.items():
-        if poster.status((state.head, name(check, False), state.run)) is None:
-            poster.post(state.head, check, "completed", conclusion, output(state, check, lab), False)
-            actions.append(f"posted {name(check, False)} {conclusion} on {state.head}")
+        relayed = name(check, False)
+        if relayed in state.runs:
+            poster.seed(state.head, check, state.run, state.runs[relayed], "completed", False)
+        if poster.status((state.head, relayed, state.run)) is None:
+            state.runs[relayed] = poster.post(
+                state.head, check, "completed", conclusion, output(state, check, lab), False
+            )
+            ports.save(state)
+            actions.append(f"posted {relayed} {conclusion} on {state.head}")
     body = f"Relayed by the CI lab from grade {state.run}: {lab}/grades/{state.head}"
     actions.append(ports.pulls(slug).open(branch, branch, body))
     return actions
@@ -188,16 +210,22 @@ class Relay:
         self.grades = grades
         self.ports = ports
         self.lab = lab
+        self.held: defaultdict[str, int] = defaultdict(int)
 
     def tick(self) -> list[str]:
         """Record the new notices' relays per head and branch, then relay each pending one a closed grade answers and
-        forget it once relayed; a relay whose git or HTTP call fails is named and stays pending for the next tick."""
+        forget it once relayed; a relay whose git or HTTP call fails is named and stays pending for the next tick, and a
+        relay whose App token GitHub refuses is named held, stays pending and holds every relay of its repository for
+        POST_HOLD_MS while other repositories still relay."""
         actions: list[str] = []
+        now_ms = int(self.ports.clock() * 1000)
         for item in self.notices.pending():
             self.client.hset(PENDING, f"{item.head} {item.branch}", json.dumps(asdict(item)))
             actions.append(f"pending {item.head} for {item.branch}")
         for key, raw in sorted(self.client.hgetall(PENDING).items()):
             item = Pending(**json.loads(raw))
+            if now_ms < self.held[item.repo]:
+                continue
             states = self.grades(item.head)
             if not states:
                 continue
@@ -205,6 +233,10 @@ class Relay:
                 actions.extend(self._relay(item, states))
             except (OSError, subprocess.SubprocessError) as error:
                 actions.append(f"retry {item.head} for {item.branch}: {error}")
+                continue
+            except GitAuthRefused as error:
+                self.held[item.repo] = now_ms + POST_HOLD_MS
+                actions.append(f"held {item.head} for {item.branch} for a later pass: {error}")
                 continue
             self.client.hdel(PENDING, key)
         return actions
@@ -322,10 +354,10 @@ def build(environ: Mapping[str, str], scheduler: Scheduler, consumer: Consumer) 
 
     def checks(slug: str) -> CheckRuns:
         if slug not in posters:
-            posters[slug] = Checks(slug)
+            posters[slug] = Checks(slug, registry=scheduler.registry)
         return posters[slug]
 
-    ports = Ports(pusher, checks, PullRequests)
+    ports = Ports(pusher, checks, PullRequests, scheduler.save)
     lab = environ[LAB_URL].rstrip("/")
     notices = BusNotices(consumer, scheduler.settings.trusted)
     return Relay(scheduler.client, notices, partial(closed, scheduler), ports, lab)
