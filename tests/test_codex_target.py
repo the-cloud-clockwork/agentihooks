@@ -458,6 +458,240 @@ class TestSharedSkillsDir:
         assert (shared / "SKILL.md").read_text() == "REAL SKILL"
 
 
+def _is_md(path: Path) -> bool:
+    return path.suffix == ".md"
+
+
+def _agent(path: Path, description: str = "Scouts.", body: str = "Read only.") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\nname: {path.stem}\ndescription: {description}\n---\n\n{body}\n")
+    return path
+
+
+class TestCustomAgents:
+    def test_agents_are_written_as_codex_custom_agents(self, adapter, tmp_path):
+        import tomllib
+
+        _agent(tmp_path / "agents" / "scout.md")
+        adapter.install_features("agents", [("agent", tmp_path / "agents")], _is_md)
+        doc = tomllib.loads((codex_home() / "agents" / "scout.toml").read_text())
+        assert doc == {"name": "scout", "description": "Scouts.", "developer_instructions": "Read only."}
+
+    def test_a_later_install_removes_the_agents_it_no_longer_ships(self, adapter, tmp_path):
+        src = tmp_path / "agents"
+        _agent(src / "keep.md")
+        dropped = _agent(src / "drop.md")
+        adapter.install_features("agents", [("agent", src)], _is_md)
+        dropped.unlink()
+        CodexAdapter().install_features("agents", [("agent", src)], _is_md)
+        assert sorted(p.name for p in (codex_home() / "agents").glob("*.toml")) == ["keep.toml"]
+
+    def test_an_operator_agent_file_of_the_same_name_wins(self, adapter, tmp_path):
+        own = codex_home() / "agents" / "scout.toml"
+        own.parent.mkdir(parents=True)
+        own.write_text('name = "mine"\n')
+        _agent(tmp_path / "agents" / "scout.md")
+        adapter.install_features("agents", [("agent", tmp_path / "agents")], _is_md)
+        assert own.read_text() == 'name = "mine"\n'
+
+    def test_agents_land_in_a_codex_home_that_does_not_exist_yet_with_their_manifest(self, adapter, tmp_path):
+        import shutil
+
+        shutil.rmtree(codex_home(), ignore_errors=True)
+        _agent(tmp_path / "agents" / "scout.md")
+        adapter.install_features("agents", [("agent", tmp_path / "agents")], _is_md)
+        manifest = codex_home() / "agents" / ".agentihooks-manifest.json"
+        assert json.loads(manifest.read_text()) == ["scout.toml"]
+
+    def test_an_operator_agent_file_leaves_the_agents_after_it_installed(self, adapter, tmp_path):
+        own = codex_home() / "agents" / "a-scout.toml"
+        own.parent.mkdir(parents=True)
+        own.write_text('name = "mine"\n')
+        _agent(tmp_path / "agents" / "a-scout.md")
+        _agent(tmp_path / "agents" / "b-helper.md")
+        adapter.install_features("agents", [("agent", tmp_path / "agents")], _is_md)
+        assert (codex_home() / "agents" / "b-helper.toml").is_file()
+
+    def test_an_unreadable_agent_leaves_the_agents_after_it_installed(self, adapter, tmp_path):
+        src = tmp_path / "agents"
+        src.mkdir()
+        (src / "a-broken.md").symlink_to(tmp_path / "missing.md")
+        _agent(src / "b-helper.md")
+        adapter.install_features("agents", [("agent", src)], _is_md)
+        assert sorted(p.name for p in (codex_home() / "agents").glob("*.toml")) == ["b-helper.toml"]
+
+    def test_a_managed_agent_the_operator_already_deleted_is_dropped_from_the_manifest(self, adapter, tmp_path):
+        src = tmp_path / "agents"
+        _agent(src / "keep.md")
+        dropped = _agent(src / "drop.md")
+        adapter.install_features("agents", [("agent", src)], _is_md)
+        dropped.unlink()
+        (codex_home() / "agents" / "drop.toml").unlink()
+        CodexAdapter().install_features("agents", [("agent", src)], _is_md)
+        manifest = codex_home() / "agents" / ".agentihooks-manifest.json"
+        assert json.loads(manifest.read_text()) == ["keep.toml"]
+
+
+class TestHandPlacedClaudeFiles:
+    def test_a_hand_placed_rule_reaches_agents_md(self, adapter, tmp_path):
+        _hand_placed(install.CLAUDE_HOME / "rules" / "mine.md", "Tests run in CI only.")
+        adapter.install_features("rules", [("rule", tmp_path / "none")], _is_md)
+        assert "<!-- rule: mine.md (local) -->\nTests run in CI only." in _agents_md(adapter, tmp_path)
+
+    def test_a_rule_the_installer_copied_into_claude_appears_once(self, adapter, tmp_path):
+        layer = tmp_path / "rules"
+        layer.mkdir()
+        (layer / "shipped.md").write_text("Shipped rule body.")
+        copy = _hand_placed(install.CLAUDE_HOME / "rules" / "shipped.md", "Shipped rule body.")
+        install._state_record_links([(copy, layer / "shipped.md", "rules")])
+        adapter.install_features("rules", [("rule", layer)], _is_md)
+        assert _agents_md(adapter, tmp_path).count("Shipped rule body.") == 1
+
+    def test_a_hand_placed_skill_reaches_the_codex_skills_dir(self, adapter, tmp_path):
+        from scripts.targets._common import agents_skills_home
+
+        skill = install.CLAUDE_HOME / "skills" / "proxy-analyst"
+        _hand_placed(skill / "SKILL.md", "---\nname: proxy-analyst\ndescription: Reads the proxy.\n---\n")
+        adapter.install_features("skills", [("skill", tmp_path / "none")], lambda p: (p / "SKILL.md").is_file())
+        link = agents_skills_home() / "proxy-analyst"
+        assert link.is_symlink() and link.resolve() == skill.resolve()
+
+    def test_a_hand_placed_command_becomes_a_codex_skill(self, adapter, tmp_path):
+        from scripts.targets._common import agents_skills_home
+
+        text = "---\ndescription: Deploys the agent.\n---\n\nRun the deploy.\n"
+        _hand_placed(install.CLAUDE_HOME / "commands" / "deploy-agent.md", text)
+        adapter.install_features("commands", [("command", tmp_path / "none")], _is_md)
+        assert (agents_skills_home() / "deploy-agent" / "SKILL.md").read_text() == text
+
+    def test_a_hand_placed_agent_becomes_a_codex_custom_agent(self, adapter, tmp_path):
+        _agent(install.CLAUDE_HOME / "agents" / "helper.md")
+        adapter.install_features("agents", [("agent", tmp_path / "none")], _is_md)
+        assert (codex_home() / "agents" / "helper.toml").is_file()
+
+    def test_a_hand_placed_skill_is_linked_by_name_and_managed_entries_are_not(self, adapter, tmp_path, capsys):
+        from scripts.targets._common import agents_skills_home
+
+        bundle = tmp_path / "bundle-skill"
+        _hand_placed(bundle / "SKILL.md", "---\nname: bundle-skill\ndescription: Ships.\n---\n")
+        managed = install.CLAUDE_HOME / "skills" / "bundle-skill"
+        managed.parent.mkdir(parents=True, exist_ok=True)
+        managed.symlink_to(bundle)
+        install._state_record_links([(managed, bundle, "skills")])
+        _hand_placed(install.CLAUDE_HOME / "skills" / "mine" / "SKILL.md", "---\nname: mine\ndescription: Mine.\n---\n")
+        adapter.install_features("skills", [("skill", tmp_path / "none")], lambda p: (p / "SKILL.md").is_file())
+        assert sorted(p.name for p in agents_skills_home().iterdir()) == ["mine"]
+        assert "Linked codex local skill 'mine'" in capsys.readouterr().out
+
+    def test_a_hand_placed_command_never_replaces_an_operator_skill(self, adapter, tmp_path):
+        from scripts.targets._common import agents_skills_home
+
+        own = _hand_placed(agents_skills_home() / "deploy-agent" / "SKILL.md", "operator skill")
+        _hand_placed(install.CLAUDE_HOME / "commands" / "deploy-agent.md", "---\ndescription: D.\n---\n\nbody\n")
+        adapter.install_features("commands", [("command", tmp_path / "none")], _is_md)
+        assert own.read_text() == "operator skill"
+
+    def test_a_command_without_frontmatter_is_skipped_and_the_next_one_still_lands(self, adapter, tmp_path):
+        import shutil
+
+        from scripts.targets._common import agents_skills_home
+
+        shutil.rmtree(agents_skills_home().parent, ignore_errors=True)
+        _hand_placed(install.CLAUDE_HOME / "commands" / "a-plain.md", "no frontmatter\n")
+        _hand_placed(install.CLAUDE_HOME / "commands" / "b-real.md", "---\ndescription: B.\n---\n\nbody\n")
+        adapter.install_features("commands", [("command", tmp_path / "none")], _is_md)
+        assert not (agents_skills_home() / "a-plain").exists()
+        assert (agents_skills_home() / "b-real" / "SKILL.md").is_file()
+
+    def test_a_hand_placed_command_removed_later_leaves_no_skill_behind(self, adapter, tmp_path):
+        from scripts.targets._common import agents_skills_home
+
+        command = _hand_placed(install.CLAUDE_HOME / "commands" / "gone.md", "---\ndescription: G.\n---\n\nbody\n")
+        adapter.install_features("commands", [("command", tmp_path / "none")], _is_md)
+        command.unlink()
+        CodexAdapter().install_features("commands", [("command", tmp_path / "none")], _is_md)
+        assert not (agents_skills_home() / "gone").exists()
+        manifest = agents_skills_home() / ".agentihooks-codex-local-commands.json"
+        assert json.loads(manifest.read_text()) == []
+
+    def test_a_hand_placed_command_survives_a_second_install(self, adapter, tmp_path):
+        from scripts.targets._common import agents_skills_home
+
+        text = "---\ndescription: Deploys the agent.\n---\n\nRun the deploy.\n"
+        _hand_placed(install.CLAUDE_HOME / "commands" / "deploy-agent.md", text)
+        adapter.install_features("commands", [("command", tmp_path / "none")], _is_md)
+        CodexAdapter().install_features("commands", [("command", tmp_path / "none")], _is_md)
+        assert (agents_skills_home() / "deploy-agent" / "SKILL.md").read_text() == text
+
+    def test_an_unreadable_hand_placed_command_leaves_the_next_one_to_land(self, adapter, tmp_path):
+        from scripts.targets._common import agents_skills_home
+
+        commands = install.CLAUDE_HOME / "commands"
+        commands.mkdir(parents=True, exist_ok=True)
+        (commands / "a-broken.md").symlink_to(tmp_path / "missing.md")
+        _hand_placed(commands / "b-real.md", "---\ndescription: B.\n---\n\nbody\n")
+        adapter.install_features("commands", [("command", tmp_path / "none")], _is_md)
+        assert (agents_skills_home() / "b-real" / "SKILL.md").is_file()
+
+    def test_a_removed_command_whose_skill_the_operator_replaced_or_deleted_keeps_the_install_running(
+        self, adapter, tmp_path
+    ):
+        import shutil
+
+        from scripts.targets._common import agents_skills_home
+
+        body = "---\ndescription: C.\n---\n\nbody\n"
+        commands = [_hand_placed(install.CLAUDE_HOME / "commands" / f"{name}.md", body) for name in ("linked", "gone")]
+        adapter.install_features("commands", [("command", tmp_path / "none")], _is_md)
+        for command in commands:
+            command.unlink()
+        own = _hand_placed(tmp_path / "own-skill" / "SKILL.md", "operator skill").parent
+        shutil.rmtree(agents_skills_home() / "linked")
+        (agents_skills_home() / "linked").symlink_to(own)
+        shutil.rmtree(agents_skills_home() / "gone")
+        CodexAdapter().install_features("commands", [("command", tmp_path / "none")], _is_md)
+        assert (agents_skills_home() / "linked").is_symlink()
+        assert (own / "SKILL.md").read_text() == "operator skill"
+
+    def test_an_unreadable_hand_placed_rule_leaves_the_others_in_agents_md(self, adapter, tmp_path):
+        rules = install.CLAUDE_HOME / "rules"
+        rules.mkdir(parents=True, exist_ok=True)
+        (rules / "a-broken.md").symlink_to(tmp_path / "missing.md")
+        _hand_placed(rules / "b-mine.md", "Tests run in CI only.")
+        adapter.install_features("rules", [("rule", tmp_path / "none")], _is_md)
+        assert "<!-- rule: b-mine.md (local) -->\nTests run in CI only." in _agents_md(adapter, tmp_path)
+
+
+class TestClaudeLocalEntries:
+    def test_only_unledgered_unshipped_visible_matching_entries_count(self, adapter, tmp_path):
+        from scripts.targets._common import claude_local_entries
+
+        rules = install.CLAUDE_HOME / "rules"
+        for name in ("mine.md", ".hidden.md", "notes.txt", "shipped.md", "copied.md"):
+            _hand_placed(rules / name, name)
+        install._state_record_links([(rules / "copied.md", tmp_path / "copied.md", "rules")])
+        layer = tmp_path / "layer"
+        _hand_placed(layer / "shipped.md", "layer")
+        assert [p.name for p in claude_local_entries("rules", [("rule", layer)], _is_md)] == ["mine.md"]
+
+    def test_a_missing_claude_dir_has_no_entries(self, adapter, tmp_path):
+        from scripts.targets._common import claude_local_entries
+
+        assert claude_local_entries("no-such-kind", [], _is_md) == []
+
+
+def _hand_placed(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def _agents_md(adapter: CodexAdapter, tmp_path: Path) -> str:
+    prof = _hand_placed(tmp_path / "prof" / "CLAUDE.md", "persona").parent
+    adapter.install_persona([("p", prof)], ["p"], None)
+    return (codex_home() / "AGENTS.md").read_text()
+
+
 class TestPersona:
     def test_agents_md_compiles_chain_rules_and_manifesto(self, adapter, tmp_path, monkeypatch):
         prof = tmp_path / "prof-anton"
