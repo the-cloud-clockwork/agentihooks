@@ -15464,6 +15464,17 @@
       ]
     },
     {
+      "id": "swarm-set-ascii-whole-numbers",
+      "origin": "regression",
+      "ordered_at": "2026-11-24",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-set-unicode-digit",
+      "behaviour": "Swarm set takes a whole number cap, memory per agent, swap floor or placement node limit only in ASCII digits: a value written with a superscript or fullwidth digit gets the same usage refusal as a letter, exit 1, and the stored swarm config stays unchanged instead of the command crashing or storing it.",
+      "seam": "scripts.swarm.cli.main through cmd_set, config_value and scaling_value",
+      "tests": [
+        "tests/swarm/test_set_ascii_digits.py::test_set_refuses_a_non_ascii_digit_like_any_other_non_number"
+      ]
+    },
+    {
       "id": "swarm-review-trigger",
       "origin": "inventory",
       "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
