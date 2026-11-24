@@ -26,6 +26,7 @@ CONTRACT_NAMES = (
     "ci_lab_cache_hits_total",
     "ci_lab_cache_misses_total",
     "ci_lab_mirror_age_seconds",
+    "ci_lab_node_mirror_age_seconds",
     "ci_lab_core_seconds_total",
     "ci_lab_heads_graded_total",
     "ci_lab_budget_fraction",
