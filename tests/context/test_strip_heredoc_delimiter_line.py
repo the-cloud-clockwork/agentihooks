@@ -107,12 +107,6 @@ def test_branch_guard_refuses_a_push_after_any_arithmetic_shift(command: str) ->
 
 
 @pytest.mark.feature("guard-stripping-reads-heredocs-from-the-bash-parse")
-def test_stripping_drops_a_double_quoted_heredoc_like_a_single_quoted_one() -> None:
-    command = 'cat <<"EOF" > out.txt && git status\nbody line\nEOF'
-    assert strip_non_command_content(command) == "cat  > out.txt && git status"
-
-
-@pytest.mark.feature("guard-stripping-reads-heredocs-from-the-bash-parse")
 @pytest.mark.parametrize(
     ("command", "stripped"),
     [
@@ -146,6 +140,7 @@ def test_stripping_keeps_exact_text_around_heredocs(command: str, stripped: str)
         "cat <<EOF > out.txt\n${HOME}/notes\ngit push origin main\n",
         "cat <<EOF > out.txt\n$(date)x\ngit push origin main\n",
         "cat <<A <<B\ngit push origin main\nA\nb\nB",
+        'cat <<"EOF" | bash\ngit push origin main\nEOF',
         "\n\tEOF<<'EOF'cat\n\nGUARDED<<X\nEOF<<-EOF<<X]${ ",
         "#]1<<2\né<<-EOF\n$(done#GUARDED\n<<EOF(($(X",
         "\tEOF<<-EOF\tEOF\nGUARDED\n\tEOFX$((<<X<<'EOF'\"1<<2|",

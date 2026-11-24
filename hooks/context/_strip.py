@@ -20,7 +20,8 @@ def _without_heredocs(command: str) -> str:
 
     The rest of the delimiter line stays. An arithmetic shift never parses as a heredoc. A heredoc counts as terminated
     only when its terminator holds the delimiter word, because the parse can end an unterminated body holding an
-    expansion with a terminator made of the rest of the text. A parse with an error keeps every heredoc, as prod
+    expansion with a terminator made of the rest of the text. A double quoted delimiter never matches its terminator,
+    so the guards still read its body. A parse with an error keeps every heredoc, as prod
     lockdown keeps the whole command, because error recovery can find a terminator inside a line.
     """
     source = command.encode("utf-8", "surrogatepass")
@@ -30,7 +31,7 @@ def _without_heredocs(command: str) -> str:
     kept = [True] * len(source)
     for _, match in QueryCursor(_HEREDOCS).matches(tree.root_node):
         redirect, start, body, end = (match[name][0] for name in ("redirect", "start", "body", "end"))
-        delimiter = source[start.start_byte : start.end_byte].strip(b"'\"")
+        delimiter = source[start.start_byte : start.end_byte].strip(b"'")
         if delimiter and source[end.start_byte : end.end_byte] == delimiter:
             line_end = source.rfind(b"\n", 0, body.start_byte)
             for first, last in ((redirect.start_byte, start.end_byte), (line_end, end.end_byte)):

@@ -1,0 +1,6 @@
+{
+  "hooks/context/_strip.py:hooks.context._strip.x__without_heredocs:aba8ff066c2c1aa5b7bfe1ac96831131950ca45dc9768e925c30daaa99572735": {
+    "reader": "standards_reader",
+    "reason": "Equivalent. Decode looks up the codec name case-insensitively, so the upper-case spelling selects the same codec."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "hooks/context/_strip.py:hooks.context._strip.x__without_heredocs:289023e9954f80e6da4406c0734103f5ac372e58e0448e96dd20851e827ad2c0": {
+    "reader": "standards_reader",
+    "reason": "Equivalent. Python codec lookup normalizes names case-insensitively, so \"UTF-8\" and \"utf-8\" select the same codec."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "hooks/context/_strip.py:hooks.context._strip.x__without_heredocs:528ce89de7fb377483d4c9f7136d3065cd7aba6a2c7ef78b79b6ca5161a9866c": {
+    "reader": "standards_reader",
+    "reason": "Equivalent. The newline that ends the opener line is always the last newline before the body, and it sits at or after start.end_byte, which is at least 2, so index 0 is never the result."
+  }
+}

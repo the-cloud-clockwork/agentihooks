@@ -1,0 +1,6 @@
+{
+  "hooks/context/_strip.py:hooks.context._strip.x__without_heredocs:ea32d7b40033628a79b36ff117a068fa22a8986638fe15114a2a91503cedb5b6": {
+    "reader": "standards_reader",
+    "reason": "Equivalent. strict=False differs from strict=True only when the zip inputs have different lengths, and kept keeps len(source) entries because each slice assignment replaces kept[first:last] with last - first entries on a clean parse."
+  }
+}
