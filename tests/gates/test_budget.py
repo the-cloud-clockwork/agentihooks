@@ -76,3 +76,4 @@ def test_a_refund_never_counts_below_zero_and_leaves_spends_without_a_call(tmp_p
     budget.refund("toolu_9")
     budget.refund("")
     assert (budget.spent("h1", "reruns"), budget.spent("h2", "reruns")) == (0, 1)
+    assert list((tmp_path / "demo" / "gates" / "reruns" / "calls").iterdir()) == []

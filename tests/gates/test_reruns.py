@@ -180,6 +180,14 @@ def test_released_gives_back_only_the_reruns_of_its_own_call(tmp_path: Path, mon
 
 
 @pytest.mark.feature("rerun-budget-counts-admitted-reruns")
+def test_a_gate_call_carries_the_tool_use_id_of_its_hook_payload() -> None:
+    from scripts.gates import base
+
+    assert base.Call.from_payload(payload("gh run rerun 1", "toolu_1")).tool_use_id == "toolu_1"
+    assert base.Call.from_payload({"tool_name": "Bash"}).tool_use_id == ""
+
+
+@pytest.mark.feature("rerun-budget-counts-admitted-reruns")
 def test_a_rerun_panic_refuses_leaves_both_reruns_of_the_head_unspent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
