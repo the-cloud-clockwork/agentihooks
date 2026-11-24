@@ -1,0 +1,19 @@
+rules:
+  - id: lab-manifest-cache-forgets-absent-answers
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab manifest fetch cache measures the age of a finished fetch against the fresh window alone, so it forgets
+      a fetch that found no manifest as soon as one that found one. On 24 November a search that passes one commit per
+      scheduler pass lost its first absent answers after 300 seconds, started again at the base and held every head
+      whose nearest manifest lay more than four commits behind for ever. Take the window from the answer of the fetch,
+      the absent window when it found none, and compare the age with that.
+    paths:
+      include:
+        - /scripts/ci_lab/manifests.py
+        - lab-manifest-cache-forgets-absent-answers.py
+    pattern-either:
+      - pattern: $AGE < $CACHE.fresh_s
+      - pattern: $AGE <= $CACHE.fresh_s
+      - pattern: $AGE > $CACHE.fresh_s
+      - pattern: $AGE >= $CACHE.fresh_s

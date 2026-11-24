@@ -215,7 +215,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `CI_LAB_MIRROR_STORE` | yes | no | Folder of the scheduler's private git stores, one per repository, that borrow the mirror's objects |
 | `CI_LAB_REPOSITORY` | yes | yes | Repository URL whose dev runner trust list admits head actors; on the worker, the repository its node mirror holds, which the lab remote URL must name |
 | `AGENTIHOOKS_LAB_REMOTE`, `AGENTIHOOKS_LAB_REMOTE_TOKEN` | yes | yes | The lab remote URL a mirror fetches a sha GitHub or the node mirror lacks from, and its token, passed by reference; unset, the mirrors fetch from GitHub and the node mirror only. On a workstation or hive the same pair gives workspaces the `lab` remote; see [Workspaces that carry the lab remote](#workspaces-that-carry-the-lab-remote) |
-| `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset |
+| `CI_LAB_IMAGE` | yes | no | Worker image name keyed into static unit keys; empty when unset. Also the image the lab wants: a worker whose pod names a floating tag and runs another digest is answered `426` on its next lease and restarts in place, see [Worker executors](#worker-executors) |
 | `CI_LAB_CONTROL_TOKEN` | yes | no | Bearer token the [control routes](#control-routes) require, passed by reference; unset, they refuse every request. The swarm host that presses panic or merge priority holds the same variable |
 | `UV_CACHE_DIR` | no | yes | Shared uv cache for virtual environments |
 
@@ -997,7 +997,7 @@ and `uv`, the worker waits in `ContainerCreating` while the kubelet retries the 
 | Setting | Value | Effect |
 |---|---|---|
 | `cluster-autoscaler.kubernetes.io/safe-to-evict` | `"false"`, the pod template's only annotation | The cluster autoscaler never removes a node that runs a worker; a CI node goes only after its workers have. A scale down of the Deployment removes idle workers first, see [Worker pod deletion cost](#worker-pod-deletion-cost) |
-| `terminationGracePeriodSeconds` | `worker.terminationGracePeriodSeconds`, `2100` | How long the kubelet waits after SIGTERM before it kills the container. The worker's drain window is fixed in code, `worker.GRACE_SECONDS`, 2100 seconds: a stopping worker stops leasing and drains its running units for up to that long, see [Worker executors](#worker-executors). A Helm value below 2100 kills a worker mid drain |
+| `terminationGracePeriodSeconds` | `worker.terminationGracePeriodSeconds`, `2100` | How long the kubelet waits after SIGTERM before it kills the container. The worker's drain window is fixed in code, `worker.GRACE_SECONDS`, 2100 seconds: a stopping worker stops leasing and drains its running units for up to that long, see [Worker executors](#worker-executors). A Helm value below 2100 kills a worker mid drain. A worker that restarts in place on a `426` lease answer drains within the same window and exits 0 on its own, with no SIGTERM and no grace left unused |
 | `strategy` | `RollingUpdate` with `maxSurge: 0` and `maxUnavailable: 1` | A rollout adds no surge pod, so it asks the autoscaler for no extra node, and takes one worker down at a time; a busy worker holds its step for up to the grace |
 
 ### Network
@@ -1200,7 +1200,8 @@ its done criteria name are not recorded:
 | The worker exits at start with `ci-lab worker refuses` | Its environment holds a `GITHUB_APP_` or `REDIS` variable | Remove the variable from the chart |
 | The worker exits at start with a `KeyError` naming a `CI_LAB_` variable | A required work setting is missing from the pod environment | Compare the pod's `env` with the contract table above |
 | The worker log repeats `ci-lab worker: lease call failed, retrying in <n>s` | The scheduler is not answering on 8800, or answers with a server error: it is rolling, restarting or down. The worker keeps running, retries after a backoff that doubles from 1 up to 10 seconds, and leases again on the first answer | `kubectl -n ci-lab get deploy ci-lab-scheduler` and `kubectl -n ci-lab logs deploy/ci-lab-scheduler --since 10m` |
-| The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
+| The worker exits with an `HTTPError` 4xx raised from `Client.lease` | The scheduler answered the lease call with a client error other than `426`, such as a 404 when `CI_LAB_SCHEDULER_URL` names a wrong path; a retry cannot change that answer, so the process ends with the traceback without draining its running units, which are left to finish or reap | Compare the pod's `CI_LAB_SCHEDULER_URL` with the contract table above |
+| The worker log reads `ci-lab worker: the lab wants another image, restarting` and the container restarts with no crash | `Client.lease` got a `426`: the worker's pod names a floating tag and runs a digest other than `CI_LAB_IMAGE`. It stops leasing, drains within the grace and exits 0, and the kubelet starts the container again on the same pod | Compare the pod's running image digest with `CI_LAB_IMAGE`; expected once per release until the chart rolls that pod |
 | A head's units are reaped undelivered and the worker log shows a failed `git fetch` | The node mirror lacks the head and the worker has no other source | The node cache's `fetched-at` stamp and warm log, see [Verify every node](ci-lab-node-cache.md#verify-every-node) |
 | A venv build fails with `uv venv for <tree> ended with code` or `uv pip install for <tree> ended with code` | The build needs the package index, which the policy refuses | The kept build log the error names; see Limitations |
 | The worker log reads `ci-lab worker: unit <job> crashed: FileNotFoundError(2, 'No such file or directory')` and the traceback's last line names `<tree>/.github/test-requirements.lock` | The head does not track the test requirements lock, so `executors.lockfile_digest` cannot key the unit's venv. The unit never reports, its lease expires, and the [retry policy](#retry-policy) requeues it once and marks it lost on the second expiry | `git ls-tree <head> .github/test-requirements.lock` prints nothing; see [Which venv a unit gets](#which-venv-a-unit-gets) |
@@ -2548,6 +2549,12 @@ units, with no test scope and no mutation; a merge group grade does the same for
 promotion or backfill grade keeps every lab gate. A gate without units passes, so a grade turns red only
 through what the lab grades.
 
+A plant pull request grade is the one pull request grade that runs test units, so it is framed as a run
+of the full suite: its select scope reads `full` and it carries the jobs that scope requires, `split`,
+`unit` and `shard-check`, beside the pull request jobs. The rules then require its `unit` job, so the
+grade folds green when every gate passes, with no test unit or with passing ones, and red when a test
+unit fails. `split` and `shard-check` hold no unit and post no check run.
+
 A pull request or hotfix grade reads `lab.authoritative` from the `delivery.yaml` of its base, the
 grader revision, so the head cannot widen it. Each listed gate the frame gives no unit, such as `unit`,
 `unit-selected`, `shard-check` or `mutation`, which those classes never expand, lands in the grade
@@ -2921,6 +2928,7 @@ batch. A test that `.test_durations` does not list counts 0 seconds, and a head 
 | Head | Unit job |
 |---|---|
 | Pull request, hotfix | No test units; the manifest is not read |
+| Plant pull request | The listed batches whose test module the plant changed and each test module it added or changed that the manifest does not list; none when it touches no test module |
 | Merge group | The batches that hold a test the group's entries invalidate, or every batch when `interaction.decide` returns `FULL` |
 | Promotion, backfill | Every batch; the verdict store is not consulted for the choice |
 
@@ -2951,8 +2959,10 @@ runs each fetch off the scheduler pass through
 unchanged, so the next pass reads the finished fetch and a manifest request GitHub never answers
 holds no pass from reaping leases or advancing grades. Until the fetch finishes each pass repeats the
 head's expansion up to the manifest, its git reads included; the mirror's `git fetch` of a missing
-sha still runs on the pass. A failed fetch answers once; any other answers every call for `FRESH_S`
-(300 seconds) after the fetch started. The dev push artifact is kept 7 days, so a commit older
+sha still runs on the pass. A failed fetch answers once; one that found a manifest answers every
+call for `FRESH_S` (300 seconds) after the fetch started, and one that found none answers for
+`ABSENT_S` (3600 seconds), so a search that passes one commit per pass keeps its first answers until
+it has passed the last commit of its depth. The dev push artifact is kept 7 days, so a commit older
 than that is answered only from the store. A head that needs test units and finds none fails with
 `no dependency manifest at or before <base>` and is dropped with that reason, so a merge group
 never folds green on an empty unit job.
@@ -3271,7 +3281,7 @@ refuses a key of that form with `ValueError: not a <kind> unit key: <key>`, so t
 
 #### How a worker runs them
 
-Both kinds run through `scripts.ci_lab.executors.mutation` in a private copy of the head, as
+Both kinds run through `scripts.ci_lab.executors.mutation`, with the grader tree's runner grading a private copy of the head, as
 [Worker executors](#worker-executors) describes. The executor first makes the lease's base present
 in the pod's store and puts behind trampolines only the functions the head changes against that
 base: for each file `scope.changes_since` names, `run_mutation.trampoline` rewrites the functions
@@ -3474,16 +3484,22 @@ Each grade is `scripts.ci_lab.scheduler.summary` of its state:
 from the scheduler and runs each through `scripts.ci_lab.executors`, the adapter its unit kind
 names. Every grant of `POST /lease` carries the job's `head`, `base` and `grader` revisions: the
 scheduler enqueues a grade's misses with the grade's base and its plan's grader revision.
+`POST /lease` answers `426` with no grant, and records no offer, for a worker whose pod runs a
+digest other than `CI_LAB_IMAGE` under a floating tag; a pod pinned by digest is never stale, so a
+release that leaves the chart's tag pinned changes nothing live. Every other request is answered
+as before.
 
 | Kind | Trees | Executor inputs |
 |---|---|---|
-| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
+| `static` | head, base and grader, read only, shared by the pod's units; a gate whose step passes `--baseline-commit` runs in a private writable tree of the head | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
 | `test` | head, read only | the batch and its selected manifest records, read from the object store into its lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
-| `stats` | a private copy of the head with the functions the head changes against the lease's base behind their trampolines, and the base present in the pod's store | the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
-| `mutant` | the same private trampolined copy | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of the test files its manifest names show reaching the mutant's function, with their seconds |
+| `stats` | a private copy of the head with the functions the head changes against the lease's base behind their trampolines, the base present in the pod's store, and the grader bound read only |  the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
+| `mutant` | the same private trampolined copy and read only grader | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of the test files its manifest names show reaching the mutant's function, with their seconds |
 
 The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
-from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
+from the grader tree, so the grader revision's copy of the runner grades the unit and a head change
+to the runner changes no verdict. Each request names the private copy as its `tree`; every pytest
+session the runner starts runs there and imports that copy's `scripts` package. A mutant unit passes only when every mutant is killed; a runner that exits
 non zero fails its unit. The scheduler splits a function whose mutants price over the 30 minute
 unit time limit into several mutant units, as
 [Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) describes. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
@@ -3493,7 +3509,15 @@ termination grace: 2100 seconds, the 30 minute unit time limit (`worker.UNIT_TIM
 which every executor's pod timeout reads) plus the five delivery calls of a unit (two upload
 URLs, two puts and the completion) at the 60 second HTTP timeout. The worker Deployment of the
 deployment repository's `ci-lab` chart sets `worker.terminationGracePeriodSeconds` to the same 2100 seconds, so
-a rollout lets the longest unit finish and deliver before the pod is killed.
+a rollout lets the longest unit finish and deliver before the pod is killed. A `426` lease answer
+stops the worker the same way, without SIGTERM: it stops leasing, drains within the same grace and
+its process exits 0, so the kubelet restarts the container in the same pod and pulls the floating
+tag; its running units finish or are left to reap exactly as on a SIGTERM drain. The entry point
+empties `CI_LAB_WORK_ROOT` first, sealed trees and folders without owner access included, so a
+restarted or freshly scheduled pod always starts from an empty root: the venvs, mutation cache and
+killers a worker built under it are built again after any container restart, a crash included. A
+worker answered `426` again after its restart, because the node has not pulled the wanted digest
+yet, exits again at once; the kubelet's restart backoff is the only pause between those attempts.
 
 Check the wiring offline:
 
@@ -4536,12 +4560,17 @@ verdict.
 |---|---|---|---|
 | `run_static.run(gate, head_tree, base_tree, grader_tree, settings)` | The head tree | The grader tree and the base tree | Never |
 | `run_tests.run(batch, tree, venv, slots, lab)` | The tree the batch runs from | None | `lab.net` |
+| `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT` | The grader tree; its pytest sessions run in the request's `tree` | The grader tree | Never |
 
 `run_static.run` prepares the step the way the workflow runs it:
 
 - `RUNNER_TEMP` is a fresh folder under `settings.root`. Its `grader` and `base` entries are
   symlinks to the real tree paths, and it holds the empty `GITHUB_STEP_SUMMARY` file.
-- `GITHUB_WORKSPACE` and the working folder are the head tree.
+- `GITHUB_WORKSPACE` and the working folder are the head tree. For a gate whose step passes
+  `--baseline-commit` (`StaticGate.rewrites_tree`) that is a private writable tree of the head,
+  cut for the lease's head and base and dropped when the gate ends: Semgrep resets its working
+  tree to the baseline commit and back whenever the current scan has a finding, and the leased
+  tree is sealed and read by every unit of the head at once.
 - `PATH` is `settings.venv/bin`, then `/usr/local/bin`, where the worker image installs semgrep
   and helm, then `/bin:/usr/bin`. `RUFF_CACHE_DIR` is the `ruff` folder inside `RUNNER_TEMP`,
   since the worker seals the leased head tree and ruff would otherwise write `.ruff_cache` into

@@ -1,0 +1,21 @@
+rules:
+  - id: lab-lease-handler-without-stale-check
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lease handler grants a worker a lease before checking whether its pod runs the wrong image, so a stale
+      worker keeps leasing instead of restarting on the floating tag. Call leases.stale(worker) and answer 426
+      before leases.lease.
+    paths:
+      include:
+        - /scripts/ci_lab/lease_api.py
+        - lab-lease-handler-without-stale-check.py
+    patterns:
+      - pattern-inside: |
+          def _lease(...):
+              ...
+      - pattern: $LEASES.lease(...)
+      - pattern-not-inside: |
+          if <... $LEASES.stale(...) ...>:
+              ...
+          ...

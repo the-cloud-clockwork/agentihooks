@@ -61,7 +61,7 @@ from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
-from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
+from scripts.ci_lab.pods import Pods, pod_images, unmanaged, worker_pods
 from scripts.ci_lab.queue import DEFAULT, Job, Queue
 from scripts.ci_lab.remote.post_receive import GRADE_REFS
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
@@ -1402,8 +1402,9 @@ def frame(
     """Return a tier's plan: the lab's gates its `Gate — Required` rules require, and every other job they require as
     a gate without units, which passes, so only what the lab grades can turn the grade red.
 
-    A pull request or hotfix grade runs with no mutation; only a plant pull request runs test units. Each grades
-    under each required job the units
+    A pull request or hotfix grade runs with no mutation and no test scope. Only a plant pull request runs test
+    units, so it is framed as a run of the full suite: its select scope reads full and it carries the jobs that
+    scope requires, which the rules then demand of it. Each grades under each required job the units
     of every reusable workflow job it calls, which the expander files under the job, a slash and the called job, and
     names each authoritative gate it runs no unit of, which it posts as skipped; a merge group grade runs only the
     queue suite with no lost unit rerun; both keep the authoritative gates, which post as lab/<gate>; a promotion or
@@ -1416,13 +1417,14 @@ def frame(
         required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
         queued = {job: gates.get(job, ()) for job in required}
         return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed)
-    required = (*PULL_REQUIRED, UNIT_JOBS[0]) if tier == Priority.PULL_REQUEST and plant else PULL_REQUIRED
+    scope = "full" if tier == Priority.PULL_REQUEST and plant else "none"
+    required = (*PULL_REQUIRED, *SCOPED.get(scope, ()))
     framed = {
         job: tuple(unit for key, units in gates.items() if key == job or key.startswith(f"{job}/") for unit in units)
         for job in required
     }
     idle = frozenset(gate for gate in authoritative if not framed.get(gate))
-    return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}}, idle=idle, authoritative=listed)
+    return Plan(tree, grader, framed, outputs={"select": {"scope": scope}}, idle=idle, authoritative=listed)
 
 
 @dataclass(frozen=True)
@@ -1935,7 +1937,17 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     if environ.get(REINDEX_ON_START) == "true":
         print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
     manifests = partial(stored_manifest, scheduler.objects)
-    leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods, manifests)
+    leases = Leases(
+        scheduler.queue,
+        LEASE_TTL_MS,
+        _now_ms,
+        _sleep_ms,
+        LEASE_POLL_MS,
+        scheduler.ports.pods,
+        manifests,
+        environ.get(IMAGE, ""),
+        pod_images(scheduler.ports.pods),
+    )
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
     for server in listen(scheduler, leases, routes, spending, _now_ms, ports, Path(environ[contract.GIT_MIRROR])):

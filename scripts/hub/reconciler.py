@@ -1,11 +1,12 @@
 import json
+import os
 import sys
 from collections.abc import Callable
 from dataclasses import asdict, replace
 from typing import Any
 
 from scripts.events.bus import Bus
-from scripts.events.config import BusConfig
+from scripts.events.config import BIND_ENV, BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
 from scripts.hive import execution_events, execution_stop, presence, reports
@@ -62,19 +63,22 @@ def admitted_agents(store: Any, slug: str, legacy: list[AgentRecord]) -> list[Ag
     return [agent for agent in store.agents(slug) if agent.name not in kept]
 
 
-def stop_admitted(slug: str, agent: AgentRecord, reason: str) -> str:
-    """Sends the execution stop for ``agent`` to the hive that recorded its start, says on stderr what the stop
-    answered and answers it; unknown on the memory bus, where no hive records a start, and failed when the bus
-    refused the stop."""
+def stop_admitted(slug: str, agent: AgentRecord, reason: str, *, store: Any = None, bus: Bus | None = None) -> str:
+    """Parks a member tick's stop for the hub or sends it through the supplied bus, closing only a bus it opens."""
     config = BusConfig.from_environ()
-    if config.backend == "memory":
+    if bus is None and config.backend == "memory":
         return execution_stop.UNKNOWN
+    if bus is None and store is not None and os.environ.get(BIND_ENV) == "1" and agent.execution_id:
+        held = json.dumps({"agent": asdict(agent), "reason": reason, "forward": True})
+        store.redis.hset(store.key(slug, PENDING_STOPS), agent.execution_id, held)
+        return execution_stop.PENDING
     try:
-        bus = open_bus(config)
+        active = bus if bus is not None else open_bus(config)
         try:
-            outcome = execution_stop.stop(bus, slug, agent, reason)
+            outcome = execution_stop.stop(active, slug, agent, reason)
         finally:
-            bus.close()
+            if bus is None:
+                active.close()
     except Exception as exc:
         outcome = f"{execution_stop.FAILED} ({type(exc).__name__}: {exc})"
     print(f"hub execution stop for {agent.name} in swarm {slug} after {reason}: {outcome}", file=sys.stderr)
@@ -108,37 +112,41 @@ def stop_dropped(store: Any, slug: str, agent: AgentRecord, reason: str) -> str:
     """Sends the execution stop for ``agent``, which the swarm dropped, through ``stop_admitted`` and answers it; a
     stop the bus refused waits in the swarm's pending stops for ``retry_stops`` unless the agent has no execution for
     a stop to reach."""
-    outcome = stop_admitted(slug, agent, reason)
+    outcome = stop_admitted(slug, agent, reason, store=store)
     if outcome.startswith(execution_stop.FAILED) and agent.execution_id:
         held = json.dumps({"agent": asdict(agent), "reason": reason})
         store.redis.hset(store.key(slug, PENDING_STOPS), agent.execution_id, held)
     return outcome
 
 
-def retry_stops(store: Any, slug: str) -> list[str]:
-    """Sends again the stops the bus refused in ``slug`` through ``_resend`` and answers one action per stop sent
-    again; reads nothing on the memory bus, where no stop is ever refused."""
-    if BusConfig.from_environ().backend == "memory":
+def retry_stops(store: Any, slug: str, bus: Bus | None = None, guard: Callable[[], bool] = lambda: True) -> list[str]:
+    """Retries pending stops through the supplied hub bus; member ticks leave their requests parked."""
+    if bus is None and (BusConfig.from_environ().backend == "memory" or os.environ.get(BIND_ENV) == "1"):
         return []
     pending = store.key(slug, PENDING_STOPS)
     held = store.redis.hgetall(pending)
-    return _resend(store, slug, pending, held) if held else []
+    return _resend(store, slug, pending, held, bus, guard) if held else []
 
 
-def _resend(store: Any, slug: str, pending: str, held: dict[str, str]) -> list[str]:
-    """Sends again each stop in ``held``, the swarm's pending stops under ``pending`` by execution, whose execution
-    the swarm has since dropped; a refused stop for an execution the swarm still seats is discarded, since the next
-    judgement of that agent sends afresh. A stop the bus takes, or one for an execution that already ended, leaves the
-    pending stops; the first stop the bus refuses again ends the pass and leaves the rest for the next one."""
+def _resend(
+    store: Any, slug: str, pending: str, held: dict[str, str], bus: Bus | None, guard: Callable[[], bool]
+) -> list[str]:
+    """Sends pending stops, retaining deliberate member requests for seated executions and failed deliveries."""
     seated = {agent.execution_id for agent in store.agents(slug)}
     actions: list[str] = []
     for execution, raw in held.items():
-        if execution in seated:
+        if not guard():
+            break
+        stop = json.loads(raw)
+        if execution in seated and not stop.get("forward"):
             store.redis.hdel(pending, execution)
             continue
-        stop = json.loads(raw)
         agent = AgentRecord(**stop["agent"])
-        outcome = stop_dropped(store, slug, agent, stop["reason"])
+        outcome = (
+            stop_admitted(slug, agent, stop["reason"], bus=bus)
+            if bus is not None
+            else stop_dropped(store, slug, agent, stop["reason"])
+        )
         actions.append(f"sent the {stop['reason']} stop for {agent.name} again: {outcome}")
         if outcome.startswith(execution_stop.FAILED):
             break
@@ -240,6 +248,7 @@ class Reconciler:
         self._lifecycle = self._lifecycle or Lifecycle(self._bus, self._store)
         snapshots = reports.Reports(self._store.redis).live()
         for slug in event_slugs(self._store):
+            retry_stops(self._store, slug, self._bus, guard)
             for agent in self._store.execution_registry.records(slug):
                 if not guard():
                     return

@@ -218,6 +218,7 @@ SETTABLE = {
     "master-move-grace": "master_move_grace",
     "local-max-agents": "local_max_agents",
     "focus-weight": "focus_weight",
+    "review-share": "review_share",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
@@ -260,7 +261,11 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
 PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
 PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) for site in PASS_SITES[1:]}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
-WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"judged"}), "wrapper view": frozenset({"agents"})}
+WRAPPER_HOOK_READS = {
+    "wrapper phases": frozenset({"doc"}),
+    "wrapper relay": frozenset({"judged"}),
+    "wrapper view": frozenset({"agents"}),
+}
 ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
 LEDGER_HOOKS = frozenset({"wrapper commands", "wrapper phases", "wrapper intent", "wrapper view"})
 CONFIG_KEYS = {
@@ -1461,6 +1466,7 @@ def cmd_set(store: RedisStore, args: argparse.Namespace) -> None:
                 "masters_step": config.masters_step,
                 "compact_limit": config.compact_limit,
                 "focus_weight": config.focus_weight,
+                "review_share": config.review_share,
                 "autonomy": config.autonomy,
                 "snapshot_minutes": config.snapshot_minutes,
                 "effort_min": config.effort_min,
