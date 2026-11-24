@@ -1,6 +1,6 @@
 {
   "hooks/context/_strip.py:hooks.context._strip.x__without_heredocs:6346456d897f9b4d04746b173411c1e0d36cbd1c7516e3292f2ec718c004677c": {
     "reader": "standards_reader",
-    "reason": "Equivalent. A None start argument to bytes.rfind is treated as 0, so the call is identical."
+    "reason": "Equivalent. The newline that ends the opener line is always the last newline before the body, and it sits at or after start.end_byte, which is at least 2, so index 0 is never the result."
   }
 }

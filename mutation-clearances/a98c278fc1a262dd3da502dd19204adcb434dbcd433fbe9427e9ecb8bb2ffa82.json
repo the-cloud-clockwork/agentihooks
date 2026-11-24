@@ -1,6 +1,6 @@
 {
   "hooks/context/_strip.py:hooks.context._strip.x__without_heredocs:cc6349c1b2138278f85ed6a63b361e69f4bc58c30668ec33ebb59221a3982d06": {
     "reader": "standards_reader",
-    "reason": "Equivalent. strict=None is falsy, so it behaves as strict=False, which differs from strict=True only when the zip inputs have different lengths, and kept keeps len(source) entries because each slice assignment replaces kept[first:last] with last - first entries on a clean parse."
+    "reason": "Equivalent. Omitting strict gives the default False, which differs from strict=True only when the zip inputs have different lengths, and kept keeps len(source) entries because each slice assignment replaces kept[first:last] with last - first entries on a clean parse."
   }
 }
