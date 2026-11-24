@@ -48,6 +48,7 @@ ARTIFACTS_BY_NAME_QUERY = f"artifacts?name={ARTIFACT}"
 PACKED = "packed.json"
 WORKERS = 4
 FRESH_S = 300.0
+ABSENT_S = 3600.0
 
 
 class FetchRefused(ValueError):
@@ -170,9 +171,11 @@ class Background:
         workers: int = WORKERS,
         fresh_s: float = FRESH_S,
         clock: Callable[[], float] = time.monotonic,
+        absent_s: float = ABSENT_S,
     ) -> None:
         self.fetch = fetch
         self.fresh_s = fresh_s
+        self.absent_s = absent_s
         self.clock = clock
         self.pool = ThreadPoolExecutor(workers)
         self.fetches: dict[tuple[str, str], tuple[float, Future[bytes | None]]] = {}

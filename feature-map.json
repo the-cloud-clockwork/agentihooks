@@ -12851,6 +12851,18 @@
       ]
     },
     {
+      "id": "lab-manifest-search-outlives-absent-answers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "The CI lab scheduler's search for a dependency manifest ends however far behind the head's base the nearest manifest lies within the manifest depth. The search passes one commit per scheduler pass, since each call starts one fetch and waits for it, so the fetch cache keeps the answer of a fetch that found no manifest for ABSENT_S, one hour after the fetch started, and fetches the commit again on the first call after that. A fetch that found a manifest is still forgotten FRESH_S, five minutes, after it started, so the scheduler holds no manifest in memory longer than before, and a failed fetch still answers once. With the nearest manifest six commits behind the base the search answers on its seventh call, at one minute a call and at 304 seconds a call, the slowest pass seen when the search restarted for ever on 24 November.",
+      "seam": "scripts.ci_lab.manifests.Background over a released fake fetch and a set clock, alone and under scripts.ci_lab.scheduler.StoredManifests over a local object store",
+      "tests": [
+        "tests/ci_lab/test_manifests.py::test_background_keeps_an_absent_answer_for_an_hour_and_fetches_it_again_after_it",
+        "tests/ci_lab/test_manifests.py::test_background_forgets_a_found_manifest_on_its_fresh_window_and_an_absent_answer_on_its_own",
+        "tests/ci_lab/test_scheduler_manifest_fetch.py::test_a_search_whose_nearest_manifest_lies_six_commits_behind_answers_on_its_seventh_call"
+      ]
+    },
+    {
       "id": "lab-control-routes",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-panic-and-priority",
