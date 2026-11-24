@@ -1306,11 +1306,11 @@ def run_control(store, args, who, handler):
         clearance.record(LedgerClient(), args.slug, cleared, before, after)
 
 
-def scaling_value(key, value):
+def scaling_value(key: str, value: str) -> str | int | float:
     if key == "scaling":
         return value
     if key in ("memory-per-agent", "swap-floor"):
-        if not value.isdigit():
+        if not (value.isascii() and value.isdigit()):
             raise SwarmError(f"{key} takes a whole number of MB")
         return int(value)
     try:
@@ -1331,7 +1331,7 @@ def api_address(value: str, refusal: str) -> str:
     return value
 
 
-def config_value(key, value):
+def config_value(key: str, value: str) -> str | bool | int | float:
     if (
         key in default_models.KEYS
         or key in TRANSPORT_KEYS
@@ -1341,7 +1341,7 @@ def config_value(key, value):
     if key == HIVE_PLACEMENT:
         return on_off(value)
     if key == PLACEMENT_NODES:
-        if not value.isdigit():
+        if not (value.isascii() and value.isdigit()):
             raise SwarmError("placement-nodes takes a whole number of hives, 0 for no limit")
         return int(value)
     if key == LAB_URL:
@@ -1432,7 +1432,7 @@ def cmd_set(store: RedisStore, args: argparse.Namespace) -> None:
             except ValueError as exc:
                 raise SwarmError(str(exc)) from exc
             continue
-        if key not in SETTABLE or not value.isdigit():
+        if key not in SETTABLE or not (value.isascii() and value.isdigit()):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
