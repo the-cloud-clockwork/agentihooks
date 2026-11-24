@@ -212,6 +212,6 @@ def invalid_tasks(plan: dict, doc: dict, ids: list[str]) -> list[str]:
 
 def _ranged(doc: dict, phase: dict, task: dict) -> bool:
     try:
-        return task.get("plan_lines") == task_slice(doc, phase, task["plan_slice"])
+        return task.get("plan_lines") == task_slice(doc, phase, task["plan_slice"], task.get("plan_url"))
     except (KeyError, ValueError):
         return False
