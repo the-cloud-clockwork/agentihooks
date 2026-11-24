@@ -295,6 +295,14 @@ class Queue:
             if slots is not None
         }
 
+    def states(self, jobs: Sequence[str]) -> list[str | None]:
+        """Return each job's state in order, None for a job whose record is gone, read with HGET in one pipeline that
+        opens no transaction and builds no job."""
+        pipe = self.client.pipeline(transaction=False)
+        for job in jobs:
+            pipe.hget(_job(job), "state")
+        return pipe.execute()
+
     def token(self, job: str) -> str:
         return str(self.client.hget(_job(job), "token") or "")
 

@@ -791,6 +791,28 @@
       ]
     },
     {
+      "id": "lab-scheduler-pass-moves-changed-grades",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-grade-state-load",
+      "behaviour": "A lab scheduler pass reads and writes a live grade document only when the grade can change. A quiet pass leaves unread and unwritten every grade waiting on a pending or leased job, the budget, its own post hold, its repository's post hold or a held final post; a finished job moves only the grade holding it; a vanished job still drops its unit; a restarted scheduler reads each quiet live grade once and writes none; a live grade with no revision is written once to take one; a summarised grade's open job states come from one plain pipeline that builds no job; and a scheduler keeping its per grade summaries grades every pass, reaps, supersedes and relays exactly like one rebuilt from Redis.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over the scheduler lab fixture, recording grade document GET and SET commands outside the demand build and comparing a warm scheduler with one rebuilt every pass, and scripts.ci_lab.queue.Queue.states over fakeredis",
+      "tests": [
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_quiet_pass_reads_and_writes_no_live_grade_whatever_holds_it",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_pass_after_one_job_finishes_reads_and_writes_only_the_grade_holding_it",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_unit_whose_queued_job_vanished_is_dropped_on_the_next_pass",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_warm_scheduler_grades_every_pass_like_one_rebuilt_from_redis",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_finished_job_its_retry_policy_reruns_goes_back_to_pending_and_leaves_its_grade_unwritten",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_live_grade_saved_with_every_slot_final_and_every_check_posted_closes_on_the_next_pass",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_grade_ref_head_records_its_moves_for_the_relay_while_its_repository_posts_are_held",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_grade_another_scheduler_saves_is_read_again_and_advanced_on_the_next_pass",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_warm_scheduler_reaps_supersedes_and_relays_like_one_rebuilt_from_redis",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_restarted_scheduler_reads_each_quiet_live_grade_once_through_plain_pipelines_and_writes_none",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_live_grade_stored_without_a_revision_is_written_once_to_take_one_and_then_left_unwritten",
+        "tests/ci_lab/test_scheduler_quiet_pass.py::test_a_quiet_pass_after_a_grade_s_first_unit_was_collected_leaves_it_unread_while_its_other_unit_waits",
+        "tests/ci_lab/test_queue.py::test_states_reads_each_job_state_in_order_through_plain_pipelines_and_a_missing_job_reads_none"
+      ]
+    },
+    {
       "id": "lab-scheduler-memory",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2755",
@@ -3509,6 +3531,19 @@
         "tests/tick/test_slow_export_write.py::test_a_mid_pass_read_the_server_refused_queues_writes_without_sending",
         "tests/tick/test_slow_export_write.py::test_a_full_outbox_leaves_an_offline_write_unreachable",
         "tests/tick/test_slow_export_write.py::test_only_a_timeout_marks_a_failed_read_slow"
+      ]
+    },
+    {
+      "id": "swarm-tick-renew-keeps-stored-view",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-pass-offcpu-stall",
+      "behaviour": "A tick pass stores its ledger view once, at the pass start; a renew of the held view after a ledger write makes one delta read and returns the patched view without rewriting the stored view, and stores it only when it had to read the view in full.",
+      "seam": "scripts.tick.view.start and the renew it holds, read through scripts.tick.view.current after scripts.tick.view.wrote",
+      "tests": [
+        "tests/tick/test_view.py::test_a_pass_start_stores_the_view_its_delta_read_moved",
+        "tests/tick/test_view.py::test_a_renew_after_a_ledger_write_holds_the_patched_view",
+        "tests/tick/test_view.py::test_a_renew_after_a_ledger_write_leaves_the_stored_view_at_the_pass_start",
+        "tests/tick/test_view.py::test_a_renew_whose_stored_view_no_longer_fits_stores_the_full_read"
       ]
     },
     {
@@ -15229,6 +15264,18 @@
         "tests/test_ci_changelog_fragments.py::test_a_run_outside_a_pull_request_that_adds_no_fragment_stays_green",
         "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_its_branch_fragment_is_green",
         "tests/test_ci_changelog_fragments.py::test_a_pull_request_that_adds_only_a_misnamed_fragment_is_red_naming_both"
+      ]
+    },
+    {
+      "id": "worktree-name-skips-taken-names",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-worktree-name-fragment-taken",
+      "behaviour": "agentihooks name worktree offers the session base name, then the base with a -2, -3 suffix, skipping every name that already has a folder under the worktree root or a changelog fragment on origin/dev, so a reused name never collides with the fragment its earlier pull request put on dev.",
+      "seam": "scripts.gc_cli.main name worktree, then scripts.gc_cli._name and scripts.swarm.naming.worktree",
+      "tests": [
+        "tests/swarm_ledger/test_created_names.py::test_name_worktree_prints_the_next_free_name_and_checks_a_given_one",
+        "tests/swarm_ledger/test_created_names.py::test_name_worktree_skips_a_name_whose_changelog_fragment_is_on_origin_dev",
+        "tests/swarm_ledger/test_created_names.py::test_name_reads_the_default_worktree_root_and_the_current_repo"
       ]
     },
     {
