@@ -46,7 +46,6 @@ LANE_USERS = {
     "hive-worker.yml",
     "lost-runner.yml",
     "ci-lab-image.yml",
-    "gate-required.yml",
     "changelog.yml",
     "changelog-seed.yml",
     "tick-scale.yml",
@@ -75,6 +74,11 @@ if (_WORKFLOWS / "access-audit.yml").exists():
 SERIAL = {
     ("swarm-node-image.yml:hive", "hive-worker-release"): "every release's hive job queues behind the last one, so a "
     "newer published hive image always decides the release tag and no waiting hive job is replaced",
+    (
+        "gate-required.yml",
+        "${{ format('gate-required-status-{0}', github.event.workflow_run.head_sha) }}",
+    ): "status runs of one head post in order and none is replaced, while other heads and other workflows never "
+    "wait on them",
 }
 CALLERS = ("test.yml", "proofs.yml")
 REQUIRED = ("pull_request", "merge_group", "pull_request_target")
@@ -211,7 +215,10 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled() -> None:
                 seen.add(where)
                 assert resolved["queue"] == "max", (where, github)
                 assert not resolved["cancel-in-progress"], (where, github)
-            elif (where, resolved["group"]) in {*SERIAL, ("proofs.yml", f"focused-proof-{github['run_id']}")}:
+            elif (where, str(block.get("group"))) in SERIAL or (where, resolved["group"]) == (
+                "proofs.yml",
+                f"focused-proof-{github['run_id']}",
+            ):
                 assert resolved["queue"] == "max" and not resolved["cancel-in-progress"], (where, github)
             else:
                 dev_push = (github["event_name"], github["ref"]) == ("push", "refs/heads/dev")
