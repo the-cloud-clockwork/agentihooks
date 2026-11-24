@@ -1,0 +1,6 @@
+{
+  "scripts/ci_select.py:scripts.ci_select.x_read_jobs:749feddc04eb7570209eed88c75cb8df25b32dc234ff5a7ed9319bfaf0ae5a6a": {
+    "reader": "Standards",
+    "reason": "documents starts deduplicated and gains only previously absent nodes from the supplied tree. Its length cannot exceed len(nodes), so removing that iteration bound changes no traversal."
+  }
+}

@@ -632,6 +632,53 @@ def test_changed_jobs_compares_the_head_against_its_merge_base(repo: Path) -> No
             "    assert head['jobs']['lint'] and grade(base, head)\n",
             {"lint"},
         ),
+        (
+            "def workflow():\n    return load_workflow()\n\n\n"
+            "def test_a():\n    doc = workflow()\n    assert doc['jobs']['lint'] and normalize(doc)\n",
+            None,
+        ),
+        (
+            "def test_a():\n    doc = MAPPING['workflow']\n    assert doc['jobs']['lint'] and normalize(doc)\n",
+            None,
+        ),
+        (
+            "def workflow():\n    return workflow()\n\n\n"
+            "def test_a():\n    doc = workflow()\n    assert doc['jobs']['lint'] and normalize(doc)\n",
+            None,
+        ),
+        (
+            "def test_a():\n    doc = {'jobs': {}}\n    doc = dict(doc)\n"
+            "    assert doc['jobs']['lint'] and normalize(doc)\n",
+            None,
+        ),
+        (
+            "def test_a():\n    doc = load_workflow({'jobs': {}})\n    assert doc['jobs']['lint'] and normalize(doc)\n",
+            None,
+        ),
+        (
+            "BASE = {'jobs': {}}\n\n\n"
+            "def test_a():\n    assert copy.deepcopy(BASE)['jobs']['lint'] and normalize(copy.deepcopy(BASE))\n",
+            {"lint"},
+        ),
+        (
+            "def test_a():\n    assert load_workflow()['jobs']['lint'] and len(other())\n",
+            {"lint"},
+        ),
+        (
+            "def helper():\n    doc = load_workflow()\n    return normalize(doc)\n\n\n"
+            "def test_a():\n    doc = {'jobs': {}}\n    assert doc['jobs']['lint'] and helper()\n",
+            {"lint"},
+        ),
+        (
+            "def helper(doc):\n    return normalize(doc)\n\n\n"
+            "def test_a(doc):\n    assert doc['jobs']['lint'] and helper(other)\n",
+            {"lint"},
+        ),
+        (
+            "def test_a():\n    first = yaml.safe_load(TEXT)\n    second = yaml.safe_load(TEXT)\n"
+            "    assert first['jobs']['lint'] and normalize(second)\n",
+            None,
+        ),
         ("def test_a():\n    assert [doc['jobs']['lint'] for doc in yaml.safe_load_all(TEXT)]\n", None),
     ],
     ids=[
@@ -667,6 +714,16 @@ def test_changed_jobs_compares_the_head_against_its_merge_base(repo: Path) -> No
         "aliased-load-handed-on",
         "built-document-handed-on",
         "built-copy-handed-on",
+        "module-helper-external-document",
+        "subscript-external-document",
+        "recursive-document-helper",
+        "recursive-document-binding",
+        "single-argument-external-loader",
+        "direct-copy-built-document",
+        "unrelated-call-beside-document",
+        "same-local-name-in-helper",
+        "same-parameter-name-in-helper",
+        "second-loaded-document-handed-on",
         "loaded-all",
     ],
 )
@@ -689,7 +746,22 @@ def test_definition_jobs_covers_only_test_functions_and_classes() -> None:
 @pytest.mark.feature("ci-select-workflow-job-readers")
 def test_workflow_tests_offers_the_job_readers_of_each_named_or_recorded_file(repo: Path) -> None:
     write(repo, READERS)
-    assert ci_select.workflow_tests(repo, {"lint"}, RECORD) == {*LINT_READERS, *UNNAMED_LINT_READERS}
+    source = "def test_a():\n    assert W['jobs']['lint']\n"
+    write(repo, dict.fromkeys(("tests/test_files.py", "tests/test_outside.py", "tests/test_other.py"), source))
+    manifest = {
+        "tests": {
+            **RECORD["tests"],
+            "tests/test_files.py::test_a": {"files": [ci_select.WORKFLOW]},
+            "tests/test_outside.py::test_a": {"outside": [ci_select.WORKFLOW]},
+            "tests/test_other.py::test_a": {"files": ["README.md"], "outside": []},
+        }
+    }
+    assert ci_select.workflow_tests(repo, {"lint"}, manifest) == {
+        *LINT_READERS,
+        *UNNAMED_LINT_READERS,
+        "tests/test_files.py::test_a",
+        "tests/test_outside.py::test_a",
+    }
 
 
 @pytest.mark.feature("ci-select-workflow-job-readers")
@@ -766,12 +838,23 @@ def test_selected_definitions_of_a_splittable_file_run_apart_and_count_their_sec
     ("tests", "legs"),
     [
         ({"tests/test_pair.py::test_a"}, [["tests/test_pair.py::test_a"]]),
+        (
+            {"tests/test_pair.py::test_a", "tests/test_pair.py::test_b"},
+            [["tests/test_pair.py::test_a", "tests/test_pair.py::test_b"]],
+        ),
         ({"tests/test_single.py::test_a"}, [["tests/test_single.py"]]),
         ({"tests/test_pair.py", "tests/test_pair.py::test_a"}, [["tests/test_pair.py"]]),
         ({"tests/test_pair.py::test_gone"}, [["tests/test_pair.py"]]),
         ({"tests/routing/test_codex_api.py::test_a"}, [["tests/routing/test_codex_api.py"]]),
     ],
-    ids=["part-of-a-splittable-file", "unsplittable-file", "whole-file-wins", "unknown-definition", "first-shard-file"],
+    ids=[
+        "part-of-a-splittable-file",
+        "all-definitions-without-durations",
+        "unsplittable-file",
+        "whole-file-wins",
+        "unknown-definition",
+        "first-shard-file",
+    ],
 )
 def test_a_definition_runs_alone_only_when_its_file_runs_its_definitions_apart(
     tmp_path: Path, tests: set[str], legs: list[list[str]]

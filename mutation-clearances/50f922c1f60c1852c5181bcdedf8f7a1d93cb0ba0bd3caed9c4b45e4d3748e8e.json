@@ -1,0 +1,6 @@
+{
+  "scripts/ci_select.py:scripts.ci_select.x_built:bd60779b866674413df46dd46e9084095301c8f62afdcc5a4d339c1232e9dc7b": {
+    "reader": "Standards",
+    "reason": "The fallback applies only when the callee expression is neither ast.Name nor ast.Attribute. Neither the empty string nor XXXX belongs to COPIES; the following guard returns False for that expression type."
+  }
+}

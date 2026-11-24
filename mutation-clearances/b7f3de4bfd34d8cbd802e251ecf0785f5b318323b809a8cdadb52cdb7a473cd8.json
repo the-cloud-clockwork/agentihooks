@@ -1,0 +1,6 @@
+{
+  "scripts/ci_select.py:scripts.ci_select.x_taken_from:484b899b73f4936b8e276e98b7b422f9036e599e242264ea556646a68a40a148": {
+    "reader": "Standards",
+    "reason": "The outer cast changes no runtime value or attribute access."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_select.py:scripts.ci_select.x_changed_jobs:fca51baede29ccc21e10d7643d57056cd21d3c8db2fe539f467b18a20d8e966d": {
+    "reader": "Standards",
+    "reason": "typing.cast returns its second argument unchanged; replacing the type argument does not change parsed workflows."
+  }
+}

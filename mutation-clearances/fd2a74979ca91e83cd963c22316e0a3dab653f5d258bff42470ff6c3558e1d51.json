@@ -1,0 +1,6 @@
+{
+  "scripts/ci_select.py:scripts.ci_select.x_workflow_tests:ebb303195bd28c91e9a6aae2f9c1f89e98728571c8e5593a523a3852108e487f": {
+    "reader": "Standards",
+    "reason": "The cast preserves the manifest tests mapping and every subsequent lookup."
+  }
+}
