@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_apply_claim:00c29984b351509543ed59fb6c6a4ae23a5e1ee26ce7a28365d4cd4aadc8cf11": {
+    "reader": "standards_reader",
+    "reason": "apply_claim's checked() call only reaches a claim-shaped task_update op. check_op dispatches task_update through EXTENSION_OPS[op[\"op\"]].check(op), passing only op, never task_ids. task_ids is unused on this path, so () vs None changes no output."
+  }
+}

@@ -1,0 +1,25 @@
+rules:
+  - id: feature-health-kept-key-own-module
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The value a health check keeps between tick passes belongs to that check's module alone: only the module
+      reads and writes it, through scripts/swarm/health/kept.py, under its own KEY. No other module calls the
+      helper with a key that is not its own, or names another check's key. A value another module reads is a
+      declared domain written through a port.
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: scripts.swarm.health.kept.read($STORE, $SLUG, $KEY)
+              - pattern: scripts.swarm.health.kept.write($STORE, $SLUG, $KEY, ...)
+          - pattern-not: scripts.swarm.health.kept.read($STORE, $SLUG, KEY)
+          - pattern-not: scripts.swarm.health.kept.write($STORE, $SLUG, KEY, ...)
+      - pattern: scripts.swarm.health.focus_unclaimed.KEY
+      - pattern: scripts.swarm.health.order_waiting.KEY
+    paths:
+      include:
+        - /scripts/
+        - /hooks/
+        - '*.test.py'
+      exclude:
+        - /scripts/swarm/health/kept.py

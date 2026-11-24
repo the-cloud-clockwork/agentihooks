@@ -5,6 +5,7 @@ import uuid
 import pytest
 
 from scripts.swarm_ledger.repository import postgres, sqlite
+from tests.swarm_ledger import narrow_write_cases
 from tests.swarm_ledger.test_hierarchy_reads import PLAN_A, STATE
 
 URL = os.environ.get("LEDGER_TEST_POSTGRES_URL", "")
@@ -124,3 +125,19 @@ def test_the_postgres_relay_journal_holds_each_revision_once_and_drops_it():
     assert shared.held_revisions()["inbox"][slug] == [3, 7]
     shared.drop_revisions("inbox", slug)
     assert slug not in shared.held_revisions().get("inbox", {})
+
+
+def shared_store(name: str) -> postgres.PostgresLedgerRepository:
+    repository = postgres.PostgresLedgerRepository(URL)
+    repository.migrate()
+    return repository
+
+
+@pytest.mark.parametrize("scenario", sorted(narrow_write_cases.SCENARIOS))
+def test_a_narrow_claim_on_postgres_stores_what_the_whole_write_stores(monkeypatch, scenario: str) -> None:
+    narrow_write_cases.assert_same_write(shared_store, scenario, monkeypatch)
+
+
+@pytest.mark.parametrize("prepare", narrow_write_cases.FALLBACKS)
+def test_a_claim_the_narrow_write_cannot_prove_on_postgres_writes_nothing(monkeypatch, prepare) -> None:
+    narrow_write_cases.assert_falls_back(shared_store, prepare, monkeypatch)
