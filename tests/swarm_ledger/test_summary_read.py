@@ -95,7 +95,7 @@ def test_an_open_first_page_answers_without_building_the_whole_page_view(
     status, reply = request(live, "GET", "followups?state=open&limit=5&q=x")
     assert status == 400
     assert reply == {"error": {"code": "schema_invalid", "message": routes.OPEN_ONLY}}
-    status, reply = request(live, "GET", "tasks?state=open&cursor=x")
+    status, reply = request(live, "GET", f"tasks?state=open&cursor={'0' * 64}:0")
     assert status == 400
     assert reply == {"error": {"code": "schema_invalid", "message": routes.OPEN_ONLY}}
 
