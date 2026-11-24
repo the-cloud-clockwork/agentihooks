@@ -1,5 +1,6 @@
-"""Remote URL parsing, the origin reader and the picker that chooses a forge by remote host."""
+"""Remote URL and change request link parsing, the origin reader and the picker that chooses a forge by remote host."""
 
+import re
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -11,12 +12,23 @@ from scripts.forge.model import Forge, ForgeError
 GIT_TIMEOUT_SEC = 30
 TOKEN_ENV = "GITLAB_TOKEN"
 KINDS = ("github", "gitlab")
+CHANGE_LINK = re.compile(r"(?!)")
 
 
 @dataclass(frozen=True)
 class Remote:
     host: str
     path: str
+
+
+@dataclass(frozen=True)
+class ChangeLink:
+    kind: str
+    host: str
+    path: str
+    number: int
+    web: str
+    clone: str
 
 
 def parse(url: str) -> Remote:
@@ -37,6 +49,10 @@ def kind_of(host: str) -> str:
     if "gitlab" in host.split("."):
         return "gitlab"
     raise ValueError(f"no forge known for host {host}; pass --forge github or gitlab")
+
+
+def change_link(url: str) -> ChangeLink:
+    raise NotImplementedError(url)
 
 
 def pick(where: Remote, kind: str | None, env: Mapping[str, str]) -> Forge:
