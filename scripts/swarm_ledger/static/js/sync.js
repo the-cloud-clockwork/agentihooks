@@ -301,7 +301,7 @@ export function loadSaved() {
   }
 }
 
-const FIRST = { tasks: 40, phases: 100, followups: 50, alerts: 50, slices: 100, freezes: 100 };
+const FIRST = { tasks: 20, phases: 40, followups: 50, alerts: 50, slices: 100, freezes: 100 };
 const NEWEST = { notifications: 50 };
 const COMPLETE = ["slices", "freezes"];
 const OPEN_PAGE = 50;
