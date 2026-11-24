@@ -1,6 +1,7 @@
 import copy
 import json
 import subprocess
+from collections.abc import Callable
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, TypeVar
 
@@ -13,7 +14,7 @@ from scripts.gates.verdicts import Verdicts
 from scripts.swarm import capacity, claim_hold, cli, linked_issues, merge_queue, outage, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_pull
-from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from scripts.tick.steps import agents as agent_steps
@@ -403,7 +404,9 @@ def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_reques
     monkeypatch.setattr(stall_watch, "ntfy", lambda *args: "")
     attempts = []
 
-    def queue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def queue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         attempts.append(url)
         if pull.queued:
             return {}
@@ -584,7 +587,7 @@ class Ledger:
 
 
 @pytest.fixture
-def merging(monkeypatch):
+def merging(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -601,7 +604,9 @@ def merging(monkeypatch):
     monkeypatch.setattr(stack, "shell", shell)
     _port(monkeypatch, shell.port)
 
-    def queue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def queue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         queued.append((action, url))
         queue.journals.append(journal)
         return {"url": url, "queued": True, **getattr(queue, "extra", {})}
@@ -659,7 +664,10 @@ def test_a_queue_pass_watches_the_merge_whatever_the_queue_command_reports(mergi
     assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "merge", "target": URL}
 
 
-def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging, monkeypatch):
+def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(
+    merging: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    merging.store.create(SwarmConfig("sw", TOP, 1, 1))
     merging.pulls[URL] = GREEN
     monkeypatch.setattr(merge_queue.ledger_events, "view", read_pull)
     pull = {
@@ -701,17 +709,21 @@ def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging,
             data = {"resource": pull}
         return subprocess.CompletedProcess(command, 0, json.dumps({"data": data}))
 
-    def queue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
-        return merge_queue.operate(action, url, github, journal=journal, priority=priority)
+    def queue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
+        return merge_queue.operate(action, url, github, admit=admit, journal=journal, priority=priority)
 
-    merging.run(queuer=queue)
-    assert merged_heads == [f"head={HEAD}"]
+    actions = merging.run(queuer=queue)
+    assert merged_heads == [f"head={HEAD}"], actions
     assert merging.run() == [f"task t1 done, {URL} merged", f"removed the worktree {TOP}"]
     assert merging.rows["t1"]["state"] == "done" and merging.rows["t1"]["awaiting"] == ""
     assert ready.record(merging.store, "sw", "t1") is None
 
 
-def refused(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+def refused(
+    action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+) -> dict[str, Any]:
     raise SwarmError("GraphQL: Pull request is not mergeable")
 
 
@@ -754,7 +766,9 @@ def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
 def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error):
     merging.pulls[URL] = GREEN
 
-    def failed(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def failed(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError(error)
 
     assert merging.run(queuer=failed) == [
@@ -782,7 +796,9 @@ def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error)
 def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(merging, error):
     merging.pulls[URL] = GREEN
 
-    def down(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def down(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError(error)
 
     for _ in range(6):
@@ -791,7 +807,9 @@ def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(mergi
     assert merging.rows["t1"]["state"] == "pr"
 
 
-def timed_out(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+def timed_out(
+    action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+) -> dict[str, Any]:
     raise SwarmError("GitHub API: timed out")
 
 
@@ -864,7 +882,9 @@ def test_outage_time_never_counts_toward_a_released_pull_request_green_hold(
 def test_a_pull_request_into_another_base_counts_as_a_refusal(merging):
     merging.pulls[URL] = GREEN
 
-    def elsewhere(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def elsewhere(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError("swarm merge queue operations require a pull request into dev")
 
     merging.run(queuer=elsewhere)
@@ -1463,7 +1483,9 @@ def test_an_enqueue_github_refuses_reopens_the_task_awaiting_fix(merging):
     merging.pulls[URL] = GREEN
     error = "GitHub refused to enqueue the pull request"
 
-    def refused_enqueue(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def refused_enqueue(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError(error)
 
     assert merging.run(queuer=refused_enqueue) == [
@@ -1590,7 +1612,9 @@ def test_a_requeue_the_queue_refuses_records_no_requeue_comment(merging):
     left_queue_green(merging)
     merging.exits.failures = []
 
-    def refuse(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def refuse(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         raise SwarmError("timed out")
 
     for minute in range(ready.QUEUE_TRIES + 1):
@@ -1799,7 +1823,9 @@ def test_a_failed_requeue_raises_a_ledger_alert(merging):
     dequeued_transient(merging)
     merging.pulls[URL] = GREEN
 
-    def refuse(action: str, url: str, journal: Any = None, priority: Any = None) -> dict[str, Any]:
+    def refuse(
+        action: str, url: str, journal: Any = None, priority: Any = None, admit: Callable[[str], Any] | None = None
+    ) -> dict[str, Any]:
         merging.queued.append((action, url))
         raise SwarmError("timed out")
 

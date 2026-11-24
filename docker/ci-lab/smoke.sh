@@ -27,5 +27,5 @@ fi
 tree="$(mktemp -d)"
 mkdir "$tree/scripts"
 printf 'def fee(amount, rate):\n    return amount * rate + 1\n' > "$tree/scripts/sample.py"
-/opt/agentihooks-venv/bin/python -c 'import sys; from pathlib import Path; from scripts.ci_lab import run_mutation; names = run_mutation.trampoline(Path(sys.argv[1]), "scripts/sample.py"); assert len(names) > 1, names' "$tree"
+/opt/agentihooks-venv/bin/python -c 'import sys; from pathlib import Path; from scripts.ci_lab import run_mutation; names = run_mutation.trampoline(Path(sys.argv[1]), "scripts/sample.py", {2}); assert len(names) > 1, names' "$tree"
 CHECKS
