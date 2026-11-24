@@ -7316,6 +7316,44 @@
       ]
     },
     {
+      "id": "ledger-live-row-updates",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "A live ledger change rebuilds only the section rows whose inputs changed and moves rows to their place; every other row keeps its element, so comment drafts and focus survive, while marks, blocker text, slice counts, header counts, stats and the sync badge still follow the change.",
+      "seam": "The ledger page applying stream changes through sync.receiveLedger and the keyed section render",
+      "tests": [
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_live_change_to_one_task_rebuilds_only_its_row_and_updates_its_counts",
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_live_change_to_one_phase_rebuilds_only_its_row",
+        "tests/swarm_ledger/test_page_live_rows.py::test_rank_and_state_changes_move_a_live_row_to_its_place",
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_live_change_keeps_a_comment_draft_and_its_focus",
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_freeze_mark_reaches_a_row_whose_task_did_not_change",
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_new_task_in_a_slice_updates_its_phase_slice_count",
+        "tests/swarm_ledger/test_page_live_rows.py::test_the_agents_stat_counts_a_new_commenter_after_a_live_change",
+        "tests/swarm_ledger/test_page_live_rows.py::test_the_sync_badge_counts_agents_that_have_not_synced",
+        "tests/swarm_ledger/test_page_live_rows.py::test_a_burst_of_live_changes_on_a_production_size_ledger_rebuilds_only_the_changed_rows"
+      ]
+    },
+    {
+      "id": "ledger-task-blockers-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "An open task row names what it waits on, which dependency branch it is ready to start on, or the branch it is parked on, and drops the text once the blocker is done, hidden done tasks included.",
+      "seam": "The task rows of the ledger page Swarm tasks section",
+      "tests": [
+        "tests/swarm_ledger/test_page_live_rows.py::test_waiting_ready_and_parked_tasks_name_their_blockers_until_the_blocker_finishes"
+      ]
+    },
+    {
+      "id": "ledger-cache-first-screen",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "The ledger page writes its browser cache once live changes go quiet, and the cached document keeps only the first page of each list in display order.",
+      "seam": "state.lsWrite and the cache worker on the ledger page",
+      "tests": [
+        "tests/swarm_ledger/test_page_live_rows.py::test_live_changes_defer_the_cache_write_and_keep_it_to_the_first_screen"
+      ]
+    },
+    {
       "id": "ledger-agent-row-actions",
       "origin": "inventory",
       "behaviour": "An agent row on the Swarm tab messages the agent through chat and terminates it only after confirmation; header stop and close ask before they send.",
@@ -11353,13 +11391,38 @@
     {
       "id": "hive-registry-unique-name-suffix",
       "origin": "inventory",
-      "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another registered hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it, and a headless hive renamed to a held name takes the next free suffix.",
+      "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another live hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it while its base stays held, and a headless hive renamed to a held name takes the next free suffix.",
       "seam": "scripts.hive.registry.update through _settle, _read_name, _held and _unique",
       "tests": [
         "tests/hive/test_registry.py::test_two_headed_hives_joining_take_unique_names",
         "tests/hive/test_registry.py::test_a_restarted_headed_hive_keeps_its_derived_name",
         "tests/hive/test_registry.py::test_a_headless_hive_renamed_to_a_held_name_takes_the_next_free_suffix",
         "tests/hive/test_registry.py::test_a_second_seeded_headed_hive_gets_a_unique_name_on_its_next_named_set"
+      ]
+    },
+    {
+      "id": "hive-registry-name-returns-to-base",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "Only a live hive holds a name, so a never beaten settings record or a stale hive leaves its name free, and a hive carrying a derived numeric suffix returns to its base name at its next heartbeat once no other live hive holds that base; the root hive reads swarm-master again instead of keeping swarm-master-2 forever.",
+      "seam": "scripts.hive.registry.update and scripts.hive.registry.beat through _held, _base, _named and _healed",
+      "tests": [
+        "tests/hive/test_registry.py::test_a_suffixed_master_name_returns_to_its_base_once_no_other_live_hive_holds_it",
+        "tests/hive/test_registry.py::test_a_suffixed_headless_name_returns_to_its_base_once_its_holder_goes_stale",
+        "tests/hive/test_registry.py::test_a_never_beaten_settings_record_holds_no_name",
+        "tests/hive/test_registry.py::test_a_stored_master_suffix_with_no_live_holder_returns_on_the_next_heartbeat",
+        "tests/hive/test_registry.py::test_an_interface_hive_turned_headless_keeps_its_name_and_chases_no_master_name",
+        "tests/hive/test_registry.py::test_a_derived_name_stays_while_its_base_is_held_and_a_rename_drops_its_base"
+      ]
+    },
+    {
+      "id": "monitor-hive-names-match-registry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-render-responsive",
+      "behaviour": "The home resource monitor names each live hive row by the name the hive registry holds, the same name hive list prints, so an interface hive with a derived name is never shown as plain swarm-master, and the swarm-master row still sorts first.",
+      "seam": "scripts.swarm_ledger.api.monitor.labels and tally behind the monitor route",
+      "tests": [
+        "tests/swarm_ledger/test_api_monitor.py::test_each_live_hive_row_reads_the_registry_name_hive_list_prints"
       ]
     },
     {
