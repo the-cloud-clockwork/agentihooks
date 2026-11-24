@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import shutil
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 
 try:
@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover
 
 
 @contextlib.contextmanager
-def file_lock(path: Path, *, blocking: bool = True) -> Iterator[None]:
+def file_lock(path: Path, *, blocking: bool = True) -> Generator[None]:
     if fcntl is None:
         yield
         return

@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-import install
+from scripts import install
 
 
 def _tiny_profile(tmp_path: Path) -> Path:
