@@ -10,7 +10,7 @@ from typing import cast
 from unittest.mock import patch
 
 from scripts.ci_mutation.stats_cache import per_test_stats
-from scripts.ci_mutation.stats_dependencies import StoredStats
+from scripts.ci_mutation.stats_dependencies import SHARED, StoredStats
 
 
 def old_class(path: Path) -> type[StoredStats]:
@@ -40,18 +40,25 @@ def lookup(
 
 def hashes(
     cls: type[StoredStats], root: Path, cache: Path, context: dict, nodes: list[str], shared: bool
-) -> Counter[str]:
+) -> tuple[Counter[str], Counter[str]]:
     reads: Counter[str] = Counter()
+    payloads: Counter[str] = Counter()
     original = Path.read_bytes
+    original_text = Path.read_text
 
     def counted(path: Path) -> bytes:
         if path.is_relative_to(root):
             reads[path.relative_to(root).as_posix()] += 1
         return original(path)
 
-    with patch.object(Path, "read_bytes", counted):
+    def text(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        if path.parent == cache and path.name.endswith(SHARED):
+            payloads[path.name] += 1
+        return original_text(path, encoding=encoding, errors=errors)
+
+    with patch.object(Path, "read_bytes", counted), patch.object(Path, "read_text", text):
         lookup(cls, root, cache, context, nodes, shared)
-    return reads
+    return reads, payloads
 
 
 def main() -> None:
@@ -90,8 +97,8 @@ def main() -> None:
     after, after_seconds, after_memo = lookup(StoredStats, root, cache, context, nodes, True)
     assert before == after
     assert before_memo == 0 and after_memo == len(expected)
-    before_hashes = hashes(baseline, root, cache, context, nodes, False)
-    after_hashes = hashes(StoredStats, root, cache, context, nodes, True)
+    before_hashes, _ = hashes(baseline, root, cache, context, nodes, False)
+    after_hashes, after_payloads = hashes(StoredStats, root, cache, context, nodes, True)
     assert before_hashes == expected
     assert after_hashes == Counter(dict.fromkeys(expected, 1))
     assert cache_before == {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in cache.iterdir()}
@@ -109,6 +116,8 @@ def main() -> None:
                 "speedup": before_seconds / after_seconds,
                 "before_hashes": before_hashes.total(),
                 "after_hashes": after_hashes.total(),
+                "after_shared_payload_reads": after_payloads.total(),
+                "distinct_shared_payloads": len(after_payloads),
                 "identical_results": before == after,
                 "cache_and_inputs_unchanged": True,
                 "scope": "StoredStats.load on original saved bucket and original input bytes; collection and discovery excluded",
