@@ -127,7 +127,7 @@ export function setState(item, field, value) {
 let cacheWorker = null;
 let cacheVersion = 0;
 let cacheTimer = 0;
-const CACHE_QUIET_MS = 2000;
+const CACHE_WAIT_MS = 2000;
 
 export function lsRead() {
   try {
@@ -155,8 +155,7 @@ export function lsWrite() {
   } catch (e) {
     return false;
   }
-  clearTimeout(cacheTimer);
-  cacheTimer = setTimeout(writeCache, CACHE_QUIET_MS);
+  if (!cacheTimer) cacheTimer = setTimeout(() => { cacheTimer = 0; writeCache(); }, CACHE_WAIT_MS);
   return true;
 }
 
