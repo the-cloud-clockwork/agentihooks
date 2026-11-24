@@ -1,10 +1,12 @@
 import importlib.util
+import stat
 import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -91,3 +93,47 @@ def test_the_pod_template_grader_renders_the_chart_and_its_bumped_copy_over_thei
     for command in seen:
         assert command[4:6] == ["-f", str(Path(command[3]) / "ci/required-values.yaml")]
         assert command[6:] in ([], ["-f", str(chart / "ci/kind.yaml")])
+
+
+def _sealed(tree: Path) -> None:
+    for path in (tree, *tree.rglob("*")):
+        path.chmod(path.stat().st_mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
+
+
+@pytest.mark.feature("chart-grader-sealed-head")
+def test_the_bumped_copy_of_a_read_only_chart_carries_the_probe_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, pods = _graders(monkeypatch)
+    chart = _chart(tmp_path / "head", required=True)
+    (chart / "Chart.yaml").write_text("name: chart\nversion: 1.2.3\n")
+    _sealed(chart)
+
+    copy = pods.bumped_copy(chart, tmp_path / "scratch")
+
+    bumped = copy / "Chart.yaml"
+    assert yaml.safe_load(bumped.read_text()) == {"name": "chart", "version": pods.PROBE_VERSION}
+    assert bumped.stat().st_mode & stat.S_IWUSR
+    assert (copy / "ci/required-values.yaml").read_text() == "{}\n"
+    assert (chart / "Chart.yaml").read_text() == "name: chart\nversion: 1.2.3\n"
+    assert not (chart / "Chart.yaml").stat().st_mode & stat.S_IWUSR
+
+
+@pytest.mark.feature("chart-grader-sealed-head")
+def test_the_pod_template_grader_renders_a_read_only_tree_and_leaves_no_scratch_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    timers, pods = _graders(monkeypatch)
+    head = tmp_path / "head"
+    chart = _chart(head, required=True)
+    (chart / "Chart.yaml").write_text("name: chart\nversion: 1.2.3\n")
+    _sealed(head)
+    seen = _recorded(monkeypatch, timers)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(pods.tempfile, "tempdir", str(scratch))
+
+    pods.main(["--root", str(head)])
+
+    assert [command[3] == str(chart) for command in seen] == [True, False, True, False]
+    assert list(scratch.iterdir()) == []
