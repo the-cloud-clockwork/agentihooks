@@ -2722,6 +2722,22 @@
       ]
     },
     {
+      "id": "review-done-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-done-findings",
+      "behaviour": "Swarm done refuses a task in the review lane, or of kind review, until the post counter for that exact swarm and task holds at least one posted finding, and names the review post command in its refusal; the refusal runs before the proof check, a count under another swarm or task does not satisfy it, and every other lane and kind closes without reading the review record.",
+      "seam": "scripts.swarm.cli.cmd_done through swarm done, calling scripts.review.record require_done and done_refusal over the review-tasks counter",
+      "tests": [
+        "tests/review/test_done.py::test_swarm_done_never_reads_the_review_record_for_other_lanes_and_kinds",
+        "tests/review/test_done.py::test_swarm_done_refuses_a_review_task_that_posted_no_finding",
+        "tests/review/test_done.py::test_one_posted_finding_lets_a_review_task_reach_the_proof_check",
+        "tests/review/test_done.py::test_a_finding_posted_through_the_review_record_lets_its_task_reach_the_proof_check",
+        "tests/review/test_done.py::test_the_count_is_read_for_the_exact_swarm_and_task",
+        "tests/swarm/test_ready.py::test_a_merged_review_task_stays_open_for_swarm_done"
+      ],
+      "semgrep_rule": "feature-review-done-findings"
+    },
+    {
       "id": "review-record-post",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-record-post",

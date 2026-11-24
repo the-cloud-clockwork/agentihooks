@@ -172,3 +172,19 @@ def post(store: RedisStore, slug: str, forge: Forge, url: str, by: str, task: st
     for body in cleaned:
         found = _post_one(store, forge, found, who, body)
     return found
+
+
+def done_refusal(store: RedisStore, slug: str, kind: str, lane: str, task: str) -> str | None:
+    if "review" not in (kind, lane):
+        return None
+    if int(_redis(store).hget(store.key(slug, "review-tasks"), task) or 0) > 0:
+        return None
+    return (
+        "a review task is done only after it posts at least one finding: "
+        f"agentihooks review post <url> --slug {slug} --finding <text>"
+    )
+
+
+def require_done(store: RedisStore, slug: str, kind: str, lane: str, task: str) -> None:
+    if reason := done_refusal(store, slug, kind, lane, task):
+        raise SwarmError(reason)
