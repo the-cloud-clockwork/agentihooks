@@ -107,6 +107,34 @@ def test_lease_returns_the_grant_payload(lab: leases.Leases, signer: Signer, job
     }
 
 
+@pytest.mark.feature("lab-worker-executors")
+def test_lease_ignores_a_request_field_it_does_not_know(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> None:
+    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {}, "b1", "g1")
+
+    status, body = post(
+        lab,
+        signer,
+        "/lease",
+        {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0, "priority": "high"},
+    )
+
+    assert status == 200
+    grant = body["leases"][0]
+    token = grant.pop("token")
+    assert isinstance(token, str) and len(token) == 32
+    assert grant == {
+        "job": "h1:test:a",
+        "head": "h1",
+        "base": "b1",
+        "grader": "g1",
+        "kind": "test",
+        "key": "a",
+        "members": ["tests/a.py::t"],
+        "slots": 1,
+        "expires_ms": 1500,
+    }
+
+
 def test_lease_passes_capabilities_and_caps_the_wait(
     lab: leases.Leases, signer: Signer, jobs: queue.Queue, clock: Clock
 ) -> None:

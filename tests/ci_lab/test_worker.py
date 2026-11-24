@@ -2,6 +2,7 @@
 
 import email.message
 import http.client
+import json
 import threading
 import time
 import urllib.error
@@ -10,6 +11,7 @@ from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -727,6 +729,27 @@ def test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none(
     assert error.value.code == 400
     assert client.complete(lease.job, lease.token, "passed") is True
     assert found(jobs, lease.job).outcome == "passed"
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_the_lease_request_body_carries_exactly_worker_free_slots_capabilities_and_wait_ms() -> None:
+    seen: list[bytes] = []
+
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> tuple[int, dict[str, Any]]:
+        seen.append(raw)
+        return 200, {"leases": []}
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    _serving(server)
+    try:
+        client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
+        client.lease("pod-1", 2, frozenset({"net"}), 10)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    [raw] = seen
+    assert json.loads(raw) == {"worker": "pod-1", "free_slots": 2, "capabilities": ["net"], "wait_ms": 10}
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
