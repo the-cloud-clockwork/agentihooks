@@ -4722,7 +4722,7 @@
       "id": "tick-thin-task-pass",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-tick-step",
-      "behaviour": "Every 120 seconds the thin task pass checks each open engineer or ci task whose enhancement field is empty; a thin one gets one enhancement plan task in its phase, its enhancement set to needed in the same ledger write, and one master notice, and a second pass queues nothing more; a task the swarm freeze check reads as frozen, held by a freeze on itself, its phase or its plan, gets no write and no place in the notice.",
+      "behaviour": "Every 120 seconds the thin task pass checks each open engineer or ci task whose enhancement field is empty; a thin one gets one enhancement plan task in its phase, its enhancement set to needed in the same ledger write, and one master notice, and a second pass queues nothing more; a thin task whose enhancement task already exists gets only the mark, a line reporting it marked rather than queued, and no place in the notice; a task the swarm freeze check reads as frozen, held by a freeze on itself, its phase or its plan, gets no write and no place in the notice.",
       "seam": "scripts.tick.steps.thin._thin_task_pass registered as tick step thin task pass in group wrapper phases",
       "tests": [
         "tests/tick/steps/test_thin_task_pass.py::test_thin_task_pass",
@@ -4730,6 +4730,7 @@
         "tests/tick/steps/test_thin_task_pass.py::test_a_task_that_is_not_an_unmarked_thin_open_engineer_task_gets_no_write",
         "tests/tick/steps/test_thin_task_pass.py::test_a_thin_ci_or_engineer_task_is_queued_whatever_its_lane_field",
         "tests/tick/steps/test_thin_task_pass.py::test_an_existing_enhancement_task_skips_the_add_and_still_marks_the_task",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_mark_only_task_is_left_out_of_the_master_notice_beside_a_queued_task",
         "tests/tick/steps/test_thin_task_pass.py::test_a_task_with_no_description_field_is_checked_as_an_empty_description",
         "tests/tick/steps/test_thin_task_pass.py::test_a_refused_write_is_reported_and_the_pass_goes_on_to_the_next_task",
         "tests/tick/steps/test_thin_task_pass.py::test_a_title_the_ledger_would_refuse_falls_back_to_a_plain_title",

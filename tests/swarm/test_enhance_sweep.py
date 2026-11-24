@@ -181,7 +181,11 @@ def test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_wri
     assert json.loads(capsys.readouterr().out) == {
         "dry_run": False,
         "lanes": REPORT,
-        "actions": [f"queued enhance-{tid} for thin task {tid}" for tid in ("t1", "t2", "t8", "t9", "t10")],
+        "actions": [
+            *(f"queued enhance-{tid} for thin task {tid}" for tid in ("t1", "t2")),
+            "marked thin task t8 as needing enhancement by its existing enhance-t8",
+            *(f"queued enhance-{tid} for thin task {tid}" for tid in ("t9", "t10")),
+        ],
     }
     assert built == [("sw", "clients of sw")]
     assert swarm == [3.0, 3.0, 3.0, 3.0]

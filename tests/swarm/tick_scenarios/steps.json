@@ -44,7 +44,8 @@
   ],
   "thin task pass": [
    "running",
-   "thin-accepted"
+   "thin-accepted",
+   "thin-marked"
   ],
   "tick master": [
    "running"
