@@ -165,9 +165,7 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
     tmp_path: Path, origin: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     base = _commit(origin, "a", "a")
-    mirror = replace(
-        _mirror(tmp_path, origin, base), lab=worktrees.Lab("https://lab.example/git/origin.git", "lab-token")
-    )
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab("https://lab.example/origin.git", "lab-token"))
     assert mirror.fetch(base) is False
     calls: list[tuple[list[str], dict[str, str] | None]] = []
 
@@ -198,7 +196,7 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
             "fetch",
             "--quiet",
             "--no-write-fetch-head",
-            "https://lab.example/git/origin.git",
+            "https://lab.example/origin.git",
             f"{'1' * 40}:refs/lab/{'1' * 40}",
         ],
     ]
@@ -206,7 +204,7 @@ def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_la
     assert calls[2][1] == {
         **os.environ,
         "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": "http.https://lab.example/git/origin.git.extraheader",
+        "GIT_CONFIG_KEY_0": "http.https://lab.example/origin.git.extraheader",
         "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {base64.b64encode(b'lab:lab-token').decode()}",
         "GIT_TERMINAL_PROMPT": "0",
     }
@@ -352,9 +350,9 @@ def test_a_mutation_unit_gets_its_own_writable_copy(
 ) -> None:
     head = _commit(origin, "a", "a")
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "pod" / "trees", capacity=1)
-    own, _ = trees.own(head)
+    own, _ = trees.own(head, head)
     shared, _ = trees.lease(head)
-    other, _ = trees.own(head)
+    other, _ = trees.own(head, head)
     assert len({shared, own, other}) == 3
     assert own.parent == tmp_path / "pod" / "trees"
     assert own.name.startswith(f"{head}.")
@@ -377,8 +375,62 @@ def test_a_lease_and_an_own_copy_report_whether_the_store_fetched_their_head(tmp
     assert trees.lease(base) == (tmp_path / "trees" / base, False)
     assert trees.lease(head) == (tmp_path / "trees" / head, True)
     assert trees.lease(head) == (tmp_path / "trees" / head, False)
-    assert trees.own(head)[1] is False
+    assert trees.own(head, base)[1] is False
     later = _commit(origin, "c", "c")
-    owned, fetched = trees.own(later)
+    owned, fetched = trees.own(later, head)
     assert fetched is True
     assert _git(owned, "rev-parse", "HEAD").strip() == later
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_empty_removes_sealed_trees_locked_folders_files_and_symlinks_but_keeps_the_folder(
+    tmp_path: Path, origin: Path
+) -> None:
+    head = _commit(origin, "a", "a")
+    folder = tmp_path / "root"
+    folder.mkdir()
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=folder / "trees", capacity=1)
+    trees.lease(head)
+    locked = folder / "locked"
+    locked.mkdir()
+    (locked / "inner").write_text("x")
+    locked.chmod(locked.stat().st_mode & ~(stat.S_IWUSR | stat.S_IXUSR))
+    (folder / "plain.txt").write_text("y")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("kept")
+    (folder / "link").symlink_to(outside)
+    kept_dir = tmp_path / "kept-dir"
+    kept_dir.mkdir()
+    (kept_dir / "file").write_text("kept too")
+    (folder / "dirlink").symlink_to(kept_dir)
+
+    worktrees.empty(folder)
+
+    assert folder.exists()
+    assert list(folder.iterdir()) == []
+    assert outside.read_text() == "kept"
+    assert (kept_dir / "file").read_text() == "kept too"
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_empty_of_a_missing_folder_is_not_an_error(tmp_path: Path) -> None:
+    worktrees.empty(tmp_path / "absent")
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_an_own_copy_holds_the_base_its_unit_compares_it_against(tmp_path: Path, origin: Path) -> None:
+    fork = _commit(origin, "a", "a")
+    mirror = _mirror(tmp_path, origin, fork)
+    _git(origin, "switch", "-q", "-c", "side")
+    base = _commit(origin, "b", "b")
+    _git(origin, "switch", "-q", "main")
+    head = _commit(origin, "c", "c")
+    trees = worktrees.Worktrees(mirror=mirror, root=tmp_path / "trees", capacity=1)
+    tree, fetched = trees.own(head, base)
+    assert fetched is True
+    assert _git(tree, "merge-base", base, head).strip() == fork
+    _git(origin, "switch", "-q", "side")
+    later = _commit(origin, "d", "d")
+    known, fetched = trees.own(head, later)
+    assert fetched is False
+    assert _git(known, "merge-base", later, head).strip() == fork

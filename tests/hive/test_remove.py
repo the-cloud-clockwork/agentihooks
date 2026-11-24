@@ -1080,6 +1080,23 @@ def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_
     ]
 
 
+@pytest.mark.feature("master-handoff-carries-orders")
+def test_a_master_still_running_at_the_deadline_gets_a_recovery_envelope_naming_its_orders_unknown(
+    store: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.handoff import envelope
+
+    member = _member(store)
+    _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("master@1", "master", "master", seat=f"master@{SLUG}", hive=member))
+    monkeypatch.setattr(envelope, "build", lambda swarm, slug, agent, reason, rows, at, run: {"agent": agent.name})
+
+    remove.settle(store, member, 30, _host(Clock(store, member, 99), Run(), tmp_path))
+
+    assert store.envelopes[(SLUG, "t1")] == {"agent": "engineer@1"}
+    assert store.envelopes[(SLUG, "master")] == {"agent": "master@1", "orders": "unknown"}
+
+
 @pytest.mark.feature("hive-drain-push-resume")
 def test_a_release_roll_orders_each_agent_to_commit_and_push_before_it_hands_off(store: Any, tmp_path: Path) -> None:
     member = _member(store)

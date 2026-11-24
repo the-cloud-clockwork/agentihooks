@@ -23,6 +23,7 @@ CODE_DIRS = (
             "swarm_v2",
             "handoff",
             "doctor",
+            "forge",
             "gates",
             "hive",
             "codex_session",

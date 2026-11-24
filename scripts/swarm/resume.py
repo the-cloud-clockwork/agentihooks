@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from scripts import agent_choice
 from scripts.handoff import transfers
-from scripts.swarm import deliberate_exit, fencing, idle, outage, profile_choice
+from scripts.swarm import deliberate_exit, expert_launch, fencing, idle, outage, profile_choice
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
@@ -68,9 +68,11 @@ def blocker(agent, worktree, exists=os.path.isdir, has_quota=account_quota):
     return ""
 
 
-def restored_text(slug, agent, ledger):
+def restored_text(slug: str, agent: AgentRecord, ledger: object) -> str:
     sources = f"the ledger, printed by {ledger}"
-    if agent.lane != MASTER:
+    if agent.lane == expert_launch.LANE:
+        sources = f"your mission, printed by agentihooks swarm {slug} expert mission, and the recap of your seat"
+    elif agent.lane != MASTER:
         folder = ledger_workspace.named(slug, agent)
         sources = f"your task folder {folder} (steering.md, progress.md, proof.md) and {sources}"
     return RESTORED.format(slug=slug, name=agent.name, task=agent.task, sources=sources)

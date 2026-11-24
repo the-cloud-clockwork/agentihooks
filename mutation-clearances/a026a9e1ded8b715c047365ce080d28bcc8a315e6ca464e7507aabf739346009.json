@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_claim:fc94cb6d75eae349c50b478cd9a559fd8d07ffc3e28de18d898bff41c87f1d22": {
+    "reader": "standards_reader",
+    "reason": "typing.cast(typ, val) returns val unchanged at runtime; the type argument is discarded immediately and never inspected. cast(list[Any], ops) and cast(None, ops) both evaluate to ops."
+  }
+}

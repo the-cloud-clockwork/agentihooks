@@ -1,0 +1,29 @@
+rules:
+  - id: review-mark-accepts-own-findings
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A review mark path acknowledges findings without refusing the ones the marking agent
+      authored, so a reviewer could mark its own findings read and satisfy its own review.
+      Compare each chosen finding's author with the marker and raise before acknowledging,
+      as scripts.review.record._mark does.
+    paths:
+      include:
+        - /scripts/review/
+        - review-mark-accepts-own-findings.py
+    patterns:
+      - pattern: _acknowledge(...)
+      - pattern-inside: |
+          def $FUNC(...):
+            ...
+      - pattern-not-inside: |
+          def $FUNC(...):
+            ...
+            $OWN = <... $ITEM.by == $BY ...>
+            ...
+      - pattern-not-inside: |
+          def $FUNC(...):
+            ...
+            if <... $ITEM.by == $BY ...>:
+              ...
+            ...

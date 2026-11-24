@@ -933,3 +933,12 @@ def test_a_merged_task_stops_while_a_live_checks_wait_names_another_pull_request
     on = {"kind": "checks", "target": other}
     idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {other}", rig.clock[0], on=on)
     assert rig.stop().allowed
+
+
+@pytest.mark.feature("reviewer-worker-gates")
+@pytest.mark.parametrize("lane", ["eng", "ci", "review"])
+def test_worker_lanes_cannot_stop_with_an_unfinished_claim(
+    rig: Any, monkeypatch: pytest.MonkeyPatch, lane: str
+) -> None:
+    monkeypatch.setattr("scripts.gates.claim_stop.lane_of", lambda name: lane)
+    assert not rig.stop(Who(name=WHO.name, swarm=SLUG, lane=lane, task="t1")).allowed

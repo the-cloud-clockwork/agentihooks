@@ -1022,6 +1022,7 @@ statistics cache entries. This happens automatically in the pull request
 | Test import index | `mentions` caches Unicode-normalized tokens and relative import detection. `imported_names` caches parsed imports by test text and package. `select_tests` parses a file only when it names a reached module's last component or contains a relative import; its import walk visits statements | In-process reuse by content and package, including repeated selection for changed sources. Each selection still reads test text; unrelated files avoid AST parsing |
 | Test duration map | `stats_part_count` computes `file_seconds` once, then passes the same map to every candidate part count and worker bucket. `partition` splits the files using that map without rereading durations | One statistics part sizing calculation. A new plan reads its current duration input |
 | Statistics dependency fingerprints | `StatsInputs.for_test` retains a test file's dependency trace when multiple selectors name that file, and the import closure of each distinct measured dependency list; `StatsInputs.discovery` retains the digest of each distinct input set. Test ids with equal measured lists cost one closure walk when their records are saved and one when they are checked for reuse. `test_inputs` materializes each module's AST walk once while recording its dependencies | One `StatsInputs` instance, separately for measured and unmeasured dependencies. Recorded coverage and dynamically loaded inputs still participate in validation |
+| Statistics cache input digests | `collect_cached_stats` passes one path to digest map to every `StoredStats.load` call of a cache lookup, so each input file the cached records list is read and hashed once, and every other record that lists the file reuses that digest | One cache lookup. The next lookup hashes its inputs again, so a changed or deleted input still misses; a `load` call without a map hashes every input it checks |
 
 These in-memory values reduce repeated planning work. The persisted statistics
 cache still validates its inputs before reusing collected results, as described
@@ -1115,7 +1116,8 @@ files. These are delivery measurements, not a current runner speed guarantee.
 
 The `mutation-plan` job of the Tests run installs only the third party
 packages that the shard planner and the empty change grade import: mutmut,
-pytest, pyyaml and tomlkit, at the specifiers `pyproject.toml` declares. Before
+pytest, pyyaml and tomlkit, at the exact pins `.github/test-requirements.lock`
+holds. Before
 [pull request 5439](https://github.com/the-cloud-clockwork/agentihooks/pull/5439)
 the job installed the whole project with `.[dev,all]`, 95 packages, only to
 size shards. It now resolves and installs 20 packages in about one second. The
@@ -1127,15 +1129,15 @@ still install `.[dev,all]`.
 
 ```yaml
       - name: Install dependencies
-        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest==9.1.1" "pyyaml==6.0.3" "tomlkit==0.15.2"
 ```
 
-| Package | Specifier | Declared in `pyproject.toml` | Planner module that imports it at module level |
+| Package | Pin in `.github/test-requirements.lock` | Declared in `pyproject.toml` | Planner module that imports it at module level |
 |---|---|---|---|
 | `mutmut` | `==3.6.0` | `dev` extra | `scripts.ci_mutation.selection` |
-| `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `scripts.ci_mutation.selection` |
-| `pyyaml` | `>=6.0` | project dependencies | `scripts.dep_manifest` (imported as `yaml`) |
-| `tomlkit` | `>=0.12` | project dependencies | `scripts.ci_mutation.runner` |
+| `pytest` | `==9.1.1` | `dev` extra | `scripts.ci_mutation.killers`, `scripts.ci_mutation.selection` |
+| `pyyaml` | `==6.0.3` | project dependencies | `scripts.dep_manifest` (imported as `yaml`) |
+| `tomlkit` | `==0.15.2` | project dependencies | `scripts.ci_mutation.runner` |
 
 - The packages go into the runner's system Python 3.12. The project itself is
   not installed: **Size mutation shards from stored timings** runs
@@ -1156,9 +1158,9 @@ still install `.[dev,all]`.
 ### Adding a planner dependency
 
 `test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pins`
-in `tests/test_ci_workflow.py` keeps the step, the planner and `pyproject.toml`
-in agreement. `PLANNER_PACKAGES` in the same file maps each installed
-distribution to its import name:
+in `tests/test_ci_workflow.py` keeps the step, the planner and
+`.github/test-requirements.lock` in agreement. `PLANNER_PACKAGES` in the same
+file maps each installed distribution to its import name:
 
 ```python
 PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "tomlkit": "tomlkit"}
@@ -1167,9 +1169,9 @@ PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "t
 The test makes two checks:
 
 1. The step's `run` line equals the retry wrapper followed by
-   `uv pip install --system` and the `pyproject.toml` specifier of every
-   `PLANNER_PACKAGES` distribution, quoted and sorted by distribution name.
-   Specifiers are looked up in the project dependencies and the `dev` extra.
+   `uv pip install --system --constraint` with the workflow revision's test
+   requirements lock and the exact lock pin of every `PLANNER_PACKAGES`
+   distribution, quoted and sorted by distribution name.
 2. The third party top level modules imported by `scripts.ci_mutation.plan`,
    `scripts.ci_mutation.__main__` and every `scripts` or `tests` module they
    reach equal the `PLANNER_PACKAGES` import names. Module level imports count,
@@ -1181,17 +1183,18 @@ When a planner module gains a module level import of another third party
 package, change three places in one pull request:
 
 1. Declare the package in the project dependencies or the `dev` extra of
-   `pyproject.toml`, if it is not there yet.
+   `pyproject.toml`, if it is not there yet, and regenerate
+   `.github/test-requirements.lock` so it pins the package.
 2. Add it to `PLANNER_PACKAGES`, distribution name to import name.
-3. Add its `pyproject.toml` specifier to the step, in sorted order. For a
-   hypothetical `packaging>=24.0` dependency the step becomes:
+3. Add its exact lock pin to the step, in sorted order. For a hypothetical
+   `packaging==24.2` lock pin the step becomes:
 
 ```yaml
-        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "packaging>=24.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "packaging==24.2" "pytest==9.1.1" "pyyaml==6.0.3" "tomlkit==0.15.2"
 ```
 
-A changed specifier in `pyproject.toml`, such as a new mutmut pin, also needs
-the same change in the step, or the test fails.
+A changed pin in `.github/test-requirements.lock`, such as a new mutmut
+version, also needs the same change in the step, or the test fails.
 
 ### Inspect the plan job
 
@@ -1225,9 +1228,9 @@ Stats parts: 1
 | Symptom | Cause and fix |
 |---|---|
 | **Size mutation shards from stored timings** or **Grade the empty change set** fails with `ModuleNotFoundError` | A planner path imports a package the step does not install. A module level import also fails the contract test; an import inside a function does not. Add the package as described in [Adding a planner dependency](#adding-a-planner-dependency). |
-| The contract test fails on the `run` line | The step and `pyproject.toml` disagree on a specifier, the order or the retry wrapper. Copy the specifier from `pyproject.toml` into the step. |
+| The contract test fails on the `run` line | The step and `.github/test-requirements.lock` disagree on a pin, the order, the constraint or the retry wrapper. Copy the exact pin from `.github/test-requirements.lock` into the step. |
 | The contract test fails on the import set | A planner module gained or dropped a third party import. Add or remove the package in `PLANNER_PACKAGES` and in the step. |
-| The test raises `KeyError` with a package name | A `PLANNER_PACKAGES` entry is declared in neither the project dependencies nor the `dev` extra. Declare it there. |
+| The test raises `KeyError` with a package name | A `PLANNER_PACKAGES` distribution has no exact pin in `.github/test-requirements.lock`. Declare it in the project dependencies or the `dev` extra, then regenerate the lock with `bash .github/scripts/lock-test-deps.sh`. |
 | The step fails with `Python package index unavailable` | The package index did not answer within the retry window. This is not a code verdict; rerun the job. |
 
 ### Plan job dependency delivery evidence

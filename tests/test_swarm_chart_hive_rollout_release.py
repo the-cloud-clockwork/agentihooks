@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -12,7 +13,7 @@ CHART = ROOT / "deploy" / "helm" / "agentihooks-swarm"
 def test_the_worker_hive_release_annotation_carries_no_image_digest() -> None:
     template = (CHART / "templates" / "worker-hive.yaml").read_text()
     values = (CHART / "values.yaml").read_text()
-    workflow = (ROOT / ".github" / "workflows" / "chart-release.yml").read_text()
+    workflow = (ROOT / ".github" / "workflows" / "swarm-node-image.yml").read_text()
 
     assert "imageDigest" not in template
     assert "imageDigest" not in values
@@ -42,13 +43,13 @@ def test_a_leased_release_tag_hive_takes_the_chart_release_version_as_its_stamp(
 @pytest.mark.feature("hive-roll-hooks-run-the-chart-release-worker")
 def test_the_rollout_hooks_run_the_hive_worker_tag_the_chart_release_stamps() -> None:
     template = (CHART / "templates" / "hive-rollout.yaml").read_text()
-    workflow = (ROOT / ".github" / "workflows" / "chart-release.yml").read_text()
+    workflow = (ROOT / ".github" / "workflows" / "swarm-node-image.yml").read_text()
     publish = (ROOT / "deploy" / "worker" / "release-hive.sh").read_text()
+    runs = [step.get("run", "") for step in yaml.safe_load(workflow)["jobs"]["hive"]["steps"]]
+    published = [index for index, run in enumerate(runs) if "bash deploy/worker/release-hive.sh" in run]
+    packaged = [index for index, run in enumerate(runs) if '--app-version "$version"' in run]
 
-    assert '--app-version "$version"' in workflow
-    assert "workflows: [Swarm worker image]" in workflow
-    assert "github.event.workflow_run.conclusion == 'success'" in workflow
-    assert "release-hive.sh" in (ROOT / ".github" / "workflows" / "swarm-node-image.yml").read_text()
+    assert published and packaged and published[-1] < packaged[0]
     assert 'ne (toString .Chart.AppVersion) "dev"' in template
     assert '"$image:$version"' in publish
     assert 'merge (dict "tag" (toString .Chart.AppVersion)) $workers.image' in template

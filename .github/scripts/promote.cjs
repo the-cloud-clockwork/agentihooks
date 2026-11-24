@@ -5,14 +5,15 @@ const EXEMPT = ['mutation-stats-seed', 'test-summary'];
 const settled = (job, hotfix) => EXEMPT.includes(job.name) ||
   (job.status === 'completed' && (hotfix || ['success', 'skipped'].includes(job.conclusion)));
 
-async function snapshotGradeComplete(github, context, api, triggering = context, hotfix = false) {
+async function snapshotGradeComplete(github, context, api, report, triggering = context, hotfix = false) {
   const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
     { ...api, run_id: context.runId, filter: 'latest', per_page: 100 });
   const selected = context.runId !== triggering.runId;
   if (selected && !jobs.some(job => job.run_id === context.runId && job.name === 'Promotion ready' &&
       job.status === 'completed' && job.conclusion === 'success')) throw new Error('Selected promotion grade is no longer ready');
   const current = jobs.filter(job => job.run_id === context.runId && job.name === 'promote / promote' &&
-    (selected || job.status === 'in_progress'));
+    (selected || job.status !== 'completed'));
+  report(current.length, jobs);
   const red = jobs.filter(job => !current.includes(job) && job.status === 'completed' && !settled(job, hotfix));
   if (red.length) throw new Error(`Graded run jobs did not pass: ${red.map(job => `${job.name} ${job.conclusion}`).join(', ')}`);
   return current.length === 1 && jobs.some(job => job.name === (hotfix ? HOTFIX_GRADE : GRADE) && job.status === 'completed' && job.conclusion === 'success') &&
@@ -152,13 +153,23 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
     await github.rest.repos.createCommitStatus({ ...status, state: 'pending', description: 'Verifying the integration grade for this snapshot.' });
     let reported = false;
     let ready = false;
+    let previousPoll;
+    const reportPoll = (count, jobs) => {
+      const unsettled = jobs.filter(job => job.status !== 'completed')
+        .map(job => `${job.name} ${job.status}`).sort();
+      const poll = `Promotion grade poll: current promote jobs=${count}; unsettled jobs=${unsettled.join(', ') || 'none'}`;
+      if (poll !== previousPoll) {
+        core.info(poll);
+        previousPoll = poll;
+      }
+    };
     core.info('Waiting for the required snapshot grade and checks before merging.');
     const deadline = now() + 30 * 60 * 1000;
     while (now() < deadline) {
       const latest = (await github.rest.pulls.get({ ...api, pull_number: pull.number })).data;
       if (latest.head.sha !== snapshot) throw new Error('Promotion pull request moved away from the graded head');
       if (latest.mergeable === false) throw new Error('Promotion pull request has merge conflicts');
-      if (!reported && await snapshotGradeComplete(github, context, api, triggering, hotfix)) {
+      if (!reported && await snapshotGradeComplete(github, context, api, reportPoll, triggering, hotfix)) {
         await github.rest.repos.createCommitStatus({ ...status, state: 'success', description: 'The integration grade passed for the verified snapshot tree.' });
         reported = true;
       }

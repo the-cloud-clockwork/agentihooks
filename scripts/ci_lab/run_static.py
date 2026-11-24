@@ -15,6 +15,9 @@ __all__ = ["SHELL", "SUMMARY", "Result", "Settings", "run"]
 SHELL = ("bash", "--noprofile", "--norc", "-eo", "pipefail", "-c")
 SUMMARY = "GITHUB_STEP_SUMMARY"
 OUTPUT = "GITHUB_OUTPUT"
+IMAGE_TOOLS = "/usr/local/bin"
+RUFF_CACHE = "RUFF_CACHE_DIR"
+TYPE_WORKERS = "AGENTIHOOKS_TYPE_WORKERS"
 SKIPPED = "skipped"
 SUCCESS = "success"
 
@@ -60,10 +63,15 @@ def _folder(root: Path, base_tree: Path, grader_tree: Path) -> Path:
 
 def _sandbox(settings: Settings, trees: tuple[Path, Path, Path], folder: Path, env: Mapping[str, str]) -> Sandbox:
     """The sandbox a step of the gate's job runs in from the head tree, its env joining the whitelist under the tree
-    variables, with the grader and base trees bound read only."""
+    variables, with the grader and base trees bound read only. PATH names the venv, then the folder the worker image
+    installs its own tools in, then the system folders; ruff keeps its cache in the run folder, since the leased head
+    tree refuses writes, unless the step's env names another folder; and the type gate runs one checker at a time,
+    since a worker's memory holds one beside its other units, unless the step's env names another count."""
     head_tree, base_tree, grader_tree = trees
     whitelist = {
-        "PATH": os.pathsep.join((str(settings.venv / "bin"), os.defpath)),
+        "PATH": os.pathsep.join((str(settings.venv / "bin"), IMAGE_TOOLS, os.defpath)),
+        RUFF_CACHE: str(folder / "ruff"),
+        TYPE_WORKERS: "1",
         **settings.whitelist,
         **env,
         "RUNNER_TEMP": str(folder),

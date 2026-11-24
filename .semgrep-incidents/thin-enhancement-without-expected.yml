@@ -1,0 +1,12 @@
+rules:
+  - id: thin-enhancement-without-expected
+    languages: [python]
+    severity: ERROR
+    message: Thin enhancement marks must carry the enhancement value read from the task snapshot.
+    paths:
+      include:
+        - /scripts/tick/steps/thin.py
+        - thin-enhancement-without-expected.py
+    patterns:
+      - pattern: '{"op": "task_enhancement", ...}'
+      - pattern-not: '{"op": "task_enhancement", ..., "expected": $VALUE, ...}'

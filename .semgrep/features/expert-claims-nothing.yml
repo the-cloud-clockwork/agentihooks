@@ -1,0 +1,21 @@
+rules:
+  - id: feature-expert-claims-nothing
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-22, an expert behaves like a swarm agent but claims no task: the worker lookup every worker verb
+      of the swarm command starts from refuses the expert lane.
+    patterns:
+      - pattern: |
+          def _worker(...):
+            ...
+      - pattern-not: |
+          def _worker(...):
+            ...
+            if $AGENT.lane == expert_launch.LANE:
+              raise SwarmError(...)
+            ...
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - '*.test.py'

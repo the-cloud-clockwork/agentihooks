@@ -3,6 +3,7 @@ their own port with the lab's bearer token to mark heads hotfix, pause a class b
 
 import hmac
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -16,6 +17,7 @@ from scripts.ci_lab.leases import Grant, Leases
 
 __all__ = [
     "MAX_WAIT_MS",
+    "STALE",
     "Answer",
     "ControlRoutes",
     "Reply",
@@ -30,6 +32,7 @@ __all__ = [
 ]
 
 MAX_WAIT_MS = 30_000
+STALE = 426
 MAX_BODY_BYTES = 65_536
 LENGTH = "Content-Length"
 AUTHORIZATION = "Authorization"
@@ -120,12 +123,13 @@ def _grant(grant: Grant) -> dict[str, Any]:
 
 def _lease(leases: Leases, signer: UploadSigner, query: str, raw: bytes) -> Reply:
     data = _body(raw)
-    grants = leases.lease(
-        _text(data, "worker"),
-        _number(data, "free_slots"),
-        _texts(data, "capabilities"),
-        min(_number(data, "wait_ms"), MAX_WAIT_MS),
-    )
+    worker = _text(data, "worker")
+    free_slots = _number(data, "free_slots")
+    capabilities = _texts(data, "capabilities")
+    wait_ms = min(_number(data, "wait_ms"), MAX_WAIT_MS)
+    if leases.stale(worker):
+        return STALE, {"error": "stale worker"}
+    grants = leases.lease(worker, free_slots, capabilities, wait_ms)
     return 200, {"leases": [_grant(grant) for grant in grants]}
 
 
@@ -240,6 +244,11 @@ def answer_control(routes: ControlRoutes, method: str, target: str, raw: bytes, 
     return command(routes, method, target, raw, authorization) or (404, {"error": "not found"})
 
 
+def _log_request(request: BaseHTTPRequestHandler, code: int | str = "-", size: int | str = "-") -> None:
+    line = re.sub(r"\?[^ ]*", "", request.requestline)
+    request.log_message('"%s" %s %s', line, str(code), str(size))
+
+
 def bind(host: str, port: int, reply: Answer) -> ThreadingHTTPServer:
     """Bind JSON routes on host and port, each request's method, target, body and Authorization header answered by
     reply; the caller runs serve_forever."""
@@ -258,7 +267,11 @@ def bind(host: str, port: int, reply: Answer) -> ThreadingHTTPServer:
         request.end_headers()
         request.wfile.write(data)
 
-    handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": handle, "do_POST": handle})
+    handler = type(
+        BaseHTTPRequestHandler.__name__,
+        (BaseHTTPRequestHandler,),
+        {"do_GET": handle, "do_POST": handle, "log_request": _log_request},
+    )
     return ThreadingHTTPServer((host, port), handler)
 
 
