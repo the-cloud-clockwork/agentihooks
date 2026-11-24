@@ -3,14 +3,20 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A chart grader copies a tree out of the head with a copy function that keeps each file's permission bits. On
-      23 November the lab worker, which seals a leased head tree read only, ran the chart pod template grader on
-      unchanged dev: the copied Chart.yaml kept its read only mode, the rewrite of the copy was refused and the gate
-      failed. Copy contents only: shutil.copytree(source, copy, copy_function=shutil.copyfile).
+      A chart is copied out of the head with a copy function that keeps each file's permission bits, and the copy's
+      Chart.yaml is then rewritten. On 23 November the lab worker, which seals a leased head tree read only, ran the
+      chart pod template grader on unchanged dev: the copied Chart.yaml kept its read only mode, the rewrite was
+      refused and the gate failed. Copy contents only: shutil.copytree(source, copy, copy_function=shutil.copyfile).
     paths:
       include:
-        - /tests/ci_charts/
+        - /tests/
         - chart-grader-copy-keeps-source-modes.py
     patterns:
-      - pattern: shutil.copytree(...)
-      - pattern-not: shutil.copytree(..., copy_function=shutil.copyfile, ...)
+      - pattern: |
+          shutil.copytree(...)
+          ...
+          ($COPY / "Chart.yaml").write_text(...)
+      - pattern-not: |
+          shutil.copytree(..., copy_function=shutil.copyfile, ...)
+          ...
+          ($COPY / "Chart.yaml").write_text(...)
