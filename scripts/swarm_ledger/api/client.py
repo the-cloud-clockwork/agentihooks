@@ -144,7 +144,7 @@ class ResourceClient:
                 if replay.code != 409 or error.get("code") != "revision_conflict":
                     raise replay from None
                 rows, query = [], {"limit": 100}
-                if path.startswith(READ_AGAIN):
+                if path.split("/")[0] in READ_AGAIN:
                     attempt = next(restarts)
                     if attempt == RETRIES:
                         raise replay from None

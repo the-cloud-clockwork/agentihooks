@@ -130,13 +130,14 @@ def read(doc: dict[str, Any], path: str, fix: str, now_ms: int) -> list[dict[str
 
 def task_rows(doc: dict[str, Any], path: str, fix: str) -> list[dict[str, Any]] | None:
     """The ledger API's paged focus read: the tasks under the target of ``focus/<target>/tasks`` that are not done,
-    each with its verdict. None when the path names no such list: it does not end in ``/tasks``, the whole name is
-    itself a plan node, as for a task whose id is ``tasks``, or what stands before ``/tasks`` is no target."""
+    each with its verdict. None when the path does not end in ``/tasks``, or what stands before ``/tasks`` is no
+    target: a task whose id is ``tasks`` keeps its one reply read, because the bare word before it names no
+    target."""
     name = path.removeprefix("focus").removeprefix("/")
     if not name.endswith(TASKS):
         return None
     seen, above = view(doc, fix), name.removesuffix(TASKS)
-    if name in seen.graph or not known(above, seen):
+    if not known(above, seen):
         return None
     rows: list[dict[str, Any]] = target(above, seen)["tasks"]
     return rows

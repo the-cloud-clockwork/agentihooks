@@ -1,21 +1,28 @@
 """Live check of the paged focus read: in every swarm that is not stopped, the task list of a focus target read in
-pages at ``focus/<target>/tasks`` holds the task rows the one reply read of ``focus/<target>`` holds. It checks the
-focus records with the most tasks of each ledger, prints one line per target and never a credential."""
+pages at ``focus/<target>/tasks`` holds the task rows the one reply read of ``focus/<target>`` holds; a target one
+reply cannot hold is held instead to the list the ledger hashes, through a cursor made from the hash of its pages.
+It checks the focus records with the most tasks of each ledger, or the first three the freezes read lists when the
+focus list itself passes the reply limit, prints one line per target and never a credential."""
 
 import sys
 import urllib.error
 from collections.abc import Callable, Iterable
 from typing import Any, Protocol
+from urllib.parse import urlencode
+
+from scripts.swarm_ledger.api import resources
 
 FAIL = "FAIL: "
 SAME = "{slug} focus {target}: {count} task rows in pages, as the read of the target holds"
 PAGED = "{slug} focus {target}: {count} task rows in pages, more than one reply holds"
 DIFFERENT = "{slug} focus {target}: the pages hold {paged} task rows that differ from the {whole} the target holds"
+BROKEN = "{slug} focus {target}: the pages hold {paged} task rows that are not the list the ledger holds"
 NONE = "{slug} holds no focus record"
 CHECKED = 3
 ATTEMPTS = 3
 KEYS = ("id", "lane", "state", "verdict")
 TOO_LARGE = 413
+CONFLICT = 409
 FOCUS = "focus"
 
 Read = Callable[[str, str, bool], Any]
@@ -30,14 +37,15 @@ class Swarms(Protocol):
 
 
 def lines(slug: str, read: Read) -> list[str]:
-    """One line per checked focus target of a ledger, a failing one where the pages and the read of the target
-    still differ after both were read again, or one line that says the ledger holds no focus record."""
+    """One line per checked focus target of a ledger, a failing one where the pages and the read of the target, or
+    the list the ledger hashes, still differ after every attempt, or one line that says the ledger holds no focus
+    record."""
     return [_target(slug, target, read) for target in _targets(slug, read)] or [NONE.format(slug=slug)]
 
 
 def _targets(slug: str, read: Read) -> list[str]:
-    """The targets to check: those of the focus records with the most tasks. A focus list one reply cannot hold
-    names no size, so its first records are taken as the freezes read lists them; any other refusal is raised."""
+    """The targets to check: the focus records with the most tasks. A focus list one reply cannot hold names no
+    size, so its first records are taken as the freezes read lists them instead; any other refusal is raised."""
     try:
         records: list[dict[str, Any]] = read(slug, "focus", True)
     except urllib.error.HTTPError as refused:
@@ -56,23 +64,43 @@ def _rows(rows: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
     return [tuple(row.get(key) for key in KEYS) for row in rows]
 
 
-def _target(slug: str, target: str, read: Read) -> str:
-    """The line of one target. A ledger that moves between the two reads is read again, so only a difference that
-    stays is a failure. A target one reply cannot hold has only its pages, so it passes on them; any other refusal
-    is raised."""
-    whole: list[tuple[Any, ...]] = []
-    paged: list[tuple[Any, ...]] = []
-    for _ in range(ATTEMPTS):
-        try:
-            whole = _rows(read(slug, f"focus/{target}", False)["tasks"])
-        except urllib.error.HTTPError as refused:
-            if refused.code != TOO_LARGE:
-                raise
-            return PAGED.format(slug=slug, target=target, count=len(read(slug, f"focus/{target}/tasks", True)))
-        paged = _rows(read(slug, f"focus/{target}/tasks", True))
-        if whole == paged:
-            return SAME.format(slug=slug, target=target, count=len(paged))
+def _bare(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{key: value for key, value in row.items() if key != "revision"} for row in rows]
+
+
+def _target(slug: str, target: str, read: Read, attempts: int = ATTEMPTS) -> str:
+    """The line of one target, judged once and read again with one attempt less while the two reads differ; the
+    failing line is written when no attempt is left. A target one reply cannot hold has only its pages, held to
+    the list the ledger hashes; any other refusal is raised."""
+    try:
+        whole = _rows(read(slug, f"focus/{target}", False)["tasks"])
+    except urllib.error.HTTPError as refused:
+        if refused.code != TOO_LARGE:
+            raise
+        return _paged(slug, target, read, attempts)
+    paged = _rows(read(slug, f"focus/{target}/tasks", True))
+    if whole == paged:
+        return SAME.format(slug=slug, target=target, count=len(paged))
+    if attempts > 1:
+        return _target(slug, target, read, attempts - 1)
     return FAIL + DIFFERENT.format(slug=slug, target=target, paged=len(paged), whole=len(whole))
+
+
+def _paged(slug: str, target: str, read: Read, attempts: int = ATTEMPTS) -> str:
+    """The line of a target one reply cannot hold: its pages are held to the list the ledger hashes, by asking for
+    one row at the cursor made from the hash of its bare rows, read again with one attempt less on a conflict; the
+    failing line is written when no attempt is left. Any other refusal is raised."""
+    rows = read(slug, f"focus/{target}/tasks", True)
+    cursor = f"{resources.revision(_bare(rows))}:0"
+    try:
+        read(slug, f"focus/{target}/tasks?" + urlencode({"limit": 1, "cursor": cursor}), False)
+    except urllib.error.HTTPError as refused:
+        if refused.code != CONFLICT:
+            raise
+        if attempts > 1:
+            return _paged(slug, target, read, attempts - 1)
+        return FAIL + BROKEN.format(slug=slug, target=target, paged=len(rows))
+    return PAGED.format(slug=slug, target=target, count=len(rows))
 
 
 def _running(store: Swarms) -> list[str]:
