@@ -202,7 +202,7 @@ def test_the_kept_placing_steps_of_the_placement_site_reach_the_placement_worker
         return run
 
     for name in site:
-        monkeypatch.setattr(registered[name], "run", starts(name))
+        monkeypatch.setitem(registered[name].__dict__, "run", starts(name))
     with pool.running(workers=2, critical_s=20.0, slow_s=20.0):
         rows = engine.run_graph((registered[name] for name in site), Context(View(), Deadline.after(20.0)))
 
