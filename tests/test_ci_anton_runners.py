@@ -68,7 +68,7 @@ MOVED = {
     ("docs-sanity.yml", "scan"): LIGHT,
     ("startup-stages.yml", "measure"): STANDARD,
     ("swarm-image.yml", "publish"): STANDARD,
-    ("swarm-image.yml", "release"): STANDARD,
+    ("swarm-image.yml", "release"): LIGHT,
     ("swarm-node-base.yml", "copy"): STANDARD,
     ("swarm-node-image.yml", "image"): STANDARD,
     ("swarm-node-image.yml", "hive"): STANDARD,
