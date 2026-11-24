@@ -231,13 +231,14 @@ def _base(record: dict[str, Any]) -> str:
 
 
 def _named(client: object, hive_id: str, record: dict[str, Any]) -> dict[str, Any]:
-    """The record under its base name, or the first free suffix of it while another live hive holds the base."""
+    """The record under its base name, or the first free suffix of it while another live hive holds the base; only a
+    headless hive keeps its base beside a suffix, since an interface hive's base is always MASTER_NAME."""
     base = _base(record)
     name = _unique(base, _held(client, hive_id))
     named = {field: value for field, value in record.items() if field != "base"}
     if name != _read_name(record):
         named["name"] = name
-    return named if name == base else {**named, "base": base}
+    return named if name == base or record.get("ui") == "yes" else {**named, "base": base}
 
 
 def _healed(client: object, hive_id: str, record: dict[str, Any]) -> dict[str, Any]:

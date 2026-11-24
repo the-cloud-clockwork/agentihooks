@@ -225,6 +225,18 @@ def test_a_stored_master_suffix_with_no_live_holder_returns_on_the_next_heartbea
     assert [hive["name"] for hive in registry.hives(redis)] == ["swarm-master"]
 
 
+@pytest.mark.feature("hive-registry-name-returns-to-base")
+def test_an_interface_hive_turned_headless_keeps_its_name_and_chases_no_master_name(redis: "FakeRedis") -> None:
+    registry.update(redis, "root", ["ui=yes"])
+    _live(redis, "root")
+    assert registry.update(redis, "vm", ["ui=yes"])["name"] == "swarm-master-2"
+    assert "base" not in _shown(redis, "vm")
+    assert registry.update(redis, "vm", ["ui=no"])["name"] == "swarm-master-2"
+    _live(redis, "root", at=registry.wall_ms() - registry.LIVE_MS - 1)
+    _live(redis, "vm")
+    assert _shown(redis, "vm")["name"] == "swarm-master-2"
+
+
 def test_a_restarted_registration_keeps_the_stored_settings(redis):
     pod = ["ui=no", "ephemeral=yes", "excluded=master", "max-agents=9"]
     first = registry.update(redis, "box", pod, keep=True)
