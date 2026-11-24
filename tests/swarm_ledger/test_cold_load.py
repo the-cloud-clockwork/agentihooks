@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import chromium
+from scripts.swarm_ledger import ledger_server as server
+from tests.swarm_ledger.ledger_page import chromium, served
 from tests.swarm_ledger.test_api_v1 import authority_live, live, stored
 from tests.swarm_ledger.test_ledger_authority import SLUG
 
@@ -95,11 +96,9 @@ def test_a_cold_browser_shows_the_first_task_rows_within_a_second_and_a_megabyte
     size = len(json.dumps(document))
     assert size > 28_000_000
     stored(monkeypatch, document)
-    with chromium() as browser:
+    with served(server) as base, chromium() as browser:
         context = browser.new_context(viewport={"width": 1920, "height": 1080})
-        context.add_cookies(
-            [{"name": f"ledger-session-{SLUG}", "value": f"page:{live['admin']}", "url": f"http://{live['host']}"}]
-        )
+        context.add_cookies([{"name": f"ledger-session-{SLUG}", "value": f"page:{live['admin']}", "url": base}])
         page = context.new_page()
         page.add_init_script(FIRST_ROW)
         totals: dict[str, int] = {}
@@ -107,8 +106,16 @@ def test_a_cold_browser_shows_the_first_task_rows_within_a_second_and_a_megabyte
         cdp.send("Network.enable")
         cdp.on("Network.dataReceived", lambda event: received_bytes(totals, event, False))
         cdp.on("Network.loadingFinished", lambda event: received_bytes(totals, event, True))
-        page.goto(f"http://{live['host']}/{SLUG}", wait_until="commit")
-        page.wait_for_function("() => window.firstTaskRow !== undefined", timeout=30000)
+        refused: list[str] = []
+        page.on("pageerror", lambda error: refused.append(str(error)))
+        page.on(
+            "response", lambda answer: refused.append(f"{answer.status} {answer.url}") if answer.ok is False else None
+        )
+        page.goto(f"{base}/{SLUG}", wait_until="commit")
+        try:
+            page.wait_for_function("() => window.firstTaskRow !== undefined", timeout=30000)
+        except Exception as exc:
+            raise AssertionError(f"no task row shown; refused or failed: {refused}") from exc
         transferred = sum(totals.values())
         first_row = float(page.evaluate("window.firstTaskRow"))
         context.close()
