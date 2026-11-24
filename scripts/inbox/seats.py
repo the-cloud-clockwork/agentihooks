@@ -16,6 +16,7 @@ from scripts.swarm.keyspace import ROOT
 PREFIX = f"{ROOT}:seat"
 OCCUPY_ATTEMPTS = 5
 SCAN_PAGE = 1000
+LEARNED_RESCAN_S = 3600  # pragma: no mutate
 MEMORY_KINDS = ("history", "recaps", "learned")
 MATURITIES = ("data", "note", "insight", "canon")
 DEFAULT_MATURITY = "note"
@@ -223,8 +224,8 @@ class SeatMemory:
         return selected
 
     def _learned_seats(self, slug: str) -> set[str]:
-        """The swarm's seats with a learned list: scanned from the keyspace once, then kept in a set that learn
-        adds to."""
+        """The addresses learn recorded for the swarm, with the seats a keyspace scan finds once per rescan window, so
+        notes a writer of an older release adds without the index still load within that window."""
         index = self.learned_index(slug)
         if not self.redis.exists(f"{index}:listed"):
             pattern = f"{PREFIX}:*@{slug}:learned"
@@ -233,7 +234,7 @@ class SeatMemory:
             with self.redis.pipeline() as pipe:
                 if seats:
                     pipe.sadd(index, *seats)
-                pipe.set(f"{index}:listed", 1)
+                pipe.set(f"{index}:listed", 1, ex=LEARNED_RESCAN_S)
                 pipe.execute()
         members: set[str] = self.redis.smembers(index)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         return members

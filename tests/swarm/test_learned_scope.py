@@ -164,7 +164,7 @@ def test_scoped_memory_asks_redis_only_for_the_swarm_learned_keys(
 
 
 @pytest.mark.feature("swarm-learned-scope")
-def test_scoped_memory_scans_the_keyspace_once_per_swarm(
+def test_scoped_memory_reads_the_index_after_its_first_scan(
     env: tuple[Any, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -175,6 +175,7 @@ def test_scoped_memory_scans_the_keyspace_once_per_swarm(
     memory = SeatMemory(store.redis)
     memory.scoped("sw", "eng-1@sw")
     store.memory.learn("ci-1@sw", "previous occupant", "later canon", 2, "canon")
+    store.memory.learn("x@eng-1@sw", "previous occupant", "two at canon", 3, "canon")
     scans: list[dict[str, object]] = []
     scan = store.redis.scan_iter
 
@@ -186,25 +187,39 @@ def test_scoped_memory_scans_the_keyspace_once_per_swarm(
     rows = memory.scoped("sw", "eng-1@sw")
     assert [(row["seat"], row["text"]) for row in rows] == [("ci-1@sw", "later canon"), ("eng-1@sw", "own note")]
     assert scans == []
+    assert store.redis.smembers(memory.learned_index("sw")) == {"eng-1@sw", "ci-1@sw", "x@eng-1@sw"}
 
 
 @pytest.mark.feature("swarm-learned-scope")
 def test_notes_written_before_the_index_load_through_one_scan(
     env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import json
 
-    from scripts.inbox.seats import SeatMemory
+    from scripts.inbox.seats import LEARNED_RESCAN_S, PREFIX, SCAN_PAGE, SeatMemory
 
     store, _, _ = env
     memory = SeatMemory(store.redis)
     entry = {"occupant": "previous occupant", "text": "older canon", "at": 1, "maturity": "canon"}
     store.redis.rpush(memory.key("ci-1@sw", "learned"), json.dumps(entry))
     store.redis.rpush(memory.key("ci-1@sw-doctor", "learned"), json.dumps(entry))
+    scans: list[dict[str, object]] = []
+    scan = store.redis.scan_iter
+
+    def recorded(**options: Any) -> Any:
+        scans.append(options)
+        return scan(**options)
+
+    monkeypatch.setattr(store.redis, "scan_iter", recorded)
     first = memory.scoped("sw", "eng-1@sw")
     again = memory.scoped("sw", "eng-1@sw")
+    marker = f"{memory.learned_index('sw')}:listed"
     assert [(row["seat"], row["text"]) for row in first] == [("ci-1@sw", "older canon")]
     assert again == first
+    assert scans == [{"match": f"{PREFIX}:*@sw:learned", "count": SCAN_PAGE}]
+    assert store.redis.get(marker) == "1"
+    assert 0 < store.redis.ttl(marker) <= LEARNED_RESCAN_S
 
 
 @pytest.mark.feature("swarm-learned-scope")
