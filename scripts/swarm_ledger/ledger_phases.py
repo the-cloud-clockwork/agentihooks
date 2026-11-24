@@ -1,7 +1,7 @@
 import re
-from typing import Any
 
 from scripts.swarm_ledger import ledger_plans
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("phase_add", "phase_update", "phase_review", "phase_append")
 FIELDS = ("title", "description", "depends_on", "planning", "release", "plan_url", "plan_ref", "plan")
@@ -134,7 +134,7 @@ def check_append(op: dict) -> None:
         seen.add(entry["phase"])
 
 
-def append(doc: dict, op: dict, ctx) -> bool:
+def append(doc: dict, op: dict, ctx: OpContext) -> bool:
     ids = {phase["id"] for phase in doc["phases"]}
     taken = [f"phase id {entry['phase']} is already taken" for entry in op["phases"] if entry["phase"] in ids]
     if taken:
@@ -171,7 +171,7 @@ def append(doc: dict, op: dict, ctx) -> bool:
     return True
 
 
-def apply(doc: dict, op: dict, ctx) -> bool:
+def apply(doc: dict, op: dict, ctx: OpContext) -> bool:
     if op["op"] == "phase_append":
         return append(doc, op, ctx)
     phases = doc["phases"]
@@ -234,7 +234,7 @@ def review_record(phase: dict, op: dict, at: int) -> dict:
     return record
 
 
-def decided(doc: dict, phase_id: str, review: dict, by: str, ctx: Any) -> None:
+def decided(doc: dict, phase_id: str, review: dict, by: str, ctx: OpContext) -> None:
     if review["state"] == "pending":
         return
     item = f"phases/{phase_id}"
