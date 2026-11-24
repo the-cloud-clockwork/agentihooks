@@ -1,5 +1,6 @@
 import { h } from "./dom.js";
-import { closedLeft, loadClosed, loadOpen, openLeft } from "./sync.js";
+import { closedLeft, loadClosed } from "./sync.js";
+import { loadOpen, openLeft } from "./seed.js";
 
 export const PAGE_SIZE = 50;
 export const FULL_PAGE = { first: PAGE_SIZE, more: PAGE_SIZE };

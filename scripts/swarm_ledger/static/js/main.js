@@ -1,6 +1,7 @@
 import { QUOTA_REFRESH_MS } from "./config.js";
 import { $ } from "./dom.js";
-import { flush, loadSaved, loaded, renderSync, seed, sendSync } from "./sync.js";
+import { flush, loadSaved, loaded, renderSync, sendSync } from "./sync.js";
+import { seed } from "./seed.js";
 import { showArtifacts } from "./artifacts.js";
 import { render } from "./render.js";
 import { renderStats } from "./stats.js";

@@ -252,6 +252,10 @@ def run(browser: Any, files: list[Path], pages: Path | None = None) -> dict[str,
     doc, served = ledger_doc(files), assets(pages)
     tab = browser.new_page(viewport=VIEWPORT)
     try:
+        html = page_html(pages)
+        tab.route(PAGE_URL, lambda route: route.fulfill(body=html, content_type="text/html; charset=utf-8"))
+        tab.route("**/static/*/**", lambda route: _asset(route, served))
+        tab.route("**/api/v1/ledgers/**", lambda route: _feed(route, doc))
         tab.route(
             "**/artifacts/**",
             lambda route: route.fulfill(
@@ -259,10 +263,6 @@ def run(browser: Any, files: list[Path], pages: Path | None = None) -> dict[str,
                 content_type=TYPES[Path(route.request.url).suffix],
             ),
         )
-        html = page_html(pages)
-        tab.route(PAGE_URL, lambda route: route.fulfill(body=html, content_type="text/html; charset=utf-8"))
-        tab.route("**/static/*/**", lambda route: _asset(route, served))
-        tab.route("**/api/v1/ledgers/**", lambda route: _feed(route, doc))
         tab.goto(PAGE_URL)
         tab.wait_for_function(FIRST_STATE)
         return {path.name: _view(tab, path) for path in files}

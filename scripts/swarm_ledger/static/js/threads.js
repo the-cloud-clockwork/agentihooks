@@ -1,6 +1,7 @@
 import { COMMENTS_KEY, NOUN } from "./config.js";
 import { grow, h, newId, store, stored, when } from "./dom.js";
-import { loadThread, queue, remoteComments } from "./sync.js";
+import { queue } from "./sync.js";
+import { loadThread, remoteComments } from "./seed.js";
 import { attachable, attaching, attachmentsView, withAttachments } from "./media.js";
 import { render } from "./render.js";
 import { jumpTo } from "./outline.js";

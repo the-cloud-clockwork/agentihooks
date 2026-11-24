@@ -1,10 +1,12 @@
 import { RETRY_MS } from "./config.js";
 import { openEvents, readSwarm } from "./api.js";
 import { applyPatch } from "./patch.js";
-import { disconnected, receiveChange, receiveOpen, receiveSnapshot, resume } from "./sync.js";
+import { disconnected, resume } from "./sync.js";
+import { receiveChange, receiveOpen, receiveSnapshot } from "./seed.js";
 import { receiveSwarm, swarmLost } from "./swarm.js";
 
 let eventCursor = null;
+let snapshot = null;
 const latest = { swarm: null };
 
 function onStreamEvent(name, data) {
@@ -62,7 +64,13 @@ async function takeFrame(block) {
   }
   if (!data.length) return;
   try {
-    onStreamEvent(name, JSON.parse(data.join("\n")));
+    const raw = data.join("\n");
+    if (name === "snapshot" && raw === snapshot) resume();
+    else {
+      onStreamEvent(name, JSON.parse(raw));
+      if (name === "snapshot") snapshot = raw;
+      else if (name === "ledger" || name === "swarm") snapshot = null;
+    }
   } catch (error) {
     eventCursor = null;
     throw error;

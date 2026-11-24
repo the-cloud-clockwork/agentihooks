@@ -488,11 +488,8 @@ def sample_streams() -> None:
     """Publish swarm status for every ledger a stream is open on."""
     HUB.evict()
     for slug in HUB.watched():
-        ledger = HUB.resource(slug, "ledger")
-        if ledger is None:
-            continue
         try:
-            HUB.publish(slug, "swarm", stream_swarm(slug, ledger))
+            HUB.publish(slug, "swarm", stream_swarm(slug, HUB.resource(slug, "ledger")))
         except Exception as exc:  # the seed watcher that calls this must outlive any one ledger's readers
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 

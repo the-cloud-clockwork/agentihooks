@@ -1,7 +1,8 @@
 import { $, closedText, excerpt, h, headCount, newId } from "./dom.js";
 import { forget, kept, place, rebuildAll, renderCycle } from "./render_cycle.js";
 import { hiddenDone, itemState, pendingOf, sourceOf, taskBlockers, taskRank, taskRanks, workOrder } from "./state.js";
-import { checks, closedLeft, closedLeftIn, doc, openStates, ops, queue, renderSync, toggle } from "./sync.js";
+import { checks, closedLeft, closedLeftIn, doc, ops, queue, renderSync, toggle } from "./sync.js";
+import { openStates } from "./seed.js";
 import { renderArtifacts } from "./artifacts.js";
 import { commentsView, taskLink, threadView } from "./threads.js";
 import { renderAlerts, renderNotifications, renderPriorities } from "./notices.js";

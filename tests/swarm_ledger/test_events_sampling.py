@@ -103,10 +103,14 @@ def test_idle_sampling_reads_no_ledger_document_and_sends_nothing(folders, monke
     assert server.HUB.channels["s"].seq == 0
 
 
-def test_sampling_skips_a_watched_ledger_without_a_loaded_copy(folders, monkeypatch):
-    monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: pytest.fail("sampled"))
-    server.HUB.open("s", lambda: {"swarm": None})
+def test_sampling_publishes_the_swarm_status_of_a_watched_ledger_without_a_loaded_copy(
+    folders: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: {"config": {"state": "paused"}})
+    server.HUB.open("s", lambda: {"swarm": {"config": {"state": "running"}}})
     server.sample_streams()
+    assert server.HUB.resource("s", "swarm") == {"config": {"state": "paused"}}
+    assert [entry[2] for entry in server.HUB.channels["s"].log] == ["swarm"]
 
 
 def test_the_served_page_version_is_computed_once_per_process(monkeypatch):

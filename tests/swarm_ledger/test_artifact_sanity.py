@@ -332,6 +332,7 @@ def test_the_harness_routes_the_page_its_assets_and_its_stream_then_closes_the_t
         }"""
     ]
     assert tab.closed
+    assert list(tab.routes)[-1] == "**/artifacts/**"
     assert answered(tab.routes[sanity.PAGE_URL]) == {
         "body": sanity.page_html(),
         "content_type": "text/html; charset=utf-8",

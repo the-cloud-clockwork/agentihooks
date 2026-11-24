@@ -22,6 +22,7 @@ ORDER = (
     "frozen_view",
     "state",
     "sync",
+    "seed",
     "phase_review",
     "markdown",
     "media",
