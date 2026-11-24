@@ -404,7 +404,7 @@ def test_a_held_poll_never_holds_a_wait_end_delivery(bus: Bus) -> None:
     )
     hosted = runner.HubRunner(bus, reactors, "a", clock=Clock(), lease_ttl_ms=100)
     passes: list[dict[str, list[str]]] = []
-    serving = threading.Thread(target=lambda: passes.append(hosted.run_once(timeout_ms=50)))
+    serving = threading.Thread(target=lambda: passes.append(hosted.run_once(timeout_ms=50)), daemon=True)
     serving.start()
     try:
         assert polling.wait(10)
@@ -412,7 +412,8 @@ def test_a_held_poll_never_holds_a_wait_end_delivery(bus: Bus) -> None:
         assert delivered.wait(10)
     finally:
         held.set()
-        serving.join()
+        serving.join(10)
+    assert not serving.is_alive()
     assert passes == [{"pulls": [], "wait-ends-checks": ["handled"]}]
 
 
