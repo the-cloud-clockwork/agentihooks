@@ -5696,6 +5696,19 @@
       ]
     },
     {
+      "id": "swarm-enhancement-frozen-target",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-frozen-hold",
+      "behaviour": "The claim gate holds open plan lane enhancements while their target is frozen by its ancestry, a selector or its explicit flag, releases them after thaw, and leaves unfrozen or missing targets claimable. Repeated claims reuse the task index while task list identity and length stay fixed.",
+      "seam": "scripts.swarm.freeze.claim_gate",
+      "rules": ["enhancement-frozen-hold"],
+      "tests": [
+        "tests/swarm/test_freeze.py::test_claim_gate_holds_a_plan_enhancing_frozen_work",
+        "tests/swarm/test_freeze.py::test_claim_gate_releases_an_enhancement_when_its_target_is_unfrozen",
+        "tests/swarm/test_freeze.py::test_claim_gate_keeps_an_unfrozen_enhancement_claimable"
+      ]
+    },
+    {
       "id": "ledger-stats-admission-batch",
       "origin": "inventory",
       "behaviour": "Computing which pending tasks a focus holds back from the time-left estimate derives the admitted-focus queue once per ledger view and reuses it across every task instead of revalidating it once per task, and the dependency-chain propagation that follows it stops as soon as a pass adds nothing new.",
