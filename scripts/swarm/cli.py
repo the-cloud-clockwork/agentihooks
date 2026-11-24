@@ -2688,11 +2688,13 @@ def cmd_masters_channel(store, args):
     print(json.dumps([asdict(post) for post in posts]))
 
 
-def _read(path, what):
+def _read(path: str, what: str) -> str:
     try:
         return Path(path).expanduser().read_text(encoding="utf-8")
     except OSError as exc:
         raise SwarmError(f"cannot read the {what} {path}: {exc.strerror}") from exc
+    except UnicodeDecodeError as exc:
+        raise SwarmError(f"cannot read the {what} {path}: it is not UTF-8 text") from exc
 
 
 def _seat(agent):
