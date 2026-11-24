@@ -128,16 +128,6 @@ def without_path_filters(workflow: dict[Any, Any]) -> dict[Any, Any]:
     return {key: unfiltered(value) if key in ("on", True) else value for key, value in workflow.items()}
 
 
-def dedicated_chart_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
-    return (
-        trusted.get("name") == "Helm chart release"
-        and events(trusted) == [{"workflow_run": {"workflows": ["Swarm worker image"], "types": ["completed"]}}]
-        and name in {"package", "kind", "publish"}
-        and job == (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name)
-        and block == {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
-    )
-
-
 def only_concurrency_changed(name: str, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
     baseline = mapping(mapping(trusted.get("jobs")).get(name))
     return bool(baseline) and {key: value for key, value in job.items() if key != "concurrency"} == {
@@ -247,8 +237,7 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         base_job = (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name, cast(dict[Any, Any], {}))
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
         if (
-            dedicated_chart_group(name, block, job, trusted)
-            or flake_history_group(name, block, job, trusted)
+            flake_history_group(name, block, job, trusted)
             or hive_release_group(name, block, job, trusted)
             or focused_proof_group(name, block, job, proofs)
         ):

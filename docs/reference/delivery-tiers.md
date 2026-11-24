@@ -1197,7 +1197,7 @@ After the pin, `scripts.ci_gate_queue.normalize` checks the early gate in each w
 |---|---|
 | Exactly two jobs carry the expression form, `gate-required` is named `SUMMARY_NAME`, and `queue-fail-fast` equals `scripts.ci_gate_queue.watcher` rendered with `gate-required`'s `runs-on`, with or without `deferred=True` | `The early queue gate must use the exact reviewed context pair and verifier` |
 | The `reuse` job's `if` is `github.event_name != 'merge_group' && github.event_name != 'pull_request'` | `The early queue gate requires the existing whole queue reuse exclusion` |
-| `gate-required`'s `needs`, ignoring `lab-verdict`, equal the reviewed inventory, or the reviewed inventory plus `ANNOUNCED` | `The early queue gate must preserve the reviewed graded inventory` |
+| `gate-required`'s `needs`, ignoring `lab-verdict`, equal the reviewed inventory, the reviewed inventory plus `ANNOUNCED`, or that plus `SPLIT` | `The early queue gate must preserve the reviewed graded inventory` |
 
 The reviewed inventory joins `REQUIRED`, `SKIPPED` and four unit and watcher jobs:
 
@@ -1207,9 +1207,12 @@ The reviewed inventory joins `REQUIRED`, `SKIPPED` and four unit and watcher job
 | `SKIPPED` | `unit-selected`, `coverage-ratchet`, `lint`, `docs`, `sonar`, `mutation-plan`, `mutation-stats`, `mutation`, `swarm-image`, `worker-image`, `brain-smoke`, `writer-lock`, `install-smoke`, `kind-due`, `helm-kind`, `semgrep`, `ledger-load`, `stage-budget`, `reuse`, `dep-manifest` |
 | Unit and watcher jobs | `unit`, `unit-lost`, `unit-rerun`, `queue-fail-fast` |
 | `ANNOUNCED` | `install-smoke`, `dep-manifest`, `type-gate` |
+| `SPLIT` | `collect`, `lint-actions` |
 | `LAB_VERDICT` | `lab-verdict`, ignored in the comparison |
 
 The comparison is between sets, so need order does not matter, and a missing need is refused like an added one. `install-smoke` and `dep-manifest` already belong to the inventory, so `type-gate` is the one need that `ANNOUNCED` adds. `dev`'s `gate-required` already lists `type-gate` and grades green only because `ANNOUNCED` admits it.
+
+`SPLIT` names the two jobs split out of `test-count` and `lint`: `collect`, which holds the early collection and the test plan, and `lint-actions`, which holds the lint steps only Actions can run. The needs are accepted with both or with neither, never with one, and the protected grader refuses a head that names one of them whatever its steps. A head whose needs name both must also render its aggregation with `scripts.ci_reuse.split_required`, which requires both jobs to succeed on pull requests, `collect` to succeed and `lint-actions` to be skipped on merge groups, and lets both be skipped on a `dev` push. `split_required` raises unless the aggregation holds the pull request, merge group and `dev` push job lists once each, so a rendering without those lists has no split form and is refused for such a head.
 
 When every check passes, `normalize` renames the pair to plain `Gate — Required` and `queue-fail-fast` in its copy, so the rest of the grade sees one job named `Gate — Required`. A refusal from `normalize` ends the grade: the result is the pin problems followed by that refusal.
 

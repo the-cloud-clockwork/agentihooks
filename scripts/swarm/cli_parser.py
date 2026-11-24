@@ -3,7 +3,7 @@ import argparse
 
 def build_parser() -> argparse.ArgumentParser:
     from scripts.swarm import cli as cli_module
-    from scripts.swarm import launch_starts, master_drill, night_watch_drill, tasks_read, tick_report
+    from scripts.swarm import enhance_sweep, launch_starts, master_drill, night_watch_drill, tasks_read, tick_report
     from scripts.swarm.cli import (
         DEFAULT_MATURITY,
         MATURITIES,
@@ -57,6 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     sub.add_parser("tasks").set_defaults(handler=tasks_read.command)
+    enhance = sub.add_parser("enhance").add_subparsers(dest="action", required=True).add_parser("sweep")
+    enhance.add_argument("--dry-run", action="store_true")
+    enhance.set_defaults(handler=enhance_sweep.command)
     sub.add_parser("launches").set_defaults(handler=launch_starts.command)
     sub.add_parser("probe").set_defaults(handler=probe_command)
     sub.add_parser("tick").set_defaults(handler=cmd_swarm_tick)
