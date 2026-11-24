@@ -786,6 +786,7 @@
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_grade_of_the_same_head_in_another_lane_is_no_other_pull_request_of_the_branch",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_whose_lane_names_a_grade_that_finished_leaves_the_grade_of_its_head_in_another_lane",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_whose_live_grade_lost_its_document_is_still_forgotten",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_whose_lane_names_a_grade_that_finished_passes_over_a_grade_that_lost_its_document",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_the_listing_of_a_repository_url_asks_its_owner_and_name",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_listing_github_refuses_raises_instead_of_naming_fewer_heads",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_listing_longer_than_its_page_cap_raises_instead_of_naming_fewer_heads",

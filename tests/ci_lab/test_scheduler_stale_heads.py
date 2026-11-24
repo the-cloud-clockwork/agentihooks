@@ -546,6 +546,24 @@ def test_a_closed_pull_request_whose_live_grade_lost_its_document_is_still_forgo
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_close_whose_lane_names_a_grade_that_finished_passes_over_a_grade_that_lost_its_document(
+    lab: Callable[..., Run],
+) -> None:
+    second = unit(2)
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    _deliver(run, _pull("opened", HEAD_A))
+    run.tick(1000)
+    live = run.grade(HEAD_A).run
+    run.lab.expander.plans[HEAD_A] = plan({"lint": (second,)})
+    run.cache(second)
+    _deliver(run, _pull("opened", HEAD_A, base=OTHER_BASE))
+    run.tick(1010)
+    run.lab.client.delete(scheduler.GRADES + live)
+    _deliver(run, _pull("closed", HEAD_A))
+    assert run.tick(1100) == [f"closed feature of {REPO}: nothing held", f"forgot {live}"]
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
 def test_a_closed_pull_request_leaves_a_grade_pushed_to_a_grade_ref(lab: Callable[..., Run]) -> None:
     first = unit(1)
     run = lab({HEAD_A: plan({"lint": (first,)})})
