@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from scripts import dep_manifest
-from scripts.ci_lab import digests, executors, expand_tests, scheduler
+from scripts.ci_lab import digests, expand_tests, scheduler
 from scripts.ci_lab.digests import Toolchain
 from scripts.ci_lab.objects import LocalObjects, manifest_folder
 from scripts.ci_lab.units import Unit
@@ -280,9 +280,28 @@ def test_unlisted_keys_every_test_module_the_mutant_runner_runs(repository: Path
         (repository / path).write_text(text)
     _git(repository, "add", "-A")
     _git(repository, "commit", "-qm", "extra")
-    runs = executors._test_files(repository)  # pyright: ignore[reportPrivateUsage]
-    assert set(runs) <= set(expand_tests.unlisted_test_hashes({"tests": {}}, _tree(repository)))
+    tree = _tree(repository)
+    runs = expand_tests.unlisted_modules({"tests": {}}, tree)
+    assert set(runs) <= set(expand_tests.unlisted_test_hashes({"tests": {}}, tree))
     assert "tests/inner/test_deep.py" in runs
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_unlisted_modules_lists_the_test_modules_that_hold_no_manifest_test() -> None:
+    tree = {path: text.encode() for path, text in FILES.items()}
+    assert expand_tests.unlisted_modules(MANIFEST, tree) == []
+    added = ["tests/test_new.py", "tests/inner/test_deep.py", "tests/new_helper.py", "scripts/test_tool.py"]
+    tree.update(dict.fromkeys(added, b""))
+    found = expand_tests.unlisted_modules(MANIFEST, tree)
+    assert found == ["tests/inner/test_deep.py", "tests/test_new.py"]
+    assert set(found) <= set(expand_tests.unlisted_test_hashes(MANIFEST, tree))
+    assert expand_tests.unlisted_modules({"tests": {}}, tree) == [
+        "tests/inner/test_deep.py",
+        "tests/test_alpha.py",
+        "tests/test_beta.py",
+        "tests/test_group.py",
+        "tests/test_new.py",
+    ]
 
 
 def _manifest(*tests: str) -> dict[str, Any]:

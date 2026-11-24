@@ -207,6 +207,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_release.sh",
         "scripts/ci_semgrep_floors.py",
         "scripts/ci_stats_seed.py",
+        "scripts/ci_swarm_imports.py",
         "scripts/ci_unit_copy.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
@@ -596,7 +597,7 @@ def test_a_value_without_the_workflow_token_holds_none(value):
 
 def test_sonar_takes_this_runs_coverage_through_the_runtime_token_as_the_shards_upload_it() -> None:
     sonar = _jobs()["sonar"]
-    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict"]
+    assert sonar["needs"] == ["select", "reuse", "admission", "lab-verdict", "test-count"]
     steps = sonar["steps"]
     arrivals = next(step for step in steps if step.get("name") == "Take each shard's coverage as it lands")
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")

@@ -51,13 +51,12 @@ def _phase_plan(phase: dict[str, Any], doc: dict[str, Any], limit: int) -> list[
 
 def evidence(task: dict, doc: dict) -> str:
     limit = int(os.environ.get("AGENTIHOOKS_PLAN_EVIDENCE_CHARS", "6000"))
-    phases = {phase["id"]: phase for phase in doc["phases"]}
-    phase = phases[task["phase"]]
-    lines = [
-        "Plan evidence",
-        _bounded("Project intent", doc["overview"], limit),
-        _bounded("Mission intent", f"{phase['title']}\n{phase.get('description', '')}", limit),
-    ]
+    phases: dict[str, Any] = {phase["id"]: phase for phase in doc["phases"]}
+    lines = ["Plan evidence", _bounded("Project intent", doc["overview"], limit)]
+    phase = phases.get(task["phase"])
+    if phase is None:
+        return "\n\n".join(lines) + "\n"
+    lines.append(_bounded("Mission intent", f"{phase['title']}\n{phase.get('description', '')}", limit))
     for dependency in _dependencies(phase, phases):
         title = dependency["title"]
         tasks = [

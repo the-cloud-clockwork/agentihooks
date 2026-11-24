@@ -133,3 +133,13 @@ def test_an_admission_reads_a_plan_task_steering_through_its_readiness_source(ga
     gates.admitter.admit(SLUG, ask(task="plan-p1", lane="plan"))
 
     assert gates.ledger.exports == 1
+
+
+@pytest.mark.feature("plan-evidence-phase-less-plan-task")
+def test_an_admission_claims_a_plan_task_with_no_phase(gates: SimpleNamespace) -> None:
+    gates.found["tasks"].append(task("plan-x", phase="", kind="plan", lane="plan"))
+
+    admitted = gates.admitter.admit(SLUG, ask(task="plan-x", lane="plan"))
+
+    assert admitted is not None and admitted["task"]["id"] == "plan-x"
+    assert gates.store.claimant(SLUG, "plan-x") == admitted["name"]
