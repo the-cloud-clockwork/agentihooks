@@ -542,6 +542,26 @@
       ]
     },
     {
+      "id": "gate-required-split-jobs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
+      "behaviour": "The protected grader accepts the Gate Required aggregation that requires the collect and lint-actions jobs only in its exact reviewed rendering and only when the gate needs name both jobs; a head that names one of them is refused whatever its steps, and an aggregation that does not hold the pull request, merge group and dev push job lists once each has no split rendering. That rendering requires both to succeed on pull requests, collect to succeed and lint-actions to be skipped on merge groups, and lets both be skipped on a dev push, so a skipped or cancelled run of either on a pull request is red.",
+      "seam": "scripts.ci_reuse.split_required over scripts.ci_reuse.gate_steps, scripts.gate_protected.grade and scripts.ci_gate_queue.normalize",
+      "tests": [
+        "tests/test_gate_protected_split.py::test_split_admission_requires_the_exact_reviewed_aggregation_and_both_jobs",
+        "tests/test_gate_protected_split.py::test_split_aggregation_requires_both_jobs_to_succeed_on_pull_requests",
+        "tests/test_gate_protected_split.py::test_split_aggregation_requires_collection_on_the_queue_and_skips_both_jobs_on_promotion",
+        "tests/test_gate_protected_split.py::test_split_admission_refuses_both_jobs_over_an_aggregation_without_the_three_job_lists",
+        "tests/test_gate_protected_split.py::test_the_repository_gate_refuses_one_split_job_through_the_early_queue_gate",
+        "tests/test_gate_protected_split.py::test_split_aggregation_refuses_a_rendering_that_does_not_hold_each_job_list_once",
+        "tests/test_gate_protected_split.py::test_split_aggregation_adds_exactly_the_split_jobs_of_the_queue_gate",
+        "tests/test_ci_gate_queue.py::test_the_early_gate_accepts_the_split_jobs_only_together",
+        "tests/test_ci_gate_queue.py::test_the_early_gate_refuses_a_gate_that_names_no_needs",
+        "tests/test_gate_protected_split.py::test_an_unchanged_gate_is_graded_against_the_renderings_of_its_own_needs",
+        "tests/test_gate_protected_split.py::test_the_split_renderings_are_the_unsplit_ones_of_the_same_gate_that_hold_the_job_lists"
+      ]
+    },
+    {
       "id": "lab-pull-request-reusable-job-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2722",
@@ -11904,6 +11924,46 @@
         "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_number_check_refuses_with_its_whole_message",
         "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_confirmed_pull_check_takes_fields_without_a_number_or_head",
         "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_on_a_confirmed_pull_request_passes_the_ledger_task_update_check"
+      ]
+    },
+    {
+      "id": "ledger-task-update-narrow-write",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-claim-write-no-state",
+      "behaviour": "A hub claim, one guarded task update by the swarm that sets only the claim fields of an open, claimed or pull request task, is guarded, applied and written on that task's own stored rows under the ledger lock and answers with the touched row and the new revision, storing the same rows, events, outbox rows, change record and summary the whole ledger write stores; the relay, doctor phrase and alert delivery still run on it, and any other write, or a claim on a blocked or done task, takes the whole ledger write.",
+      "seam": "mutations.apply claim branch and the repository apply_task_update narrow write",
+      "tests": [
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_through_the_api_bumps_the_claim_generation_and_records_the_claim",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_whose_guard_misses_leaves_the_task_as_it_was",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_on_a_task_with_an_open_dependency_keeps_it_open",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_relays_doctors_and_delivers_alerts_at_its_revision",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_refused_hub_claim_raises_its_alert_for_delivery",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_reply_carries_the_projected_row_and_the_new_revision",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_on_a_large_ledger_never_reads_or_returns_the_whole_ledger",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_the_narrow_write_returns_only_the_touched_row_and_the_new_revision",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_stores_what_the_whole_write_stores",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_guarded_narrow_claim_and_its_replay_then_a_whole_write_match_the_whole_path",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_the_narrow_write_cannot_prove_falls_back_with_nothing_written",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_only_a_single_guarded_hub_claim_takes_the_narrow_path",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_publishing_refreshes_only_a_published_ledger_after_a_narrow_write",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_reads_its_dependencies_and_keeps_stored_size_warnings",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_its_gate_refuses_is_rejected_and_trims_events_as_the_whole_write_does",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_on_a_ledger_without_a_task_revision_stores_the_previous_revision",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_on_a_settled_task_or_one_that_changes_a_priority_line_falls_back",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_ledger_missing_a_part_the_whole_write_creates_falls_back",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_on_a_missing_ledger_names_it",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_adopts_only_its_own_legacy_ledger",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_locks_and_begins_its_own_ledger_and_times_its_write_steps",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_row_written_outside_the_read_keeps_its_stored_key_and_position",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_reads_the_rows_operator_events_and_open_alerts_name_since_the_oldest_held_revision",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_leaves_the_written_state_alone_when_nothing_it_names_is_missing",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_adds_a_named_phase_to_a_written_state_without_phases",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_the_narrow_fold_names_a_refused_claim_and_keeps_only_the_stored_size_warnings",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_stored_warnings_reads_only_the_stored_warning_list",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_refused_hub_claim_answers_with_the_stored_warnings_and_the_refusal",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_with_a_stale_guard_is_refused_by_its_write_gate",
+      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_hands_its_hooks_the_task_an_operator_wrote_since_a_held_revision",
+        "tests/swarm/test_ledger_client_task_guard.py::test_a_narrow_claim_reply_holding_only_the_claimed_row_returns_that_row"
       ]
     },
     {
