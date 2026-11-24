@@ -15,6 +15,11 @@ __all__ = ["authority_live", "live"]
 
 FIRST_ROW = """(() => {
   new MutationObserver((_, observer) => {
+    const box = (document.getElementById("tasks") || document.body).closest("details");
+    if (box && !box.open && !window.tasksOpened) {
+      window.tasksOpened = true;
+      box.open = true;
+    }
     if (document.querySelector('[id^="item-tasks-"]')) {
       window.firstTaskRow = performance.now();
       observer.disconnect();
