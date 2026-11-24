@@ -5,10 +5,12 @@ import logging
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -32,6 +34,7 @@ from scripts.ci_lab import (
     interaction,
     lease_api,
     manifests,
+    metrics,
     queue,
     relay,
     scheduler,
@@ -45,7 +48,7 @@ from scripts.ci_lab.digests import GradeInputs, StaticInputs, Toolchain, digest,
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
 from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused, FetchUnanswered
-from scripts.ci_lab.objects import LocalObjects, manifest_folder, unit_path, upload_path
+from scripts.ci_lab.objects import LocalObjects, flakes_path, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CRASH
 from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.static_gates import StaticGate
@@ -67,6 +70,7 @@ BASE = "c" * 40
 TREE = "d" * 40
 OTHER_TREE = "e" * 40
 LOCK = ".github/test-requirements.lock"
+APP_SETTINGS = {"GITHUB_APP_ID": "1", "GITHUB_APP_INSTALLATION_ID": "2", "GITHUB_APP_PRIVATE_KEY": "fixture"}
 
 Post = tuple[str, str, str, str | None, Output, bool]
 
@@ -147,6 +151,9 @@ class Expander:
     def reachable(self, repo: str, head: str) -> bool:
         return True
 
+    def groups(self, repo: str) -> frozenset[str]:
+        return frozenset(self.plans)
+
 
 @dataclass
 class Poster:
@@ -224,7 +231,8 @@ class Run:
         return self.engine.tick(at)
 
     def leases(self, ttl_ms: int = 1000) -> Leases:
-        return Leases(self.engine.queue, ttl_ms, lambda: self.lab.now, lambda _: None, 1, self.lab.kube)
+        manifests = partial(scheduler.stored_manifest, self.lab.objects)
+        return Leases(self.engine.queue, ttl_ms, lambda: self.lab.now, lambda _: None, 1, self.lab.kube, manifests)
 
     def lease(self, slots: int = 1, ttl_ms: int = 1000) -> list[Grant]:
         return self.leases(ttl_ms).lease("worker", slots, frozenset(), 0)
@@ -1058,9 +1066,10 @@ def test_the_load_counts_each_job_once_in_the_most_urgent_class_of_the_live_grad
     run.tick(1000)
     run.lab.expander.plans[HEAD_A] = plan({"lint": (shared, joined)})
     run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
-    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
     run.tick(1100)
     assert [grant.unit for grant in run.lease(slots=2)] == [shared, joined]
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(1100)
     run.lab.client.hset(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_A, solo)}", "slots", 2)
     run.lab.client.delete(f"{queue.PREFIX}job:{scheduler.job_id(HEAD_B, lost)}")
     run.lab.client.sadd(scheduler.LIVE, "grade-v1-gone")
@@ -1159,8 +1168,21 @@ def _read(url: str, data: bytes | None = None) -> bytes:
         return reply.read()
 
 
+def _built(api: str) -> bytes:
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            return _read(f"{api}/capacity")
+        except urllib.error.HTTPError as error:
+            if error.code != 503 or time.monotonic() > deadline:
+                raise
+        time.sleep(0.05)
+
+
 @pytest.mark.feature("lab-scheduler-service")
-def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load(lab: Callable[..., Run]) -> None:
+def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
     item = unit(1)
     run = lab({HEAD_A: plan({"lint": (item,)})})
     run.push(HEAD_A)
@@ -1168,20 +1190,29 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
     spending = budget.Budget(run.lab.client, lambda: 0, budget.Policy(100.0, {"backfill": 0.5}))
     spending.charge(1, 3600.0)
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: 1000)
+    leased_first = threading.Event()
+    load = run.engine.load
+
+    def after_lease(now_ms: int) -> Load:
+        assert leased_first.wait(10)
+        return load(now_ms)
+
+    monkeypatch.setattr(run.engine, "load", after_lease)
     servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: 1000, (0, 0, 0))
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     api, control, exposition = (f"http://127.0.0.1:{server.server_address[1]}" for server in servers)
     try:
-        capacity = json.loads(_read(f"{api}/capacity"))
-        assert capacity["classes"]["promotion"]["pending"] == 1
+        body = json.dumps({"worker": "w", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
+        leased = json.loads(_read(f"{api}/lease", body))["leases"]
+        assert [grant["job"] for grant in leased] == [scheduler.job_id(HEAD_A, item)]
+        leased_first.set()
+        capacity = json.loads(_built(api))
+        assert capacity["classes"]["promotion"]["running"] == 1
         assert capacity["budget_fraction"] == pytest.approx(0.4)
         assert capacity["shed"] == ["backfill"]
         grades = json.loads(_read(f"{api}/grades/{HEAD_A}"))
         assert [grade["run"] for grade in grades["grades"]] == [run.grade(HEAD_A).run]
-        body = json.dumps({"worker": "w", "free_slots": 1, "capabilities": [], "wait_ms": 0}).encode()
-        leased = json.loads(_read(f"{api}/lease", body))["leases"]
-        assert [grant["job"] for grant in leased] == [scheduler.job_id(HEAD_A, item)]
         job, token = leased[0]["job"], leased[0]["token"]
         signed = json.loads(_read(f"{api}/upload-url?job={job}&token={token}&name=report"))
         assert signed == {"url": run.lab.objects.upload_url(upload_path(job, "report"), 0)}
@@ -1193,6 +1224,7 @@ def test_listen_serves_leases_capacity_grades_and_metrics_from_one_budgeted_load
         assert 'ci_lab_class_shed{class="backfill"} 1.0' in text
         assert "ci_lab_slots_busy 1.0" in text
     finally:
+        leased_first.set()
         for server in servers:
             server.shutdown()
             server.server_close()
@@ -1228,13 +1260,14 @@ def test_listen_serves_the_control_routes_only_on_the_control_port(lab: Callable
             server.server_close()
 
 
-def scrape(run: Run, now: int) -> str:
+def scrape(run: Run, now: int, mirror: Path | None = None) -> str:
     spending = budget.Budget(run.lab.client, lambda: now, budget.Policy(100.0, {}))
     routes = lease_api.ControlRoutes(run.lab.client, "tok", lambda: now)
-    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0, 0))
+    servers = scheduler.listen(run.engine, run.leases(), routes, spending, lambda: now, (0, 0, 0), mirror)
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
+        _built(f"http://127.0.0.1:{servers[0].server_address[1]}")
         return _read(f"http://127.0.0.1:{servers[2].server_address[1]}/metrics").decode()
     finally:
         for server in servers:
@@ -1316,6 +1349,22 @@ def test_backfill_takes_only_the_slots_left_free_after_the_units_waiting_in_othe
     assert run.lease(slots=3) == []
     assert run.tick(1200) == [f"enqueued 3 units of {run.grade(HEAD_A).run}"]
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, item) for item in (second, third, fourth)]
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_pull_request_grade_admitted_after_a_merge_group_grade_is_leased_first(lab: Callable[..., Run]) -> None:
+    grouped, checked = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (grouped,)}), HEAD_B: plan({"lint": (checked,)})})
+    run.push(HEAD_A, lane="gh-readonly-queue/dev/pr-1", event="merge_group", action="checks_requested")
+    run.tick(1000)
+    run.push(HEAD_B, lane="pr-2", event="pull_request", action="synchronize")
+    run.tick(2000)
+
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, checked), scheduler.job_id(HEAD_A, grouped)]
+    assert [grant.job for grant in run.lease(slots=1)] == [scheduler.job_id(HEAD_B, checked)]
+    queued = run.engine.queue.job(scheduler.job_id(HEAD_A, grouped))
+    assert queued is not None
+    assert queued.rank == int(Priority.QUEUE)
 
 
 @pytest.mark.feature("lab-scheduler-budget")
@@ -2259,7 +2308,7 @@ def test_a_promotion_head_keys_a_mutant_unit_by_the_tests_that_ran_its_function(
         suite.repo, {"tests/test_alpha.py": "def test_first():\n    assert True\n\n\ndef test_other():\n    pass\n"}
     )
     assert [executors.function_of(unit.members[0]) for unit in before] == [FIRST]
-    assert expander.expand(suite.request(Priority.PROMOTION, other)).gates["mutation"] == before
+    assert expander.expand(suite.request(Priority.PROMOTION, other)).gates["mutation"] != before
     after = expander.expand(suite.request(Priority.PROMOTION, own)).gates["mutation"]
     assert [unit.members for unit in after] == [unit.members for unit in before]
     assert after[0].key != before[0].key
@@ -2538,6 +2587,7 @@ def test_the_hotfix_port_reads_the_heads_the_control_routes_marked() -> None:
 @dataclass
 class FakeChecks:
     repo: str
+    registry: metrics.Registry | None = None
 
 
 @pytest.mark.feature("lab-worker-deletion-cost")
@@ -2587,8 +2637,8 @@ def test_build_wires_the_service_ports_from_the_environment(tmp_path: Path, monk
     bare = scheduler.build(imageless, client, objects, consumer, spending).ports.expander
     assert isinstance(bare, scheduler.MirrorExpander) and bare.toolchain.image == ""
     first = built.ports.checks(SLUG)
-    assert first == FakeChecks(SLUG) and built.ports.checks(SLUG) is first
-    assert built.ports.checks("other/repo") == FakeChecks("other/repo")
+    assert first == FakeChecks(SLUG, built.registry) and built.ports.checks(SLUG) is first
+    assert built.ports.checks("other/repo") == FakeChecks("other/repo", built.registry)
     hotfixes = built.ports.hotfixes
     assert isinstance(hotfixes, control.Priorities)
     assert (hotfixes.client, hotfixes.clock) == (client, scheduler._now_ms)
@@ -2665,8 +2715,9 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         spending: Any,
         clock: Any,
         ports: tuple[int, int, int],
+        mirror: Path,
     ) -> list[Server]:
-        calls["listen"] = (found, leases, routes, spending, clock, ports)
+        calls["listen"] = (found, leases, routes, spending, clock, ports, mirror)
         return [Server(), Server(), Server()]
 
     class Thread:
@@ -2712,7 +2763,8 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
         scheduler.MINIO_SECRET_KEY: "secret",
         scheduler.MINIO_BUCKET: "bucket",
         scheduler.contract.CONTROL_TOKEN: "tok",
-    }
+        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
+    } | APP_SETTINGS
     monkeypatch.setattr(redis.Redis, "from_url", from_url)
     monkeypatch.setattr(boto3, "client", s3)
     provisioning = config.BusConfig(backend="nats", url="nats://lab")
@@ -2747,9 +2799,12 @@ def test_main_reads_the_runtime_config_serves_both_ports_and_runs_the_passes(
     assert calls["consumers"] == [("ci-lab-scheduler", "ci.lab.head.>"), ("ci-lab-relay", "ci.lab.head.notice")]
     relayed_from, relayed, relay_consumer = builds.builds[0]
     assert (relayed_from, relayed.queue.client, relay_consumer) == (environ, client, "ci-lab-relay consumer")
-    found, leases, routes, spending, clock, ports = calls["listen"]
+    found, leases, routes, spending, clock, ports, mirror = calls["listen"]
+    assert mirror == tmp_path / "node"
     assert found.queue.client is client and leases.queue is found.queue
     assert leases.pods is found.ports.pods
+    assert isinstance(leases.manifests, partial)
+    assert (leases.manifests.func, leases.manifests.args) == (scheduler.stored_manifest, (found.objects,))
     assert routes == lease_api.ControlRoutes(client, "tok", scheduler._now_ms)
     assert (leases.ttl_ms, leases.poll_ms) == (scheduler.LEASE_TTL_MS, scheduler.LEASE_POLL_MS)
     assert leases.clock() == 1_000_250 and clock() == 1_000_250
@@ -2858,6 +2913,8 @@ def test_main_rebuilds_the_verdict_index_before_serving_only_when_reindex_on_sta
         scheduler.MINIO_ACCESS_KEY: "access",
         scheduler.MINIO_SECRET_KEY: "secret",
         scheduler.MINIO_BUCKET: "bucket",
+        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
+        **APP_SETTINGS,
     } | setting
     stdout = Stdout()
     monkeypatch.setattr(redis.Redis, "from_url", from_url)
@@ -2898,3 +2955,45 @@ def test_the_cli_runs_the_scheduler_service_and_keeps_the_self_test(
     assert cli.main(["scheduler", "--self-test"], {}) == 0
     assert json.loads(capsys.readouterr().out)["service"] == "scheduler"
     assert len(seen) == 1
+
+
+def flake_rows(item: Unit, *tests: str) -> list[dict[str, Any]]:
+    return [{"test": test, "run": item.key, "run_attempt": 2, "attempts": 2, "outcome": "flaky"} for test in tests]
+
+
+def flakes_at(run: Run, item: Unit) -> bytes:
+    assert run.lab.objects.keys("lab/flakes/") == [flakes_path(item.kind, item.key)]
+    return run.lab.objects.read(flakes_path(item.kind, item.key))
+
+
+@pytest.mark.feature("lab-flakes-object-once")
+def test_only_a_passed_flaky_unit_with_flake_rows_writes_its_flakes_object(lab: Callable[..., Run]) -> None:
+    flaky, steady, failed, rowless, empty = (unit(number) for number in range(1, 6))
+    run = lab({HEAD_A: plan({"lint": (flaky, steady, failed, rowless, empty)})})
+    run.push(HEAD_A)
+    run.tick(1000)
+    grants = {grant.unit: grant for grant in run.lease(slots=5)}
+    rows = flake_rows(flaky, "tests/test_a.py::test_one", "tests/test_a.py::test_two")
+    run.finish(grants[flaky], "passed", {"flaky": True, "seconds": 3.5, "flakes": rows})
+    run.finish(grants[steady], "passed", {"flaky": False, "flakes": flake_rows(steady, "t")})
+    run.finish(grants[failed], "failed", {"flaky": True, "flakes": flake_rows(failed, "t")})
+    run.finish(grants[rowless], "passed", {"flaky": True})
+    run.finish(grants[empty], "passed", {"flaky": True, "flakes": []})
+    run.tick(1100)
+    assert flakes_at(run, flaky) == "".join(json.dumps(row) + "\n" for row in rows).encode()
+    assert run.store.get(flaky.kind, flaky.key) == Verdict(flaky.kind, flaky.key, True, True, 3.5)
+
+
+@pytest.mark.feature("lab-flakes-object-once")
+def test_a_second_remember_of_a_flaky_unit_keeps_the_first_flakes_object_and_verdict(lab: Callable[..., Run]) -> None:
+    flaky = unit(1)
+    first, second = (lab({head: plan({"lint": (flaky,)})}) for head in (HEAD_A, HEAD_B))
+    for run, head, seconds, test in ((first, HEAD_A, 3.5, "tests/test_a.py::test_one"), (second, HEAD_B, 9.0, "t")):
+        run.push(head)
+        run.tick(1000)
+        (grant,) = run.lease()
+        run.finish(grant, "passed", {"flaky": True, "seconds": seconds, "flakes": flake_rows(flaky, test)})
+        run.tick(1100)
+        assert run.grade(head).conclusion == "success"
+    assert json.loads(flakes_at(second, flaky)) == flake_rows(flaky, "tests/test_a.py::test_one")[0]
+    assert second.store.get(flaky.kind, flaky.key) == Verdict(flaky.kind, flaky.key, True, True, 3.5)

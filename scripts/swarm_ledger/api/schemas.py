@@ -51,7 +51,18 @@ def validate(schema: dict, body: object) -> None:
         raise APIError(400, "schema_invalid", "Request does not match the resource schema")
 
 
-LEDGER_PARTS = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
+LEDGER_PARTS = (
+    "tasks",
+    "_meta",
+    "phases",
+    "slices",
+    "plans",
+    "freezes",
+    "priorities",
+    "followups",
+    "alerts",
+    "overview",
+)
 
 PAGINATION = {
     "type": "object",
@@ -63,6 +74,11 @@ PAGINATION = {
         "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "q": {"type": "string", "maxLength": 200},
         "targets": {"type": "string", "minLength": 1, "maxLength": 500},
+        "ids": {"type": "string", "maxLength": 8000},
+        "states": {"type": "string", "maxLength": 200},
+        "pinned": {"enum": ["1"]},
+        "branches": {"type": "string", "maxLength": 8000},
+        "fields": {"type": "string", "maxLength": 500},
     },
 }
 
@@ -87,9 +103,10 @@ FIELDS = {
     "priority_clear": "by target reason",
     "notification_clear": "target",
     "notice": "by text",
-    "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up workstation requires_harness needs workflow case covers_job",
+    "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up workstation requires_harness needs workflow case covers_job enhances",
     "task_update": "by item fields if_state if_match if_plan_lines_missing quote",
     "task_rank": "by item rank if_owned",
+    "task_enhancement": "by item enhancement expected",
     "task_group": "by item members",
     "task_ungroup": "by item if_match",
     "task_split": "by item halves",
@@ -109,6 +126,8 @@ FIELDS = {
     "phase_review": "by item state note override rounds escalated",
     "phase_append": "by phases",
     "relay": "by item text quote",
+    "order_set": "by item quote request filing",
+    "order_clear": "by item quote",
     "answer": "by item text",
     "verdict": "item verdict",
     "artifact_add": "by task title file request plan",
@@ -129,6 +148,7 @@ FIELDS = {
 TYPES = {
     "long": {"type": "boolean"},
     "notice": {"const": True},
+    "filing": {"const": True},
     "to": {"const": "operator"},
     "needs_operator": {"type": "boolean"},
     "artifact": {"type": "boolean"},
@@ -160,6 +180,7 @@ KIND_TYPES = {
     "artifact_add": {"plan": {"type": "boolean"}},
     "freeze_set": {"only": {"type": "boolean"}, "position": {"enum": ["top", "bottom"]}},
     "plan_add": {"artifact": {"type": "string", "maxLength": 100000}, "source": {"type": "object"}},
+    "task_enhancement": {"expected": {"enum": [None, "", "needed", "planned", "skipped"]}},
     "task_rank": {"if_owned": {"type": "boolean"}},
     "time_left": {"lab": {"type": "object"}},
 }
@@ -268,7 +289,7 @@ def target(op: dict) -> str:
         return "notifications"
     if kind.startswith("artifact_"):
         return "artifacts"
-    if kind in ("claim", "retext", "relay", "answer", "verdict") or kind.startswith("blocker_"):
+    if kind in ("claim", "retext", "relay", "answer", "verdict") or kind.startswith(("blocker_", "order_")):
         return op["item"]
     return {
         "alert_claim": "alerts",

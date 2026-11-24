@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/mutation.py:scripts.swarm_ledger.repository.mutation.x_narrow:4d246f70ccd052cf8e8f33111b504081d7687d299537bdbf97d809659076671f": {
+    "reader": "standards_reader",
+    "reason": "narrow() is used exclusively by task_write.update for the single claim-shaped task_update op. ctx.slug is read nowhere in that path (only by ledger_blockers.py and ledger_freezes.py, for blocker_* and freeze_* ops, never task_update), so replacing slug with None in core.Context(...) changes no output."
+  }
+}

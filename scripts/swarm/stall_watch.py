@@ -34,7 +34,7 @@ ANTON_ALERTS = "https://ntfy.homeofanton.com/anton-alerts"
 TITLE, AUTHORIZATION, TIMEOUT_S = "Title", "Authorization", 10
 QUEUED, SEEN, ALERTS, ALERTED_KEY = "stall-queued", "stall-seen", "stall-alerts", "stall-alerted"
 ANSWERED = "stall-answered"
-LANES = ("eng", "ci")
+LANES = ("eng", "ci", "review")
 FINISHED, STOPPED, DONE, UNCLAIMED = "finished", "stopped", "done", "unclaimed"
 ENV = {
     "green": "AGENTIHOOKS_STALL_GREEN_MINUTES",

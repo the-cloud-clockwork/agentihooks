@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.x__undecodable:fbe6e4e74b9366a20cbca24da391cd2afa5190161f6cc6bdd3e8b51e20ec8a2f": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: Python codec names are case insensitive, so ascii and ASCII select the same decoder. base64.b64encode produces ASCII-only bytes; both spellings return identical payload text for every source byte sequence and change no failures or side effects."
+  }
+}

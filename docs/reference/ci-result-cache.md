@@ -168,6 +168,8 @@ The `flake-budget` job runs on every dev push after `unit`. It restores the newe
 
 CI runners cannot reach the ledger, so the follow up is filed by the swarm's minute tick, beside the CI budget defects pass. `scripts.ci_budget.flakes.refresh` reads the newest dev `flake-budget` artifact every five minutes and adds one follow up per test over budget, in plain words naming the test, its folder and the number of runs. A test that has been raised is not raised again for seven days; a test still flaky twice in a later window gets a new follow up. A ledger that cannot be reached skips that test until the next pass.
 
+Lab flake records join the count. Before the count, the `Export the lab flake records` step installs the project in its own venv under `.github/test-requirements.lock` and runs `agentihooks ci lab flakes --out ~/flake-reports/lab`. Its lab store settings come from the `CI_LAB_FLAKES_ENDPOINT`, `CI_LAB_FLAKES_BUCKET`, `CI_LAB_FLAKES_ACCESS_KEY` and `CI_LAB_FLAKES_SECRET_KEY` Actions secrets, which hold a read only credential for the lab flakes objects; the install runs without them. An empty setting, a failed install, a failed or timed out export, or an export that writes no file prints one `Lab flakes` warning, and the budget counts the Actions reports alone. The job is red only when neither source left a report, and an empty lab export counts as one. Rows from the lab folder join the history with `source` set to `lab`; older lines count as Actions runs. A budget entry holding a lab run carries a `sources` map from run to source, and the step summary prints the source beside every run. A lab run is a unit key, so one flaky unit counts once however many dev pushes export it, and the tick refresh counts a lab run as current without looking it up as a GitHub run.
+
 | Run | Plant: one test fails its first attempt | Result |
 |---|---|---|
 | [38122887391](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38122887391) | first run on a fresh history | no cache found; 1 flaky test id; nothing over budget; the tick pass filed nothing |
@@ -186,7 +188,7 @@ After the coverage merge, `sonar` runs `python -m scripts.dep_manifest build` on
 
 `python -m scripts.dep_manifest invalidated` lists the tests a diff invalidates, from the manifest's commit to a head:
 
-- a change under `.github/`, to `pyproject.toml`, `uv.lock` or the stored durations, or to Python outside `hooks/`, `scripts/` and `tests/` invalidates every test;
+- a change under `.github/`, to `pyproject.toml` or the stored durations, or to Python outside `hooks/`, `scripts/` and `tests/` invalidates every test;
 - a changed function or module level unit under `hooks/` or `scripts/` invalidates the tests that ran it;
 - a test module invalidates its own tests; any other Python file under `tests/` invalidates every test;
 - any other file invalidates the tests that opened it;
@@ -641,7 +643,7 @@ gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$RUN/artifacts?per_pa
 
 - Open evidence: the scratch pull request that shows head 2 reusing tests that passed on head 1, and head 3 reusing from a cancelled head 2.
 - Hypotheses not yet observed: the arcs flushed at each context switch survive a killed worker, the record step finishes inside GitHub's cancellation window, and an earlier `refs/pull/<n>/merge` commit can still be fetched by its sha. A commit that cannot be fetched is a barrier for its run and every older one.
-- A change to a global input between a record's commit and the head invalidates every record, as `dep_manifest.global_input` decides: anything under `.github/` except, for these version 2 manifests, workflow files other than `test.yml` and `test.yml` changes that leave the unit jobs' execution unchanged; `pyproject.toml`; `uv.lock`; any path starting `.test_durations`; and any `.py` file outside `hooks/`, `scripts/` and `tests/`. 75 of 460 dev commits over 3 days touched `.github/`, `pyproject.toml` or `uv.lock`.
+- A change to a global input between a record's commit and the head invalidates every record, as `dep_manifest.global_input` decides: anything under `.github/` except, for these version 2 manifests, workflow files other than `test.yml` and `test.yml` changes that leave the unit jobs' execution unchanged; `pyproject.toml`; any path starting `.test_durations`; and any `.py` file outside `hooks/`, `scripts/` and `tests/`. 75 of 460 dev commits over 3 days touched `.github/`, `pyproject.toml` or `uv.lock`.
 - The venv cache key carries the UTC day, so a record from an earlier day never matches. Records expire after 7 days.
 - Selected legs now wait for `test-count`'s early collection, up to 4 minutes, before running tests.
 - Selected legs carry no dev coverage for tests the dev plan reuses. Those tests depend on no changed unit, so coverage on changed lines is unaffected; the run's overall coverage figure drops.

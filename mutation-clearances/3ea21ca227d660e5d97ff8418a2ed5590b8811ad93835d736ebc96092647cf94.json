@@ -1,0 +1,6 @@
+{
+  "scripts/secret_env.py:scripts.secret_env.x__read_value:599128588b46202d20c654b3fd8433ecbe8e716e5cb580b139480e04b1054fc9": {
+    "reader": "standards_reader",
+    "reason": "splitlines pieces never contain a line boundary character. Without one, splitlines returns [value] or [] and any separator joins back to value; with one, both joins lack it while value contains it, so both comparisons are true. Checked for \"\", \"abc\\n\", \"\\r\\n\" and \"a\\n\\n\"."
+  }
+}

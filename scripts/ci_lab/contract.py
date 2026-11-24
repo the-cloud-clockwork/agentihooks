@@ -62,6 +62,7 @@ UNITS_OVERDUE = "ci_lab_units_overdue"
 WORKERS_READY = "ci_lab_workers_ready"
 GITHUB_RATE_REMAINING = "ci_lab_github_rate_remaining"
 VERDICT_MISMATCH_TOTAL = "ci_lab_verdict_mismatch_total"
+LOAD_AGE_SECONDS = "ci_lab_load_age_seconds"
 
 METRICS: Mapping[str, tuple[str, ...]] = {
     UNITS_QUEUED: ("class",),
@@ -84,6 +85,7 @@ METRICS: Mapping[str, tuple[str, ...]] = {
     WORKERS_READY: (),
     GITHUB_RATE_REMAINING: (),
     VERDICT_MISMATCH_TOTAL: ("gate",),
+    LOAD_AGE_SECONDS: (),
 }
 
 METRIC_NAME = re.compile(r"ci_lab_[a-z0-9_]+")

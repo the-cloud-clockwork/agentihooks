@@ -1,13 +1,16 @@
 import sys
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from scripts.swarm_ledger import HERE
 
 sys.path.insert(0, str(HERE))
 
 from .entry import Entry
+
+if TYPE_CHECKING:
+    from .task_write import Written
 
 
 class Transaction(Protocol):
@@ -66,6 +69,8 @@ class LedgerRepository(Protocol):
     def apply_ops(
         self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
     ) -> tuple[dict, list]: ...
+
+    def apply_task_update(self, slug: str, op: dict[str, object], gate: object = None) -> "Written | None": ...
 
     def list_summaries(self) -> list: ...
 

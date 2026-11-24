@@ -368,7 +368,7 @@ These steps declare the slow lane:
 | `scripts.tick.steps.observe` | `observe` | pane evidence, lab capacity |
 | `scripts.tick.steps.agents` | `agents` | strays, failed panes |
 | `scripts.tick.steps.masters` | `masters` | retire idle master, master stall, prompt stall |
-| `scripts.tick.steps.tasks` | `reopen passes` | promotion refresh, release alert, [fleet red notice](fleet-red-notice.md#the-slow-lane) |
+| `scripts.tick.steps.tasks` | `reopen passes` | promotion refresh, release alert, [fleet red notice](fleet-red-notice.md#the-slow-lane), autoscaler alert |
 | `scripts.tick.steps.place` | `placement notices` | lost runner, time left |
 | `scripts.tick.steps.masters` | `master watch` | night watch, master alarm |
 | `scripts.tick.steps.agents` | `close` | conversations, session models |
@@ -1209,13 +1209,13 @@ and placement steps are in bold; the others hold steps from other changes.
 | 5 | `masters` | After the agents | master wake, retire idle master, master stall, prompt stall |
 | 6 | `drained resume` | After the masters | sleeping, drained resume |
 | 7 | `tasks` | After `drained resume` | orphans |
-| 8 | `reopen passes` | After `tasks` | dev red reopen, prerequisite reopen, promotion refresh, release alert, [fleet red notice](fleet-red-notice.md) (slow lane) |
+| 8 | `reopen passes` | After `tasks` | dev red reopen, prerequisite reopen, promotion refresh, release alert, [fleet red notice](fleet-red-notice.md) (slow lane), autoscaler alert (slow lane) |
 | 9 | **`task passes`** | After `reopen passes` | run window, verification notices, size pass, grouping release, dispatcher group |
 | 10 | `place` | First line inside the placing lock | |
 | 11 | `placement notices` | After `place`, inside the placing lock | quota notice, lost runner (slow lane), time left (slow lane) |
 | 12 | **`placement acks`** | After `placement notices`, inside the placing lock | codex hook order |
 | 13 | `master seats` | Inside the placing lock, only when the swarm is not sleeping | master down, tick master, master scale, seat alarm |
-| 14 | `dispatch seat` | After the master seats, inside the placing lock, ahead of lane placement so a pending dispatcher trigger takes the next free hive slot | dispatch seat |
+| 14 | `dispatch seat` | After the master seats, inside the placing lock, ahead of lane placement so a pending dispatcher trigger takes the next free hive slot | dispatch seat, expert seats |
 | 15 | **`placement`** | Last site inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy |
 | 16 | `master watch` | After the placing lock | night watch, master alarm |
 | 17 | `close` | Last line of the pass | conversations, session models, handoff transfers, **settle**, **close space** |
@@ -1250,8 +1250,9 @@ the step checks it and returns no actions when it does not hold.
 | `placement` | bottleneck remedy | `bottleneck_remedy.step` |
 
 The placement sites launch only seats: the `master seats` steps place the
-master through `seat_spawn.place` and the `dispatch seat` step launches the
-dispatcher seat. A new lane agent comes from the hub: hives pull lane work and
+master through `seat_spawn.place`, the `dispatch seat` step launches the
+dispatcher seat and the `expert seats` step keeps one expert on the seat of
+each running [expert lineage](expert-lineage.md). A new lane agent comes from the hub: hives pull lane work and
 the hub admits each launch, see
 [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub).
 The one tick step that starts a lane agent is `recover outages` in the
@@ -1794,7 +1795,7 @@ The delivered proof and limitations are recorded in
 | `AttributeError: module 'scripts.swarm.tick' has no attribute ...` from a common helper | A moved helper names a tick module attribute that no longer exists there; import it back into the tick module or reference its new home |
 | A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module is not listed in `scripts.tick.steps.MODULES` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
-| No lane agent launches after the placement sites run | Expected: the `master seats` and `dispatch seat` steps launch only the master and the dispatcher seat, and `recover outages` only restarts a dead agent from its handoff. New lane agents come from hub offers that hives take and the hub admits; see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub) |
+| No lane agent launches after the placement sites run | Expected: the `master seats` and `dispatch seat` steps launch only the master, the dispatcher seat and the expert of each running expert lineage, and `recover outages` only restarts a dead agent from its handoff. New lane agents come from hub offers that hives take and the hub admits; see [Pulling work from the hub](../pillars/hives.md#pulling-work-from-the-hub) |
 | A `dropped write` line in the tick actions | Expected under a concurrent change: the guarded field moved or the ledger refused the call. The next pass recomputes it; a line that repeats every pass for the same task means something keeps changing that field, or the ledger keeps refusing the write |
 | A size or group change never lands and no `dropped write` line appears | The site had no `ledger` or `slug` in its pass state, so `tasks.appliers` returned no appliers and the writes stayed on the record |
 | `Step <name>: feature '<id>' is not a feature map id` from `catalogue check` | The step's `feature` names no `id` in `feature-map.json`; use an existing id or add the entry |
