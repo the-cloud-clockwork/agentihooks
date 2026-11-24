@@ -115,9 +115,9 @@ def test_an_attempt_opens_no_episode_and_each_write_expires_within_the_window(st
     assert store.redis.exists(key) == 0
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2)
-    assert store.redis.get(key) == "2" and 0 < store.redis.pttl(key) <= preempt.ANSWER_MS
+    assert store.redis.get(key) == "2" and preempt.ANSWER_MS - 1_000 < store.redis.pttl(key) <= preempt.ANSWER_MS
     preempt.attempted(store, SLUG, "t3", 3)
-    assert store.redis.get(key) == "3" and 0 < store.redis.pttl(key) <= preempt.ANSWER_MS
+    assert store.redis.get(key) == "3" and preempt.ANSWER_MS - 1_000 < store.redis.pttl(key) <= preempt.ANSWER_MS
 
 
 @pytest.mark.feature("repeated-subject-notices-pass-the-seen-claim")
