@@ -899,11 +899,11 @@ def test_create_refuses_memory_that_cannot_round_trip(store, memory):
     assert store.slugs() == []
 
 
-def test_scaling_boundaries_round_trip_and_manual_preserves_lane_caps(store):
+def test_scaling_boundaries_round_trip_and_manual_preserves_lane_caps(store: RedisStore) -> None:
     store.create(config())
-    stored = store.update("smoke", scaling="manual", load_low=10, load_high=10, memory_per_agent_mb=1)
+    stored = store.update("smoke", scaling="manual", load_low=10, load_high=10, memory_per_agent_mb=1, review_share=0)
     assert store.config("smoke") == stored
-    assert (stored.max_eng, stored.max_ci, stored.max_plan) == (2, 1, 1)
+    assert (stored.max_eng, stored.max_ci, stored.max_plan, stored.review_share) == (2, 1, 1, 0)
 
 
 def test_scaling_update_explains_the_allowed_modes(store):
