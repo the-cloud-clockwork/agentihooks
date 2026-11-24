@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install the check poster dependencies
-        run: python -m pip install --quiet requests==2.34.2 PyJWT==2.15.1
+        run: python -m pip install --quiet --constraint .github/test-requirements.lock requests==2.34.2 PyJWT==2.15.1
       - name: Post the lab check run the dispatch carries
         env:
           GITHUB_TOKEN: ${{ github.token }}
