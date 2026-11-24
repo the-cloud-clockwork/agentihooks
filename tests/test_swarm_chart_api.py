@@ -1,7 +1,10 @@
 from pathlib import Path
+from subprocess import CompletedProcess
 
 import pytest
 import yaml
+
+from tests import chart_api
 
 pytestmark = pytest.mark.unit
 
@@ -125,3 +128,48 @@ def test_api_network_policy_admits_the_same_sources_as_the_ledger() -> None:
 
     assert "networkPolicy.ingressFrom" in section
     assert "port: http" in section
+
+
+@pytest.mark.feature("api-private-ledger-home")
+@pytest.mark.parametrize("missing_database", [False, True])
+def test_api_mirrors_the_database_but_not_the_ledgers_private_home(
+    monkeypatch: pytest.MonkeyPatch, missing_database: bool
+) -> None:
+    database = {"name": "AGENTIHOOKS_SWARM_DATABASE_URL", "value": "postgresql://ledger"}
+    server_rows = [database, {"name": "AGENTIHOOKS_HOME", "value": "/run/agentihooks"}]
+    api_rows = [*chart_api.API_ROWS, *([] if missing_database else [database])]
+    selector = {"matchLabels": {"role": "api"}}
+    docs = [
+        {
+            "kind": "Deployment",
+            "metadata": {"name": chart_api.API},
+            "spec": {
+                "selector": selector,
+                "template": {"spec": {"containers": [{"env": api_rows}]}},
+            },
+        },
+        {
+            "kind": "StatefulSet",
+            "metadata": {"name": chart_api.LEDGER},
+            "spec": {"template": {"spec": {"containers": [{"env": server_rows}]}}},
+        },
+        *[
+            {
+                "kind": "NetworkPolicy",
+                "metadata": {"name": name},
+                "spec": {"podSelector": selector, "ingress": []},
+            }
+            for name in [chart_api.API, chart_api.LEDGER]
+        ],
+    ]
+
+    def rendered(*args: str) -> CompletedProcess[str]:
+        return CompletedProcess(args, 0, yaml.safe_dump_all(docs), "")
+
+    monkeypatch.setattr(chart_api, "render", rendered)
+    found = chart_api.mirror_problems("chart")
+
+    if missing_database:
+        assert any("AGENTIHOOKS_SWARM_DATABASE_URL" in problem for problem in found)
+    else:
+        assert found == []
