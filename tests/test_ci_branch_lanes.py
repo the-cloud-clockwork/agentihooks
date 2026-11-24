@@ -856,6 +856,41 @@ def test_tests_dev_pushes_may_share_three_promotion_lanes(change):
     assert bool(lanes.problems(updated, baseline)) == (change is not None)
 
 
+@pytest.mark.feature("lane-grader-admits-dedicated-tests-dispatch-lanes")
+@pytest.mark.parametrize(
+    "change", [None, "group", "queue", "cancel", "extra", "name", "trusted-name", "events", "untrusted", "job"]
+)
+def test_only_the_trusted_tests_workflow_may_use_dedicated_dispatch_lanes(change: str | None) -> None:
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "test.yml").read_text())
+    updated = copy.deepcopy(baseline)
+    block = updated["concurrency"]
+    block["group"] = block["group"].replace("format('hosted-lane-{0}'", "format('tests-dispatch-lane-{0}'", 1)
+    if change == "group":
+        block["group"] = block["group"].replace("tests-dispatch-lane", "other-dispatch-lane")
+    elif change == "queue":
+        block["queue"] = "single"
+    elif change == "cancel":
+        block["cancel-in-progress"] = True
+    elif change == "extra":
+        block["extra"] = True
+    elif change == "name":
+        updated["name"] = "Other"
+    elif change == "trusted-name":
+        baseline["name"] = updated["name"] = "Other"
+    elif change == "events":
+        updated.setdefault("on", updated.get(True, {}))["schedule"] = [{"cron": "0 * * * *"}]
+    elif change == "untrusted":
+        baseline = None
+    elif change == "job":
+        updated["jobs"]["untrusted"] = {"concurrency": {"group": "other"}}
+    found = lanes.problems(updated, baseline)
+    assert bool(found) == (change is not None)
+    if found:
+        assert all("has no shared hosted lane concurrency group" in problem for problem in found)
+
+
 def test_the_promotion_lanes_apply_only_to_dev_pushes():
     assert "github.event_name == 'push' && format('promotion-dev-{0}', " in lanes.TESTS_GROUPS[1]
 
