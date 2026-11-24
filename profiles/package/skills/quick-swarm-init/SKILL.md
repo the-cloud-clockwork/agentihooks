@@ -35,6 +35,17 @@ It runs only inside herdr; outside it the command refuses and says why.
    `agentihooks quick send <seat> "<text>"`. Read what seats sent you with
    `agentihooks quick room`.
 
+## Hard rule: never trust a pane message as delivered
+
+The operator, 24 November: "never fucking never trust in a pane message being
+delivered you need to double check FUCKING ALWAYS THIS IS A MASTER RULE."
+
+After typing a message into a seat's pane (herdr tab then Enter), read that
+pane back and confirm the seat started working on it or queued it. If the text
+still sits unsent in the input box, press Enter again and recheck. If it still
+cannot be confirmed, report NOT SENT and send the message through the room
+instead with `agentihooks quick send <seat> "<text>"`.
+
 4. When the operator ends the quick swarm:
 
    `agentihooks quick stop`

@@ -34,6 +34,14 @@ def test_the_master_seed_makes_it_the_front_door_over_its_own_panes(tmp_path):
 
 
 @pytest.mark.feature("quick-swarm")
+def test_the_master_seed_never_trusts_a_pane_message_delivered(tmp_path):
+    text = seeds.opening(_member(tmp_path, "master"))
+    assert "Never trust that a pane message reached its seat" in text
+    assert "report NOT SENT" in text
+    assert text.count('agentihooks quick send <seat> "<text>"') == 2
+
+
+@pytest.mark.feature("quick-swarm")
 def test_an_engineer_seed_plans_first_and_reports_to_the_master_before_starting(tmp_path):
     text = seeds.opening(_member(tmp_path, "eng-1"))
     assert "eng-1 of quick swarm quick-abc, in herdr pane 2" in text

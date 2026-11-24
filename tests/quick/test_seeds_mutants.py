@@ -32,6 +32,10 @@ def test_the_master_seed_pins_every_exact_sentence(tmp_path: Path) -> None:
             "learned.md its lessons. Tell the operator what each engineer is doing and where its notes are.",
             "Reach a Claude engineer with SendMessage to its session; reach any other seat with "
             '`agentihooks quick send <seat> "<text>"` and read what seats sent you with `agentihooks quick room`.',
+            "Never trust that a pane message reached its seat: after typing into a pane, read it back and confirm "
+            "the seat started on it or queued it; if the text still sits unsent, press Enter again and recheck, and "
+            "if it still cannot be confirmed, report NOT SENT and send it through the room instead with "
+            '`agentihooks quick send <seat> "<text>"`.',
             seeds.HANDOFF.format(handoff=paths.handoff(tmp_path, MASTER), learned=paths.learned(tmp_path, MASTER)),
         ]
     )
