@@ -9596,6 +9596,23 @@
       ]
     },
     {
+      "id": "design-rules-same-name-pairing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-design-rules-duplicate-pairing",
+      "behaviour": "The design rules gate pairs each head unit with a base unit of the same name in the same scope by identical content first and by order of appearance for the rest, and nested units follow the base unit their enclosing unit paired with, so a new same named definition placed above an unchanged one is graded alone, a deleted, moved or reordered duplicate leaves its unchanged twin ungraded, and duplicates both edited still pair first to first.",
+      "seam": "scripts.design_rules.grade through its base to head unit pairing",
+      "tests": [
+        "tests/test_design_rules.py::test_a_redefined_function_is_graded_under_its_own_numbered_key",
+        "tests/test_design_rules.py::test_an_identical_redefinition_is_graded_once_as_new",
+        "tests/test_design_rules.py::test_same_named_definitions_both_edited_pair_in_order",
+        "tests/test_design_rules.py::test_an_edited_function_pairs_with_its_own_name_after_another_is_deleted",
+        "tests/test_design_rules.py::test_only_the_new_definition_above_an_unchanged_same_named_one_is_graded",
+        "tests/test_design_rules.py::test_the_survivor_of_a_deleted_same_named_definition_is_not_graded",
+        "tests/test_design_rules.py::test_reordered_same_named_definitions_are_not_graded",
+        "tests/test_design_rules.py::test_nested_functions_follow_the_definition_their_outer_pairs_with"
+      ]
+    },
+    {
       "id": "hive-master-refused-account-retry",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-scale-cpu",
