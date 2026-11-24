@@ -217,9 +217,7 @@ def test_the_gate_summary_counts_a_lone_report_that_lands_at_the_folder_root(tmp
 def test_sonar_lists_the_reused_test_plan_only_after_every_job_that_uploads_it_finished() -> None:
     file, job, _ = REUSED_PLAN
     jobs = yaml.safe_load((GITHUB / file).read_text())["jobs"]
-    downloads = [
-        key for key, step in _pattern_downloads().items() if key[:2] == (file, job) and "run-id" not in step["with"]
-    ]
+    downloads = [key for key in _pattern_downloads() if key[:2] == (file, job)]
     assert REUSED_PLAN in downloads
     for _, _, pattern in downloads:
         uploaders = _uploaders(file, pattern)
