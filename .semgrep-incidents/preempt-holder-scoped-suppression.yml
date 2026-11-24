@@ -1,0 +1,11 @@
+rules:
+  - id: preempt-holder-scoped-suppression
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Urgent suppression must read a task keyed episode. Current holder asks disappear when a holder leaves.
+    patterns:
+      - pattern-inside: |
+          def _pending(...):
+              ...
+      - pattern: $ASKED.values()
