@@ -289,15 +289,18 @@ def test_a_closed_pull_request_drops_its_waiting_head_and_starts_no_grade(lab: C
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
-def test_a_closed_pull_request_ends_its_waiting_head_and_its_live_grade_together(lab: Callable[..., Run]) -> None:
+@pytest.mark.parametrize("base", [BASE, OTHER_BASE])
+def test_a_closed_pull_request_ends_its_waiting_head_and_its_live_grade_together(
+    lab: Callable[..., Run], base: str
+) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})}, quiet_ms=500)
     _deliver(run, _pull("opened", HEAD_A))
     run.tick(1000)
     run.tick(1600)
     live = run.grade(HEAD_A).run
-    _deliver(run, _pull("synchronize", HEAD_B))
+    _deliver(run, _pull("synchronize", HEAD_B, base=base))
     run.tick(1700)
-    _deliver(run, _pull("closed", HEAD_B))
+    _deliver(run, _pull("closed", HEAD_B, base=base))
     closed = f"closed feature of {REPO}: dropped the waiting head {HEAD_B}, retired {live}, dropped 1 pending units"
     assert run.tick(1800) == [closed]
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
@@ -349,14 +352,13 @@ def test_a_closed_pull_request_ends_its_own_grade_and_leaves_the_other_pull_requ
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
-@pytest.mark.parametrize("base", [OTHER_BASE, HEAD_C])
 def test_a_closed_pull_request_whose_grade_its_lane_names_hands_the_lane_to_the_other_pull_request(
-    lab: Callable[..., Run], base: str
+    lab: Callable[..., Run],
 ) -> None:
     first, second = unit(1), unit(2)
     run = lab({HEAD_A: plan({"lint": (first,)}), HEAD_B: plan({"lint": (second,)})})
     one, two = _twin_grades(run)
-    _deliver(run, _pull("closed", HEAD_A, base=base))
+    _deliver(run, _pull("closed", HEAD_A, base=OTHER_BASE))
     assert f"closed feature of {REPO}: retired {two.run}, {one.run} still grades {HEAD_A}" in run.tick(1100)
     assert [grade.run for grade in run.grades()] == [one.run]
     assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, first)]
@@ -368,6 +370,53 @@ def test_a_closed_pull_request_whose_grade_its_lane_names_hands_the_lane_to_the_
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_close_whose_base_no_grade_of_a_shared_lane_carries_ends_nothing(lab: Callable[..., Run]) -> None:
+    first = unit(1)
+    run = lab({HEAD_A: plan({"lint": (first,)})})
+    one, two = _twin_grades(run)
+    _deliver(run, _pull("closed", HEAD_A, base=THIRD_BASE))
+    assert f"closed feature of {REPO}: nothing held" in run.tick(1100)
+    assert sorted(grade.run for grade in run.grades()) == sorted([one.run, two.run])
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, first)]
+    assert run.lab.client.get(scheduler.LANES + PULL_LANE) == two.run
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_closed_pull_request_with_no_grade_of_its_own_ends_nothing_of_its_branch(lab: Callable[..., Run]) -> None:
+    first = unit(1)
+    run = lab({HEAD_A: plan({"lint": (first,)})}, quiet_ms=500)
+    _deliver(run, _pull("opened", HEAD_A))
+    _deliver(run, _pull("opened", HEAD_A, base=OTHER_BASE))
+    run.tick(1000)
+    run.tick(1600)
+    live = run.grade(HEAD_A)
+    assert [grade.base for grade in run.grades()] == [BASE]
+    _deliver(run, _pull("closed", HEAD_A, base=OTHER_BASE))
+    assert f"closed feature of {REPO}: nothing held" in run.tick(1700)
+    assert [grade.run for grade in run.grades()] == [live.run]
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, first)]
+    _deliver(run, _pull("closed", HEAD_A))
+    assert f"closed feature of {REPO}: retired {live.run}, dropped 1 pending units" in run.tick(1800)
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_close_leaves_the_waiting_head_of_another_base(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})}, quiet_ms=500)
+    _deliver(run, _pull("opened", HEAD_B, base=OTHER_BASE))
+    run.tick(1000)
+    _deliver(run, _pull("closed", HEAD_B))
+    assert run.tick(1100) == [f"closed feature of {REPO}: nothing held"]
+    run.tick(1600)
+    live = run.grade(HEAD_B).run
+    _deliver(run, _pull("synchronize", HEAD_A))
+    run.tick(1700)
+    _deliver(run, _pull("closed", HEAD_A, base=OTHER_BASE))
+    assert f"closed feature of {REPO}: retired {live}, dropped 1 pending units" in run.tick(1800)
+    assert list(run.lab.client.hgetall(scheduler.WAITING)) == [PULL_LANE]
+    assert run.lab.client.smembers(scheduler.LIVE) == set()
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
 def test_three_pull_requests_of_one_branch_end_one_grade_at_each_close(lab: Callable[..., Run]) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1),)})})
     one, two = _twin_grades(run)
@@ -375,7 +424,7 @@ def test_three_pull_requests_of_one_branch_end_one_grade_at_each_close(lab: Call
     run.tick(1020)
     three = next(grade for grade in run.grades() if grade.base == THIRD_BASE)
     stays, other = sorted([one, two], key=lambda grade: grade.run)
-    _deliver(run, _pull("closed", HEAD_A, base=HEAD_C))
+    _deliver(run, _pull("closed", HEAD_A, base=THIRD_BASE))
     assert f"closed feature of {REPO}: retired {three.run}, {stays.run} still grades {HEAD_A}" in run.tick(1100)
     assert run.lab.client.get(scheduler.LANES + PULL_LANE) == stays.run
     _deliver(run, _pull("closed", HEAD_A, base=other.base))
@@ -386,7 +435,7 @@ def test_three_pull_requests_of_one_branch_end_one_grade_at_each_close(lab: Call
     assert f"closed feature of {REPO}: retired {stays.run}, dropped 1 pending units" in run.tick(1300)
     assert run.grades() == []
     assert run.lab.client.get(scheduler.LANES + PULL_LANE) == stays.run
-    _deliver(run, _pull("closed", HEAD_A, base=THIRD_BASE))
+    _deliver(run, _pull("closed", HEAD_A, base=stays.base))
     assert run.tick(1400) == [f"closed feature of {REPO}: nothing held"]
 
 
@@ -413,9 +462,8 @@ def test_a_closed_pull_request_keeps_the_waiting_head_of_a_branch_another_pull_r
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
-def test_a_second_grade_of_the_same_head_and_base_is_no_other_pull_request(lab: Callable[..., Run]) -> None:
-    first = unit(1)
-    run = lab({HEAD_A: plan({"lint": (first,)})})
+def test_a_closed_pull_request_ends_every_grade_of_its_head_and_base_in_its_lane(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
     _deliver(run, _pull("opened", HEAD_A))
     run.tick(1000)
     earlier = run.grade(HEAD_A).run
@@ -424,8 +472,9 @@ def test_a_second_grade_of_the_same_head_and_base_is_no_other_pull_request(lab: 
     again = run.lab.client.get(scheduler.LANES + PULL_LANE)
     assert again != earlier and sorted(grade.run for grade in run.grades()) == sorted([earlier, again])
     _deliver(run, _pull("closed", HEAD_A))
-    assert f"closed feature of {REPO}: retired {again}, dropped 0 pending units" in run.tick(1100)
-    assert [grade.run for grade in run.grades()] == [earlier]
+    assert f"closed feature of {REPO}: retired {earlier}, {again}, dropped 1 pending units" in run.tick(1100)
+    assert run.grades() == []
+    assert run.engine.queue.pending() == []
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
