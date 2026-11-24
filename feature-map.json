@@ -1387,6 +1387,19 @@
       ]
     },
     {
+      "id": "hub-controller-memory-caches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-controller-ledger-cache-memory",
+      "behaviour": "The swarm hub keeps its ledger export and entry copy on bounded memory storage, and the controller keeps its tick view on bounded memory storage while retaining its existing memory home and process memory budget.",
+      "seam": "hub and controller cache volumes, mounts, memory resources and the paths computed by their cache writers",
+      "tests": [
+        "tests/test_swarm_chart_memory_caches.py::test_hub_ledger_caches_use_bounded_memory",
+        "tests/test_swarm_chart_memory_caches.py::test_controller_tick_view_uses_bounded_memory",
+        "tests/test_swarm_chart_memory_caches.py::test_cache_memory_preserves_the_process_budget",
+        "tests/test_swarm_chart_memory_caches.py::test_controller_keeps_its_existing_memory_home"
+      ]
+    },
+    {
       "id": "hub-ready-only-when-serving",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2600",
@@ -1788,6 +1801,21 @@
         "tests/hub/test_admission_gates.py::test_an_admission_hands_the_continuation_the_rows_on_its_task_branch",
         "tests/hub/test_admission_gates.py::test_an_admission_reads_a_plan_task_steering_through_its_readiness_source",
         "tests/swarm/test_admission_view.py::test_the_admits_gate_needs_a_running_swarm_and_every_wait_clear"
+      ]
+    },
+    {
+      "id": "hub-admission-running-fields",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-admit-view-fields",
+      "behaviour": "A hub events admission reads the claimed and pull request rows, the rows its task names and the open rows pinned to a hive with a field selection of only the keys their readers take, so the ledger task selection answers under its reply cap however large those rows grow, the root waiting count stays the same, and a running row the task names keeps the title, description, phase, kind and apply time its claim seeds read.",
+      "seam": "admission_view.Narrow task and waiting over the ledger API tasks selection, through the narrow ledger test reads that run the real selection",
+      "tests": [
+        "tests/swarm/test_admission_view.py::test_running_rows_over_the_reply_cap_still_give_the_admission_its_view",
+        "tests/swarm/test_admission_view.py::test_a_running_group_member_keeps_what_its_readers_take",
+        "tests/swarm/test_admission_view.py::test_pinned_open_rows_over_the_reply_cap_keep_the_same_root_waiting_count"
+      ],
+      "rules": [
+        "admission-view-running-full-row"
       ]
     },
     {
@@ -4492,6 +4520,16 @@
       ]
     },
     {
+      "id": "swarm-wrapper-phases-hook-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-wrapper-phases-doc-read",
+      "behaviour": "The wrapper phases site hook declares the pass box key doc, under which it stores the ledger pass state and reads it back, so a pass of that hook under AGENTIHOOKS_TICK_HOOK_READS enforce or observe answers true with no undeclared read raised or logged, keeps the pass state under doc, hands its open tasks to the panic fixer sweep and clears the halt marks.",
+      "seam": "scripts.swarm.cli.WRAPPER_HOOK_READS and the wrapper phases hook of scripts.swarm.cli._Wrapper.hooks",
+      "tests": [
+        "tests/tick/test_hook_reads.py::test_the_phases_hook_reads_back_the_pass_state_it_stores_without_an_undeclared_read"
+      ]
+    },
+    {
       "id": "swarm-tick-no-shared-rows",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c5",
@@ -6786,6 +6824,40 @@
         "tests/ci_lab/test_pods.py::test_an_unreadable_token_answers_false_and_sends_nothing",
         "tests/ci_lab/test_pods.py::test_outside_a_cluster_the_pods_port_patches_nothing",
         "tests/ci_lab/test_pods.py::test_in_a_cluster_the_pods_port_patches_in_the_service_account_namespace"
+      ]
+    },
+    {
+      "id": "lab-worker-seat-keeping-restart",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "A lab worker that runs an image other than the one the lab wants restarts in place and keeps its pod, its node and its seat. The scheduler reads a pod's declared spec image and the digest its container actually runs over the Kubernetes API it already uses for the deletion cost; a failed read, a pod with no container status yet and a running image id with no digest all read as unknown. A worker is stale only when its pod names a floating image tag and the digest its container runs differs from the digest CI_LAB_IMAGE names; no wanted image, an unknown running image and a pod pinned by digest are never stale, and only digests are compared, never repository names. The lease API answers a stale worker's POST /lease with 426 and no grant, recording no offer and leaving its pending job pending; every other request is answered as today. The worker turns a 426 lease answer into its own stop, lets its running units finish within the termination grace and its entry point returns zero with no raise and no backoff; every other 4xx still raises. The worker's entry point empties its work root, sealed trees and folders without owner access included, before it builds its settings on it; a symlink in the root is removed and its target stays, and a missing root is not an error. The scheduler's entry point builds Leases with CI_LAB_IMAGE and the pod image reader of its pods port, so a pod pinned by digest and an unmanaged pods port both carry no wanted image or the unread reader.",
+      "seam": "scripts.ci_lab.pods.KubePods.images and pod_images, scripts.ci_lab.leases.Leases.stale, scripts.ci_lab.lease_api._lease over POST /lease, scripts.ci_lab.worker.Worker.run_once and run, scripts.ci_lab.worktrees.empty, and scripts.ci_lab.scheduler.main building Leases",
+      "tests": [
+        "tests/ci_lab/test_pods.py::test_a_floating_pods_image_read_is_one_get_with_the_service_account_token",
+        "tests/ci_lab/test_pods.py::test_a_pinned_pods_image_read_carries_its_declared_digest_too",
+        "tests/ci_lab/test_pods.py::test_a_pod_with_no_container_status_yet_reads_as_unknown",
+        "tests/ci_lab/test_pods.py::test_a_running_image_id_with_no_digest_reads_as_unknown",
+        "tests/ci_lab/test_pods.py::test_an_image_or_image_id_that_is_no_string_reads_as_unknown",
+        "tests/ci_lab/test_pods.py::test_a_refused_or_unreachable_api_server_reads_the_image_as_unknown",
+        "tests/ci_lab/test_pods.py::test_an_unreadable_token_reads_the_image_as_unknown_and_sends_nothing",
+        "tests/ci_lab/test_pods.py::test_pod_images_gives_the_kube_reader_for_a_kube_pods_port_and_unread_otherwise",
+        "tests/ci_lab/test_pods.py::test_unread_answers_none",
+        "tests/ci_lab/test_leases.py::test_stale_is_true_for_a_floating_pod_running_another_digest_than_the_wanted_one",
+        "tests/ci_lab/test_leases.py::test_stale_is_false_with_no_wanted_image",
+        "tests/ci_lab/test_leases.py::test_stale_is_false_with_a_wanted_image_that_names_no_digest",
+        "tests/ci_lab/test_leases.py::test_stale_is_false_with_an_unknown_running_image",
+        "tests/ci_lab/test_leases.py::test_stale_is_false_when_the_running_digest_matches_under_another_repository_name",
+        "tests/ci_lab/test_leases.py::test_stale_is_false_for_a_pod_pinned_by_digest_even_when_its_running_digest_differs",
+        "tests/ci_lab/test_lease_api.py::test_a_stale_workers_lease_is_answered_426_with_no_grant_and_records_no_offer",
+        "tests/ci_lab/test_lease_api.py::test_a_malformed_body_from_a_stale_worker_is_still_400",
+        "tests/ci_lab/test_lease_api.py::test_a_worker_that_is_not_stale_is_answered_200_as_today",
+        "tests/ci_lab/test_worker.py::test_a_lease_call_the_scheduler_answers_426_stops_the_worker_without_raising_or_backing_off",
+        "tests/ci_lab/test_worker.py::test_a_stale_restart_lets_a_running_unit_finish_within_the_grace_then_run_returns",
+        "tests/ci_lab/test_worktrees.py::test_empty_removes_sealed_trees_locked_folders_files_and_symlinks_but_keeps_the_folder",
+        "tests/ci_lab/test_worktrees.py::test_empty_of_a_missing_folder_is_not_an_error",
+        "tests/ci_lab/test_executors.py::test_main_empties_the_work_root_before_it_builds_its_settings",
+        "tests/ci_lab/test_scheduler_seat_keeping.py::test_main_builds_leases_with_the_wanted_image_and_the_pods_port_image_reader",
+        "tests/ci_lab/test_scheduler_seat_keeping.py::test_main_gives_leases_the_unmanaged_image_reader_outside_a_cluster"
       ]
     },
     {
@@ -13047,14 +13119,30 @@
       "id": "lab-manifest-fetch-off-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2703",
-      "behaviour": "The CI lab scheduler service fetches packed dependency manifests off its pass, at most four at once: a fetch a head's expansion needs starts on a worker thread, and while it runs the scheduler keeps the head waiting in its lane with its quiet window unchanged, so the next pass reads the finished fetch. A pass whose manifest fetch GitHub never answers still reaps expired leases and advances live grades within one request timeout. A failed fetch answers once, so the head waits out its window again; a finished fetch answers every call for five minutes after it started, so a search past a commit with no manifest does not fetch it on every pass.",
+      "behaviour": "The CI lab scheduler service fetches packed dependency manifests off its pass, at most four at once: a fetch a head's expansion needs starts on a worker thread, and while it runs the scheduler keeps the head waiting in its lane with its quiet window unchanged, so the next pass reads the finished fetch. A pass whose manifest fetch GitHub never answers still reaps expired leases and advances live grades within one request timeout. A failed fetch answers once, so the head waits out its window again; a fetch that found a manifest answers every call for five minutes after it started and one that found none for an hour, so a search past a commit with no manifest does not fetch it on every pass.",
       "seam": "scripts.ci_lab.manifests.Background over a released fake fetch and a set clock, and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis, with a scheduler.MirrorExpander over a git origin fixture reading the default scheduler.StoredManifests through a manifests.Fetcher that never answers, and with an expander that raises a pending fetch",
       "tests": [
         "tests/ci_lab/test_manifests.py::test_background_raises_pending_while_a_fetch_runs_and_answers_it_until_it_goes_stale",
         "tests/ci_lab/test_manifests.py::test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next_call",
+        "tests/ci_lab/test_manifests.py::test_background_forgets_a_failed_fetch_nobody_asked_again_once_its_fresh_window_ends",
         "tests/ci_lab/test_manifests.py::test_background_runs_at_most_four_fetches_at_once",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_still_fetches_keeps_its_window_and_each_pass_reads_the_fetch_again",
         "tests/ci_lab/test_scheduler_manifest_fetch.py::test_a_pass_reaps_leases_and_advances_grades_while_a_manifest_fetch_github_never_answers"
+      ]
+    },
+    {
+      "id": "lab-manifest-search-outlives-absent-answers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "The CI lab scheduler's search for a dependency manifest ends however far behind the head's base the nearest manifest lies within the manifest depth. The search passes one commit per scheduler pass, since each call starts one fetch and waits for it, so the fetch cache keeps the answer of a fetch that found no manifest for ABSENT_S, one hour after the fetch started, and fetches the commit again on the first call after that. A fetch that found a manifest is still forgotten FRESH_S, five minutes, after it started, so the scheduler holds no manifest in memory longer than before, and a failed fetch still answers once. With the nearest manifest six commits behind the base the search answers on its seventh call, at one minute a call and at 304 seconds a call, the slowest pass seen when the search restarted for ever on 24 November.",
+      "seam": "scripts.ci_lab.manifests.Background over a released fake fetch and a set clock, alone and under scripts.ci_lab.scheduler.StoredManifests over a local object store",
+      "rules": [
+        "lab-manifest-cache-forgets-absent-answers"
+      ],
+      "tests": [
+        "tests/ci_lab/test_manifests.py::test_background_keeps_an_absent_answer_for_an_hour_and_fetches_it_again_after_it",
+        "tests/ci_lab/test_manifests.py::test_background_forgets_a_found_manifest_on_its_fresh_window_and_an_absent_answer_on_its_own",
+        "tests/ci_lab/test_scheduler_manifest_fetch.py::test_a_search_whose_nearest_manifest_lies_six_commits_behind_answers_on_its_seventh_call"
       ]
     },
     {
@@ -13241,6 +13329,7 @@
         "tests/ci_lab/test_worker.py::test_stop_ends_a_lease_backoff_at_once",
         "tests/ci_lab/test_worker.py::test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slots_fit",
         "tests/ci_lab/test_worker.py::test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none",
+        "tests/ci_lab/test_worker.py::test_the_lease_request_body_carries_exactly_worker_free_slots_capabilities_and_wait_ms",
         "tests/ci_lab/test_worker.py::test_the_client_gives_up_on_a_scheduler_or_upload_that_does_not_answer",
         "tests/ci_lab/test_worker.py::test_the_worker_environment_refuses_github_app_and_redis_variables",
         "tests/ci_lab/test_worker.py::test_the_worker_environment_keeps_only_the_service_contract_variables",
@@ -13280,6 +13369,7 @@
         "tests/ci_lab/test_queue.py::test_enqueue_stores_the_base_and_grader_revision_each_job_reads",
         "tests/ci_lab/test_leases.py::test_a_grant_carries_the_base_and_grader_revision_of_its_job",
         "tests/ci_lab/test_lease_api.py::test_lease_returns_the_grant_payload",
+        "tests/ci_lab/test_lease_api.py::test_lease_ignores_a_request_field_it_does_not_know",
         "tests/ci_lab/test_scheduler.py::test_each_enqueued_job_carries_the_grades_base_and_its_plans_grader",
         "tests/ci_lab/test_contract.py::test_the_worker_command_runs_the_service_and_keeps_the_self_test",
         "tests/ci_lab/test_executors.py::test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_and_grader_trees",
@@ -13565,7 +13655,7 @@
       "id": "events-retirement-stops-the-execution",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-idle-mismatch-retire",
-      "behaviour": "When the tick retires a hub admitted agent whose hive recorded its start, for an account mismatch in the observe verify step, or for idling, a revoked account, repeated content refusals or a stuck provider error in the agents reap step, the hub sends that hive the execution stop for its started execution once the store took the drop, naming the retirement reason, so the hive spoke ends the execution through its exited event. A refused drop sends no stop for an agent the runtime reached, and a legacy agent with no recorded start sends none. The hive's exit for a retired agent still releases its launch slot and settles the spoke claim as exited without a second refund. When the runtime cannot reach a hub admitted agent retired for an account mismatch or idling, the stop the hive took retires it instead; that stop goes out before the drop, so the agent stays seated with its execution stopped when the store refuses the drop. A declared wait or typed input holds an idle hub admitted agent seated with its claim and sends no stop.",
+      "behaviour": "On a controller bus, when the tick retires a hub admitted agent whose hive recorded its start, for an account mismatch in the observe verify step, or for idling, a revoked account, repeated content refusals or a stuck provider error in the agents reap step, the hub sends that hive the execution stop for its started execution once the store took the drop, naming the retirement reason, so the hive spoke ends the execution through its exited event. A refused drop sends no stop for an agent the runtime reached, and a legacy agent with no recorded start sends none. The hive's exit for a retired agent still releases its launch slot and settles the spoke claim as exited without a second refund. When the runtime cannot reach a hub admitted agent retired for an account mismatch or idling, the stop the hive took retires it instead; that stop goes out before the drop, so the agent stays seated with its execution stopped when the store refuses the drop. A declared wait or typed input holds an idle hub admitted agent seated with its claim and sends no stop.",
       "seam": "observe verify and the agents reap watch retiring an events owned agent through execution_stop.stop",
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_swarm_retirement_sends_the_stop_to_the_hive_that_started_the_agent",
@@ -13586,7 +13676,7 @@
       "id": "events-ended-agent-stopped",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-finished-not-retired",
-      "behaviour": "When the agents reap step judges a hub admitted agent whose hive recorded its start and whose work ended, because the agent is finished or its task is done, blocked, handed off or released, it sends that hive the execution stop for the started execution with the reason ended in the same pass, whether or not its pane is live, and reports one action naming the agent. While the spoke claim still holds that launch, the tick neither retires the agent through its own runtime nor drops it: the hive spoke reaps the execution and reports its exit, and the hub lifecycle then removes the agent from the swarm, releases its launch slot and settles the spoke claim as exited. A pass inside the bus dedupe window sends no second stop and reports nothing; a stop the bus refused is reported and sent again on the next pass.",
+      "behaviour": "On a controller bus, when the agents reap step judges a hub admitted agent whose hive recorded its start and whose work ended, because the agent is finished or its task is done, blocked, handed off or released, it sends that hive the execution stop for the started execution with the reason ended in the same pass, whether or not its pane is live, and reports one action naming the agent. While the spoke claim still holds that launch, the tick neither retires the agent through its own runtime nor drops it: the hive spoke reaps the execution and reports its exit, and the hub lifecycle then removes the agent from the swarm, releases its launch slot and settles the spoke claim as exited. A pass inside the bus dedupe window sends no second stop and reports nothing; a stop the bus refused is reported and sent again on the next pass.",
       "seam": "the agents reap step judging an ended hub admitted agent through reconciler.stop_admitted, then execution_stop.Stopper and the hub lifecycle on the hive exit",
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_an_admitted_agent_whose_work_ended_gets_the_stop_from_its_hive_in_one_reap_pass",
@@ -13619,7 +13709,7 @@
       "id": "events-refused-stop-resent",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-refused-stop-retry",
-      "behaviour": "A hive execution stop the bus refused waits in the swarm's pending stops under its execution with the agent and its retirement reason, and the agents reap step sends it again at the start of every pass, one action per stop sent again, until the bus takes it or the execution already ended, which clears it. The first stop the bus refuses again ends that pass's resends and leaves the rest for the next pass. Only the stop of an execution the swarm dropped is sent again; a pending stop for an execution the swarm still seats is discarded, since the next judgement of that agent sends afresh. A refused stop for an agent with no execution is not kept, since no started execution exists for it to reach. On the memory bus, where no hive records a start, no pending stop is sent again.",
+      "behaviour": "On a controller bus, a hive execution stop the bus refused waits in the swarm's pending stops under its execution with the agent and its retirement reason, and the agents reap step sends it again at the start of every pass, one action per stop sent again, until the bus takes it or the execution already ended, which clears it. The first stop the bus refuses again ends that pass's resends and leaves the rest for the next pass. Only the stop of an execution the swarm dropped is sent again; a pending stop for an execution the swarm still seats is discarded, since the next judgement of that agent sends afresh. A refused stop for an agent with no execution is not kept, since no started execution exists for it to reach. On the memory bus, where no hive records a start, no pending stop is sent again.",
       "seam": "reconciler.stop_dropped recording a refused stop and reconciler.retry_stops sending it again from the agents reap step",
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_stop_the_bus_refused_is_sent_again_on_each_reap_pass_until_the_bus_takes_it",
@@ -14203,6 +14293,23 @@
       "tests": [
         "tests/test_ci_charts_grader.py::test_the_bumped_copy_of_a_read_only_chart_carries_the_probe_version",
         "tests/test_ci_charts_grader.py::test_the_pod_template_grader_renders_a_read_only_tree_and_leaves_no_scratch_behind"
+      ]
+    },
+    {
+      "id": "lab-static-baseline-gate-own-tree",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "A CI lab static gate whose step passes --baseline-commit runs with its working directory in a private writable tree of the head, cut for the lease's head and base and dropped when the gate ends or raises, because Semgrep resets its working tree to the baseline commit and back whenever the current scan has a finding. Every other static gate runs in the shared tree of the head, which the worker seals read only and which the units of one head read at once. On 24 November the gate that bounds new test waits ran in that sealed tree, its reset was refused and the lab posted a red semgrep check on a head whose Semgrep jobs passed in Actions.",
+      "seam": "scripts.ci_lab.static_gates.discover over a workflow text, scripts.ci_lab.executors.static over fake worktrees and a recorded gate run, and scripts.ci_lab.worktrees.Worktrees.own over a real git store",
+      "rules": [
+        "lab-static-gate-runs-baseline-scan-in-shared-tree"
+      ],
+      "tests": [
+        "tests/ci_lab/test_static_gates.py::test_a_gate_rewrites_its_tree_exactly_when_its_step_passes_a_baseline_commit",
+        "tests/ci_lab/test_static_gates.py::test_the_real_workflow_s_only_gates_that_rewrite_their_tree_are_its_two_baseline_scans",
+        "tests/ci_lab/test_executors.py::test_static_runs_only_a_gate_that_rewrites_its_tree_in_a_private_tree_of_the_head_and_drops_it",
+        "tests/ci_lab/test_executors.py::test_static_drops_the_private_tree_of_a_gate_that_raises",
+        "tests/ci_lab/test_worktrees.py::test_an_own_copy_takes_a_hard_reset_to_its_base_and_back_while_the_leased_tree_stays_sealed"
       ]
     },
     {
@@ -15335,6 +15442,16 @@
       ]
     },
     {
+      "id": "mutation-stats-lookup-digests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2728",
+      "behaviour": "One mutation stats cache lookup hashes each input file once and reuses that digest for every cached record that lists the file, so checking records that share most of their inputs costs one hash per file instead of one per file per record, while the next lookup hashes the files again, so a changed input still sends its records back to collection.",
+      "seam": "scripts.ci_mutation.stats_cache.collect_cached_stats and scripts.ci_mutation.stats_dependencies.StoredStats.load",
+      "tests": [
+        "tests/test_ci_mutation_stats_cache.py::test_one_stats_lookup_hashes_each_input_file_once_across_its_records"
+      ]
+    },
+    {
       "id": "mutation-stats-flake-ledger",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stats-flake-ledger",
@@ -16005,6 +16122,18 @@
       ]
     },
     {
+      "id": "member-tick-stop-forwarded-by-hub",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2698",
+      "behaviour": "A member bind tick parks execution stops for ended work, idle or mismatched agents and refused, revoked or stuck launches with agent identity and reason in swarm pending stops, without publishing on the member bus. The guarded hub reconciler delivers parked stops using its injected controller bus, including a stop for a seated execution. Failed delivery stays pending for the next due poll without blocking lifecycle settlement in other swarms; successful delivery clears it without duplication. A lease lost between sends leaves the remaining parked stops pending for the next due poll.",
+      "seam": "agents._reap to swarm pending stops to Reconciler.poll and the owning hive stop stream",
+      "tests": [
+        "tests/swarm/test_events_claim_refunds.py::test_a_member_bind_tick_parks_its_stop_until_the_hub_sends_it",
+        "tests/hub/test_reconciler.py::test_a_refused_stop_does_not_hold_other_swarm_lifecycle_reconciliation",
+        "tests/hub/test_reconciler.py::test_a_lease_lost_mid_resend_leaves_the_other_parked_stops_for_the_next_poll"
+      ]
+    },
+    {
       "id": "ledger-orders-panel",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-orders-page-panel",
@@ -16022,6 +16151,17 @@
         "tests/swarm_ledger/test_page_events.py::test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410",
         "tests/swarm_ledger/test_page_modules.py::test_the_source_view_for_text_checks_covers_every_module",
         "tests/swarm_ledger/test_single_page.py::test_approved_columns_overview_tabs_and_stats"
+      ]
+    },
+    {
+      "id": "lab-budget-docs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2714",
+      "behaviour": "The CI lab reference states the day's core budget the way scripts.ci_lab.budget reads it: each shed threshold of the runtime configuration example is the share of the budget spent at which that class sheds together with every less urgent class, in the shed order backfill, promotion, queue, at the budget left the example prose names; the threshold rule and the CILabBudgetShedding alert both measure a shed fraction against the budget spent, never the budget left; a docs copy with the thresholds written as shares left, swapped between classes or read against the budget left fails the check.",
+      "seam": "The CI lab reference page's runtime configuration example, its threshold rule and the CILabBudgetShedding alert row, read against scripts.ci_lab.delivery.runtime, scripts.ci_lab.budget.policy and scripts.ci_lab.budget.assess",
+      "tests": [
+        "tests/ci_lab/test_budget_docs.py::test_the_published_lab_budget_docs_match_the_shed_thresholds_in_code",
+        "tests/ci_lab/test_budget_docs.py::test_a_docs_copy_with_the_thresholds_swapped_fails_the_check"
       ]
     }
   ],

@@ -21,9 +21,13 @@ __all__ = [
     "MERGE_PATCH",
     "SERVICE_HOST",
     "TIMEOUT_S",
+    "Images",
     "KubePods",
+    "PodImages",
     "Pods",
+    "pod_images",
     "unmanaged",
+    "unread",
     "worker_pods",
 ]
 
@@ -41,6 +45,22 @@ Pods = Callable[[str, bool], bool]
 def unmanaged(pod: str, busy: bool) -> bool:
     """The pods port outside a cluster, where no worker runs as a pod: patch nothing and answer False."""
     return False
+
+
+@dataclass(frozen=True)
+class Images:
+    """A pod's declared spec image and the digest its container actually runs."""
+
+    declared: str
+    running: str
+
+
+PodImages = Callable[[str], Images | None]
+
+
+def unread(pod: str) -> Images | None:
+    """The pod images port outside a cluster, where no worker runs as a pod: read nothing."""
+    return None
 
 
 @dataclass(frozen=True)
@@ -66,6 +86,32 @@ class KubePods:
                 return True
         except (OSError, http.client.HTTPException):
             return False
+
+    def images(self, pod: str) -> Images | None:
+        """Read the pod's declared and running image over the Kubernetes API with the service account token; None on
+        a failed read, a reply that is not the expected shape, no container status yet, or a running image with no
+        digest."""
+        url = f"{self.server}/api/v1/namespaces/{self.namespace}/pods/{quote_plus(pod)}"
+        request = urllib.request.Request(url)
+        try:
+            request.add_header(AUTHORIZATION, f"Bearer {self.token.read_text().strip()}")
+            with self.opener(request, timeout=TIMEOUT_S, context=self.context) as response:
+                body = json.loads(response.read())
+        except (OSError, http.client.HTTPException, ValueError):
+            return None
+        try:
+            declared = body["spec"]["containers"][0]["image"]
+            running = body["status"]["containerStatuses"][0]["imageID"]
+        except (LookupError, TypeError):
+            return None
+        if not isinstance(declared, str) or not isinstance(running, str) or "@" not in running:
+            return None
+        return Images(declared, running)
+
+
+def pod_images(pods: Pods) -> PodImages:
+    """Return the pod image reader bound to a KubePods port, else the unmanaged reader."""
+    return pods.images if isinstance(pods, KubePods) else unread
 
 
 def worker_pods(environ: Mapping[str, str], account: Path = ACCOUNT) -> Pods:

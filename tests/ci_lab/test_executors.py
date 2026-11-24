@@ -333,6 +333,78 @@ def test_static_releases_every_tree_it_leased_when_a_lease_or_the_gate_raises(
     assert static_trees.calls == [("lease", "h1"), ("release", "h1")]
 
 
+BASELINE_WORKFLOW = """
+on: pull_request
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: New findings
+        run: semgrep scan --error --config rules.yml --baseline-commit "$BASE" tests
+      - name: Every finding
+        run: semgrep scan --error --config rules.yml tests
+"""
+LEASED = [("lease", "h1"), ("lease", "b1"), ("lease", "g1")]
+RELEASED = [("release", "h1"), ("release", "b1"), ("release", "g1")]
+
+
+class PrivateWorktrees(FakeWorktrees):
+    def own(self, head: str, base: str) -> tuple[Path, bool]:
+        super().own(head, base)
+        return self.trees[f"own {head}"], False
+
+
+@pytest.fixture
+def baseline_trees(tmp_path: Path) -> PrivateWorktrees:
+    head = folder(tmp_path, "head", {LOCK: "lock-h"})
+    private = folder(tmp_path, "private", {LOCK: "lock-h"})
+    base = folder(tmp_path, "base", {LOCK: "lock-b"})
+    files = {".github/workflows/test.yml": BASELINE_WORKFLOW, ".github/input-keys.json": "{}", LOCK: "lock-g"}
+    grader = folder(tmp_path, "grader", files)
+    return PrivateWorktrees({"h1": head, "own h1": private, "b1": base, "g1": grader})
+
+
+@pytest.mark.feature("lab-static-baseline-gate-own-tree")
+@pytest.mark.parametrize(("name", "tree"), [("semgrep/new-findings", "own h1"), ("semgrep/every-finding", "h1")])
+def test_static_runs_only_a_gate_that_rewrites_its_tree_in_a_private_tree_of_the_head_and_drops_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    venv: Recorder,
+    baseline_trees: PrivateWorktrees,
+    name: str,
+    tree: str,
+) -> None:
+    gates = {found.name: found for found in static_gates.discover(BASELINE_WORKFLOW)}
+    summary = folder(tmp_path, "run", {"summary.md": "ok\n"}) / "summary.md"
+    ran = Recorder(run_static.Result(name, 0, tmp_path / "log.txt", summary))
+    monkeypatch.setattr(executors.run_static, "run", ran)
+    pod = pod_of(tmp_path, baseline_trees)
+
+    finished = executors.static(pod, lease("static", "k", (name,)))
+
+    trees = baseline_trees.trees
+    settings = run_static.Settings(pod.runs, tmp_path / "venv", pod.ports, WHITELIST, 30.0, LEASE_CONTEXT)
+    assert ran.calls == [(gates[name], trees[tree], trees["b1"], trees["g1"], settings)]
+    assert [call[1] for call in venv.calls] == [trees["h1"]]
+    assert finished.outcome == PASSED
+    private = [("own", "h1", "b1"), ("drop", trees["own h1"])] if tree == "own h1" else []
+    assert baseline_trees.calls == [*LEASED, *private, *RELEASED]
+
+
+@pytest.mark.feature("lab-static-baseline-gate-own-tree")
+def test_static_drops_the_private_tree_of_a_gate_that_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, baseline_trees: PrivateWorktrees
+) -> None:
+    monkeypatch.setattr(executors.run_static, "run", Recorder(RuntimeError("gate")))
+    pod = pod_of(tmp_path, baseline_trees)
+
+    with pytest.raises(RuntimeError, match="^gate$"):
+        executors.static(pod, lease("static", "k", ("semgrep/new-findings",)))
+
+    private = baseline_trees.trees["own h1"]
+    assert baseline_trees.calls == [*LEASED, ("own", "h1", "b1"), ("drop", private), *RELEASED]
+
+
 @pytest.fixture
 def bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     folder = tmp_path / "bin"
@@ -1078,6 +1150,34 @@ def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
     assert capsys.readouterr().err == (
         "usage: agentihooks ci-lab-worker [-h]\nagentihooks ci-lab-worker: error: unrecognized arguments: --unknown\n"
     )
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_main_empties_the_work_root_before_it_builds_its_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class Service:
+        def run(self) -> list[Lease]:
+            handlers[signal.SIGTERM](signal.SIGTERM, None)
+            return []
+
+        def stop(self) -> None:
+            pass
+
+    handlers: dict[int, Callable[[int, object], None]] = {}
+    monkeypatch.setattr(executors.worker, "build", lambda *args: Service())
+    monkeypatch.setattr(executors.signal, "signal", lambda number, handler: handlers.__setitem__(number, handler))
+    monkeypatch.setattr(executors.contract, "METRICS_PORT", 0)
+    environ = environ_of(tmp_path)
+    stale = tmp_path / "work" / "trees" / "old-head" / "left"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("stale")
+
+    assert executors.main([], environ) == 0
+
+    assert not stale.exists()
+    assert (tmp_path / "work" / "runs").is_dir()
+    assert (tmp_path / "work" / "venvs").is_dir()
 
 
 @pytest.mark.feature("lab-worker-metrics")
