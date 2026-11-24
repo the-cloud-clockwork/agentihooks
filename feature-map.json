@@ -1387,6 +1387,19 @@
       ]
     },
     {
+      "id": "hub-controller-memory-caches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-controller-ledger-cache-memory",
+      "behaviour": "The swarm hub keeps its ledger export and entry copy on bounded memory storage, and the controller keeps its tick view on bounded memory storage while retaining its existing memory home and process memory budget.",
+      "seam": "hub and controller cache volumes, mounts, memory resources and the paths computed by their cache writers",
+      "tests": [
+        "tests/test_swarm_chart_memory_caches.py::test_hub_ledger_caches_use_bounded_memory",
+        "tests/test_swarm_chart_memory_caches.py::test_controller_tick_view_uses_bounded_memory",
+        "tests/test_swarm_chart_memory_caches.py::test_cache_memory_preserves_the_process_budget",
+        "tests/test_swarm_chart_memory_caches.py::test_controller_keeps_its_existing_memory_home"
+      ]
+    },
+    {
       "id": "hub-ready-only-when-serving",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2600",
@@ -1788,6 +1801,21 @@
         "tests/hub/test_admission_gates.py::test_an_admission_hands_the_continuation_the_rows_on_its_task_branch",
         "tests/hub/test_admission_gates.py::test_an_admission_reads_a_plan_task_steering_through_its_readiness_source",
         "tests/swarm/test_admission_view.py::test_the_admits_gate_needs_a_running_swarm_and_every_wait_clear"
+      ]
+    },
+    {
+      "id": "hub-admission-running-fields",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-admit-view-fields",
+      "behaviour": "A hub events admission reads the claimed and pull request rows, the rows its task names and the open rows pinned to a hive with a field selection of only the keys their readers take, so the ledger task selection answers under its reply cap however large those rows grow, the root waiting count stays the same, and a running row the task names keeps the title, description, phase, kind and apply time its claim seeds read.",
+      "seam": "admission_view.Narrow task and waiting over the ledger API tasks selection, through the narrow ledger test reads that run the real selection",
+      "tests": [
+        "tests/swarm/test_admission_view.py::test_running_rows_over_the_reply_cap_still_give_the_admission_its_view",
+        "tests/swarm/test_admission_view.py::test_a_running_group_member_keeps_what_its_readers_take",
+        "tests/swarm/test_admission_view.py::test_pinned_open_rows_over_the_reply_cap_keep_the_same_root_waiting_count"
+      ],
+      "rules": [
+        "admission-view-running-full-row"
       ]
     },
     {
@@ -4356,7 +4384,7 @@
       "origin": "regression",
       "ordered_at": "2026-11-18",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-venv-editable-guard",
-      "behaviour": "The venv guard runs on every Bash call and refuses an editable pip install, run as uv pip install, a pip program or python -m pip with -e, --editable or --editable=, whose target is the venv the hooks run from and whose source is not inside a primary git checkout: a linked worktree, whose git dir differs from its common dir, or any source outside a checkout, a VCS URL included. The target is the --python or -p value, else the venv holding the program's own path, else the session's VIRTUAL_ENV, else for uv the nearest .venv; a target an unexpanded variable hides, or one the command picks by assigning VIRTUAL_ENV or UV_PYTHON, counts as the hooks' venv. An install from the primary checkout, or into another venv the command names such as a worktree's own, passes. The venv guard runs last in the shell guards' shared try block, so a crash in it warns branch_guard check failed only after the branch, commit and protection checks have run.",
+      "behaviour": "The venv guard runs on every Bash call and refuses an editable pip install, run as uv pip install, a pip program or python -m pip with -e, --editable or --editable=, whose target is the venv the hooks run from and whose source is not inside a primary git checkout: a linked worktree, whose git dir differs from its common dir, or any source outside a checkout, a VCS URL included. The target is the --python or -p value, else the venv holding the program's own path, else the session's VIRTUAL_ENV, else for uv the nearest .venv; a target an unexpanded variable hides, or one the command picks by assigning VIRTUAL_ENV or UV_PYTHON, counts as the hooks' venv. An install from the primary checkout, or into another venv the command names such as a worktree's own, passes. The venv guard runs last with independent failure handling, so its crash warns venv_guard check failed after the branch, commit and protection checks have run.",
       "seam": "hooks.context.venv_guard.check_venv_guard, run on every Bash call by hooks.hook_manager._check_shell_guards",
       "rules": [
         "shell-guards-skip-venv-guard"
@@ -4369,6 +4397,22 @@
         "tests/context/test_venv_guard.py::test_an_install_from_a_primary_checkout_whose_path_holds_a_space_passes",
         "tests/context/test_venv_guard.py::test_the_shell_guards_refuse_a_worktree_editable_install_into_the_hooks_venv",
         "tests/context/test_venv_guard.py::test_the_shell_guards_warn_when_the_venv_guard_crashes"
+      ]
+    },
+    {
+      "id": "shell-guard-failures-are-isolated",
+      "origin": "regression",
+      "ordered_at": "2026-11-19",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2674",
+      "behaviour": "Each Bash branch, commit on main, protection and venv guard handles its own unexpected failure, logs and flushes a warning naming itself, and lets every remaining guard run. An intentional BlockAction or protection refusal still stops the pipeline.",
+      "seam": "hooks.hook_manager.on_pre_tool_use through hooks.hook_manager._check_shell_guards",
+      "rules": [
+        "shell-guards-share-error-handler"
+      ],
+      "tests": [
+        "tests/context/test_shell_guard_failures.py::test_pretool_runs_every_shell_guard_and_names_only_the_crashed_guard",
+        "tests/context/test_shell_guard_failures.py::test_pretool_preserves_each_shell_guard_denial",
+        "tests/context/test_shell_guard_failures.py::test_pretool_still_blocks_a_protection_refusal"
       ]
     },
     {
