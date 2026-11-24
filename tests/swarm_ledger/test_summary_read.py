@@ -1,6 +1,7 @@
 """The ledger page's first reads answer from narrow reads, never from the whole ledger page view."""
 
 import copy
+from typing import Any, cast
 
 import pytest
 
@@ -98,10 +99,8 @@ def test_the_summary_derives_what_the_page_view_derives() -> None:
     built = summary.build(parts, state["tasks"], ("", False), ledger_server.PAGE_LIMITS)
     assert built["marks"] == view["marks"]
     assert built["phase_status"] == view["phase_status"]
-    counted = {
-        name: {key: entry[key] for key in summary.CLOSED_KEPT if key in entry}
-        for name, entry in view["_meta"].get("closed", {}).items()
-    }
+    hidden = cast(dict[str, dict[str, Any]], view["_meta"].get("closed", {}))
+    counted = {name: {key: entry[key] for key in summary.CLOSED_KEPT if key in entry} for name, entry in hidden.items()}
     assert built["_meta"]["closed"] == counted
     assert built["_meta"]["limits"] == view["_meta"]["limits"]
 

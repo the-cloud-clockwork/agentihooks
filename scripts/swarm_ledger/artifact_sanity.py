@@ -6,7 +6,7 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 SHELL = Path(__file__).resolve().parent / "shell.html"
@@ -176,7 +176,7 @@ def _markdown(measure, expected):
     return failures
 
 
-def ledger_doc(files: list[Path]) -> dict:
+def ledger_doc(files: list[Path]) -> dict[str, Any]:
     rows = [
         {"id": f"art-{n}", "title": path.name, "file": {"id": path.name, "type": TYPES[path.suffix]}}
         for n, path in enumerate(files)
@@ -207,12 +207,12 @@ def _asset(route, served):
     return route.fulfill(body=path.read_text(), content_type=f"{kind}; charset=utf-8")
 
 
-def _events(route, doc):
+def _events(route: Any, doc: dict[str, Any]) -> None:
     data = json.dumps({"rev": doc["_meta"]["rev"], "swarm": None})
     route.fulfill(body=f"id: c0\nevent: open\ndata: {data}\n\n", content_type="text/event-stream")
 
 
-def _summary(route, doc):
+def _summary(route: Any, doc: dict[str, Any]) -> None:
     from scripts.swarm_ledger.api import summary
 
     data = {key: value for key, value in doc.items() if key not in summary.PAGED}
@@ -220,18 +220,22 @@ def _summary(route, doc):
     route.fulfill(json={"data": data, "revision": "r"})
 
 
-def _open_page(route, doc):
-    name = urlsplit(route.request.url).path.rsplit("/", 1)[1]
-    rows = [{**row, "position": at} for at, row in enumerate(doc.get(name) or []) if isinstance(row, dict)]
+def _open_page(route: Any, doc: dict[str, Any]) -> None:
+    url: str = cast(str, route.request.url)
+    name = urlsplit(url).path.rsplit("/", 1)[1]
+    rows: list[dict[str, Any]] = [
+        {**row, "position": at} for at, row in enumerate(doc.get(name) or []) if isinstance(row, dict)
+    ]
     route.fulfill(json={"data": rows, "revision": "r", "total": len(rows), "next_offset": None})
 
 
-def _swarm(route):
+def _swarm(route: Any) -> None:
     route.fulfill(json={"data": {}, "collections": []})
 
 
-def _feed(route, doc):
-    parts = urlsplit(route.request.url)
+def _feed(route: Any, doc: dict[str, Any]) -> None:
+    url: str = cast(str, route.request.url)
+    parts = urlsplit(url)
     if parts.path.endswith("/events"):
         return _events(route, doc)
     if parts.path.endswith("/summary"):

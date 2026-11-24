@@ -96,7 +96,7 @@ class Hub:
         with self.changed:
             return [slug for slug, channel in self.channels.items() if channel.subscribers]
 
-    def resource(self, slug, name):
+    def resource(self, slug: str, name: str) -> Any:
         with self.changed:
             channel = self.channels.get(slug)
             return channel.resources.get(name) if channel else None

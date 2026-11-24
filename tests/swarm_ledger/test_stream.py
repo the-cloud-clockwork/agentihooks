@@ -5,6 +5,7 @@ import threading
 import time
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -110,7 +111,7 @@ def test_a_stream_opens_without_a_ledger_then_announces_it_and_sends_patches(liv
     server.repository.apply_ops(SLUG, ops=[comment(1)])
     _, born, cursor2 = next_of(reader, {"open"})
     assert cursor2 != cursor
-    ledger = server.HUB.resource(SLUG, "ledger")
+    ledger: Any = server.HUB.resource(SLUG, "ledger")
     assert born == {"rev": ledger["_meta"]["rev"]}
     assert ledger["notes"][-1]["text"] == "note 1"
     server.repository.apply_ops(SLUG, ops=[comment(2)])
@@ -147,7 +148,7 @@ def test_a_reconnect_replays_the_changes_it_missed_and_nothing_else(live):
     second = next_of(reader, {"ledger", "open"})
     assert [first[0], second[0]] == ["open", "ledger"]
     assert first[1]["rev"] == baseline["_meta"]["rev"]
-    ledger = apply(baseline, second[1]["patch"])
+    ledger: Any = apply(baseline, second[1]["patch"])
     assert [n["text"] for n in ledger["notes"]][-2:] == ["note 2", "note 3"]
     assert next_of(reader, {"ledger", "heartbeat"})[0] == "heartbeat"
     conn.close()

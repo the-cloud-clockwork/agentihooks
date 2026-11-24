@@ -117,11 +117,16 @@ export function closedLeftIn(name, key) {
 
 function keepDropped(previous, next) {
   for (const name of Object.keys(pulled)) {
-    if (!((next.closed || {})[name] || {}).ids) continue;
-    const gone = hiddenDone(next, name);
-    const have = new Set([...next[name], ...(older[name] || [])].map((i) => i.id));
-    const dropped = previous[name].filter((i) => gone.has(i.id) && !have.has(i.id)).reverse();
-    older[name] = [...dropped, ...older[name]].filter((i) => gone.has(i.id));
+    const closed = (next.closed || {})[name] || {};
+    if (closed.ids) {
+      const gone = hiddenDone(next, name);
+      const have = new Set([...next[name], ...(older[name] || [])].map((i) => i.id));
+      const dropped = previous[name].filter((i) => gone.has(i.id) && !have.has(i.id)).reverse();
+      older[name] = [...dropped, ...older[name]].filter((i) => gone.has(i.id));
+    } else {
+      const open = new Set(next[name].map((i) => i.id));
+      older[name] = (older[name] || []).filter((i) => !i.deleted && !open.has(i.id) && closedRow(name, i));
+    }
     pulled[name] = older[name].length;
   }
   for (const name of new Set([...touchedPaged(seenRev), ...unsettled])) refreshClosed(name).catch(() => null);

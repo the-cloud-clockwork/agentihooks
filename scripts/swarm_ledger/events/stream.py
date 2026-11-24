@@ -2,7 +2,6 @@
 
 import json
 from collections.abc import Callable
-from http.server import BaseHTTPRequestHandler
 from typing import Any
 
 from .hub import Closed, Expired, Hub
@@ -38,7 +37,7 @@ def parse(lines):
             cursor = value
 
 
-def serve(handler: BaseHTTPRequestHandler, hub: Hub, slug: str, load: Callable[[], dict[str, Any]]) -> None:
+def serve(handler: Any, hub: Hub, slug: str, load: Callable[[], dict[str, Any]]) -> None:
     """Answer one events request until the client goes away or the hub drains; raises Expired before any byte is
     sent."""
     seq, first = hub.open(slug, load, handler.headers.get("Last-Event-ID"))

@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger.events import patch
@@ -33,7 +34,8 @@ def test_a_write_copies_only_changed_parts_and_keeps_published_state_isolated(mo
     assert len(events) == 1
     update = events[0][3]["patch"]
     assert "tasks" not in update["o"]
-    assert patch.apply(before, update)["notes"] == [{"id": "n1", "text": "new note"}]
+    applied: Any = patch.apply(before, update)
+    assert applied["notes"] == [{"id": "n1", "text": "new note"}]
     state["notes"][0]["text"] = "caller mutation"
     state["tasks"][0]["title"] = "caller mutation"
     assert hub.resource("s", "ledger")["notes"] == [{"id": "n1", "text": "new note"}]

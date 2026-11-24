@@ -139,7 +139,7 @@ def test_serve_raises_expired_before_sending_anything():
     hub.open(SLUG, lambda: {"ledger": ledger(1)})
     handler = Handler(Sink(1), {"Last-Event-ID": "gone.0"})
     with pytest.raises(Expired):
-        stream.serve(handler, hub, SLUG, None)
+        stream.serve(handler, hub, SLUG, lambda: {})
     assert handler.sent == [] and handler.wfile.getvalue() == b""
     assert hub.channels[SLUG].subscribers == 1
 

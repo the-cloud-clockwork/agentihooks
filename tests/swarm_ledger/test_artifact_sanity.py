@@ -4,6 +4,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -257,7 +258,7 @@ class FakeBrowser:
         return self.tab
 
 
-def answered(handler, url=""):
+def answered(handler: Any, url: str = "") -> Any:
     route = FakeRoute(url)
     handler(route)
     return route.answer
