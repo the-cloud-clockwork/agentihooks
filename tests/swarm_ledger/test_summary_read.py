@@ -77,15 +77,17 @@ def test_an_open_first_page_answers_without_building_the_whole_page_view(
     refuse_whole_view(monkeypatch)
     status, reply = request(live, "GET", "tasks?state=open&offset=0&limit=2")
     assert status == 200
-    assert [row["id"] for row in reply["data"]] == ["t-pr", "t-claimed"]
-    assert (reply["total"], reply["next_offset"]) == (3, 2)
+    assert [(row["id"], row["position"]) for row in reply["data"]] == [("t-done", 0), ("t-pr", 3)]
+    assert (reply["total"], reply["next_offset"]) == (4, 2)
     status, reply = request(live, "GET", "tasks?state=open&offset=2&limit=2")
-    assert [row["id"] for row in reply["data"]] == ["t-open"]
-    assert reply["data"][0]["comments_count"] == 1 and "comments" not in reply["data"][0]
+    assert [row["id"] for row in reply["data"]] == ["t-claimed", "t-open"]
+    assert reply["data"][1]["comments_count"] == 1 and "comments" not in reply["data"][1]
     assert reply["next_offset"] is None
     status, reply = request(live, "GET", "phases?state=open&offset=0&limit=5")
     assert status == 200
-    assert [row["id"] for row in reply["data"]] == ["p1"]
+    assert [row["id"] for row in reply["data"]] == ["p1", "p0"]
+    status, reply = request(live, "GET", "followups?state=open&limit=5&q=x")
+    assert status == 400
 
 
 @pytest.mark.feature("ledger-summary-read")

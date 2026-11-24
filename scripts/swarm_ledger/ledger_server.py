@@ -363,9 +363,25 @@ PAGE_LIMITS = {
 }
 
 
-def stream_resources(slug):
-    ledger = ledger_view(repository.get_document(slug), slug)
-    return {"ledger": ledger, "swarm": stream_swarm(slug, ledger)}
+def stream_resources(slug: str) -> dict:
+    return {"swarm": stream_swarm(slug, None)}
+
+
+SUMMARIES: dict[str, tuple[object, dict]] = {}
+
+
+def ledger_summary(slug: str) -> dict:
+    from scripts.swarm_ledger.api import summary, task_list
+
+    stored = task_list.rows(repository, slug)
+    held = SUMMARIES.get(slug)
+    if held is not None and held[0] is stored:
+        return held[1]
+    parts = repository.read(slug, *summary.READS)
+    built = summary.build(parts, stored[2], doctor_holds(slug), PAGE_LIMITS)
+    built["_meta"].update(page_version=served_version(), crew=ledger_gate.crew(parts.get("_meta") or {}))
+    SUMMARIES[slug] = (stored, built)
+    return built
 
 
 def workspace_tails(slug, task_id):
@@ -425,6 +441,7 @@ def api_services(hooks: WriteHooks | None = None) -> "Services":
         bin_ledger=writes.bin_ledger,
         workspace_tails=workspace_tails,
         stream_resources=stream_resources,
+        summary=ledger_summary,
         layout=ledger_layout.read,
         write_layout=writes.write_layout,
         write_gate=writes.write_gate,
@@ -457,15 +474,12 @@ def api_services(hooks: WriteHooks | None = None) -> "Services":
     )
 
 
-def sample_streams():
+def sample_streams() -> None:
     """Publish swarm status for every ledger a stream is open on."""
     HUB.evict()
     for slug in HUB.watched():
-        ledger = HUB.resource(slug, "ledger")
-        if ledger is None:
-            continue
         try:
-            HUB.publish(slug, "swarm", stream_swarm(slug, ledger))
+            HUB.publish(slug, "swarm", stream_swarm(slug, HUB.resource(slug, "ledger")))
         except Exception as exc:  # the seed watcher that calls this must outlive any one ledger's readers
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 

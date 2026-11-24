@@ -15,6 +15,10 @@ def ledger(rev, **fields):
     return {"tasks": [], **fields, "_meta": {"rev": rev}}
 
 
+def unloaded() -> dict[str, object]:
+    raise AssertionError("a cursor replay never loads the channel")
+
+
 def opened(hub, slug=SLUG, cursor=None, rev=1):
     return hub.open(slug, lambda: {"ledger": ledger(rev), "swarm": None, "workspaces": {}}, cursor)
 
@@ -37,11 +41,14 @@ def test_a_connect_without_a_cursor_opens_without_a_ledger_snapshot():
     channel = hub.channels[SLUG]
     assert seq == 0
     assert first == [(0, f"{channel.epoch}.0", "open", {"rev": None, "swarm": {"agents": []}})]
-    assert hub.publish(SLUG, "ledger", ledger(2, tasks=[{"id": "t0"}, {"id": "t1"}])) is False
+    assert hub.publish(SLUG, "ledger", ledger(2, tasks=[{"id": "t0"}, {"id": "t1"}]))
     assert hub.publish(SLUG, "ledger", ledger(3, tasks=[{"id": "t1", "state": "pr"}, {"id": "t2"}]))
     events = hub.wait(SLUG, seq, 0.01)
-    assert [(name, data["from"], data["rev"]) for _, _, name, data in events] == [("ledger", 2, 3)]
-    assert events[0][3]["rows"] == {"tasks": {"u": ["t1", "t2"], "gone": ["t0"]}}
+    assert [(name, data.get("from"), data["rev"]) for _, _, name, data in events] == [
+        ("open", None, 2),
+        ("ledger", 2, 3),
+    ]
+    assert events[1][3]["rows"] == {"tasks": {"u": ["t1", "t2"], "gone": ["t0"]}}
     _, again = hub.open(SLUG, lambda: {"swarm": None})
     assert [(name, data) for _, _, name, data in again] == [("open", {"rev": 3, "swarm": {"agents": []}})]
 
@@ -239,19 +246,19 @@ def test_a_reconnect_replays_exactly_the_events_after_its_cursor():
     for rev in (2, 3, 4):
         hub.publish(SLUG, "ledger", ledger(rev))
     cursor = hub.channels[SLUG].log[0][1]
-    seq, replay = hub.open(SLUG, None, cursor)
+    seq, replay = hub.open(SLUG, unloaded, cursor)
     assert seq == 1
     assert [data["rev"] for _, _, _, data in replay] == [3, 4]
     latest = hub.channels[SLUG].log[-1][1]
-    assert hub.open(SLUG, None, latest) == (3, [])
+    assert hub.open(SLUG, unloaded, latest) == (3, [])
 
 
 def test_a_cursor_from_the_snapshot_replays_everything_since():
     hub = Hub()
     _, first = opened(hub)
-    assert hub.open(SLUG, None, first[0][1]) == (0, [])
+    assert hub.open(SLUG, unloaded, first[0][1]) == (0, [])
     hub.publish(SLUG, "ledger", ledger(2))
-    _, replay = hub.open(SLUG, None, first[0][1])
+    _, replay = hub.open(SLUG, unloaded, first[0][1])
     assert [data["rev"] for _, _, _, data in replay] == [2]
 
 
@@ -261,9 +268,9 @@ def test_an_unreadable_cursor_is_expired(seq):
     opened(hub)
     hub.publish(SLUG, "ledger", ledger(2))
     with pytest.raises(Expired):
-        hub.open(SLUG, None, f"{hub.channels[SLUG].epoch}.{seq}")
+        hub.open(SLUG, unloaded, f"{hub.channels[SLUG].epoch}.{seq}")
     with pytest.raises(Expired):
-        hub.open(SLUG, None, f"{hub.channels[SLUG].epoch}{seq}")
+        hub.open(SLUG, unloaded, f"{hub.channels[SLUG].epoch}{seq}")
 
 
 def test_a_cursor_from_another_server_ledger_or_channel_life_is_expired():
@@ -273,26 +280,26 @@ def test_a_cursor_from_another_server_ledger_or_channel_life_is_expired():
     other = Hub()
     opened(other)
     with pytest.raises(Expired):
-        hub.open(SLUG, None, Hub.cursor(other.channels[SLUG], 0))
+        hub.open(SLUG, unloaded, Hub.cursor(other.channels[SLUG], 0))
     with pytest.raises(Expired):
-        hub.open(SLUG, None, Hub.cursor(hub.channels["other-2026-01-01"], 0))
+        hub.open(SLUG, unloaded, Hub.cursor(hub.channels["other-2026-01-01"], 0))
     with pytest.raises(Expired):
-        hub.open("never-2026-01-01", None, Hub.cursor(hub.channels[SLUG], 0))
+        hub.open("never-2026-01-01", unloaded, Hub.cursor(hub.channels[SLUG], 0))
     old = Hub.cursor(hub.channels[SLUG], 0)
     hub.close(SLUG)
     hub.evict(now=time.monotonic() + events_hub.IDLE_EVICT_S)
     with pytest.raises(Expired):
-        hub.open(SLUG, None, old)
+        hub.open(SLUG, unloaded, old)
     opened(hub)
     with pytest.raises(Expired):
-        hub.open(SLUG, None, old)
+        hub.open(SLUG, unloaded, old)
 
 
 def test_a_cursor_ahead_of_the_channel_is_expired():
     hub = Hub()
     opened(hub)
     with pytest.raises(Expired):
-        hub.open(SLUG, None, Hub.cursor(hub.channels[SLUG], 1))
+        hub.open(SLUG, unloaded, Hub.cursor(hub.channels[SLUG], 1))
 
 
 def test_a_cursor_older_than_retention_is_expired_and_the_oldest_kept_one_replays():
@@ -304,10 +311,10 @@ def test_a_cursor_older_than_retention_is_expired_and_the_oldest_kept_one_replay
     assert [at for at, *_ in channel.log] == [10, 11, 12]
     for old in (8, 1):
         with pytest.raises(Expired):
-            hub.open(SLUG, None, Hub.cursor(channel, old))
-    seq, replay = hub.open(SLUG, None, Hub.cursor(channel, 9))
+            hub.open(SLUG, unloaded, Hub.cursor(channel, old))
+    seq, replay = hub.open(SLUG, unloaded, Hub.cursor(channel, 9))
     assert seq == 9 and [at for at, *_ in replay] == [10, 11, 12]
-    assert hub.open(SLUG, None, Hub.cursor(channel, 11)) == (11, [channel.log[-1]])
+    assert hub.open(SLUG, unloaded, Hub.cursor(channel, 11)) == (11, [channel.log[-1]])
 
 
 @pytest.mark.wall_clock

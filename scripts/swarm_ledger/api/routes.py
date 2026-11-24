@@ -15,7 +15,7 @@ from scripts.swarm_ledger import ledger_closed, models, ports, request_metrics
 from ..repository import live_rows
 from ..repository.fragments import Fragment, exported, members
 from ..repository.rows import children, encode
-from . import resources, schemas, task_list
+from . import resources, schemas, summary, task_list
 from .errors import APIError
 from .services import Services
 
@@ -23,6 +23,7 @@ WORKSPACE_RE = re.compile(r"tasks/[\w.-]+/workspace")
 FILE_RE = re.compile(r"files/(media|artifacts)/[\w.-]+")
 CONTEXT_RE = re.compile(r"swarm/context/[\w.-]+/[\w.:-]+")
 ORDERS_TOO_LARGE = "The open orders pass the reply limit: read the tasks of one order with focus/<item>"
+OPEN_ONLY = "State open pages the open rows of a paged section with offset and limit"
 
 
 def body(handler: object, services: Services) -> dict:
@@ -66,8 +67,11 @@ def dispatch(handler: object, services: Services) -> dict | str | None:
 
 
 def ledger_get(handler: object, services: Services, slug: str, path: str) -> dict | None:
-    query = pagination(handler.path)
-    if ("state" in query or "offset" in query or "q" in query) and path not in ledger_closed.COLLECTIONS:
+    query: dict[str, Any] = pagination(handler.path)
+    if query.get("state") == "open":
+        if path not in summary.PAGED or query.keys() & {"q", "cursor"}:
+            raise APIError(400, "schema_invalid", OPEN_ONLY)
+    elif ("state" in query or "offset" in query or "q" in query) and path not in ledger_closed.COLLECTIONS:
         raise APIError(400, "schema_invalid", resources.DONE_ONLY)
     if "targets" in query and (path != "tasks" or query.keys() & {"state", "offset", "q", "cursor", "limit"}):
         raise APIError(400, "schema_invalid", "Only a plain tasks read takes targets")
@@ -87,13 +91,22 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
     return ledger_read(services, slug, path, query)
 
 
-def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
+def ledger_read(services: Services, slug: str, path: str, query: dict[str, Any]) -> dict[str, Any]:
     if path.split("/")[0] == "hierarchy":
         return resources.hierarchy_read(services.repository, slug, path, query)
     if path.split("/")[0] == "focus":
         return focus_read(services, slug, path)
     if path == "orders":
         return orders_read(services, slug)
+    if path == "summary":
+        data = services.ledger.summary(slug)
+        return resources.bounded({"data": data, "revision": resources.revision(data)})
+    state: object = query.get("state")
+    if state == "open":
+        return open_read(services, slug, path, query)
+    if state == "done":
+        rows = task_list.rows(services.repository, slug)[2] if path == "tasks" else collection(services, slug, path)
+        return resources.closed_page({path: rows}, path, query)
     if path == "architecture":
         from . import architecture
 
@@ -101,10 +114,26 @@ def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
     if path == "tasks" and not query.keys() & {"state", "offset", "q"}:
         return task_list.read(services.repository, slug, query)
     keys = own_rows(path)
-    if keys and not query:
-        return resources.read(services.repository.read(slug, *keys), path)
+    if keys and query.keys() <= {"limit", "cursor"}:
+        return resources.read(services.repository.read(slug, *keys), path, query)
     entry = services.repository.current(slug)
     return resources.read(entry.state, path, query, entry.views)
+
+
+def open_read(services: Services, slug: str, path: str, query: dict[str, Any]) -> dict[str, Any]:
+    frozen: set[str] = set()
+    if path == "tasks":
+        rows: list[Any] = task_list.rows(services.repository, slug)[2]
+        marks: dict[str, Any] = services.ledger.summary(slug)["marks"]
+        frozen = set(marks.get("frozen") or [])
+    else:
+        rows = collection(services, slug, path)
+    return resources.open_page(summary.view_rows(path, rows, frozen), query)
+
+
+def collection(services: Services, slug: str, path: str) -> list[Any]:
+    found: dict[str, Any] = services.repository.read(slug, path)
+    return found.get(path) or []
 
 
 def focus_read(services: Services, slug: str, path: str) -> dict[str, Any]:

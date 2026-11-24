@@ -35,6 +35,23 @@ export function readContextEvidence(task, ref) {
   return fetch(`${API_V1}/swarm/context/${encodeURIComponent(task)}/${encodeURIComponent(ref)}`, { cache: "no-store" });
 }
 
+export function readSummary() {
+  return fetch(`${API_V1}/summary`, { cache: "no-store" });
+}
+
+export function readOpen(name, offset, limit) {
+  return fetch(`${API_V1}/${name}?state=open&offset=${offset}&limit=${limit}`, { cache: "no-store" });
+}
+
+export function readThread(key, cursor) {
+  return fetch(`${API_V1}/${key}/comments?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { cache: "no-store" });
+}
+
+export function readSwarm(name, cursor) {
+  const page = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+  return fetch(`${API_V1}/swarm${name ? `/${name}?limit=100${page}` : ""}`, { cache: "no-store" });
+}
+
 export function readClosed(name, offset) {
   return fetch(`${API_V1}/${name}?state=done&offset=${offset}&limit=10`, { cache: "no-store" });
 }

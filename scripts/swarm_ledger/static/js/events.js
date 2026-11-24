@@ -1,27 +1,46 @@
 import { RETRY_MS } from "./config.js";
-import { openEvents } from "./api.js";
+import { openEvents, readSwarm } from "./api.js";
 import { applyPatch } from "./patch.js";
-import { disconnected, receiveLedger, resume } from "./sync.js";
+import { disconnected, receiveChange, receiveOpen, resume } from "./sync.js";
 import { receiveSwarm, swarmLost } from "./swarm.js";
 
 let eventCursor = null;
-let snapshot = null;
-const latest = { ledger: null, swarm: null };
+const latest = { swarm: null };
 
 function onStreamEvent(name, data) {
-  if (name === "snapshot") {
-    Object.assign(latest, data);
-    receiveSwarm(latest.swarm);
-    if (latest.ledger) receiveLedger(latest.ledger);
+  if (name === "open") {
+    if ("swarm" in data) {
+      latest.swarm = data.swarm;
+      receiveSwarm(latest.swarm);
+    }
+    receiveOpen(data.rev);
   } else if (name === "ledger") {
-    latest.ledger = applyPatch(latest.ledger, data.patch);
-    receiveLedger(latest.ledger);
+    receiveChange(data);
   } else if (name === "swarm") {
     latest.swarm = applyPatch(latest.swarm, data.patch);
     receiveSwarm(latest.swarm);
   } else if (name === "heartbeat") {
     resume();
   }
+}
+
+export async function loadSwarm() {
+  const resp = await readSwarm();
+  if (!resp.ok) return;
+  const reply = await resp.json();
+  const status = { ...reply.data };
+  for (const name of reply.collections || []) {
+    status[name] = [];
+    let cursor = null;
+    do {
+      const page = await readSwarm(name, cursor);
+      if (!page.ok) return;
+      const rows = await page.json();
+      status[name].push(...rows.data);
+      cursor = rows.next_cursor;
+    } while (cursor);
+  }
+  if (latest.swarm === null) receiveSwarm(status);
 }
 
 async function takeFrame(block) {
@@ -37,16 +56,7 @@ async function takeFrame(block) {
   }
   if (!data.length) return;
   try {
-    const raw = data.join("\n");
-    if (name === "snapshot" && raw === snapshot) resume();
-    else {
-      await scheduler.postTask(() => {}, { priority: "background" });
-      const parsed = JSON.parse(raw);
-      await scheduler.postTask(() => {}, { priority: "background" });
-      onStreamEvent(name, parsed);
-      if (name === "snapshot") snapshot = raw;
-      else if (name === "ledger" || name === "swarm") snapshot = null;
-    }
+    onStreamEvent(name, JSON.parse(data.join("\n")));
   } catch (error) {
     eventCursor = null;
     throw error;

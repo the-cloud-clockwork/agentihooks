@@ -1,6 +1,6 @@
 import { QUOTA_REFRESH_MS } from "./config.js";
 import { $ } from "./dom.js";
-import { flush, loadMetadata, loadSaved, loaded, renderSync, sendSync } from "./sync.js";
+import { flush, loadSaved, loaded, renderSync, seed, sendSync } from "./sync.js";
 import { showArtifacts } from "./artifacts.js";
 import { render, renderStats } from "./render.js";
 import { editOverview, editTitle, saveOverview, saveTitle } from "./edits.js";
@@ -10,7 +10,7 @@ import { closeComplete, collapsible, commentBoxes, groupOpen, markToggles, remem
 import { openHash, startLayout, wireRail, wireStatsDrawer, wireTabs } from "./layout.js";
 import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
-import { connectEvents } from "./events.js";
+import { connectEvents, loadSwarm } from "./events.js";
 import { loadArchitecture } from "./architecture.js";
 import { keepSession, loadTips } from "./api.js";
 import { tips } from "./state.js";
@@ -90,7 +90,8 @@ function start() {
   wireRail();
   wireStatsDrawer();
   $("main-content").addEventListener("scroll", markOutline, { passive: true });
-  loadMetadata();
+  seed().catch(() => null);
+  loadSwarm().catch(() => null);
   loadTips().then((values) => { if (values) { Object.assign(tips, values); render(); } });
   connectEvents();
   loaded.then(() => {

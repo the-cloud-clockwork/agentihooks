@@ -2,7 +2,7 @@ import { ACTIVE_MS } from "./config.js";
 import { $, closedText, excerpt, h, headCount, newId, span, when } from "./dom.js";
 import { renderCycle } from "./render_cycle.js";
 import { hiddenDone, inScope, itemState, pendingOf, taskBlockers, taskRank, taskRanks } from "./state.js";
-import { closedLeft, closedLeftIn, doc, meta, queue, renderSync, toggle } from "./sync.js";
+import { closedLeft, closedLeftIn, doc, meta, openStates, queue, renderSync, toggle } from "./sync.js";
 import { renderArtifacts } from "./artifacts.js";
 import { commentsView, taskLink, threadView } from "./threads.js";
 import { bottleneckStat, renderAlerts, renderNotifications, renderPriorities, statGrip, statKey } from "./notices.js";
@@ -11,7 +11,7 @@ import { markToggles } from "./folds.js";
 import { renderChat, renderChatBadge } from "./chat.js";
 import { inboxPending, renderSwarm, swarm } from "./swarm.js";
 import { readWorkspace } from "./api.js";
-import { closedMore, firstPage, moreButton } from "./pages.js";
+import { closedMore, firstPage, moreButton, openMore } from "./pages.js";
 import { frozen, held, ownFreeze, snowflake } from "./freezes.js";
 import { prepareFrozenView, viewCount, viewItems, viewVisible } from "./frozen_view.js";
 import { phaseReview, phaseStatus } from "./phase_review.js";
@@ -207,6 +207,7 @@ function taskCounts(tasks) {
   const order = ["open", "claimed", "pr", "blocked", "done"];
   const n = {};
   for (const t of tasks) n[t.state || "open"] = (n[t.state || "open"] || 0) + 1;
+  for (const [st, left] of Object.entries(openStates("tasks"))) if (left) n[st] = (n[st] || 0) + left;
   if (closedLeft("tasks")) n.done = (n.done || 0) + closedLeft("tasks");
   const states = [...order, ...Object.keys(n).filter((st) => !order.includes(st))];
   return headCount(states.map((st) => [n[st], st]));
@@ -218,6 +219,7 @@ function stateCounts(list, labels) {
     const st = itemState(list, i);
     n[st] = (n[st] || 0) + 1;
   }
+  for (const [st, left] of Object.entries(openStates(list))) if (left) n[st] = (n[st] || 0) + left;
   if (closedLeft(list)) n.done = (n.done || 0) + closedLeft(list);
   return headCount(Object.entries(labels).map(([st, label]) => [n[st], label]));
 }
@@ -287,7 +289,7 @@ function groupedWork(name, items, row) {
   const done = items.filter((i) => !i.deleted && (i.done || i.state === "done"));
   const rank = { pr: 0, claimed: 1, open: 2, blocked: 3 };
   live.sort((a, b) => (rank[a.state || "open"] ?? 4) - (rank[b.state || "open"] ?? 4) || taskRanks().indexOf(taskRank(a)) - taskRanks().indexOf(taskRank(b)));
-  $(name).replaceChildren(...firstPage(name, live, idOf).map(row), moreButton(name, live.length, `more ${NOUNS[name]}`, render) || "");
+  $(name).replaceChildren(...firstPage(name, live, idOf).map(row), moreButton(name, live.length, `more ${NOUNS[name]}`, render) || openMore(name, `open ${NOUNS[name]}`, render) || "");
   if (!items.length && doc[name].some((i) => !i.deleted)) $(name).append(h("li", { class: "empty", text: "All items are hidden." }));
   if (!done.length && !closedLeft(name)) return;
   done.reverse();

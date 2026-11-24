@@ -1,7 +1,7 @@
 import hashlib
 import json
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 from scripts.swarm_ledger import ledger_closed, models, ports
 
@@ -123,14 +123,29 @@ def closed_page(doc: dict, path: str, query: dict) -> dict:
     return closed_reply(selected, len(rows), offset)
 
 
-def closed_reply(rows: list, total: int, offset: int) -> dict:
+def closed_reply(rows: list[Any], total: int, offset: int) -> dict[str, Any]:
     end = offset + len(rows)
     return {"data": rows, "revision": revision(rows), "total": total, "next_offset": end if end < total else None}
+
+
+def open_page(rows: list[tuple[int, dict[str, Any]]], query: dict[str, Any]) -> dict[str, Any]:
+    offset: int = query.get("offset", 0)
+    limit: int = query.get("limit", OPEN_LIMIT)
+    selected: list[dict[str, Any]] = []
+    for at, row in rows[offset : offset + limit]:
+        item = {**cast(dict[str, Any], project(row)), "position": at}
+        if reply_size(closed_reply([*selected, item], len(rows), offset)) > MAX_REPLY:
+            if not selected:
+                raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
+            break
+        selected.append(item)
+    return closed_reply(selected, len(rows), offset)
 
 
 COLLECTIONS = models.COLLECTIONS
 THREADS = models.THREADS
 MAX_REPLY = 262144
+OPEN_LIMIT = 50
 DONE_ONLY = "State and offset read the done rows of a collection"
 
 

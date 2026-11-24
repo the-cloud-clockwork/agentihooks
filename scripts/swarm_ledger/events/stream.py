@@ -58,7 +58,7 @@ def serve(handler, hub, slug, load):
             try:
                 pending = hub.wait(slug, seq, HEARTBEAT_S)
             except Expired:
-                seq, pending = hub.snapshot(slug)
+                seq, pending = hub.opening(slug)
     except (OSError, Closed):
         return None
     finally:
