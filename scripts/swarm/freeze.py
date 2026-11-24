@@ -19,7 +19,9 @@ WATCHED = "watched_focus"
 UNCACHED = object()
 
 
-def held(task: dict, doc: dict, graph: dict, fix_phase: str, admitted_queue: Any = UNCACHED) -> bool:
+def held(
+    task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix_phase: str, admitted_queue: Any = UNCACHED
+) -> bool:
     """A freeze, a focus with open work elsewhere or a watched focus keeps a claim off the open task.
 
     admitted_queue carries a result of ``admitted(doc, graph)`` a caller already computed for this doc and
@@ -96,7 +98,7 @@ def _selects(target: str) -> bool:
 def _enhancement_frozen(task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any]) -> bool:
     if task.get("lane") != "plan" or not task.get("enhances"):
         return False
-    tasks = doc.get("tasks") or []
+    tasks = doc.get("tasks") or ()
     if not _TASK_ROWS or _TASK_ROWS[0] is not tasks or _TASK_ROWS[1] != len(tasks):
         _TASK_ROWS[:] = [tasks, len(tasks), {row["id"]: row for row in tasks}]
     target = _TASK_ROWS[2].get(task["enhances"])
