@@ -15241,13 +15241,14 @@
       "origin": "regression",
       "ordered_at": "2026-11-24",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2809",
-      "behaviour": "The shared command stripping finds heredocs in the tree-sitter bash parse, so a << shift in nested arithmetic, a dollar bracket expression, an array subscript or a substring offset never opens a heredoc: the line after such a shift stays in the stripped text even when a later line equals the shift operand, and branch guard refuses a push to main there. A double quoted delimiter strips like a single quoted one, and the stripped text around a heredoc stays exact for text that is not ASCII, an empty body, two heredocs in separate commands, a heredoc nested in another heredoc body and a lone surrogate in a body.",
+      "behaviour": "The shared command stripping finds heredocs in the tree-sitter bash parse, so a << shift in nested arithmetic, a dollar bracket expression, an array subscript or a substring offset never opens a heredoc: the line after such a shift stays in the stripped text even when a later line equals the shift operand, and branch guard refuses a push to main there. A double quoted delimiter strips like a single quoted one, and the stripped text around a heredoc stays exact for text that is not ASCII, an empty body, two heredocs in separate commands, a heredoc nested in another heredoc body and a lone surrogate in a body. A heredoc counts as terminated only when its terminator holds the delimiter word, and a command the parse reads with an error keeps every heredoc, so an unterminated body holding an expansion and a terminator found by error recovery inside a line hide nothing.",
       "seam": "hooks.context._strip.strip_non_command_content, observed through hooks.context.branch_guard.check_branch_guard on Bash payloads",
       "tests": [
         "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_the_line_after_any_arithmetic_shift",
         "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_after_any_arithmetic_shift",
         "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_drops_a_double_quoted_heredoc_like_a_single_quoted_one",
-        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_exact_text_around_heredocs"
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_exact_text_around_heredocs",
+        "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_a_heredoc_the_parse_cannot_close"
       ]
     },
     {
