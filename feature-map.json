@@ -5492,7 +5492,9 @@
         "tests/swarm/test_enhance_sweep.py::test_the_sweep_pauses_three_seconds_between_thin_tasks_and_never_before_the_first",
         "tests/swarm/test_enhance_sweep.py::test_the_dry_run_prints_the_thin_task_count_and_ids_per_lane_and_writes_nothing",
         "tests/swarm/test_enhance_sweep.py::test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_writes",
-        "tests/swarm/test_enhance_sweep.py::test_a_refused_enhancement_write_leaves_the_sweep_writing_the_next_thin_task"
+        "tests/swarm/test_enhance_sweep.py::test_a_refused_enhancement_write_leaves_the_sweep_writing_the_next_thin_task",
+        "tests/swarm/test_enhance_sweep.py::test_a_timed_out_write_counts_as_failed_and_the_sweep_writes_the_next_thin_task",
+        "tests/swarm/test_enhance_sweep.py::test_a_refused_write_prints_its_line_and_counts_as_skipped"
       ]
     },
     {

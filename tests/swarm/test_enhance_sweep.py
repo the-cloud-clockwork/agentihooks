@@ -84,6 +84,38 @@ class SecondWriteFails(FakeLedger):
         return super().mutate(operations, deadline=deadline)
 
 
+@dataclass
+class Stdout:
+    log: list[str]
+    pending: str = ""
+
+    def write(self, text: str) -> int:
+        self.pending += text
+        return len(text)
+
+    def flush(self) -> None:
+        self.log.append(self.pending)
+        self.pending = ""
+
+
+THREE_LANES = {"eng": {"count": 3, "ids": ["a", "b", "c"]}, "ci": {"count": 0, "ids": []}}
+NONE_DONE = {"queued": 0, "failed": 0, "skipped": 0}
+
+
+def _sweep_three(monkeypatch: pytest.MonkeyPatch, ledger: SecondWriteFails) -> tuple[list[str], dict[str, Any]]:
+    out = Stdout(ledger.log)
+
+    def tasks(_: LedgerClient, slug: str) -> list[dict[str, Any]]:
+        return THREE if slug == "sw" else []
+
+    monkeypatch.setattr(LedgerClient, "tasks", tasks)
+    monkeypatch.setattr(enhance_sweep, "ClientLedger", lambda slug, clients: ledger)
+    monkeypatch.setattr(enhance_sweep, "resource_client", lambda slug: f"clients of {slug}")
+    monkeypatch.setattr("sys.stdout", out)
+    assert cli.main(["sw", "enhance", "sweep"]) == 0
+    return ledger.log[:6], json.loads("".join([*ledger.log[6:], out.pending]))
+
+
 def _calls(ledger: FakeLedger) -> list[tuple[str, tuple[object, ...]]]:
     return [(call.operation, call.args) for call in ledger.calls]
 
@@ -158,7 +190,7 @@ def test_the_dry_run_prints_the_thin_task_count_and_ids_per_lane_and_writes_noth
     built: list[str] = []
     monkeypatch.setattr(enhance_sweep, "ClientLedger", lambda slug, clients: built.append(slug))
     assert cli.main(["sw", "enhance", "sweep", "--dry-run"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"dry_run": True, "lanes": REPORT, "actions": []}
+    assert json.loads(capsys.readouterr().out) == {"dry_run": True, "lanes": REPORT, "counts": NONE_DONE}
     assert (built, swarm) == ([], [])
 
 
@@ -176,11 +208,9 @@ def test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_wri
     monkeypatch.setattr(enhance_sweep, "ClientLedger", client_ledger)
     monkeypatch.setattr(enhance_sweep, "resource_client", lambda slug: f"clients of {slug}")
     assert cli.main(["sw", "enhance", "sweep"]) == 0
-    assert json.loads(capsys.readouterr().out) == {
-        "dry_run": False,
-        "lanes": REPORT,
-        "actions": [f"queued enhance-{tid} for thin task {tid}" for tid in ("t1", "t2", "t8", "t9", "t10")],
-    }
+    *lines, summary = capsys.readouterr().out.splitlines()
+    assert lines == [f"queued enhance-{tid} for thin task {tid}" for tid in ("t1", "t2", "t8", "t9", "t10")]
+    assert json.loads(summary) == {"dry_run": False, "lanes": REPORT, "counts": {**NONE_DONE, "queued": 5}}
     assert built == [("sw", "clients of sw")]
     assert swarm == [3.0, 3.0, 3.0, 3.0]
     assert _calls(ledger) == _tick_calls(TASKS)
@@ -192,3 +222,36 @@ def test_a_refused_enhancement_write_leaves_the_sweep_writing_the_next_thin_task
     enhance_sweep.sweep(THREE, ledger, pause=lambda _: None)
     assert ledger.log == ["write 1", "write 2", "write 3"]
     assert [call.operation for call in ledger.calls] == ["mutate", "mutate"]
+
+
+@pytest.mark.feature("swarm-enhance-sweep")
+def test_a_timed_out_write_counts_as_failed_and_the_sweep_writes_the_next_thin_task(
+    swarm: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lines, summary = _sweep_three(monkeypatch, SecondWriteFails(dict(ANSWERS)))
+    assert lines == [
+        "write 1",
+        "queued enhance-a for thin task a\n",
+        "write 2",
+        "failed the enhancement of b: the ledger writer took tasks on sw and sent no answer\n",
+        "write 3",
+        "queued enhance-c for thin task c\n",
+    ]
+    assert summary == {"dry_run": False, "lanes": THREE_LANES, "counts": {**NONE_DONE, "queued": 2, "failed": 1}}
+
+
+@pytest.mark.feature("swarm-enhance-sweep")
+def test_a_refused_write_prints_its_line_and_counts_as_skipped(
+    swarm: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = SecondWriteFails(dict(ANSWERS), error=LedgerRefused("the task changed"))
+    lines, summary = _sweep_three(monkeypatch, ledger)
+    assert lines == [
+        "write 1",
+        "queued enhance-a for thin task a\n",
+        "write 2",
+        "refused the enhancement of b: the task changed\n",
+        "write 3",
+        "queued enhance-c for thin task c\n",
+    ]
+    assert summary == {"dry_run": False, "lanes": THREE_LANES, "counts": {**NONE_DONE, "queued": 2, "skipped": 1}}
