@@ -166,15 +166,18 @@ def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop
     start = repository.get_document(SLUG)["_meta"]["rev"]
     original = watch_ledger.Watch.take
     seen_names = []
+    written = []
 
     def take(self, name, data):
         original(self, name, data)
-        if name not in {"snapshot", "ledger"}:
-            return
         seen_names.append(name)
-        if seen_names == ["snapshot"]:
+        if name not in {"open", "ledger"}:
+            return
+        if not written:
+            written.append(1)
             server.repository.apply_ops(SLUG, ops=[note(1)])
-        elif seen_names == ["snapshot", "ledger"]:
+        elif written == [1] and self.since == start + 1:
+            written.append(2)
             server.repository.apply_ops(SLUG, ops=[note(2)])
             raise OSError("dropped")
         elif self.since >= start + 2:
@@ -182,7 +185,7 @@ def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop
 
     calls, out = run_watch(monkeypatch, capsys, take, "--since-rev", str(start))
     assert calls[0] is None and calls[1] and len(calls) == 2
-    assert seen_names.count("snapshot") == 1
+    assert seen_names[0] == "open" and "snapshot" not in seen_names
     assert [line for line in out.splitlines() if line.startswith("OPERATOR")] == [
         f'OPERATOR rev={start + 1} note added [n-1]: "note 1"',
         f'OPERATOR rev={start + 2} note added [n-2]: "note 2"',
@@ -198,15 +201,15 @@ def test_an_expired_cursor_reconnects_without_one_and_prints_nothing_twice(live,
     def take(self, name, data):
         original(self, name, data)
         seen_names.append(name)
-        if seen_names == ["snapshot", "heartbeat"]:
+        if seen_names == ["open", "heartbeat"]:
             server.HUB.channels[SLUG].epoch = "restarted"
             raise OSError("server restarted")
-        if seen_names.count("snapshot") == 2:
+        if seen_names.count("open") == 2:
             raise SystemExit
 
     calls, out = run_watch(monkeypatch, capsys, take, "--since-rev", str(start))
     assert calls[0] is None and calls[1] and calls[2] is None
-    assert seen_names == ["snapshot", "heartbeat", "snapshot"]
+    assert seen_names == ["open", "heartbeat", "open"]
     assert out.count("[n-3]") == 1
     assert out.count("WATCHING") == 1
 

@@ -1,6 +1,8 @@
+import json
+
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
+from tests.swarm_ledger.ledger_page import ledger_state, served_ledger, shell_html, show
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -117,6 +119,30 @@ def test_a_reconnect_naming_a_newer_revision_updates_without_serializing_the_ful
     ledger["_meta"]["rev"] += 1
     page.wait_for_function("() => document.getElementById('title').textContent === 'After reconnect'", timeout=5000)
     assert page.evaluate("window.snapshotComparisons") == 0
+    page.close()
+
+
+def test_an_identical_reconnect_snapshot_frame_is_skipped_before_decoding(browser):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    page.add_init_script(
+        """(() => {
+          const parse = JSON.parse;
+          window.snapshotDecodes = 0;
+          JSON.parse = function(text, ...args) {
+            if (typeof text === "string" && text.includes("snapshotMarker")) window.snapshotDecodes++;
+            return parse.call(this, text, ...args);
+          };
+        })();"""
+    )
+    show(page, shell_html(), ledger=ledger_state({"title": "Before snapshot"}))
+    ledger = served_ledger(ledger_state({"title": "Same snapshot", "snapshotMarker": True}, rev=2))
+    body = f"id: c1\nevent: snapshot\ndata: {json.dumps({'ledger': ledger, 'swarm': None})}\n\n"
+    page.route("**/events", lambda route: route.fulfill(body=body, content_type="text/event-stream"))
+    page.wait_for_function("() => document.getElementById('title').textContent === 'Same snapshot'", timeout=5000)
+    for _ in range(2):
+        with page.expect_request("**/events", timeout=5000):
+            pass
+    assert page.evaluate("window.snapshotDecodes") == 1
     page.close()
 
 

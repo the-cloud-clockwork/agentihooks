@@ -27,6 +27,7 @@ def test_live_replay_finishes_with_forced_heartbeats(live, monkeypatch, capsys, 
     if server_beat:
         beat_once_per_sequence(monkeypatch)
     original = watch_ledger.stream
+    start = replay_tests.repository.get_document(replay_tests.SLUG)["_meta"]["rev"]
     frames = []
     received = []
 
@@ -40,13 +41,13 @@ def test_live_replay_finishes_with_forced_heartbeats(live, monkeypatch, capsys, 
                 for _ in range(heartbeats):
                     yield "heartbeat", {}, None
             for name, data, event_id in source:
-                received.append((cursor, name))
+                received.append((cursor, name, data.get("rev")))
                 yield name, data, event_id
-                if name == "snapshot":
+                if name == "open" and data.get("rev") is None:
                     for _ in range(heartbeats):
                         yield "heartbeat", {}, None
-                elif name == "ledger" and cursor is None:
-                    pytest.fail("watcher did not reconnect after the first ledger event with forced heartbeats")
+                elif cursor is None and (data.get("rev") or 0) > start:
+                    pytest.fail("watcher did not reconnect after the first ledger change with forced heartbeats")
         finally:
             source.close()
 
@@ -62,7 +63,12 @@ def test_live_replay_finishes_with_forced_heartbeats(live, monkeypatch, capsys, 
         replay_tests.test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop(
             live, monkeypatch, capsys
         )
-        assert [name for _, name in received if name != "heartbeat"] == ["snapshot", "ledger", "ledger", "ledger"]
+        assert received[0][1:] == ("open", None)
+        assert [(bool(cursor), rev) for cursor, _, rev in received if (rev or 0) > start] == [
+            (False, start + 1),
+            (True, start + 1),
+            (True, start + 2),
+        ]
         assert received[-1][0]
         assert all(inspect.getgeneratorstate(item) == inspect.GEN_CLOSED for item in streams + frames)
     finally:

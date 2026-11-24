@@ -104,7 +104,7 @@ def test_idle_sampling_reads_no_ledger_document_and_sends_nothing(folders, monke
 
 
 def test_sampling_publishes_the_swarm_status_of_a_watched_ledger_without_a_loaded_copy(
-    folders: None, monkeypatch: pytest.MonkeyPatch
+    folders: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: {"config": {"state": "paused"}})
     server.HUB.open("s", lambda: {"swarm": {"config": {"state": "running"}}})
