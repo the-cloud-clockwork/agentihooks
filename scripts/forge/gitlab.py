@@ -2,13 +2,33 @@
 
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 from urllib.request import Request, urlopen
 
-from scripts.forge.model import ChangeRequest, Check
+from scripts.forge.model import ChangeRequest, Check, ForgeError
+
+__all__ = [
+    "CONCLUSIONS",
+    "HTTP_TIMEOUT_SEC",
+    "PAGE_SIZE",
+    "PIPELINE_APP",
+    "STATES",
+    "FetchError",
+    "GitLabForge",
+    "MergeRequestState",
+    "Transport",
+    "merge_request_state",
+    "pipeline_suites",
+    "unified",
+    "urlopen_transport",
+]
 
 HTTP_TIMEOUT_SEC = 60
 PAGE_SIZE = 100
+STATES = {"opened": "open", "closed": "closed", "merged": "merged"}
+CONCLUSIONS = {"success": "success", "failed": "failure", "canceled": "cancelled", "skipped": "skipped"}
+PIPELINE_APP = "gitlab-ci"
 Transport = Callable[[str, str, Mapping[str, str], bytes | None], bytes]
 
 
@@ -21,6 +41,24 @@ def unified(item: dict[str, Any]) -> str:
     old = "/dev/null" if item["new_file"] else f"a/{item['old_path']}"
     new = "/dev/null" if item["deleted_file"] else f"b/{item['new_path']}"
     return f"diff --git a/{item['old_path']} b/{item['new_path']}\n--- {old}\n+++ {new}\n{item['diff']}"
+
+
+class FetchError(ForgeError):
+    """A GitLab merge request state could not be read; the tracker counts it as a failed fetch, never a closed pull."""
+
+
+@dataclass(frozen=True)
+class MergeRequestState:
+    url: str
+    state: str
+    head: str
+    queued: bool
+    checks_head: str
+    suites: dict[str, dict[str, str]]
+
+
+def pipeline_suites(pipeline: dict[str, Any]) -> dict[str, dict[str, str]]:
+    raise NotImplementedError
 
 
 class GitLabForge:
@@ -63,3 +101,10 @@ class GitLabForge:
     def post(self, number: int, body: str) -> str:
         note = self._call("POST", f"{self.api}/{number}/notes", {"body": body})
         return f"{self.web}/-/merge_requests/{number}#note_{note['id']}"
+
+    def state(self, number: int) -> MergeRequestState:
+        raise NotImplementedError
+
+
+def merge_request_state(url: str, token: str | None, send: Transport = urlopen_transport) -> MergeRequestState:
+    raise NotImplementedError
