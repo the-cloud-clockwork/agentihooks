@@ -1,6 +1,7 @@
 """A cold browser shows the first task rows of a production sized ledger within a second and a megabyte."""
 
 import json
+import statistics
 import warnings
 from typing import Any
 
@@ -27,6 +28,7 @@ FIRST_ROW = """(() => {
   }).observe(document, {childList: true, subtree: true});
 })();"""
 OPEN_STATES = ("open", "claimed", "pr", "blocked")
+LOADS = 3
 READS = """() => performance.getEntriesByType("resource")
   .filter((entry) => entry.name.includes("/api/"))
   .map((entry) => {
@@ -99,55 +101,67 @@ def received_bytes(totals: dict[str, int], event: dict[str, Any], finished: bool
 
 
 def cold_reading(live: dict, monkeypatch: pytest.MonkeyPatch) -> tuple[float, int, str]:
-    """Open a production sized ledger in a cold browser and answer the milliseconds to its first task row, the
-    bytes received before it and the report line naming both."""
+    """Open a production sized ledger in a cold browser LOADS times after one warm up load, so the server process is
+    warm as a running server is, clearing its summary cache before each load as a new revision does, and answer the
+    median milliseconds to the first task row, the most bytes received before it and the report line naming both."""
     document = production_document()
     size = len(json.dumps(document))
     assert size > 28_000_000
     stored(monkeypatch, document)
     with served(server) as base, chromium() as browser:
-        context = browser.new_context(viewport={"width": 1920, "height": 1080})
-        context.add_cookies([{"name": f"ledger-session-{SLUG}", "value": f"page:{live['admin']}", "url": base}])
-        page = context.new_page()
-        page.add_init_script(FIRST_ROW)
-        totals: dict[str, int] = {}
-        cdp = context.new_cdp_session(page)
-        cdp.send("Network.enable")
-        cdp.on("Network.dataReceived", lambda event: received_bytes(totals, event, False))
-        cdp.on("Network.loadingFinished", lambda event: received_bytes(totals, event, True))
-        refused: list[str] = []
-        page.on("pageerror", lambda error: refused.append(str(error)))
-        page.on("console", lambda line: refused.append(f"console {line.text}") if line.type == "error" else None)
-        page.on(
-            "response", lambda answer: refused.append(f"{answer.status} {answer.url}") if answer.ok is False else None
-        )
-        page.goto(f"{base}/{SLUG}", wait_until="commit")
-        try:
-            page.wait_for_function("() => window.firstTaskRow !== undefined", timeout=30000)
-        except Exception as exc:
-            shown = page.evaluate(
-                """async () => {
-                  const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
-                  const sync = await import(new URL("sync.js", main));
-                  const tasks = document.getElementById("tasks");
-                  const children = (id) => (document.getElementById(id) || {children: []}).children.length;
-                  return {loaded: sync.doc.tasks.length, rev: sync.meta && sync.meta.rev, html: tasks && tasks.outerHTML.slice(0, 300),
-                    rendered: performance.getEntriesByName("ledger-rendered").length, phases: children("phases"),
-                    followups: children("followups"), status: (document.getElementById("status") || {}).textContent,
-                    scheduler: typeof scheduler};
-                }"""
-            )
-            raise AssertionError(f"no task row shown; refused or failed: {refused}; tasks: {shown}") from exc
-        transferred = sum(totals.values())
-        first_row = float(page.evaluate("window.firstTaskRow"))
-        reads = "; ".join(page.evaluate(READS))
-        context.close()
+        cold_load(browser, base, live)
+        readings = []
+        for _ in range(LOADS):
+            monkeypatch.setattr(server, "SUMMARIES", {})
+            readings.append(cold_load(browser, base, live))
+    first_row = statistics.median(reading[0] for reading in readings)
+    transferred = max(reading[1] for reading in readings)
     report = (
         f"COLD LOAD document_bytes={size} first_task_row_ms={first_row:.0f} bytes_before_first_row={transferred}"
-        f" reads={reads}"
+        f" loads_ms={[round(reading[0]) for reading in readings]} reads={readings[-1][2]}"
     )
     warnings.warn(report, stacklevel=1)
     return first_row, transferred, report
+
+
+def cold_load(browser: Any, base: str, live: dict) -> tuple[float, int, str]:
+    """One load in a new browser context with empty storage: the milliseconds to its first task row, the bytes
+    received before it and each API read with its start and end."""
+    context = browser.new_context(viewport={"width": 1920, "height": 1080})
+    context.add_cookies([{"name": f"ledger-session-{SLUG}", "value": f"page:{live['admin']}", "url": base}])
+    page = context.new_page()
+    page.add_init_script(FIRST_ROW)
+    totals: dict[str, int] = {}
+    cdp = context.new_cdp_session(page)
+    cdp.send("Network.enable")
+    cdp.on("Network.dataReceived", lambda event: received_bytes(totals, event, False))
+    cdp.on("Network.loadingFinished", lambda event: received_bytes(totals, event, True))
+    refused: list[str] = []
+    page.on("pageerror", lambda error: refused.append(str(error)))
+    page.on("console", lambda line: refused.append(f"console {line.text}") if line.type == "error" else None)
+    page.on("response", lambda answer: refused.append(f"{answer.status} {answer.url}") if answer.ok is False else None)
+    page.goto(f"{base}/{SLUG}", wait_until="commit")
+    try:
+        page.wait_for_function("() => window.firstTaskRow !== undefined", timeout=30000)
+    except Exception as exc:
+        shown = page.evaluate(
+            """async () => {
+              const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+              const sync = await import(new URL("sync.js", main));
+              const tasks = document.getElementById("tasks");
+              const children = (id) => (document.getElementById(id) || {children: []}).children.length;
+              return {loaded: sync.doc.tasks.length, rev: sync.meta && sync.meta.rev, html: tasks && tasks.outerHTML.slice(0, 300),
+                rendered: performance.getEntriesByName("ledger-rendered").length, phases: children("phases"),
+                followups: children("followups"), status: (document.getElementById("status") || {}).textContent,
+                scheduler: typeof scheduler};
+            }"""
+        )
+        raise AssertionError(f"no task row shown; refused or failed: {refused}; tasks: {shown}") from exc
+    transferred = sum(totals.values())
+    first_row = float(page.evaluate("window.firstTaskRow"))
+    reads = "; ".join(page.evaluate(READS))
+    context.close()
+    return first_row, transferred, reads
 
 
 @pytest.mark.wall_clock
