@@ -1,0 +1,18 @@
+rules:
+  - id: hive-quota-reading-drops-expired
+    languages: [python]
+    severity: ERROR
+    message: Carry a hive quota entry's expired flag into the reading parsed from its windows; otherwise an expired Codex login reads as unknown and the controller opens it as a free seat.
+    paths:
+      include:
+        - /scripts/swarm_v2/quota.py
+        - hive-quota-reading-drops-expired.py
+    patterns:
+      - pattern-inside: |
+          def $FUNC(...):
+              ...
+      - pattern: $READING["seven_day"]
+      - pattern-not-inside: |
+          def $FUNC(...):
+              ...
+              return <... $READING.get("expired") ...>

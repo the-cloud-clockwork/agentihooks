@@ -1,0 +1,36 @@
+rules:
+  - id: merge-queue-admit-skips-review
+    languages: [python]
+    severity: ERROR
+    message: First queue entry must run the review gate for every caller and the exact observed head.
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - /scripts/swarm/ready.py
+        - merge-queue-admit-skips-review.py
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: $QUEUE.operate(..., admit=$ADMIT, ...)
+              - pattern: $QUEUE.operate("queue", ...)
+              - pattern: $RUN.queue("queue", ...)
+          - pattern-not: |
+              $QUEUE.operate(..., admit=lambda $HEAD: $REVIEW.queue_admit(...), ...)
+          - pattern-not: |
+              $RUN.queue("queue", ..., admit=lambda $HEAD: _review(...), ...)
+      - patterns:
+          - pattern-inside: |
+              if $ARGS.action == "queue":
+                  ...
+          - pattern: $QUEUE.operate(...)
+          - pattern-not: |
+              $QUEUE.operate(..., admit=lambda $HEAD: $REVIEW.queue_admit(...), ...)
+      - patterns:
+          - pattern: |
+              def _review(...):
+                  ...
+          - pattern-not: |
+              def _review(...):
+                  ...
+                  $REVIEW.admit(...)
+                  ...

@@ -22,6 +22,7 @@
 /scripts/type_gate.py @nestorcolt
 /tests/test_type_gate.py @nestorcolt
 /scripts/no_comments.py @nestorcolt
+/scripts/pr_body.py @nestorcolt
 /tests/COMMENT_FREE_PATHS.json @nestorcolt
 /tests/test_no_comments.py @nestorcolt
 /scripts/no_whole_ledger.py @nestorcolt

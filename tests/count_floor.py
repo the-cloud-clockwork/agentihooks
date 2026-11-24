@@ -784,11 +784,8 @@ def _signed(ruling: object) -> bool:
     )
 
 
-def retirements(base: Path, head: Path) -> dict[str, str]:
-    """Return each node id the head newly retires under a Standards reader's signed ruling, mapped to who signed it.
-
-    While TEST_COUNT_REVIEWED_HEAD names the pull request head, only the retirements a code owner approved are kept.
-    """
+def _new_retirements(base: Path, head: Path) -> dict[str, str]:
+    """Return each node id the head newly retires under a Standards reader's signed ruling, mapped to who signed it."""
     retired = {}
     if (head / _RETIREMENTS).is_symlink():
         print(f"{_RETIREMENTS} is a symbolic link, so it admits nothing")
@@ -810,9 +807,32 @@ def retirements(base: Path, head: Path) -> dict[str, str]:
             )
             continue
         retired[entry[0]] = entry[1]["reader"]
+    return retired
+
+
+def _reviewed(base: Path, retired: dict[str, str]) -> dict[str, str]:
+    """Keep the retirements a code owner approved while TEST_COUNT_REVIEWED_HEAD names the pull request head, and
+    all of them while it names none."""
     reviewed = os.environ.get("TEST_COUNT_REVIEWED_HEAD")
     reviews = Path(os.environ.get("TEST_COUNT_REVIEWS", ""))
     return _approved(base, retired, reviews, reviewed) if reviewed and retired else retired
+
+
+def retirements(base: Path, head: Path) -> dict[str, str]:
+    """Return each node id the head newly retires under a Standards reader's signed ruling, mapped to who signed it.
+
+    While TEST_COUNT_REVIEWED_HEAD names the pull request head, only the retirements a code owner approved are kept.
+    """
+    return _reviewed(base, _new_retirements(base, head))
+
+
+def hold_approvals(base: Path, head: Path) -> int:
+    """Fail when the reviewed pull request head newly retires a test under a ruling no code owner approved."""
+    retired = _new_retirements(base, head)
+    refused = sorted(set(retired) - set(_reviewed(base, retired)))
+    for nodeid in refused:
+        print(f"::error::{nodeid} is retired without a code owner's approval of the pull request head.")
+    return 1 if refused else 0
 
 
 def code_owners(root: Path, path: str) -> list[str]:
@@ -936,11 +956,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--collected", type=Path, help="with --record, the head collection the floor already exported")
     parser.add_argument("--reader", default="", help="with --retire, the Standards reader who signs the ruling")
     parser.add_argument("--reason", default="", help="with --retire, why the removed behaviour needs no test")
+    parser.add_argument(
+        "--approvals",
+        action="store_true",
+        help="with --base, grade only that a code owner approved each new signed retirement, without collecting",
+    )
     args = parser.parse_args(argv)
+    if args.approvals and args.base is None:
+        parser.error("--approvals grades a head against a base, so it needs --base")
     if args.retire:
         return write_retirements(args.head, args.retire, args.reader, args.reason)
     if args.record:
         return write_record(args.head, args.tests, args.record, args.collected)
+    if args.approvals:
+        return hold_approvals(args.base, args.head)
     collected = collect_sides(args.base, args.head, args.tests)
     failed = [side for side, nodeids in collected.items() if not nodeids]
     for side in failed:

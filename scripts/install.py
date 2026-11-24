@@ -704,13 +704,13 @@ def _register_target_global(profile: str, settings_profile: str = "", target: st
     """Record the global install for *target* in state.json (per-target record)."""
     state = _load_state()
     adapter_home = CLAUDE_HOME if target == DEFAULT_TARGET else get_adapter(target).home()
-    entry = {
+    entry: dict[str, Any] = {
         "path": str(adapter_home),
         "profile": profile,
         "installed_at": datetime.now(timezone.utc).isoformat(),
+        **({"settings_profile": settings_profile} if settings_profile else {}),
+        **{key: value for key, value in _global_record(state, target).items() if key == "managed_mcp"},
     }
-    if settings_profile:
-        entry["settings_profile"] = settings_profile
     state.setdefault("targets", {}).setdefault("global", {})[target] = entry
     # Last-used target, consulted only as the interactive TTY prompt's
     # default. It is NOT scoped to a target's own record and is never

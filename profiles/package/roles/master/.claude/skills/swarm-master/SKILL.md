@@ -25,8 +25,9 @@ goes to a lane as a task.
 
 - A full plan is a plan file a master or planner writes and publishes to the
   artifacts; every task built from it carries its slice.
-- Follow ups, open questions, operator notes and orders the operator types or
-  gives are standalone tasks with no plan and no slice.
+- Work that is small in context, vague or wider than one pull request,
+  operator orders and follow ups included, goes to a planner before any
+  engineer claims it: follow the planners-first rule.
 - A standalone task that a master or planner expands because it grew wide
   becomes a plan: write and publish the plan with slice markers, then add its
   tasks with their slices.
@@ -50,12 +51,42 @@ goes to a lane as a task.
 - At full autonomy the dispatcher seat reports what it settled; raise to the
   operator only what he alone can decide.
 
+## Operator orders
+
+A phase or task the operator ordered carries his order as a mark. Among the
+tasks a lane may claim, the hub offers urgent and focused work, then ordered
+work, oldest order first, then the rest. An order holds nothing: seats it
+cannot use take other work.
+
+- File his work with its order in one command: `agentihooks api --slug <slug>
+  --as <name> phase add <id> "<title>" --quote "<his words>"`, or `task add
+  <id> "<title>" --lane <lane> --phase <phase> --quote "<his words>"`. Words
+  that are not his recorded words stop the command before it files anything.
+  A reply with `not_ordered` means the entry is filed and the server refused
+  the mark for the reason it names: fix that, then mark the entry.
+- Mark work already filed: `agentihooks api --slug <slug> --as <name> order
+  phases/<id> --quote "<his words>"`, or `--request <entry id>` naming the
+  chat line or comment where he asked.
+- Done work drops out of the orders by itself. Only his words clear an order
+  whose work is not done: `agentihooks api --slug <slug> --as <name> order
+  <item> --clear --quote "<his words>"`.
+- Every loop, read the orders: `agentihooks api --slug <slug> get orders`. An
+  order with `claimable` 0 and `busy` 0 is stuck: fix what its verdicts name.
+  An `order waiting` finding names an order whose unfinished tasks had nothing
+  claimed or in a pull request for more than thirty minutes.
+- A handoff carries the open orders by code: the envelope lists them and the
+  successor's opening prompt shows them.
+
 ## Focus and freeze
 
 Every open task is focused, free or frozen. Focused tasks form an ordered
 queue and run first; free tasks run only once no focused task is left undone;
 frozen tasks never run. Urgent rank orders work inside its state and never
 passes the focus queue.
+
+Focus is the hold for "only this runs": while a focus has open work, every
+seat that cannot work it idles. To keep the operator's batch first while
+other work continues, mark it as his order.
 
 - "Focus only this plan": `agentihooks swarm <slug> focus plans/<id> --only
   --quote "<his words>"` drops every other focus.
@@ -208,9 +239,32 @@ Review each slice against its phase intent, then
   yourself; when that has not solved it by the two hour mark, launch the crew.
 - While the crew runs, set its thirty minute seat cron on the scheduler, never a session cron, and take only
   its tasks and the follow ups that really come from the troubleshooting at medium, high or critical priority.
-- The standing master reminders (master loop, drift check, safety nudge, progress sheet, progress email due
-  check) are seat crons that `swarm start` and your orchestrator join keep on the scheduler; never recreate
-  them as session crons. The agentihooks cron list shows them.
+- Findings, follow ups, blocked tasks, releases, green promotions and hive drains arrive as seat inbox items;
+  act on each item as it lands. The master loop seat cron carries the rest of the loop duties until they
+  have seat items of their own.
+- The standing seat crons (master loop, safety nudge, progress sheet, progress email due check) are kept on
+  the scheduler by `swarm start` and your orchestrator join, which also cancel the retired drift check cron.
+  Never recreate them as session crons. The agentihooks cron list shows them.
+
+## Expert lineages
+
+The most difficult, mission critical engineering work goes to an expert lineage: Fable agents that carry one
+saved mission on one seat, each handing off to the next, until the swarm accepts a mission proof.
+
+- Write the mission from `agentihooks swarm <slug> expert template`: the operator's words word for word, the
+  problem, the evidence with each fact marked proven or unproven, the numbered deliverables, how to report.
+- Start it with `agentihooks swarm <slug> expert start <mission-file>`; add `--effort max` only when the
+  operator names it. A refusal lists every fault of the mission: fix them and start again. The swarm launches
+  the expert on its next tick pass and each successor after a handoff; nobody opens an expert session by hand.
+- To move a session that is not an expert into a lineage, have it write a Handoff v2 and start the lineage from
+  it: `agentihooks swarm <slug> expert start <mission-file> --handoff <doc> --from <session>`. The first expert
+  confirms that handoff like any successor.
+- `agentihooks swarm <slug> expert status` shows where each running lineage stands. An expert asks you through
+  the inbox, never the operator: answer from the mission and relay only what he alone can decide.
+- A lineage ends itself on an accepted mission proof; the notice reaches your inbox and
+  `agentihooks swarm <slug> expert proof <lineage>` prints the proof. End one by order with
+  `agentihooks swarm <slug> expert stop <lineage> --note "<why>"`.
+- An expert claims no task and files no follow up. Never queue its mission as tasks beside it.
 
 ## Scaling
 

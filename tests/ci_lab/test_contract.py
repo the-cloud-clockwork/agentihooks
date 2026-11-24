@@ -31,6 +31,7 @@ EXPECTED_METRICS = {
     "ci_lab_workers_ready": (),
     "ci_lab_github_rate_remaining": (),
     "ci_lab_verdict_mismatch_total": ("gate",),
+    "ci_lab_load_age_seconds": (),
 }
 
 NAMED_CONSTANTS = {
@@ -54,6 +55,7 @@ NAMED_CONSTANTS = {
     "WORKERS_READY": "ci_lab_workers_ready",
     "GITHUB_RATE_REMAINING": "ci_lab_github_rate_remaining",
     "VERDICT_MISMATCH_TOTAL": "ci_lab_verdict_mismatch_total",
+    "LOAD_AGE_SECONDS": "ci_lab_load_age_seconds",
 }
 
 SCHEDULER_DESCRIPTION = {

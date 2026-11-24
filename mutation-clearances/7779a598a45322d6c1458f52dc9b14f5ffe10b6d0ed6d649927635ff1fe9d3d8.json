@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x_write_reason:9b0a4eed4d1fdae727690f8e77c40b0ea1ce8693977426943813ed1b55e6a112": {
+    "reader": "standards_reader",
+    "reason": "words[:2] and words[:1] are both nonempty exactly when words is nonempty."
+  }
+}

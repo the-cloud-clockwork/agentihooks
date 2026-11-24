@@ -1,0 +1,11 @@
+{
+  "gate": "semgrep/charts/charts-render-no-cronjob-outside-the-scheduler",
+  "reason": "A CronJob schedules work outside the agentihooks scheduler: the swarm chart renders a CronJob",
+  "edits": [
+    {
+      "path": "deploy/helm/agentihooks-swarm/templates/auth.yaml",
+      "before": "{{- if and .Values.auth.enabled (not .Values.hiveOnly) }}\n",
+      "after": "apiVersion: batch/v1\nkind: CronJob\nmetadata:\n  name: planted\nspec:\n  schedule: \"* * * * *\"\n  jobTemplate:\n    spec:\n      template:\n        spec:\n          restartPolicy: Never\n          containers:\n            - name: planted\n              image: busybox\n---\n{{- if and .Values.auth.enabled (not .Values.hiveOnly) }}\n"
+    }
+  ]
+}

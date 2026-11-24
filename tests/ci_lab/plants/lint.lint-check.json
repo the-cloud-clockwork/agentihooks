@@ -1,0 +1,11 @@
+{
+  "gate": "lint/lint-check",
+  "reason": "I001: the import block is unsorted",
+  "edits": [
+    {
+      "path": "scripts/ci_lab/run_static.py",
+      "before": "import os\nimport tempfile\n",
+      "after": "import tempfile\nimport os\n"
+    }
+  ]
+}

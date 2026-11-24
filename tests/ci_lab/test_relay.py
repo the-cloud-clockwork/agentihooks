@@ -836,6 +836,7 @@ def test_build_gives_the_pusher_mirror_the_lab_remote_the_environment_names(
     assert pusher.mirror == Mirror(tmp_path / "node", tmp_path / "stores" / "acme--widgets", REPO, found)
 
 
+@pytest.mark.feature("lab-relay-build-wiring")
 def test_build_wires_the_relay_to_the_scheduler_grades_the_mirror_and_the_lab_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

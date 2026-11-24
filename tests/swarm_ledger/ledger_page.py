@@ -28,11 +28,13 @@ ORDER = (
     "threads",
     "render_cycle",
     "render",
+    "stats",
     "edits",
     "notices",
 )
 ORDER += (
     "outline",
+    "outline_keep",
     "walk",
     "folds",
     "layout",
@@ -48,6 +50,7 @@ ORDER += (
     "architecture",
     "status_note",
     "controls",
+    "orders",
     "events",
     "main",
 )

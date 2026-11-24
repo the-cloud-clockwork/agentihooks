@@ -9,6 +9,7 @@ from tests.swarm_ledger.ledger_page import page_source
 VOID = {"meta", "input", "br", "img", "hr", "link", "path"}
 SECTIONS = {
     "Original sources": False,
+    "Operator orders": True,
     "Priorities": False,
     "Plan phases": True,
     "Swarm tasks": False,

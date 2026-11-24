@@ -160,7 +160,10 @@ def test_failed_collection_never_populates_reusable_stats(tmp_path):
     assert list(cache.glob("*.json")) == []
 
 
-def test_collection_parts_reuse_stats_and_keep_the_new_head_identity(tmp_path, monkeypatch):
+@pytest.mark.feature("mutation-stats-flake-ledger")
+def test_collection_parts_reuse_stats_and_keep_the_new_head_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import json
     from types import SimpleNamespace
 
@@ -194,8 +197,11 @@ def test_collection_parts_reuse_stats_and_keep_the_new_head_identity(tmp_path, m
         "cpu": 2,
     }
 
-    def collect(engine, test_runner, buckets, work):
+    flake = '{"test":"test_sample.py::test_sample","outcome":"flaky","errors":["first attempt fails"]}\n'
+
+    def collect(engine: object, test_runner: object, buckets: list[list[str]], work: Path) -> list[dict]:
         calls.append(buckets)
+        (work / "stats-0.flakes.jsonl").write_text(flake)
         return [result]
 
     monkeypatch.setattr("scripts.ci_mutation.selection.run_stats_buckets", collect)
@@ -211,6 +217,10 @@ def test_collection_parts_reuse_stats_and_keep_the_new_head_identity(tmp_path, m
                 (str(output), head, "0", "1"),
             )
         assert json.loads(output.read_text())["key"] == head
+        assert (root / "flakes-0.jsonl").read_text() == (flake if head == "old" else "")
+        records = list((tmp_path / "cache").glob("*.json"))
+        assert records
+        assert all("first attempt fails" not in path.read_text() for path in records)
     assert calls == [[["test_sample.py"]]]
 
 
@@ -1715,6 +1725,64 @@ def test_the_discovery_digest_of_one_input_set_is_computed_once(tmp_path: Path) 
     assert reads == {"scripts/scan.py": 1, "scripts/plain.py": 1}
     assert inputs.discovery({"scripts/plain.py": "same"}) != digest
     assert reads == {"scripts/scan.py": 1, "scripts/plain.py": 2}
+
+
+@pytest.mark.feature("mutation-stats-lookup-digests")
+def test_one_stats_lookup_hashes_each_input_file_once_across_its_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashlib
+
+    from scripts.ci_mutation import stats_dependencies
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = [f"tests/test_{index}.py" for index in range(3)]
+    sources = {
+        "scripts/shared.py": "value = 1\n",
+        **{
+            path: f"from scripts.shared import value\n\n\ndef test_{index}():\n    assert value\n"
+            for index, path in enumerate(files)
+        },
+    }
+    _repository(root, sources)
+    nodes = {path: f"{path}::test_{index}" for index, path in enumerate(files)}
+    hashed: Counter[bytes] = Counter()
+    sha256 = hashlib.sha256
+
+    def counted(data: bytes) -> "hashlib._Hash":
+        hashed[data] += 1
+        return sha256(data)
+
+    monkeypatch.setattr(stats_dependencies, "hashlib", SimpleNamespace(**{**vars(hashlib), "sha256": counted}))
+    calls: list[list[str]] = []
+
+    def collect(chosen: list[str]) -> list[dict[str, object]]:
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {nodes[path]: 1 for path in chosen}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    hashed.clear()
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+    assert {path: hashed[text.encode()] for path, text in sources.items()} == dict.fromkeys(sources, 1)
+    (root / "scripts/shared.py").write_text("value = 2\n")
+    hashed.clear()
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+    assert hashed[b"value = 2\n"] == 1
+
+
+def test_conftest_candidates_name_every_parent_folder_conftest_nearest_first() -> None:
+    from scripts.ci_mutation.stats_cache import conftest_candidates
+
+    assert conftest_candidates("tests/swarm/test_cli.py") == (
+        "tests/swarm/conftest.py",
+        "tests/conftest.py",
+        "conftest.py",
+    )
+    assert conftest_candidates("conftest.py") == ("conftest.py",)
 
 
 def test_selected_test_ids_read_the_collected_stats_once_not_once_per_id(tmp_path):

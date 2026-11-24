@@ -95,8 +95,9 @@ def admits(name: str, slots: int, free_slots: int, waiting_slots: int, shed_clas
     """Whether a unit of the class taking slots may lease now.
 
     A shed class never leases; backfill leases only into the free slots left after waiting_slots, the slots that lease
-    before it. The scheduler admits units into one queue that leases in order, so it passes every queued slot, shed
-    classes and backfill included, not the waiting function's count.
+    before it. The scheduler admits units into one queue that leases the most urgent class first and in order inside a
+    class, backfill last, so it passes every queued slot, shed classes and backfill included, not the waiting
+    function's count.
     """
     if name in shed_classes:
         return False

@@ -9,7 +9,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, account_key
-from scripts.swarm import autoscale, freeze, host_budget, master_pin
+from scripts.swarm import autoscale, freeze, host_budget, master_pin, plan_cap_floor
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import AUTO_SCALING, AgentRecord, RedisStore, SwarmConfig
@@ -17,7 +17,8 @@ from scripts.swarm.store import AUTO_SCALING, AgentRecord, RedisStore, SwarmConf
 if TYPE_CHECKING:
     from scripts.routing.reservation import Reservation
 
-LANES = ("eng", "ci", "plan")
+LANES = ("eng", "ci", "plan", "review")
+SCALED_LANES = ("eng", "ci", "plan")
 LABELS = {"claude": "Claude", "codex": "Codex"}
 CODEX_SHARE = 0.3
 SHARED_LANES = ("eng", "ci")
@@ -427,7 +428,11 @@ def _allocate(
 ) -> tuple:
     allocation = {lane: {"claude": 0, "codex": 0} for lane in LANES}
     placements = {lane: [] for lane in LANES}
-    options = requirements or {lane: [_harnesses(config, lane)] * limits[lane] for lane in LANES}
+    options = (
+        {lane: requirements.get(lane, []) for lane in LANES}
+        if requirements
+        else {lane: [_harnesses(config, lane)] * limits[lane] for lane in LANES}
+    )
     cursors = dict.fromkeys(LANES, 0)
     held = {(seat.harness, seat.account): seat for seat in open_seats}
 
@@ -459,8 +464,13 @@ def _allocate(
         effective[lane] += 1
 
 
-def _configured(config) -> dict:
-    return dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan), strict=True))
+def _configured(config: SwarmConfig) -> dict[str, int]:
+    return dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan, config.max_review), strict=True))
+
+
+def _scaled(counts: dict[str, int]) -> dict[str, int]:
+    """The counts of the lanes autoscale sizes; the review lane keeps its configured cap."""
+    return {lane: counts.get(lane, 0) for lane in SCALED_LANES}
 
 
 def _busy(agents: list) -> dict:
@@ -537,20 +547,21 @@ def warned_accounts(observations: list[Account], environ: dict[str, str]) -> dic
 def autoscaled(
     config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None
 ) -> tuple[SwarmConfig, dict[str, Any] | None]:
+    demand: dict[str, int] = inputs.demand or dict.fromkeys(LANES, 0)
     if config.scaling != AUTO_SCALING:
-        return config, None
+        return plan_cap_floor.manual(config, demand), None
     host = host or granted(host_room(config, inputs), inputs.previous, inputs.now_ms)
     stored = inputs.previous.get("autoscale") or {}
     previous = {
-        "ceilings": stored.get("ceilings") or _configured(config),
+        "ceilings": stored.get("ceilings") or _scaled(_configured(config)),
         "pending_raise": stored.get("pending_raise") or {"target": None, "ticks": 0},
     }
-    demand = inputs.demand or dict.fromkeys(LANES, 0)
+    demand = _scaled(demand)
     free = _placeable(_open(inputs.observations, inputs.warned))
     decision = autoscale.calculate(
-        _busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous, now_ms=inputs.now_ms
+        _scaled(_busy(inputs.agents)), free, unspent(host, inputs.spent), demand, previous, now_ms=inputs.now_ms
     )
-    caps = decision["ceilings"]
+    caps = decision["ceilings"] = plan_cap_floor.ceilings(decision["ceilings"], demand)
     scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
     return scaled, {**decision, "host": host}
 
@@ -669,7 +680,7 @@ def calculate(
     busy = _busy(agents)
     effective = {lane: min(configured[lane], busy[lane]) for lane in LANES}
     limits = {
-        lane: min(configured[lane], busy[lane] + demand[lane]) if demand is not None else configured[lane]
+        lane: min(configured[lane], busy[lane] + demand.get(lane, 0)) if demand is not None else configured[lane]
         for lane in LANES
     }
     warned = warned or {}
@@ -708,7 +719,7 @@ def read(store: Any, slug: str) -> dict[str, Any]:
 
 
 def caps(decision: dict, config: SwarmConfig) -> dict[str, int]:
-    return decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
+    return decision.get("effective", _configured(config))
 
 
 def status_line(decision: dict) -> str:

@@ -6,6 +6,7 @@ from pathlib import PurePath
 _WEB_SUFFIXES = {".js", ".ts", ".jsx", ".tsx", ".vue", ".svelte", ".html", ".htm"}
 _WEB = re.compile(r"""(?P<quote>["'`])(?P<literal>(?:\\.|(?!(?P=quote)).)*)(?P=quote)|>(?P<node>[^<>]+)<""", re.DOTALL)
 _DELIMITER = re.compile(r"(?i)^[rubf]*(\"\"\"|'''|\"|')")
+_SPACE = re.compile(r"\s")
 
 
 def _finding(text: str, start: int, end: int) -> dict:
@@ -48,7 +49,7 @@ def find(text: str, path: str, tool: str) -> list[dict]:
         findings = []
         for match in _WEB.finditer(text):
             group = "literal" if match["quote"] else "node"
-            if match[group].strip():
+            if match[group].strip() and (group == "node" or _SPACE.search(match[group])):
                 findings.append(_finding(text, match.start(group), match.end(group)))
         return findings
     return []

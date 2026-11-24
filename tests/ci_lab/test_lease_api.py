@@ -1,8 +1,11 @@
+import http.client
 import json
+import socket
 import threading
 import urllib.error
 import urllib.request
-from typing import Any
+from http.server import BaseHTTPRequestHandler
+from typing import Any, cast
 
 import pytest
 
@@ -304,6 +307,62 @@ def test_server_round_trip(lab: leases.Leases, signer: Signer, jobs: queue.Queue
         server.shutdown()
         server.server_close()
         thread.join(10)
+
+
+@pytest.mark.feature("lab-scheduler-access-log-query-redaction")
+@pytest.mark.parametrize(("method", "status"), [("GET", 200), ("GET", 403), ("POST", 200)])
+@pytest.mark.parametrize(
+    ("target", "logged_path"),
+    [("/upload-url?job=example&token=synthetic-lease-value&name=log", "/upload-url"), ("/health", "/health")],
+)
+def test_access_logs_omit_upload_query_strings(
+    method: str, status: int, target: str, logged_path: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: list[tuple[str, str, bytes, str | None]] = []
+
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> tuple[int, dict[str, Any]]:
+        seen.append((method, target, raw, authorization))
+        return status, {}
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=10)
+    try:
+        connection.request(method, target)
+        response = connection.getresponse()
+        assert response.status == status
+        assert json.loads(response.read()) == {}
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(10)
+    assert seen == [(method, target, b"", None)]
+    logged = capsys.readouterr().err
+    assert "synthetic-lease-value" not in logged
+    assert "?job=" not in logged
+    assert f'"{method} {logged_path} HTTP/1.1" {status} -\n' in logged
+
+
+@pytest.mark.feature("lab-scheduler-access-log-query-redaction")
+def test_access_logs_keep_default_status_and_size(
+    lab: leases.Leases, signer: Signer, capsys: pytest.CaptureFixture[str]
+) -> None:
+    server = lease_api.serve("127.0.0.1", 0, lab, signer)
+    client, connection = socket.socketpair()
+    try:
+        client.sendall(b"GET /upload-url?token=synthetic-lease-value HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        request = cast(BaseHTTPRequestHandler, server.RequestHandlerClass(connection, ("127.0.0.1", 0), server))
+        capsys.readouterr()
+        request.log_request()
+        logged = capsys.readouterr().err
+        assert '"GET /upload-url HTTP/1.1" - -\n' in logged
+        assert "synthetic-lease-value" not in logged
+    finally:
+        client.close()
+        connection.close()
+        server.server_close()
 
 
 def order(routes: lease_api.ControlRoutes, path: str, body: object, authorization: str = BEARER) -> object:
