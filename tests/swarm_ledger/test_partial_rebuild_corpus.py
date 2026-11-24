@@ -7,6 +7,8 @@ import hashlib
 import itertools
 import json
 import sqlite3
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -32,6 +34,25 @@ QUERIES = {
     "outbox_sent": "SELECT id FROM outbox_sent",
 }
 Corpus = Callable[[], dict[str, Any]]
+RERUN_PROBE = (
+    "import itertools\n"
+    "from pathlib import Path\n"
+    "from tests.swarm_ledger import test_partial_rebuild_corpus as corpus\n"
+    "from tests.swarm_ledger.test_partial_rebuild_corpus import full, partial, recorded\n"
+    "from tests.swarm_ledger.test_partial_rebuild_corpus import (\n"
+    "    test_warm_writes_spend_less_storage_write_cpu_than_the_full_rebuild_on_the_recorded_corpus,\n"
+    ")\n"
+    "CALLS = Path(__file__).with_name('calls.txt')\n"
+    "PAIRS = itertools.count()\n"
+    "def run(path, replayed, full, plant=None):\n"
+    "    pair = next(PAIRS) // 2\n"
+    "    with CALLS.open('a') as calls:\n"
+    "        calls.write(f'{pair} {full}\\n')\n"
+    "    seconds = 1.5 if full else 2.0 if pair == 0 else 1.0\n"
+    "    return {'phase_cpu_seconds_per_request': {'storage_write': seconds}}\n"
+    "corpus.run = run\n"
+    "corpus.replay.corpus = dict\n"
+)
 
 
 def digest(text: str) -> str:
@@ -199,3 +220,23 @@ def test_warm_writes_spend_less_storage_write_cpu_than_the_full_rebuild_on_the_r
 ) -> None:
     storage = "storage_write"
     assert partial["phase_cpu_seconds_per_request"][storage] < full["phase_cpu_seconds_per_request"][storage]
+
+
+@pytest.mark.feature("ledger-write-partial-rebuild")
+def test_a_rerun_of_the_storage_write_cpu_test_measures_its_own_warm_and_full_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probe = tmp_path / "test_rerun_probe.py"
+    probe.write_text(RERUN_PROBE)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    child = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "pytest_rerunfailures", "--reruns", "1", str(probe)],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert "1 rerun" in child.stdout, child.stdout + child.stderr
+    assert (tmp_path / "calls.txt").read_text().splitlines() == ["0 False", "0 True", "1 False", "1 True"], child.stdout
+    assert child.returncode == 0, child.stdout
