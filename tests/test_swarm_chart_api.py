@@ -1,10 +1,11 @@
+import importlib.util
+import sys
 from pathlib import Path
 from subprocess import CompletedProcess
+from types import ModuleType
 
 import pytest
 import yaml
-
-from tests import chart_api
 
 pytestmark = pytest.mark.unit
 
@@ -130,11 +131,22 @@ def test_api_network_policy_admits_the_same_sources_as_the_ledger() -> None:
     assert "port: http" in section
 
 
+def _load_chart_checker(name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.mark.feature("api-private-ledger-home")
 @pytest.mark.parametrize("missing_database", [False, True])
 def test_api_mirrors_the_database_but_not_the_ledgers_private_home(
     monkeypatch: pytest.MonkeyPatch, missing_database: bool
 ) -> None:
+    dependency = _load_chart_checker("chart_ledger_rollout")
+    monkeypatch.setitem(sys.modules, "chart_ledger_rollout", dependency)
+    chart_api = _load_chart_checker("chart_api")
     database = {"name": "AGENTIHOOKS_SWARM_DATABASE_URL", "value": "postgresql://ledger"}
     server_rows = [database, {"name": "AGENTIHOOKS_HOME", "value": "/run/agentihooks"}]
     api_rows = [*chart_api.API_ROWS, *([] if missing_database else [database])]
