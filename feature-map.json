@@ -7567,6 +7567,17 @@
       ]
     },
     {
+      "id": "plan-slice-task-plan-url",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-range-task-url",
+      "behaviour": "Swarm done on a plan task grades each slice task against its own plan link, so a plan task with no phase accepts a slice task whose plan lines match its plan, and a phase plan link still grades a slice task without one.",
+      "seam": "scripts.swarm_ledger.plan_ranges invalid_tasks, called by the ledger_tasks slice refusal when a plan task moves to done",
+      "tests": [
+        "tests/swarm_ledger/test_plan_ranges.py::test_a_plan_task_without_a_phase_grades_a_slice_task_by_its_own_plan_url",
+        "tests/swarm_ledger/test_plan_ranges.py::test_a_phase_plan_url_grades_a_slice_task_without_its_own"
+      ]
+    },
+    {
       "id": "ledger-home",
       "origin": "inventory",
       "behaviour": "The HOME page lists every ledger with its title, kind, counts, swarm state and last activity, and a closed ledger shows closed with a reopen button.",
