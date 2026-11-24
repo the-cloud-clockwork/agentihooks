@@ -44,6 +44,17 @@ FROZEN = "tests/registry/FROZEN_GATES.json"
 LAB_VERDICT_JOB = "lab-verdict"
 LAB_CLAUSE_PREFIX = f"fromJSON(needs.{LAB_VERDICT_JOB}.outputs.authoritative || '{{}}')"
 LAB_UPSTREAM = frozenset({"reuse", LAB_VERDICT_JOB})
+LAB_INSTALL = {
+    "name": "Install the lab verdict dependencies",
+    "run": "python -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1",
+}
+LAB_PINNED_INSTALL = {
+    **LAB_INSTALL,
+    "run": (
+        "python -m pip install --quiet --constraint grader/.github/ci-tools/parser.lock "
+        "--constraint grader/.github/ci-tools/lint-tools.lock PyYAML==6.0.3 jsonschema==4.25.1"
+    ),
+}
 DOWNLOAD_ARTIFACT = "actions/download-artifact@"
 SUMMARY_DOWNLOADS = ("actions/download-artifact@v4", "actions/download-artifact@v8.0.2")
 SUMMARY_REPORTS = ("Download this run's test reports", "{durations,flakes}-3.*")
@@ -123,8 +134,14 @@ def reuse_jobs(policy: object = None) -> list[dict]:
 
 
 @lru_cache(maxsize=None)
-def _accepted_steps_renderings(type_gate: bool, postgres: bool, docs: bool) -> list[list[dict[str, Any]]]:
-    """Every rendering of the gate-required job's steps the protected branch still accepts, for one (type_gate, postgres, docs) combination."""
+def _accepted_steps_renderings(type_gate: bool, postgres: bool, docs: bool, split: bool) -> list[list[dict[str, Any]]]:
+    """Every rendering of the gate-required job's steps the protected branch still accepts, for one (type_gate, postgres, docs, split) combination."""
+    if split:
+        return [
+            ci_reuse.split_required(steps)
+            for steps in _accepted_steps_renderings(type_gate, postgres, docs, False)
+            if ci_reuse.split_lists(steps)
+        ]
     requirements = (ci_reuse.postgres_required,) if postgres else (list, ci_reuse.postgres_required)
     return [
         typing(
@@ -183,12 +200,20 @@ def _accepted_steps_renderings(type_gate: bool, postgres: bool, docs: bool) -> l
 def _aggregator_problems(
     base: tuple[str, str, dict], head: tuple[str, str, dict], policy: object = None, retired: frozenset = frozenset()
 ) -> list[str]:
+    from scripts import ci_gate_queue
+
     (base_file, base_id, base_job), (head_file, head_id, head_job) = base, head
     if (base_file, base_id) != (head_file, head_id):
         return [f"The head moves {GATE} from {base_file}/{base_id} to {head_file}/{head_id}."]
+    needs = ci_wiring.needs_of(head_job)
+    split = ci_gate_queue.SPLIT & needs
     problems = [
         f"The head's {GATE} drops the base need {need}."
-        for need in sorted(ci_wiring.needs_of(base_job) - ci_wiring.needs_of(head_job) - retired)
+        for need in sorted(ci_wiring.needs_of(base_job) - needs - retired)
+    ] + [
+        f"The head's {GATE} needs {job} without {missing}; the split jobs are required together."
+        for job in sorted(split)
+        for missing in sorted(ci_gate_queue.SPLIT - split)
     ]
     fields = sorted((set(base_job) | set(head_job)) - {"needs"})
     postgres = any(ci_reuse.POSTGRES_REQUIRED[1] in str(step.get("run")) for step in base_job.get("steps") or [])
@@ -199,15 +224,13 @@ def _aggregator_problems(
             base_job.get(field) != head_job.get(field)
             or field == "steps"
             and base_id == "gate-required"
-            and {"docs", "type-gate"} & ci_wiring.needs_of(head_job)
+            and ({"docs", "type-gate"} | split) & needs
         )
         and not (
             field == "steps"
             and base_id == "gate-required"
             and head_job.get("steps")
-            in _accepted_steps_renderings(
-                "type-gate" in ci_wiring.needs_of(head_job), postgres, "docs" in ci_wiring.needs_of(head_job)
-            )
+            in _accepted_steps_renderings("type-gate" in needs, postgres, "docs" in needs, bool(split))
         )
         and not (field == "runs-on" and head_job.get(field) in runners(policy))
     ]
@@ -239,15 +262,24 @@ def _reads_needs_freely(condition: str) -> bool:
     return re.search(r"(?<![\w.-])needs\b(?!\s*(?:\.\s*\w|\[\s*''\s*\]))", bare, flags=re.IGNORECASE) is not None
 
 
+def _pinned_lab_job(job: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return the reviewed lab verdict job with its exact dependency install under the grader checkout's locks."""
+    if job is None or LAB_INSTALL not in job.get("steps", ()):
+        return job
+    steps: list[Any] = job["steps"]
+    return {**job, "steps": [LAB_PINNED_INSTALL if step == LAB_INSTALL else step for step in steps]}
+
+
 def _lab_problems(base: dict[str, Any], head: dict[str, Any], gate: dict[str, Any]) -> list[str]:
     """Refuse a lab verdict job or a gate condition off its reviewed form.
 
     A gate whose base condition reads the lab verdict keeps that condition exactly. Any other gate reads the lab
     verdict, or the needs context by a computed key or as a whole, only through its base condition plus its exact lab
-    clause.
+    clause. The lab verdict job may gain the grader checkout's parser and lint tool locks on its exact dependency
+    install, and never loses them.
     """
     problems: list[str] = []
-    if head.get(LAB_VERDICT_JOB) != base.get(LAB_VERDICT_JOB):
+    if head.get(LAB_VERDICT_JOB) not in (base.get(LAB_VERDICT_JOB), _pinned_lab_job(base.get(LAB_VERDICT_JOB))):
         problems.append(
             "The head's lab verdict job differs from the reviewed rendering; the protected branch grades with its own."
         )

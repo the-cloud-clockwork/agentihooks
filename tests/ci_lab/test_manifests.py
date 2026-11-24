@@ -383,6 +383,50 @@ def test_background_raises_pending_while_a_fetch_runs_and_answers_it_until_it_go
     held.release.set()
 
 
+@pytest.mark.feature("lab-manifest-search-outlives-absent-answers")
+def test_background_keeps_an_absent_answer_for_an_hour_and_fetches_it_again_after_it() -> None:
+    held = Held({COMMIT: None})
+    clock = Clock()
+    background = manifests.Background(held, clock=clock)
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    held.release.set()
+    finished(background.fetches)
+    held.release.clear()
+    for now in (300.0, 3599.0):
+        clock.now = now
+        assert background("example/repo", COMMIT) is None
+    assert held.asked == [("example/repo", COMMIT)]
+    clock.now = 3600.0
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    assert all(held.started.acquire(timeout=WAIT_S) for _ in range(2))
+    assert held.asked == [("example/repo", COMMIT), ("example/repo", COMMIT)]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-manifest-search-outlives-absent-answers")
+def test_background_forgets_a_found_manifest_on_its_fresh_window_and_an_absent_answer_on_its_own() -> None:
+    held = Held({COMMIT: None, OTHER: packed(OTHER)})
+    clock = Clock()
+    background = manifests.Background(held, fresh_s=5.0, clock=clock, absent_s=10.0)
+    for commit in (COMMIT, OTHER):
+        with pytest.raises(manifests.FetchPending):
+            background("example/repo", commit)
+    held.release.set()
+    finished(background.fetches)
+    held.release.clear()
+    clock.now = 5.0
+    assert background("example/repo", COMMIT) is None
+    assert list(background.fetches) == [("example/repo", COMMIT)]
+    clock.now = 9.0
+    assert background("example/repo", COMMIT) is None
+    clock.now = 10.0
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    held.release.set()
+
+
 @pytest.mark.feature("lab-manifest-fetch-off-pass")
 def test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next_call() -> None:
     held = Held({COMMIT: FetchUnanswered("GET runs answered 502")})
@@ -399,6 +443,27 @@ def test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next
         background("example/repo", COMMIT)
     assert all(held.started.acquire(timeout=WAIT_S) for _ in range(2))
     assert held.asked == [("example/repo", COMMIT), ("example/repo", COMMIT)]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+def test_background_forgets_a_failed_fetch_nobody_asked_again_once_its_fresh_window_ends() -> None:
+    held = Held({COMMIT: FetchUnanswered("GET runs answered 502"), OTHER: None})
+    clock = Clock()
+    background = manifests.Background(held, clock=clock)
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    held.release.set()
+    finished(background.fetches)
+    held.release.clear()
+    clock.now = 299.0
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", OTHER)
+    assert sorted(background.fetches) == [("example/repo", COMMIT), ("example/repo", OTHER)]
+    clock.now = 300.0
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", OTHER)
+    assert list(background.fetches) == [("example/repo", OTHER)]
     held.release.set()
 
 

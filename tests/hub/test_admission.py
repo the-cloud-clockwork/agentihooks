@@ -2,7 +2,7 @@ import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -11,9 +11,10 @@ from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
 from scripts.hive import account_slots
 from scripts.hub import admission, slots
-from scripts.swarm import model_catalog
+from scripts.swarm import admission_view, model_catalog
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.helpers import store_seed
+from tests.helpers.narrow_ledger import DocLedger
 from tests.swarm.test_readiness import doc, snapshot, task
 
 SLUG = "sw"
@@ -27,27 +28,20 @@ def rig():
     store.create(SwarmConfig(SLUG, "/repo", 2, 2))
     found = doc([task("t1"), task("t2", lane="ci", pr_url="https://example.invalid/pull/1")])
     rows = {row["id"]: row for row in found["tasks"]}
-    ledger = SimpleNamespace(writes=[])
-
-    def update_task(slug, task_id, fields, if_state=(), if_match=None):
-        ledger.writes.append((slug, task_id, fields, tuple(if_state), if_match))
-        row = rows[task_id]
-        if row["state"] in if_state and all(
-            row.get(key, "" if key == "claimed_by" else 0) == value for key, value in (if_match or {}).items()
-        ):
-            if fields.get("claimed_by", row.get("claimed_by", "")) != row.get("claimed_by", ""):
-                row["claim_generation"] = row.get("claim_generation", 0) + 1
-            row.update(fields)
-        return dict(row)
-
-    ledger.update_task = update_task
+    ledger: Any = DocLedger(found)
     source = SimpleNamespace(
         slugs=lambda: [SLUG],
         snapshot=lambda slug: snapshot(found, claimed=[t for t in rows if store.claimant(slug, t)]),
     )
     admitter = admission.Admission(store, ledger, source, clock=lambda: 7_000)
+    admitter.view = admission_view.Narrow(lambda: store, ledger, cast(Any, source), claims=claimant_only)
     yield SimpleNamespace(store=store, ledger=ledger, rows=rows, admitter=admitter, found=found)
     store.redis.close()
+
+
+def claimant_only(store: RedisStore, slug: str) -> Callable[[str], bool]:
+    """The rig's claimed check: a task is claimed only while the store names its claimant."""
+    return lambda task_id: store.claimant(slug, task_id) is not None
 
 
 def ask(**fields):
@@ -993,13 +987,15 @@ def test_a_repeat_ask_that_read_the_offer_claimed_by_its_own_finished_admission_
     other = admission.Admission(rig.store, rig.ledger, rig.admitter.source, clock=lambda: 7_000)
     kept: list[dict[str, Any] | None] = []
 
-    def snapshot(slug: str) -> Any:
+    read = other.view.task
+
+    def task(slug: str, task_id: str, mark: Callable[[str], None]) -> Any:
         kept.append(rig.admitter.admit(SLUG, ask()))
         if not listed:
             rig.store.redis.hdel(rig.store.key(SLUG, "agents"), rig.store.claimant(SLUG, "t1"))
-        return rig.admitter.source.snapshot(slug)
+        return read(slug, task_id, mark)
 
-    monkeypatch.setattr(other, "source", SimpleNamespace(snapshot=snapshot))
+    monkeypatch.setattr(other.view, "task", task)
 
     again = other.admit(SLUG, ask())
 
@@ -1190,7 +1186,8 @@ def test_a_late_admission_prints_one_line_naming_the_member_the_task_and_the_wai
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after {admission.ANSWER_MS + 5} ms, "
         f"past the {admission.ANSWER_MS} ms answer budget, claim kept release={admission.ANSWER_MS + 5} held=0 stopped=0 "
-        f"snapshot=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0"
+        f"row=0 rows=0 parts=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0 "
+        f"continuation=0 seeds=0 primed=0 transfer=0"
     ]
 
 
@@ -1210,7 +1207,8 @@ def test_a_late_admission_counts_the_time_its_request_waited_in_the_hub_serve_qu
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after {admission.ANSWER_MS} ms, "
         f"past the {admission.ANSWER_MS} ms answer budget, claim kept release=0 held=0 stopped=0 "
-        f"snapshot=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0"
+        f"row=0 rows=0 parts=0 withdrawal=0 placement=0 cap=0 turn=0 full=0 claim=0 seat=0 execution=0 ledger=0 "
+        f"continuation=0 seeds=0 primed=0 transfer=0"
     ]
 
 
@@ -1245,7 +1243,7 @@ def test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step(
     monkeypatch.setattr(rig.admitter, "_outdated", bump(100, rig.admitter._outdated))
     monkeypatch.setattr(rig.admitter, "_key", bump(200, rig.admitter._key))
     monkeypatch.setattr(admission.run_window, "claims_stopped", bump(300, admission.run_window.claims_stopped))
-    monkeypatch.setattr(rig.admitter.source, "snapshot", bump(400, rig.admitter.source.snapshot))
+    monkeypatch.setattr(rig.ledger, "task", bump(400, rig.ledger.task))
     monkeypatch.setattr(admission.readiness, "withdrawal", bump(500, admission.readiness.withdrawal))
     monkeypatch.setattr(rig.admitter, "_unplaceable", bump(600, rig.admitter._unplaceable))
     monkeypatch.setattr(tick_module, "_lives_spent", bump(700, tick_module._lives_spent))
@@ -1260,8 +1258,9 @@ def test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step(
 
     assert capsys.readouterr().err.splitlines() == [
         f"hub: events admission swarm={SLUG} task=t1 hive=hive-a late: finished after 9100 ms, "
-        f"past the {admission.ANSWER_MS} ms answer budget, claim kept release=100 held=200 stopped=300 snapshot=400 "
-        f"withdrawal=500 placement=600 cap=700 turn=800 full=900 claim=1000 seat=1100 execution=1200 ledger=1300"
+        f"past the {admission.ANSWER_MS} ms answer budget, claim kept release=100 held=200 stopped=300 row=400 rows=0 "
+        f"parts=0 withdrawal=500 placement=600 cap=700 turn=800 full=900 claim=1000 seat=1100 execution=1200 "
+        f"ledger=1300 continuation=0 seeds=0 primed=0 transfer=0"
     ]
 
 
@@ -1662,6 +1661,117 @@ def test_the_hub_admits_a_launch_for_a_hive_below_its_max_agents(
     assert admitted["hive"] == "hive-a"
     assert rig.store.claimant(SLUG, "t1") == admitted["name"]
     assert capsys.readouterr().err == ""
+
+
+def _lineage_running(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, slug: str, expert: str) -> str:
+    """Hive A one below its cap of two beside a running expert lineage of the swarm whose expert, seated on another
+    hive, is in the given state; no expert record at all when the state is empty. Returns the lineage id."""
+    from dataclasses import replace
+
+    from scripts.swarm import expert_lineage
+    from scripts.swarm.store import AgentRecord
+    from tests.swarm.test_expert_mission import GOOD
+
+    _hive_holding(rig, monkeypatch, "2", 1)
+    lineage = expert_lineage.start(rig.store, slug, GOOD, "/missions/batch.md", "xhigh", "master@a1b2c3-0001", 1_000)
+    if expert:
+        name = rig.store.next_name(slug, "expert")
+        record = AgentRecord(name, "expert", lineage.id, seat=lineage.seat, started_at=1, hive="hive-b")
+        agent = rig.store.start_execution(slug, record)
+        rig.store.put_agent(slug, replace(agent, state=expert))
+    return lineage.id
+
+
+WAITING = "1 of 2 agents on the hive with 1 kept for expert lineages waiting for an expert"
+
+
+@pytest.mark.feature("hub-admission-expert-room-reserve")
+@pytest.mark.parametrize("expert", ["ended", "finished", ""])
+def test_the_hub_holds_a_launch_on_a_hive_one_below_max_agents_while_a_running_expert_lineage_waits(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], expert: str
+) -> None:
+    _lineage_running(rig, monkeypatch, SLUG, expert)
+    before = {slug: len(rig.store.agents(slug)) for slug in (SLUG, "other")}
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted == {"held": WAITING}
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert {slug: len(rig.store.agents(slug)) for slug in (SLUG, "other")} == before
+    assert rig.ledger.writes == []
+    assert rig.rows["t1"]["state"] == "open"
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: {WAITING}"
+    ]
+
+
+@pytest.mark.feature("hub-admission-expert-room-reserve")
+def test_a_lineage_of_another_swarm_waiting_for_an_expert_also_holds_the_hive(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _lineage_running(rig, monkeypatch, "other", "")
+
+    assert rig.admitter.admit(SLUG, ask()) == {"held": WAITING}
+    assert rig.store.claimant(SLUG, "t1") is None
+
+
+@pytest.mark.feature("hub-admission-expert-room-reserve")
+@pytest.mark.parametrize("expert, stopped", [("working", False), ("starting", False), ("", True)])
+def test_the_hub_admits_a_launch_below_max_agents_while_no_running_expert_lineage_waits(
+    rig: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    expert: str,
+    stopped: bool,
+) -> None:
+    from scripts.swarm import expert_lineage
+
+    lineage = _lineage_running(rig, monkeypatch, SLUG, expert)
+    if stopped:
+        expert_lineage.stop(rig.store, SLUG, lineage, "master@a1b2c3-0001", "mission dropped", 2_000)
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert rig.store.claimant(SLUG, "t1") == admitted["name"]
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hub-admission-expert-room-reserve")
+def test_the_slot_kept_for_a_waiting_lineage_goes_to_its_successor_and_then_the_hive_is_full(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.store import AgentRecord
+
+    lineage = _lineage_running(rig, monkeypatch, SLUG, "")
+
+    assert rig.admitter.admit(SLUG, ask()) == {"held": WAITING}
+
+    seat = f"{lineage}@{SLUG}"
+    successor = AgentRecord(
+        rig.store.next_name(SLUG, "expert"), "expert", lineage, seat=seat, started_at=2, hive="hive-a"
+    )
+    rig.store.start_execution(SLUG, successor)
+
+    assert rig.admitter.admit(SLUG, ask()) == {"held": "2 of 2 agents on the hive"}
+    assert rig.store.claimant(SLUG, "t1") is None
+
+
+@pytest.mark.feature("hub-admission-expert-room-reserve")
+def test_a_hive_that_takes_no_expert_keeps_no_slot_for_a_waiting_lineage(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import registry
+
+    _lineage_running(rig, monkeypatch, SLUG, "")
+    registry.update(rig.store.redis, "hive-a", ["excluded=master,expert"])
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert rig.store.claimant(SLUG, "t1") == admitted["name"]
 
 
 def _released(rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, member: str, hub: str) -> None:
@@ -2226,6 +2336,15 @@ def test_a_plan_task_steering_carries_its_phase_evidence(rig: SimpleNamespace) -
     assert seeds["steering.md"] != ledger_workspace.steering(planned, None)
 
 
+@pytest.mark.feature("plan-evidence-phase-less-plan-task")
+def test_a_plan_task_with_no_phase_gets_its_steering_seed(rig: SimpleNamespace) -> None:
+    planned = {**rig.rows["t1"], "kind": "plan", "phase": ""}
+
+    seeds = rig.admitter._seeds(SLUG, planned, rig.found, "eng@sw-0009")  # pyright: ignore[reportPrivateUsage]
+
+    assert seeds == {"steering.md": "# t1: title t1\n\nPlan evidence\n\nProject intent\no\n"}
+
+
 @pytest.mark.feature("hub-admission-claim-context")
 def test_the_seeds_are_built_from_the_ledger_document_the_offer_was_read_against(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
@@ -2240,5 +2359,7 @@ def test_the_seeds_are_built_from_the_ledger_document_the_offer_was_read_against
 
     rig.admitter.admit(SLUG, ask())
 
-    assert read == [rig.found]
-    assert read[0] is rig.found
+    assert len(read) == 1
+    assert read[0]["overview"] == rig.found["overview"]
+    assert [phase["id"] for phase in read[0]["phases"]] == ["p1"]
+    assert "t1" in {row["id"] for row in read[0]["tasks"]}

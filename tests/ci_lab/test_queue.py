@@ -98,6 +98,24 @@ def test_supersede_drops_pending_and_keeps_leased(jobs: queue.Queue) -> None:
     assert jobs.supersede("old") == []
 
 
+@pytest.mark.feature("lab-retire-gone-merge-groups")
+def test_drop_removes_the_pending_jobs_of_a_head_and_keeps_its_leased_ones(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a"), unit("b"), unit("c")], "old", {})
+    jobs.enqueue([unit("a")], "new", {})
+    assert take(jobs, "old:test:b")
+
+    assert jobs.drop("old") == ["old:test:a", "old:test:c"]
+
+    assert jobs.pending() == ["new:test:a"]
+    assert jobs.job("old:test:a") is None
+    assert jobs.job("old:test:c") is None
+    assert found(jobs, "old:test:b").state == "leased"
+    assert jobs.members("old", "pending") == set()
+    assert jobs.members("old", "leased") == {"old:test:b"}
+    assert jobs.members("new", "pending") == {"new:test:a"}
+    assert jobs.drop("old") == []
+
+
 def test_claim_is_won_once(jobs: queue.Queue) -> None:
     jobs.enqueue([unit("a")], "h1", {})
     record = found(jobs, "h1:test:a")
@@ -255,6 +273,134 @@ def test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt(jobs: 
     assert found(jobs, "h1:test:a").attempts == 2
 
 
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_more_urgent_rank_sorts_ahead_of_work_enqueued_earlier(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("q1"), unit("q2")], "merge", {}, rank=2)
+    jobs.enqueue([unit("b")], "sweep", {}, rank=4)
+    jobs.enqueue([unit("p1"), unit("p2")], "pull", {}, rank=1)
+    jobs.enqueue([unit("x")], "fix", {}, rank=0)
+    jobs.enqueue([unit("q3")], "merge", {}, rank=2)
+
+    assert jobs.pending() == [
+        "fix:test:x",
+        "pull:test:p1",
+        "pull:test:p2",
+        "merge:test:q1",
+        "merge:test:q2",
+        "merge:test:q3",
+        "sweep:test:b",
+    ]
+    assert [found(jobs, job).rank for job in ("fix:test:x", "pull:test:p1", "merge:test:q3", "sweep:test:b")] == [
+        0,
+        1,
+        2,
+        4,
+    ]
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_an_unranked_job_keeps_its_counter_score_and_sorts_after_every_ranked_one(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("old")], "h1", {})
+    jobs.enqueue([unit("sweep")], "h2", {}, rank=queue.RANKS - 1)
+
+    assert jobs.pending() == ["h2:test:sweep", "h1:test:old"]
+    assert jobs.client.zscore(f"{queue.PREFIX}pending", "h1:test:old") == 1
+    assert jobs.client.zscore(f"{queue.PREFIX}pending", "h2:test:sweep") == 2 - queue.BAND
+    assert found(jobs, "h1:test:old").rank == queue.UNRANKED == queue.RANKS
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_job_enqueued_before_ranks_existed_sorts_after_ranked_work_and_moves_under_a_rank(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("old"), unit("kept")], "h1", {})
+    for job in ("h1:test:old", "h1:test:kept"):
+        jobs.client.hdel(f"{queue.PREFIX}job:{job}", "rank")
+    jobs.enqueue([unit("p")], "pull", {}, rank=1)
+
+    assert found(jobs, "h1:test:old").rank == queue.UNRANKED
+    assert list(jobs.ordered()) == ["pull:test:p", "h1:test:old", "h1:test:kept"]
+
+    assert jobs.enqueue([unit("kept")], "h1", {}, rank=0) == []
+
+    assert list(jobs.ordered()) == ["h1:test:kept", "pull:test:p", "h1:test:old"]
+    assert jobs.client.zscore(f"{queue.PREFIX}pending", "h1:test:kept") == 2 - queue.RANKS * queue.BAND
+    assert found(jobs, "h1:test:kept").rank == 0
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_reaped_or_retried_job_keeps_its_rank(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a"), unit("b")], "pull", {}, rank=1)
+    jobs.enqueue([unit("q")], "merge", {}, rank=2)
+    assert take(jobs, "pull:test:a")
+
+    assert jobs.reap(found(jobs, "pull:test:a"), 100, 1) == "pending"
+
+    assert jobs.pending() == ["pull:test:b", "pull:test:a", "merge:test:q"]
+    assert take(jobs, "pull:test:b")
+    record = found(jobs, "pull:test:b")
+    assert jobs.finish(record, "tok", "crash")
+
+    assert jobs.retry(record) is True
+
+    assert jobs.pending() == ["pull:test:a", "pull:test:b", "merge:test:q"]
+    assert (found(jobs, "pull:test:a").rank, found(jobs, "pull:test:b").rank) == (1, 1)
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_more_urgent_enqueue_moves_a_pending_job_and_leaves_a_leased_one(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {}, rank=3)
+    jobs.enqueue([unit("p")], "pull", {}, rank=1)
+    assert take(jobs, "h1:test:a")
+
+    assert jobs.enqueue([unit("a"), unit("c")], "h1", {}, rank=1) == []
+
+    assert jobs.pending() == ["h1:test:c", "pull:test:p", "h1:test:b"]
+    assert (found(jobs, "h1:test:c").rank, found(jobs, "h1:test:b").rank) == (1, 3)
+    leased = found(jobs, "h1:test:a")
+    assert (leased.state, leased.rank) == ("leased", 3)
+    assert jobs.members("h1", "pending") == {"h1:test:b", "h1:test:c"}
+
+    assert jobs.enqueue([unit("c")], "h1", {}, rank=4) == []
+
+    assert jobs.pending() == ["h1:test:c", "pull:test:p", "h1:test:b"]
+    assert found(jobs, "h1:test:c").rank == 1
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_a_more_urgent_enqueue_leaves_a_finished_job_alone(jobs: queue.Queue) -> None:
+    jobs.enqueue([unit("a")], "h1", {}, rank=3)
+    assert take(jobs, "h1:test:a")
+    assert jobs.finish(found(jobs, "h1:test:a"), "tok", "crash")
+
+    assert jobs.enqueue([unit("a")], "h1", {}, rank=1) == []
+
+    finished = found(jobs, "h1:test:a")
+    assert (finished.state, finished.rank) == ("done", 3)
+    assert jobs.pending() == []
+
+
+@pytest.mark.feature("lab-lease-class-order")
+def test_the_lease_order_is_read_in_pages_that_a_claim_between_them_cannot_shift(
+    jobs: queue.Queue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([unit(str(number)) for number in range(7)], "h1", {}, rank=1)
+    pages: list[tuple[object, ...]] = []
+    read = jobs.client.zrangebyscore
+
+    def counted(*arguments: object, **options: object) -> object:
+        pages.append(arguments)
+        return read(*arguments, **options)
+
+    monkeypatch.setattr(jobs.client, "zrangebyscore", counted)
+    ordered = jobs.ordered(page=3)
+
+    assert next(ordered) == "h1:test:0"
+    assert len(pages) == 1
+    assert take(jobs, "h1:test:0")
+    assert list(ordered) == [f"h1:test:{number}" for number in range(1, 7)]
+    assert len(pages) == 3
+    assert list(jobs.ordered(page=7)) == [f"h1:test:{number}" for number in range(1, 7)]
+
+
 def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
     jobs.enqueue([unit("a"), unit("b")], "h1", {})
     assert take(jobs, "h1:test:a")
@@ -302,3 +448,24 @@ def test_leased_lists_each_leased_job_and_offers_keep_each_workers_latest_free_s
     jobs.offer("w3", 5, 1300)
     assert jobs.prune(1201) == 1
     assert jobs.offers(0) == {"w3": (5, 1300)}
+
+
+@pytest.mark.feature("lab-scheduler-pass-moves-changed-grades")
+def test_states_reads_each_job_state_in_order_through_plain_pipelines_and_a_missing_job_reads_none(
+    jobs: queue.Queue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ids = jobs.enqueue([unit("a"), unit("b"), unit("c")], "h1", {})
+    assert jobs.claim(found(jobs, ids[1]), "w1", "t1", 900, 0)
+    assert jobs.claim(found(jobs, ids[2]), "w1", "t2", 900, 0)
+    assert jobs.finish(found(jobs, ids[2]), "t2", "passed")
+    opened: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    pipeline = jobs.client.pipeline
+
+    def piped(*args: object, **options: object) -> object:
+        opened.append((args, options))
+        return pipeline(*args, **options)
+
+    monkeypatch.setattr(jobs.client, "pipeline", piped)
+    assert jobs.states([ids[2], "h1:test:none", ids[0], ids[1]]) == ["done", None, "pending", "leased"]
+    assert jobs.states([]) == []
+    assert opened == [((), {"transaction": False})] * 2

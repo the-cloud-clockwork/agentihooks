@@ -1,8 +1,11 @@
 import json
 import subprocess
 import time
+from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
 
 from scripts.swarm import queue_exit
 from scripts.swarm.store import SwarmError
@@ -14,6 +17,7 @@ PATH = "repos/o/r/actions/runs?event=merge_group&created=>=2026-10-18T19:00:00Z&
 
 COMMITTED = "2026-10-20T08:00:00Z"
 FRESH = "repos/o/r/actions/runs?event=merge_group&created=>=2026-10-20T08:00:00Z&per_page=100&page=1"
+UNIT = "unit (3.12, 1)"
 
 
 def run_of(number, conclusion, name="Tests", run_id=1, group="g1", created="2026-10-20T09:00:00Z"):
@@ -32,16 +36,23 @@ def jobs_path(run_id, page=1):
     return f"repos/o/r/actions/runs/{run_id}/jobs?per_page=100&page={page}"
 
 
-def runner(*pages, total=None, code=0, jobs=None):
+def gate_summary(conclusion: str = "failure") -> dict[str, str]:
+    return {"name": "Queue gate summary", "conclusion": conclusion}
+
+
+def runner(
+    *pages: list[Any], total: int | None = None, code: int = 0, jobs: dict[int, list[list[Any]]] | None = None
+) -> Any:
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         path = command[2]
         if "/jobs?" in path:
             listed = (jobs or {}).get(int(path.split("/runs/")[1].split("/")[0]), [[]])
             page = listed[int(path.rsplit("page=", 1)[1]) - 1]
-            body = {"total_count": sum(map(len, listed)), "jobs": [{"conclusion": c} for c in page]}
+            named = [job if isinstance(job, dict) else {"name": UNIT, "conclusion": job} for job in page]
+            body = {"total_count": sum(map(len, listed)), "jobs": named}
         elif "/commits/" in path:
             body = {"commit": {"committer": {"date": COMMITTED}}}
         else:
@@ -80,6 +91,22 @@ def test_cancelled_and_passed_own_runs_are_no_failure():
 @pytest.mark.parametrize("conclusion", ["failure", "timed_out", "startup_failure"])
 def test_a_cancelled_own_run_with_a_failed_job_is_the_entrys_own_failure(conclusion):
     run = runner([run_of(7, "cancelled", run_id=5)], jobs={5: [["success", conclusion, "cancelled"]]})
+    assert queue_exit.own_failures(URL, SINCE, run) == ["Tests https://github.com/o/r/actions/runs/5"]
+
+
+@pytest.mark.feature("merge-queue-cancel-skips-gate-summary")
+@pytest.mark.parametrize("conclusion", ["failure", "timed_out", "startup_failure"])
+def test_a_cancelled_own_run_whose_only_failed_job_is_the_queue_gate_summary_is_no_failure(conclusion: str) -> None:
+    jobs = {5: [["cancelled", "skipped", "success", gate_summary(conclusion)]]}
+    run = runner([run_of(7, "cancelled", run_id=5)], jobs=jobs)
+    assert queue_exit.own_failures(URL, SINCE, run) == []
+    assert run.calls[-1] == ["gh", "api", jobs_path(5)]
+
+
+@pytest.mark.feature("merge-queue-cancel-skips-gate-summary")
+@pytest.mark.parametrize("conclusion", ["failure", "timed_out", "startup_failure"])
+def test_a_cancelled_own_run_with_a_failed_unit_shard_and_summary_is_a_failure(conclusion: str) -> None:
+    run = runner([run_of(7, "cancelled", run_id=5)], jobs={5: [["cancelled", conclusion, gate_summary()]]})
     assert queue_exit.own_failures(URL, SINCE, run) == ["Tests https://github.com/o/r/actions/runs/5"]
 
 
@@ -174,6 +201,32 @@ def test_a_head_whose_last_group_had_a_failed_job_is_refused_naming_the_run():
         "Proofs https://github.com/o/r/actions/runs/6); push a new commit before queueing again"
     )
     assert ["gh", "api", jobs_path(5)] in run.calls
+
+
+@pytest.mark.feature("merge-queue-cancel-skips-gate-summary")
+def test_a_head_whose_last_group_was_cancelled_with_only_the_queue_gate_summary_failed_may_queue() -> None:
+    last = run_of(7, "cancelled", run_id=5, group="g1")
+    run = runner([last], jobs={5: [["cancelled", "skipped", "success", gate_summary()]]})
+    assert queue_exit.require_fresh(URL, "abc", run) is None
+    assert ["gh", "api", jobs_path(5)] in run.calls
+
+
+@pytest.mark.feature("merge-queue-cancel-skips-gate-summary")
+def test_a_head_whose_cancelled_last_group_had_a_failed_unit_shard_is_still_refused() -> None:
+    last = run_of(7, "cancelled", run_id=5, group="g1")
+    run = runner([last], jobs={5: [["cancelled", "failure", gate_summary()]]})
+    with pytest.raises(
+        SwarmError, match=r"failed its last merge group run \(Tests https://github.com/o/r/actions/runs/5\)"
+    ):
+        queue_exit.require_fresh(URL, "abc", run)
+
+
+@pytest.mark.feature("merge-queue-cancel-skips-gate-summary")
+def test_queue_exit_skips_the_job_name_the_tests_workflow_gives_gate_required_on_merge_groups() -> None:
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/test.yml").read_text())
+    assert (
+        f"github.event_name == 'merge_group' && '{queue_exit.SUMMARY}' ||" in workflow["jobs"]["gate-required"]["name"]
+    )
 
 
 def test_an_older_failed_group_does_not_refuse_a_clean_last_group():

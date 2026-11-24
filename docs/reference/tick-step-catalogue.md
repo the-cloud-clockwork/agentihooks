@@ -31,8 +31,8 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | drained resume | drained resume | tick | 2 | 60 | automated cleanup, ledger state, master move fail over, master start watch, master wake, recover master, sleeping, stopped branch | none | none |
 | sleeping | drained resume | tick | 2 | 60 | automated cleanup, ledger state, stopped branch | none | none |
 | master down | master seats | tick | 2 | 60 | drained resume | none | none |
-| master scale | master seats | tick | 2 | 60 | drained resume | none | none |
-| seat alarm | master seats | tick | 2 | 60 | ledger state | none | none |
+| master scale | master seats | tick | 2 | 60 | drained resume | none | kept-placing-steps-first-on-the-placement-worker |
+| seat alarm | master seats | tick | 2 | 60 | ledger state | none | kept-placing-steps-first-on-the-placement-worker |
 | tick master | master seats | tick | 2 | 60 | drained resume | none | master-launch-lock |
 | master alarm | master watch | slow | 2 | 60 | none | none | none |
 | night watch | master watch | slow | 22 | 120 | ledger state, sleeping | none | none |
@@ -55,8 +55,8 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | pass budget | pass setup | tick | 2 | 60 | none | none | none |
 | spawn hold clear | pass setup | tick | 2 | 60 | none | none | none |
 | bottleneck remedy | placement | tick | 2 | 60 | ledger state | none | none |
-| rank pass | placement | tick | 7 | 60 | drained resume | none | none |
-| codex hook order | placement acks | tick | 2 | 60 | sleeping | none | none |
+| rank pass | placement | tick | 7 | 60 | drained resume | none | kept-placing-steps-first-on-the-placement-worker |
+| codex hook order | placement acks | tick | 2 | 60 | sleeping | none | kept-placing-steps-first-on-the-placement-worker |
 | lost runner | placement notices | slow | 2 | 60 | drained resume | none | none |
 | quota notice | placement notices | tick | 2 | 60 | drained resume | none | none |
 | time left | placement notices | slow | 2 | 60 | drained resume | none | none |
@@ -106,6 +106,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | planning after phase | wrapper phases | tick | 12 | 60 | planning and phase pass | none | none |
 | planning and phase pass | wrapper phases | tick | 12 | 60 | none | none | none |
 | review pass | wrapper phases | tick | 2 | 60 | none | ledger | swarm-review-trigger |
+| thin task pass | wrapper phases | tick | 2 | 120 | none | inbox, ledger | tick-thin-task-pass |
 | urgent hold | wrapper phases | tick | 2 | 60 | none | none | none |
 | workflow runner | wrapper phases | slow | 2 | 60 | drained resume, ledger state, planning and phase pass | host | swarm-workflow-runner |
 | hive ledger | wrapper probes | slow | 2 | 120 | none | none | none |

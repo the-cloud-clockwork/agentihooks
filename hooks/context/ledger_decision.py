@@ -1,6 +1,5 @@
 """Tell a swarm-bound session to ingest an accepted plan into its ledger with agentihooks plan ingest."""
 
-import fcntl
 import json
 import os
 from collections.abc import Mapping
@@ -8,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from hooks.compat import fcntl
 from hooks.config import AGENTIHOOKS_HOME
 from hooks.context import worker_mode
 from hooks.targets import capabilities

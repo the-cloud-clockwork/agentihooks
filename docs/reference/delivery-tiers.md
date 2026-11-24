@@ -1177,8 +1177,8 @@ Issue 5456 also records two diagnostic gaps: the rebuild cause reader reported `
 {% raw %}
 | Job key | `name:` in `test.yml` | Constant in `scripts.ci_gate_queue` | Name on `merge_group` | Name on other events |
 |---|---|---|---|---|
-| `queue-fail-fast` | `${{ github.event_name == 'merge_group' && 'Gate — Required' \|\| 'queue-fail-fast' }}` | `GATE_NAME` | `Gate — Required` | `queue-fail-fast` |
-| `gate-required` | `${{ github.event_name == 'merge_group' && 'Queue gate summary' \|\| 'Gate — Required' }}` | `SUMMARY_NAME` | `Queue gate summary` | `Gate — Required` |
+| `queue-fail-fast` | <code>${{ github.event_name == 'merge_group' && 'Gate — Required' &#124;&#124; 'queue-fail-fast' }}</code> | `GATE_NAME` | `Gate — Required` | `queue-fail-fast` |
+| `gate-required` | <code>${{ github.event_name == 'merge_group' && 'Queue gate summary' &#124;&#124; 'Gate — Required' }}</code> | `SUMMARY_NAME` | `Queue gate summary` | `Gate — Required` |
 {% endraw %}
 
 `gate_protected.grade` first runs `_pinned_names`. For every base workflow job whose `name` equals `GATE_NAME` or `SUMMARY_NAME`, the head job with the same workflow file and job key must carry the same `name` string, character for character. Each job that differs adds one problem:
@@ -1197,7 +1197,7 @@ After the pin, `scripts.ci_gate_queue.normalize` checks the early gate in each w
 |---|---|
 | Exactly two jobs carry the expression form, `gate-required` is named `SUMMARY_NAME`, and `queue-fail-fast` equals `scripts.ci_gate_queue.watcher` rendered with `gate-required`'s `runs-on`, with or without `deferred=True` | `The early queue gate must use the exact reviewed context pair and verifier` |
 | The `reuse` job's `if` is `github.event_name != 'merge_group' && github.event_name != 'pull_request'` | `The early queue gate requires the existing whole queue reuse exclusion` |
-| `gate-required`'s `needs`, ignoring `lab-verdict`, equal the reviewed inventory, or the reviewed inventory plus `ANNOUNCED` | `The early queue gate must preserve the reviewed graded inventory` |
+| `gate-required`'s `needs`, ignoring `lab-verdict`, equal the reviewed inventory, the reviewed inventory plus `ANNOUNCED`, or that plus `SPLIT` | `The early queue gate must preserve the reviewed graded inventory` |
 
 The reviewed inventory joins `REQUIRED`, `SKIPPED` and four unit and watcher jobs:
 
@@ -1207,9 +1207,12 @@ The reviewed inventory joins `REQUIRED`, `SKIPPED` and four unit and watcher job
 | `SKIPPED` | `unit-selected`, `coverage-ratchet`, `lint`, `docs`, `sonar`, `mutation-plan`, `mutation-stats`, `mutation`, `swarm-image`, `worker-image`, `brain-smoke`, `writer-lock`, `install-smoke`, `kind-due`, `helm-kind`, `semgrep`, `ledger-load`, `stage-budget`, `reuse`, `dep-manifest` |
 | Unit and watcher jobs | `unit`, `unit-lost`, `unit-rerun`, `queue-fail-fast` |
 | `ANNOUNCED` | `install-smoke`, `dep-manifest`, `type-gate` |
+| `SPLIT` | `collect`, `lint-actions` |
 | `LAB_VERDICT` | `lab-verdict`, ignored in the comparison |
 
 The comparison is between sets, so need order does not matter, and a missing need is refused like an added one. `install-smoke` and `dep-manifest` already belong to the inventory, so `type-gate` is the one need that `ANNOUNCED` adds. `dev`'s `gate-required` already lists `type-gate` and grades green only because `ANNOUNCED` admits it.
+
+`SPLIT` names the two jobs split out of `test-count` and `lint`: `collect`, which holds the early collection and the test plan, and `lint-actions`, which holds the lint steps only Actions can run. The needs are accepted with both or with neither, never with one, and the protected grader refuses a head that names one of them whatever its steps. A head whose needs name both must also render its aggregation with `scripts.ci_reuse.split_required`, which requires both jobs to succeed on pull requests, `collect` to succeed and `lint-actions` to be skipped on merge groups, and lets both be skipped on a `dev` push. `split_required` raises unless the aggregation holds the pull request, merge group and `dev` push job lists once each, so a rendering without those lists has no split form and is refused for such a head.
 
 When every check passes, `normalize` renames the pair to plain `Gate — Required` and `queue-fail-fast` in its copy, so the rest of the grade sees one job named `Gate — Required`. A refusal from `normalize` ends the grade: the result is the pin problems followed by that refusal.
 
@@ -1745,7 +1748,8 @@ The coverage ratchet fails a run when a line the base tree ran is no longer run 
 - **Grading on a dev push.** The ratchet takes the push's `before` commit as its base and resolves its baseline in this order:
   1. the cache entry for the base tree, `coverage-baseline-<tree>`;
   2. the newest `coverage-baseline-` cache entry, used only when the commit recorded in its `baseline.json` is an ancestor of the pushed head. This covers a base whose own push run was cancelled by a newer push before it published. The log line reads `Grading from the newest dev baseline at <commit>`, and the ratchet checks out that commit as its base;
-  3. the live `coverage-baseline` artifact of a dev push run on the base commit whose unit shards and baseline publishing steps passed, even if another gate of that run was red, found through the API with the `tcc main ci` App token, when the cache has no usable entry.
+  3. the live `coverage-baseline` artifact of a dev push run on the base commit whose unit shards and baseline publishing steps passed, even if another gate of that run was red, found through the API with the `tcc main ci` App token, when the cache has no usable entry;
+  4. the live `coverage-baseline` artifact of the base's nearest first parent ancestor whose dev push run passed the same checks, read from one page of the repository's newest `coverage-baseline` artifacts, when no run of the base kept one. This covers a base whose own push run was replaced before it published while the cache holds no usable entry. The log line reads `Restoring the coverage baseline of base <sha> from measured run <id> of its nearest measured first parent ancestor <commit>`, and the ratchet checks out that ancestor as its base. The hold then covers the lines that ancestor ran, so a line first run by the unmeasured commits after it is not held for this push. A base older than the newest hundred published baselines, such as a rerun of an old dev push, finds no ancestor this way.
 - **Grading on a dispatch.** The `durations` job finds the measured dev push run of the dispatched base and republishes its baseline as `queue-coverage-baseline`; the ratchet grades against that.
 
 The ratchet always runs `tests/coverage_ratchet.py` from the base checkout, never from the head under test, and uploads its findings as the `coverage-ratchet` artifact (`report.txt`, kept 7 days).
@@ -1756,7 +1760,7 @@ The disabled `queue-baseline` job is gone: pull request [3517](https://github.co
 
 | Message in the `coverage-ratchet` log | Cause | Action |
 |---|---|---|
-| `No measured Tests run on base <sha> kept a live coverage-baseline artifact with successful measuring and publishing jobs.` | No cache entry fit and no dev push run of the base kept a live artifact with passed unit shards and publishing steps. | Rerun the failed jobs once the next dev push publishes a baseline, or dispatch the Tests workflow against a measured base. |
+| `No measured Tests run on base <sha> kept a live coverage-baseline artifact with successful measuring and publishing jobs.` | No cache entry fit, no dev push run of the base kept a live artifact with passed unit shards and publishing steps, and no first parent ancestor on the newest page of live `coverage-baseline` artifacts had such a run. | Rerun the failed jobs once the next dev push publishes a baseline, or dispatch the Tests workflow against a measured base. |
 | `Base <sha> is outside dev history.` | The base commit is not on `dev`. | Dispatch the Tests workflow with a `base` on `dev`. |
 | `The base carries no tests/coverage_ratchet.py, so nothing trusted can grade.` | The base predates the ratchet. | Dispatch the Tests workflow with a newer `base` input. |
 | `<n> lines the base ran are no longer run by any head test; see the coverage-ratchet report.` | A merged change removed or rerouted the only test reaching those lines, listed by file and line in `report.txt`, so promotion is red while the queue keeps merging. | Follow [Clearing a lost line](#clearing-a-lost-line); never lower the ratchet or exclude the line. |

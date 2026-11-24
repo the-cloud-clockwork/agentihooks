@@ -13,6 +13,7 @@ Usage::
 """
 
 import os
+import sys
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -260,7 +261,7 @@ def record_lifecycle_context(payload: dict) -> None:
     from hooks.config import TOKEN_MONITOR_ENABLED
     from hooks.targets import is_codex
 
-    if not TOKEN_MONITOR_ENABLED or not is_codex():
+    if not TOKEN_MONITOR_ENABLED or not is_codex() or sys.platform == "win32":
         return
     if payload.get("hook_event_name") not in ("PostToolUse", "Stop"):
         return

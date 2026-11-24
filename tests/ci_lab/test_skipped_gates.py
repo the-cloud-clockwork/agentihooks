@@ -24,6 +24,27 @@ def test_a_pull_request_frame_names_each_authoritative_gate_it_grades_with_no_un
         assert scheduler.frame(tier, TREE, BASE, gates, authoritative).idle == frozenset()
 
 
+@pytest.mark.feature("lab-pull-request-reusable-job-units")
+def test_a_pull_request_frame_grades_each_reusable_workflow_job_under_the_job_that_calls_it() -> None:
+    gates = {
+        "lint": (unit(1),),
+        "semgrep/scan": (unit(2),),
+        "semgrep": (unit(5),),
+        "semgrep/feature-tests": (unit(3),),
+        "semgrep/charts": (unit(4),),
+        "semgrep-extra/scan": (unit(6),),
+    }
+    for tier in (Priority.HOTFIX, Priority.PULL_REQUEST):
+        framed = scheduler.frame(tier, TREE, BASE, gates, ("semgrep",))
+        assert framed.gates["semgrep"] == (unit(2), unit(5), unit(3), unit(4))
+        assert framed.gates["lint"] == (unit(1),)
+        assert set(framed.gates) == set(scheduler.PULL_REQUIRED)
+        assert unit(6) not in {item for units in framed.gates.values() for item in units}
+        assert framed.idle == frozenset()
+    for tier in (Priority.PROMOTION, Priority.BACKFILL):
+        assert scheduler.frame(tier, TREE, BASE, gates).gates == gates
+
+
 @pytest.mark.feature("lab-skipped-authoritative-gates")
 def test_a_pull_request_head_posts_each_authoritative_gate_it_runs_no_unit_of_skipped_on_its_first_pass(
     lab: Callable[..., Run],

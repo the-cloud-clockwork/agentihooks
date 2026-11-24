@@ -143,7 +143,7 @@ def test_manual_phase_admits_build_tasks_without_requeuing_its_old_plan(env, clo
         build = next(t for t in current["tasks"] if t["id"] == "build")
         assert phase_state.lifecycle(manual, current) == "building"
         assert phase_state.admits(build, current)
-        assert [t["id"] for t in tasks("p1") if t.get("kind") == "plan"] == ["plan-p1"]
+        assert [t["id"] for t in tasks("p1") if t.get("kind") == "plan" and not t.get("enhances")] == ["plan-p1"]
         assert next(t for t in tasks("p1") if t["id"] == "plan-p1").get("out_of_scope", False) is close_plan
 
 
@@ -156,7 +156,7 @@ def test_new_manual_phase_never_queues_a_plan_while_its_build_task_waits(env):
         current = state(SLUG)
         build = next(t for t in current["tasks"] if t["id"] == "build")
         assert phase_state.admits(build, current)
-        assert [t["id"] for t in tasks("p1")] == ["build"]
+        assert [t["id"] for t in tasks("p1") if not t.get("enhances")] == ["build"]
 
 
 def unplanned(store):
@@ -635,7 +635,7 @@ def test_a_release_phase_gets_one_release_task_on_the_tick_its_build_tasks_are_d
     assert phase("p1")["done"] is False
     assert [t["id"] for t in tasks("p1")] == ["t1", "release-p1"]
     run(store, ledger)
-    [release] = [t for t in tasks("p1") if t["id"] != "t1"]
+    [release] = [t for t in tasks("p1") if t["id"] != "t1" and not t.get("enhances")]
     assert (release["id"], release["lane"], release["kind"], release["state"]) == ("release-p1", "eng", "ops", "open")
     assert release["title"] == "Release phase Build"
     assert release["description"] == (
@@ -656,7 +656,7 @@ def test_no_release_task_while_a_build_task_is_open_or_without_the_release_field
     build_task(ledger, "t2", done=False)
     set_phase("p1", release=True)
     run(store, ledger)
-    assert [t["id"] for t in tasks("p1")] == ["t1", "t2"]
+    assert [t["id"] for t in tasks("p1") if not t.get("enhances")] == ["t1", "t2"]
     build_task(ledger, "t3", pid="p2")
     set_phase("p2", release=False)
     run(store, ledger)

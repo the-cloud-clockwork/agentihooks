@@ -1,6 +1,6 @@
 from typing import cast
 
-from . import refresh
+from . import refresh, tracked
 from .entry import thawed
 from .events import read_events
 from .fragments import Fragment, document, replaced
@@ -30,7 +30,10 @@ def detached(fragment: Fragment, previous: Fragment | None, value: object) -> tu
     if fragment is previous:
         return fragment, value
     if fragment.parts is None:
-        return Fragment(thawed(fragment.value), signature=fragment.signature), thawed(fragment.value)
+        if tracked.held(value) is fragment:
+            return fragment, value
+        stored = Fragment(thawed(fragment.value), signature=fragment.signature)
+        return stored, tracked.bound(stored)
     old = previous.parts if previous is not None and type(previous.parts) is type(fragment.parts) else None
     if isinstance(fragment.parts, dict):
         own = cast(dict[str, Fragment], fragment.parts)

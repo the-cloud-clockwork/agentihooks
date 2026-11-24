@@ -1,0 +1,24 @@
+rules:
+  - id: feature-ledger-relay-marks-one-helper
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The marks of an entry relayed for the operator are built by scripts.swarm_ledger.ledger_relay.marks_of
+      alone, so every stored entry and event carries them in one order: who relayed it, from where, then the
+      proof. No other module writes relayed_by and relayed_from side by side, as a dict or as keyword arguments.
+    pattern-either:
+      - pattern: '{..., "relayed_by": $BY, ..., "relayed_from": $FROM, ...}'
+      - pattern: '{..., "relayed_from": $FROM, ..., "relayed_by": $BY, ...}'
+      - pattern: '{..., "relayed_by": $BY, ..., "relayed_from": $FROM, ..., **$PROOF, ...}'
+      - pattern: '{..., "relayed_from": $FROM, ..., "relayed_by": $BY, ..., **$PROOF, ...}'
+      - pattern: '{..., **$PROOF, ..., "relayed_by": $BY, ..., "relayed_from": $FROM, ...}'
+      - pattern: '{..., **$PROOF, ..., "relayed_from": $FROM, ..., "relayed_by": $BY, ...}'
+      - pattern: $CALL(..., relayed_by=$BY, ..., relayed_from=$FROM, ...)
+      - pattern: $CALL(..., relayed_from=$FROM, ..., relayed_by=$BY, ...)
+    paths:
+      include:
+        - /scripts/
+        - /hooks/
+        - '*.test.py'
+      exclude:
+        - /scripts/swarm_ledger/ledger_relay.py

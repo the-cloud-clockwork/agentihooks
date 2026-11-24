@@ -144,7 +144,12 @@ def lane_caps(config: SwarmConfig, doc: dict[str, Any] | None = None) -> dict[st
     """The stored lane caps, the plan cap at least one while the ledger holds an open plan lane task."""
     tasks = (doc or {}).get("tasks", [])
     planning = any(task.get("lane") == "plan" and task.get("state") == "open" for task in tasks)
-    return {"eng": config.max_eng, "ci": config.max_ci, "plan": max(config.max_plan, int(planning))}
+    return {
+        "eng": config.max_eng,
+        "ci": config.max_ci,
+        "plan": max(config.max_plan, int(planning)),
+        "review": config.max_review,
+    }
 
 
 def claim_key(config: SwarmConfig, doc: dict[str, Any]) -> Callable[[dict[str, Any]], tuple[int, int]] | None:
@@ -163,7 +168,8 @@ def _merged(task, known):
 
 def guarded(doc: dict, fix: str) -> set[str]:
     graph, known, deferred = hierarchy.project(doc)[0], {t["id"]: t for t in doc["tasks"]}, _deferred(doc)
-    depth = chains({**doc, "tasks": [t for t in doc["tasks"] if not freeze.claim_gate(t, doc, graph, fix)]})
+    queue = freeze.admitted(doc, graph)
+    depth = chains({**doc, "tasks": [t for t in doc["tasks"] if not freeze.claim_gate(t, doc, graph, fix, queue)]})
     longest = depth and max(depth.values())
     return {
         task_id
