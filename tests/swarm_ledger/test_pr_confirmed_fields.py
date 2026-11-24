@@ -11,6 +11,7 @@ from tests.swarm_ledger import legacy_page
 SLUG = "prconfirmed-2026-01-01"
 ENGINEER = "engineer@abcdef-0002"
 HEAD = "0123456789abcdef0123456789abcdef01234567"
+GITLAB = "https://gitlab.example.com/group/sub/project/-/merge_requests/7"
 
 
 @pytest.fixture(autouse=True)
@@ -91,3 +92,42 @@ def test_the_number_check_refuses_with_its_whole_message(bad: object) -> None:
 @pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
 def test_the_confirmed_pull_check_takes_fields_without_a_number_or_head() -> None:
     assert ledger_tasks.check_confirmed_pull({}) is None
+
+
+@pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
+def test_a_task_update_records_a_confirmed_gitlab_merge_request() -> None:
+    fields = {
+        "state": "pr",
+        "pr_url": GITLAB,
+        "branch": "feature",
+        "branch_repo": "https://gitlab.example.com/group/sub/project",
+        "pr_number": 7,
+        "pr_head": HEAD,
+    }
+    core.check_op(op(fields))
+    state, _ = core.sync(SLUG, ops=[op(fields)])
+    task = next(t for t in state["tasks"] if t["id"] == "t1")
+    assert {key: task.get(key) for key in fields} == fields
+
+
+@pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
+@pytest.mark.parametrize("url", ["https://github.com/o/r/pull/7"])
+def test_a_task_update_records_the_scope_a_change_request_delivers(url: str) -> None:
+    scopes = {url: {"kind": "stage", "scope": "the gate"}}
+    core.check_op(op({"pull_scopes": scopes}))
+    state, _ = core.sync(SLUG, ops=[op({"pull_scopes": scopes})])
+    assert next(t for t in state["tasks"] if t["id"] == "t1")["pull_scopes"] == scopes
+
+
+@pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://gitlab.example.com/group/sub/project/-/issues/7",
+        "https://example.com/group/sub/project/-/merge_requests/7",
+        f"{GITLAB}/diffs",
+    ],
+)
+def test_a_task_update_refuses_a_scope_on_a_link_that_is_no_change_request(url: str) -> None:
+    with pytest.raises(ValueError, match="pull_scopes must map pull request URLs"):
+        ledger_tasks.check(op({"pull_scopes": {url: {"kind": "stage", "scope": "the gate"}}}))
