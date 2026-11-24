@@ -9,10 +9,29 @@ from scripts.forge.github import GitHubForge, Runner
 from scripts.forge.gitlab import GitLabForge
 from scripts.forge.model import Forge, ForgeError
 
+__all__ = [
+    "CHANGE_LINK",
+    "GIT_TIMEOUT_SEC",
+    "KINDS",
+    "MARKERS",
+    "TOKEN_ENV",
+    "ChangeLink",
+    "Remote",
+    "change_link",
+    "kind_of",
+    "origin",
+    "parse",
+    "pick",
+]
+
 GIT_TIMEOUT_SEC = 30
 TOKEN_ENV = "GITLAB_TOKEN"
 KINDS = ("github", "gitlab")
-CHANGE_LINK = re.compile(r"(?!)")
+CHANGE_LINK = re.compile(
+    r"https://(?:github\.com/[\w.-]+/[\w.-]+/pull"
+    r"|(?:[\w-]+\.)*gitlab(?:\.[\w-]+)*/[\w.][\w.-]*(?:/[\w.][\w.-]*)+/-/merge_requests)/[1-9][0-9]*"
+)
+MARKERS = {"github": "/pull/", "gitlab": "/-/merge_requests/"}
 
 
 @dataclass(frozen=True)
@@ -52,7 +71,20 @@ def kind_of(host: str) -> str:
 
 
 def change_link(url: str) -> ChangeLink:
-    raise NotImplementedError(url)
+    """Read a GitHub pull link or a GitLab merge request link into its forge, project and number.
+
+    Only the exact link is accepted: https, a lowercase host without a port or credentials, no trailing slash, sub
+    page, query or fragment, and a number without a leading zero. A GitLab host must carry a gitlab label, the rule
+    kind_of applies, and a GitLab project path keeps its nested groups whole. CHANGE_LINK accepts the same links.
+    Anything else raises ValueError.
+    """
+    if not CHANGE_LINK.fullmatch(url):
+        raise ValueError("not a GitHub pull link or GitLab merge request link")
+    host, _, rest = url.removeprefix("https://").partition("/")
+    kind = kind_of(host)
+    path, _, number = rest.rpartition(MARKERS[kind])
+    web = f"https://{host}/{path}"
+    return ChangeLink(kind, host, path, int(number), web, f"{web}.git")
 
 
 def pick(where: Remote, kind: str | None, env: Mapping[str, str]) -> Forge:

@@ -6422,7 +6422,8 @@
         "tests/forge/test_remote.py::test_a_malformed_or_unlabelled_gitlab_link_is_refused",
         "tests/forge/test_remote.py::test_the_web_link_and_clone_remote_read_back_to_the_same_project",
         "tests/forge/test_remote.py::test_the_shared_pattern_accepts_exactly_the_links_the_parser_accepts",
-        "tests/forge/test_remote.py::test_the_shared_pattern_finds_change_links_in_text_as_plain_strings"
+        "tests/forge/test_remote.py::test_the_shared_pattern_finds_change_links_in_text_as_plain_strings",
+        "tests/forge/test_remote.py::test_the_parser_and_shared_pattern_are_public_names_of_the_remote_module"
       ]
     },
     {

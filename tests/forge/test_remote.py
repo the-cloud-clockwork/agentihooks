@@ -258,3 +258,9 @@ def test_the_shared_pattern_finds_change_links_in_text_as_plain_strings() -> Non
         "https://github.com/Org/repo/pull/12",
         "https://gitlab.com/group/sub/app/-/merge_requests/3",
     ]
+
+
+@pytest.mark.feature("forge-change-link-parse")
+def test_the_parser_and_shared_pattern_are_public_names_of_the_remote_module() -> None:
+    assert {"CHANGE_LINK", "ChangeLink", "change_link"} <= set(remote.__all__)
+    assert [name for name in remote.__all__ if not hasattr(remote, name)] == []
