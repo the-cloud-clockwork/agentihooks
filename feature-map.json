@@ -834,6 +834,19 @@
       ]
     },
     {
+      "id": "lab-scheduler-job-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-scheduler-pipelined-slot-reads",
+      "behaviour": "A scheduler pass reads the job of each open slot, one with no outcome, not held and naming a job, through Queue.jobs: HGETALL in Redis pipelines that open no transaction, at most 500 ids each, in slot order and within one grade at a time, each batch read only once the one before it was taken. Queue.jobs yields exactly the Job or None that Queue.job returns for each id, duplicates and missing records included, so collected, held, empty, missing, leased and finished slots keep the outcomes serial reads gave them.",
+      "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis, counting direct job reads and the job reads of each pipeline, and scripts.ci_lab.queue.Queue.jobs against Queue.job on pending, leased, done, lost, legacy and missing records",
+      "tests": [
+        "tests/ci_lab/test_scheduler_job_reads.py::test_a_pass_preserves_collected_missing_empty_and_started_slots",
+        "tests/ci_lab/test_scheduler_job_reads.py::test_a_pass_reads_only_open_jobs_in_nontransactional_batches_of_at_most_500",
+        "tests/ci_lab/test_scheduler_job_reads.py::test_batched_job_reads_return_exactly_what_serial_reads_return",
+        "tests/ci_lab/test_scheduler_job_reads.py::test_batched_job_reads_read_each_batch_only_once_the_one_before_was_taken"
+      ]
+    },
+    {
       "id": "lab-scheduler-load-measure",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-parse-measure",
