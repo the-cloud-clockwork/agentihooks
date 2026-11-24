@@ -4847,7 +4847,9 @@
       "id": "thin-task-enhancement-snapshot",
       "behaviour": "The thin task pass sends the enhancement value from its task snapshot with its needed mark. A refreshed resource revision retains that expectation and cannot overwrite a concurrent planned or skipped decision or emit a success notice.",
       "seam": "scripts.tick.steps.thin.enhance and _marking through ClientLedger and ResourceClient",
-      "rules": ["thin-enhancement-without-expected"],
+      "rules": [
+        "thin-enhancement-without-expected"
+      ],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2885",
       "tests": [
@@ -15955,6 +15957,26 @@
         "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_serena_worktree_uses_the_repository_name",
         "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_unknown_repository_keeps_the_relative_scope",
         "tests/gates/test_build.py::TestSerenaRepositoryAreas::test_serena_dry_run_does_not_resolve_a_repository"
+      ]
+    },
+    {
+      "id": "ledger-orders-panel",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-orders-page-panel",
+      "behaviour": "The ledger page lists every open operator order from the master orders read with its title, quoted words and claimable, busy and done counts, and distinguishes an empty set from a failed read while preserving phase views.",
+      "seam": "the ledger page in Chromium at 1920 by 1080 consuming the existing orders resource",
+      "tests": [
+        "tests/swarm_ledger/test_orders_page.py::test_existing_phase_and_overview_remain_visible",
+        "tests/swarm_ledger/test_orders_page.py::test_ordered_phase_shows_quoted_words_and_master_counts",
+        "tests/swarm_ledger/test_orders_page.py::test_no_open_order_has_an_explicit_empty_state",
+        "tests/swarm_ledger/test_orders_page.py::test_every_open_order_is_rendered_oldest_first_with_safe_text",
+        "tests/swarm_ledger/test_orders_page.py::test_order_counts_refresh_and_closed_orders_leave_the_panel",
+        "tests/swarm_ledger/test_orders_page.py::test_failed_read_preserves_orders_and_recovers_on_the_next_update",
+        "tests/swarm_ledger/test_orders_page.py::test_order_panel_fold_choice_survives_reload",
+        "tests/swarm_ledger/test_page_events.py::test_tabs_get_ledger_and_swarm_changes_without_polling_the_document",
+        "tests/swarm_ledger/test_page_events.py::test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410",
+        "tests/swarm_ledger/test_page_modules.py::test_the_source_view_for_text_checks_covers_every_module",
+        "tests/swarm_ledger/test_single_page.py::test_approved_columns_overview_tabs_and_stats"
       ]
     }
   ],
