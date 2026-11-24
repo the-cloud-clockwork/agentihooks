@@ -908,6 +908,63 @@ class TestMcp:
         assert set(run._load_toml(codex_home() / "config.toml")["mcp_servers"]) == {"a", "b"}
         assert "profile(s) gone, lost did not resolve" in capsys.readouterr().out
 
+    _SERVERS = {
+        "atl": {"type": "http", "url": "https://mcp.example.com/v1/mcp"},
+        "brain": {"type": "http", "url": "http://localhost:8104/mcp"},
+        "gw": {"type": "http", "url": "https://gw.example/mcp", "headers": {"Authorization": "Bearer ${GW_KEY}"}},
+        "cmd": {"command": "/bin/cmd"},
+    }
+
+    @staticmethod
+    def _manual_install(manual: bool = True) -> dict:
+        import tomllib
+
+        run = CodexAdapter()
+        run.write_settings({"_agentihooks": {"mcpManualSignIn": True}} if manual else {})
+        run.register_mcp(TestMcp._SERVERS)
+        return tomllib.loads((codex_home() / "config.toml").read_text())["mcp_servers"]
+
+    def test_manual_sign_in_servers_start_disabled(self, adapter):
+        servers = self._manual_install()
+        assert servers["atl"]["enabled"] is False
+        assert all("enabled" not in servers[name] for name in ("brain", "gw", "cmd"))
+
+    def test_an_operator_enable_survives_reinstall(self, adapter):
+        self._manual_install()
+        config = codex_home() / "config.toml"
+        config.write_text(config.read_text().replace("enabled = false", "enabled = true"))
+        assert self._manual_install()["atl"]["enabled"] is True
+
+    def test_without_the_directive_no_server_is_disabled(self, adapter):
+        assert all("enabled" not in entry for entry in self._manual_install(manual=False).values())
+
+    def test_a_layer_that_enables_a_sign_in_server_keeps_it_enabled(self, adapter):
+        run = CodexAdapter()
+        run.write_settings({"_agentihooks": {"mcpManualSignIn": True}})
+        run.register_mcp({"atl": {**self._SERVERS["atl"], "enabled": True}})
+        assert run._load_toml(codex_home() / "config.toml")["mcp_servers"]["atl"]["enabled"] is True
+
+    def test_an_adapter_that_read_no_settings_asks_for_no_manual_sign_in(self):
+        assert CodexAdapter()._manual_sign_in is False
+
+    @pytest.mark.parametrize(
+        ("entry", "manual"),
+        [
+            ({"url": "https://mcp.example.com/mcp"}, True),
+            ({"url": "http://localhost:8104/mcp"}, False),
+            ({"url": "http://127.0.0.1:9121/mcp"}, False),
+            ({"url": "http://[::1]:9121/mcp"}, False),
+            ({"url": "https://gw.example/mcp", "bearer_token_env_var": "K"}, False),
+            ({"url": "https://gw.example/mcp", "env_http_headers": {"X": "K"}}, False),
+            ({"url": "https://gw.example/mcp", "http_headers": {"X": "v"}}, False),
+            ({"command": "/bin/cmd"}, False),
+        ],
+    )
+    def test_signs_in_by_hand(self, entry, manual):
+        from scripts.targets.codex_target import signs_in_by_hand
+
+        assert signs_in_by_hand(entry) is manual
+
     def test_credential_shaped_header_dropped(self, adapter, capsys):
         # Built by concatenation so the literal secret-shaped string never appears
         # whole anywhere else in this file.

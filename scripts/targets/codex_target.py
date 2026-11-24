@@ -32,6 +32,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from scripts.targets._common import (
     LEGACY_MCP_SERVER_NAMES,
@@ -77,6 +78,15 @@ CODEX_HOOK_EVENTS = (
 _NO_CONTEXT_EVENTS = frozenset({"Stop", "SubagentStop", "SessionEnd", "PreCompact", "PermissionRequest"})
 
 _LOCAL_COMMANDS_MANIFEST = ".agentihooks-codex-local-commands.json"
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_CREDENTIAL_KEYS = frozenset({"bearer_token_env_var", "env_http_headers", "http_headers"})
+
+
+def signs_in_by_hand(entry: Mapping[str, Any]) -> bool:
+    """A remote HTTP server that carries no credential of its own works only after an interactive OAuth sign-in."""
+    if "url" not in entry or entry.keys() & _CREDENTIAL_KEYS:
+        return False
+    return urlsplit(str(entry["url"])).hostname not in _LOOPBACK_HOSTS
 
 
 _REFERENCE_NAME = re.compile(r"\$\{?(\w+)")
@@ -366,6 +376,7 @@ class CodexAdapter:
         """
         self._pending_rules: list[tuple[str, str, str]] = []
         self._written_mcp: set[str] = set()
+        self._manual_sign_in = False
 
     def home(self) -> Path:
         return codex_home()
@@ -407,7 +418,7 @@ class CodexAdapter:
         managed = legacy.get("managed") if isinstance(legacy, dict) else None
         return managed.unwrap() if isinstance(managed, dict) else {}
 
-    def write_settings(self, native: dict) -> Path:
+    def write_settings(self, native: dict[str, Any]) -> Path:
         """
         Drops a model_catalog_json that points at the stale pinned catalog: a pinned catalog limits codex to the
         models it lists.
@@ -459,6 +470,7 @@ class CodexAdapter:
         _atomic_write(self._managed_sidecar(home), json.dumps(managed, indent=2) + "\n")
         _i._cprint(f"[OK] Wrote managed keys into {config_path}")
 
+        self._manual_sign_in = bool(native.get("_agentihooks", {}).get("mcpManualSignIn"))
         self._write_hooks_json(home, native.get("_agentihooks", {}).get("env", {}))
         if trusted := trust_hooks(home):
             _i._cprint(f"[OK] Trusted {trusted} Codex hook entries in {config_path}")
@@ -733,6 +745,9 @@ class CodexAdapter:
             entry, _ = codex_mcp_entry(name, dict(spec))
             if entry is None:
                 continue
+            if self._manual_sign_in and "enabled" not in entry and signs_in_by_hand(entry):
+                previous: Any = table.get(name) or {}
+                entry["enabled"] = bool(previous.get("enabled"))
             table[name] = entry
             added.append(name)
         self._dump_toml(config_path, doc)

@@ -353,6 +353,20 @@ warning.
 Every env and header value is scanned by `hooks.secrets.scan` before being
 written to disk — a HARD FLOOR path.
 
+**Pruning.** A server an earlier install wrote and the chain no longer ships is
+removed at `post_install_reconcile`. Nothing is removed in a run where a
+persisted profile did not resolve, and servers the operator added are never
+recorded, so they stay.
+
+**Manual sign-in.** With `_agentihooks.mcpManualSignIn = true` in a layer's
+codex native settings, a remote HTTP server that carries no credential of its
+own (no `bearer_token_env_var`, `env_http_headers` or `http_headers`, and not on
+loopback) is written with `enabled = false`. Codex skips a disabled server at
+startup, so it never fails with AuthRequired. The operator signs in with
+`codex mcp login <name>` and turns the server on in one of two ways:
+`enabled = true` in `config.toml`, which the next install keeps, or
+`-c mcp_servers.<name>.enabled=true` for a single launch.
+
 ## §8 Known gaps
 
 - **Uninstall.** `uninstall_global()` removes Claude artifacts only; nothing
@@ -400,6 +414,7 @@ uv run python -m pytest tests/test_codex_target.py tests/test_codex_e2e.py tests
 | `project_doc_fallback_filenames` loading a repo CLAUDE.md | `codex -c 'project_doc_fallback_filenames=["CLAUDE.md"]' debug prompt-input` in tcc-qitp: instructions block 36,998 → 77,358 chars |
 | Repo skill root `<repo>/.agents/skills` | 0.154.0 binary strings ("failed to stat repo skills root" beside ".agents"); global roots confirmed live via `debug prompt-input` |
 | `~/.codex/agents/*.toml` loaded as spawnable roles | codex-cli 0.171.0, 2026-11-23: a scratch `CODEX_HOME` holding only `config.toml` and `agents/probe-scout.toml`; `codex exec` listed the roles `probe-scout`, `default`, `explorer`, `worker` |
+| `enabled = false` skips an MCP server at startup | codex-cli 0.171.0, 2026-11-23: one `codex exec` with `-c mcp_servers.<name>.enabled=false` for nine OAuth servers and `enabled=true` for pagerduty logged AuthRequired for pagerduty alone; codex-rs `config/src/mcp_types.rs`: "When `false`, Codex skips initializing this MCP server" |
 | What Claude loads that codex did not | a real tcc-qitp session transcript: one `instructions` attachment, 37 files, 252,291 bytes, every rule body inline |
 | Everything in §3–§5 not listed above | code-derived from `scripts/targets/codex_target.py` during this reconstruction; not re-verified against a codex binary |
 
