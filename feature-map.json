@@ -6817,6 +6817,40 @@
       ]
     },
     {
+      "id": "lab-worker-seat-keeping-restart",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "A lab worker that runs an image other than the one the lab wants restarts in place and keeps its pod, its node and its seat. The scheduler reads a pod's declared spec image and the digest its container actually runs over the Kubernetes API it already uses for the deletion cost; a failed read, a pod with no container status yet and a running image id with no digest all read as unknown. A worker is stale only when its pod names a floating image tag and the digest its container runs differs from the digest CI_LAB_IMAGE names; no wanted image, an unknown running image and a pod pinned by digest are never stale, and only digests are compared, never repository names. The lease API answers a stale worker's POST /lease with 426 and no grant, recording no offer and leaving its pending job pending; every other request is answered as today. The worker turns a 426 lease answer into its own stop, lets its running units finish within the termination grace and its entry point returns zero with no raise and no backoff; every other 4xx still raises. The worker's entry point empties its work root, sealed trees and folders without owner access included, before it builds its settings on it; a symlink in the root is removed and its target stays, and a missing root is not an error. The scheduler's entry point builds Leases with CI_LAB_IMAGE and the pod image reader of its pods port, so a pod pinned by digest and an unmanaged pods port both carry no wanted image or the unread reader.",
+      "seam": "scripts.ci_lab.pods.KubePods.images and pod_images, scripts.ci_lab.leases.Leases.stale, scripts.ci_lab.lease_api._lease over POST /lease, scripts.ci_lab.worker.Worker.run_once and run, scripts.ci_lab.worktrees.empty, and scripts.ci_lab.scheduler.main building Leases",
+      "tests": [
+        "tests/ci_lab/test_pods.py::test_a_floating_pods_image_read_is_one_get_with_the_service_account_token",
+        "tests/ci_lab/test_pods.py::test_a_pinned_pods_image_read_carries_its_declared_digest_too",
+        "tests/ci_lab/test_pods.py::test_a_pod_with_no_container_status_yet_reads_as_unknown",
+        "tests/ci_lab/test_pods.py::test_a_running_image_id_with_no_digest_reads_as_unknown",
+        "tests/ci_lab/test_pods.py::test_an_image_or_image_id_that_is_no_string_reads_as_unknown",
+        "tests/ci_lab/test_pods.py::test_a_refused_or_unreachable_api_server_reads_the_image_as_unknown",
+        "tests/ci_lab/test_pods.py::test_an_unreadable_token_reads_the_image_as_unknown_and_sends_nothing",
+        "tests/ci_lab/test_pods.py::test_pod_images_gives_the_kube_reader_for_a_kube_pods_port_and_unread_otherwise",
+        "tests/ci_lab/test_pods.py::test_unread_answers_none",
+        "tests/ci_lab/test_leases.py::test_stale_is_true_for_a_floating_pod_running_another_digest_than_the_wanted_one",
+        "tests/ci_lab/test_leases.py::test_stale_is_false_with_no_wanted_image",
+        "tests/ci_lab/test_leases.py::test_stale_is_false_with_a_wanted_image_that_names_no_digest",
+        "tests/ci_lab/test_leases.py::test_stale_is_false_with_an_unknown_running_image",
+        "tests/ci_lab/test_leases.py::test_stale_is_false_when_the_running_digest_matches_under_another_repository_name",
+        "tests/ci_lab/test_leases.py::test_stale_is_false_for_a_pod_pinned_by_digest_even_when_its_running_digest_differs",
+        "tests/ci_lab/test_lease_api.py::test_a_stale_workers_lease_is_answered_426_with_no_grant_and_records_no_offer",
+        "tests/ci_lab/test_lease_api.py::test_a_malformed_body_from_a_stale_worker_is_still_400",
+        "tests/ci_lab/test_lease_api.py::test_a_worker_that_is_not_stale_is_answered_200_as_today",
+        "tests/ci_lab/test_worker.py::test_a_lease_call_the_scheduler_answers_426_stops_the_worker_without_raising_or_backing_off",
+        "tests/ci_lab/test_worker.py::test_a_stale_restart_lets_a_running_unit_finish_within_the_grace_then_run_returns",
+        "tests/ci_lab/test_worktrees.py::test_empty_removes_sealed_trees_locked_folders_files_and_symlinks_but_keeps_the_folder",
+        "tests/ci_lab/test_worktrees.py::test_empty_of_a_missing_folder_is_not_an_error",
+        "tests/ci_lab/test_executors.py::test_main_empties_the_work_root_before_it_builds_its_settings",
+        "tests/ci_lab/test_scheduler_seat_keeping.py::test_main_builds_leases_with_the_wanted_image_and_the_pods_port_image_reader",
+        "tests/ci_lab/test_scheduler_seat_keeping.py::test_main_gives_leases_the_unmanaged_image_reader_outside_a_cluster"
+      ]
+    },
+    {
       "id": "packed-manifest-outside-files",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-packed-manifest-opened-files",
@@ -13058,14 +13092,30 @@
       "id": "lab-manifest-fetch-off-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2703",
-      "behaviour": "The CI lab scheduler service fetches packed dependency manifests off its pass, at most four at once: a fetch a head's expansion needs starts on a worker thread, and while it runs the scheduler keeps the head waiting in its lane with its quiet window unchanged, so the next pass reads the finished fetch. A pass whose manifest fetch GitHub never answers still reaps expired leases and advances live grades within one request timeout. A failed fetch answers once, so the head waits out its window again; a finished fetch answers every call for five minutes after it started, so a search past a commit with no manifest does not fetch it on every pass.",
+      "behaviour": "The CI lab scheduler service fetches packed dependency manifests off its pass, at most four at once: a fetch a head's expansion needs starts on a worker thread, and while it runs the scheduler keeps the head waiting in its lane with its quiet window unchanged, so the next pass reads the finished fetch. A pass whose manifest fetch GitHub never answers still reaps expired leases and advances live grades within one request timeout. A failed fetch answers once, so the head waits out its window again; a fetch that found a manifest answers every call for five minutes after it started and one that found none for an hour, so a search past a commit with no manifest does not fetch it on every pass.",
       "seam": "scripts.ci_lab.manifests.Background over a released fake fetch and a set clock, and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis, with a scheduler.MirrorExpander over a git origin fixture reading the default scheduler.StoredManifests through a manifests.Fetcher that never answers, and with an expander that raises a pending fetch",
       "tests": [
         "tests/ci_lab/test_manifests.py::test_background_raises_pending_while_a_fetch_runs_and_answers_it_until_it_goes_stale",
         "tests/ci_lab/test_manifests.py::test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next_call",
+        "tests/ci_lab/test_manifests.py::test_background_forgets_a_failed_fetch_nobody_asked_again_once_its_fresh_window_ends",
         "tests/ci_lab/test_manifests.py::test_background_runs_at_most_four_fetches_at_once",
         "tests/ci_lab/test_scheduler.py::test_a_head_whose_manifest_still_fetches_keeps_its_window_and_each_pass_reads_the_fetch_again",
         "tests/ci_lab/test_scheduler_manifest_fetch.py::test_a_pass_reaps_leases_and_advances_grades_while_a_manifest_fetch_github_never_answers"
+      ]
+    },
+    {
+      "id": "lab-manifest-search-outlives-absent-answers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "The CI lab scheduler's search for a dependency manifest ends however far behind the head's base the nearest manifest lies within the manifest depth. The search passes one commit per scheduler pass, since each call starts one fetch and waits for it, so the fetch cache keeps the answer of a fetch that found no manifest for ABSENT_S, one hour after the fetch started, and fetches the commit again on the first call after that. A fetch that found a manifest is still forgotten FRESH_S, five minutes, after it started, so the scheduler holds no manifest in memory longer than before, and a failed fetch still answers once. With the nearest manifest six commits behind the base the search answers on its seventh call, at one minute a call and at 304 seconds a call, the slowest pass seen when the search restarted for ever on 24 November.",
+      "seam": "scripts.ci_lab.manifests.Background over a released fake fetch and a set clock, alone and under scripts.ci_lab.scheduler.StoredManifests over a local object store",
+      "rules": [
+        "lab-manifest-cache-forgets-absent-answers"
+      ],
+      "tests": [
+        "tests/ci_lab/test_manifests.py::test_background_keeps_an_absent_answer_for_an_hour_and_fetches_it_again_after_it",
+        "tests/ci_lab/test_manifests.py::test_background_forgets_a_found_manifest_on_its_fresh_window_and_an_absent_answer_on_its_own",
+        "tests/ci_lab/test_scheduler_manifest_fetch.py::test_a_search_whose_nearest_manifest_lies_six_commits_behind_answers_on_its_seventh_call"
       ]
     },
     {
@@ -13252,6 +13302,7 @@
         "tests/ci_lab/test_worker.py::test_stop_ends_a_lease_backoff_at_once",
         "tests/ci_lab/test_worker.py::test_the_pod_leases_only_units_its_net_and_browser_capabilities_and_free_slots_fit",
         "tests/ci_lab/test_worker.py::test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none",
+        "tests/ci_lab/test_worker.py::test_the_lease_request_body_carries_exactly_worker_free_slots_capabilities_and_wait_ms",
         "tests/ci_lab/test_worker.py::test_the_client_gives_up_on_a_scheduler_or_upload_that_does_not_answer",
         "tests/ci_lab/test_worker.py::test_the_worker_environment_refuses_github_app_and_redis_variables",
         "tests/ci_lab/test_worker.py::test_the_worker_environment_keeps_only_the_service_contract_variables",
@@ -13291,6 +13342,7 @@
         "tests/ci_lab/test_queue.py::test_enqueue_stores_the_base_and_grader_revision_each_job_reads",
         "tests/ci_lab/test_leases.py::test_a_grant_carries_the_base_and_grader_revision_of_its_job",
         "tests/ci_lab/test_lease_api.py::test_lease_returns_the_grant_payload",
+        "tests/ci_lab/test_lease_api.py::test_lease_ignores_a_request_field_it_does_not_know",
         "tests/ci_lab/test_scheduler.py::test_each_enqueued_job_carries_the_grades_base_and_its_plans_grader",
         "tests/ci_lab/test_contract.py::test_the_worker_command_runs_the_service_and_keeps_the_self_test",
         "tests/ci_lab/test_executors.py::test_static_runs_the_gate_the_grader_tree_names_over_the_head_with_its_base_and_grader_trees",
@@ -16043,6 +16095,17 @@
         "tests/swarm_ledger/test_page_events.py::test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410",
         "tests/swarm_ledger/test_page_modules.py::test_the_source_view_for_text_checks_covers_every_module",
         "tests/swarm_ledger/test_single_page.py::test_approved_columns_overview_tabs_and_stats"
+      ]
+    },
+    {
+      "id": "lab-budget-docs",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2714",
+      "behaviour": "The CI lab reference states the day's core budget the way scripts.ci_lab.budget reads it: each shed threshold of the runtime configuration example is the share of the budget spent at which that class sheds together with every less urgent class, in the shed order backfill, promotion, queue, at the budget left the example prose names; the threshold rule and the CILabBudgetShedding alert both measure a shed fraction against the budget spent, never the budget left; a docs copy with the thresholds written as shares left, swapped between classes or read against the budget left fails the check.",
+      "seam": "The CI lab reference page's runtime configuration example, its threshold rule and the CILabBudgetShedding alert row, read against scripts.ci_lab.delivery.runtime, scripts.ci_lab.budget.policy and scripts.ci_lab.budget.assess",
+      "tests": [
+        "tests/ci_lab/test_budget_docs.py::test_the_published_lab_budget_docs_match_the_shed_thresholds_in_code",
+        "tests/ci_lab/test_budget_docs.py::test_a_docs_copy_with_the_thresholds_swapped_fails_the_check"
       ]
     }
   ],
