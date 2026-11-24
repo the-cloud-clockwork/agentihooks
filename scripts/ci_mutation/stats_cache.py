@@ -43,6 +43,11 @@ def plugin_names(nodes: list[ast.AST]) -> set[str]:
     }
 
 
+@functools.cache
+def file_name(path: str) -> str:
+    return Path(path).name
+
+
 def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str, set[str]]) -> set[str]:
     scanners = {
         name: name
@@ -91,10 +96,15 @@ def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str,
             candidates = {
                 path
                 for path in candidates
-                if fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(Path(path).name, pattern)
+                if fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(file_name(path), pattern)
             }
         inputs.update(candidates)
     return inputs
+
+
+@functools.cache
+def conftest_candidates(start: str) -> tuple[str, ...]:
+    return tuple(str(parent / "conftest.py") for parent in Path(start).parents)
 
 
 def test_inputs(
@@ -110,10 +120,7 @@ def test_inputs(
     starts = [path] if isinstance(path, str) else path
     known = set(modules.values())
     pending = set(starts) | {
-        str(parent / "conftest.py")
-        for start in starts
-        for parent in Path(start).parents
-        if str(parent / "conftest.py") in known
+        conftest for start in starts for conftest in conftest_candidates(start) if conftest in known
     }
     inputs = {}
     while pending:

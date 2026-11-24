@@ -3,6 +3,7 @@ their own port with the lab's bearer token to mark heads hotfix, pause a class b
 
 import hmac
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -240,6 +241,11 @@ def answer_control(routes: ControlRoutes, method: str, target: str, raw: bytes, 
     return command(routes, method, target, raw, authorization) or (404, {"error": "not found"})
 
 
+def _log_request(request: BaseHTTPRequestHandler, code: int | str = "-", size: int | str = "-") -> None:
+    line = re.sub(r"\?[^ ]*", "", request.requestline)
+    request.log_message('"%s" %s %s', line, str(code), str(size))
+
+
 def bind(host: str, port: int, reply: Answer) -> ThreadingHTTPServer:
     """Bind JSON routes on host and port, each request's method, target, body and Authorization header answered by
     reply; the caller runs serve_forever."""
@@ -258,7 +264,11 @@ def bind(host: str, port: int, reply: Answer) -> ThreadingHTTPServer:
         request.end_headers()
         request.wfile.write(data)
 
-    handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": handle, "do_POST": handle})
+    handler = type(
+        BaseHTTPRequestHandler.__name__,
+        (BaseHTTPRequestHandler,),
+        {"do_GET": handle, "do_POST": handle, "log_request": _log_request},
+    )
     return ThreadingHTTPServer((host, port), handler)
 
 

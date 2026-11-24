@@ -218,5 +218,5 @@ def test_the_shell_guards_warn_when_the_venv_guard_crashes(
     monkeypatch.setattr(venv_guard, "check_venv_guard", crash)
     monkeypatch.setattr(hook_manager, "log", record)
     hook_manager._check_shell_guards({"tool_name": "Bash", "session_id": "s1", "tool_input": {"command": "echo hi"}})
-    assert ("branch_guard check failed", {"error": "boom"}) in logged
-    assert "WARNING: branch_guard check failed (boom) — guard bypassed\n" in capsys.readouterr().err
+    assert ("venv_guard check failed", {"error": "boom"}) in logged
+    assert "WARNING: venv_guard check failed (boom) — guard bypassed\n" in capsys.readouterr().err
