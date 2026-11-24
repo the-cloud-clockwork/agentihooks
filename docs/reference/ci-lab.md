@@ -1930,9 +1930,10 @@ yields a name and that name equals the name of the checkout's `origin`. When the
 an owner, the part before the repository name in the path of a URL with a scheme or of an scp
 address such as `git@host:owner/repo.git`, that owner must equal the origin's owner, in lowercase.
 A lab URL with the repository at the root of its path, a local path and a `file://` URL name no
-owner and match on the name alone. The host is not compared. `wt.sh` compares the name alone.
+owner and match on the name alone. The host is not compared. These rules apply to both the Python
+checkout helper and `wt.sh`.
 
-| `AGENTIHOOKS_LAB_REMOTE` | `origin` | Gets `lab` |
+| `AGENTIHOOKS_LAB_REMOTE` | `origin` | Gets `lab` in Python and `wt.sh` |
 |---|---|---|
 | `http://<lab host>/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name `agentihooks` and the lab URL names no owner |
 | `http://<lab host>/the-cloud-clockwork/agentihooks.git` | `git@github.com:The-Cloud-Clockwork/agentihooks.git` | Yes, both name the owner `the-cloud-clockwork` and `agentihooks` |
