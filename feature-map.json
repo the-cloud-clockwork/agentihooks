@@ -14728,6 +14728,16 @@
       ]
     },
     {
+      "id": "gate-required-status-runs-in-its-own-head-group",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-required-status-lane",
+      "behaviour": "The Gate Required status workflow runs in a concurrency group of its own, keyed by the head of the Tests run it reports, with queue max and cancel-in-progress written as the literal false, so a status run never waits on a shared hosted lane behind other workflows and the runs of one head keep their order.",
+      "seam": "Gate Required status workflow concurrency group",
+      "tests": [
+        "tests/test_ci_hosted_lanes.py::test_the_gate_required_status_runs_in_one_own_group_per_reported_head_and_never_on_a_lane"
+      ]
+    },
+    {
       "id": "swarm-harness-pin-guard",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-harness-pin-guard",

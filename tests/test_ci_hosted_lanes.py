@@ -246,6 +246,20 @@ def test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_wait
         assert resolved == {"group": f"focused-proof-{run_id}", "queue": "max", "cancel-in-progress": False}, proof
 
 
+@pytest.mark.feature("gate-required-status-runs-in-its-own-head-group")
+def test_the_gate_required_status_runs_in_one_own_group_per_reported_head_and_never_on_a_lane() -> None:
+    block = _block("gate-required.yml")
+    heads = ("a" * 40, "b" * 40, "a" * 40)
+    resolved = [
+        _resolve(block, event_name="workflow_run", run_id=run_id, event={"workflow_run": {"head_sha": head}})
+        for run_id, head in zip((1000, 1003, 1006), heads)
+    ]
+    assert resolved == [
+        {"group": f"gate-required-status-{head}", "queue": "max", "cancel-in-progress": False} for head in heads
+    ]
+    assert "\n  cancel-in-progress: false\n" in (_WORKFLOWS / "gate-required.yml").read_text()
+
+
 def test_a_pull_request_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait_on() -> None:
     jobs = _workflow("test.yml")["jobs"]
     assert all("concurrency" not in jobs[job] for job in ("mutation-stats", "mutation-shard"))
