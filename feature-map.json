@@ -12326,8 +12326,8 @@
       "id": "ledger-task-update-takes-confirmed-pull-request",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-pr-confirmed-fields",
-      "behaviour": "The ledger task update accepts the confirmed pull request number as a positive integer and its head as a lowercase commit hash, so swarm pr on a confirmed pull request moves the task to pr instead of being refused as schema invalid; any other type for either field is refused.",
-      "seam": "ledger_tasks.check task_update fields and swarm pr through the ledger task update",
+      "behaviour": "The ledger task update accepts the confirmed pull request number as a positive integer and its head as a lowercase commit hash, so swarm pr on a confirmed pull request moves the task to pr instead of being refused as schema invalid; any other type for either field is refused. Swarm pr confirms a GitLab merge request through the GitLab forge and records the same fields as for a GitHub pull request, refuses one GitLab does not confirm open, skips the GitHub only closing keyword guard for it, and the stage and prerequisite scopes accept it on the command line and in the ledger.",
+      "seam": "ledger_tasks.check task_update fields, swarm pr through the ledger task update, and pull_head.pull_branch with an injected forge",
       "tests": [
         "tests/swarm_ledger/test_pr_confirmed_fields.py::test_a_task_update_records_the_confirmed_pull_request_number_and_head",
         "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_ledger_check_takes_the_fields_swarm_pr_writes",
@@ -12335,7 +12335,21 @@
         "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_head_check_refuses_a_head_that_is_no_string",
         "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_number_check_refuses_with_its_whole_message",
         "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_confirmed_pull_check_takes_fields_without_a_number_or_head",
-        "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_on_a_confirmed_pull_request_passes_the_ledger_task_update_check"
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_a_task_update_records_a_confirmed_gitlab_merge_request",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_a_task_update_records_the_scope_a_change_request_delivers",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_a_task_update_refuses_a_scope_on_a_link_that_is_no_change_request",
+        "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_on_a_confirmed_pull_request_passes_the_ledger_task_update_check",
+        "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_records_every_confirmed_field_of_a_github_pull_request",
+        "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_records_a_gitlab_merge_request_the_ledger_accepts",
+        "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_refuses_a_merge_request_gitlab_does_not_confirm",
+        "tests/swarm/test_pull_confirm.py::test_the_pull_branch_confirms_a_gitlab_merge_request_through_the_forge",
+        "tests/swarm/test_pull_confirm.py::test_the_pull_branch_reads_the_head_project_of_a_gitlab_fork",
+        "tests/swarm/test_pull_confirm.py::test_the_pull_branch_refuses_a_merge_request_gitlab_does_not_confirm",
+        "tests/swarm/test_pull_confirm.py::test_the_pull_branch_refuses_a_gitlab_link_without_a_token",
+        "tests/swarm/test_pull_confirm.py::test_the_pull_branch_refuses_a_closed_merge_request",
+        "tests/swarm/test_pull_confirm.py::test_the_pull_branch_reads_a_github_link_without_the_gitlab_forge",
+        "tests/swarm/test_pull_confirm.py::test_the_gitlab_forge_reads_the_network_with_the_process_environment_by_default",
+        "tests/swarm/test_pull_scope_pr.py::test_swarm_pr_records_the_scope_a_gitlab_merge_request_delivers"
       ]
     },
     {
