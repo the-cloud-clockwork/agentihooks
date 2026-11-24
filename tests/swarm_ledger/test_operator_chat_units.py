@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -198,7 +199,7 @@ def test_a_notice_comes_from_the_swarm_or_an_agent(by):
 
 
 def test_a_notice_lands_in_the_panel_with_no_item_and_kept_text():
-    doc, c, text = {}, SimpleNamespace(rev=3, at=9, dirty=False), "x" * 300
+    doc, c, text = {}, cast(Any, SimpleNamespace(rev=3, at=9, dirty=False)), "x" * 300
     assert ledger_notifications.apply(doc, notice(text=text), c) is True
     assert doc["notifications"] == [
         {"id": "nt-3-n-1", "item": "", "label": "Swarm notice", "text": "x" * 280, "by": "swarm", "at": 9}

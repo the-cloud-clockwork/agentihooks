@@ -5,7 +5,7 @@ import io
 import json
 import urllib.error
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -213,7 +213,7 @@ class Context:
 
 @pytest.mark.feature("swarm-focus-verdict")
 def test_unfreeze_of_a_target_that_does_not_exist_is_refused() -> None:
-    found, ctx = ledger_doc(record("tasks/gone", "focus")), Context()
+    found, ctx = ledger_doc(record("tasks/gone", "focus")), cast(Any, Context())
     op = {"op": "freeze_clear", "id": "c1", "target": "tasks/nope"}
     assert ledger_freezes._clear(found, op, ctx, "operator") is False
     assert ctx.refused == ["freeze_clear refused: target tasks/nope does not exist"]
