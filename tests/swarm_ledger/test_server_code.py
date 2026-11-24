@@ -36,6 +36,7 @@ def test_the_server_and_the_swarm_share_one_list_of_code_folders():
         "swarm_v2",
         "handoff",
         "doctor",
+        "forge",
         "gates",
         "hive",
         "codex_session",
