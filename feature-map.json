@@ -10411,6 +10411,18 @@
       ]
     },
     {
+      "id": "master-floor-agrees-with-handoff-week-line",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/master2-1070-floor-fix",
+      "behaviour": "The master week floor that closes a hive's master Claude login, and the master login pick that skips a reserved primary login, both widen to the quota hook's AGENTIHOOKS_HANDOFF_WEEK_PCT handoff line when that line reserves more of the week than the configured primary login reserve, so a successor is never placed back on a login the hook already told the running master to leave.",
+      "seam": "scripts.routing.reservation.master_week_floor through scripts.hive.launch._master_floor and scripts.routing.reservation.primary_reserved",
+      "tests": [
+        "tests/routing/test_reservation.py::test_master_week_floor_widens_to_the_hooks_handoff_line",
+        "tests/routing/test_reservation.py::test_primary_reserved_widens_at_the_hooks_handoff_week_line",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_is_refused_at_the_master_floor_when_the_handoff_line_is_tighter"
+      ]
+    },
+    {
       "id": "docs-sanity-scan",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-public-docs-lan-scrub",
