@@ -12163,6 +12163,17 @@
       ]
     },
     {
+      "id": "sonar-reads-the-reused-plan-after-test-count-uploads-it",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-sonar-reused-artifacts-race",
+      "behaviour": "The sonar job of the Tests workflow waits for every job that uploads the reused test plan artifacts it downloads by the pattern {reused-branch,reused}-3.12, so its download lists both reused-branch-3.12 and reused-3.12 and each lands in its own folder where the branch coverage carrier reads it. Before, Sonar could list the run's artifacts between the two uploads, take the lone match into the bare folder, carry no reused coverage and fail the quality gate on new coverage. Sonar still runs when test-count is skipped or fails, because its condition starts with !cancelled() and reads no test-count result.",
+      "seam": "The needs and the condition of the sonar job and the upload steps of the test-count job in the Tests workflow",
+      "tests": [
+        "tests/test_ci_lone_artifact_download.py::test_sonar_lists_the_reused_test_plan_only_after_every_job_that_uploads_it_finished",
+        "tests/test_ci_sonar_workflow.py::test_sonar_runs_when_test_count_is_skipped_or_failed"
+      ]
+    },
+    {
       "id": "test-summary-downloads-every-report-in-one-step",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-test-summary-single-download",
