@@ -62,10 +62,10 @@ def measured_dependencies(
             shared.add(path)
         for context in filter(None, contexts):
             found.setdefault(context.rpartition("|")[0], set()).add(path)
-    if not all(node in found for node in nodeids):
+    if not any(node in found for node in nodeids):
         return {}
     test_modules = {path for path in shared if path.startswith("tests/") and is_test_file(path)}
-    return {node: sorted(found[node] | (shared - test_modules)) for node in nodeids}
+    return {node: sorted(found.get(node, set()) | (shared - test_modules)) for node in nodeids}
 
 
 def digest(value: dict | list) -> str:

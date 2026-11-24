@@ -67,6 +67,18 @@ def fork_and_call(
         return
     argv = [sys.executable, "-c", _WORKER, job, str(timeout_sec), task_name]
     env = _worker_env()
+    if sys.platform == "win32":
+        import subprocess
+
+        rotate_if_full(_LOG_FILE)
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        try:
+            with open(_LOG_FILE, "ab") as log, open(os.devnull, "rb") as devnull:
+                subprocess.Popen(argv, env=env, stdin=devnull, stdout=log, stderr=log, creationflags=flags)
+        except OSError as e:
+            os.unlink(job)
+            _best_effort_log(f"{task_name}: spawn failed: {e}")
+        return
     try:
         pid = os.fork()
     except OSError as e:
@@ -120,9 +132,20 @@ def _close_inherited_fds(start: int = 3, end: int = 1024) -> None:
 
 
 def _install_alarm(timeout_sec: int, task_name: str) -> None:
-    def _handler(signum, frame):  # noqa: ARG001
+    def _expire() -> None:
         sys.stderr.write(_stamped(f"[async] {task_name}: TIMEOUT after {timeout_sec}s"))
         os._exit(124)
+
+    if sys.platform == "win32":
+        import threading
+
+        timer = threading.Timer(max(1, timeout_sec), _expire)
+        timer.daemon = True
+        timer.start()
+        return
+
+    def _handler(signum, frame):  # noqa: ARG001
+        _expire()
 
     signal.signal(signal.SIGALRM, _handler)
     signal.alarm(max(1, timeout_sec))
