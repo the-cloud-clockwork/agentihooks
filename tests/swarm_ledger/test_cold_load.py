@@ -136,6 +136,13 @@ def test_a_cold_browser_shows_the_first_task_rows_within_a_second_and_a_megabyte
             raise AssertionError(f"no task row shown; refused or failed: {refused}; tasks: {shown}") from exc
         transferred = sum(totals.values())
         first_row = float(page.evaluate("window.firstTaskRow"))
+        timeline = page.evaluate(
+            """() => [Math.round(performance.getEntriesByType('navigation')[0].responseEnd),
+              ...performance.getEntriesByType('resource').map((e) => [e.name.split('/').slice(-2).join('/').slice(0, 70),
+                Math.round(e.startTime), Math.round(e.responseEnd)]),
+              ...performance.getEntriesByType('mark').map((m) => [m.name, Math.round(m.startTime)])]"""
+        )
+        warnings.warn("TIMELINE " + json.dumps(timeline), stacklevel=1)
         context.close()
     report = f"COLD LOAD document_bytes={size} first_task_row_ms={first_row:.0f} bytes_before_first_row={transferred}"
     warnings.warn(report, stacklevel=1)
