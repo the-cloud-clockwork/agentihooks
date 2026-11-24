@@ -366,7 +366,7 @@ def test_primary_login_ceiling_is_the_complement_of_the_reserve(monkeypatch):
 
 
 @pytest.mark.feature("master-floor-agrees-with-handoff-week-line")
-def test_master_week_floor_widens_to_the_hooks_handoff_line(monkeypatch):
+def test_master_week_floor_widens_to_the_hooks_handoff_line(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks import config as hooks_config
 
     assert reservation.master_week_floor({}) == 2.0
@@ -377,7 +377,7 @@ def test_master_week_floor_widens_to_the_hooks_handoff_line(monkeypatch):
 
 
 @pytest.mark.feature("master-floor-agrees-with-handoff-week-line")
-def test_primary_reserved_widens_at_the_hooks_handoff_week_line(monkeypatch):
+def test_primary_reserved_widens_at_the_hooks_handoff_week_line(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks import config as hooks_config
 
     monkeypatch.setattr(reservation, "primary_login", lambda: "main")
