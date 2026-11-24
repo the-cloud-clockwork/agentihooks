@@ -17,23 +17,30 @@ SERVER = "https://api:6443"
 
 
 class Response:
+    def __init__(self, body: bytes = b"{}") -> None:
+        self.body = body
+
     def __enter__(self) -> "Response":
         return self
 
     def __exit__(self, *raised: object) -> None:
         return None
 
+    def read(self) -> bytes:
+        return self.body
+
 
 class Opener:
-    def __init__(self, error: Exception | None = None) -> None:
+    def __init__(self, error: Exception | None = None, body: bytes = b"{}") -> None:
         self.error = error
+        self.body = body
         self.calls: list[tuple[urllib.request.Request, dict[str, Any]]] = []
 
     def __call__(self, request: urllib.request.Request, **options: Any) -> Response:
         self.calls.append((request, options))
         if self.error is not None:
             raise self.error
-        return Response()
+        return Response(self.body)
 
 
 def kube(tmp_path: Path, opener: Opener) -> pods.KubePods:
@@ -115,3 +122,78 @@ def test_in_a_cluster_the_pods_port_patches_in_the_service_account_namespace(
     built = pods.worker_pods(environ, tmp_path)
     assert built == pods.KubePods("https://10.43.0.1:443", "ci-lab", tmp_path / "token", CONTEXT)
     assert authorities == [str(tmp_path / "ca.crt")]
+
+
+def pod_body(image: str, image_id: str) -> bytes:
+    return json.dumps(
+        {"spec": {"containers": [{"image": image}]}, "status": {"containerStatuses": [{"imageID": image_id}]}}
+    ).encode()
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_floating_pods_image_read_is_one_get_with_the_service_account_token(tmp_path: Path) -> None:
+    opener = Opener(body=pod_body("repo/lab-worker:dev", "repo/lab-worker@sha256:abc"))
+    assert kube(tmp_path, opener).images("ci-lab-worker-7d9f-abc") == pods.Images(
+        "repo/lab-worker:dev", "repo/lab-worker@sha256:abc"
+    )
+    [(request, options)] = opener.calls
+    assert request.get_method() == "GET"
+    assert request.full_url == f"{SERVER}/api/v1/namespaces/ci-lab/pods/ci-lab-worker-7d9f-abc"
+    assert request.get_header("Authorization") == "Bearer tok"
+    assert options == {"timeout": 5, "context": CONTEXT}
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_pinned_pods_image_read_carries_its_declared_digest_too(tmp_path: Path) -> None:
+    opener = Opener(body=pod_body("repo/lab-worker@sha256:abc", "repo/lab-worker@sha256:abc"))
+    assert kube(tmp_path, opener).images("ci-lab-worker-1") == pods.Images(
+        "repo/lab-worker@sha256:abc", "repo/lab-worker@sha256:abc"
+    )
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_pod_with_no_container_status_yet_reads_as_unknown(tmp_path: Path) -> None:
+    body = json.dumps({"spec": {"containers": [{"image": "repo/lab-worker:dev"}]}, "status": {}}).encode()
+    opener = Opener(body=body)
+    assert kube(tmp_path, opener).images("ci-lab-worker-1") is None
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_running_image_id_with_no_digest_reads_as_unknown(tmp_path: Path) -> None:
+    opener = Opener(body=pod_body("repo/lab-worker:dev", "repo/lab-worker:dev"))
+    assert kube(tmp_path, opener).images("ci-lab-worker-1") is None
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+@pytest.mark.parametrize(
+    "error",
+    [
+        urllib.error.HTTPError(SERVER, 403, "Forbidden", Message(), None),
+        urllib.error.URLError("refused"),
+        TimeoutError("slow"),
+        http.client.RemoteDisconnected("gone"),
+        http.client.BadStatusLine("garbled"),
+    ],
+)
+def test_a_refused_or_unreachable_api_server_reads_the_image_as_unknown(tmp_path: Path, error: Exception) -> None:
+    assert kube(tmp_path, Opener(error)).images("ci-lab-worker-1") is None
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_an_unreadable_token_reads_the_image_as_unknown_and_sends_nothing(tmp_path: Path) -> None:
+    opener = Opener()
+    api = pods.KubePods(SERVER, "ci-lab", tmp_path / "missing", CONTEXT, opener)
+    assert api.images("ci-lab-worker-1") is None
+    assert opener.calls == []
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_pod_images_gives_the_kube_reader_for_a_kube_pods_port_and_unread_otherwise(tmp_path: Path) -> None:
+    api = kube(tmp_path, Opener())
+    assert pods.pod_images(api) == api.images
+    assert pods.pod_images(pods.unmanaged) is pods.unread
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_unread_answers_none() -> None:
+    assert pods.unread("ci-lab-worker-1") is None

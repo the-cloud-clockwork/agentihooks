@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from scripts.ci_lab.outcomes import COMPLETED
-from scripts.ci_lab.pods import Pods, unmanaged
+from scripts.ci_lab.pods import PodImages, Pods, unmanaged, unread
 from scripts.ci_lab.queue import Queue
 from scripts.ci_lab.units import Unit
 
@@ -43,6 +43,12 @@ class Leases:
     poll_ms: int
     pods: Pods = unmanaged
     manifests: Manifests = unstored
+    image: str = ""
+    images: PodImages = unread
+
+    def stale(self, worker: str) -> bool:
+        """Whether the worker's pod runs a floating image other than the one the lab wants."""
+        return False
 
     def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[Grant]:
         """Grant fitting pending jobs, polling until some are granted or the wait ends; the worker's offer is its free

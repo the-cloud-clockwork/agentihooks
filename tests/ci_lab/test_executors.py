@@ -954,6 +954,32 @@ def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
     )
 
 
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_main_empties_the_work_root_before_it_builds_its_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class Service:
+        def run(self) -> list[Lease]:
+            handlers[signal.SIGTERM](signal.SIGTERM, None)
+            return []
+
+        def stop(self) -> None:
+            pass
+
+    handlers: dict[int, Callable[[int, object], None]] = {}
+    monkeypatch.setattr(executors.worker, "build", lambda *args: Service())
+    monkeypatch.setattr(executors.signal, "signal", lambda number, handler: handlers.__setitem__(number, handler))
+    monkeypatch.setattr(executors.contract, "METRICS_PORT", 0)
+    environ = environ_of(tmp_path)
+    stale = tmp_path / "work" / "trees" / "old-head" / "left"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("stale")
+
+    assert executors.main([], environ) == 0
+
+    assert not stale.exists()
+
+
 @pytest.mark.feature("lab-worker-metrics")
 def test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_drains(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path

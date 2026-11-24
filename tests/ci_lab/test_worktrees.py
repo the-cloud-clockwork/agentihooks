@@ -380,3 +380,33 @@ def test_a_lease_and_an_own_copy_report_whether_the_store_fetched_their_head(tmp
     owned, fetched = trees.own(later)
     assert fetched is True
     assert _git(owned, "rev-parse", "HEAD").strip() == later
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_empty_removes_sealed_trees_locked_folders_files_and_symlinks_but_keeps_the_folder(
+    tmp_path: Path, origin: Path
+) -> None:
+    head = _commit(origin, "a", "a")
+    folder = tmp_path / "root"
+    folder.mkdir()
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=folder / "trees", capacity=1)
+    trees.lease(head)
+    locked = folder / "locked"
+    locked.mkdir()
+    (locked / "inner").write_text("x")
+    locked.chmod(locked.stat().st_mode & ~(stat.S_IWUSR | stat.S_IXUSR))
+    (folder / "plain.txt").write_text("y")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("kept")
+    (folder / "link").symlink_to(outside)
+
+    worktrees.empty(folder)
+
+    assert folder.exists()
+    assert list(folder.iterdir()) == []
+    assert outside.read_text() == "kept"
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_empty_of_a_missing_folder_is_not_an_error(tmp_path: Path) -> None:
+    worktrees.empty(tmp_path / "absent")

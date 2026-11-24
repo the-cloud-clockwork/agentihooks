@@ -21,9 +21,13 @@ __all__ = [
     "MERGE_PATCH",
     "SERVICE_HOST",
     "TIMEOUT_S",
+    "Images",
     "KubePods",
+    "PodImages",
     "Pods",
+    "pod_images",
     "unmanaged",
+    "unread",
     "worker_pods",
 ]
 
@@ -41,6 +45,22 @@ Pods = Callable[[str, bool], bool]
 def unmanaged(pod: str, busy: bool) -> bool:
     """The pods port outside a cluster, where no worker runs as a pod: patch nothing and answer False."""
     return False
+
+
+@dataclass(frozen=True)
+class Images:
+    """A pod's declared spec image and the digest its container actually runs."""
+
+    declared: str
+    running: str
+
+
+PodImages = Callable[[str], Images | None]
+
+
+def unread(pod: str) -> Images | None:
+    """The pod images port outside a cluster, where no worker runs as a pod: read nothing."""
+    return None
 
 
 @dataclass(frozen=True)
@@ -66,6 +86,16 @@ class KubePods:
                 return True
         except (OSError, http.client.HTTPException):
             return False
+
+    def images(self, pod: str) -> Images | None:
+        """Read the pod's declared and running image; None when the pod has no container status yet, the running
+        image carries no digest, or the API server could not be reached."""
+        return None
+
+
+def pod_images(pods: Pods) -> PodImages:
+    """Return the pod image reader bound to a KubePods port, else the unmanaged reader."""
+    return pods.images if isinstance(pods, KubePods) else unread
 
 
 def worker_pods(environ: Mapping[str, str], account: Path = ACCOUNT) -> Pods:

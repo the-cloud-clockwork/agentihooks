@@ -664,6 +664,57 @@ def test_a_lease_call_the_scheduler_answers_with_a_client_error_still_raises(
     assert "lease call failed" not in capsys.readouterr().err
 
 
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_lease_call_the_scheduler_answers_426_stops_the_worker_without_raising_or_backing_off(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class Stale(worker.Client):
+        def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[worker.Lease]:
+            raised = email.message.Message()
+            raise urllib.error.HTTPError("http://scheduler:8800/lease", 426, "Upgrade Required", raised, None)
+
+    paced = Paced()
+    stale = worker.Worker(Stale("http://scheduler:8800"), {}, "pod-1", 1, wait_ms=0, stopping=paced)
+
+    assert stale.run_once() == []
+
+    assert stale.stopping.is_set()
+    assert paced.waits == []
+    assert "lease call failed" not in capsys.readouterr().err
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_stale_restart_lets_a_running_unit_finish_within_the_grace_then_run_returns(
+    scheduler: str, jobs: queue.Queue, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    release = threading.Event()
+    calls = [0]
+
+    def held(lease: worker.Lease) -> worker.Finished:
+        release.wait(10)
+        return finished(tmp_path, lease)
+
+    class Stale(worker.Client):
+        def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[worker.Lease]:
+            calls[0] += 1
+            if calls[0] == 1:
+                return super().lease(worker, free_slots, capabilities, wait_ms)
+            raised = email.message.Message()
+            raise urllib.error.HTTPError(f"{scheduler}/lease", 426, "Upgrade Required", raised, None)
+
+    restarting = worker.Worker(Stale(scheduler), {"test": held}, "pod-1", 2, wait_ms=0, grace_s=10)
+    assert len(restarting.run_once()) == 1
+
+    threading.Timer(0.2, release.set).start()
+    guard = threading.Timer(10, restarting.stop)
+    guard.start()
+
+    assert restarting.run() == []
+    guard.cancel()
+    assert found(jobs, "h1:test:a").outcome == "passed"
+
+
 @pytest.mark.wall_clock
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_stop_ends_a_lease_backoff_at_once() -> None:

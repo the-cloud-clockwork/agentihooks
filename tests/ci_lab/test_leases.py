@@ -2,7 +2,7 @@ import threading
 
 import pytest
 
-from scripts.ci_lab import leases, queue
+from scripts.ci_lab import leases, pods, queue
 from scripts.ci_lab.units import Unit
 
 
@@ -454,3 +454,61 @@ def test_a_grant_landing_while_the_last_lease_clears_its_cost_marks_the_worker_p
     assert lab.owns("h1:test:b", "raced")
     assert lab.complete("h1:test:b", "raced", "passed") is True
     assert kube.patches[3:] == [("w1", False)]
+
+
+def staled(jobs: queue.Queue, clock: Clock, image: str, images: dict[str, pods.Images | None]) -> leases.Leases:
+    def reader(worker: str) -> pods.Images | None:
+        return images.get(worker)
+
+    return leases.Leases(jobs, ttl_ms=500, clock=clock, sleep=clock.sleep, poll_ms=50, image=image, images=reader)
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_stale_is_true_for_a_floating_pod_running_another_digest_than_the_wanted_one(
+    jobs: queue.Queue, clock: Clock
+) -> None:
+    lab = staled(
+        jobs,
+        clock,
+        "repo/lab-worker@sha256:wanted",
+        {"w1": pods.Images("repo/lab-worker:dev", "repo/lab-worker@sha256:running")},
+    )
+    assert lab.stale("w1") is True
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_stale_is_false_with_no_wanted_image(jobs: queue.Queue, clock: Clock) -> None:
+    lab = staled(jobs, clock, "", {"w1": pods.Images("repo/lab-worker:dev", "repo/lab-worker@sha256:running")})
+    assert lab.stale("w1") is False
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_stale_is_false_with_an_unknown_running_image(jobs: queue.Queue, clock: Clock) -> None:
+    lab = staled(jobs, clock, "repo/lab-worker@sha256:wanted", {})
+    assert lab.stale("w1") is False
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_stale_is_false_when_the_running_digest_matches_under_another_repository_name(
+    jobs: queue.Queue, clock: Clock
+) -> None:
+    lab = staled(
+        jobs,
+        clock,
+        "repo/lab-worker@sha256:wanted",
+        {"w1": pods.Images("mirror/lab-worker:dev", "other/lab-worker@sha256:wanted")},
+    )
+    assert lab.stale("w1") is False
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_stale_is_false_for_a_pod_pinned_by_digest_even_when_its_running_digest_differs(
+    jobs: queue.Queue, clock: Clock
+) -> None:
+    lab = staled(
+        jobs,
+        clock,
+        "repo/lab-worker@sha256:wanted",
+        {"w1": pods.Images("repo/lab-worker@sha256:pinned", "repo/lab-worker@sha256:running")},
+    )
+    assert lab.stale("w1") is False
