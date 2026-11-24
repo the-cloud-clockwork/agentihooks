@@ -30,6 +30,7 @@ from scripts.swarm import readiness
 from scripts.swarm.store import EVENTS_ENGINE, RedisStore, SwarmConfig
 from scripts.swarm_v2.runtime.base import Outcome, Status
 from tests.events import nats_server
+from tests.helpers import narrow_ledger
 from tests.swarm.test_readiness import doc, task
 
 ENABLED = "AGENTIHOOKS_EVENTS_SMOKE"
@@ -208,7 +209,8 @@ def smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Smoke]:
         }
     )
     served: Any = ledger
-    admitter = admission.Admission(store, served, readiness.Source(store, served))
+    reads: Any = narrow_ledger.Reads(served)
+    admitter = admission.Admission(store, reads, readiness.Source(store, served))
     with nats_server.running(tmp_path / "nats") as nats_url:
         bus = connect(nats_url)
         opened = [bus]

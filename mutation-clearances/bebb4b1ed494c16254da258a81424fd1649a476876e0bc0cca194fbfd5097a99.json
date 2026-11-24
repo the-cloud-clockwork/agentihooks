@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.x__request:eb567a7f8540fafbe05891b2ec90ab2031b45246329ba4b06c5195470a20eb49": {
+    "reader": "Standards",
+    "reason": "For decoded held requests, omitting dict.get's default returns None for an absent plant key, and bool(None) equals bool(False). Present plant values are unchanged, so the restored GradeRequest and all observed behavior are identical."
+  }
+}

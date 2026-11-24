@@ -216,12 +216,14 @@ def entitled(ledger: Any, slug: str, tasks: list[dict[str, Any]]) -> bool:
 def automatic(store: RedisStore, slug: str, url: str, ledger: Any) -> dict[str, Any] | None:
     """Move a pull request that just entered the merge queue ahead of the waiting entries when its task is urgent or
     focused, leaving the groups under test in place; None when no such task names it."""
+    from redis.exceptions import NoPermissionError
+
     tasks: list[dict[str, Any]] = ledger.tasks_targeting(slug, url)
     if not entitled(ledger, slug, tasks):
         return None
     try:
         return apply(store, slug, url, "swarm", tasks, queue_record.Journal(url))
-    except SwarmError as exc:
+    except (SwarmError, NoPermissionError) as exc:
         return {"url": url, "errors": [str(exc)]}
 
 

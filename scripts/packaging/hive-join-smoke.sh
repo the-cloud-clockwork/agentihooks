@@ -101,6 +101,9 @@ for command in (
     ("SET", f"{ROOT}:inbox:owner:master@proof", "forged"),
     ("SET", f"{ROOT}:swarm:proof:heartbeat:other-agent", "{}"),
     ("SET", f"{ROOT}:swarm:proof:stop-blocks:other-agent", "{}"),
+    ("INCR", f"{ROOT}:swarm:proof:expert-seq"),
+    ("HSET", f"{ROOT}:swarm:proof:expert-missions", "forged", "{}"),
+    ("HINCRBY", f"{ROOT}:swarm:proof:expert-launches", "forged", "1"),
     ("SREM", f"{ROOT}:hives", member),
     ("SADD", f"{ROOT}:hives", "forged"),
     ("PEXPIRE", f"{ROOT}:launch-slot:forged", "45000"),
@@ -120,6 +123,13 @@ for command in (
 client.hset(f"{ROOT}:swarm:proof:executions", "member-granted", "{}")
 client.hdel(f"{ROOT}:swarm:proof:executions", "member-granted")
 print("HSET swarm executions: allowed for a hive member")
+for part in ("expert-lineages", "expert-proofs"):
+    client.hset(f"{ROOT}:swarm:proof:{part}", "member-granted", "{}")
+    client.hdel(f"{ROOT}:swarm:proof:{part}", "member-granted")
+for part in ("expert-running", "expert-closing"):
+    client.sadd(f"{ROOT}:swarm:proof:{part}", "member-granted")
+    client.srem(f"{ROOT}:swarm:proof:{part}", "member-granted")
+print("expert complete keys: allowed for a hive member")
 os.environ.update(AGENTIHOOKS_HIVE_ID=member, AGENTIHOOKS_HIVE_REDIS_URL=env["AGENTIHOOKS_HIVE_REDIS_URL"])
 assert daemon.hive_id() == member
 

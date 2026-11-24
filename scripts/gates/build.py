@@ -20,7 +20,7 @@ from scripts.swarm_ledger import ledger_workspace
 if TYPE_CHECKING:
     from scripts.gates.verdicts import Verdicts
 
-LANES = frozenset({"eng", "ci"})
+LANES = frozenset({"eng", "ci", "review"})
 EDIT_TOOLS = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path"}
 SERENA = "mcp__serena__"
 SERENA_EDITS = frozenset(
@@ -64,6 +64,14 @@ def git_root(path):
         if (candidate / ".git").exists():
             return candidate
     return None
+
+
+def _serena_repository(call: Call) -> str:
+    from hooks.context.serena_binding import root_for
+
+    directory = root_for(call.session, call.agent) or call.cwd
+    root = git_root(Path(directory).resolve()) if directory else None
+    return naming.repo_name(root) if root else NO_VALUE
 
 
 def task_territory(ledger_dir, slug, task):
@@ -178,10 +186,10 @@ class BuildGate:
         return call.tool == "Bash" and "commit" in call.command and any(_git_commits(call.command, call.cwd))
 
     def touched(self, call: Call, folder: Path) -> list[tuple[str, str]]:
-        """(repository, path inside it) for each file the call edits or commits; Serena paths carry no repository."""
+        """(repository, path inside it) for each file the call edits or commits."""
         if call.tool.startswith(SERENA):
             scope = call.tool_input.get("relative_path") or WHOLE_PROJECT
-            return [] if call.tool_input.get("dry_run") else [(NO_VALUE, _area(scope))]
+            return [] if call.tool_input.get("dry_run") else [(_serena_repository(call), _area(scope))]
         if call.tool == "Bash":
             commits = _git_commits(call.command, call.cwd)
             return sorted(

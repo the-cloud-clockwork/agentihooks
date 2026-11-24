@@ -18,6 +18,7 @@ from scripts.ci_lab.objects import LocalObjects, manifest_folder
 from scripts.ci_lab.units import Priority
 from scripts.ci_lab.webhooks import HeadEvent
 from scripts.dep_manifest import _git
+from tests.ci_lab.test_manifests import Clock, Held, finished
 from tests.ci_lab.test_scheduler import (
     ACTOR,
     DELIVERY,
@@ -68,6 +69,29 @@ def test_stored_manifests_fetch_only_the_newest_commits_of_the_chain(tmp_path: P
     assert scheduler.StoredManifests(objects, fetches)(REPO, commits) is None
     assert fetches.asked == [(SLUG, commit) for commit in commits[:-1]]
     assert objects.keys("lab/") == []
+
+
+@pytest.mark.feature("lab-manifest-search-outlives-absent-answers")
+@pytest.mark.parametrize("pass_s", [60.0, 304.0])
+def test_a_search_whose_nearest_manifest_lies_six_commits_behind_answers_on_its_seventh_call(
+    tmp_path: Path, pass_s: float
+) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    commits = [f"commit-{index}" for index in range(7)]
+    objects.write_once(f"{manifest_folder(SLUG)}{commits[-1]}.json", packed_file(STORED_MANIFEST, commits[-1]))
+    held = Held({commit: None for commit in commits[:-1]})
+    clock = Clock()
+    background = manifests.Background(held, clock=clock)
+    stored = scheduler.StoredManifests(objects, background)
+    for _ in commits[:-1]:
+        held.release.clear()
+        with pytest.raises(manifests.FetchPending):
+            stored(REPO, commits)
+        held.release.set()
+        finished(background.fetches)
+        clock.now += pass_s
+    assert stored(REPO, commits) == {**STORED_MANIFEST, "commit": commits[-1]}
+    assert held.asked == [(SLUG, commit) for commit in commits[:-1]]
 
 
 @pytest.mark.feature("lab-dev-manifest-fetch")

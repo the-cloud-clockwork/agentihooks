@@ -32,6 +32,7 @@ class GradeRequest:
     tier: Priority
     actor: str
     bypass_negative: bool
+    plant: bool = False
 
 
 def request_from(event: HeadEvent) -> GradeRequest:
@@ -43,6 +44,7 @@ def request_from(event: HeadEvent) -> GradeRequest:
         tier=priority_of({"event_name": TIER_EVENTS.get(event.event, event.event)}),
         actor=event.actor,
         bypass_negative=event.action == RERUN,
+        plant=event.event == "plant",
     )
 
 

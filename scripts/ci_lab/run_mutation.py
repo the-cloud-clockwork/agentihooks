@@ -13,7 +13,7 @@ grader tree grades the head while its own code stays the grader's.
 import json
 import math
 import sys
-from collections.abc import Callable, Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence, Set
 from dataclasses import asdict, dataclass
 from functools import partial
 from gc import freeze
@@ -28,7 +28,7 @@ from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_lab.units import Unit
 from scripts.ci_mutation.killers import KillMemory
-from scripts.ci_mutation.selection import LIGHT_MAIN, selected_mutants
+from scripts.ci_mutation.selection import LIGHT_MAIN, plain_copies
 from scripts.ci_mutation.stats_cache import collect_cached_stats  # pyright: ignore[reportUnknownVariableType]
 
 __all__ = ["Recorder", "Row", "WarmLoop", "install", "main", "mutants", "run", "stats", "trampoline"]
@@ -43,7 +43,7 @@ NO_TESTS = "no tests"
 SUSPICIOUS = "suspicious"
 STATUSES = {0: "survived", 1: "killed"}
 CRASHED = 3
-EVERY_LINE = frozenset(range(1, 100_000))
+NOTHING_COLLECTED = int(pytest.ExitCode.NO_TESTS_COLLECTED)
 HITS: set[str] = set()
 PACKAGE = "scripts"
 
@@ -68,10 +68,22 @@ def install(modules: MutableMapping[str, ModuleType]) -> ModuleType:
     return light
 
 
-def trampoline(tree: Path, path: str) -> list[str]:
-    """Rewrite path under tree with every mutant mutmut makes of it behind trampolines and return their full names."""
+def trampoline(tree: Path, path: str, changed: Set[int]) -> list[str]:
+    """Rewrite path under tree with every mutant of each function whose lines meet changed behind trampolines, leave
+    its other functions as they stand and return the full names of the mutants written, applying no ignore pattern
+    and reading no mutmut config."""
+    from mutmut.mutation.file_mutation import combine_mutations_to_source
+
+    from scripts.ci_lab.expand_mutation import changed_functions
+
     target = tree / path
-    code, names = selected_mutants(path, target.read_text(), set(EVERY_LINE))
+    wrapper, functions = changed_functions(path, target.read_text(), changed)
+    if not functions:
+        return []
+    selected = [mutation for mutations in functions.values() for mutation in mutations]
+    code, names = combine_mutations_to_source(wrapper.module, selected)
+    if any(function.decorators for function in functions):
+        code = plain_copies(code)
     target.write_text(code)
     return [get_mutant_name(Path(path), name) for name in names]
 
@@ -177,6 +189,12 @@ class WarmLoop:
         return run_items(session, [items[test] for test in order if test in items])
 
 
+def collected_status(code: int) -> int:
+    """Return the stats record status of a pytest exit code: zero when the session collected no test, since test
+    files that hold no test have nothing to trace, and the code itself otherwise."""
+    return 0 if code == NOTHING_COLLECTED else code
+
+
 def packaged(modules: Mapping[str, ModuleType]) -> list[str]:
     """Name every loaded module of the package the runner shares with the code it grades."""
     return [name for name in modules if name == PACKAGE or name.startswith(f"{PACKAGE}.")]
@@ -218,7 +236,7 @@ def collect(tree: Path, options: Sequence[str], chosen: list[str]) -> list[dict[
     status = under_test(tree, partial(pytest.main, [*options, *chosen], plugins=[recorder.plugin()]))
     tests = {function: sorted(names) for function, names in recorder.tests.items()}
     cpu = process_time() - started
-    return [{"status": int(status), "tests": tests, "durations": recorder.durations, "cpu": cpu}]
+    return [{"status": collected_status(int(status)), "tests": tests, "durations": recorder.durations, "cpu": cpu}]
 
 
 def stats(
