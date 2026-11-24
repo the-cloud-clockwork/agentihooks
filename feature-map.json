@@ -9220,6 +9220,19 @@
       ]
     },
     {
+      "id": "hive-startup-recovers-stuck-gc",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2764",
+      "behaviour": "Worker startup recovers configured existing primary checkouts with a stale garbage collection log by pruning unreachable objects older than two weeks, removing the log only after successful pruning, then running full garbage collection with cruft packs that preserve younger unreachable objects. Checkouts without a log and unconfigured repositories remain untouched.",
+      "seam": "configured repository startup loop through scripts.hive.repo_maintenance.recover",
+      "rules": ["hive-prune-needs-expiry"],
+      "tests": [
+        "tests/hive/test_repo_maintenance.py::test_startup_recovers_only_configured_existing_checkouts_with_a_gc_log",
+        "tests/hive/test_repo_maintenance.py::test_failed_pruning_keeps_the_gc_log_and_does_not_start_gc",
+        "tests/hive/test_repo_maintenance.py::test_recovery_retains_young_unreachable_objects_without_another_gc_warning"
+      ]
+    },
+    {
       "id": "hive-quiet-sweep",
       "origin": "inventory",
       "behaviour": "The tick step hive sweep drains an ephemeral hive quiet past the registry window and removes its records once no agent runs on it; a quiet lasting hive raises one quiet hive finding; the hives page hides quiet ephemeral hives and counts no agents on a quiet row; the hive reproduce proof removes its invited member on exit.",
