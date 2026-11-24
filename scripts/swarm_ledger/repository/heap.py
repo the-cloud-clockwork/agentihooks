@@ -1,6 +1,7 @@
 import ctypes
+import sys
 
-TRIM = getattr(ctypes.CDLL(None), "malloc_trim", None)
+TRIM = None if sys.platform == "win32" else getattr(ctypes.CDLL(None), "malloc_trim", None)
 
 
 def release() -> None:

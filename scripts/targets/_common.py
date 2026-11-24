@@ -510,12 +510,18 @@ def build_persona(
     a layer with no ``CLAUDE.md`` at all, such as a Codex-only profile with
     ``.codex/AGENTS.md`` instead, still contributes its persona through it.
     """
-    from hooks.context.profile_chain import inherited
+    from hooks.context.profile_chain import inherited, takes_package_features
 
     managed_header, managed_footer = markers
     later = user_dir if isinstance(user_dir, Mapping) else {"user bundle": user_dir}
     parents = inherited(profile_dirs)
-    parts: list[str] = [managed_header, identity_preamble([name for name in profile_chain if name not in parents])]
+    names = [name for name in profile_chain if name not in parents]
+    opening = (
+        identity_preamble(names)
+        if takes_package_features(profile_dirs)
+        else f"# Identity\n\nYou are **{names[0] if names else 'the assistant'}**. Everything below is who you are."
+    )
+    parts: list[str] = [managed_header, opening]
 
     for label, directory in (("bundle", bundle_dir), *later.items()):
         if content := shared_directive(directory, native):

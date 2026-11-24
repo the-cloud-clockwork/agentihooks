@@ -2837,16 +2837,17 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     bundle_dir = _get_bundle_path()
     user_dir = _get_user_bundle_path()
     shared_dir = _get_shared_bundle_path()
-    from hooks.context.profile_chain import unlayered
+    from hooks.context.profile_chain import takes_package_features, unlayered
 
     content_dirs = unlayered(profile_dirs, (bundle_dir, shared_dir, user_dir))
+    package = takes_package_features(profile_dirs)
     for subdir, label, filter_fn in [
         ("skills", "skill", _skill_dir_filter()),
         ("agents", "agent", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ("commands", "command", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ("rules", "rule", lambda p: p.suffix == ".md" and p.name != "README.md"),
     ]:
-        layers: list[tuple[str, Path]] = [(label, PACKAGE_FEATURES_DIR / subdir)]
+        layers: list[tuple[str, Path]] = [(label, PACKAGE_FEATURES_DIR / subdir)] if package else []
         layers.extend(_bundle_feature_layers(subdir, label))
         for pname, pdir in content_dirs:
             if (pdir / _CLAUDE_SUBDIR / subdir).is_dir():

@@ -58,7 +58,7 @@ def server(
     pid: int | None,
     proc: Path = PROC,
     sleep: Callable[[float], None] = time.sleep,
-    hertz: int = os.sysconf("SC_CLK_TCK"),
+    hertz: int = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100,
 ) -> dict:
     if pid is None:
         return {"cpu": None, "started_minutes": None}

@@ -2,7 +2,6 @@ import cProfile
 import json
 import os
 import pstats
-import resource
 import sys
 import time
 import traceback
@@ -204,6 +203,8 @@ def pass_errors(store: Any, slug: str) -> list[dict[str, Any]]:
 
 @contextmanager
 def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
+    import resource
+
     slug = SWARM.get()
     if slug is None:
         yield

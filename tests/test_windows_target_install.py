@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from scripts import install
 
 
@@ -100,3 +102,19 @@ def test_windows_reinstall_replaces_bash_wrapper_hooks(monkeypatch):
     commands = [hook["command"] for groups in doc["hooks"].values() for group in groups for hook in group["hooks"]]
     assert not any(command.endswith("agentihooks-hook.sh") for command in commands)
     assert "PostCompact" not in doc["hooks"]
+
+
+@pytest.mark.parametrize("takes_package", [True, False])
+def test_package_features_false_leaves_out_package_rules_and_fleet_preamble(tmp_path, monkeypatch, takes_package):
+    """A single-user assistant profile opts out of agentihooks' own rules and the fleet identity preamble."""
+    from scripts.targets.codex_target import codex_home
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    profiles = _tiny_profile(tmp_path)
+    if not takes_package:
+        (profiles / "tiny" / "profile.yml").write_text("name: tiny\npackage_features: false\n")
+    _run(profiles, monkeypatch, "codex")
+    text = (codex_home() / "AGENTS.md").read_text()
+    assert ("rule: worktrees.md" in text) is takes_package
+    assert ("operator's fleet" in text) is takes_package
+    assert "You are **tiny**" in text
