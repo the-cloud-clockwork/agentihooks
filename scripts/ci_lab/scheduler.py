@@ -1115,8 +1115,9 @@ class Scheduler:
         if state is None:
             self._drop(run)
             return [f"forgot {run}"]
-        for slot in state.units.values():
-            self._collect(slot, tiers, state)
+        queued = [slot for slot in state.units.values() if not (slot.outcome or slot.held) and slot.job]
+        for slot, job in zip(queued, self.queue.jobs([slot.job for slot in queued])):
+            self._collect(slot, job, tiers, state)
         actions = self._post(state, now_ms)
         if all(slot.outcome for slot in state.units.values()) and not _moved(state):
             self._drop(run)
@@ -1130,12 +1131,8 @@ class Scheduler:
         self.save(state)
         return actions
 
-    def _collect(self, slot: Slot, tiers: Mapping[str, int], state: State) -> None:
-        """Take a finished job into its slot in the class of its tier; a vanished job was dropped and a held one waits
-        for the budget."""
-        if slot.outcome or slot.held or not slot.job:
-            return
-        job = self.queue.job(slot.job)
+    def _collect(self, slot: Slot, job: Job | None, tiers: Mapping[str, int], state: State) -> None:
+        """Take a finished job read for an open slot into it in the class of its tier; a vanished job was dropped."""
         if job is None:
             slot.outcome = DROPPED
         elif job.state in FINISHED:
