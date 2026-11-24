@@ -82,7 +82,7 @@ def test_a_plant_push_grades_in_the_pull_request_tier_on_its_dev_merge_base(tmp_
     planted(run, HEAD_A)
     actions = run.tick(1000)
     assert bases.resolved == [(REPO, HEAD_A)]
-    assert bases.seen == [GradeRequest(REPO, HEAD_A, MERGE_BASE, Priority.PULL_REQUEST, ACTOR, False)]
+    assert bases.seen == [GradeRequest(REPO, HEAD_A, MERGE_BASE, Priority.PULL_REQUEST, ACTOR, False, plant=True)]
     grade = run.grade(HEAD_A)
     assert grade.run == grade_key(GradeInputs(REPO, HEAD_A, MERGE_BASE, CLASSES[Priority.PULL_REQUEST], MERGE_BASE))
     assert (grade.base, grade.grader, grade.tier) == (MERGE_BASE, MERGE_BASE, Priority.PULL_REQUEST)

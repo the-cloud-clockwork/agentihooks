@@ -1,0 +1,6 @@
+{
+  "scripts/hive/registry.py:scripts.hive.registry.x_beat__mutmut_3:28594234cea8e51bfdfe6bf7175d30464c226df4e5aaf15b72a4c5434a9e0606": {
+    "reader": "standards_reader",
+    "reason": "Equivalent. _healed uses hive_id in exactly one place, the _held(client, hive_id) call inside the short-circuited guard base == _read_name(record) or base in _held(client, hive_id). That call only runs when base != _read_name(record). Passing None makes the hive's own previously-stored record eligible for the held set instead of excluded by id; that self-entry equals _read_name(record) (since beat()'s fields never carry name/ui; update() is the only setter of those and never calls _healed), a value the guard's first clause already proved differs from base. So the guard's truth value, and therefore whether _healed returns the record unchanged or renamed to base, is unchanged. This is mechanically the same mutation as the _healed hive id mutant, one call frame up; there is no second use of hive_id to examine."
+  }
+}

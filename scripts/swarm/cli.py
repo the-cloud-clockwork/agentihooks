@@ -42,6 +42,7 @@ from urllib.parse import urlsplit
 import scripts.tick.steps.report  # noqa: F401
 from hooks.classifier import settings as classifier_settings
 from hooks.context import injection_trace, quarantine
+from scripts import review
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, quiet
 from scripts.gates import feature as feature_gate
@@ -104,7 +105,6 @@ from scripts.swarm import (
     priming_trace,
     prompt,
     pull_head,
-    queue_exit,
     queue_priority,
     queue_record,
     ready,
@@ -129,6 +129,9 @@ from scripts.swarm import (
     waits,
 )
 from scripts.swarm import ledger_client as ledger_client
+from scripts.swarm import (
+    queue_exit as queue_exit,
+)
 from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.cli_parser import build_parser
@@ -207,6 +210,7 @@ SETTABLE = {
     "max-eng-agents": "max_eng",
     "max-ci-agents": "max_ci",
     "max-plan-agents": "max_plan",
+    "max-review-agents": "max_review",
     "masters-step": "masters_step",
     "compact-limit": "compact_limit",
     "snapshot-minutes": "snapshot_minutes",
@@ -1453,6 +1457,7 @@ def cmd_set(store: RedisStore, args: argparse.Namespace) -> None:
                 "max_eng": config.max_eng,
                 "max_ci": config.max_ci,
                 "max_plan": config.max_plan,
+                "max_review": config.max_review,
                 "masters_step": config.masters_step,
                 "compact_limit": config.compact_limit,
                 "focus_weight": config.focus_weight,
@@ -1593,7 +1598,7 @@ def cmd_status(store: Any, args: Any) -> None:
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  masters step {config.masters_step}  scaling {config.scaling}  focus weight {config.focus_weight}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
+        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  review {config.max_review}  masters step {config.masters_step}  scaling {config.scaling}  focus weight {config.focus_weight}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
     )
     print(
         "gate modes  "
@@ -2173,6 +2178,8 @@ def _require_target(store: object, args: argparse.Namespace, agent: AgentRecord)
 
 
 def cmd_merge(store: Any, args: argparse.Namespace) -> None:
+    from scripts.review import gate as review
+
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
@@ -2194,9 +2201,8 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
             result = merge_queue.operate(
                 args.action,
                 args.url,
-                admit=lambda head: (
-                    (agent is not None and _queue_intent(store, args, agent, head))
-                    or queue_exit.require_fresh(args.url, head)
+                admit=lambda head: review.queue_admit(
+                    store, args, agent, _me(store, args), head, _queue_intent, stalled
                 ),
                 journal=queue_record.Journal(args.url, context=stalled or (agent and {"task": agent.task})),
                 attempts=merge_queue.ATTEMPTS,
@@ -2220,6 +2226,7 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
             return
         proof.update(found)
     proven = {**row, "proof": {**(row.get("proof") or {}), **proof}}
+    review.require_done(store, args.slug, ledger_kinds.kind(row), agent.lane, agent.task)
     missing = ledger_kinds.unmet(proven)
     if missing:
         raise SwarmError(_unproven(ledger_kinds.kind(row), missing))

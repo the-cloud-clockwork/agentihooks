@@ -1979,7 +1979,7 @@ holds the token, without printing it.
 
 | Symptom | Cause | Check |
 |---|---|---|
-| `git remote -v` lists no `lab` | The process that made the workspace had no `AGENTIHOOKS_LAB_REMOTE`, or the URL names another repository | `test -n "${AGENTIHOOKS_LAB_REMOTE:-}" && echo set \|\| echo unset` in that process's environment, then compare the last part of the lab URL, and the owner before it when the URL names one, with `git remote get-url origin` |
+| `git remote -v` lists no `lab` | The process that made the workspace had no `AGENTIHOOKS_LAB_REMOTE`, or the URL names another repository | <code>test -n "${AGENTIHOOKS_LAB_REMOTE:-}" && echo set &#124;&#124; echo unset</code> in that process's environment, then compare the last part of the lab URL, and the owner before it when the URL names one, with `git remote get-url origin` |
 | A hive checkout lacks `lab` while a fresh worktree has it | The checkout was cloned after the daemon started, or the daemon started without the variable | Restart the daemon, or run `wt.sh new` against that checkout |
 | `lab` points at an old URL | The workspace was carried before the URL changed | The next `wt.sh new`, `publish --via lab` or daemon start sets the new URL; the old URL's helper entry stays and is unused |
 | A push to `lab` fails authentication | The pushing shell has no `AGENTIHOOKS_LAB_REMOTE_TOKEN`, so the helper sends an empty password, or it holds another value than the lab expects | The third verify command; set the variable in the environment the agent runs in |
@@ -3125,14 +3125,33 @@ expansion still reads the mirror with `git ls-tree` and `git show`:
 | Job | Units |
 |---|---|
 | `mutation` | One `mutant` unit per function the head changes against its base, naming every mutant of that function, or several when those mutants price over the sandbox timeout |
-| `mutation-stats` | One `stats` unit per test file present at the head that holds a test running such a function, with the worker's stats options |
+| `mutation-stats` | One `stats` unit per test file the head's mutant units trace, with the worker's stats options |
 
 The changed lines are `scripts.ci_mutation.scope.changes_since` of the base and head, the lines the
 pull request mutation gate grades. `expand_mutation.covering` maps each function to the fingerprint
 of every dependency manifest test that ran it or a function nested in it, and those fingerprints
-enter the mutant key, so a changed covering test rekeys the unit. The stats units warm the stats
-cache the worker's mutant runner reads before it runs the mutants. The manifest only names the tests
-of the base, while the mutant runner runs every test module of the head, so
+enter the mutant key, so a changed covering test rekeys the unit.
+
+Every mutant unit of a head traces the same test files, and the scheduler names them on the unit as
+its manifest, a JSON list:
+
+- the test files present at the head that hold a dependency manifest test running a changed
+  function;
+- each test module of the head that holds no manifest test (`expand_tests.unlisted_modules`);
+- each test module the head changes against its base and still holds
+  (`expand_mutation.changed_tests`).
+
+The manifest is stored once under the unit's key, like a test unit's, and the lease carries it. It
+is outside the key. One stats unit is planned per traced file, and none for a head that changes no
+function. A test in a listed test module the head leaves as it was, which reaches a changed function
+only at the head and ran no changed function when the manifest was recorded, is not traced. The
+hash of each test module the head changes enters every mutant key of that head, with the hashes
+described below, so a head that edits a test module rekeys its mutant units, also when none of that
+module's manifest tests ran the function.
+
+The stats units warm the stats cache the worker's mutant runner reads before it runs the mutants.
+The manifest only names the tests of the base, while the mutant runner also runs every test module
+the manifest lists no test of, so
 `expand_tests.unlisted_test_hashes` hashes each test module of the head that holds no manifest test,
 with every conftest pytest loads for it and every test tree module either imports, and those hashes
 enter every mutant key too: a head that adds or edits such a module rekeys its units. The manifest
@@ -3168,15 +3187,16 @@ A head with no kept line gets neither mutation job, and its grade folds on its o
 
 | Input | Where | Without it |
 |---|---|---|
-| `[tool.mutmut]` `source_paths` | The head's `pyproject.toml` | The worker cannot trampoline its copy of the head, so the executor raises a `KeyError` before the runner starts |
 | A quoted `mutmut==<version>` requirement | The head's `pyproject.toml`, such as the `dev` extra of `[project.optional-dependencies]` | Expansion raises `<checkout>/pyproject.toml pins no mutmut version` |
 | A dependency manifest stored at or before the base | The lab store, fetched as [Test units](#test-units) describes | Expansion raises `no dependency manifest at or before <base>` before any mutation unit is built |
 | `CI_LAB_MIRROR_STORE` | The scheduler's [environment](#environment) | The scheduler does not start |
 | `CI_LAB_MUTATION_CACHE`, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` | The worker's [environment](#environment) | The worker does not start |
 
-The lab reads no other mutmut setting. The scheduler names the mutants and the worker trampolines
-them in their own processes without loading mutmut's config, so neither depends on its working
-directory. A head's `do_not_mutate_patterns` are not applied; its `# pragma: no mutate` lines are.
+The lab reads no mutmut setting, `source_paths` included: the changed files come from
+`scope.changes_since`, which looks under `hooks/` and `scripts/`. The scheduler names the mutants
+and the worker trampolines them in their own processes without loading mutmut's config, so neither
+depends on its working directory. A head's `do_not_mutate_patterns` are not applied; its
+`# pragma: no mutate` lines are.
 
 This repository's `pyproject.toml` holds both:
 
@@ -3226,16 +3246,29 @@ refuses a key of that form with `ValueError: not a <kind> unit key: <key>`, so t
 
 #### How a worker runs them
 
-Both kinds run through `scripts.ci_lab.executors.mutation` in the private trampolined copy,
-as [Worker executors](#worker-executors) describes:
+Both kinds run through `scripts.ci_lab.executors.mutation` in a private copy of the head, as
+[Worker executors](#worker-executors) describes. The executor first makes the lease's base present
+in the pod's store and puts behind trampolines only the functions the head changes against that
+base: for each file `scope.changes_since` names, `run_mutation.trampoline` rewrites the functions
+whose lines meet the changed lines, from `expand_mutation.changed_functions`, the selection the
+scheduler names the mutant units from. No other file of the copy is rewritten, so the step's memory
+and time follow the size of the change.
 
 | Kind | Runner requests | Passes when |
 |---|---|---|
 | `stats` | One stats request over the unit's test file, with the copy as root and `CI_LAB_MUTATION_CACHE` | The runner exits 0 |
-| `mutant` | A stats request over every tracked `test_*.py` under `tests/` of the copy with the same cache, then a mutant request with the unit's mutant names, the tests those stats records show reaching its function with their seconds, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET` and `CI_LAB_MUTATION_CAP` | The runner exits 0 and every row reads `killed` |
+| `mutant` | A stats request over the test files the unit's manifest names with the same cache, then a mutant request with the unit's mutant names, the tests those stats records show reaching its function with their seconds, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET` and `CI_LAB_MUTATION_CAP` | The runner exits 0 and every row reads `killed` |
+
+A mutant unit whose lease carries no manifest raises `mutant unit <key> carries no manifest of the
+test files to trace`, and one with a member the copy holds behind no trampoline raises `mutant unit
+<key> names mutants its tree holds behind no trampoline`, both before the runner starts: the
+scheduler and the worker disagree on the change, which must not grade as a surviving mutant.
 
 The stats request of a mutant unit reuses every record in `CI_LAB_MUTATION_CACHE` whose inputs
 still match, such as those the grade's stats units stored, and measures only the other test files.
+A stats collection over test files that collect no test, such as a traced test module that holds no
+test, ends as a record with status 0 and no test: `run_mutation.collected_status` reads pytest's no
+tests collected exit code as 0 and keeps every other code, which still fails the collection.
 Each mutant row has a status:
 
 | Status | Meaning |
@@ -3421,8 +3454,8 @@ scheduler enqueues a grade's misses with the grade's base and its plan's grader 
 |---|---|---|
 | `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
 | `test` | head, read only | the batch and its selected manifest records, read from the object store into its lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
-| `stats` | a private copy of the head with every file under the `[tool.mutmut]` source paths behind its trampolines | the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
-| `mutant` | the same private trampolined copy | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of every test module in the tree show reaching the mutant's function, with their seconds |
+| `stats` | a private copy of the head with the functions the head changes against the lease's base behind their trampolines, and the base present in the pod's store | the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
+| `mutant` | the same private trampolined copy | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of the test files its manifest names show reaching the mutant's function, with their seconds |
 
 The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
 from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
@@ -4487,8 +4520,11 @@ verdict.
 - `PATH` is `settings.venv/bin`, then `/usr/local/bin`, where the worker image installs semgrep
   and helm, then `/bin:/usr/bin`. `RUFF_CACHE_DIR` is the `ruff` folder inside `RUNNER_TEMP`,
   since the worker seals the leased head tree and ruff would otherwise write `.ruff_cache` into
-  it. `settings.whitelist` and the step's own `env` values, with their `${{ }}` expressions read
-  from `settings.context`, come after both and can replace them. Neither can replace
+  it. `AGENTIHOOKS_TYPE_WORKERS` is `1`, so the type gate runs one basedpyright checker at a
+  time: a worker's memory holds one beside its other units, and the lease grants a worker one
+  static gate of the job `type-gate` at a time, whatever its free slots.
+  `settings.whitelist` and the step's own `env` values, with their `${{ }}` expressions read
+  from `settings.context`, come after these and can replace them. Neither can replace
   `RUNNER_TEMP`, `GITHUB_WORKSPACE` or `GITHUB_STEP_SUMMARY`.
 
 The bind applies to the real tree paths, so a write through `$RUNNER_TEMP/grader/...` or
