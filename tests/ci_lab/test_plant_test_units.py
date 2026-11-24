@@ -6,11 +6,15 @@ from pathlib import Path
 import pytest
 
 from scripts.ci_lab import intake, scheduler
-from scripts.ci_lab.units import Priority
+from scripts.ci_lab.units import Priority, Unit
 from tests.ci_lab import test_scheduler as fixtures
 from tests.ci_lab.test_intake import head
 from tests.ci_lab.test_scheduler import lab as lab
 from tests.ci_lab.test_scheduler import staticless as staticless
+
+
+def plant_plan(gates: dict[str, tuple[Unit, ...]]) -> scheduler.Plan:
+    return scheduler.frame(Priority.PULL_REQUEST, fixtures.TREE, fixtures.BASE, gates, plant=True)
 
 
 @pytest.mark.feature("lab-plant-test-units")
@@ -135,3 +139,19 @@ def test_a_plant_selects_changed_test_modules_whose_tests_are_class_methods(tmp_
     request = replace(suite.request(Priority.PULL_REQUEST, commit), plant=True)
     found = fixtures.Port(manifest).expander(tmp_path).expand(request)
     assert [unit.members for unit in found.gates["unit"]] == [(method,)]
+
+
+@pytest.mark.feature("lab-plant-required-verdict")
+@pytest.mark.parametrize("failed", ["lint", "unit"])
+def test_a_plant_grade_with_a_failed_gate_posts_its_required_check_and_that_gates_check_as_failure(
+    lab: Callable[..., fixtures.Run], failed: str
+) -> None:
+    linted, tested = fixtures.unit(1), fixtures.unit(2)
+    run = lab({fixtures.HEAD_A: plant_plan({"lint": (linted,), "unit": (tested,)})})
+    run.cache(linted, passed=failed != "lint")
+    run.cache(tested, passed=failed != "unit")
+    run.push(fixtures.HEAD_A, event="plant")
+    run.tick(1000)
+    assert run.grade(fixtures.HEAD_A).conclusion == "failure"
+    assert run.lab.poster.moves(fixtures.HEAD_A, failed) == [("completed", "failure")]
+    assert run.lab.poster.moves(fixtures.HEAD_A, scheduler.REQUIRED) == [("completed", "failure")]
