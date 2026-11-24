@@ -3,7 +3,9 @@
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from scripts.forge.model import ChangeRequest, Check, ForgeError
@@ -58,7 +60,8 @@ class MergeRequestState:
 
 
 def pipeline_suites(pipeline: dict[str, Any]) -> dict[str, dict[str, str]]:
-    raise NotImplementedError
+    conclusion = CONCLUSIONS.get(pipeline["status"])
+    return {} if conclusion is None else {str(pipeline["id"]): {"app": PIPELINE_APP, "conclusion": conclusion}}
 
 
 class GitLabForge:
@@ -103,8 +106,37 @@ class GitLabForge:
         return f"{self.web}/-/merge_requests/{number}#note_{note['id']}"
 
     def state(self, number: int) -> MergeRequestState:
-        raise NotImplementedError
+        url = f"{self.web}/-/merge_requests/{number}"
+        try:
+            raw = self._call("GET", f"{self.api}/{number}")
+        except HTTPError as error:
+            if error.code == HTTPStatus.NOT_FOUND:
+                raise FetchError(f"GitLab has no merge request at {url}") from error
+            raise
+        if raw["state"] not in STATES:
+            raise FetchError(f"GitLab merge request {url} is {raw['state']}")
+        pipeline = raw["head_pipeline"]
+        return MergeRequestState(
+            url=url,
+            state=STATES[raw["state"]],
+            head=raw["sha"],
+            queued=False,
+            checks_head=pipeline["sha"] if pipeline else raw["sha"],
+            suites=pipeline_suites(pipeline) if pipeline else {},
+        )
 
 
 def merge_request_state(url: str, token: str | None, send: Transport = urlopen_transport) -> MergeRequestState:
-    raise NotImplementedError
+    """Read the tracker state of the GitLab merge request at ``url``.
+
+    The link parser is imported here because the remote module imports this one. A link of another forge or a missing
+    token raises FetchError before any request, so the GitLab token never goes to another host.
+    """
+    from scripts.forge.remote import change_link
+
+    link = change_link(url)
+    if link.kind != "gitlab":
+        raise FetchError(f"not a GitLab merge request link: {url}")
+    if not token:
+        raise FetchError("GITLAB_TOKEN is not set")
+    return GitLabForge(link.host, link.path, token, send).state(link.number)
