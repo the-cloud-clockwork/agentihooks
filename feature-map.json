@@ -1020,16 +1020,21 @@
       "id": "doctor-lab-health",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/swarm-doctor-lab-detector",
-      "behaviour": "The Doctor reports lab health as findings: the last capacity read failed (lab unreachable, measured from the last good read), a fresh reading predicts pull request grading more than the claim hold limit AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES behind (lab behind), a class of a fresh reading has a verdict cache hit ratio below AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR, default 0.6 (lab cache hit ratio), and a gate the swarm checkout's delivery.yaml makes authoritative disagrees with GitHub Actions on any of its newest ten pull request heads as the acceptance rule report counts them with lab verdicts from the App AGENTIHOOKS_LAB_APP names, the detector failing while no App is named (lab gate mismatch); agentihooks doctor <slug> findings --json prints the findings the detectors find now.",
+      "behaviour": "The Doctor reports lab health as findings: the last capacity read failed (lab unreachable, measured from the last good read), a fresh reading predicts pull request grading more than the claim hold limit AGENTIHOOKS_HEALTH_CI_BEHIND_MINUTES behind (lab behind), a class of a fresh reading has a verdict cache hit ratio below AGENTIHOOKS_DOCTOR_LAB_HIT_FLOOR, default 0.6 (lab cache hit ratio), and a gate the swarm checkout's delivery.yaml makes authoritative disagrees with GitHub Actions on any of the newest ten pull request heads, the lab verdict being the newest lab/<gate> or lab-shadow/<gate> check run of the App AGENTIHOOKS_LAB_APP names and a head whose Actions job of the gate was skipped counting none, the detector failing while no App is named (lab gate mismatch); one pass reads those ten heads and each head's check runs once for every listed gate together and makes no GitHub read while no gate is listed; agentihooks doctor <slug> findings --json prints the findings the detectors find now.",
       "seam": "scripts.doctor.lab findings, gate_findings, mismatches, read and read_gates, registered as the lab and lab gate readers of scripts.doctor.detect.readers, through agentihooks doctor <slug> findings",
+      "rules": [
+        "doctor-reader-walks-the-acceptance-report"
+      ],
       "tests": [
         "tests/doctor/test_lab.py::test_an_unreachable_lab_is_one_finding_measured_from_its_last_good_read",
         "tests/doctor/test_lab.py::test_a_fresh_reading_behind_the_limit_is_a_finding_and_at_the_limit_is_not",
         "tests/doctor/test_lab.py::test_each_class_with_a_hit_ratio_under_the_floor_is_a_finding",
         "tests/doctor/test_lab.py::test_the_wait_limit_and_hit_floor_come_from_the_environment",
         "tests/doctor/test_lab.py::test_an_authoritative_gate_with_a_mismatch_is_a_finding",
-        "tests/doctor/test_lab.py::test_mismatches_count_each_authoritative_gate_through_the_acceptance_rule_report",
+        "tests/doctor/test_lab.py::test_mismatches_count_a_listed_gate_over_the_newest_heads_reading_each_head_once",
         "tests/doctor/test_lab.py::test_the_gate_reader_asks_github_only_for_authoritative_gates",
+        "tests/doctor/test_lab.py::test_a_pass_reads_the_newest_ten_heads_once_for_every_listed_gate",
+        "tests/doctor/test_lab.py::test_a_listed_gate_is_compared_under_the_name_the_lab_posts",
         "tests/doctor/test_lab.py::test_the_doctor_reads_the_stored_lab_block_and_registers_both_readers",
         "tests/doctor/test_lab.py::test_doctor_findings_prints_a_faked_lab_reading_as_json"
       ]
@@ -12888,11 +12893,13 @@
       "id": "lab-shadow-acceptance-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-shadow-report",
-      "behaviour": "python -m scripts.ci_lab shadow report --gate GATE reads the newest completed Tests runs of the event, pull_request unless --event merge_group, and joins each distinct head's github-actions jobs of the gate with its lab-shadow check run from the lab App named by --app or AGENTIHOOKS_LAB_APP, refusing to run without one; a head whose jobs of the gate were cancelled, still run or never graded leaves the window, a unit job the workflow reran after a lost runner counts by its rerun, and the report prints one row per head with each verdict, whether the lab verdict completed first and whether the two disagree, then the counts, and exits 0 only when the window holds the asked heads, no mismatch, a lab verdict on 48 and a lab verdict first on 45 of every 50, rounded up.",
+      "behaviour": "python -m scripts.ci_lab shadow report --gate GATE reads the newest completed Tests runs of the event, pull_request unless --event merge_group, and joins each distinct head's github-actions jobs of the gate with its lab-shadow check run from the lab App named by --app or AGENTIHOOKS_LAB_APP, never the lab/<gate> check run of a listed gate, refusing to run without one; a head whose jobs of the gate were cancelled, still run or never graded leaves the window, a unit job the workflow reran after a lost runner counts by its rerun, and the report prints one row per head with each verdict, whether the lab verdict completed first and whether the two disagree, then the counts, and exits 0 only when the window holds the asked heads, no mismatch, a lab verdict on 48 and a lab verdict first on 45 of every 50, rounded up.",
       "seam": "scripts.ci_lab.shadow_report actions, lab, head, rule, tally, holds, render, collect, claims and main through python -m scripts.ci_lab shadow report --gate",
       "tests": [
         "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_rule",
         "tests/ci_lab/test_shadow_report.py::test_a_head_without_a_lab_verdict_counts_against_presence",
+        "tests/ci_lab/test_shadow_report.py::test_the_acceptance_report_reads_the_lab_verdict_only_under_the_shadow_name",
+        "tests/ci_lab/test_shadow_report.py::test_a_listed_gate_reads_the_newest_lab_verdict_under_either_name",
         "tests/ci_lab/test_shadow_report.py::test_a_cancelled_actions_job_takes_its_head_out_of_the_window",
         "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_completing_after_the_actions_jobs_is_late",
         "tests/ci_lab/test_shadow_report.py::test_a_lost_runners_unit_job_counts_by_its_rerun",
