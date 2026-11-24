@@ -76,6 +76,7 @@
       "seam": "the run text of the step SonarQube Quality Gate of the sonar job, run in a shell against a fake curl that answers the hotspot search",
       "tests": [
         "tests/test_ci_sonar_speed.py::test_a_failed_gate_names_its_unreviewed_hotspots",
+        "tests/test_ci_sonar_speed.py::test_finding_searches_use_the_read_token_and_polling_keeps_the_scan_token",
         "tests/test_ci_sonar_speed.py::test_a_failed_gate_says_how_many_hotspots_it_left_out",
         "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_red_when_the_hotspot_read_is_refused",
         "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_a_code_verdict_when_the_hotspot_read_meets_an_outage",

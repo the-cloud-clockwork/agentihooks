@@ -85,6 +85,7 @@ def _gate(
         bin_dir,
         "curl",
         f'url="${{@: -1}}"; echo "$url" >> "{tmp_path}/urls"\n'
+        f'printf \'%s %s\\n\' "${{@: -2:1}}" "$url" >> "{tmp_path}/headers"\n'
         'case "$url" in\n'
         f'  */ce/task?id=T1) s=$(head -n1 "{tmp_path}/statuses"); sed -i 1d "{tmp_path}/statuses"\n'
         f'    sed "s/STATUS/$s/" "{tmp_path}/task.json" ;;\n'
@@ -101,6 +102,7 @@ def _gate(
         tmp_path,
         bin_dir,
         SONAR_TOKEN="t",
+        SONAR_READ_TOKEN="r",
         GITHUB_EVENT_NAME=event,
         GITHUB_OUTPUT=str(output),
         GITHUB_STEP_SUMMARY=str(tmp_path / "summary"),
@@ -268,6 +270,21 @@ def test_a_failed_gate_names_its_unreviewed_hotspots(tmp_path: Path, scope: str)
         "&inNewCodePeriod=true&status=TO_REVIEW&ps=100"
     ]
     assert (tmp_path / "output").read_text() == ""
+
+@pytest.mark.feature("sonar-failed-gate-names-new-hotspots")
+def test_finding_searches_use_the_read_token_and_polling_keeps_the_scan_token(tmp_path: Path) -> None:
+    result, _ = _gate(
+        tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH, issues=_BUGS, hotspots=_HOTSPOTS
+    )
+    assert result.returncode == 1
+    headers = (tmp_path / "headers").read_text().splitlines()
+    assert len(headers) == 4
+    assert all(header.startswith("Authorization: Bearer t ") for header in headers[:2])
+    assert all(header.startswith("Authorization: Bearer r ") for header in headers[2:])
+    assert "/ce/task?" in headers[0]
+    assert "/qualitygates/project_status?" in headers[1]
+    assert "/issues/search?" in headers[2]
+    assert "/hotspots/search?" in headers[3]
 
 
 @pytest.mark.feature("sonar-failed-gate-names-new-hotspots")
