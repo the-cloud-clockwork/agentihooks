@@ -8,8 +8,10 @@ from scripts.swarm import cli, pull_head
 from scripts.swarm_ledger import ledger_tasks
 from scripts.tick.adapters.fakes import FakeSourceControl
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
+from tests.forge.fakes import Sent
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_intent_cli import started  # noqa: F401
+from tests.swarm.test_pull_confirm import GITLAB, GITLAB_HEAD, GITLAB_REPO, merge_request
 
 URL = "https://github.com/o/r/pull/11024"
 HEAD = "0123456789abcdef0123456789abcdef01234567"
@@ -78,4 +80,31 @@ def test_swarm_pr_records_every_confirmed_field_of_a_github_pull_request(
         "pr_number": 11024,
         "pr_head": HEAD,
         "pr_url": URL,
+    }
+
+
+@pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
+@pytest.mark.parametrize("body", [None, "Closes #9"])
+def test_swarm_pr_records_a_gitlab_merge_request_the_ledger_accepts(
+    started: tuple[Any, Any, list],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    body: str | None,
+) -> None:
+    _, ledger, _ = started
+    sent = _checking(ledger)
+    transport = Sent(merge_request(body=body))
+    monkeypatch.setenv("GITLAB_TOKEN", "fake-token")
+
+    def confirmed(url: str) -> pull_head.PullHead:
+        return pull_head.pull_branch(url, forge=lambda link: pull_head.gitlab_change(link, transport))
+
+    monkeypatch.setattr(cli, "pull_branch", confirmed)
+    assert run("sw", "pr", GITLAB) == 0
+    assert {key: sent[-1][key] for key in FIELDS} == {
+        "state": "pr",
+        "branch": BRANCH,
+        "branch_repo": GITLAB_REPO,
+        "pr_number": 7,
+        "pr_head": GITLAB_HEAD,
+        "pr_url": GITLAB,
     }

@@ -111,7 +111,7 @@ def test_a_task_update_records_a_confirmed_gitlab_merge_request() -> None:
 
 
 @pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
-@pytest.mark.parametrize("url", ["https://github.com/o/r/pull/7"])
+@pytest.mark.parametrize("url", ["https://github.com/o/r/pull/7", GITLAB])
 def test_a_task_update_records_the_scope_a_change_request_delivers(url: str) -> None:
     scopes = {url: {"kind": "stage", "scope": "the gate"}}
     core.check_op(op({"pull_scopes": scopes}))

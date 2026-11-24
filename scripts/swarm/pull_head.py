@@ -1,9 +1,12 @@
 """Confirm a pull request with GitHub before swarm pr records it on a task."""
 
 import argparse
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple
 
+from scripts.forge.gitlab import Transport, urlopen_transport
+from scripts.forge.remote import ChangeLink
 from scripts.swarm import stack
 from scripts.swarm.store import SwarmError
 from scripts.tick.deadline import Deadline
@@ -24,7 +27,18 @@ class PullHead(NamedTuple):
     body: str = ""
 
 
-def pull_branch(url: str, ports: Callable[[str], tuple[SourceControl, ChangeRef]] = stack.source_control) -> PullHead:
+def gitlab_change(
+    link: ChangeLink, send: Transport = urlopen_transport, env: Mapping[str, str] = os.environ
+) -> tuple[str, PullHead]:
+    """Read the GitLab merge request ``link`` names into its state and pull head."""
+    raise ValueError(f"{link.web} is not read yet")
+
+
+def pull_branch(
+    url: str,
+    ports: Callable[[str], tuple[SourceControl, ChangeRef]] = stack.source_control,
+    forge: Callable[[ChangeLink], tuple[str, PullHead]] = gitlab_change,
+) -> PullHead:
     """Read an open pull request's head branch, repository url, number, head and body, refusing one GitHub does not
     confirm open."""
     try:
