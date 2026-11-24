@@ -77,3 +77,11 @@ def test_a_refund_never_counts_below_zero_and_leaves_spends_without_a_call(tmp_p
     budget.refund("")
     assert (budget.spent("h1", "reruns"), budget.spent("h2", "reruns")) == (0, 1)
     assert list((tmp_path / "demo" / "gates" / "reruns" / "calls").iterdir()) == []
+
+
+@pytest.mark.feature("rerun-budget-counts-admitted-reruns")
+def test_a_refund_gives_back_a_spend_whose_subject_holds_a_tab(tmp_path: Path) -> None:
+    budget = Budget("demo", "reruns", tmp_path)
+    budget.spend("h1\th2", "reruns", 2, "toolu_1")
+    budget.refund("toolu_1")
+    assert budget.spent("h1\th2", "reruns") == 0
