@@ -9500,6 +9500,18 @@
       ]
     },
     {
+      "id": "page-equivalence-added-outline-section",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-equivalence-added-section",
+      "behaviour": "When the reviewed expected page change contract names an outline section the head adds to the real ledger page, the page replay sets the hidden property on that section and keeps it set, so the page outline signature, the jump list and the outline groups leave it out and the head record is byte equal to the base record, while the same planted section without the contract still differs from the base.",
+      "seam": "page_replay removal and record over a planted copy of the real ledger shell with one added outline section",
+      "tests": [
+        "tests/swarm_ledger/test_page_outline_addition.py::test_a_contract_naming_an_added_outline_section_makes_head_and_base_records_identical",
+        "tests/swarm_ledger/test_page_outline_addition.py::test_the_head_outline_signature_and_jump_list_leave_out_the_hidden_section",
+        "tests/swarm_ledger/test_page_outline_addition.py::test_the_planted_outline_section_without_the_contract_still_differs_from_the_base"
+      ]
+    },
+    {
       "id": "protected-grader-admits-pinned-tool-forms",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-cipin-admit",
