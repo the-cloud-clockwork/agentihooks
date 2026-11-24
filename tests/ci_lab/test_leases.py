@@ -1,9 +1,17 @@
+import json
 import threading
+from pathlib import Path
 
 import pytest
 
-from scripts.ci_lab import leases, pods, queue
+from scripts import ci_wiring
+from scripts.ci_lab import leases, pods, queue, static_gates
 from scripts.ci_lab.units import Unit
+
+ROOT = Path(__file__).resolve().parents[2]
+TYPE_GATE = "type-gate/hold-the-strict-type-checker-s-errors-per-file-to-the-base-baseline"
+TYPE_JOB = f"static:{TYPE_GATE.replace('/', '-')}"
+FORMAT_GATE = "lint/format-check"
 
 
 class Clock:
@@ -57,6 +65,22 @@ def found(jobs: queue.Queue, job: str) -> queue.Job:
 
 def unit(key: str) -> Unit:
     return Unit(kind="test", key=key, members=(f"tests/{key}.py::t",))
+
+
+def gate(name: str) -> Unit:
+    return Unit(kind="static", key=name.replace("/", "-"), members=(name,))
+
+
+def lease_reads(jobs: queue.Queue, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    reads: list[list[str]] = []
+    read = jobs.leased
+
+    def counted() -> list[str]:
+        reads.append(read())
+        return reads[-1]
+
+    monkeypatch.setattr(jobs, "leased", counted)
+    return reads
 
 
 def page_reads(jobs: queue.Queue, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
@@ -523,3 +547,124 @@ def test_stale_is_false_for_a_pod_pinned_by_digest_even_when_its_running_digest_
         {"w1": pods.Images("repo/lab-worker@sha256:pinned", "repo/lab-worker@sha256:running")},
     )
     assert lab.stale("w1") is False
+
+
+@pytest.mark.feature("lab-type-gate-one-per-worker")
+def test_static_gates_of_other_jobs_fill_a_worker_at_one_slot_each(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([gate(FORMAT_GATE)], "h1", {})
+    jobs.enqueue([gate(FORMAT_GATE)], "h2", {})
+
+    grants = lab.lease("w1", 2, frozenset(), 0)
+
+    assert [grant.job for grant in grants] == ["h1:static:lint-format-check", "h2:static:lint-format-check"]
+    assert [grant.slots for grant in grants] == [1, 1]
+
+
+@pytest.mark.feature("lab-type-gate-one-per-worker")
+def test_units_of_other_kinds_fill_a_worker_whatever_their_members_name(jobs: queue.Queue, lab: leases.Leases) -> None:
+    named = [Unit(kind="test", key=key, members=(TYPE_GATE,)) for key in ("a", "b")]
+    jobs.enqueue([*named, Unit(kind="stats", key="bare", members=())], "h1", {})
+
+    grants = lab.lease("w1", 3, frozenset(), 0)
+
+    assert [grant.job for grant in grants] == ["h1:test:a", "h1:test:b", "h1:stats:bare"]
+
+
+@pytest.mark.feature("lab-type-gate-one-per-worker")
+def test_a_lease_of_units_that_share_a_worker_reads_no_lease_record(
+    jobs: queue.Queue, lab: leases.Leases, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([unit("a"), gate(FORMAT_GATE)], "h1", {})
+    reads: list[str] = []
+    monkeypatch.setattr(jobs, "leased", lambda: reads.append("leased") or [])
+
+    assert len(lab.lease("w1", 2, frozenset(), 0)) == 2
+    assert reads == []
+
+
+@pytest.mark.feature("lab-type-gate-one-per-worker")
+def test_one_take_grants_a_worker_one_type_gate_unit_and_reads_its_leases_once(
+    jobs: queue.Queue, lab: leases.Leases, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for head in ("h1", "h2", "h3"):
+        jobs.enqueue([gate(TYPE_GATE)], head, {})
+    jobs.enqueue([gate(FORMAT_GATE)], "h3", {})
+    reads = lease_reads(jobs, monkeypatch)
+
+    grants = lab.lease("w1", 5, frozenset(), 0)
+
+    assert [grant.job for grant in grants] == [f"h1:{TYPE_JOB}", "h3:static:lint-format-check"]
+    assert [grant.slots for grant in grants] == [1, 1]
+    assert jobs.pending() == [f"h2:{TYPE_JOB}", f"h3:{TYPE_JOB}"]
+    assert reads == [[]]
+
+
+@pytest.mark.feature("lab-type-gate-one-per-worker")
+def test_a_worker_that_holds_a_type_gate_unit_takes_the_next_one_only_after_it_completes(
+    jobs: queue.Queue, lab: leases.Leases
+) -> None:
+    jobs.enqueue([gate(TYPE_GATE)], "h1", {})
+    jobs.enqueue([gate(TYPE_GATE), unit("a")], "h2", {})
+    held = lab.lease("w1", 1, frozenset(), 0)
+    assert [grant.job for grant in held] == [f"h1:{TYPE_JOB}"]
+
+    assert [grant.job for grant in lab.lease("w1", 4, frozenset(), 0)] == ["h2:test:a"]
+    assert lab.lease("w1", 4, frozenset(), 0) == []
+    assert lab.complete(held[0].job, held[0].token, "passed") is True
+
+    assert [grant.job for grant in lab.lease("w1", 4, frozenset(), 0)] == [f"h2:{TYPE_JOB}"]
+
+
+@pytest.mark.feature("lab-type-gate-one-per-worker")
+def test_another_worker_takes_the_type_gate_unit_a_worker_that_holds_one_leaves(
+    jobs: queue.Queue, lab: leases.Leases
+) -> None:
+    jobs.enqueue([gate(TYPE_GATE)], "h1", {})
+    jobs.enqueue([gate(TYPE_GATE)], "h2", {})
+    assert [grant.job for grant in lab.lease("w1", 1, frozenset(), 0)] == [f"h1:{TYPE_JOB}"]
+
+    assert lab.lease("w1", 1, frozenset(), 0) == []
+    assert [grant.job for grant in lab.lease("w2", 1, frozenset(), 0)] == [f"h2:{TYPE_JOB}"]
+
+
+@pytest.mark.feature("lab-type-gate-one-per-worker")
+def test_a_reaped_type_gate_lease_frees_its_worker_for_one_more(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([gate(TYPE_GATE)], "h1", {})
+    jobs.enqueue([gate(TYPE_GATE)], "h2", {})
+    lab.lease("w1", 1, frozenset(), 0)
+    assert lab.reap(1500) == [(f"h1:{TYPE_JOB}", "pending")]
+
+    assert [grant.job for grant in lab.lease("w1", 5, frozenset(), 0)] == [f"h2:{TYPE_JOB}"]
+    assert jobs.pending() == [f"h1:{TYPE_JOB}"]
+
+
+@pytest.mark.feature("lab-type-gate-one-per-worker")
+def test_a_lease_whose_record_vanished_holds_no_type_gate_unit(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([gate(TYPE_GATE)], "h1", {})
+    jobs.enqueue([gate(TYPE_GATE)], "h2", {})
+    lab.lease("w1", 1, frozenset(), 0)
+    jobs.client.delete(f"agentihooks-ci:queue:job:h1:{TYPE_JOB}")
+
+    assert [grant.job for grant in lab.lease("w1", 1, frozenset(), 0)] == [f"h2:{TYPE_JOB}"]
+
+
+@pytest.mark.feature("lab-type-gate-one-per-worker")
+def test_only_a_static_gate_of_a_named_job_is_a_unit_a_worker_runs_one_at_a_time() -> None:
+    assert leases.solo(gate(TYPE_GATE))
+    assert leases.solo(gate("type-gate/checker/hold-the-errors-of-a-called-workflow"))
+    assert not leases.solo(gate(FORMAT_GATE))
+    assert not leases.solo(Unit(kind="test", key="a", members=(TYPE_GATE,)))
+    assert not leases.solo(Unit(kind="static", key="bare", members=()))
+    assert not leases.solo(Unit(kind="static", key="later", members=(FORMAT_GATE, TYPE_GATE)))
+
+
+@pytest.mark.feature("lab-type-gate-one-per-worker")
+def test_every_discovered_gate_that_runs_the_type_checker_is_held_to_one_a_worker() -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+    checkers = [found.name for found in gates if "scripts.type_gate" in found.modules]
+
+    assert checkers == [TYPE_GATE]
+    assert all(leases.solo(gate(name)) for name in checkers)
+    assert {job for _, job in leases.SOLO} <= set(static_gates.STATIC_JOBS)

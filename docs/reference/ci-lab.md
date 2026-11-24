@@ -4530,8 +4530,11 @@ verdict.
 - `PATH` is `settings.venv/bin`, then `/usr/local/bin`, where the worker image installs semgrep
   and helm, then `/bin:/usr/bin`. `RUFF_CACHE_DIR` is the `ruff` folder inside `RUNNER_TEMP`,
   since the worker seals the leased head tree and ruff would otherwise write `.ruff_cache` into
-  it. `settings.whitelist` and the step's own `env` values, with their `${{ }}` expressions read
-  from `settings.context`, come after both and can replace them. Neither can replace
+  it. `AGENTIHOOKS_TYPE_WORKERS` is `1`, so the type gate runs one basedpyright checker at a
+  time: a worker's memory holds one beside its other units, and the lease grants a worker one
+  static gate of the job `type-gate` at a time, whatever its free slots.
+  `settings.whitelist` and the step's own `env` values, with their `${{ }}` expressions read
+  from `settings.context`, come after these and can replace them. Neither can replace
   `RUNNER_TEMP`, `GITHUB_WORKSPACE` or `GITHUB_STEP_SUMMARY`.
 
 The bind applies to the real tree paths, so a write through `$RUNNER_TEMP/grader/...` or

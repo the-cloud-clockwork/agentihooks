@@ -128,6 +128,16 @@ def test_the_sweep_selects_per_lane_the_thin_tasks_the_tick_step_would() -> None
     assert enhance_sweep.thin_by_lane(TASKS, UNFROZEN) == LANES
 
 
+@pytest.mark.feature("thin-skip-open-pr")
+def test_the_sweep_skips_a_thin_task_that_carries_a_pull_request_or_a_branch() -> None:
+    tasks = [
+        _task("t1", pr_url="https://github.com/o/r/pull/7"),
+        _task("t2", lane="ci", branch="engineer-1"),
+        _task("t3", pr_url="", branch=""),
+    ]
+    assert enhance_sweep.thin_by_lane(tasks, thin.unfrozen({"tasks": tasks})) == {"eng": ["t3"], "ci": []}
+
+
 @pytest.mark.feature("swarm-enhance-sweep")
 def test_the_sweep_makes_the_same_ledger_writes_as_the_thin_task_pass_on_one_task_list() -> None:
     ledger = FakeLedger(dict(ANSWERS))
