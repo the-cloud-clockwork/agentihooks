@@ -86,6 +86,7 @@ def test_a_step_still_running_at_its_lane_expiry_is_recorded_cut_with_its_writes
     assert records["orphans"].skipped
 
 
+@pytest.mark.feature("tick-finished-step-ends-at-lane-expiry")
 def test_a_step_that_finished_before_its_lane_expired_but_was_collected_after_keeps_its_result() -> None:
     release = Event()
     applied: list[Write] = []
