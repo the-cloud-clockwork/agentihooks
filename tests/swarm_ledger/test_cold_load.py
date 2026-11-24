@@ -27,6 +27,12 @@ FIRST_ROW = """(() => {
   }).observe(document, {childList: true, subtree: true});
 })();"""
 OPEN_STATES = ("open", "claimed", "pr", "blocked")
+READS = """() => performance.getEntriesByType("resource")
+  .filter((entry) => entry.name.includes("/api/"))
+  .map((entry) => {
+    const url = new URL(entry.name);
+    return `${url.pathname.split("/").pop()}${url.search} ${Math.round(entry.startTime)}-${Math.round(entry.responseEnd)}`;
+  })"""
 
 
 def text(size: int, seed: int) -> str:
@@ -134,8 +140,12 @@ def cold_reading(live: dict, monkeypatch: pytest.MonkeyPatch) -> tuple[float, in
             raise AssertionError(f"no task row shown; refused or failed: {refused}; tasks: {shown}") from exc
         transferred = sum(totals.values())
         first_row = float(page.evaluate("window.firstTaskRow"))
+        reads = "; ".join(page.evaluate(READS))
         context.close()
-    report = f"COLD LOAD document_bytes={size} first_task_row_ms={first_row:.0f} bytes_before_first_row={transferred}"
+    report = (
+        f"COLD LOAD document_bytes={size} first_task_row_ms={first_row:.0f} bytes_before_first_row={transferred}"
+        f" reads={reads}"
+    )
     warnings.warn(report, stacklevel=1)
     return first_row, transferred, report
 
