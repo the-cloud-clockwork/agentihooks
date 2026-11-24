@@ -86,6 +86,14 @@ def test_a_pass_reads_only_open_jobs_in_nontransactional_batches_of_at_most_500(
 
     monkeypatch.setattr(client, "execute_command", direct)
     sent = pipelines(client, monkeypatch)
+    collect = getattr(run.engine, "_collect")
+    batches_at_collect: list[int] = []
+
+    def collected(*args: Any) -> None:
+        batches_at_collect.append(sum(1 for _, _, reads in sent if any(job_read(read) for read in reads)))
+        collect(*args)
+
+    monkeypatch.setattr(run.engine, "_collect", collected)
 
     run.tick(1100)
 
@@ -93,6 +101,7 @@ def test_a_pass_reads_only_open_jobs_in_nontransactional_batches_of_at_most_500(
     batches = [batch for batch in batches if batch[2]]
     assert direct_reads == []
     assert [len(keys) for _, _, keys in batches] == [500, 500, 3]
+    assert batches_at_collect == [1] * 500 + [2] * 500 + [3] * 3
     assert all((args, options) == ((), {"transaction": False}) for args, options, _ in batches)
     assert [key for _, _, keys in batches for key in keys] == [
         f"{JOB_KEYS}{scheduler.job_id(HEAD_A, item)}" for item in units[2:]
