@@ -679,6 +679,23 @@ def test_changed_jobs_compares_the_head_against_its_merge_base(repo: Path) -> No
             "    assert first['jobs']['lint'] and normalize(second)\n",
             None,
         ),
+        (
+            "def test_a(bundle):\n    assert bundle['workflow']['jobs']['lint'] and normalize(bundle['workflow'])\n",
+            None,
+        ),
+        (
+            "def test_a(bundle):\n    assert bundle.workflow['jobs']['lint'] and normalize(bundle.workflow)\n",
+            None,
+        ),
+        (
+            "def test_a():\n    doc = {**load_workflow()}\n    assert doc['jobs']['lint'] and normalize(doc)\n",
+            None,
+        ),
+        (
+            "def test_a():\n    doc = {key: value for key, value in load_workflow().items()}\n"
+            "    assert doc['jobs']['lint'] and normalize(doc)\n",
+            None,
+        ),
         ("def test_a():\n    assert [doc['jobs']['lint'] for doc in yaml.safe_load_all(TEXT)]\n", None),
     ],
     ids=[
@@ -724,6 +741,10 @@ def test_changed_jobs_compares_the_head_against_its_merge_base(repo: Path) -> No
         "same-local-name-in-helper",
         "same-parameter-name-in-helper",
         "second-loaded-document-handed-on",
+        "fixture-subscript-document-handed-on",
+        "fixture-attribute-document-handed-on",
+        "external-dictionary-unpacking",
+        "external-dictionary-comprehension",
         "loaded-all",
     ],
 )
@@ -798,9 +819,39 @@ def test_a_recorded_workflow_reader_file_offers_each_definition_that_reads_a_cha
 
 
 @pytest.mark.feature("ci-select-workflow-job-readers")
-def test_a_document_handed_on_beside_a_job_index_selects_its_reader_for_any_job_edit(repo: Path) -> None:
-    write(repo, {"tests/test_inventory.py": INVENTORY})
-    assert ci_select.decide(repo, [ci_select.WORKFLOW], {}, 3, ci_select.Change(jobs={"lint"})) == (
+@pytest.mark.parametrize(
+    ("source", "job"),
+    [
+        (INVENTORY, "lint"),
+        (
+            "WORKFLOW = '.github/workflows/test.yml'\n"
+            "def test_a(bundle):\n    assert bundle['workflow']['jobs']['lint'] and normalize(bundle['workflow'])\n",
+            "docs",
+        ),
+        (
+            "WORKFLOW = '.github/workflows/test.yml'\n"
+            "def test_a(bundle):\n    assert bundle.workflow['jobs']['lint'] and normalize(bundle.workflow)\n",
+            "docs",
+        ),
+        (
+            "WORKFLOW = '.github/workflows/test.yml'\n"
+            "def test_a():\n    doc = {**load_workflow()}\n    assert doc['jobs']['lint'] and normalize(doc)\n",
+            "docs",
+        ),
+        (
+            "WORKFLOW = '.github/workflows/test.yml'\n"
+            "def test_a():\n    doc = {key: value for key, value in load_workflow().items()}\n"
+            "    assert doc['jobs']['lint'] and normalize(doc)\n",
+            "docs",
+        ),
+    ],
+    ids=["named-document", "subscript-document", "attribute-document", "unpacked-document", "comprehended-document"],
+)
+def test_a_document_handed_on_beside_a_job_index_selects_its_reader_for_any_job_edit(
+    repo: Path, source: str, job: str
+) -> None:
+    write(repo, {"tests/test_inventory.py": source})
+    assert ci_select.decide(repo, [ci_select.WORKFLOW], {}, 3, ci_select.Change(jobs={job})) == (
         "selected",
         [["tests/test_inventory.py"]],
     )
