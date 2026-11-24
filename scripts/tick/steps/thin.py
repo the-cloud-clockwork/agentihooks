@@ -55,9 +55,10 @@ def _unfrozen(doc: dict[str, Any]) -> Callable[[dict[str, Any]], bool]:
 
 def unchecked(task: dict[str, Any]) -> bool:
     """Return whether ``task`` is an open, in scope engineer or ci task, a missing lane reading as engineer, that no
-    thin check has marked."""
+    thin check has marked and that carries no pull request link or branch of earlier work."""
     in_lane = task.get("lane", "eng") in LANES and not task.get("out_of_scope")
-    return task.get("state") == "open" and in_lane and not task.get("enhancement")
+    fresh = not (task.get("pr_url") or task.get("branch"))
+    return task.get("state") == "open" and in_lane and fresh and not task.get("enhancement")
 
 
 def enhance(
