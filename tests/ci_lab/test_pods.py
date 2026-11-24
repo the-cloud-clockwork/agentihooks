@@ -166,6 +166,25 @@ def test_a_running_image_id_with_no_digest_reads_as_unknown(tmp_path: Path) -> N
 
 @pytest.mark.feature("lab-worker-seat-keeping-restart")
 @pytest.mark.parametrize(
+    ("image", "image_id"),
+    [
+        (None, "repo/lab-worker@sha256:abc"),
+        (7, "repo/lab-worker@sha256:abc"),
+        ("repo/lab-worker:dev", None),
+        ("repo/lab-worker:dev", 7),
+    ],
+)
+def test_an_image_or_image_id_that_is_no_string_reads_as_unknown(
+    tmp_path: Path, image: object, image_id: object
+) -> None:
+    body = json.dumps(
+        {"spec": {"containers": [{"image": image}]}, "status": {"containerStatuses": [{"imageID": image_id}]}}
+    ).encode()
+    assert kube(tmp_path, Opener(body=body)).images("ci-lab-worker-1") is None
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+@pytest.mark.parametrize(
     "error",
     [
         urllib.error.HTTPError(SERVER, 403, "Forbidden", Message(), None),

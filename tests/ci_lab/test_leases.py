@@ -483,6 +483,17 @@ def test_stale_is_false_with_no_wanted_image(jobs: queue.Queue, clock: Clock) ->
 
 
 @pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_stale_is_false_with_a_wanted_image_that_names_no_digest(jobs: queue.Queue, clock: Clock) -> None:
+    lab = staled(
+        jobs,
+        clock,
+        "repo/lab-worker:release",
+        {"w1": pods.Images("repo/lab-worker:dev", "repo/lab-worker@sha256:running")},
+    )
+    assert lab.stale("w1") is False
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
 def test_stale_is_false_with_an_unknown_running_image(jobs: queue.Queue, clock: Clock) -> None:
     lab = staled(jobs, clock, "repo/lab-worker@sha256:wanted", {})
     assert lab.stale("w1") is False
