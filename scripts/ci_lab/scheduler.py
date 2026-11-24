@@ -62,7 +62,7 @@ from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
-from scripts.ci_lab.pods import Pods, unmanaged, worker_pods
+from scripts.ci_lab.pods import Pods, pod_images, unmanaged, worker_pods
 from scripts.ci_lab.queue import DEFAULT, Job, Queue
 from scripts.ci_lab.remote.post_receive import GRADE_REFS
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
@@ -2048,7 +2048,17 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     if environ.get(REINDEX_ON_START) == "true":
         print(f"reindexed {scheduler.store.reindex()} verdicts", flush=True)
     manifests = partial(stored_manifest, scheduler.objects)
-    leases = Leases(scheduler.queue, LEASE_TTL_MS, _now_ms, _sleep_ms, LEASE_POLL_MS, scheduler.ports.pods, manifests)
+    leases = Leases(
+        scheduler.queue,
+        LEASE_TTL_MS,
+        _now_ms,
+        _sleep_ms,
+        LEASE_POLL_MS,
+        scheduler.ports.pods,
+        manifests,
+        environ.get(IMAGE, ""),
+        pod_images(scheduler.ports.pods),
+    )
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
     for server in listen(scheduler, leases, routes, spending, _now_ms, ports, Path(environ[contract.GIT_MIRROR])):

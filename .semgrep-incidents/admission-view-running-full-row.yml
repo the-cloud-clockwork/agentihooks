@@ -1,0 +1,16 @@
+rules:
+  - id: admission-view-running-full-row
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The hub admission view read every claimed and pull request task as a full row with no field selection. On
+      24 November those rows reached about 293 kilobytes, the ledger task selection refused the reply with 413 above
+      its 262144 byte cap, and hive one logged 82 lane poll failures in 30 minutes. Every task selection in the
+      admission view names the fields its readers take.
+    paths:
+      include:
+        - /scripts/swarm/admission_view.py
+        - admission-view-running-full-row.py
+    patterns:
+      - pattern: $LEDGER.tasks_where(...)
+      - pattern-not: $LEDGER.tasks_where(..., fields=$FIELDS, ...)
