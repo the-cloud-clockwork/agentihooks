@@ -2524,6 +2524,12 @@ units, with no test scope and no mutation; a merge group grade does the same for
 promotion or backfill grade keeps every lab gate. A gate without units passes, so a grade turns red only
 through what the lab grades.
 
+A plant pull request grade is the one pull request grade that runs test units, so it is framed as a run
+of the full suite: its select scope reads `full` and it carries the jobs that scope requires, `split`,
+`unit` and `shard-check`, beside the pull request jobs. The rules then require its `unit` job, so the
+grade folds green when every gate passes, with no test unit or with passing ones, and red when a test
+unit fails. `split` and `shard-check` hold no unit and post no check run.
+
 A pull request or hotfix grade reads `lab.authoritative` from the `delivery.yaml` of its base, the
 grader revision, so the head cannot widen it. Each listed gate the frame gives no unit, such as `unit`,
 `unit-selected`, `shard-check` or `mutation`, which those classes never expand, lands in the grade
@@ -2897,6 +2903,7 @@ batch. A test that `.test_durations` does not list counts 0 seconds, and a head 
 | Head | Unit job |
 |---|---|
 | Pull request, hotfix | No test units; the manifest is not read |
+| Plant pull request | The listed batches whose test module the plant changed and each test module it added or changed that the manifest does not list; none when it touches no test module |
 | Merge group | The batches that hold a test the group's entries invalidate, or every batch when `interaction.decide` returns `FULL` |
 | Promotion, backfill | Every batch; the verdict store is not consulted for the choice |
 
