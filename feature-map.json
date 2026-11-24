@@ -497,19 +497,6 @@
       ]
     },
     {
-      "id": "swarm-image-import-pins",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2586",
-      "behaviour": "The required pull request lint job walks all Python modules under scripts and hooks, reports every direct module level third party import and rejects imports without an exact distribution pin in the swarm image lock. Standard library imports, relative imports, deferred imports and modules found at the repository root or in a nested folder at or above the importing file are excluded; a module beside the top level hooks or scripts packages or outside the repository never hides a dependency. Each import, a from import read as the module joined with each imported name, resolves to the distribution of its longest dotted alias prefix, else its top level package, so a submodule shipped by its own distribution, such as the OpenTelemetry SDK beside the OpenTelemetry API, needs its own pin; each location is listed once per reported name.",
-      "seam": "scripts.ci_swarm_imports.check, import_name and main over source trees and the swarm requirements lock, run by the lint job of the Tests workflow",
-      "tests": [
-        "tests/test_ci_swarm_imports.py::test_unpinned_module_import_turns_the_check_red",
-        "tests/test_ci_swarm_imports.py::test_pinned_imports_include_aliases_and_dotted_names",
-        "tests/test_ci_swarm_imports.py::test_dotted_imports_resolve_to_the_distribution_of_their_longest_alias_prefix",
-        "tests/test_ci_swarm_imports.py::test_the_required_lint_job_runs_the_check_on_pull_requests"
-      ]
-    },
-    {
       "id": "lab-store-incremental-fetch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-store-mirror-mount",
@@ -2504,6 +2491,25 @@
       ]
     },
     {
+      "id": "quota-notice-per-pass-work",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2887",
+      "behaviour": "The quota notice step's readiness sweeps compute the focus queue once per dispatcher guard call and once per readiness snapshot, and its quota requirements resolve each distinct profile's Claude only answer once per call, so its own CPU stops growing with open tasks times task rows and with ready tasks times profile files; on the live rig-grade-swarm view of 7972 rows and 740 ready tasks the body fell from 14.1 to 1.3 CPU seconds.",
+      "seam": "scripts.swarm.dispatcher.guarded, scripts.swarm.readiness.claimable over a readiness.Snapshot, scripts.swarm.claim_hold.holds given a focus queue, and scripts.swarm.runtime.HerdrRuntime.quota_requirements",
+      "tests": [
+        "tests/swarm/test_quota_notice_per_pass.py::test_the_dispatcher_guard_keeps_the_focused_chain_and_drops_held_work",
+        "tests/swarm/test_quota_notice_per_pass.py::test_the_dispatcher_guard_computes_the_focus_queue_once_whatever_the_open_task_count",
+        "tests/swarm/test_quota_notice_per_pass.py::test_claimable_over_a_snapshot_agrees_with_ready_for_every_task",
+        "tests/swarm/test_quota_notice_per_pass.py::test_claimable_computes_the_focus_queue_once_per_snapshot",
+        "tests/swarm/test_quota_notice_per_pass.py::test_claim_hold_uses_the_focus_queue_handed_in",
+        "tests/swarm/test_quota_notice_per_pass.py::test_quota_requirements_keep_each_profile_answer",
+        "tests/swarm/test_quota_notice_per_pass.py::test_quota_requirements_look_up_each_profile_once_per_call"
+      ],
+      "rules": [
+        "tick-claim-gate-without-admitted-queue"
+      ]
+    },
+    {
       "id": "swarm-preempt-claim-view-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-preempt-claim-view-reuse",
@@ -3617,6 +3623,38 @@
       ]
     },
     {
+      "id": "ledger-write-partial-rebuild",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2778",
+      "behaviour": "A warm ledger point write rebuilds only the document fragments and writer copy branches its operations change: writer copy leaves are tracked containers that hold the stored fragment they equal until any write method changes them or anything inside them, so untouched leaves keep their stored fragment and writer object without being serialized or compared again, a cold write copy built from stored fragments starts tracked, copies of tracked leaves are plain, and on the recorded operations corpus the warm path stores, publishes and relays byte for byte what a full rebuild does while a write past the write methods turns that comparison red, with less storage write CPU inside the ledger lock.",
+      "seam": "scripts.swarm_ledger.repository.writer_copy.written and detached, scripts.swarm_ledger.repository.fragments.leaf, scripts.swarm_ledger.repository.tracked, scripts.swarm_ledger.repository.entry.Entry.for_write, and the recorded corpus replay through the ledger API write path",
+      "tests": [
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_warm_point_write_serializes_as_many_values_on_four_thousand_untouched_tasks_as_on_two_thousand",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_point_write_from_a_stored_entry_serializes_as_many_values_on_four_thousand_tasks_as_on_two_thousand",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_untouched_tasks_keep_their_stored_fragment_and_writer_object",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_write_that_removes_the_first_task_keeps_every_later_task_fragment_and_writer_object",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_write_copy_built_from_stored_fragments_shares_only_stamp_records_with_the_stored_state",
+        "tests/swarm_ledger/test_partial_rebuild.py::test_a_warm_point_write_stores_what_a_fresh_encoding_of_the_written_state_stores",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_bound_copy_equals_its_fragment_shares_no_container_and_holds_it",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_reads_leave_a_bound_copy_holding_its_fragment",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_every_dict_write_method_on_the_leaf_or_inside_it_drops_its_fragment",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_every_list_write_method_inside_the_leaf_drops_its_fragment",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_every_dict_and_list_method_a_tracked_leaf_inherits_is_a_read",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_list_leaf_drops_its_fragment_on_a_write_and_keeps_it_on_reads",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_nested_container_never_claims_a_fragment_and_moving_it_drops_the_leaf_it_enters",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_copies_of_a_tracked_leaf_are_plain",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_deep_copy_keeps_the_containers_a_writer_copy_shares",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_write_methods_return_what_the_plain_methods_return",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_leaf_that_no_json_round_trip_keeps_is_bound_after_one",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_scalar_leaf_copy_is_the_scalar_and_holds_nothing",
+        "tests/swarm_ledger/test_tracked_leaves.py::test_a_writer_copy_of_a_document_keeps_its_structure_plain_and_its_leaves_bound",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_the_warm_write_replay_answers_every_recorded_write",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_warm_writes_store_publish_and_relay_what_the_full_rebuild_does_on_the_recorded_corpus",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_a_write_into_an_untouched_writer_task_past_the_write_methods_turns_the_equivalence_red",
+        "tests/swarm_ledger/test_partial_rebuild_corpus.py::test_warm_writes_spend_less_storage_write_cpu_than_the_full_rebuild_on_the_recorded_corpus"
+      ]
+    },
+    {
       "id": "swarm-tick-slow-export",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2161",
@@ -3659,6 +3697,21 @@
         "tests/tick/test_view.py::test_a_renew_after_a_ledger_write_holds_the_patched_view",
         "tests/tick/test_view.py::test_a_renew_after_a_ledger_write_leaves_the_stored_view_at_the_pass_start",
         "tests/tick/test_view.py::test_a_renew_whose_stored_view_no_longer_fits_stores_the_full_read"
+      ]
+    },
+    {
+      "id": "swarm-tick-view-held-before-lane-clock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-pass-offcpu-stall",
+      "behaviour": "A tick pass holds its ledger view once, with its delta read and its whole view store, before the step pool starts the sixty second critical lane clock, in a running and in a stopped pass, so a slow store never spends the lane of the steps after it.",
+      "seam": "scripts.swarm.cli.run_tick, the order of _hold_view against scripts.tick.pool.running",
+      "tests": [
+        "tests/swarm/test_pass_view_before_lane.py::test_a_pass_holds_its_ledger_view_exactly_once",
+        "tests/swarm/test_pass_view_before_lane.py::test_the_sites_of_a_running_pass_start_on_the_view_the_pass_holds",
+        "tests/swarm/test_pass_view_before_lane.py::test_the_pass_holds_its_ledger_view_before_the_step_pool_starts_the_lane_clock"
+      ],
+      "rules": [
+        "tick-pass-holds-view-inside-lane"
       ]
     },
     {
@@ -4794,7 +4847,9 @@
       "id": "thin-task-enhancement-snapshot",
       "behaviour": "The thin task pass sends the enhancement value from its task snapshot with its needed mark. A refreshed resource revision retains that expectation and cannot overwrite a concurrent planned or skipped decision or emit a success notice.",
       "seam": "scripts.tick.steps.thin.enhance and _marking through ClientLedger and ResourceClient",
-      "rules": ["thin-enhancement-without-expected"],
+      "rules": [
+        "thin-enhancement-without-expected"
+      ],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2885",
       "tests": [
@@ -15908,12 +15963,32 @@
       "id": "member-tick-stop-forwarded-by-hub",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2698",
-      "behaviour": "A member bind tick parks execution stops for ended work, idle or mismatched agents and refused, revoked or stuck launches with agent identity and reason in swarm pending stops, without publishing on the member bus. The guarded hub reconciler delivers parked stops using its injected controller bus, including a stop for a seated execution. Failed delivery stays pending for the next due poll without blocking lifecycle settlement in other swarms; successful delivery clears it without duplication.",
+      "behaviour": "A member bind tick parks execution stops for ended work, idle or mismatched agents and refused, revoked or stuck launches with agent identity and reason in swarm pending stops, without publishing on the member bus. The guarded hub reconciler delivers parked stops using its injected controller bus, including a stop for a seated execution. Failed delivery stays pending for the next due poll without blocking lifecycle settlement in other swarms; successful delivery clears it without duplication. A lease lost between sends leaves the remaining parked stops pending for the next due poll.",
       "seam": "agents._reap to swarm pending stops to Reconciler.poll and the owning hive stop stream",
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_member_bind_tick_parks_its_stop_until_the_hub_sends_it",
         "tests/hub/test_reconciler.py::test_a_refused_stop_does_not_hold_other_swarm_lifecycle_reconciliation",
         "tests/hub/test_reconciler.py::test_a_lease_lost_mid_resend_leaves_the_other_parked_stops_for_the_next_poll"
+      ]
+    },
+    {
+      "id": "ledger-orders-panel",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-orders-page-panel",
+      "behaviour": "The ledger page lists every open operator order from the master orders read with its title, quoted words and claimable, busy and done counts, and distinguishes an empty set from a failed read while preserving phase views.",
+      "seam": "the ledger page in Chromium at 1920 by 1080 consuming the existing orders resource",
+      "tests": [
+        "tests/swarm_ledger/test_orders_page.py::test_existing_phase_and_overview_remain_visible",
+        "tests/swarm_ledger/test_orders_page.py::test_ordered_phase_shows_quoted_words_and_master_counts",
+        "tests/swarm_ledger/test_orders_page.py::test_no_open_order_has_an_explicit_empty_state",
+        "tests/swarm_ledger/test_orders_page.py::test_every_open_order_is_rendered_oldest_first_with_safe_text",
+        "tests/swarm_ledger/test_orders_page.py::test_order_counts_refresh_and_closed_orders_leave_the_panel",
+        "tests/swarm_ledger/test_orders_page.py::test_failed_read_preserves_orders_and_recovers_on_the_next_update",
+        "tests/swarm_ledger/test_orders_page.py::test_order_panel_fold_choice_survives_reload",
+        "tests/swarm_ledger/test_page_events.py::test_tabs_get_ledger_and_swarm_changes_without_polling_the_document",
+        "tests/swarm_ledger/test_page_events.py::test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410",
+        "tests/swarm_ledger/test_page_modules.py::test_the_source_view_for_text_checks_covers_every_module",
+        "tests/swarm_ledger/test_single_page.py::test_approved_columns_overview_tabs_and_stats"
       ]
     }
   ],
@@ -16019,6 +16094,11 @@
       "id": "swarm-tick-spawn",
       "reason": "The legacy tick launch engine is removed; every swarm launches through hub events only, covered by swarm-events-only-launch.",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-legacy-events-only"
+    },
+    {
+      "id": "swarm-image-import-pins",
+      "reason": "The swarm image import pin check is reverted because its lock pins put the OpenTelemetry SDK and tree sitter into the swarm image, which the swarm image smoke forbids; the pin check returns in its own task under a new feature id.",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45389865223-0"
     }
   ]
 }

@@ -689,6 +689,7 @@ def run_tick(
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
         beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner, ledger, runtime)))
+        _hold_view(beating, slug, ledger)
         beating.enter_context(
             pool.running(
                 mode=store.config(slug).tick_mode,
@@ -699,14 +700,12 @@ def run_tick(
         budgets.resolve(store, slug)
         run_group("before")
         if store.config(slug).state == "stopped":
-            _hold_view(beating, slug, ledger)
             actions, doc = _stopped_tick(store, slug, ledger, held)
             return actions
         state = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         state |= {"inbox": InboxStore(store.redis), "scheduled": scheduled}
         ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
         wrapper = _Wrapper(held, beating, state, box, ticks)
-        _hold_view(beating, slug, ledger)
         gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen, sites=PASS_SITES)
         try:
             records = run_sites(PASS_SITES, state, box, gate, ticks.apply, PASS_HOOK_KEYS, PASS_SHUT_KEYS)
