@@ -11,7 +11,7 @@ import pytest
 from scripts.tick import engine, pool, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result
-from scripts.tick.steps import CallStep, masters
+from scripts.tick.steps import CallStep, masters, place
 
 JUDGED = frozenset({Domain("pass:judged")})
 
@@ -60,9 +60,22 @@ def _sleeping(seconds: float) -> Callable[[Context], Result]:
     return action
 
 
-def test_master_down_and_tick_master_are_kept_steps() -> None:
-    kept = {step.name for step in masters.STEPS if getattr(step, "kept", False)}
-    assert kept == {"master down", "tick master"}
+@pytest.mark.feature("kept-placing-steps-first-on-the-placement-worker")
+def test_the_placing_steps_of_the_place_and_masters_modules_but_quota_notice_are_kept() -> None:
+    declared = (*place.STEPS, *masters.STEPS)
+    placing = {step.name for step in declared if getattr(step, "placing", False)}
+    kept = {step.name for step in declared if getattr(step, "kept", False)}
+
+    assert kept == placing - {"quota notice"}
+    assert kept == {
+        "master down",
+        "tick master",
+        "master scale",
+        "seat alarm",
+        "dispatch seat",
+        "codex hook order",
+        "rank pass",
+    }
 
 
 def test_a_kept_step_runs_after_its_lane_expired_and_a_step_it_needs_was_dropped() -> None:
