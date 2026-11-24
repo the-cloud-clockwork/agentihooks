@@ -1,0 +1,15 @@
+rules:
+  - id: uvx-call-without-constraint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A uvx call without a constraint file resolves every dependency of the tool to its newest release. On 20 November
+      a new platformdirs release broke the dependency audit's pip-audit run through uvx and every pull request lint
+      failed for hours. Pass --constraints with a checked in lock that pins the tool and its whole closure, such as the
+      tool's lock under .github/ci-tools.
+    patterns:
+      - pattern-either:
+          - pattern: '["uvx", ...]'
+          - pattern: '("uvx", ...)'
+      - pattern-not: '["uvx", ..., "=~/^(-c|--constraints?)(=.+)?$/", ...]'
+      - pattern-not: '("uvx", ..., "=~/^(-c|--constraints?)(=.+)?$/", ...)'

@@ -45,7 +45,6 @@ LANE_USERS = {
     "swarm-node-image.yml",
     "hive-worker.yml",
     "lost-runner.yml",
-    "chart-release.yml",
     "ci-lab-image.yml",
     "gate-required.yml",
     "changelog.yml",

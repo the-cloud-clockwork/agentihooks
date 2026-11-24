@@ -461,6 +461,109 @@ class TestRepositoryNamedAreas:
         assert not within("k8s/charts/x", list(pieces[0].areas), "other")
 
 
+def activated(monkeypatch: pytest.MonkeyPatch, roots: dict[str, str]) -> list[tuple[str, str]]:
+    seen: list[tuple[str, str]] = []
+
+    def root_for(session_id: str, agent_id: str) -> str:
+        seen.append((session_id, agent_id))
+        return roots.get(agent_id) or roots.get("", "")
+
+    monkeypatch.setattr("hooks.context.serena_binding.root_for", root_for)
+    return seen
+
+
+class TestSerenaRepositoryAreas:
+    @pytest.fixture(autouse=True)
+    def lookups(self, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+        return activated(monkeypatch, {})
+
+    @staticmethod
+    def admits(tmp_path: Path, call: Call) -> bool:
+        gate = BuildGate(environ={"LEDGER_DIR": str(tmp_path / "ledgers")})
+        who = Who(name=ME, swarm=SLUG, task=TASK)
+        return gate.decide(call, who, Verdicts(SLUG, "build", tmp_path / "gates")).allowed
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    @pytest.mark.parametrize("separator", ["/", ":"])
+    def test_call_directory_supplies_serena_repository(self, antoncore: Any, separator: str) -> None:
+        antoncore.plan(f"- the chart | antoncore{separator}k8s/charts | the runners need it\n", kept=(True,))
+        tool = "mcp__serena__replace_symbol_body"
+        path = "k8s/charts/runners/smoke.py"
+        assert not antoncore.decide(tool=tool, relative_path="k8s/other/smoke.py", cwd=antoncore.antoncore).allowed
+        assert not antoncore.decide(tool=tool, relative_path=path, cwd=antoncore.repo).allowed
+        assert antoncore.decide(tool=tool, relative_path=path, cwd=antoncore.antoncore / "k8s/charts").allowed
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    @pytest.mark.parametrize("separator", ["/", ":"])
+    def test_serena_repository_territory_widens_the_plan(self, antoncore: Any, separator: str) -> None:
+        antoncore.plan()
+        antoncore.territory(f"antoncore{separator}k8s/charts")
+        tool = "mcp__serena__replace_symbol_body"
+        path = "k8s/charts/runners/smoke.py"
+        assert not antoncore.decide(tool=tool, relative_path="k8s/other/smoke.py", cwd=antoncore.antoncore).allowed
+        assert not antoncore.decide(tool=tool, relative_path=path, cwd=antoncore.repo).allowed
+        assert antoncore.decide(tool=tool, relative_path=path, cwd=antoncore.antoncore).allowed
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    def test_active_parent_repository_takes_precedence(
+        self, antoncore: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = activated(monkeypatch, {"": str(antoncore.antoncore)})
+        antoncore.plan(CHARTS, kept=(True,))
+        for path, allowed in [("k8s/other/smoke.py", False), ("k8s/charts/runners/smoke.py", True)]:
+            call = Call(
+                tool="mcp__serena__replace_symbol_body",
+                tool_input={"relative_path": path},
+                cwd=str(antoncore.repo),
+                session="activated-session",
+            )
+            assert self.admits(tmp_path, call) is allowed
+        assert seen == [("activated-session", ""), ("activated-session", "")]
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    def test_a_sub_agent_activation_names_its_own_repository(
+        self, antoncore: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = activated(monkeypatch, {"": str(antoncore.repo), "sub-agent": str(antoncore.antoncore)})
+        antoncore.plan(CHARTS, kept=(True,))
+        payload = {
+            "tool_name": "mcp__serena__replace_symbol_body",
+            "tool_input": {"relative_path": "k8s/charts/runners/smoke.py"},
+            "cwd": str(antoncore.repo),
+            "session_id": "activated-session",
+        }
+        assert not self.admits(tmp_path, Call.from_payload(payload))
+        assert self.admits(tmp_path, Call.from_payload({**payload, "agent_id": "sub-agent"}))
+        assert seen == [("activated-session", ""), ("activated-session", "sub-agent")]
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    def test_serena_worktree_uses_the_repository_name(self, antoncore: Any) -> None:
+        antoncore.plan(CHARTS, kept=(True,))
+        tree = antoncore.antoncore.parent / "serena-worktree"
+        git(antoncore.antoncore, "worktree", "add", "-q", str(tree))
+        assert antoncore.decide(
+            tool="mcp__serena__replace_symbol_body",
+            relative_path="k8s/charts/runners/smoke.py",
+            cwd=tree,
+        ).allowed
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    @pytest.mark.parametrize("cwd", ["", "/nonexistent/outside-git"])
+    def test_unknown_repository_keeps_the_relative_scope(self, antoncore: Any, cwd: str) -> None:
+        call = Call(
+            tool="mcp__serena__replace_symbol_body",
+            tool_input={"relative_path": "./doghouse/light/lamp.py"},
+            cwd=cwd,
+        )
+        assert BuildGate().touched(call, antoncore.folder) == [("", "doghouse/light/lamp.py")]
+
+    @pytest.mark.feature("build-gate-serena-repository-areas")
+    def test_serena_dry_run_does_not_resolve_a_repository(self, antoncore: Any, lookups: list[tuple[str, str]]) -> None:
+        call = Call(tool="mcp__serena__replace_in_files", tool_input={"dry_run": True})
+        assert BuildGate().touched(call, antoncore.folder) == []
+        assert lookups == []
+
+
 class TestTerritory:
     def test_a_missing_ledger_or_task_reads_as_no_territory(self, tmp_path):
         assert task_territory(tmp_path, SLUG, TASK) == []
@@ -622,3 +725,10 @@ class TestCommitParsing:
         assert not staged.decide(tool="Bash", command="cd && git commit -m y").allowed
         assert not staged.decide(tool="Bash", command="cd ~ && git commit -m y").allowed
         assert staged.decide(tool="Bash", command="git commit -m y").allowed
+
+
+@pytest.mark.feature("reviewer-worker-gates")
+@pytest.mark.parametrize("lane", ["eng", "ci", "review"])
+def test_worker_lanes_cannot_edit_outside_their_plan(world: Any, monkeypatch: pytest.MonkeyPatch, lane: str) -> None:
+    monkeypatch.setattr("scripts.gates.build.naming.lane_of", lambda name: lane)
+    assert not world.decide(file_path=str(world.repo / "x.py")).allowed

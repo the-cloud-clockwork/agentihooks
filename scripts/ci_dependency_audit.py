@@ -5,8 +5,9 @@ import tempfile
 from pathlib import Path
 
 PIP_AUDIT = "pip-audit==2.10.1"
-PLATFORMDIRS_PIN = "platformdirs!=4.14.8"
+AUDIT_LOCK = ".github/ci-tools/audit.lock"
 PYTHON = "3.12"
+ROOT = Path(__file__).resolve().parents[1]
 
 Finding = tuple[str, str, str]
 
@@ -27,8 +28,8 @@ def resolve(root: Path, out: Path) -> Path:
 def audit(requirements: Path) -> str:
     cmd = [
         "uvx",
-        "--with",
-        PLATFORMDIRS_PIN,
+        "--constraints",
+        str(ROOT / AUDIT_LOCK),
         PIP_AUDIT,
         "-r",
         str(requirements),

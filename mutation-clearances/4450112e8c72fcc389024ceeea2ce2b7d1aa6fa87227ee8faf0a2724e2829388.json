@@ -1,0 +1,6 @@
+{
+  "scripts/hive/registry.py:scripts.hive.registry.x__healed__mutmut_8:7ba76f4deed8cccaca874eb5b9a4fd9d8205cdce6d8ae7520af034f8ff851d21": {
+    "reader": "standards_reader",
+    "reason": "Equivalent, changes no output. _healed reaches this _held call only when _base(record) != _read_name(record) (the or's first clause already false). With hive_id=None, the only change is that the hive's own previously-stored record (read via hives() inside _held) is no longer excluded by id, so it is added to held when live. That self-entry's value is _read_name of the hive's own currently-stored record. beat() is the only caller of _healed, and its fields never carry name or ui (every production call site, e.g. the hive daemon's beat, confirms this; update() is the only setter of name/ui and never calls _healed), so the in-memory record's name/ui are identical to the hive's currently-stored record, making the self-entry's value exactly equal to _read_name(record), the same value the surrounding condition already proved is not equal to base. Adding a value known to differ from base into a set can never flip base in held from False to True. No existing or realistic test kills it; killing it would require a beat() call whose fields change name or ui while the hive already holds a derived name different from its base, which no caller in this codebase does."
+  }
+}
