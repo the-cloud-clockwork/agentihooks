@@ -483,10 +483,13 @@ def test_a_phase_plan_url_grades_a_slice_task_without_its_own(monkeypatch: pytes
     from scripts.swarm_ledger import plan_ranges
 
     monkeypatch.setattr(ledger_artifacts, "read", read_sliced)
-    task = {"id": "a", "plan_slice": "one", "plan_lines": "2-3"}
+    tasks = [
+        {"id": "a", "plan_slice": "one", "plan_lines": "2-3"},
+        {"id": "b", "plan_url": None, "plan_slice": "one", "plan_lines": "2-3"},
+    ]
     phase = {"id": "p1", "plan_url": SLICED_URL}
-    doc = {"phases": [phase], "artifacts": [{"plan": True, "file": {"id": "f1"}}], "tasks": [task]}
-    assert plan_ranges.invalid_tasks({"phase": "p1"}, doc, ["a"]) == []
+    doc = {"phases": [phase], "artifacts": [{"plan": True, "file": {"id": "f1"}}], "tasks": tasks}
+    assert plan_ranges.invalid_tasks({"phase": "p1"}, doc, ["a", "b"]) == []
 
 
 MARKED = "## Build\n<!-- slice: one -->\n### A\n<!-- slice: two -->\n### B\n## Ship\n<!-- slice: three -->\n### C\n"
