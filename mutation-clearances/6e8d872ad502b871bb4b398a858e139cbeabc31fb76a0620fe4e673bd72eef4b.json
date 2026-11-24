@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__simple_commands:cd0768dc95766287d8896439b6b917d940d1ff26c28d689fac248bcba290825d": {
+    "reader": "standards_reader",
+    "reason": "pending is compared to \"out\"/\"dup\" by equality and otherwise tested for truthiness; None and \"\" behave identically."
+  }
+}

@@ -23,9 +23,11 @@ STALL_WATCH = Enforcement("stall")
 NIGHT_WATCH = Enforcement("nightwatch", "enforce")
 MASTER_RESET = Enforcement("reset")
 FEATURE = Enforcement("feature")
+REVIEW = Enforcement("review")
 ENFORCEMENTS = {
     STALL_WATCH.name: STALL_WATCH,
     NIGHT_WATCH.name: NIGHT_WATCH,
     MASTER_RESET.name: MASTER_RESET,
     FEATURE.name: FEATURE,
+    REVIEW.name: REVIEW,
 }

@@ -2,13 +2,15 @@ import argparse
 import hmac
 import json
 import os
+import re
+import signal
 import sys
 import threading
 import traceback
 from collections.abc import Mapping
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, NoReturn
 
 from scripts.ci_lab.head_notice import signature as signed
 from scripts.ci_lab.webhooks import NOTICE_SECRET_ENV, LabIntake, envelope, head_events, notice_event
@@ -30,6 +32,8 @@ REQUEST_TIMEOUT_S = 10
 QUEUE_ACTIONS = {"enqueued": True, "dequeued": False}
 LOGGED_HEADERS = ("X-GitHub-Delivery", "X-GitHub-Event")
 LOGGED_HEADER_CHARS = 64
+QUEUED_PULL = re.compile(r"/pr-([0-9]+)-")
+RepositoryEvent = tuple[str, str, str, dict[str, object]]
 
 
 def verify(secret: bytes, body: bytes, signature: str | None) -> bool:
@@ -54,17 +58,41 @@ def observations(name: str | None, payload: dict) -> list[Observation]:
     return []
 
 
+def repository_events(name: str | None, payload: dict[str, Any]) -> list[RepositoryEvent]:
+    """Return the repository events a GitHub delivery names: a merge group asking for checks and a published
+    release, each with its repository, event kind, change identity and data."""
+    if name == "merge_group" and payload["action"] == "checks_requested":
+        group = payload["merge_group"]
+        ref = str(group.get("head_ref", ""))
+        number = QUEUED_PULL.search(ref)
+        data: dict[str, object] = {"head": group["head_sha"], "base": group["base_sha"], "head_ref": ref}
+        data["number"] = int(number.group(1)) if number else None
+        return [(payload["repository"]["html_url"], "merge_group.requested", group["head_sha"], data)]
+    if name == "release" and payload["action"] == "published":
+        tag, url = payload["release"]["tag_name"], payload["release"]["html_url"]
+        named: dict[str, object] = {"tag": tag, "url": url}
+        return [(payload["repository"]["html_url"], "release.published", tag, named)]
+    return []
+
+
 class LazyPulls:
     def __init__(self, bus: Bus):
         self._bus = bus
         self._pulls: Pulls | None = None
         self._lock = threading.Lock()
 
-    def observe(self, seen: Observation) -> None:
+    def _hub(self) -> Pulls:
         with self._lock:
             if self._pulls is None:
                 self._pulls = Pulls(self._bus)
-        self._pulls.observe(seen)
+            return self._pulls
+
+    def observe(self, seen: Observation) -> None:
+        self._hub().observe(seen)
+
+    def announce(self, repository: str, kind: str, ident: str, data: dict[str, object]) -> None:
+        """Publish a repository event through the pull tracker, opening it on first use."""
+        self._hub().announce(repository, kind, ident, data)
 
 
 class Ingress:
@@ -82,10 +110,11 @@ class Ingress:
         try:
             payload = json.loads(body)
             seen = observations(name, payload)
+            changes = repository_events(name, payload)
         except (ValueError, KeyError, TypeError):
             return 400
         heads = self._heads(name, payload)
-        status = self._record(seen, heads or [])
+        status = self._record(seen, heads or [], changes)
         return 400 if heads is None and status == 200 else status
 
     def _heads(self, name: str | None, payload: Any) -> list[Envelope] | None:
@@ -106,14 +135,16 @@ class Ingress:
             heads = [envelope(notice_event(json.loads(body)))]
         except (ValueError, KeyError, TypeError):
             return 400
-        return self._record([], heads)
+        return self._record([], heads, [])
 
-    def _record(self, seen: list[Observation], heads: list[Envelope]) -> int:
+    def _record(self, seen: list[Observation], heads: list[Envelope], changes: list[RepositoryEvent]) -> int:
         try:
-            for observed in seen:
-                self._pulls.observe(observed)
             if self._lab is not None:
                 self._lab.publish(heads)
+            for observed in seen:
+                self._pulls.observe(observed)
+            for change in changes:
+                self._pulls.announce(*change)
         except Exception:
             print("hub: GitHub webhook could not record the event", file=sys.stderr)
             traceback.print_exc()
@@ -148,6 +179,10 @@ def handler(ingress: Ingress) -> type[BaseHTTPRequestHandler]:
     return Webhook
 
 
+def _interrupted(*_: object) -> NoReturn:
+    sys.exit(0)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks github-webhook")
     parser.add_argument("--host", default="127.0.0.1")
@@ -161,8 +196,10 @@ def main(argv: list[str]) -> int:
     lab_secret = os.environ.get(NOTICE_SECRET_ENV, "").encode()
     lab = LabIntake(bus.lab_heads, lab_secret) if lab_secret else None
     server = ThreadingHTTPServer((args.host, args.port), handler(Ingress(LazyPulls(bus), secret, lab)))
+    previous = signal.signal(signal.SIGINT, _interrupted)
     try:
         server.serve_forever()
     finally:
         server.server_close()
         bus.close()
+        signal.signal(signal.SIGINT, previous)

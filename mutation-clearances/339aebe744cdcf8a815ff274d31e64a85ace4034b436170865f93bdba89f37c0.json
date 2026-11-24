@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_claim:04f2d18ca54ae62c7276b0abe6daadc795976ecf535cd57fc36149f9633f2897": {
+    "reader": "standards_reader",
+    "reason": "typing.cast is an identity function at runtime; the first argument is purely a type-checker hint, never read. cast(Doc, op) and cast(None, op) both evaluate to op."
+  }
+}

@@ -5,10 +5,12 @@ import uuid
 from collections.abc import Collection
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import lab_control, merge_queue, queue_record, ready, staged_compatibility
+from scripts.swarm import freeze, lab_control, merge_queue, queue_record, ready, staged_compatibility
 from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm_ledger.repository.live_rows import ancestry, covers
 
 DISPLACED = "queue-priority-displaced"
 ACTIVE = "queue-priority-active"
@@ -146,10 +148,16 @@ def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> lis
 
 
 def apply(
-    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal
+    store: RedisStore,
+    slug: str,
+    url: str,
+    sender: str,
+    tasks: list[dict],
+    journal: queue_record.Journal,
+    lift: bool = False,
 ) -> dict:
     with exclusive(store, slug):
-        return reorder(store, slug, url, sender, tasks, journal)
+        return reorder(store, slug, url, sender, tasks, journal, lift=lift)
 
 
 def reorder(
@@ -159,12 +167,14 @@ def reorder(
     sender: str,
     tasks: list[dict],
     journal: queue_record.Journal,
+    lift: bool,
 ) -> dict:
     lab_url = store.config(slug).lab_url
     result = merge_queue.prioritize(
         url,
         journal=journal,
         displaced=Displaced(store, slug),
+        lift=lift,
         lab=lambda head: lab_control.acknowledge(lab_url, head, os.environ),
     )
     for task in owners(tasks, result["displaced"]):
@@ -184,7 +194,37 @@ def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dic
     journal = queue_record.Journal(url)
     if lift:
         journal.write("priority-lift", url, "", None, None)
-    return apply(store, slug, url, sender, tasks, journal)
+    return apply(store, slug, url, sender, tasks, journal, lift=lift)
+
+
+def entitled(ledger: Any, slug: str, tasks: list[dict[str, Any]]) -> bool:
+    """Whether a task naming the pull request is urgent or sits under a focus that no nearer freeze overrides."""
+    if any(task.get("rank") == "urgent" for task in tasks):
+        return True
+    records: list[dict[str, Any]] = ledger.freezes(slug)
+    focus = [record["target"] for record in records if record.get("verb") == "focus"]
+    if not focus:
+        return False
+    graph = {row["node"]: (row["kind"], row["parent"]) for row in ledger.hierarchy(slug)}
+    chains = [(task, ancestry(task, graph)) for task in tasks]
+    return any(
+        any(covers(target, task, chain) for target in focus) and not freeze.frozen(task, records, chain)
+        for task, chain in chains
+    )
+
+
+def automatic(store: RedisStore, slug: str, url: str, ledger: Any) -> dict[str, Any] | None:
+    """Move a pull request that just entered the merge queue ahead of the waiting entries when its task is urgent or
+    focused, leaving the groups under test in place; None when no such task names it."""
+    from redis.exceptions import NoPermissionError
+
+    tasks: list[dict[str, Any]] = ledger.tasks_targeting(slug, url)
+    if not entitled(ledger, slug, tasks):
+        return None
+    try:
+        return apply(store, slug, url, "swarm", tasks, queue_record.Journal(url))
+    except (SwarmError, NoPermissionError) as exc:
+        return {"url": url, "errors": [str(exc)]}
 
 
 def refresh(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:

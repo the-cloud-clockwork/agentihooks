@@ -44,7 +44,7 @@ class CollapsedByDefault(unittest.TestCase):
             "· 2 open · 1 claimed · 1 pr · 3 done",
         )
         self.assertEqual(run_js(["taskCounts", "headCount"], "taskCounts([])"), "")
-        self.assertIn('$("tasks-count").textContent = taskCounts(doc.tasks)', function_source("render"))
+        self.assertIn('setText($("tasks-count"), taskCounts(doc.tasks)', function_source("render"))
 
     def test_an_outline_jump_opens_the_collapsed_section_holding_its_target(self):
         expr = """(() => {

@@ -25,7 +25,8 @@ def enabled(
     bundle: Path | None, dirs: list[tuple[str, Path]], user: Path | None = None, shared: Path | None = None
 ) -> bool:
     value = "true"
-    for root in [r for r in (bundle, shared, user) if r is not None] + [path for _, path in dirs]:
+    layers = [profile_chain.layer_root(r) for r in (bundle, shared, user) if r is not None]
+    for root in layers + [path for _, path in dirs]:
         value = str(_env(root).get(ENABLED, value))
     return value.lower() in ("true", "1", "yes")
 
@@ -87,7 +88,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     found = [Path(path) for path in config._resolve_manifesto_paths(bundle, user_root=user, shared_root=shared)]
     if not found:
-        folder = Path(bundle) / "manifestos" if bundle is not None else "the default manifesto folder"
+        folder = (
+            profile_chain.layer_root(Path(bundle)) / "manifestos"
+            if bundle is not None
+            else "the default manifesto folder"
+        )
         print(f"No manifestos in {folder}", file=sys.stderr)
         return 1
     sys.stdout.write(matrix(found))

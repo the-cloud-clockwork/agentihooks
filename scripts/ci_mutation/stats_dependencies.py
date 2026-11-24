@@ -131,7 +131,18 @@ class StoredStats:
         for record_file in self.folder.glob("*.json"):
             self.read(record_file)
 
-    def load(self, path: str, check: Callable[[dict, bool, str], bool] | None = None) -> dict | None:
+    def current_digest(self, name: str, digests: dict[str, str | None]) -> str | None:
+        if name not in digests:
+            file = self.root / name
+            digests[name] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else None
+        return digests[name]
+
+    def load(
+        self,
+        path: str,
+        check: Callable[[dict, bool, str], bool] | None = None,
+        digests: dict[str, str | None] | None = None,
+    ) -> dict | None:
         pointer = self.pointer(path)
         if not pointer.is_file():
             self.misses["no pointer"] += 1
@@ -158,11 +169,11 @@ class StoredStats:
         if not inputs.keys() <= set(self.context["inventory"]) or self.scope(inputs) not in ({}, scope):
             self.misses["scope"] += 1
             return None
+        digests = {} if digests is None else digests
         changed = [
             name
             for name, fingerprint in inputs.items()
-            if not (self.root / name).is_file()
-            or hashlib.sha256((self.root / name).read_bytes()).hexdigest() != fingerprint
+            if (current := self.current_digest(name, digests)) is None or current != fingerprint
         ]
         if changed:
             self.misses["inputs"] += 1

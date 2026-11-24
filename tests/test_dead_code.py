@@ -269,10 +269,13 @@ def _step():
     return next(step for step in steps if step.get("name") == "Hold dead code in hooks and scripts")
 
 
-def test_the_gate_runs_in_lint_graded_by_dev_against_the_base():
+def test_the_gate_runs_in_lint_graded_by_dev_against_the_base() -> None:
     steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
     install = next(step for step in steps if step.get("name") == "Install vulture")
-    assert install["run"] == f"python -m pip install vulture=={dead_code.VULTURE_VERSION}"
+    assert (
+        install["run"]
+        == f"python -m pip install --constraint .github/ci-tools/lint-tools.lock vulture=={dead_code.VULTURE_VERSION}"
+    )
     step = _step()
     assert step["if"] == "${{ !cancelled() }}"
     assert step["run"] == (

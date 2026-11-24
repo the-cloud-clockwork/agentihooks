@@ -5,6 +5,7 @@ from functools import partial
 from typing import Any, Unpack, cast
 
 from scripts.swarm import (
+    autoscaler_watch,
     dev_red,
     dispatcher,
     fleet_red,
@@ -360,10 +361,12 @@ class WriteStep:
         lane: Lane = CallStep.lane,
         **declared: Unpack[Declared],
     ) -> None:
-        """Take the name, group, lane, budgets, needs, domains, effects and feature of the call step running ``call``."""
+        """Take the name, group, lane, budgets, needs, domains, effects, feature, kept and placing flags of the call
+        step running ``call``."""
         base = CallStep(name, group, call, needs, reads, writes, lane, **declared)
         self.effects = base.effects
         self.feature = base.feature
+        self.kept = base.kept
         self.placing = base.placing
         self.name = base.name
         self.group = base.group
@@ -563,3 +566,24 @@ STEPS = (
 
 for _step in STEPS:
     registry.register(_step)
+
+
+def _autoscaler_alert(tick: Any, get: Callable[[str], Any]) -> list[str]:
+    """Return the actions of the autoscaler alert step, given the tick module and a reader of the pass state."""
+    keys = ("slug", "store", "ledger", "doc")
+    return tick.skip_refused(autoscaler_watch.alert_pass, *map(get, keys))
+
+
+registry.register(
+    CallStep(
+        "autoscaler alert",
+        "reopen passes",
+        held(_autoscaler_alert),
+        needs=RESUMED,
+        reads=DOC,
+        writes=frozenset(),
+        lane=Lane("slow"),
+        effects=frozenset(),
+        feature="swarm-autoscaler-scale-up-alert",
+    )
+)

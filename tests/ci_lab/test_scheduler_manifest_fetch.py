@@ -18,6 +18,7 @@ from scripts.ci_lab.objects import LocalObjects, manifest_folder
 from scripts.ci_lab.units import Priority
 from scripts.ci_lab.webhooks import HeadEvent
 from scripts.dep_manifest import _git
+from tests.ci_lab.test_manifests import Clock, Held, finished
 from tests.ci_lab.test_scheduler import (
     ACTOR,
     DELIVERY,
@@ -68,6 +69,29 @@ def test_stored_manifests_fetch_only_the_newest_commits_of_the_chain(tmp_path: P
     assert scheduler.StoredManifests(objects, fetches)(REPO, commits) is None
     assert fetches.asked == [(SLUG, commit) for commit in commits[:-1]]
     assert objects.keys("lab/") == []
+
+
+@pytest.mark.feature("lab-manifest-search-outlives-absent-answers")
+@pytest.mark.parametrize("pass_s", [60.0, 304.0])
+def test_a_search_whose_nearest_manifest_lies_six_commits_behind_answers_on_its_seventh_call(
+    tmp_path: Path, pass_s: float
+) -> None:
+    objects = LocalObjects(tmp_path / "objects")
+    commits = [f"commit-{index}" for index in range(7)]
+    objects.write_once(f"{manifest_folder(SLUG)}{commits[-1]}.json", packed_file(STORED_MANIFEST, commits[-1]))
+    held = Held({commit: None for commit in commits[:-1]})
+    clock = Clock()
+    background = manifests.Background(held, clock=clock)
+    stored = scheduler.StoredManifests(objects, background)
+    for _ in commits[:-1]:
+        held.release.clear()
+        with pytest.raises(manifests.FetchPending):
+            stored(REPO, commits)
+        held.release.set()
+        finished(background.fetches)
+        clock.now += pass_s
+    assert stored(REPO, commits) == {**STORED_MANIFEST, "commit": commits[-1]}
+    assert held.asked == [(SLUG, commit) for commit in commits[:-1]]
 
 
 @pytest.mark.feature("lab-dev-manifest-fetch")
@@ -183,7 +207,8 @@ def test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_
     assert run.tick(1000) == [f"received {suite.head} on dev"]
     original = {name: json.loads(raw) for name, raw in run.lab.client.hgetall(scheduler.WAITING).items()}
     runs = f"actions/workflows/test.yml/runs?event=push&branch=dev&head_sha={suite.base}"
-    failure = "failed: mint timed out" if status is None else f"token mint failed: {github_app.REFUSED}"
+    refusal = f"GitHub App cannot supply scoped actions read credentials: GitHub answered {status}"
+    failure = "failed: mint timed out" if status is None else f"token mint failed: {refusal}"
     verb = "holding" if held else "cannot expand"
     assert run.tick(31_000) == [f"{verb} {suite.head}: GET {runs} {failure}"]
     get.assert_not_called()
@@ -194,9 +219,11 @@ def test_manifest_token_mint_failures_hold_only_transient_heads_and_grade_after_
         assert run.tick(61_000) == []
         assert mint.call_count == 1
     else:
-        for when in (31_000, 61_000):
+        for when, fetches in ((31_000, 1), (61_000, 2)):
             waiting = {name: json.loads(raw) for name, raw in run.lab.client.hgetall(scheduler.WAITING).items()}
-            assert waiting == {name: {**value, "since": when} for name, value in original.items()}
+            assert waiting == {
+                name: {**value, "since": when, "unanswered": fetches} for name, value in original.items()
+            }
             assert run.tick(when + 29_999) == []
             assert mint.call_count == (1 if when == 31_000 else 2)
             if when == 31_000:

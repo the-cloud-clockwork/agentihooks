@@ -20,7 +20,7 @@ from scripts.swarm_ledger import ledger_workspace
 if TYPE_CHECKING:
     from scripts.gates.verdicts import Verdicts
 
-LANES = frozenset({"eng", "ci"})
+LANES = frozenset({"eng", "ci", "review"})
 EDIT_TOOLS = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path"}
 SERENA = "mcp__serena__"
 SERENA_EDITS = frozenset(
@@ -49,14 +49,14 @@ def _area(entry):
 
 
 def within(path: str, areas: list[str], repo: str) -> bool:
-    """True when path, inside repository repo, falls under an area written plain or with repo as its first part."""
+    """True when path, inside repository repo, falls under an area written plain or as repo/area or repo:area."""
     forms = [form for area in map(_area, areas) if area for form in _forms(area, repo)]
     return any(path == form or path.startswith(form + "/") for form in forms)
 
 
 def _forms(area: str, repo: str) -> tuple[str, ...]:
-    """The area as written, and the area inside repo when its first part names repo."""
-    return (area, area.removeprefix(f"{repo}/")) if repo else (area,)
+    """The area as written, and the area inside repo when it opens with repo and a slash or a colon."""
+    return (area, area.removeprefix(f"{repo}/"), _area(area.removeprefix(f"{repo}:"))) if repo else (area,)
 
 
 def git_root(path):
@@ -64,6 +64,14 @@ def git_root(path):
         if (candidate / ".git").exists():
             return candidate
     return None
+
+
+def _serena_repository(call: Call) -> str:
+    from hooks.context.serena_binding import root_for
+
+    directory = root_for(call.session, call.agent) or call.cwd
+    root = git_root(Path(directory).resolve()) if directory else None
+    return naming.repo_name(root) if root else NO_VALUE
 
 
 def task_territory(ledger_dir, slug, task):
@@ -106,13 +114,22 @@ def _commit_in(rest, directory):
             return
 
 
-def _git_names(directory, everything):
-    out = subprocess.run(
-        ["git", "-C", str(directory), "diff", "--name-only", "-z", "HEAD" if everything else "--cached"],
-        capture_output=True,
-        text=True,
-    )
-    return [name for name in out.stdout.split("\0") if name] if out.returncode == 0 else []
+def _git_names(directory: Path, everything: bool) -> list[str]:
+    """Files a commit in directory records, less those whose content equals a merge head origin/dev holds."""
+    names = _diff_names(directory, "HEAD" if everything else "--cached") or []
+    if _git(directory, "merge-base", "--is-ancestor", "MERGE_HEAD", "origin/dev").returncode == 0:
+        beside_dev = _diff_names(directory, *([] if everything else ["--cached"]), "MERGE_HEAD")
+        names = [name for name in names if beside_dev is None or name in beside_dev]
+    return names
+
+
+def _diff_names(directory: Path, *against: str) -> list[str] | None:
+    out = _git(directory, "diff", "--name-only", "-z", *against)
+    return [name for name in out.stdout.split("\0") if name] if out.returncode == 0 else None
+
+
+def _git(directory: Path, *words: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", "-C", str(directory), *words], capture_output=True, text=True)
 
 
 def _patch_targets(call, key):
@@ -169,10 +186,10 @@ class BuildGate:
         return call.tool == "Bash" and "commit" in call.command and any(_git_commits(call.command, call.cwd))
 
     def touched(self, call: Call, folder: Path) -> list[tuple[str, str]]:
-        """(repository, path inside it) for each file the call edits or commits; Serena paths carry no repository."""
+        """(repository, path inside it) for each file the call edits or commits."""
         if call.tool.startswith(SERENA):
             scope = call.tool_input.get("relative_path") or WHOLE_PROJECT
-            return [] if call.tool_input.get("dry_run") else [(NO_VALUE, _area(scope))]
+            return [] if call.tool_input.get("dry_run") else [(_serena_repository(call), _area(scope))]
         if call.tool == "Bash":
             commits = _git_commits(call.command, call.cwd)
             return sorted(

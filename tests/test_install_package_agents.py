@@ -42,14 +42,15 @@ def test_bundle_agent_with_the_same_name_overrides_the_scouter(tmp_path, monkeyp
     assert (home / ".claude" / "agents" / "scouter.md").resolve() == override.resolve()
 
 
-def test_codex_install_skips_agents_with_its_message(tmp_path, monkeypatch, capsys):
-    home = run_install(tmp_path, monkeypatch, "codex")
-    out = capsys.readouterr().out
-    assert (
-        "  [--] Codex has no custom-subagent registry — agents skipped (docs/reference/CODEX-COMPAT.md §3 row 16)."
-        in out
-    )
-    assert sorted(p.name for p in home.rglob("scouter.md")) == []
+def test_codex_install_writes_the_scouter_as_a_codex_custom_agent(tmp_path, monkeypatch):
+    import tomllib
+
+    from scripts.targets.codex_target import codex_home
+
+    run_install(tmp_path, monkeypatch, "codex")
+    doc = tomllib.loads((codex_home() / "agents" / "scouter.toml").read_text())
+    assert doc["name"] == "scouter"
+    assert doc["description"] and doc["developer_instructions"]
 
 
 def test_copilot_install_translates_the_scouter_with_read_only_tools(tmp_path, monkeypatch):

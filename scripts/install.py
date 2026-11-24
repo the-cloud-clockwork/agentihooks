@@ -704,13 +704,13 @@ def _register_target_global(profile: str, settings_profile: str = "", target: st
     """Record the global install for *target* in state.json (per-target record)."""
     state = _load_state()
     adapter_home = CLAUDE_HOME if target == DEFAULT_TARGET else get_adapter(target).home()
-    entry = {
+    entry: dict[str, Any] = {
         "path": str(adapter_home),
         "profile": profile,
         "installed_at": datetime.now(timezone.utc).isoformat(),
+        **({"settings_profile": settings_profile} if settings_profile else {}),
+        **{key: value for key, value in _global_record(state, target).items() if key == "managed_mcp"},
     }
-    if settings_profile:
-        entry["settings_profile"] = settings_profile
     state.setdefault("targets", {}).setdefault("global", {})[target] = entry
     # Last-used target, consulted only as the interactive TTY prompt's
     # default. It is NOT scoped to a target's own record and is never
@@ -809,18 +809,18 @@ def _get_shared_bundle_path() -> Path | None:
     return shared_bundle_path(_load_state(), os.environ)
 
 
-def _bundle_roots() -> list[tuple[str, Path]]:
+def _bundle_roots(layer: bool = False) -> list[tuple[str, Path]]:
     from hooks.context.profile_chain import bundle_roots
 
     found = (("bundle", _get_bundle_path()), ("shared_bundle", _get_shared_bundle_path()))
     found += (("user_bundle", _get_user_bundle_path()),)
-    return bundle_roots({key: {"path": str(path)} for key, path in found if path})
+    return bundle_roots({key: {"path": str(path)} for key, path in found if path}, layer)
 
 
 def _bundle_feature_layers(subdir: str, label: str) -> list[tuple[str, Path]]:
     return [
         (f"{_BUNDLE_LABELS[kind]} {label}", root / _CLAUDE_SUBDIR / subdir)
-        for kind, root in _bundle_roots()
+        for kind, root in _bundle_roots(True)
         if (root / _CLAUDE_SUBDIR / subdir).is_dir()
     ]
 
@@ -2831,7 +2831,9 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     bundle_dir = _get_bundle_path()
     user_dir = _get_user_bundle_path()
     shared_dir = _get_shared_bundle_path()
+    from hooks.context.profile_chain import unlayered
 
+    content_dirs = unlayered(profile_dirs, (bundle_dir, shared_dir, user_dir))
     for subdir, label, filter_fn in [
         ("skills", "skill", _skill_dir_filter()),
         ("agents", "agent", lambda p: p.suffix == ".md" and p.name != "README.md"),
@@ -2847,7 +2849,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         # Layer 2: bundle top-level .claude/ (inherits to all profiles)
         layers.extend(_bundle_feature_layers(subdir, label))
         # Layer 3+: each profile in chain (later profiles override earlier for same-name files)
-        for pname, pdir in profile_dirs:
+        for pname, pdir in content_dirs:
             if (pdir / _CLAUDE_SUBDIR / subdir).is_dir():
                 chain_label = f"profile({pname}) {label}" if len(profile_chain) > 1 else f"profile {label}"
                 layers.append((chain_label, pdir / _CLAUDE_SUBDIR / subdir))
@@ -2902,11 +2904,11 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             _cprint(f"  [WARN] Could not read {path}: {exc}")
 
     # Layer 2: bundle — always installed; profile MCPs layer on top (override per-name)
-    for kind, root in _bundle_roots():
+    for kind, root in _bundle_roots(True):
         _register_mcp_layer(root, _BUNDLE_LABELS[kind].capitalize())
 
     # Layer 3+: each profile (chained)
-    for pname, pdir in profile_dirs:
+    for pname, pdir in content_dirs:
         chain_label = f"Profile({pname})" if len(profile_chain) > 1 else "Profile"
         _register_mcp_layer(pdir, chain_label)
 
@@ -3643,16 +3645,14 @@ def _reseed_managed_mcp_sources() -> None:
             _cprint(f"  [WARN] Could not reseed the agentihooks MCP server: {exc}")
 
     # Layer 2: bundle .mcp.json, root, shared, then user
-    for kind, bundle_dir in _bundle_roots():
-        for candidate in (bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME):
-            if candidate.exists():
-                try:
-                    servers = load_json(candidate).get("mcpServers", {})
-                    if servers:
-                        _merge_mcp_to_user_scope(servers)
-                except (json.JSONDecodeError, OSError) as exc:
-                    _cprint(f"  [WARN] Could not reseed {kind} bundle .mcp.json: {exc}")
-                break
+    for kind, bundle_dir in _bundle_roots(True):
+        if candidate := _native_layer_path(bundle_dir, "claude", _NATIVE_MCP_NAME):
+            try:
+                servers = load_json(candidate).get("mcpServers", {})
+                if servers:
+                    _merge_mcp_to_user_scope(servers)
+            except (json.JSONDecodeError, OSError) as exc:
+                _cprint(f"  [WARN] Could not reseed {kind} bundle .mcp.json: {exc}")
 
     # Layer 3: active profile .mcp.json (full chain — see collector note)
     if profile_name:
@@ -4352,8 +4352,10 @@ def _prepend_bundle_claude_md(
     had_block = _BUNDLE_CLAUDE_MD_BEGIN in current and _BUNDLE_CLAUDE_MD_END in current
 
     sections = []
+    from hooks.context.profile_chain import layer_root
+
     for directory in (bundle_dir, shared_dir, user_dir):
-        bundle_md = (directory / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME) if directory else None
+        bundle_md = (layer_root(directory) / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME) if directory else None
         if bundle_md and bundle_md.exists() and (text := bundle_md.read_text().strip()):
             sections.append((bundle_md, text))
     body = "\n\n".join(text for _, text in sections)
@@ -4566,14 +4568,12 @@ def _collect_all_managed_mcp_servers() -> dict:
     merged.update(mcp_config["mcpServers"])
 
     # --- 2. Bundle .mcp.json, root, shared, then user ---
-    for _kind, bundle_dir in _bundle_roots():
-        for candidate in [bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME]:
-            if candidate.exists():
-                try:
-                    merged.update(load_json(candidate).get("mcpServers", {}))
-                except (json.JSONDecodeError, OSError):
-                    pass
-                break
+    for _kind, bundle_dir in _bundle_roots(True):
+        if candidate := _native_layer_path(bundle_dir, "claude", _NATIVE_MCP_NAME):
+            try:
+                merged.update(load_json(candidate).get("mcpServers", {}))
+            except (json.JSONDecodeError, OSError):
+                pass
 
     # --- 3. Profile .mcp.json (full chain) ---
     # NOTE: the active profile is a comma-joined chain (e.g. "anton,brain").

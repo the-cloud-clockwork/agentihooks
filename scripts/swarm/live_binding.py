@@ -306,10 +306,35 @@ def _same(field: str, expected: object, actual: object) -> bool:
     return actual == expected
 
 
+def observed(facts: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Each agent's facts, naming this host as the observer where they record the process absent, for a report that
+    another host reads."""
+    import socket
+
+    host = socket.gethostname()
+    return {name: {**fact, "observer": host} if fact.get("process") is False else fact for name, fact in facts.items()}
+
+
+def provenance(store: RedisStore, agent: AgentRecord, facts: dict[str, Any]) -> dict[str, Any]:
+    """Who saw the process absent and what owned it: the observer the facts name, else this recording host, and the
+    execution's codex transport record, else the agent record's transport and hive."""
+    import socket
+
+    owning = transport(store, agent)
+    owner = (
+        {"transport": agent.transport or "pane", "host": agent.hive}
+        if owning is None
+        else {"transport": owning.transport, "host": owning.host_id}
+    )
+    return {"observer": facts.get("observer") or socket.gethostname(), "owner": owner}
+
+
 def record(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, now_ms: int) -> dict:
     differences = (
         {"pane": {"expected": "closed", "actual": facts["pane"]}} if "pane" in facts else compare(agent, facts)
     )
+    if "process" in differences:
+        differences["process"] |= provenance(store, agent, facts)
     report = {
         "agent": agent.name,
         "at": now_ms,
@@ -331,6 +356,17 @@ def _seated(agents: list[AgentRecord]) -> set[str]:
     return {agent.name for agent in newest.values() if agent.state != "finished"}
 
 
+def witnesses(values: dict[str, Any]) -> tuple[str, ...]:
+    """The observer and transport owner a process difference recorded; none for a record stored before they were."""
+    if "observer" not in values:
+        return ()
+    owner = values["owner"]
+    return (
+        f"observed by {values['observer']}",
+        f"owned by {owner['transport']} on {owner['host'] or 'no recorded host'}",
+    )
+
+
 def findings(store: RedisStore, slug: str) -> list[Finding]:
     result = []
     seated = _seated(store.agents(slug))
@@ -344,7 +380,7 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
                     "live binding",
                     f"{report['agent']}/{field}",
                     f"{report['agent']} differs in {field}",
-                    (f"expected {values['expected']}; observed {values['actual']}",),
+                    (f"expected {values['expected']}; observed {values['actual']}", *witnesses(values)),
                     "assigned launch must match",
                     1,
                 )

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Offline smoke of a CI lab worker image: the entrypoint self test, no sudo, bwrap, the baked lockfile digest and the venv imports.
+# Offline smoke of a CI lab worker image: the entrypoint self test, no sudo, bwrap, the baked lockfile digest, the venv imports
+# and a trampoline of one file from the image's own working directory.
 set -euo pipefail
 
 image="${1:?usage: smoke.sh IMAGE LOCK_DIGEST}"
@@ -23,4 +24,8 @@ if [[ "$(cat /opt/agentihooks-venv/lockfile.sha256)" != "$LOCK_DIGEST" ]]; then
   exit 1
 fi
 /opt/agentihooks-venv/bin/python -c 'import scripts.ci_lab.contract, scripts.ci_lab.executors, scripts.ci_lab.run_tests, scripts.ci_lab.pricing, pytest, xdist, redis, nats, yaml, boto3'
+tree="$(mktemp -d)"
+mkdir "$tree/scripts"
+printf 'def fee(amount, rate):\n    return amount * rate + 1\n' > "$tree/scripts/sample.py"
+/opt/agentihooks-venv/bin/python -c 'import sys; from pathlib import Path; from scripts.ci_lab import run_mutation; names = run_mutation.trampoline(Path(sys.argv[1]), "scripts/sample.py", {2}); assert len(names) > 1, names' "$tree"
 CHECKS

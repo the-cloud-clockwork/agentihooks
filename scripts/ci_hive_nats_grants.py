@@ -1,7 +1,9 @@
 import argparse
+import ast
 import json
 import subprocess
 import sys
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any, cast
 
@@ -46,6 +48,9 @@ LEDGER_PUBLISH = (
 )
 LEDGER_SUBSCRIBE = ("swarm.>", "_INBOX.>")
 EVERYTHING = frozenset({">"})
+LAB_USER = "swarm-ci-lab-scheduler"
+LAB_NAMES = (("scripts/events/nats.py", "LAB_STREAM"), ("scripts/ci_lab/scheduler.py", "DURABLE"))
+LAB_SOURCE = ", ".join(f"{source} {name}" for source, name in LAB_NAMES)
 
 
 def _subjects(value: Any) -> frozenset[str]:
@@ -88,6 +93,50 @@ def ledger_grants() -> dict[str, dict[str, frozenset[str]]]:
     return {"publish": _direction(list(LEDGER_PUBLISH)), "subscribe": _direction(list(LEDGER_SUBSCRIBE))}
 
 
+def _bound(node: ast.stmt) -> tuple[list[ast.expr], ast.expr | None]:
+    if isinstance(node, ast.AnnAssign):
+        return [node.target], node.value
+    if isinstance(node, ast.Assign):
+        return node.targets, node.value
+    return [], None
+
+
+def _rebinds(node: ast.AST, name: str) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id == name and not isinstance(node.ctx, ast.Load)
+    if isinstance(node, ast.alias):
+        return node.name == "*" or name in (node.asname, node.name.split(".")[0])
+    if isinstance(node, ast.MatchMapping):
+        return node.rest == name
+    if isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar):
+        return node.name == name
+    return isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and node.name == name
+
+
+def source_name(agentihooks: str, source: str, name: str) -> str:
+    tree = ast.parse((Path(agentihooks) / source).read_text(), source)
+    values = [
+        value
+        for targets, value in map(_bound, tree.body)
+        for target in targets
+        if isinstance(target, ast.Name) and target.id == name
+    ]
+    names = [
+        value.value
+        for value in values
+        if isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value
+    ]
+    if not names or len(names) != len(values) or len(values) != sum(_rebinds(node, name) for node in ast.walk(tree)):
+        raise ValueError(f"{source} must set {name} only by top level non-empty string literal assignments")
+    return names[-1]
+
+
+def lab_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
+    consumer = ".".join(source_name(agentihooks, source, name) for source, name in LAB_NAMES)
+    publish = [f"$JS.API.CONSUMER.INFO.{consumer}", f"$JS.API.CONSUMER.MSG.NEXT.{consumer}", f"$JS.ACK.{consumer}.>"]
+    return {"publish": _direction(publish), "subscribe": _direction(SHARED_INBOX)}
+
+
 def user_grants(antoncore: Path, name: str) -> dict[str, dict[str, frozenset[str]]] | None:
     values = yaml.safe_load((antoncore / HIVE_VALUES).read_text())
     accounts = values["config"]["merge"].get("accounts")
@@ -123,6 +172,34 @@ def differences(ours: dict[str, Any], theirs: dict[str, Any], credential: str, u
     return lines
 
 
+def overlaps(first: str, second: str) -> bool:
+    for left, right in zip_longest(first.split("."), second.split(".")):
+        if ">" in (left, right):
+            return None not in (left, right)
+        if None in (left, right) or (left != right and "*" not in (left, right)):
+            return False
+    return True
+
+
+def lab_problems(ours: dict[str, dict[str, frozenset[str]]], theirs: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for direction in ("publish", "subscribe"):
+        needed = ours[direction]["allow"]
+        lines += [
+            f"{direction} allow {subject} is required by the agentihooks lab scheduler ({LAB_SOURCE})"
+            f" and not named by the antoncore {LAB_USER} user ({SERVICE_USERS})."
+            for subject in sorted(needed - theirs[direction]["allow"])
+        ]
+        lines += [
+            f"{direction} deny {denied} on the antoncore {LAB_USER} user ({SERVICE_USERS}) blocks {subject},"
+            " which the agentihooks lab scheduler needs."
+            for denied in sorted(theirs[direction]["deny"])
+            for subject in sorted(needed)
+            if overlaps(denied, subject)
+        ]
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Fail when hive, controller or ledger NATS grants differ from antoncore users."
@@ -142,12 +219,16 @@ def main(argv: list[str] | None = None) -> int:
             ("ledger", f"ledger grant ({LEDGER_SOURCE})", LEDGER_USER, ledger_grants()),
         )
         compared = [(*check, user_grants(args.antoncore, check[2])) for check in checks]
+        lab = lab_grants(args.agentihooks)
+        found = user_grants(args.antoncore, LAB_USER)
+        granted = cast("dict[str, Any]", found)  # pragma: no mutate
     except (
         OSError,
         KeyError,
         AttributeError,
         TypeError,
         ValueError,
+        SyntaxError,
         yaml.YAMLError,
     ) as exc:
         print(f"::error::The swarm NATS grants cannot be read ({type(exc).__name__}: {exc}).")
@@ -155,19 +236,28 @@ def main(argv: list[str] | None = None) -> int:
     retired = [user for _, _, user, _, theirs in compared if theirs is None]
     if retired:
         print(f"The antoncore {HIVE_USER} user is retired, so hives connect only with minted member credentials.")
-    compared = [check for check in compared if check[2] not in retired]
-    lines = [
-        line for _, credential, user, ours, theirs in compared for line in differences(ours, theirs, credential, user)
+    active = [
+        (label, credential, user, ours, theirs)
+        for label, credential, user, ours, theirs in compared
+        if theirs is not None
     ]
+    lines = [
+        line for _, credential, user, ours, theirs in active for line in differences(ours, theirs, credential, user)
+    ]
+    lines.extend(lab_problems(lab, granted))
     for line in lines:
         print(f"::error::{line}")
     if lines:
         return 1
-    for label, _, _, ours, _ in compared:
+    for label, _, _, ours, _ in active:
         print(
             f"The {label} NATS grants match antoncore: {len(ours['publish']['allow'])} publish"
             f" and {len(ours['subscribe']['allow'])} subscribe subjects."
         )
+    print(
+        f"The antoncore {LAB_USER} user grants the lab scheduler's {len(lab['publish']['allow'])} publish"
+        f" and {len(lab['subscribe']['allow'])} subscribe subjects."
+    )
     return 0
 
 
