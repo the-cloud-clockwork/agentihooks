@@ -2609,19 +2609,25 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   `closed <lane> of <repo>:` and what it ended, or `nothing held`.
 - On its first pass a scheduler retires the stale grades a restart finds live. For each repository
   with a live pull request grade that has no grade ref, `scripts.ci_lab.stale_heads.OpenHeads`
-  reads the open pull request heads and the heads of the plant branches through the lab App, each
-  in one paged listing of 100 a page and never one head at a time. `Scheduler._retire_heads` then
-  forgets every such grade whose head is in neither listing, the way a gone merge group grade is
-  forgotten. Each one prints `retired <run>: <head> is no open pull request head or plant head of
-  <repo>, dropped <n> pending units`, and each listed repository one line counting the heads
-  listed, its live pull request grades, the grades retired and the pending units dropped. When a
-  listing fails, or is longer than 50 pages, the pass retires nothing of that repository and
-  prints `cannot list the wanted heads of <repo>`; later passes do not list again. A head pushed
-  with a signed notice before its pull request exists is in neither listing, so a restart retires
-  its grade and the pull request's `opened` delivery grades it again.
+  reads the open pull request heads and the heads of the plant branches through the lab App: two
+  paged listings, 100 open pull requests a page, each followed through its `next` links and
+  never asked one head at a time. It reads both listings twice and takes a head either reading
+  names as wanted, because a pull request closed between two pages moves a later one out of a
+  single reading. `Scheduler._retire_heads` then forgets every such grade whose head no reading
+  names, the way a gone merge group grade is forgotten. Each one prints `retired <run>: <head> is
+  no open pull request head or plant head of <repo>, dropped <n> pending units`, and each listed
+  repository one line counting the heads listed, its live pull request grades, the grades retired
+  and the pending units dropped. When GitHub refuses a page, a listing is longer than 50 pages,
+  the App token is refused or a row cannot be read, the listing raises an `OSError`: the pass
+  retires nothing of that repository and prints `cannot list the wanted heads of <repo>`; later
+  passes do not list again. A head pushed with a signed notice before its pull request exists is
+  in neither listing, so a restart retires its grade and the pull request's `opened` delivery
+  grades it again.
 
 Known limits: a rerequested check run and a signed notice name no lane, so such a head's lane is
-its own sha until its pull request delivers it; expansion keys static gates, test units
+its own sha until its pull request delivers it; two open pull requests from one head branch share
+a lane, so closing one forgets the grade the lane names while the other grade of their shared head
+keeps posting its checks; expansion keys static gates, test units
 and mutation units only, so the other jobs the lab does not run yet pass by their frame; a
 rerequested grade reuses the finished jobs of its own head.
 

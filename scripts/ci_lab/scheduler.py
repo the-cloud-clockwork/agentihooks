@@ -400,8 +400,9 @@ class Relaying(Protocol):
 
 @dataclass(frozen=True)
 class Ports:
-    """The scheduler's outside world: heads in, plans, check runs out per repository, the heads marked hotfix and the
-    worker pods whose deletion cost follows their leases."""
+    """The scheduler's outside world: heads in, plans, check runs out per repository, the heads marked hotfix, the
+    worker pods whose deletion cost follows their leases and, when the service holds one, the listing of the heads a
+    repository still wants graded, which raises an OSError when it cannot name them all."""
 
     inbox: Inbox
     expander: Expander
@@ -1093,7 +1094,7 @@ class Scheduler:
         for repo in stale_heads.repositories(origins):
             try:
                 heads[repo] = wanted(repo)
-            except (GitAuthRefused, OSError) as error:
+            except OSError as error:
                 actions.append(f"cannot list the wanted heads of {repo}: {error}")
         gone = stale_heads.stale(origins, heads)
         kept = {origin["head"] for run, origin in origins.items() if run not in gone}

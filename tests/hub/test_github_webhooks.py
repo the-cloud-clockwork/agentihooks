@@ -3,7 +3,7 @@ import hmac
 import io
 import json
 import signal
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -27,7 +27,7 @@ def sign(body: bytes, secret: bytes = SECRET) -> str:
     return "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
 
 
-def pull_request(action="opened", state="open", merged=False, head="a1"):
+def pull_request(action: str = "opened", state: str = "open", merged: bool = False, head: str = "a1") -> dict[str, Any]:
     return {
         "action": action,
         "pull_request": {
@@ -443,7 +443,7 @@ def merge_group(action="checks_requested"):
     }
 
 
-def lab_pull_request(action="opened", head="a1"):
+def lab_pull_request(action: str = "opened", head: str = "a1") -> dict[str, Any]:
     payload = pull_request(action, head=head)
     payload["repository"] = {"html_url": REPO}
     payload["sender"] = {"login": "nestorcolt"}

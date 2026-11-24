@@ -1,14 +1,14 @@
 """The heads a repository still wants graded, and the live pull request grades that are none of them.
 
 `OpenHeads` is the scheduler's listing port, read from GitHub through the lab App: the head of every open pull
-request and of every plant branch of a repository, each in one paged listing and never one head at a time.
+request and of every plant branch of a repository, each from a paged listing read twice and never one head at a time.
 `repositories` names the repositories the first pass of a scheduler lists, `stale` the grades it then retires and
 `listed` the line that counts them.
 """
 
 from collections.abc import Callable, Mapping
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import requests
 
@@ -32,22 +32,26 @@ def app(slug: str) -> Token:
 
 
 def _pages(slug: str, path: str, query: Mapping[str, str], auth: Token) -> list[Any]:
-    """Return every row of one GitHub listing, page by page; raise when GitHub refuses a page or the listing is longer
-    than `PAGES` pages, so a caller never takes a part of it for the whole."""
+    """Return every row of one GitHub listing, following its next links; raise when GitHub refuses a page or the
+    listing is longer than `PAGES` pages, so a caller never takes a part of it for the whole."""
     rows: list[Any] = []
-    for page in range(1, PAGES + 1):
-        response = requests.get(
-            f"{API}/repos/{slug}/{path}",
-            params={**query, "per_page": PER_PAGE, "page": page},
-            headers={"Authorization": f"Bearer {auth.get_token()}", **HEADERS},
-            timeout=TIMEOUT,
-        )
+    url = f"{API}/repos/{slug}/{path}?{urlencode({**query, 'per_page': PER_PAGE})}"
+    for _ in range(PAGES):
+        headers = {"Authorization": f"Bearer {auth.get_token()}", **HEADERS}
+        response = requests.get(url, headers=headers, timeout=TIMEOUT)
         response.raise_for_status()
-        found = response.json()
-        rows.extend(found)
-        if len(found) < PER_PAGE:
+        rows.extend(response.json())
+        if "next" not in response.links:
             return rows
+        url = response.links["next"]["url"]
     raise OSError(f"{path} of {slug} holds more than {PAGES} pages")
+
+
+def _heads(slug: str, auth: Token) -> frozenset[str]:
+    """Return the open pull request heads and the plant branch heads one reading of the two listings names."""
+    pulls = _pages(slug, PULLS, {"state": "open"}, auth)
+    plants = _pages(slug, PLANTS, {}, auth)
+    return frozenset([*(pull["head"]["sha"] for pull in pulls), *(plant["object"]["sha"] for plant in plants)])
 
 
 class OpenHeads:
@@ -57,12 +61,15 @@ class OpenHeads:
         self.auth = auth
 
     def __call__(self, repo: str) -> frozenset[str]:
-        """Return the heads the repository still wants graded."""
+        """Return the heads the repository still wants graded. The listings are read twice and a head either
+        reading names is wanted, since a pull request closed between two pages moves a later one out of a single
+        reading. Whatever keeps a listing from being read or understood is raised as an OSError."""
         slug = urlsplit(repo).path.removeprefix("/")
-        auth = self.auth(slug)
-        pulls = _pages(slug, PULLS, {"state": "open"}, auth)
-        plants = _pages(slug, PLANTS, {}, auth)
-        return frozenset([*(pull["head"]["sha"] for pull in pulls), *(plant["object"]["sha"] for plant in plants)])
+        try:
+            auth = self.auth(slug)
+            return _heads(slug, auth) | _heads(slug, auth)
+        except (KeyError, TypeError, ValueError) as error:
+            raise OSError(f"the listings of {slug} cannot be read: {error!r}") from error
 
 
 def _plain(origin: Mapping[str, Any]) -> bool:

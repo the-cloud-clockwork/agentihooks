@@ -45,10 +45,13 @@ from tests.ci_lab.test_scheduler import (
 OTHER_REPO = f"{REPO}-bundle"
 HEAD_C = "f" * 40
 OWNER = "the-cloud-clockwork"
-PULLS = f"{API}/repos/{SLUG}/pulls"
-PLANTS = f"{API}/repos/{SLUG}/git/matching-refs/heads/diffcheck/lab-plant-"
+PULLS = f"{API}/repos/{SLUG}/pulls?state=open&per_page=100"
+PULLS_NEXT = f"{API}/repositories/7/pulls?state=open&per_page=100&page=2"
+PLANTS = f"{API}/repos/{SLUG}/git/matching-refs/heads/diffcheck/lab-plant-?per_page=100"
+PLANT = {"ref": "refs/heads/diffcheck/lab-plant-size-green", "object": {"sha": HEAD_B}}
+BEARER = f"Bearer token of {SLUG}"
 PULL_LANE = f"{REPO}|feature|{int(Priority.PULL_REQUEST)}"
-Asked = tuple[str, dict[str, Any], str]
+Asked = tuple[str, str]
 
 
 @dataclass
@@ -137,24 +140,32 @@ def _listed(heads: int, live: int, retired: int, dropped: int, repo: str = REPO)
     )
 
 
-def _answer(url: str, status: int, rows: list[Any]) -> requests.Response:
+def _answer(url: str, rows: list[Any], following: str = "", status: int = 200) -> requests.Response:
     response = requests.Response()
     response.status_code = status
     response.url = url
     response._content = json.dumps(rows).encode()  # pyright: ignore[reportPrivateUsage]
+    if following:
+        response.headers["Link"] = f'<{following}>; rel="next"'
     return response
 
 
-def _github(
-    answers: Callable[[str, int], tuple[int, list[Any]]], asked: list[Asked]
-) -> Callable[..., requests.Response]:
-    def get(url: str, *, params: Mapping[str, Any], headers: Mapping[str, str], timeout: float) -> requests.Response:
-        asked.append((url, dict(params), headers["Authorization"]))
+def _github(answers: Callable[[str], requests.Response], asked: list[Asked]) -> Callable[..., requests.Response]:
+    def get(url: str, *, headers: Mapping[str, str], timeout: float) -> requests.Response:
+        asked.append((url, headers["Authorization"]))
         assert timeout > 0
-        status, rows = answers(url, int(params["page"]))
-        return _answer(url, status, rows)
+        return answers(url)
 
     return get
+
+
+def _listings(pulls: list[Any], plants: list[Any]) -> Callable[[str], requests.Response]:
+    pages = {
+        PULLS: _answer(PULLS, pulls[:100], PULLS_NEXT if len(pulls) > 100 else ""),
+        PULLS_NEXT: _answer(PULLS_NEXT, pulls[100:]),
+        PLANTS: _answer(PLANTS, plants),
+    }
+    return pages.__getitem__
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
@@ -396,9 +407,8 @@ def test_the_stale_head_retire_runs_on_the_first_pass_of_a_scheduler_only(lab: C
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
-@pytest.mark.parametrize("error", [OSError("github is down"), GitAuthRefused("no token")])
-def test_a_listing_that_fails_retires_nothing_and_is_named_once(lab: Callable[..., Run], error: Exception) -> None:
-    first = unit(1)
+def test_a_listing_that_fails_retires_nothing_and_is_named_once(lab: Callable[..., Run]) -> None:
+    first, error = unit(1), OSError("github is down")
     run = lab({HEAD_A: plan({"lint": (first,)})})
     _opened(run, HEAD_A)
     run.tick(1000)
@@ -476,30 +486,32 @@ def test_a_scheduler_without_a_listing_retires_nothing(lab: Callable[..., Run]) 
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
-def test_the_listing_reads_every_page_of_open_pull_requests_and_of_plant_branches(
+def test_the_listing_reads_every_page_of_open_pull_requests_and_of_plant_branches_twice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pulls = [{"head": {"sha": f"{number:040x}"}} for number in range(101)]
-    plants = [{"ref": "refs/heads/diffcheck/lab-plant-size-green", "object": {"sha": HEAD_B}}]
-    pages = {(PULLS, 1): pulls[:100], (PULLS, 2): pulls[100:], (PLANTS, 1): plants}
     asked: list[Asked] = []
-    monkeypatch.setattr(requests, "get", _github(lambda url, page: (200, pages[url, page]), asked))
+    monkeypatch.setattr(requests, "get", _github(_listings(pulls, [PLANT]), asked))
     heads = stale_heads.OpenHeads(Token)(REPO)
     assert heads == frozenset({*(str(pull["head"]["sha"]) for pull in pulls), HEAD_B})
-    token = f"Bearer token of {SLUG}"
-    assert asked == [
-        (PULLS, {"state": "open", "per_page": 100, "page": 1}, token),
-        (PULLS, {"state": "open", "per_page": 100, "page": 2}, token),
-        (PLANTS, {"per_page": 100, "page": 1}, token),
-    ]
+    assert asked == [(PULLS, BEARER), (PULLS_NEXT, BEARER), (PLANTS, BEARER)] * 2
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_head_either_reading_of_the_listings_names_is_wanted(monkeypatch: pytest.MonkeyPatch) -> None:
+    readings = iter(([{"head": {"sha": HEAD_A}}], [PLANT], [{"head": {"sha": HEAD_C}}], []))
+    asked: list[Asked] = []
+    monkeypatch.setattr(requests, "get", _github(lambda url: _answer(url, next(readings)), asked))
+    assert stale_heads.OpenHeads(Token)(REPO) == frozenset({HEAD_A, HEAD_B, HEAD_C})
+    assert [url for url, _ in asked] == [PULLS, PLANTS, PULLS, PLANTS]
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
 def test_the_listing_of_a_repository_url_asks_its_owner_and_name(monkeypatch: pytest.MonkeyPatch) -> None:
     asked: list[Asked] = []
-    monkeypatch.setattr(requests, "get", _github(lambda url, page: (200, []), asked))
+    monkeypatch.setattr(requests, "get", _github(_listings([], []), asked))
     assert stale_heads.OpenHeads(Token)(f"https://github.com/{SLUG}") == frozenset()
-    assert [url for url, _, _ in asked] == [PULLS, PLANTS]
+    assert [url for url, _ in asked] == [PULLS, PLANTS] * 2
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
@@ -508,7 +520,9 @@ def test_a_listing_github_refuses_raises_instead_of_naming_fewer_heads(
     monkeypatch: pytest.MonkeyPatch, refused: str
 ) -> None:
     asked: list[Asked] = []
-    monkeypatch.setattr(requests, "get", _github(lambda url, page: (500 if url == refused else 200, []), asked))
+    monkeypatch.setattr(
+        requests, "get", _github(lambda url: _answer(url, [], status=500 if url == refused else 200), asked)
+    )
     with pytest.raises(requests.HTTPError):
         stale_heads.OpenHeads(Token)(REPO)
 
@@ -517,12 +531,42 @@ def test_a_listing_github_refuses_raises_instead_of_naming_fewer_heads(
 def test_a_listing_longer_than_its_page_cap_raises_instead_of_naming_fewer_heads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = [{"head": {"sha": HEAD_A}}] * 100
     asked: list[Asked] = []
-    monkeypatch.setattr(requests, "get", _github(lambda url, number: (200, page), asked))
+    endless = _github(lambda url: _answer(url, [{"head": {"sha": HEAD_A}}], PULLS_NEXT), asked)
+    monkeypatch.setattr(requests, "get", endless)
     with pytest.raises(OSError, match=f"pulls of {SLUG} holds more than {stale_heads.PAGES} pages"):
         stale_heads.OpenHeads(Token)(REPO)
-    assert [params["page"] for _, params, _ in asked] == list(range(1, stale_heads.PAGES + 1))
+    assert [url for url, _ in asked] == [PULLS, *[PULLS_NEXT] * (stale_heads.PAGES - 1)]
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_listing_with_a_row_that_names_no_head_raises_an_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[Asked] = []
+    monkeypatch.setattr(requests, "get", _github(_listings([{"number": 7}], []), asked))
+    with pytest.raises(OSError, match=f"the listings of {SLUG} cannot be read: KeyError\\('head'\\)"):
+        stale_heads.OpenHeads(Token)(REPO)
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_listing_whose_token_is_refused_raises_an_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    @dataclass
+    class Refused:
+        slug: str
+
+        def get_token(self) -> str:
+            raise GitAuthRefused(f"no token for {self.slug}")
+
+    monkeypatch.setattr(requests, "get", _github(_listings([], []), []))
+    with pytest.raises(OSError, match=f"cannot be read: GitAuthRefused\\('no token for {SLUG}'\\)"):
+        stale_heads.OpenHeads(Refused)(REPO)
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_listing_without_the_lab_app_settings_raises_an_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in APP_SETTINGS:
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(OSError, match="cannot be read: KeyError\\('GITHUB_APP_ID'\\)"):
+        stale_heads.OpenHeads()(REPO)
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
