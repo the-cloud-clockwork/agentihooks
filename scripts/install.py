@@ -2839,8 +2839,10 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     shared_dir = _get_shared_bundle_path()
     from hooks.context.profile_chain import takes_package_features, unlayered
 
-    content_dirs = unlayered(profile_dirs, (bundle_dir, shared_dir, user_dir))
-    package = takes_package_features(profile_dirs)
+    content_dirs, package = (
+        unlayered(profile_dirs, (bundle_dir, shared_dir, user_dir)),
+        takes_package_features(profile_dirs),
+    )
     for subdir, label, filter_fn in [
         ("skills", "skill", _skill_dir_filter()),
         ("agents", "agent", lambda p: p.suffix == ".md" and p.name != "README.md"),

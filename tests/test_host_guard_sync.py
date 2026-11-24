@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from hooks import compat
 from scripts import gc_cli
 from scripts.events.redis_state import RedisStateStore
 from scripts.host_guard import sync
@@ -284,7 +285,7 @@ def test_systemctl_reads_a_missing_or_hung_manager_as_failure(monkeypatch):
 def test_the_account_home_is_read_from_the_password_database(monkeypatch):
     seen = []
     monkeypatch.setattr(sync.os, "getuid", lambda: 4242)
-    monkeypatch.setattr(sync.pwd, "getpwuid", lambda uid: seen.append(uid) or Mock(pw_dir="/home/proof"))
+    monkeypatch.setattr(compat.pwd, "getpwuid", lambda uid: seen.append(uid) or Mock(pw_dir="/home/proof"))
     assert sync._account_home() == Path("/home/proof")
     assert seen == [4242]
 

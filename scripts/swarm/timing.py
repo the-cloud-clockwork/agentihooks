@@ -16,6 +16,9 @@ from uuid import uuid4
 from scripts.swarm import tick_stop
 from scripts.tick import metrics as tick_metrics
 
+if sys.platform != "win32":
+    import resource
+
 HISTORY_LIMIT = 50000
 ABANDONED = "abandoned"
 PROFILE_STEPS_ENV = "AGENTIHOOKS_TICK_PROFILE_STEPS"
@@ -203,8 +206,6 @@ def pass_errors(store: Any, slug: str) -> list[dict[str, Any]]:
 
 @contextmanager
 def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
-    import resource
-
     slug = SWARM.get()
     if slug is None:
         yield
