@@ -40,6 +40,8 @@ def _master(found: Member) -> str:
     lines = [
         f"You are the master of quick swarm {found.swarm.quick_id}, in herdr pane 1. You are the operator's "
         "front door: the operator talks only to you.",
+        "Load the quick-swarm-master skill before any other action: it covers how this quick swarm is built, "
+        "how a seat launches and registers, how messages travel, and how to troubleshoot or force a handoff.",
         "Take work from whatever source the operator names, tickets, issues or pull requests, with the tools you have.",
         "Your engineers, the only agents you contact:",
         *(_engineer_line(found, seat) for seat in engineers),
@@ -93,6 +95,8 @@ def block(found: Member) -> str:
         f"QUICK SWARM — you are {seat.seat} of quick swarm {found.swarm.quick_id}, herdr pane {seat.position} "
         f"({role}). Seat folder {paths.seat_dir(found.folder, seat.seat)}. Plan: {progress}."
     )
+    if seat.seat == MASTER:
+        head += " Load the quick-swarm-master skill before any other action."
     waiting = room.waiting(found.folder, seat.seat)
     head += f" Room: {waiting} message(s) for you; read them with `agentihooks quick room`." if waiting else ""
     culture = paths.read_text(paths.culture(found.folder)).strip()

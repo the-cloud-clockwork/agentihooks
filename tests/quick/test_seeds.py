@@ -42,6 +42,14 @@ def test_the_master_seed_never_trusts_a_pane_message_delivered(tmp_path):
 
 
 @pytest.mark.feature("quick-swarm")
+def test_the_master_seed_and_block_load_the_quick_swarm_master_skill_first(tmp_path):
+    found = _member(tmp_path, "master")
+    assert "Load the quick-swarm-master skill before any other action" in seeds.opening(found)
+    assert "Load the quick-swarm-master skill before any other action" in seeds.block(found)
+    assert "quick-swarm-master" not in seeds.opening(_member(tmp_path, "eng-1"))
+
+
+@pytest.mark.feature("quick-swarm")
 def test_an_engineer_seed_plans_first_and_reports_to_the_master_before_starting(tmp_path):
     text = seeds.opening(_member(tmp_path, "eng-1"))
     assert "eng-1 of quick swarm quick-abc, in herdr pane 2" in text

@@ -29,11 +29,13 @@ It runs only inside herdr; outside it the command refuses and says why.
 
    Each line names the seat, its pane, its harness and its session name.
 
-3. You are now the master. Follow the quick swarm block injected into this
-   session: tell each engineer to wait for the operator, track each seat
-   folder, and reach seats with SendMessage (Claude to Claude) or
-   `agentihooks quick send <seat> "<text>"`. Read what seats sent you with
-   `agentihooks quick room`.
+3. You are now the master. Load the `quick-swarm-master` skill for how the
+   swarm is built, how a seat launches and registers, how messages travel and
+   how to troubleshoot or force a handoff. Follow the quick swarm block
+   injected into this session: tell each engineer to wait for the operator,
+   track each seat folder, and reach seats with SendMessage (Claude to
+   Claude) or `agentihooks quick send <seat> "<text>"`. Read what seats sent
+   you with `agentihooks quick room`.
 
 ## Hard rule: never trust a pane message as delivered
 

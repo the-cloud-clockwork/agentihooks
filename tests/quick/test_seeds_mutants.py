@@ -21,6 +21,8 @@ def test_the_master_seed_pins_every_exact_sentence(tmp_path: Path) -> None:
         [
             "You are the master of quick swarm quick-abc, in herdr pane 1. You are the operator's "
             "front door: the operator talks only to you.",
+            "Load the quick-swarm-master skill before any other action: it covers how this quick swarm is built, "
+            "how a seat launches and registers, how messages travel, and how to troubleshoot or force a handoff.",
             "Take work from whatever source the operator names, tickets, issues or pull requests, with the tools you have.",
             "Your engineers, the only agents you contact:",
             f"- eng-1 in pane 2 (claude, session quick-abc-eng-1); seat folder {paths.seat_dir(tmp_path, 'eng-1')}",
@@ -89,6 +91,7 @@ def test_block_pins_the_role_and_the_no_plan_default_for_the_master(tmp_path: Pa
     expected = (
         "QUICK SWARM — you are master of quick swarm quick-abc, herdr pane 1 (master: the operator's front door). "
         f"Seat folder {paths.seat_dir(tmp_path, 'master')}. Plan: no plan yet. "
+        "Load the quick-swarm-master skill before any other action. "
         "Room: 1 message(s) for you; read them with `agentihooks quick room`.\n"
         "Culture: Ship small."
     )
