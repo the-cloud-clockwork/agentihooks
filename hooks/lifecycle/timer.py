@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -96,6 +97,8 @@ def remove_timer() -> str:
 
 
 def reconcile_units(python: str, root: str, enabled: bool) -> str:
+    if sys.platform == "win32":
+        return "lifecycle timer and host guard: not used on Windows"
     from scripts.host_guard.sync import reconcile
 
     schedule = install_timer(python, root) if enabled else remove_timer()
