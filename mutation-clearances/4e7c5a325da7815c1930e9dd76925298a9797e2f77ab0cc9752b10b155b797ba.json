@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.x__hydrate_dead:1b8a6608d6406c247988919a81e33ec1ca9282e3425f145b5e3d883ebe0b952f": {
+    "reader": "standards-reader",
+    "reason": "Equivalent for the bus contract: absent or empty stored data selects this fallback. Both empty bytes and XXXX raise JSONDecodeError before accepting a retained envelope. NatsConsumer ignores the diagnostic document and follows the same settlement path."
+  }
+}

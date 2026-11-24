@@ -18,6 +18,7 @@ from scripts.swarm import (
     master_lock,
     master_start,
     model_pick,
+    seat_heads,
     seat_spawn,
     take_master,
 )
@@ -230,8 +231,11 @@ def _new(store: RedisStore, slug: str, runtime: Any, at: int, forced: bool) -> L
     return Launched(name, record.pane_id, record.seat, FORCED if forced else NEW)
 
 
-def _front_doors(store, slug, live):
-    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.name in live]
+def _front_doors(store: RedisStore, slug: str, live: set[str]) -> list[AgentRecord]:
+    listed = store.agents(slug)
+    return [
+        a for a in listed if master_seats.is_lead(slug, a) and a.name in live and not seat_heads.superseded(a, listed)
+    ]
 
 
 def _starting_leads(store, slug):

@@ -3,9 +3,10 @@
 import json
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
+from itertools import batched
 from typing import TYPE_CHECKING, Any, cast
 
 from scripts.inbox.seats import SCAN_PAGE, SeatMemory, SeatRegistry, SwarmCulture
@@ -71,6 +72,7 @@ for index = values + 1, #KEYS do
 end
 return {out, members}
 """
+DUMP_BATCH = 1000
 DISPATCH = "dispatch"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
@@ -83,6 +85,7 @@ DEFAULT_SWAP_FLOOR_MB = 4096
 DEFAULT_MASTERS_STEP = 12
 DEFAULT_MASTER_MOVE_GRACE = 300
 DEFAULT_LOCAL_MAX_AGENTS = 15
+DEFAULT_REVIEW_SHARE = 20
 EVENTS_ENGINE = "events"
 MAX_LOAD = 10.0
 CODEX_TRANSPORTS = ("legacy", "app_server")
@@ -152,12 +155,16 @@ class SwarmConfig:
     tick_mode: str = SEQUENTIAL_TICK
     control_url: str = ""
     lab_url: str = ""
+    max_review: int = 0
+    review_share: int = DEFAULT_REVIEW_SHARE
 
     def __post_init__(self) -> None:
         if self.tick_mode not in TICK_MODES:
             raise SwarmError(f"tick mode must be one of {', '.join(TICK_MODES)}")
         if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
             raise SwarmError("focus weight must be a whole number from 0 to 100")
+        if type(self.review_share) is not int or self.review_share not in range(101):
+            raise SwarmError("review share must be a whole number from 0 to 100")
         if self.placement_mode not in PLACEMENT_MODES:
             raise SwarmError(f"placement mode must be one of {', '.join(PLACEMENT_MODES)}")
         if type(self.placement_nodes) is not int or self.placement_nodes < 0:
@@ -339,6 +346,8 @@ class RedisStore:
             raw.get("tick_mode") or SEQUENTIAL_TICK,
             raw.get("control_url", ""),
             raw.get("lab_url", ""),
+            int(raw.get("max_review", 0)),
+            int(raw.get("review_share", DEFAULT_REVIEW_SHARE)),
         )
 
     def update(self, slug: str, **changes: Any) -> SwarmConfig:
@@ -871,18 +880,23 @@ class RedisStore:
     def clear_peer(self, slug):
         self.redis.delete(self.key(slug, "peer"))
 
-    def remove(self, slug):
+    def remove(self, slug: str) -> None:
         if not slug or set(slug) & set("*?[]\\"):
             raise SwarmError(f"refusing to remove swarm {slug!r}: an empty or pattern name would match other swarms")
         self.config(slug)
         if self.agents(slug):
             raise SwarmError(f"swarm {slug} still has agents; stop it with stop --now first")
         from scripts.swarm import fencing
+        from scripts.swarm_ledger import ledger_workspace
 
         fencing.write(self, slug, lambda doc: doc.update({**fencing.EMPTY, "epoch": doc["epoch"]}))
-        keys = list(self.redis.scan_iter(match=self.key(slug, "*")))
-        if keys:
-            self.redis.delete(*keys)
+        keys = [
+            key
+            for pattern in (self.key(slug, "*"), ledger_workspace.task_files_key("*", slug, "*"))
+            for key in self.redis.scan_iter(match=pattern, count=SCAN_PAGE)
+        ]
+        for page in batched(keys, SCAN_PAGE):
+            self.redis.delete(*page)
         self.redis.srem(f"{PREFIX}:index", slug)
         self.names.release(slug)
 
@@ -899,12 +913,12 @@ class RedisStore:
         held = (key[len(self.seats.key("")) :].split(":")[0] for key in seats if key.startswith(self.seats.key("")))
         seated = {address for address in held if address.endswith(f"@{slug}")}
         mail, addresses = InboxStore(self.redis), cast(list[str], sorted(named | seated))  # pragma: no mutate
-        inbox, _ = mail.keys_at(addresses)
-        item = mail.key("item", "")
-        sets = {mail.key(shared): addresses for shared in ("waiting", "indexed", "open-indexed")}
-        sets[mail.key("wake-outbox")] = [key.removeprefix(item) for key in inbox if key.startswith(item)]
-        keys: list[str] = sorted(own) + seats + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
-        dumped, members = _dump(self.redis, keys, sets)
+        singles: list[tuple[list[str], dict[str, list[str]]]] = [
+            ([key], {}) for key in [*sorted(own), *seats, self.culture.key(slug)]
+        ]
+        names: list[tuple[list[str], dict[str, list[str]]]] = [([key], {}) for key in self.names.swarm_keys(slug)]
+        inboxes = [_inbox_group(mail, address) for address in addresses]
+        dumped, members = _dump(self.redis, singles + inboxes + names)
         return {
             "keys": dumped,
             "members": {f"{PREFIX}:index": [slug], **members},
@@ -959,6 +973,38 @@ _WRITE = {
 
 
 def _dump(
+    redis: Any, groups: list[tuple[list[str], dict[str, list[str]]]]
+) -> tuple[dict[str, dict[str, Any]], dict[str, list[str]]]:
+    """Every key's type, value and time to live and which candidates each set holds, read in scripts of at most
+    DUMP_BATCH keys; a group's keys and set checks share one atomic script so no write lands between two of its reads."""
+    dumped: dict[str, dict[str, Any]] = {}
+    members: dict[str, list[str]] = {}
+    for keys, sets in _batches(groups):
+        rows, found = _dump_batch(redis, keys, sets)
+        dumped.update(rows)
+        for key, held in found.items():
+            members.setdefault(key, []).extend(held)
+    return dumped, members
+
+
+def _batches(
+    groups: list[tuple[list[str], dict[str, list[str]]]],
+) -> Iterator[tuple[list[str], dict[str, list[str]]]]:
+    """The groups packed in order into batches of at most DUMP_BATCH keys; a group larger than a batch runs alone."""
+    keys: list[str] = []
+    sets: dict[str, list[str]] = {}
+    for group_keys, group_sets in groups:
+        if keys and len(keys) + len(group_keys) > DUMP_BATCH:
+            yield keys, sets
+            keys, sets = [], {}
+        keys.extend(group_keys)
+        for key, candidates in group_sets.items():
+            sets.setdefault(key, []).extend(candidates)
+    if keys:
+        yield keys, sets
+
+
+def _dump_batch(
     redis: Any, keys: list[str], sets: dict[str, list[str]]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, list[str]]]:
     """Every key's type, value and time to live and which candidates each set holds, read in one atomic script so no
@@ -972,6 +1018,16 @@ def _dump(
             dumped[key] = {"type": kind, "value": _DECODE[kind](raw), "ttl_ms": max(int(ttl_ms), 0)}
     members = {key: held for (key, _), held in zip(pairs, found) if held}
     return dumped, members
+
+
+def _inbox_group(mail: InboxStore, address: str) -> tuple[list[str], dict[str, list[str]]]:
+    """The keys of one inbox address, its items and journal, with its checks in the shared waiting, indexed,
+    open-indexed and wake sets, so one script reads them together."""
+    keys, _ = mail.keys_at([address])
+    item = mail.key("item", "")
+    sets = {mail.key(shared): [address] for shared in ("waiting", "indexed", "open-indexed")}
+    sets[mail.key("wake-outbox")] = [key.removeprefix(item) for key in keys if key.startswith(item)]
+    return keys, sets
 
 
 def redis_url(environ):

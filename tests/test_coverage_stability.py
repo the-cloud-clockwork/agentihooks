@@ -1,3 +1,6 @@
+import itertools
+import re
+import shlex
 from pathlib import Path
 
 import pytest
@@ -154,6 +157,22 @@ def _workflow() -> dict:
     return yaml.safe_load((_ROOT / ".github/workflows/coverage-stability.yml").read_text())
 
 
+def _installs_locked_coverage(run: str) -> bool:
+    for line in run.splitlines():
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        words = list(lexer)
+        for at, word in enumerate(words):
+            command = list(itertools.takewhile(lambda part: part.strip("();<>|&"), words[at + 1 :]))
+            if (
+                word in {"pip", "pip3"}
+                and command[:3] == ["install", "--constraint", ".github/test-requirements.lock"]
+                and any(re.fullmatch(r"coverage(?:[=<>!~].*)?", part) for part in command[3:])
+            ):
+                return True
+    return False
+
+
 def test_the_scheduled_job_compares_the_newest_dev_runs_and_fails_on_any_difference():
     workflow = _workflow()
     triggers = workflow[True]
@@ -173,6 +192,16 @@ def test_the_scheduled_job_compares_the_newest_dev_runs_and_fails_on_any_differe
     assert 'python -m tests.coverage_stability --work "$RUNNER_TEMP/coverage-stability" latest' in compare["run"]
     assert "set -o pipefail" in compare["run"]
     assert all("continue-on-error" not in step and "if" not in step for step in job["steps"])
+
+
+@pytest.mark.feature("coverage-stability-installs-locked-coverage-first")
+def test_the_compare_job_installs_locked_coverage_before_it_compares() -> None:
+    steps = _workflow()["jobs"]["compare"]["steps"]
+    installs = [index for index, step in enumerate(steps) if _installs_locked_coverage(str(step.get("run", "")))]
+    compares = [index for index, step in enumerate(steps) if step.get("id") == "compare"]
+    assert installs and compares and installs[0] < compares[0], (
+        f"coverage installs at {installs}, compare at {compares}"
+    )
 
 
 def test_stability_reads_every_coverage_shard_the_unit_job_splits():

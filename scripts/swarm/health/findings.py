@@ -143,8 +143,8 @@ def _is_master(by):
     return naming.lane_of(by) == "master"
 
 
-def _is_worker(by):
-    return naming.lane_of(by) in ("eng", "ci")
+def _is_worker(by: str) -> bool:
+    return naming.lane_of(by) in ("eng", "ci", "review")
 
 
 def _title(tasks, tid):

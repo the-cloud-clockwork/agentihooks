@@ -3,6 +3,7 @@ from collections.abc import Callable
 
 DELEGATED_CLIS = {
     "agents": "scripts.agents.cli",
+    "review": "scripts.review.cli",
     "msg": "scripts.inbox.cli",
     "recall": "scripts.recall.cli",
     "knowledge": "scripts.ledger_knowledge.cli",
@@ -20,11 +21,13 @@ DELEGATED_CLIS = {
     "swarm-jump": "scripts.swarm_v2.kubernetes.jump",
     "accounts": "scripts.account_env",
     "access": "scripts.access_env",
+    "secret-env": "scripts.secret_env",
     "timer": "scripts.scheduler.cli:timer",
     "stopwatch": "scripts.scheduler.cli:stopwatch",
     "cron": "scripts.scheduler.cli:cron",
     "judge": "scripts.judge.cli",
     "scout": "scripts.scout.cli",
+    "forge": "scripts.forge.cli",
     "safety-nudge": "scripts.swarm.safety_nudge",
     "quick": "scripts.quick.cli",
     "ci-lab-scheduler": "scripts.ci_lab.contract:scheduler",

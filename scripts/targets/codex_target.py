@@ -10,6 +10,7 @@ Writes the Codex-shaped install surface (docs/reference/CODEX-COMPAT.md §5):
 - ``~/.codex/AGENTS.md`` — persona: bundle CLAUDE.md ⊕ profile-chain
   CLAUDE.mds ⊕ compiled rules (codex has no rules dir) ⊕ CI manifesto.
 - ``~/.agents/skills/`` — skills symlinks (open agent-skills standard dir).
+- ``~/.codex/agents/`` — agents as Codex custom agent files.
 - ``~/.codex/prompts/`` — never written; prompts an earlier install translated are removed.
 - ``[mcp_servers.*]`` — MCP registration (stdio + http url; SSE entries are
   skipped with a warning until the server side exposes streamable HTTP).
@@ -31,6 +32,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from scripts.targets._common import (
     LEGACY_MCP_SERVER_NAMES,
@@ -40,9 +42,12 @@ from scripts.targets._common import (
     _install_module,
     agents_skills_home,
     build_persona,
+    claude_local_entries,
     clear_managed_mcp,
     drop_if_credentialed,
     has_env_reference,
+    load_manifest,
+    managed_mcp_names,
     migrate_legacy_mcp,
     reap_translated_commands,
     record_managed_mcp,
@@ -72,21 +77,66 @@ CODEX_HOOK_EVENTS = (
 
 _NO_CONTEXT_EVENTS = frozenset({"Stop", "SubagentStop", "SessionEnd", "PreCompact", "PermissionRequest"})
 
+_LOCAL_COMMANDS_MANIFEST = ".agentihooks-codex-local-commands.json"
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_CREDENTIAL_KEYS = frozenset({"bearer_token_env_var", "env_http_headers", "http_headers"})
+
+
+def signs_in_by_hand(entry: Mapping[str, Any]) -> bool:
+    """A remote HTTP server that carries no credential of its own works only after an interactive OAuth sign-in."""
+    if "url" not in entry or entry.keys() & _CREDENTIAL_KEYS:
+        return False
+    return urlsplit(str(entry["url"])).hostname not in _LOOPBACK_HOSTS
+
 
 _REFERENCE_NAME = re.compile(r"\$\{?(\w+)")
+LEGACY_WRAPPER = "agentihooks-hook.sh"
+WINDOWS = os.name == "nt"
 
 
-def _forward_env_references(entry: dict) -> None:
-    """Codex passes env values literally: resolve ${VAR} in a bash wrapper fed by env_vars."""
-    env = entry.get("env") or {}
-    refs = {k: str(v) for k, v in env.items() if has_env_reference(str(v))}
+def _forward_env_references(entry: dict[str, Any]) -> None:
+    """Codex passes env values literally: resolve ``${VAR}`` references.
+
+    A reference that names the same variable as its key (``{"X": "${X}"}``)
+    forwards natively through Codex's own ``env_vars`` — no subprocess
+    shell needed on any platform. A reference that renames or composes a
+    value still needs a shell to build it: ``bash -c`` where bash is on
+    ``PATH``, a ``cmd.exe /c`` equivalent otherwise (native Windows has no
+    bash on that path).
+    """
+    env: dict[str, Any] = entry.get("env") or {}
+    refs: dict[str, str] = {k: str(v) for k, v in env.items() if has_env_reference(str(v))}
     if not refs:
         return
-    assigns = " ".join(f'{k}="{v.replace(chr(34), chr(92) + chr(34))}"' for k, v in refs.items())
-    entry["args"] = ["-c", f'{assigns} exec "$0" "$@"', entry["command"], *entry.get("args", [])]
-    entry["command"] = "bash"
-    entry["env_vars"] = sorted({n for v in refs.values() for n in _REFERENCE_NAME.findall(v)})
-    literal = {k: v for k, v in env.items() if k not in refs}
+    native_names: set[str] = set()
+    renamed: dict[str, str] = {}
+    for key, value in refs.items():
+        whole = _WHOLE_REFERENCE.fullmatch(value)
+        if whole and (whole.group(1) or whole.group(2)) == key:
+            native_names.add(key)
+        else:
+            renamed[key] = value
+    env_vars: set[str] = set(entry.get("env_vars") or [])
+    if native_names:
+        env_vars |= native_names
+    if renamed:
+        referenced: set[str] = {n for v in renamed.values() for n in _REFERENCE_NAME.findall(v)}
+        env_vars |= referenced
+        command = str(entry["command"])
+        args: list[str] = [str(a) for a in entry.get("args", [])]
+        if shutil.which("bash"):
+            assigns = " ".join(f'{k}="{v.replace(chr(34), chr(92) + chr(34))}"' for k, v in renamed.items())
+            entry["args"] = ["-c", f'{assigns} exec "$0" "$@"', command, *args]
+            entry["command"] = "bash"
+        else:
+            assigns = " && ".join(f'set "{k}={v}"' for k, v in renamed.items())
+            quoted_args = " ".join(f'"{a}"' for a in args)
+            tail = f'"{command}"' + (f" {quoted_args}" if quoted_args else "")
+            entry["args"] = ["/d", "/s", "/c", f"{assigns} && {tail}"]
+            entry["command"] = "cmd.exe"
+    if env_vars:
+        entry["env_vars"] = sorted(env_vars)
+    literal: dict[str, Any] = {k: v for k, v in env.items() if k not in refs}
     if literal:
         entry["env"] = literal
     else:
@@ -107,11 +157,24 @@ def _stale_catalog_files() -> tuple[Path, Path]:
 
 
 def wrapper_text(profile_env: dict[str, str], python_bin: str) -> str:
+    """The hook wrapper script: a batch file on Windows, where Codex runs hooks through cmd.exe, bash elsewhere."""
+    root = str(_install_module().AGENTIHOOKS_ROOT)
+    if WINDOWS:
+        return (
+            "@echo off\n"
+            "rem managed-by: agentihooks, regenerate with: agentihooks init --target codex\n"
+            f'cd /d "{root}"\n'
+            + "".join(
+                f'if not defined {key} set "{key}={value.replace("%", "%%")}"\n' for key, value in profile_env.items()
+            )
+            + 'set "AGENTIHOOKS_TARGET=codex"\n'
+            + f'"{python_bin}" -m hooks\n'
+        )
     return (
         "#!/usr/bin/env bash\n"
         "# managed-by: agentihooks — regenerate with: agentihooks init --target codex\n"
         "set -euo pipefail\n"
-        f"cd {shlex.quote(str(_install_module().AGENTIHOOKS_ROOT))}\n"
+        f"cd {shlex.quote(root)}\n"
         + "".join(f'export {key}="${{{key}:={shlex.quote(value)}}}"\n' for key, value in profile_env.items())
         + f"AGENTIHOOKS_TARGET=codex exec {shlex.quote(python_bin)} -m hooks\n"
     )
@@ -123,6 +186,9 @@ def _silent(_line: str) -> None:
 
 def _wrapper_python(text: str) -> str | None:
     lines = text.splitlines()
+    if WINDOWS:
+        found = re.fullmatch(r'"([^"]+)" -m hooks', lines[-1]) if lines else None
+        return found.group(1) if found else None
     words = shlex.split(lines[-1]) if lines else []
     return words[2] if words[:2] == ["AGENTIHOOKS_TARGET=codex", "exec"] and len(words) == 5 else None
 
@@ -133,7 +199,7 @@ def refresh_wrapper() -> bool:
 
     _i = _install_module()
     record = _i._global_record(_i._load_state(), "codex")
-    wrapper = operator_codex_home() / "agentihooks-hook.sh"
+    wrapper = operator_codex_home() / wrapper_name()
     if not record.get("profile") or not wrapper.is_file():
         return False
     if _i.AGENTIHOOKS_ROOT.resolve() != _i.install_root().resolve():
@@ -164,8 +230,24 @@ def refresh_wrapper() -> bool:
 def _is_ours(group: object, wrapper: Path) -> bool:
     hooks = group.get("hooks") if isinstance(group, dict) else None
     return isinstance(hooks, list) and any(
-        isinstance(h, dict) and _command_is_wrapper(str(h.get("command")), wrapper) for h in hooks
+        isinstance(h, dict) and _runs_wrapper(str(h.get("command")), wrapper) for h in hooks
     )
+
+
+def _runs_wrapper(command: str, wrapper: Path) -> bool:
+    """True for a hook command that runs our wrapper, quoted or not, or the bash wrapper an earlier install wrote."""
+    bare = command.strip('"')
+    return _command_is_wrapper(bare, wrapper) or _command_is_wrapper(bare, wrapper.with_name(LEGACY_WRAPPER))
+
+
+def wrapper_name() -> str:
+    """The hook wrapper's file name: a batch file on Windows, which opens .sh files in a Git Bash window."""
+    return "agentihooks-hook.cmd" if WINDOWS else LEGACY_WRAPPER
+
+
+def hook_command(wrapper: Path) -> str:
+    """The hooks.json command for the wrapper; quoted on Windows so cmd.exe keeps a path with spaces whole."""
+    return f'"{wrapper}"' if WINDOWS else str(wrapper)
 
 
 def restore_hook_order(home: Path) -> list[str]:
@@ -181,7 +263,7 @@ def restore_hook_order(home: Path) -> list[str]:
     hooks = doc.get("hooks") if isinstance(doc, dict) else None
     if not isinstance(hooks, dict):
         return []
-    wrapper = path.parent / "agentihooks-hook.sh"
+    wrapper = path.parent / wrapper_name()
     moved = []
     for event, groups in hooks.items():
         if not isinstance(groups, list):
@@ -319,6 +401,16 @@ def _carry_native_keys(name: str, entry: dict[str, Any], spec: dict[str, Any]) -
         entry.setdefault(key, value)
 
 
+def _carry_oauth(entry: dict[str, Any], spec: dict[str, Any]) -> None:
+    """Carry a spec's ``oauth.client_id`` (Claude shape: ``oauth.clientId``) into the codex entry."""
+    oauth = spec.get("oauth")
+    if not isinstance(oauth, dict):
+        return
+    client_id = oauth.get("client_id") or oauth.get("clientId")
+    if client_id:
+        entry["oauth"] = {"client_id": client_id}
+
+
 def codex_mcp_entry(name: str, spec: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     """A declared (Claude-shaped) MCP server as its codex entry, or None and why it cannot mount."""
     if drop_if_credentialed(name, spec, "config.toml"):
@@ -340,6 +432,7 @@ def codex_mcp_entry(name: str, spec: dict[str, Any]) -> tuple[dict[str, Any] | N
     if spec.get("default_tools_approval_mode"):
         entry["default_tools_approval_mode"] = spec["default_tools_approval_mode"]
     _carry_native_keys(name, entry, spec)
+    _carry_oauth(entry, spec)
     return entry, ""
 
 
@@ -359,6 +452,8 @@ class CodexAdapter:
         loop runs first.
         """
         self._pending_rules: list[tuple[str, str, str]] = []
+        self._written_mcp: set[str] = set()
+        self._manual_sign_in = False
 
     def home(self) -> Path:
         return codex_home()
@@ -400,7 +495,7 @@ class CodexAdapter:
         managed = legacy.get("managed") if isinstance(legacy, dict) else None
         return managed.unwrap() if isinstance(managed, dict) else {}
 
-    def write_settings(self, native: dict) -> Path:
+    def write_settings(self, native: dict[str, Any]) -> Path:
         """
         Drops a model_catalog_json that points at the stale pinned catalog: a pinned catalog limits codex to the
         models it lists.
@@ -452,6 +547,7 @@ class CodexAdapter:
         _atomic_write(self._managed_sidecar(home), json.dumps(managed, indent=2) + "\n")
         _i._cprint(f"[OK] Wrote managed keys into {config_path}")
 
+        self._manual_sign_in = bool(native.get("_agentihooks", {}).get("mcpManualSignIn"))
         self._write_hooks_json(home, native.get("_agentihooks", {}).get("env", {}))
         if trusted := trust_hooks(home):
             _i._cprint(f"[OK] Trusted {trusted} Codex hook entries in {config_path}")
@@ -470,14 +566,14 @@ class CodexAdapter:
         groups there survive.
         """
         _i = _install_module()
-        wrapper = home / "agentihooks-hook.sh"
+        wrapper = home / wrapper_name()
         wrapper.write_text(wrapper_text(profile_env or {}, str(_i._detect_venv() or sys.executable)))
         wrapper.chmod(0o755)
 
         hooks_path = home / "hooks.json"
 
         def _entry(event: str) -> dict:
-            hook = {"type": "command", "command": str(wrapper)}
+            hook = {"type": "command", "command": hook_command(wrapper)}
             if event not in _NO_CONTEXT_EVENTS:
                 hook["additionalContextLimit"] = 0
             return {"hooks": [hook]}
@@ -498,16 +594,14 @@ class CodexAdapter:
         for event, groups in desired.items():
             prior = merged.get(event, [])
             foreign = [
-                g
-                for g in prior
-                if not any(_command_is_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
+                g for g in prior if not any(_runs_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
             ]
             merged[event] = groups + foreign
         for event in [e for e in merged if e not in desired]:
             foreign = [
                 g
                 for g in merged[event]
-                if not any(_command_is_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
+                if not any(_runs_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
             ]
             if foreign:
                 merged[event] = foreign
@@ -520,22 +614,28 @@ class CodexAdapter:
         _atomic_write(hooks_path, text)
         _i._cprint(f"[OK] Wrote {hooks_path} ({len(CODEX_HOOK_EVENTS)} events)")
 
-    def install_features(self, subdir: str, layers: list[tuple[str, Path]], filter_fn) -> None:
+    def install_features(self, subdir: str, layers: list[tuple[str, Path]], filter_fn: Callable[[Path], bool]) -> None:
         """
         ~/.agents/skills is shared with the copilot target, which writes translated commands there as real directories.
         Clear any whose name a real skill now claims — the symlinker refuses to replace a non-symlink, so otherwise this
         skill silently never installs.
 
         Codex has no auto-loaded rules dir — compile into AGENTS.md.
+
+        Claude Code also loads what the operator placed in ~/.claude by hand; each feature carries those entries too,
+        under names no layer ships.
         """
         _i = _install_module()
+        local = claude_local_entries(subdir, layers, filter_fn)
         if subdir == "skills":
             dst = agents_skills_home()
             reap_translated_commands(skill_names_in(layers, filter_fn), reason="a real skill now owns the name")
             for label, src in layers:
                 _i._symlink_dir_contents(src, dst, label=f"codex {label}", filter_fn=filter_fn)
+            self._link_local_skills(local)
         elif subdir == "commands":
             self._reap_prompts()
+            self._write_local_commands(local)
         elif subdir == "rules":
             collected: dict[str, tuple[str, str, str]] = {}
             for label, src in layers:
@@ -547,12 +647,25 @@ class CodexAdapter:
                             collected[f.name] = (label, f.name, f.read_text())
                         except OSError:
                             pass
+            for f in local:
+                with contextlib.suppress(OSError):
+                    collected[f.name] = ("local", f.name, f.read_text())
             self._pending_rules = list(collected.values())
             _i._cprint(f"  [OK] {len(self._pending_rules)} rule(s) queued for AGENTS.md compilation")
         elif subdir == "agents":
-            _i._cprint(
-                "  [--] Codex has no custom-subagent registry — agents skipped (docs/reference/CODEX-COMPAT.md §3 row 16)."
-            )
+            self._write_agents(layers, filter_fn, local)
+
+    @staticmethod
+    def _link_local_skills(local: list[Path]) -> None:
+        names = {p.name for p in local}
+
+        def is_local(path: Path) -> bool:
+            return path.name in names
+
+        _i = _install_module()
+        link: Callable[..., None] = getattr(_i, "_symlink_dir_contents")
+        skills = Path(getattr(_i, "CLAUDE_HOME")) / "skills"
+        link(skills, agents_skills_home(), label="codex local skill", filter_fn=is_local)
 
     def _reap_prompts(self) -> None:
         """Remove the prompts an earlier install translated; Codex 0.160 no longer reads ~/.codex/prompts."""
@@ -567,6 +680,68 @@ class CodexAdapter:
                 pass
             manifest_path.unlink()
             _i._cprint(f"  [RM] Removed translated prompts from {prompts_dir}")
+
+    def _write_agents(
+        self, layers: list[tuple[str, Path]], filter_fn: Callable[[Path], bool], local: list[Path]
+    ) -> None:
+        """
+        agents/*.md → ~/.codex/agents/<stem>.toml, the Codex custom agent files Codex loads as spawnable roles.
+        Tracked by a manifest: a later run removes the files it wrote and no longer ships, and an operator's own
+        file of the same name wins.
+        """
+        import tomlkit
+
+        from scripts.profiles.render import codex_agent_doc
+
+        say: Callable[[str], None] = getattr(_install_module(), "_cprint")
+        dst_dir = self.home() / "agents"
+        manifest_path = dst_dir / ".agentihooks-manifest.json"
+        previous = load_manifest(manifest_path)
+        sources = {f.stem: f for _label, src in layers if src.is_dir() for f in sorted(src.iterdir()) if filter_fn(f)}
+        sources.update({f.stem: f for f in local})
+        written: list[str] = []
+        for stem, src in sources.items():
+            dst = dst_dir / f"{stem}.toml"
+            if dst.exists() and dst.name not in previous:
+                say(f"  [!!] {dst} exists and is not agentihooks-managed — skipping (operator file wins)")
+                continue
+            with contextlib.suppress(OSError):
+                if doc := codex_agent_doc(src):
+                    dst_dir.mkdir(parents=True, exist_ok=True)
+                    _atomic_write(dst, tomlkit.dumps(doc))
+                    written.append(dst.name)
+        for stale in set(previous) - set(written):
+            (dst_dir / stale).unlink(missing_ok=True)
+        if written or previous:
+            _atomic_write(manifest_path, json.dumps(sorted(written)))
+        say(f"  [OK] {len(written)} agent(s) written as Codex custom agents → {dst_dir}")
+
+    def _write_local_commands(self, commands: list[Path]) -> None:
+        """
+        A hand-placed ~/.claude/commands file becomes ~/.agents/skills/<stem>/SKILL.md, a copy of the command: Codex
+        skips a symlinked SKILL.md and one without frontmatter. Its own manifest, apart from the copilot translations.
+        """
+        say: Callable[[str], None] = getattr(_install_module(), "_cprint")
+        dst_dir = agents_skills_home()
+        manifest_path = dst_dir / _LOCAL_COMMANDS_MANIFEST
+        previous = load_manifest(manifest_path)
+        written: list[str] = []
+        for src in commands:
+            skill_dir = dst_dir / src.stem
+            with contextlib.suppress(OSError):
+                text = src.read_text()
+                taken = (skill_dir.exists() or skill_dir.is_symlink()) and src.stem not in previous
+                if taken or not text.startswith("---"):
+                    continue
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                _atomic_write(skill_dir / "SKILL.md", text)
+                written.append(src.stem)
+        for stale in set(previous) - set(written):
+            shutil.rmtree(dst_dir / stale, ignore_errors=True)
+        if written or previous:
+            _atomic_write(manifest_path, json.dumps(sorted(written)))
+        if written:
+            say(f"  [OK] {len(written)} local command(s) written as skills → {dst_dir}")
 
     def install_persona(
         self,
@@ -587,9 +762,9 @@ class CodexAdapter:
             profile_chain,
             bundle_dir,
             self._pending_rules,
-            _MANAGED_HEADER,
-            _MANAGED_FOOTER,
+            (_MANAGED_HEADER, _MANAGED_FOOTER),
             {"shared bundle": shared_dir, "user bundle": user_dir},
+            native=(".codex", "AGENTS.md"),
         )
         dst = self.home() / "AGENTS.md"
         text = write_persona(dst, managed_text, _MANAGED_HEADER, _MANAGED_FOOTER)
@@ -645,10 +820,14 @@ class CodexAdapter:
             entry, _ = codex_mcp_entry(name, dict(spec))
             if entry is None:
                 continue
+            if self._manual_sign_in and "enabled" not in entry and signs_in_by_hand(entry):
+                previous: Any = table.get(name) or {}
+                entry["enabled"] = bool(previous.get("enabled"))
             table[name] = entry
             added.append(name)
         self._dump_toml(config_path, doc)
         if added:
+            self._written_mcp.update(added)
             record_managed_mcp(self.name, added)
             _i._cprint(f"  [OK] Codex MCP servers: {', '.join(added)}")
 
@@ -674,7 +853,7 @@ class CodexAdapter:
         """
         _i = _install_module()
         home = self.home()
-        wrapper = home / "agentihooks-hook.sh"
+        wrapper = home / wrapper_name()
 
         hooks_path = home / "hooks.json"
         if hooks_path.exists():
@@ -692,7 +871,7 @@ class CodexAdapter:
                 foreign = [
                     g
                     for g in groups
-                    if not any(_command_is_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
+                    if not any(_runs_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
                 ]
                 if foreign:
                     foreign_left[event] = foreign
@@ -761,7 +940,26 @@ class CodexAdapter:
         self._reap_prompts()
 
     def post_install_reconcile(self, profile_chain: list[str], persisted_profile: str) -> None:
-        return None
+        """
+        Prune only when this run wrote MCP servers and the full intended chain resolved — a transiently missing profile
+        would otherwise shrink the written set and delete that profile's servers.
+        """
+        say: Callable[[str], None] = getattr(_install_module(), "_cprint")
+        missing = [p.strip() for p in persisted_profile.split(",") if p.strip() and p.strip() not in profile_chain]
+        if missing or not self._written_mcp:
+            if missing:
+                say(f"  [--] Skipping codex MCP reconcile — profile(s) {', '.join(missing)} did not resolve")
+            return
+        stale = [n for n in managed_mcp_names(self.name) if n not in self._written_mcp]
+        config_path = self.home() / "config.toml"
+        doc: Any = self._load_toml(config_path)
+        table: Any = doc.get("mcp_servers")
+        removed = [n for n in stale if table is not None and table.pop(n, None) is not None]
+        if removed:
+            self._dump_toml(config_path, doc)
+            say(f"  [OK] Removed {len(removed)} codex MCP server(s) no longer shipped: {', '.join(removed)}")
+        clear_managed_mcp(self.name)
+        record_managed_mcp(self.name, sorted(self._written_mcp))
 
     def doctor(self) -> int:
         """Print codex-install health; return count of failed checks."""
@@ -787,7 +985,7 @@ class CodexAdapter:
             checks.append((bool(servers), f"mcp_servers registered: {', '.join(servers) or 'NONE'}"))
 
         hooks_path = home / "hooks.json"
-        wrapper = home / "agentihooks-hook.sh"
+        wrapper = home / wrapper_name()
         if hooks_path.exists():
             try:
                 hooks_doc = json.loads(hooks_path.read_text())
@@ -797,7 +995,7 @@ class CodexAdapter:
                     for groups in hooks_doc.get("hooks", {}).values()
                     for g in groups
                     for h in g.get("hooks", [])
-                    if _command_is_wrapper(h.get("command", ""), wrapper)
+                    if _runs_wrapper(h.get("command", ""), wrapper)
                 )
                 checks.append(
                     (

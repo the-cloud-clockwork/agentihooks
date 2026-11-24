@@ -164,6 +164,28 @@ def test_hive_heartbeat_keeps_beating_when_the_account_slot_publish_fails(redis,
     assert "account slot heartbeat failed" in capsys.readouterr().err
 
 
+@pytest.mark.feature("hive-resume-start-failure")
+def test_a_beat_whose_resume_order_process_cannot_start_still_heartbeats_to_its_end(
+    redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import join_report, orders
+
+    order = orders.CommandOrder("resume:x:1:1", "resume", "rig", "engineer", "x", 1, "continue", 5, "pane")
+    orders.Orders(redis).command("machine", order)
+    report = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    heartbeat, finished = Mock(), Mock()
+    monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
+    monkeypatch.setattr(daemon, "execution_report", lambda *args: {"executions": {}, "names": []})
+    monkeypatch.setattr(orders.subprocess, "Popen", Mock(side_effect=OSError(11, "Resource temporarily unavailable")))
+    monkeypatch.setattr(join_report, "heartbeat", heartbeat)
+    monkeypatch.setattr(registry, "finished", finished)
+    daemon.beat(redis, "machine")
+    assert heartbeat.call_args.args[:2] == (redis, "machine")
+    assert finished.call_args.args[:2] == (redis, "machine")
+    receipt = orders.Orders(redis).command_receipt("machine", order.id)
+    assert json.loads(redis.hget(receipt, "ack"))["failure"] == "error: BlockingIOError"
+
+
 def test_cold_native_accounts_use_their_own_fresh_quota_before_the_first_launch(monkeypatch):
     from hooks.context import quota_usage
     from scripts.routing import master_account
@@ -1023,7 +1045,7 @@ def test_each_beat_restarts_only_the_helper_threads_that_ended(monkeypatch):
     assert started[3:] == [(daemon.publish_herdr_stats, args, True)]
 
 
-def test_install_writes_the_service_and_enables_it(tmp_path):
+def test_install_writes_the_service_and_enables_it(tmp_path: Path) -> None:
     run = Mock(return_value=Mock(returncode=0))
     assert daemon.install("/bin/agentihooks", tmp_path, run)
     service = tmp_path / "agentihooks-hive.service"
@@ -1035,7 +1057,59 @@ def test_install_writes_the_service_and_enables_it(tmp_path):
     assert run.call_args_list[1].args[0] == ["systemctl", "--user", "enable", "--now", "agentihooks-hive.service"]
     run.reset_mock()
     daemon.install("/bin/agentihooks", tmp_path, run)
-    assert run.call_count == 1
+    assert run.call_count == 2
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_writer_unit_uses_the_installed_binary_and_restarts_after_every_exit() -> None:
+    from scripts.swarm import timer
+
+    text = timer.units("/installed/bin/agentihooks")["agentihooks-ledger-writer.service"]
+    assert text == (
+        "[Unit]\nDescription=agentihooks warm ledger writer\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        "EnvironmentFile=-%h/.agentihooks/hive.env\n"
+        'ExecStart="/installed/bin/agentihooks" ledger writer serve\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+    assert "agentihooks-ledger-writer.service" not in timer.ENGINE
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_hive_install_enables_the_shared_writer_unit(tmp_path: Path) -> None:
+    from scripts.swarm import timer
+
+    run = Mock(return_value=Mock(returncode=0))
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    writer = "agentihooks-ledger-writer.service"
+    assert (tmp_path / writer).read_text() == timer.units("/bin/agentihooks")[writer]
+    assert run.call_args_list[-1].args[0] == ["systemctl", "--user", "enable", "--now", writer]
+    assert [call.args[0] for call in run.call_args_list].count(["systemctl", "--user", "daemon-reload"]) == 1
+    run.reset_mock()
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    assert run.call_count == 2
+    assert all(call.args[0][2] == "enable" for call in run.call_args_list)
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_hive_install_reports_writer_enable_failure(tmp_path: Path) -> None:
+    run = Mock(side_effect=[Mock(returncode=0), Mock(returncode=0), Mock(returncode=1)])
+    assert daemon.install("/bin/agentihooks", tmp_path, run) is False
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_hive_install_reloads_a_changed_writer_unit(tmp_path: Path) -> None:
+    run = Mock(return_value=Mock(returncode=0))
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    writer = tmp_path / "agentihooks-ledger-writer.service"
+    writer.write_text("old")
+    run.reset_mock()
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    assert run.call_args_list[0].args[0] == ["systemctl", "--user", "daemon-reload"]
+    assert "ledger writer serve\n" in writer.read_text()
 
 
 def test_install_reports_enable_failure(tmp_path):
@@ -1605,11 +1679,11 @@ def test_install_refuses_a_missing_executable(monkeypatch, tmp_path):
     assert str(caught.value) == "agentihooks executable not found"
 
 
-def test_install_reloads_a_changed_service(tmp_path):
+def test_install_reloads_a_changed_service(tmp_path: Path) -> None:
     (tmp_path / "agentihooks-hive.service").write_text("old")
     run = Mock(return_value=Mock(returncode=0))
     assert daemon.install("/bin/agentihooks", tmp_path, run)
-    assert run.call_count == 2
+    assert run.call_count == 3
     assert (tmp_path / "agentihooks-hive.service").read_text() == daemon.unit("/bin/agentihooks")
 
 
@@ -2171,6 +2245,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
     monkeypatch.setattr(process, "local_namespace", lambda: "hive-namespace")
     monkeypatch.setattr(process, "started_ms", lambda: 100000)
     monkeypatch.setattr(daemon.time, "time", lambda: 123)
+    monkeypatch.setattr("socket.gethostname", lambda: "machine-host")
     herdr.observe.return_value = PaneObservation("idle", typed="half")
     herdr.reported.return_value = True
     consumer = Mock(runtime=Mock(herdr=herdr))
@@ -2198,7 +2273,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
                 "name": here.name,
                 "generation": here.generation,
                 "reported": True,
-                "binding": {"process": False},
+                "binding": {"process": False, "observer": "machine-host"},
                 "pane": {
                     "state": "idle",
                     "prompt_title": "",

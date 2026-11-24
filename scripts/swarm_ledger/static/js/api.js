@@ -43,6 +43,10 @@ export function searchClosed(name, text, offset = 0) {
   return fetch(`${API_V1}/${name}?state=done&q=${encodeURIComponent(text)}&offset=${offset}&limit=50`, { cache: "no-store" });
 }
 
+export function readOrders() {
+  return fetch(`${API_V1}/orders`, { cache: "no-store" });
+}
+
 export function readArchitecture() {
   return fetch(`${API_V1}/architecture`, { cache: "no-store" });
 }

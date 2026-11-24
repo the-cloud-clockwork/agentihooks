@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import signal
@@ -14,6 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from hooks.compat import fcntl
 from hooks.context.account_sessions import (
     API_ACCOUNT,
     API_MARKER,

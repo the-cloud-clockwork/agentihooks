@@ -35,6 +35,7 @@ TODAY = {
         "promotion refresh",
         "release alert",
         "fleet red notice",
+        "autoscaler alert",
     ],
     "placement notices": ["quota notice", "lost runner", "time left"],
     "task passes": ["run window", "verification notices", "size pass", "grouping release", "dispatcher group"],

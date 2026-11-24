@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
+
+from hooks.compat import fcntl
 
 UNATTRIBUTED = "unattributed"
 PREFIX = "agentihooks.signals."

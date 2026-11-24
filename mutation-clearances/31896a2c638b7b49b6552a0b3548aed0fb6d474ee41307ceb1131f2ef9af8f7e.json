@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__backgrounded:c66e854cc2247729a8184ca2e6e99aff9486422b5a223f67f66a19d8a042212d": {
+    "reader": "standards_reader",
+    "reason": "The replacement is the last step before the \"&\" membership test, and \"XXXX\" contains no \"&\"."
+  }
+}

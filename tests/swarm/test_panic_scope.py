@@ -72,6 +72,18 @@ def _rows() -> list[RepositoryRun]:
     ]
 
 
+def _release_rows() -> list[RepositoryRun]:
+    return [
+        RepositoryRun(21, "main", "workflow_run", "in_progress", title="Helm chart release"),
+        RepositoryRun(22, "main", "workflow_dispatch", "queued", title="Publish to PyPI"),
+        RepositoryRun(23, "main", "workflow_dispatch", "in_progress", title="Release"),
+        RepositoryRun(24, "main", "push", "in_progress", title="Promote green dev to main (#12957)"),
+        RepositoryRun(25, "v2.17.1108", "release", "in_progress", title="Swarm worker image"),
+        RepositoryRun(26, "engineer-a1b2c3-0001", "pull_request", "in_progress"),
+        RepositoryRun(27, "main", "workflow_run", "in_progress", title="Gate Required status for engineer-a1b2c3-0001"),
+    ]
+
+
 OWNED = [
     f"{REPO} run 1 on engineer-a1b2c3-0001",
     f"{REPO} run 2 on ci-a1b2c3-0002-2",
@@ -130,6 +142,33 @@ def test_the_tick_sweep_cancels_only_the_runs_of_the_held_swarms_agents(store: R
     assert panic.tick_pass(store, HELD, True, 1_000, reported.append, runs) == []
     panic.settle()
     assert reported == [f"panic cancelled {line}" for line in OWNED]
+
+
+@pytest.mark.feature("panic-sweep-spares-release-runs")
+def test_the_panic_button_leaves_release_runs_on_main_running(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runs = Runs(_release_rows())
+    _press(store, monkeypatch, runs, HELD)
+    assert json.loads(capsys.readouterr().out)["cancelled"] == [
+        f"{REPO} run 26 on engineer-a1b2c3-0001",
+        f"{REPO} run 27 on main",
+    ]
+    assert [call.args for call in runs.made[REPO].calls if call.operation == "cancel_run"] == [(26,), (27,)]
+
+
+@pytest.mark.feature("panic-sweep-spares-release-runs")
+def test_the_tick_sweep_leaves_release_runs_on_main_running(store: RedisStore) -> None:
+    runs = Runs(_release_rows())
+    reported: list[str] = []
+    panic.engage(store, HELD, "pressed", False, [], 0)
+    assert panic.tick_pass(store, HELD, True, 1_000, reported.append, runs) == []
+    panic.settle()
+    assert reported == [
+        f"panic cancelled {REPO} run 26 on engineer-a1b2c3-0001",
+        f"panic cancelled {REPO} run 27 on main",
+    ]
+    assert [call.args for call in runs.made[REPO].calls if call.operation == "cancel_run"] == [(26,), (27,)]
 
 
 @pytest.mark.parametrize(

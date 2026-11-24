@@ -1,5 +1,5 @@
-"""The scheduler port: the lease API workers call and its control routes, GET /capacity from a load snapshot and
-GET /grades/<sha> with every grade of one commit."""
+"""The scheduler port: the lease API workers call, GET /capacity from a load snapshot and GET /grades/<sha> with every
+grade of one commit."""
 
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -20,18 +20,21 @@ SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 @dataclass(frozen=True)
 class Routes:
-    """What the scheduler port answers from: the lease API with its control routes, the load snapshot and the grades
-    of a commit."""
+    """What the scheduler port answers from: the lease API, the load snapshot and the grades of a commit."""
 
     lease: lease_api.Answer
-    snapshot: Callable[[], Load]
+    snapshot: Callable[[], Load | None]
     grades: Callable[[str], Sequence[Mapping[str, Any]]]
 
     def respond(self, method: str, target: str, raw: bytes, authorization: str | None) -> lease_api.Reply:
-        """Answer GET /capacity and GET /grades/<sha> here and every other request through the lease API."""
+        """Answer GET /capacity and GET /grades/<sha> here and every other request through the lease API; capacity
+        answers 503 before the first load snapshot is built."""
         path = urlsplit(target).path
         if method == "GET" and path == CAPACITY:
-            return 200, document(self.snapshot())
+            load = self.snapshot()
+            if load is None:
+                return 503, {"error": "the load snapshot is not built yet"}
+            return 200, document(load)
         if method == "GET" and path.startswith(GRADES):
             head = path.removeprefix(GRADES)
             if not SHA.fullmatch(head):
