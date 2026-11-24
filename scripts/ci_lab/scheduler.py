@@ -692,6 +692,8 @@ def summary(state: State) -> dict[str, Any]:
 class Scheduler:
     """The lab's grading over its Redis state, verdict store, object store and ports."""
 
+    _swept = False
+
     def __init__(
         self, client: Any, objects: Objects, ports: Ports, settings: Settings, spending: budget.Budget | None = None
     ) -> None:
@@ -707,7 +709,6 @@ class Scheduler:
         self.held: defaultdict[str, int] = defaultdict(int)
         self._demand_cache: dict[str, tuple[str, _Demand]] = {}
         self._quiets: dict[str, _Quiet] = {}
-        self._wanted = ports.wanted
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: on the first pass retire the pull request grades whose head nothing wants, then retire the
@@ -1114,8 +1115,9 @@ class Scheduler:
 
     def _sweep(self) -> list[str]:
         """Retire the stale pull request grades once, on the first pass of a scheduler that holds a listing of the
-        heads still wanted."""
-        wanted, self._wanted = self._wanted, None
+        heads still wanted; the listing port is read on that pass, so a scheduler built with no ports builds."""
+        swept, self._swept = self._swept, True
+        wanted = None if swept else self.ports.wanted
         return [] if wanted is None else self._retire_heads(wanted)
 
     def _retire_heads(self, wanted: Callable[[str], frozenset[str]]) -> list[str]:
