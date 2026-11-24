@@ -48,7 +48,7 @@ def run(ctx: SimpleNamespace, runtime: Any = None) -> list[str]:
 
 
 def pending(ctx: SimpleNamespace) -> Any:
-    run(ctx)
+    assert run(ctx) == [f"lineage {ctx.lineage.id} waits: hive launch ordered, waiting for its acknowledgement"]
     ctx.launcher.sleep.assert_not_called()
     [agent] = [agent for agent in ctx.store.agents(ctx.config.slug) if agent.lane == "expert"]
     assert agent.state == "launching"
@@ -237,6 +237,11 @@ def test_controller_takeover_retires_the_original_expert_order_without_relaunch(
     context.runtime.held = held
     assert run(context) == [f"expert spawn failed on lineage {context.lineage.id}: {orders.STALE_EPOCH}"]
     assert context.store.execution_registry.get(context.config.slug, agent.execution_id).state == "ended"
+    ending = context.store.redis.hget(context.store.key(context.config.slug, "launch-endings"), agent.execution_id)
+    assert json.loads(ending) == {
+        "reason": f"hive launch failed: {orders.STALE_EPOCH}",
+        "generation": agent.generation,
+    }
     assert not [agent for agent in context.store.agents(context.config.slug) if agent.lane == "expert"]
     assert len(context.store.execution_registry.records(context.config.slug)) == 1
     commands = context.store.redis.xrange(context.launcher.orders.commands("remote"))
