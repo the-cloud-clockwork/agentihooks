@@ -938,5 +938,6 @@ def test_with_entry_indents_a_new_entry_like_the_line_of_the_first_entry() -> No
 
 @pytest.mark.feature("feature-map-stable-write")
 def test_with_entry_keeps_whitespace_before_the_root() -> None:
-    old, new = {"id": "a"}, {"id": "b"}
+    old: dict[str, object] = {"id": "a"}
+    new: dict[str, object] = {"id": "b"}
     assert feature_map.with_entry("\n " + _canonical([old], "\n"), new) == "\n " + _canonical([new, old], "\n")
