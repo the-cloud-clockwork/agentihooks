@@ -1,6 +1,0 @@
-{
-  "tests/ci_lab/test_static_plants.py::test_a_gate_plant_edits_this_tree_once_per_edit[lint.require-swarm-image-pins-for-every-third-party-module-import]": {
-    "reader": "standards-reader",
-    "reason": "The plant lint.require-swarm-image-pins-for-every-third-party-module-import is deleted with its lint step by the revert of 91719dad84, so the per-plant case that edits it has no plant to run. The loss is intended and matches the retired feature swarm-image-import-pins."
-  }
-}
