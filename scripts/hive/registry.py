@@ -243,9 +243,10 @@ def _named(client: object, hive_id: str, record: dict[str, Any]) -> dict[str, An
 
 def _healed(client: object, hive_id: str, record: dict[str, Any]) -> dict[str, Any]:
     """A derived name back at its base once no other live hive holds the base; any other record unchanged."""
-    if _base(record) == _read_name(record) or _base(record) in _held(client, hive_id):
+    base = _base(record)
+    if base == _read_name(record) or base in _held(client, hive_id):
         return record
-    return _named(client, hive_id, record)
+    return {**{field: value for field, value in record.items() if field != "base"}, "name": base}
 
 
 def _unique(name: str, held: set[str]) -> str:

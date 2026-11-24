@@ -207,6 +207,7 @@ def test_a_suffixed_headless_name_returns_to_its_base_once_its_holder_goes_stale
     _live(redis, "a", at=registry.wall_ms() - registry.LIVE_MS - 1)
     _live(redis, "b")
     assert _shown(redis, "b")["name"] == "swarm-hive-003"
+    assert "base" not in _shown(redis, "b")
 
 
 @pytest.mark.feature("hive-registry-name-returns-to-base")
@@ -235,6 +236,25 @@ def test_an_interface_hive_turned_headless_keeps_its_name_and_chases_no_master_n
     _live(redis, "root", at=registry.wall_ms() - registry.LIVE_MS - 1)
     _live(redis, "vm")
     assert _shown(redis, "vm")["name"] == "swarm-master-2"
+
+
+@pytest.mark.feature("hive-registry-name-returns-to-base")
+def test_a_derived_name_stays_while_its_base_is_held_and_a_rename_drops_its_base(redis: "FakeRedis") -> None:
+    stale = registry.wall_ms() - registry.LIVE_MS - 1
+    registry.update(redis, "a", ["name=box"])
+    _live(redis, "a")
+    registry.update(redis, "b", ["name=box"])
+    _live(redis, "b")
+    assert registry.update(redis, "c", ["name=box"])["name"] == "box-3"
+    _live(redis, "b", at=stale)
+    _live(redis, "c")
+    assert _shown(redis, "c")["name"] == "box-3"
+    assert registry.update(redis, "c", ["max-agents=2"])["name"] == "box-3"
+    _live(redis, "a", at=stale)
+    assert registry.update(redis, "c", ["ui=no"])["name"] == "box"
+    assert "base" not in _shown(redis, "c")
+    assert registry.update(redis, "b", ["name=crate"])["name"] == "crate"
+    assert "base" not in _shown(redis, "b")
 
 
 def test_a_restarted_registration_keeps_the_stored_settings(redis):

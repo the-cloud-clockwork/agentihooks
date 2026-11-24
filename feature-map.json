@@ -11120,7 +11120,8 @@
         "tests/hive/test_registry.py::test_a_suffixed_headless_name_returns_to_its_base_once_its_holder_goes_stale",
         "tests/hive/test_registry.py::test_a_never_beaten_settings_record_holds_no_name",
         "tests/hive/test_registry.py::test_a_stored_master_suffix_with_no_live_holder_returns_on_the_next_heartbeat",
-        "tests/hive/test_registry.py::test_an_interface_hive_turned_headless_keeps_its_name_and_chases_no_master_name"
+        "tests/hive/test_registry.py::test_an_interface_hive_turned_headless_keeps_its_name_and_chases_no_master_name",
+        "tests/hive/test_registry.py::test_a_derived_name_stays_while_its_base_is_held_and_a_rename_drops_its_base"
       ]
     },
     {
