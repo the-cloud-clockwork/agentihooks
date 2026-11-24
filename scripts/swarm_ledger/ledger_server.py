@@ -368,7 +368,7 @@ def stream_resources(slug: str) -> dict:
 
 
 SUMMARIES: dict[str, tuple[object, dict]] = {}
-SUMMARY_BUILD = threading.Lock()
+SUMMARY_BUILDS: dict[str, threading.Lock] = {}
 
 
 CREW_WINDOW_MS = 2 * 3600 * 1000
@@ -388,7 +388,7 @@ def ledger_summary(slug: str) -> dict:
     held = SUMMARIES.get(slug)
     if held is not None and held[0] is stored:
         return held[1]
-    with SUMMARY_BUILD:
+    with SUMMARY_BUILDS.setdefault(slug, threading.Lock()):
         held = SUMMARIES.get(slug)
         if held is not None and held[0] is stored:
             return held[1]
