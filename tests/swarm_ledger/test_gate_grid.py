@@ -26,6 +26,7 @@ ORDER = [
     "nightwatch",
     "reset",
     "feature",
+    "review",
     "talk",
 ]
 

@@ -231,7 +231,9 @@ STEPS = (
         held(_codex_hook_order),
         frozenset({"sleeping"}),
         pass_domains("sleeping"),
+        kept=True,
         placing=True,
+        feature="kept-placing-steps-first-on-the-placement-worker",
     ),
     WriteStep(
         "rank pass",
@@ -240,7 +242,9 @@ STEPS = (
         writes=frozenset({RANK}),
         needs=RESUMED,
         reads=CONFIG_DOC,
+        kept=True,
         placing=True,
+        feature="kept-placing-steps-first-on-the-placement-worker",
     ),
     CallStep(
         "bottleneck remedy", PLACEMENT, held(_bottleneck_remedy), frozenset({"ledger state"}), pass_domains("doc")

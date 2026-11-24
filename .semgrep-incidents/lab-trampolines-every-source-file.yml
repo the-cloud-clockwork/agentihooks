@@ -1,0 +1,31 @@
+rules:
+  - id: lab-trampolines-every-source-file
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A lab mutation unit works on the change it grades: the worker puts behind trampolines only the functions the
+      head changes against the base on its lease. A trampoline call with no changed lines or with every line of
+      the file, and a read of the mutmut source paths to list the files to trampoline, rewrite whole files with
+      every mutant in the worker's own process, whose memory and time then follow the size of the repository. Pass
+      the changed lines scope.changes_since names for the file.
+    paths:
+      include:
+        - /scripts/ci_lab/
+        - lab-trampolines-every-source-file.py
+    pattern-either:
+      - pattern: trampoline($TREE, $PATH)
+      - pattern: $MODULE.trampoline($TREE, $PATH)
+      - pattern: trampoline($TREE, $PATH, <... range(...) ...>)
+      - pattern: $MODULE.trampoline($TREE, $PATH, <... range(...) ...>)
+      - pattern: trampoline($TREE, $PATH, EVERY_LINE)
+      - pattern: trampoline($TREE, $PATH, $HOLDER.EVERY_LINE)
+      - pattern: $MODULE.trampoline($TREE, $PATH, EVERY_LINE)
+      - pattern: $MODULE.trampoline($TREE, $PATH, $HOLDER.EVERY_LINE)
+      - patterns:
+          - pattern-inside: |
+              $LINES = <... range(...) ...>
+              ...
+          - pattern-either:
+              - pattern: trampoline($TREE, $PATH, $LINES)
+              - pattern: $MODULE.trampoline($TREE, $PATH, $LINES)
+      - pattern: $SETTINGS["tool"]["mutmut"]["source_paths"]

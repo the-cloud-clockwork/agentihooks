@@ -35,7 +35,7 @@ def _thin_task_pass(tick: Any, get: Get) -> list[str]:
     ids = {task["id"] for task in tasks}
     lines: list[str] = []
     queued: list[str] = []
-    for task in takewhile(lambda _: not deadline.expired, filter(_unfrozen(doc), filter(unchecked, tasks))):
+    for task in takewhile(lambda _: not deadline.expired, filter(unfrozen(doc), filter(unchecked, tasks))):
         if problems := thin_task.thin({"description": "", **task}):
             line, marked = enhance(tools.ledger, deadline, task, problems, ids)
             lines.append(line)
@@ -45,7 +45,7 @@ def _thin_task_pass(tick: Any, get: Get) -> list[str]:
     return lines
 
 
-def _unfrozen(doc: dict[str, Any]) -> Callable[[dict[str, Any]], bool]:
+def unfrozen(doc: dict[str, Any]) -> Callable[[dict[str, Any]], bool]:
     """Return the check that no freeze record of the ledger ``doc`` holds a task, as the swarm freeze check reads it
     over the ledger hierarchy projected once for the pass."""
     records: list[dict[str, Any]] = doc.get("freezes") or []
@@ -55,9 +55,10 @@ def _unfrozen(doc: dict[str, Any]) -> Callable[[dict[str, Any]], bool]:
 
 def unchecked(task: dict[str, Any]) -> bool:
     """Return whether ``task`` is an open, in scope engineer or ci task, a missing lane reading as engineer, that no
-    thin check has marked."""
+    thin check has marked and that carries no pull request link or branch of earlier work."""
     in_lane = task.get("lane", "eng") in LANES and not task.get("out_of_scope")
-    return task.get("state") == "open" and in_lane and not task.get("enhancement")
+    fresh = not (task.get("pr_url") or task.get("branch"))
+    return task.get("state") == "open" and in_lane and fresh and not task.get("enhancement")
 
 
 def enhance(
