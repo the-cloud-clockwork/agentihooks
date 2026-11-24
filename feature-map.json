@@ -1804,6 +1804,21 @@
       ]
     },
     {
+      "id": "hub-admission-running-fields",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-admit-view-fields",
+      "behaviour": "A hub events admission reads the claimed and pull request rows, the rows its task names and the open rows pinned to a hive with a field selection of only the keys their readers take, so the ledger task selection answers under its reply cap however large those rows grow, the root waiting count stays the same, and a running row the task names keeps the title, description, phase, kind and apply time its claim seeds read.",
+      "seam": "admission_view.Narrow task and waiting over the ledger API tasks selection, through the narrow ledger test reads that run the real selection",
+      "tests": [
+        "tests/swarm/test_admission_view.py::test_running_rows_over_the_reply_cap_still_give_the_admission_its_view",
+        "tests/swarm/test_admission_view.py::test_a_running_group_member_keeps_what_its_readers_take",
+        "tests/swarm/test_admission_view.py::test_pinned_open_rows_over_the_reply_cap_keep_the_same_root_waiting_count"
+      ],
+      "rules": [
+        "admission-view-running-full-row"
+      ]
+    },
+    {
       "id": "hub-admission-claim-context",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-claim-workspace",
