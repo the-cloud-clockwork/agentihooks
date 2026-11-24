@@ -11,7 +11,6 @@ session count per account. Outcomes:
 - push: the operator said "keep pushing"; continue to 100%.
 """
 
-import fcntl
 import math
 import os
 import time
@@ -21,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from hooks.compat import fcntl
 from hooks.config import (
     AGENTIHOOKS_HOME,
     QUOTA_HANDOFF_5H_PCT,
