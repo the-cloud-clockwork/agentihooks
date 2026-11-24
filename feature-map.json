@@ -7568,7 +7568,8 @@
         "tests/swarm/test_parser_equivalence.py::test_namespaces_help_and_refusals_equal_recorded_base",
         "tests/swarm/test_parser_equivalence.py::test_recorded_invalid_arguments_are_refused",
         "tests/swarm/test_parser_equivalence.py::test_builder_resolves_current_cli_handlers",
-        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom"
+        "tests/swarm/test_parser_equivalence.py::test_parser_is_separate_and_cli_has_size_headroom",
+        "tests/swarm/test_parser_equivalence.py::test_headroom_counts_the_tracked_cli_beside_a_mutants_copy"
       ]
     },
     {
@@ -15018,6 +15019,21 @@
         "tests/swarm/test_review_lane.py::test_capacity_places_a_reviewer_only_for_review_demand",
         "tests/swarm/test_review_lane.py::test_quota_status_reads_a_decision_stored_before_the_review_lane",
         "tests/swarm/test_review_lane.py::test_quota_status_shows_the_configured_review_cap_beside_the_autoscaled_ceilings"
+      ]
+    },
+    {
+      "id": "swarm-review-cap-setting",
+      "origin": "regression",
+      "ordered_at": "2026-11-23",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-review-cap-setting",
+      "behaviour": "A running swarm opens its review lane with swarm set max-review-agents: set and the bare pair take a whole number and store it as the swarm config review cap, refuse anything else, leave the autoscale caps unpinned and report the cap in the set reply; status shows the review cap after the plan cap; once the cap is above zero on a running swarm the review pass queues the review task it held back at zero.",
+      "seam": "scripts.swarm.cli.cmd_set and the SETTABLE table, scripts.swarm.cli.cmd_status text line, scripts.swarm.store.RedisStore.config and update, and scripts.tick.steps.review._review_pass",
+      "tests": [
+        "tests/swarm/test_review_cap_setting.py::test_set_stores_the_review_cap_on_a_swarm_stored_without_one",
+        "tests/swarm/test_review_cap_setting.py::test_set_refuses_a_review_cap_that_is_not_a_whole_number",
+        "tests/swarm/test_review_cap_setting.py::test_status_shows_the_worker_caps",
+        "tests/swarm/test_review_cap_setting.py::test_status_shows_the_review_cap",
+        "tests/swarm/test_review_cap_setting.py::test_a_review_cap_set_on_a_running_swarm_lets_the_review_pass_queue"
       ]
     },
     {
