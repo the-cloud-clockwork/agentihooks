@@ -161,9 +161,10 @@ class Fetcher:
 
 class Background:
     """Manifest fetches run off the scheduler pass on at most `workers` threads at once. A call starts the fetch of a
-    repository's commit and raises FetchPending until it finished; a failed fetch then raises its error once, and any
-    other answers every call until `fresh_s` after the fetch started, so a search that passes over a commit holding no
-    manifest does not fetch it again on every pass."""
+    repository's commit and raises FetchPending until it finished; a failed fetch then raises its error once. A fetch
+    that found a manifest answers every call until `fresh_s` after it started, so no manifest stays in memory longer.
+    One that found none answers until `absent_s` after it started: a search passes one commit per scheduler pass, and
+    its first answers must last until it has passed the last commit of its depth."""
 
     def __init__(
         self,
@@ -187,7 +188,7 @@ class Background:
         self.fetches = {
             key: (started, future)
             for key, (started, future) in self.fetches.items()
-            if not future.done() or now - started < self.fresh_s
+            if not future.done() or now - started < self._kept_s(future)
         }
         key = (slug, commit)
         if key not in self.fetches:
@@ -198,3 +199,9 @@ class Background:
         if future.exception() is not None:
             del self.fetches[key]
         return future.result()
+
+    def _kept_s(self, future: Future[bytes | None]) -> float:
+        """Return how long after its start a finished fetch keeps answering: the absent window when it found no
+        manifest, the fresh window when it found one or failed."""
+        absent = future.exception() is None and future.result() is None
+        return self.absent_s if absent else self.fresh_s
