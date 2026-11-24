@@ -121,7 +121,11 @@ def test_a_cold_browser_shows_the_first_task_rows_within_a_second_and_a_megabyte
                   const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
                   const sync = await import(new URL("sync.js", main));
                   const tasks = document.getElementById("tasks");
-                  return {loaded: sync.doc.tasks.length, rev: sync.meta && sync.meta.rev, html: tasks && tasks.outerHTML.slice(0, 500)};
+                  const children = (id) => (document.getElementById(id) || {children: []}).children.length;
+                  return {loaded: sync.doc.tasks.length, rev: sync.meta && sync.meta.rev, html: tasks && tasks.outerHTML.slice(0, 300),
+                    rendered: performance.getEntriesByName("ledger-rendered").length, phases: children("phases"),
+                    followups: children("followups"), status: (document.getElementById("status") || {}).textContent,
+                    scheduler: typeof scheduler};
                 }"""
             )
             raise AssertionError(f"no task row shown; refused or failed: {refused}; tasks: {shown}") from exc
