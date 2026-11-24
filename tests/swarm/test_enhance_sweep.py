@@ -14,7 +14,7 @@ from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.tick import registry
 from scripts.tick.adapters.fakes import FakeLedger, fake_tools
 from scripts.tick.deadline import Deadline
-from scripts.tick.steps import CallStep
+from scripts.tick.steps import CallStep, thin
 
 pytestmark = pytest.mark.unit
 
@@ -57,6 +57,7 @@ TASKS = [
 LANES = {"eng": ["t1", "t8", "t9", "t10"], "ci": ["t2"]}
 REPORT = {"eng": {"count": 4, "ids": ["t1", "t8", "t9", "t10"]}, "ci": {"count": 1, "ids": ["t2"]}}
 HELD = _task("t11", phase="p2")
+UNFROZEN = thin.unfrozen({"tasks": TASKS})
 
 
 @dataclass
@@ -121,13 +122,13 @@ def swarm(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 
 @pytest.mark.feature("swarm-enhance-sweep")
 def test_the_sweep_selects_per_lane_the_thin_tasks_the_tick_step_would() -> None:
-    assert enhance_sweep.thin_by_lane(TASKS) == LANES
+    assert enhance_sweep.thin_by_lane(TASKS, UNFROZEN) == LANES
 
 
 @pytest.mark.feature("swarm-enhance-sweep")
 def test_the_sweep_makes_the_same_ledger_writes_as_the_thin_task_pass_on_one_task_list() -> None:
     ledger = FakeLedger(dict(ANSWERS))
-    enhance_sweep.sweep(TASKS, ledger, pause=lambda _: None)
+    enhance_sweep.sweep(TASKS, UNFROZEN, ledger, pause=lambda _: None)
     expected = _tick_calls(TASKS)
     assert expected
     assert _calls(ledger) == expected
@@ -136,7 +137,7 @@ def test_the_sweep_makes_the_same_ledger_writes_as_the_thin_task_pass_on_one_tas
 @pytest.mark.feature("swarm-enhance-sweep")
 def test_each_thin_task_writes_under_its_own_thirty_second_deadline() -> None:
     ledger = FakeLedger(dict(ANSWERS))
-    enhance_sweep.sweep(TASKS, ledger, pause=lambda _: None)
+    enhance_sweep.sweep(TASKS, UNFROZEN, ledger, pause=lambda _: None)
     deadlines = {id(call.deadline): call.deadline for call in ledger.calls}
     assert len(deadlines) == 5
     assert all(29 < deadline.remaining <= 30 for deadline in deadlines.values())
@@ -145,7 +146,7 @@ def test_each_thin_task_writes_under_its_own_thirty_second_deadline() -> None:
 @pytest.mark.feature("swarm-enhance-sweep")
 def test_the_sweep_pauses_three_seconds_between_thin_tasks_and_never_before_the_first() -> None:
     pauses: list[float] = []
-    enhance_sweep.sweep(TASKS, FakeLedger(dict(ANSWERS)), pause=pauses.append)
+    enhance_sweep.sweep(TASKS, UNFROZEN, FakeLedger(dict(ANSWERS)), pause=pauses.append)
     assert pauses == [3.0, 3.0, 3.0, 3.0]
 
 
