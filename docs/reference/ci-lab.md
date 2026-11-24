@@ -2615,7 +2615,9 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   pull request of the same head branch and stays. While the lane holds live grades of one head
   against two bases, a close ends the grades of its own base only: the waiting head and the
   pending jobs stay, the lane names a grade that stays, and the pass prints `retired <run>,
-  <run> still grades <head>`.
+  <run> still grades <head>`. When the lane names a grade that already finished, or one pushed
+  to a grade ref, the close starts from the live grades of the closed head that name the lane,
+  and the lane keeps naming the grade it names.
 - On its first pass a scheduler retires the stale grades a restart finds live. For each repository
   with a live pull request grade that has no grade ref, `scripts.ci_lab.stale_heads.OpenHeads`
   reads the open pull request heads and the heads of the plant branches through the lab App: two

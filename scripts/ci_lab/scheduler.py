@@ -925,13 +925,25 @@ class Scheduler:
         repo = closed.repo
         name = f"{repo}|{lane}|{int(Priority.PULL_REQUEST)}"
         origins = self._origins()
-        run = self.client.get(f"{LANES}{name}")
-        origin = None if run is None else origins.get(run)
-        if run is None or origin is None or origin["ref"]:
+        run = self._pivot(name, closed, lane, origins)
+        if run is None:
             ended = self._unwait(name, closed.base)
         else:
             ended = self._end(name, run, self._bases(run, lane, origins, closed.base), closed.base, origins)
         return f"closed {lane} of {repo}: {', '.join(ended) or 'nothing held'}"
+
+    def _pivot(self, name: str, closed: HeadEvent, lane: str, origins: Mapping[str, Mapping[str, Any]]) -> str | None:
+        """Return the live grade a close starts from: the run the lane names while it is live and pushed to no
+        grade ref, else the first live pull request grade of the closed head, pushed to no grade ref, that names
+        the lane, since the lane may name a grade that finished or was pushed to a grade ref while an older grade
+        of that head still runs; none when the lane holds neither."""
+        named = self.client.get(f"{LANES}{name}")
+        origin = None if named is None else origins.get(named)
+        if named is not None and origin is not None and not origin["ref"]:
+            return named
+        head = {"repo": closed.repo, "head": closed.head}
+        grades = ((run, self.grade(run)) for run in sorted(origins) if stale_heads.twin(head, origins[run]))
+        return next((run for run, grade in grades if grade is not None and grade.lane == lane), None)
 
     def _bases(self, run: str, lane: str, origins: Mapping[str, Mapping[str, Any]], lost: str) -> dict[str, str]:
         """Return the base of a lane's run and of every other live pull request grade of its head that names the
@@ -961,7 +973,7 @@ class Scheduler:
             self._forget(each)
         if not stay:
             return [*ended, f"retired {', '.join(gone)}, dropped {len(dropped)} pending units"]
-        if run in gone:
+        if self.client.get(f"{LANES}{name}") in gone:
             self.client.set(f"{LANES}{name}", stay[0])
         return [f"retired {', '.join(gone)}, {stay[0]} still grades {head}"]
 
