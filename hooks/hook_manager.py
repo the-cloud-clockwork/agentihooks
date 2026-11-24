@@ -476,7 +476,7 @@ def on_session_start(payload: dict) -> None:
 
     from hooks.config import BROADCAST_ENABLED
 
-    if BROADCAST_ENABLED:
+    if BROADCAST_ENABLED and sys.platform != "win32":
         try:
             from hooks.context.account_sessions import agent_pid, session_account
             from hooks.context.broadcast import (
@@ -763,6 +763,8 @@ def _prompt_quota_usage(session_id: str) -> None:
 
 
 def _prompt_quota_policy(payload: dict, session_id: str) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.config import QUOTA_POLICY_ENABLED
 
@@ -1054,6 +1056,8 @@ def _inject_inbox(session_id: str, cwd: str = "") -> None:
 
 
 def _confirm_inbox(session_id: str) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.context.inbox_delivery import confirm_shown
 
@@ -1109,6 +1113,8 @@ def _inject_after_tool(payload: dict) -> None:
 
 
 def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.context.swarm_heartbeat import beat, heard, report
         from scripts.swarm.safety_nudge import record
@@ -1124,6 +1130,8 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
 
 
 def _swarm_outcome(payload: dict) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.context.swarm_heartbeat import outcome
         from hooks.observability.consultation import search
@@ -1135,6 +1143,8 @@ def _swarm_outcome(payload: dict) -> None:
 
 
 def _master_login_checkpoint() -> None:
+    if sys.platform == "win32":
+        return
     try:
         from scripts import master_claude_login
 
@@ -1153,6 +1163,8 @@ def _hive_join(payload: dict, event: str) -> None:
 
 
 def _swarm_ledger(payload: dict) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.context.swarm_ledger import run
 
@@ -1194,6 +1206,8 @@ def on_post_tool_use_failure(payload: dict[str, Any]) -> None:
 
 
 def _operator_words(payload: dict) -> bool:
+    if sys.platform == "win32":
+        return False
     try:
         from hooks.context.operator_words import typed
 
@@ -1210,6 +1224,8 @@ def _scheduled_prompt(payload: dict[str, Any]) -> None:
 
 
 def _operator_mode(payload: dict, typed: bool) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.common import inject_context
         from hooks.context.operator_mode import notice
@@ -1248,6 +1264,8 @@ def _operator_question(payload: dict) -> str:
 
 
 def _operator_reminder(payload: dict) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.common import inject_context
         from hooks.context import operator_mode
@@ -1274,6 +1292,8 @@ def _arm_gate_lifts(payload: dict) -> None:
 
 
 def _refocus_blocks(session_id: str, event: str) -> list[str]:
+    if sys.platform == "win32":
+        return []
     try:
         from hooks.context.quick_swarm import refocus
         from hooks.context.swarm_refocus import refocus_context
@@ -1481,7 +1501,7 @@ def on_pre_tool_use(payload: dict) -> None:
     try:
         from hooks.config import QUOTA_POLICY_ENABLED
 
-        if QUOTA_POLICY_ENABLED:
+        if QUOTA_POLICY_ENABLED and sys.platform != "win32":
             from hooks.context.quota_policy import pretool as _quota_policy_pretool
 
             _quota_policy_block, _quota_policy_ctx = _quota_policy_pretool(
@@ -1803,8 +1823,6 @@ def on_pre_tool_use(payload: dict) -> None:
     _can_inject_pretool = can_inject_context("PreToolUse")
     _recycle_ctx = None
     try:
-        from hooks.context.context_recycle import directive as _recycle_directive
-
         if _can_inject_pretool:
             _recycle_ctx = _recycle_directive(payload.get("session_id", ""))
     except Exception as e:
@@ -2277,7 +2295,7 @@ def on_post_tool_use(payload: dict) -> None:
 def _link_codex_rollout(transcript_path: str) -> None:
     from hooks.targets import is_codex
 
-    if not is_codex():
+    if not is_codex() or sys.platform == "win32":
         return
     try:
         from scripts import codex_rollouts
@@ -2464,7 +2482,7 @@ def on_stop(payload: dict) -> None:
     try:
         from hooks.lifecycle.handoff_close import on_stop as handoff_close_on_stop
 
-        if handoff_close_on_stop(payload):
+        if sys.platform != "win32" and handoff_close_on_stop(payload):
             log("handed-off session close scheduled", {"session_id": session_id})
     except Exception as e:
         log("handed-off session close failed", {"error": str(e)})
@@ -2668,6 +2686,8 @@ def on_pre_compact(payload: dict) -> None:
 
 
 def _request_trace_flush(payload: dict, reason: str) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.observability import trace_flush
 

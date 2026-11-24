@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -26,7 +27,7 @@ def _setting(key: str, default: str) -> str:
 
 
 def enabled() -> bool:
-    return _setting("LIFECYCLE_GC_ENABLED", "true").lower() in ("1", "true", "yes")
+    return sys.platform != "win32" and _setting("LIFECYCLE_GC_ENABLED", "true").lower() in ("1", "true", "yes")
 
 
 def caller_holder(session_id: str, proc: Path = Path("/proc"), start: int | None = None) -> Holder | None:
