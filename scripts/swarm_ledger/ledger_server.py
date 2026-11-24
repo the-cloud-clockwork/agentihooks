@@ -368,6 +368,7 @@ def stream_resources(slug: str) -> dict:
 
 
 SUMMARIES: dict[str, tuple[object, dict]] = {}
+SUMMARY_BUILD = threading.Lock()
 
 
 CREW_WINDOW_MS = 2 * 3600 * 1000
@@ -387,11 +388,15 @@ def ledger_summary(slug: str) -> dict:
     held = SUMMARIES.get(slug)
     if held is not None and held[0] is stored:
         return held[1]
-    parts = repository.read(slug, *summary.READS)
-    built = summary.build(parts, stored[2], doctor_holds(slug), PAGE_LIMITS)
-    built["_meta"].update(page_version=served_version(), crew=active_crew(parts.get("_meta") or {}, core.now_ms()))
-    SUMMARIES[slug] = (stored, built)
-    return built
+    with SUMMARY_BUILD:
+        held = SUMMARIES.get(slug)
+        if held is not None and held[0] is stored:
+            return held[1]
+        parts = repository.read(slug, *summary.READS)
+        built = summary.build(parts, stored[2], doctor_holds(slug), PAGE_LIMITS)
+        built["_meta"].update(page_version=served_version(), crew=active_crew(parts.get("_meta") or {}, core.now_ms()))
+        SUMMARIES[slug] = (stored, built)
+        return built
 
 
 def workspace_tails(slug, task_id):
