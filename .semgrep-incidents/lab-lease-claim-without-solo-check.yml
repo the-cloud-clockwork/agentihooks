@@ -1,0 +1,27 @@
+rules:
+  - id: lab-lease-claim-without-solo-check
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lease take claims a job for a worker without first asking whether the job is a solo unit the worker already
+      holds one of. On 22 and 24 November lab workers leased several strict type gate units at once, their basedpyright
+      checkers filled the worker's 8 GiB memory limit and the kernel killed the worker with every unit it held. Ask
+      solo for the job's unit before the claim and skip the job for a worker that holds one.
+    paths:
+      include:
+        - /scripts/ci_lab/leases.py
+        - lab-lease-claim-without-solo-check.py
+    patterns:
+      - pattern: $QUEUE.claim(...)
+      - pattern-inside: |
+          def $TAKE(...):
+              ...
+      - pattern-not-inside: |
+          for $JOB in $ORDER:
+              ...
+              if <... solo(...) ...>:
+                  ...
+              ...
+              if <... $QUEUE.claim(...) ...>:
+                  ...
+              ...

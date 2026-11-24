@@ -13,9 +13,9 @@ PROBE_VERSION = "999.999.999"
 
 
 def bumped_copy(chart: Path, into: Path) -> Path:
-    """Copy the chart and give the copy a different chart version."""
+    """Copy the chart's contents and give the copy a different chart version."""
     copy = into / chart.name
-    shutil.copytree(chart, copy)
+    shutil.copytree(chart, copy, copy_function=shutil.copyfile)
     meta = yaml.safe_load((copy / "Chart.yaml").read_text())
     meta["version"] = PROBE_VERSION
     (copy / "Chart.yaml").write_text(yaml.safe_dump(meta, sort_keys=False))

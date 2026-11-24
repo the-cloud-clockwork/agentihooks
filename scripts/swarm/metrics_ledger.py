@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import sqlite3
 from collections import Counter
 
 from scripts.swarm import metrics_outbox
@@ -42,6 +43,7 @@ SAVE_CHECKPOINT = "INSERT OR REPLACE INTO ledger_metrics VALUES (?, ?, ?)"
 PATHS = "CREATE TABLE IF NOT EXISTS ledger_metric_paths (slug TEXT, node TEXT, value TEXT, PRIMARY KEY (slug, node))"
 READ_PATHS = "SELECT node, value FROM ledger_metric_paths WHERE slug=?"
 SAVE_PATHS = "INSERT OR REPLACE INTO ledger_metric_paths VALUES (?, ?, ?)"
+DROP_SHIPPED = "DELETE FROM spool WHERE tbl = ? AND shipped = 1"
 
 
 def paths(nodes: list, tasks: list) -> dict:
@@ -110,7 +112,7 @@ def snapshot_row(slug: str, now_ms: int, measure: str, item: str, path: dict, va
 
 def count_rows(slug: str, now_ms: int, nodes: list, known: dict) -> list:
     groups = {"": Counter(), **{row["node"]: Counter() for row in nodes if row["kind"] != "task"}}
-    lanes = {"", "eng", "ci", "plan"}
+    lanes = {"", "eng", "ci", "plan", "review"}
     for node in nodes:
         if node["kind"] != "task":
             continue
@@ -196,10 +198,11 @@ def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerCli
         batches.append((SNAPSHOTS, snapshot_rows(slug, now_ms, doc, nodes, current, births)))
         snapshot = now_ms
 
-    def checkpoint(connection):
+    def checkpoint(connection: sqlite3.Connection) -> None:
         connection.executemany(SAVE_PATHS, [(slug, node, json.dumps(path)) for node, path in current.items()])
         connection.executemany(SAVE_BIRTHS, [(slug, node, at) for node, at in births.items()])
         connection.execute(SAVE_CHECKPOINT, (slug, doc["_meta"]["rev"], snapshot))
+        connection.execute(DROP_SHIPPED, (SNAPSHOTS.name,))
 
     box.append_many(batches, checkpoint)
     acknowledged = doc["_meta"].get("events_ack")

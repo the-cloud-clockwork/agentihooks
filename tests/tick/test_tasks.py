@@ -7,6 +7,7 @@ import pytest
 
 import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import (
+    autoscaler_watch,
     claim_hold,
     dev_red,
     difficulty,
@@ -129,13 +130,14 @@ def test_the_task_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest
 def test_the_reopen_passes_run_their_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     found = _run(tasks.REOPENS, _tick(calls), _pass(), monkeypatch)
-    assert found == ["ran 1", "ran 2", "ran 3", "ran 4", "ran 5"]
+    assert found == ["ran 1", "ran 2", "ran 3", "ran 4", "ran 5", "ran 6"]
     assert calls == [
         (dev_red.reopen_pass, "sw", "config", "store", "ledger", "rows"),
         (prerequisite_wait.reopen_pass, "sw", "store", "ledger", "rows"),
         (promotion_watch.refresh, "sw", "config", "store", "ledger", "doc", 7),
         (release_wait.alert_pass, "sw", "config", "ledger", "doc"),
         (tasks.fleet_red_writes, "sw", "store", "rows", 7),
+        (autoscaler_watch.alert_pass, "sw", "store", "ledger", "doc"),
     ]
 
 

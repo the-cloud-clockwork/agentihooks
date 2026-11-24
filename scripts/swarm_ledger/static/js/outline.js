@@ -10,6 +10,8 @@ import { collapsible, groupOpen, markToggles, rememberGroup } from "./folds.js";
 import { selectTab } from "./layout.js";
 import { render } from "./render.js";
 import { closedMore, firstPage, lazy, moreButton, wanted } from "./pages.js";
+import { place } from "./render_cycle.js";
+import { keptGroup } from "./outline_keep.js";
 import { revealFrozenTarget, viewCount, viewItems } from "./frozen_view.js";
 
 let outlinePick = null;
@@ -95,7 +97,7 @@ function outlineLink(e) {
   return h("a", { href: `#${e.id}`, "data-target": e.id, title: e.title, text: e.title, class: e.state && `st-${e.state}` });
 }
 
-function outlineAgain() {
+export function outlineAgain() {
   $("outline").dataset.sig = "";
   renderOutline();
 }
@@ -107,7 +109,7 @@ const remoteTotal = {};
 let searchTurn = 0;
 let searchTimer = 0;
 
-function filtering() {
+export function filtering() {
   return !!(filter.text || filter.state);
 }
 
@@ -127,12 +129,13 @@ export function completeList(list) {
 
 function byPhase(items) {
   if (!items.some((i) => i.phase)) return items;
-  const order = doc.phases.map((p) => p.id);
-  const rank = (i) => (order.includes(i.phase) ? order.indexOf(i.phase) : order.length);
-  return [...items].sort((a, b) => rank(a) - rank(b) || (rank(a) === order.length ? a.phase.localeCompare(b.phase) : 0));
+  const order = new Map();
+  for (const [n, p] of doc.phases.entries()) if (!order.has(p.id)) order.set(p.id, n);
+  const rank = (i) => (order.has(i.phase) ? order.get(i.phase) : doc.phases.length);
+  return [...items].sort((a, b) => rank(a) - rank(b) || (rank(a) === doc.phases.length ? a.phase.localeCompare(b.phase) : 0));
 }
 
-function phaseRows(sorted) {
+export function phaseRows(sorted) {
   if (!sorted.some((i) => i.phase)) return sorted;
   const titles = Object.fromEntries(doc.phases.map((p) => [p.id, p.title || p.id]));
   const grouped = [];
@@ -193,7 +196,7 @@ function outlineTools() {
   return h("div", { class: "ol-tools" }, input, pick, h("button", { class: "link", type: "button", id: "outline-all", on: { click: foldAll } }));
 }
 
-function remoteMore(s) {
+export function remoteMore(s) {
   const list = s.id.replace(/^sec-/, "");
   const left = filtering() ? (remoteTotal[list] || 0) - (remote[list] || []).length : 0;
   if (left <= 0) return "";
@@ -224,18 +227,22 @@ async function searchMore(list) {
   }
 }
 
-function outlineRow(i) {
+export function outlineRow(i) {
   return i.group ? h("li", { class: "ol-group", text: i.group }) : h("li", {}, outlineLink(i));
 }
 
-function outlineGroup(s) {
+export function outlineGroup(s) {
   const box = h("details", { class: "fold", id: `ol-${s.id}`, open: filtering() || !s.complete ? "" : false }, h("summary", {}, outlineLink(s)));
   if (box.open) box.dataset.fresh = "";
   if (!filtering()) collapsible(box);
+  box.section = s;
   const key = `ol-${s.id}`;
-  return h("li", { class: "ol-sec" }, lazy(box, () => h("ul", { class: "ol-items" },
-    ...phaseRows(firstPage(key, s.items, (i) => i.id)).map(outlineRow), remoteMore(s), moreButton(key, s.items.length, "more items", outlineAgain) || "",
-    (s.items.length && !filtering() && closedMore(s.id.replace(/^sec-/, ""), "done", () => render())) || "")));
+  return h("li", { class: "ol-sec" }, lazy(box, () => {
+    const t = box.section;
+    return h("ul", { class: "ol-items" },
+      ...phaseRows(firstPage(key, t.items, (i) => i.id)).map(outlineRow), remoteMore(t), moreButton(key, t.items.length, "more items", outlineAgain) || "",
+      (t.items.length && !filtering() && closedMore(t.id.replace(/^sec-/, ""), "done", () => render())) || "");
+  }));
 }
 
 export function outlineBoxes() {
@@ -269,15 +276,17 @@ export function renderOutline() {
   const tree = outlineOf(doc, pageHeads());
   const shaped = shapeOutline(tree);
   const nav = $("outline");
-  const sig = JSON.stringify(shaped);
+  const sigs = shaped.map((s) => JSON.stringify(s));
+  const sig = `[${sigs.join(",")}]`;
   if (nav.dataset.sig !== sig) {
     nav.dataset.sig = sig;
     $("jump-to").replaceChildren(h("option", { value: "", text: "Choose a section" }), ...tree.map((s) => h("option", { value: s.id, text: s.title })));
     if (!$("outline-filter")) nav.replaceChildren(outlineTools());
-    const list = h("ul", { id: "outline-list" }, ...shaped.map(outlineGroup));
+    const phases = doc.phases.map((p) => `${p.id} ${p.title}`).join("\n");
+    const groups = shaped.map((s, n) => keptGroup(s, sigs[n], phases));
     const old = $("outline-list");
-    if (old) old.replaceWith(list);
-    else nav.append(list);
+    if (old) place(old, groups);
+    else nav.append(h("ul", { id: "outline-list" }, ...groups));
   }
   scheduleOutline();
   markPending();

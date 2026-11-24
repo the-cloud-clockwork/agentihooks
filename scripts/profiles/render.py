@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import os
-import pwd
 import re
 import shutil
 import subprocess
@@ -14,6 +13,8 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+
+from hooks.compat import real_home
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -55,7 +56,7 @@ def rendered_root() -> Path:
 
 
 def live_root() -> Path:
-    return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".agentihooks" / "profiles"
+    return real_home() / ".agentihooks" / "profiles"
 
 
 def _refuse_live_render_from_another_checkout(name: str) -> None:
@@ -385,7 +386,7 @@ def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str,
     sources.write(sources.path(root.name, target, root.parent), sources.rows(bundle, dirs, items, user, shared))
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
     later = {"shared bundle": shared, "user bundle": user}
-    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER, later))
+    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, (HEADER, FOOTER), later))
     ending = f"\n\n{FOOTER}\n"
     text = binding.persona(text.removesuffix(ending)) + ending
     if len(text) > 150_000:
@@ -570,25 +571,32 @@ def _link_codex_state(out: Path, operator: Path, login: bool, rollouts: Path | N
         _link(out / item, cast(Path, rollouts) / item)
 
 
+def codex_agent_doc(src: Path) -> dict[str, object] | None:
+    """A Claude agent file with a string description and a body as a Codex custom agent document, else None."""
+    import yaml
+
+    parts = re.split(r"^---[ \t\r]*$", src.read_text(), maxsplit=2, flags=re.M)
+    if len(parts) != 3 or parts[0]:
+        return None
+    try:
+        front: dict[str, object] | None = yaml.safe_load(parts[1])
+    except yaml.YAMLError:
+        return None
+    meta: dict[str, object] = front if isinstance(front, dict) else {}
+    name, description, body = meta.get("name"), meta.get("description"), parts[2].strip()
+    if not (isinstance(description, str) and description.strip() and body):
+        return None
+    named = name.strip() if isinstance(name, str) and name.strip() else src.stem
+    return {"name": named, "description": description, "developer_instructions": body}
+
+
 def _codex_agents(claude_agents: Path, out: Path) -> None:
     """Write each Claude home agent with a string description and a body as a Codex custom agent file in ``out``."""
     import tomlkit
-    import yaml
 
     out.mkdir()
     for src in sorted(p for p in claude_agents.iterdir() if p.is_file()):
-        parts = re.split(r"^---[ \t\r]*$", src.read_text(), maxsplit=2, flags=re.M)
-        if len(parts) != 3 or parts[0]:
-            continue
-        try:
-            front: dict[str, object] | None = yaml.safe_load(parts[1])
-        except yaml.YAMLError:
-            continue
-        meta: dict[str, object] = front if isinstance(front, dict) else {}
-        name, description, body = meta.get("name"), meta.get("description"), parts[2].strip()
-        if isinstance(description, str) and description.strip() and body:
-            named = name.strip() if isinstance(name, str) and name.strip() else src.stem
-            doc = {"name": named, "description": description, "developer_instructions": body}
+        if doc := codex_agent_doc(src):
             _atomic_write(out / f"{src.stem}.toml", tomlkit.dumps(doc))
 
 

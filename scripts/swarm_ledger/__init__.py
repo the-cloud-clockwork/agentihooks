@@ -12,6 +12,8 @@ TOOLS = {
     "watch": ("watch_ledger", []),
     "chat": ("chat_ledger", []),
     "proof": ("proof_ledger", []),
+    "time-writes": ("scripts.swarm_ledger.write_timing", []),
+    "writer": ("scripts.swarm_ledger.warm_writer", []),
 }
 
 

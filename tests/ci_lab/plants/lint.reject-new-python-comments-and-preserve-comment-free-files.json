@@ -1,0 +1,11 @@
+{
+  "gate": "lint/reject-new-python-comments-and-preserve-comment-free-files",
+  "reason": "forbidden comment: a new comment on a changed line",
+  "edits": [
+    {
+      "path": "scripts/ci_lab/run_static.py",
+      "before": "    return Result(gate=gate.name, code=outcome.code, log=outcome.log, report=folder / SUMMARY)\n",
+      "after": "    return Result(gate=gate.name, code=outcome.code, log=outcome.log, report=folder / SUMMARY)  # lab plant\n"
+    }
+  ]
+}

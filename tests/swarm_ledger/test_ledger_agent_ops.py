@@ -117,3 +117,24 @@ def test_adding_an_item_whose_id_exists_changes_nothing_and_reports_success() ->
     assert ledger_agent_ops.apply(doc, {**first, "text": "Second text"}, again) is True
     assert doc["followups"] == [{"id": "f1", "text": "First text", "comments": [], "done": False}]
     assert again.events == []
+
+
+def test_an_expert_follow_up_is_refused_by_name_and_adds_nothing() -> None:
+    doc: dict[str, object] = {}
+    ctx = ledger_core.Context(meta(), 10)
+    op = {"op": "add_item", "list": "followups", "id": "f1", "text": "Check the disk", "by": "expert@abcdef-0001"}
+    assert ledger_agent_ops.apply(doc, op, ctx) is False
+    assert ctx.refused == [
+        "expert@abcdef-0001 files no follow up: an expert works one mission to its end: do the work inside the "
+        "mission or ask the master with agentihooks msg send"
+    ]
+    assert doc == {} and ctx.events == []
+
+
+def test_an_expert_question_is_added_like_any_other() -> None:
+    doc: dict[str, object] = {}
+    ctx = ledger_core.Context(meta(), 10)
+    op = {"op": "add_item", "list": "questions", "id": "q1", "text": "Which batch", "by": "expert@abcdef-0001"}
+    assert ledger_agent_ops.apply(doc, op, ctx) is True
+    assert ctx.refused == []
+    assert doc["questions"] == [{"id": "q1", "text": "Which batch", "comments": [], "answers": []}]

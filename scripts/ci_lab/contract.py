@@ -17,6 +17,7 @@ from typing import NamedTuple
 from scripts.ci_lab.remote import checkout
 
 SCHEDULER_PORT = 8800
+CONTROL_PORT = 8801
 METRICS_PORT = 9108
 SELF_TEST = "--self-test"
 
@@ -61,6 +62,7 @@ UNITS_OVERDUE = "ci_lab_units_overdue"
 WORKERS_READY = "ci_lab_workers_ready"
 GITHUB_RATE_REMAINING = "ci_lab_github_rate_remaining"
 VERDICT_MISMATCH_TOTAL = "ci_lab_verdict_mismatch_total"
+LOAD_AGE_SECONDS = "ci_lab_load_age_seconds"
 
 METRICS: Mapping[str, tuple[str, ...]] = {
     UNITS_QUEUED: ("class",),
@@ -83,6 +85,7 @@ METRICS: Mapping[str, tuple[str, ...]] = {
     WORKERS_READY: (),
     GITHUB_RATE_REMAINING: (),
     VERDICT_MISMATCH_TOTAL: ("gate",),
+    LOAD_AGE_SECONDS: (),
 }
 
 METRIC_NAME = re.compile(r"ci_lab_[a-z0-9_]+")
@@ -102,7 +105,7 @@ class Service(NamedTuple):
 
 SCHEDULER = Service(
     name="scheduler",
-    ports=(SCHEDULER_PORT, METRICS_PORT),
+    ports=(SCHEDULER_PORT, CONTROL_PORT, METRICS_PORT),
     prefixes=(BUS_PREFIX, MINIO_PREFIX, GITHUB_APP_PREFIX),
     names=(REDIS_URL, RUNTIME_CONFIG, LAB_URL),
     metrics=METRICS,

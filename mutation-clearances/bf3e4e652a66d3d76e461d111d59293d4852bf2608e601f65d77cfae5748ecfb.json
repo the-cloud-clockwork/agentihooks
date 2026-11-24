@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__quote_end:268814cc00ddb1cf8f5fa152120162705b9ba56043119f68d573f01263d81e6e": {
+    "reader": "standards_reader",
+    "reason": "Differs only in the return value for unterminated quotes; every caller clamps or slices to the end of the word."
+  }
+}

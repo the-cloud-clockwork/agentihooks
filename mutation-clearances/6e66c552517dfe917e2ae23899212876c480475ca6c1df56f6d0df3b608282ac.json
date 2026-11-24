@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats.py:scripts.events.nats.xǁNatsConsumerǁ_fetch:c424353a5441c4c07fa147537f5c2f9129c2c5e6b70120959ddc69b0f196f809": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: parts starts at zero per fetched batch and is read only for truthiness. Decrementing once per hidden part preserves zero exactly when no part was skipped and nonzero otherwise. Python integers do not overflow, and the count never escapes the function."
+  }
+}

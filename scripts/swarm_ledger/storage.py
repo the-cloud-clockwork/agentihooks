@@ -6,6 +6,7 @@ from pathlib import Path
 from scripts.swarm_ledger.repository import LedgerRepository, host_entries, postgres, sqlite
 
 DATABASE = sqlite.DATABASE
+WalSwitch = sqlite.WalSwitch
 Error = sqlite3.Error
 Missing = sqlite.Missing
 
@@ -34,6 +35,12 @@ def read_document(directory, slug: str) -> dict | None:
 
 def read_ids(directory, slug: str, collection: str) -> tuple:
     return sqlite.read_ids(store(directory), slug, collection)
+
+
+def read_flags(
+    directory: object, slug: str, collections: tuple[str, ...], names: tuple[str, ...]
+) -> dict[str, list[dict[str, object]]]:
+    return sqlite.read_flags(store(directory), slug, collections, names)
 
 
 def read_ledger(directory, slug: str, *keys: str) -> dict | None:

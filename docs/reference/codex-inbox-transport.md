@@ -32,7 +32,7 @@ These are separate mechanisms. None replaces another.
 
 | Path | Who receives | What it is |
 |---|---|---|
-| Inbox channel | Claude sessions | `scripts.inbox.channel`, a Python MCP server loaded with `--dangerously-load-development-channels=server:inbox`. It pushes each inbox item into the open Claude session and offers a reply tool. |
+| Inbox channel | Claude sessions | `scripts.inbox.channel`, a Python MCP server loaded with `--dangerously-load-development-channels=server:inbox`. It pushes each inbox item into the open Claude session and offers a reply tool. The launch registers it in the Claude config under the [Claude config lock](cli-commands.md#claude-config-lock). |
 | Codex push pump | Codex `app_server` executions | `scripts.inbox.codex`, run by the execution's supervisor. It delivers through the app-server protocol; replies go through `agentihooks msg reply`. |
 | Broadcast topics | Every subscribed session | `channel_publish` and the broadcast file, filtered by `AGENTIHOOKS_BASE_CHANNELS`. Fleet notices, never addressed work. |
 

@@ -92,16 +92,19 @@ def test_a_failed_resolve_is_an_error_naming_the_tree_and_the_reason(tmp_path, m
 
 
 @pytest.mark.feature("ci-dependency-audit-platformdirs-pin")
-def test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home(tmp_path, monkeypatch):
-    calls = []
+def test_audit_runs_pip_audit_under_the_checked_in_audit_constraint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[list[str], dict[str, bool]]] = []
+    lock = _ROOT / ".github/ci-tools/audit.lock"
     monkeypatch.setattr(audit.subprocess, "run", _run(calls, 1, _report()))
     assert audit.audit(tmp_path / "head.txt") == _report()
     assert calls == [
         (
             [
                 "uvx",
-                "--with",
-                "platformdirs!=4.14.8",
+                "--constraints",
+                str(lock),
                 "pip-audit==2.10.1",
                 "-r",
                 str(tmp_path / "head.txt"),
@@ -113,6 +116,10 @@ def test_audit_excludes_the_platformdirs_release_that_refuses_the_runner_home(tm
             {"capture_output": True, "text": True},
         )
     ]
+    pins = lock.read_text().splitlines()
+    (platformdirs,) = [pin for pin in pins if pin.startswith("platformdirs==")]
+    assert "pip-audit==2.10.1" in pins
+    assert platformdirs != "platformdirs==4.14.8"
 
 
 def test_a_report_error_names_the_cause():
@@ -233,7 +240,8 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_dependency_audit_is_a_lint_step_graded_by_the_base():
+@pytest.mark.feature("ci-dependency-audit-platformdirs-pin")
+def test_dependency_audit_is_a_lint_step_graded_by_the_base() -> None:
     jobs = _workflow()["jobs"]
     job = jobs["lint"]
     assert "dependency-audit" not in jobs
@@ -258,8 +266,6 @@ def test_dependency_audit_is_a_lint_step_graded_by_the_base():
         '  echo "::error::The base carries no scripts/ci_dependency_audit.py, so nothing trusted can grade."\n'
         "  exit 1\n"
         "fi\n"
-        'echo "platformdirs!=4.14.8" > "$RUNNER_TEMP/pip-audit-constraints.txt"\n'
-        'export UV_CONSTRAINT="$RUNNER_TEMP/pip-audit-constraints.txt"\n'
         'cd "$RUNNER_TEMP/base"\n'
         'python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )

@@ -1,7 +1,10 @@
 import json
 import os
+import signal
 import ssl
 import subprocess
+import time
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -48,6 +51,29 @@ def startup(
     cli = tools / "agentihooks"
     cli.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'if [[ "$*" == "ledger writer serve" ]]; then\n'
+        '  printf "%s|%s\\\\n" "${AGENTIHOOKS_SWARM_DATABASE_URL:-}" "$AGENTIHOOKS_HIVE_REDIS_URL" >> "$AGENTIHOOKS_HOME/writer-calls"\n'
+        '  if [[ "${WRITER_TEST_STATUS:-}" == active ]]; then\n'
+        "    trap 'printf stopped > \"$AGENTIHOOKS_HOME/writer-stopped\"; exit 0' TERM INT\n"
+        '    printf %s "$$" > "$AGENTIHOOKS_HOME/writer.pid"\n'
+        "    for _ in {1..300}; do sleep 0.01; done\n"
+        "    exit 8\n"
+        "  fi\n"
+        '  exit "${WRITER_TEST_STATUS:-0}"\nfi\n'
+        'if [[ "$*" == "hive run" && "${WRITER_TEST_STATUS:-}" == active ]]; then\n'
+        "  trap 'printf stopped > \"$AGENTIHOOKS_HOME/hive-stopped\"; exit 0' TERM INT\n"
+        '  printf %s "$$" > "$AGENTIHOOKS_HOME/hive.pid"\n'
+        "  for _ in {1..300}; do\n"
+        '    if [[ "${WRITER_TEST_STOP:-}" == hive && -f "$AGENTIHOOKS_HOME/writer.pid" ]]; then exit 9; fi\n'
+        "    sleep 0.01\n"
+        "  done\n"
+        "  exit 8\nfi\n"
+        'if [[ "$*" == "hive run" && -n "${WRITER_TEST_STATUS:-}" ]]; then\n'
+        "  for _ in {1..700}; do\n"
+        '    if [[ -f "$AGENTIHOOKS_HOME/writer-calls" ]] && (( $(wc -l < "$AGENTIHOOKS_HOME/writer-calls") >= 2 )); then exit 9; fi\n'
+        "    sleep 0.01\n"
+        "  done\n"
+        "  exit 8\nfi\n"
         'printf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
         'if [[ "$*" == "bundle unlink" ]]; then rm -f "$AGENTIHOOKS_HOME/linked-bundle"; fi\n'
         'if [[ "$1" == init ]]; then\n'
@@ -133,8 +159,66 @@ def startup(
             "HIVE_SSH_AUTHORIZED_KEYS_FILE": str(keys / "authorized_keys"),
             "HIVE_SSH_HOST_KEY_FILE": str(keys / "host_key"),
         }
-    result = subprocess.run(["bash", str(START)], env=env, capture_output=True, text=True)
+    result = run_startup(env)
     return result, log.read_text() if log.exists() else "", home, tmp_path / "repos/checkout"
+
+
+def run_startup(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    if env.get("WRITER_TEST_STATUS") != "active":
+        return subprocess.run(["bash", str(START)], env=env, capture_output=True, text=True)
+    home = Path(env["AGENTIHOOKS_HOME"])
+    markers = [home / "writer.pid", home / "hive.pid"]
+    process = subprocess.Popen(
+        ["bash", str(START)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
+    )
+    completed = False
+    try:
+        if env["WRITER_TEST_STOP"] == "term":
+            for _ in range(1500):
+                if all(marker.exists() for marker in markers) or process.poll() is not None:
+                    break
+                time.sleep(0.01)
+            process.terminate()
+        stdout, stderr = process.communicate(timeout=15)
+        for marker in markers:
+            with pytest.raises(ProcessLookupError):
+                os.kill(int(marker.read_text()), 0)
+        completed = True
+        return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+    finally:
+        if not completed:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=10)
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+@pytest.mark.parametrize("stop", ["hive", "term"])
+def test_worker_stops_live_children_when_the_hive_ends_or_startup_is_terminated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stop: str
+) -> None:
+    monkeypatch.setenv("WRITER_TEST_STATUS", "active")
+    monkeypatch.setenv("WRITER_TEST_STOP", stop)
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == (143 if stop == "term" else 9), result.stderr
+    assert (home / "writer-stopped").read_text() == "stopped"
+    if stop == "term":
+        assert (home / "hive-stopped").read_text() == "stopped"
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+@pytest.mark.parametrize("writer_status", ["0", "7"])
+def test_worker_restarts_the_writer_with_the_database_env_and_stops_with_the_hive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer_status: str
+) -> None:
+    monkeypatch.setenv("WRITER_TEST_STATUS", writer_status)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://writer.example.test/swarm")
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == 9, result.stderr
+    assert (home / "writer-calls").read_text().splitlines() == [
+        "postgresql://writer.example.test/swarm|redis://localhost:6379/15",
+        "postgresql://writer.example.test/swarm|redis://localhost:6379/15",
+    ]
 
 
 def test_a_container_restart_clears_the_previous_readiness_marker(tmp_path, monkeypatch):
