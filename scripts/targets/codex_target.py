@@ -90,6 +90,8 @@ def signs_in_by_hand(entry: Mapping[str, Any]) -> bool:
 
 
 _REFERENCE_NAME = re.compile(r"\$\{?(\w+)")
+LEGACY_WRAPPER = "agentihooks-hook.sh"
+WINDOWS = os.name == "nt"
 
 
 def _forward_env_references(entry: dict[str, Any]) -> None:
@@ -155,11 +157,24 @@ def _stale_catalog_files() -> tuple[Path, Path]:
 
 
 def wrapper_text(profile_env: dict[str, str], python_bin: str) -> str:
+    """The hook wrapper script: a batch file on Windows, where Codex runs hooks through cmd.exe, bash elsewhere."""
+    root = str(_install_module().AGENTIHOOKS_ROOT)
+    if WINDOWS:
+        return (
+            "@echo off\n"
+            "rem managed-by: agentihooks, regenerate with: agentihooks init --target codex\n"
+            f'cd /d "{root}"\n'
+            + "".join(
+                f'if not defined {key} set "{key}={value.replace("%", "%%")}"\n' for key, value in profile_env.items()
+            )
+            + 'set "AGENTIHOOKS_TARGET=codex"\n'
+            + f'"{python_bin}" -m hooks\n'
+        )
     return (
         "#!/usr/bin/env bash\n"
         "# managed-by: agentihooks — regenerate with: agentihooks init --target codex\n"
         "set -euo pipefail\n"
-        f"cd {shlex.quote(str(_install_module().AGENTIHOOKS_ROOT))}\n"
+        f"cd {shlex.quote(root)}\n"
         + "".join(f'export {key}="${{{key}:={shlex.quote(value)}}}"\n' for key, value in profile_env.items())
         + f"AGENTIHOOKS_TARGET=codex exec {shlex.quote(python_bin)} -m hooks\n"
     )
@@ -171,6 +186,9 @@ def _silent(_line: str) -> None:
 
 def _wrapper_python(text: str) -> str | None:
     lines = text.splitlines()
+    if WINDOWS:
+        found = re.fullmatch(r'"([^"]+)" -m hooks', lines[-1]) if lines else None
+        return found.group(1) if found else None
     words = shlex.split(lines[-1]) if lines else []
     return words[2] if words[:2] == ["AGENTIHOOKS_TARGET=codex", "exec"] and len(words) == 5 else None
 
@@ -181,7 +199,7 @@ def refresh_wrapper() -> bool:
 
     _i = _install_module()
     record = _i._global_record(_i._load_state(), "codex")
-    wrapper = operator_codex_home() / "agentihooks-hook.sh"
+    wrapper = operator_codex_home() / wrapper_name()
     if not record.get("profile") or not wrapper.is_file():
         return False
     if _i.AGENTIHOOKS_ROOT.resolve() != _i.install_root().resolve():
@@ -212,8 +230,24 @@ def refresh_wrapper() -> bool:
 def _is_ours(group: object, wrapper: Path) -> bool:
     hooks = group.get("hooks") if isinstance(group, dict) else None
     return isinstance(hooks, list) and any(
-        isinstance(h, dict) and _command_is_wrapper(str(h.get("command")), wrapper) for h in hooks
+        isinstance(h, dict) and _runs_wrapper(str(h.get("command")), wrapper) for h in hooks
     )
+
+
+def _runs_wrapper(command: str, wrapper: Path) -> bool:
+    """True for a hook command that runs our wrapper, quoted or not, or the bash wrapper an earlier install wrote."""
+    bare = command.strip('"')
+    return _command_is_wrapper(bare, wrapper) or _command_is_wrapper(bare, wrapper.with_name(LEGACY_WRAPPER))
+
+
+def wrapper_name() -> str:
+    """The hook wrapper's file name: a batch file on Windows, which opens .sh files in a Git Bash window."""
+    return "agentihooks-hook.cmd" if WINDOWS else LEGACY_WRAPPER
+
+
+def hook_command(wrapper: Path) -> str:
+    """The hooks.json command for the wrapper; quoted on Windows so cmd.exe keeps a path with spaces whole."""
+    return f'"{wrapper}"' if WINDOWS else str(wrapper)
 
 
 def restore_hook_order(home: Path) -> list[str]:
@@ -229,7 +263,7 @@ def restore_hook_order(home: Path) -> list[str]:
     hooks = doc.get("hooks") if isinstance(doc, dict) else None
     if not isinstance(hooks, dict):
         return []
-    wrapper = path.parent / "agentihooks-hook.sh"
+    wrapper = path.parent / wrapper_name()
     moved = []
     for event, groups in hooks.items():
         if not isinstance(groups, list):
@@ -532,14 +566,14 @@ class CodexAdapter:
         groups there survive.
         """
         _i = _install_module()
-        wrapper = home / "agentihooks-hook.sh"
+        wrapper = home / wrapper_name()
         wrapper.write_text(wrapper_text(profile_env or {}, str(_i._detect_venv() or sys.executable)))
         wrapper.chmod(0o755)
 
         hooks_path = home / "hooks.json"
 
         def _entry(event: str) -> dict:
-            hook = {"type": "command", "command": str(wrapper)}
+            hook = {"type": "command", "command": hook_command(wrapper)}
             if event not in _NO_CONTEXT_EVENTS:
                 hook["additionalContextLimit"] = 0
             return {"hooks": [hook]}
@@ -560,16 +594,14 @@ class CodexAdapter:
         for event, groups in desired.items():
             prior = merged.get(event, [])
             foreign = [
-                g
-                for g in prior
-                if not any(_command_is_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
+                g for g in prior if not any(_runs_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
             ]
             merged[event] = groups + foreign
         for event in [e for e in merged if e not in desired]:
             foreign = [
                 g
                 for g in merged[event]
-                if not any(_command_is_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
+                if not any(_runs_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
             ]
             if foreign:
                 merged[event] = foreign
@@ -821,7 +853,7 @@ class CodexAdapter:
         """
         _i = _install_module()
         home = self.home()
-        wrapper = home / "agentihooks-hook.sh"
+        wrapper = home / wrapper_name()
 
         hooks_path = home / "hooks.json"
         if hooks_path.exists():
@@ -839,7 +871,7 @@ class CodexAdapter:
                 foreign = [
                     g
                     for g in groups
-                    if not any(_command_is_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
+                    if not any(_runs_wrapper(h.get("command", ""), wrapper) for h in g.get("hooks", []))
                 ]
                 if foreign:
                     foreign_left[event] = foreign
@@ -953,7 +985,7 @@ class CodexAdapter:
             checks.append((bool(servers), f"mcp_servers registered: {', '.join(servers) or 'NONE'}"))
 
         hooks_path = home / "hooks.json"
-        wrapper = home / "agentihooks-hook.sh"
+        wrapper = home / wrapper_name()
         if hooks_path.exists():
             try:
                 hooks_doc = json.loads(hooks_path.read_text())
@@ -963,7 +995,7 @@ class CodexAdapter:
                     for groups in hooks_doc.get("hooks", {}).values()
                     for g in groups
                     for h in g.get("hooks", [])
-                    if _command_is_wrapper(h.get("command", ""), wrapper)
+                    if _runs_wrapper(h.get("command", ""), wrapper)
                 )
                 checks.append(
                     (

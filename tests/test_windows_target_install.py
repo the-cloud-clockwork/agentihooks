@@ -61,3 +61,42 @@ def test_sync_lock_is_a_noop_where_fcntl_is_unavailable(monkeypatch):
     with install._sync_lock():
         entered.append(True)
     assert entered == [True]
+
+
+def test_codex_hooks_run_a_batch_wrapper_on_windows(monkeypatch):
+    """cmd.exe opens a .sh hook in a new Git Bash window, so Windows hooks run a .cmd wrapper."""
+    from scripts.targets import codex_target
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setattr(codex_target, "WINDOWS", True)
+    home = codex_target.codex_home()
+    home.mkdir(parents=True, exist_ok=True)
+    codex_target.CodexAdapter().write_settings({})
+    wrapper = home / "agentihooks-hook.cmd"
+    commands = {
+        hook["command"]
+        for groups in json.loads((home / "hooks.json").read_text())["hooks"].values()
+        for group in groups
+        for hook in group["hooks"]
+    }
+    assert commands == {f'"{wrapper}"'}
+    text = wrapper.read_text()
+    assert text.startswith("@echo off\n")
+    assert codex_target._wrapper_python(text) == text.splitlines()[-1].split('"')[1]
+
+
+def test_windows_reinstall_replaces_bash_wrapper_hooks(monkeypatch):
+    """A Windows install from before the batch wrapper left .sh hooks; reinstall must not keep them."""
+    from scripts.targets import codex_target
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setattr(codex_target, "WINDOWS", True)
+    home = codex_target.codex_home()
+    home.mkdir(parents=True, exist_ok=True)
+    legacy = {"hooks": [{"type": "command", "command": str(home / "agentihooks-hook.sh")}]}
+    (home / "hooks.json").write_text(json.dumps({"hooks": {"PreToolUse": [legacy], "PostCompact": [legacy]}}))
+    codex_target.CodexAdapter().write_settings({})
+    doc = json.loads((home / "hooks.json").read_text())
+    commands = [hook["command"] for groups in doc["hooks"].values() for group in groups for hook in group["hooks"]]
+    assert not any(command.endswith("agentihooks-hook.sh") for command in commands)
+    assert "PostCompact" not in doc["hooks"]
