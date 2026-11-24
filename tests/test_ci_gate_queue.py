@@ -421,6 +421,50 @@ def test_the_early_gate_rejects_a_changed_graded_job_inventory():
         ci_gate_queue.normalize({"test.yml": workflow})
 
 
+def _reviewed_pair(needs: list[str]) -> dict[str, dict[str, dict[str, object]]]:
+    return {
+        "test.yml": {
+            "jobs": {
+                "gate-required": {"name": ci_gate_queue.SUMMARY_NAME, "runs-on": "runner", "needs": needs},
+                "queue-fail-fast": ci_gate_queue.watcher("runner"),
+                "reuse": {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"},
+            }
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "announced,added,accepted",
+    [
+        (True, (), True),
+        (True, ("collect", "lint-actions"), True),
+        (True, ("collect",), False),
+        (True, ("lint-actions",), False),
+        (False, ("collect", "lint-actions"), False),
+    ],
+    ids=["neither", "both", "collect alone", "lint-actions alone", "both without the announced gates"],
+)
+@pytest.mark.feature("gate-required-split-jobs")
+def test_the_early_gate_accepts_the_split_jobs_only_together(
+    announced: bool, added: tuple[str, ...], accepted: bool
+) -> None:
+    inventory = ci_gate_queue.REQUIRED | ci_gate_queue.SKIPPED | {"unit", "unit-lost", "unit-rerun", "queue-fail-fast"}
+    workflows = _reviewed_pair(sorted(inventory | (ci_gate_queue.ANNOUNCED if announced else set()) | set(added)))
+    if accepted:
+        assert ci_gate_queue.normalize(workflows)["test.yml"]["jobs"]["gate-required"]["name"] == "Gate — Required"
+    else:
+        with pytest.raises(ValueError, match="reviewed graded inventory"):
+            ci_gate_queue.normalize(workflows)
+
+
+@pytest.mark.feature("gate-required-split-jobs")
+def test_the_early_gate_refuses_a_gate_that_names_no_needs() -> None:
+    workflows = _reviewed_pair([])
+    workflows["test.yml"]["jobs"]["gate-required"] = {"name": ci_gate_queue.SUMMARY_NAME, "runs-on": "runner"}
+    with pytest.raises(ValueError, match="reviewed graded inventory"):
+        ci_gate_queue.normalize(workflows)
+
+
 def test_pending_originals_wait_without_misclassifying_started_recovery():
     jobs = complete()
     next(job for job in jobs if job["name"] == "unit (3.12, 7)").update(status="in_progress", conclusion=None)
