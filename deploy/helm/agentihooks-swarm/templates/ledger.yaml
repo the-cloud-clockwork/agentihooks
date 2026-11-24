@@ -149,7 +149,6 @@ spec:
       volumes:
         - name: cache
           emptyDir:
-            medium: Memory
             sizeLimit: {{ .Values.ledger.cache.sizeLimit | quote }}
       {{- with .Values.ledger.tls.secretName }}
         - name: ledger-tls
