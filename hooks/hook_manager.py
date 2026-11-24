@@ -25,6 +25,7 @@ import os
 import re
 import sys
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -1355,6 +1356,17 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
         log("plan_read_guard failed", {"error": str(e)})
 
 
+@contextmanager
+def _shell_guard(name: str) -> Iterator[None]:
+    try:
+        yield
+    except BlockAction:
+        raise
+    except Exception as e:
+        log(f"{name} check failed", {"error": str(e)})
+        print(f"WARNING: {name} check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+
+
 def _check_shell_guards(payload: dict[str, Any]) -> None:
     from hooks.context.approval_guard import check_approval
     from hooks.context.local_test_guard import check_local_tests
@@ -1369,21 +1381,23 @@ def _check_shell_guards(payload: dict[str, Any]) -> None:
         raise BlockAction(_blocker_block)
     if payload.get("tool_name") != "Bash":
         return
-    try:
-        from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
-        from hooks.context.master_coding import protection_refusal
-        from hooks.context.venv_guard import check_venv_guard
+    with _shell_guard("branch_guard"):
+        from hooks.context.branch_guard import check_branch_guard
 
         check_branch_guard(payload)
+    with _shell_guard("commit_on_main"):
+        from hooks.context.branch_guard import check_commit_on_main
+
         check_commit_on_main(payload)
+    with _shell_guard("master_coding"):
+        from hooks.context.master_coding import protection_refusal
+
         if refusal := protection_refusal(payload):
             raise BlockAction(refusal)
+    with _shell_guard("venv_guard"):
+        from hooks.context.venv_guard import check_venv_guard
+
         check_venv_guard(payload)
-    except BlockAction:
-        raise
-    except Exception as e:
-        log("branch_guard check failed", {"error": str(e)})
-        print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
 
 
 def _fit_pretool(blocks: list[tuple[str, str]]) -> str:

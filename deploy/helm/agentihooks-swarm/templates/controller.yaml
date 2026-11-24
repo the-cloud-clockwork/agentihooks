@@ -420,6 +420,8 @@ spec:
           volumeMounts:
             - name: home
               mountPath: /run/agentihooks
+            - name: cache
+              mountPath: /home/swarm/.cache
             {{- if $api.enabled }}
             - name: launch-signing
               mountPath: /run/secrets/launch-signing
@@ -448,6 +450,10 @@ spec:
         - name: home
           emptyDir:
             medium: Memory
+        - name: cache
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.controller.cache.sizeLimit | quote }}
         {{- if $jump.enabled }}
         - name: jump
           emptyDir:
