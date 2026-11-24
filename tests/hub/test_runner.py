@@ -10,7 +10,7 @@ import pytest
 
 from scripts import cli_delegates
 from scripts.events import memory
-from scripts.events.bus import StateEntry
+from scripts.events.bus import Bus, StateEntry
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.hub import lease, registry, runner
@@ -389,7 +389,7 @@ def _waiting() -> registry.Reactor:
 
 
 @pytest.mark.feature("hub-wait-ends-own-loop")
-def test_a_held_poll_never_holds_a_wait_end_delivery(bus: memory.MemoryBus) -> None:
+def test_a_held_poll_never_holds_a_wait_end_delivery(bus: Bus) -> None:
     held, polling, delivered = threading.Event(), threading.Event(), threading.Event()
 
     def poll(guard: Callable[[], bool]) -> None:
@@ -418,7 +418,7 @@ def test_a_held_poll_never_holds_a_wait_end_delivery(bus: memory.MemoryBus) -> N
 
 @pytest.mark.feature("hub-wait-ends-own-loop")
 def test_an_own_loop_reactor_on_standby_reports_standby_once_across_its_rests(
-    bus: memory.MemoryBus, monkeypatch: pytest.MonkeyPatch
+    bus: Bus, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(runner, "IDLE_S", 0.001)
     leader = runner.HubRunner(bus, registry.Registry(own_loop=[_waiting()]), "b", clock=Clock(), lease_ttl_ms=100)
