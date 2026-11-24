@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_hook_state:12e9a3c1f51eccc2e46699ea5796deb9fe2bf4c92ef2b696207719274fac266e": {
+    "reader": "standards_reader",
+    "reason": "since is min(meta rev, held inbox revisions), both revisions that are never negative, so since is always >= 0; since <= -1 and since <= -2 are both always False for an alert without a rev, so the -1 vs -2 default changes no output."
+  }
+}

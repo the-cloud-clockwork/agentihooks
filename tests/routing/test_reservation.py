@@ -363,3 +363,24 @@ def test_primary_login_ceiling_is_the_complement_of_the_reserve(monkeypatch):
     assert reservation.primary_login_ceiling("other", {}) is None
     monkeypatch.setattr(reservation, "primary_login", lambda: "")
     assert reservation.primary_login_ceiling("main", {}) is None
+
+
+@pytest.mark.feature("master-floor-agrees-with-handoff-week-line")
+def test_master_week_floor_widens_to_the_hooks_handoff_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks import config as hooks_config
+
+    assert reservation.master_week_floor({}) == 2.0
+    monkeypatch.setattr(hooks_config, "QUOTA_HANDOFF_WEEK_PCT", 97.0)
+    assert reservation.master_week_floor({}) == 3.0
+    monkeypatch.setattr(reservation, "primary_reserve_pct", lambda environ: 8.0)
+    assert reservation.master_week_floor({}) == 8.0
+
+
+@pytest.mark.feature("master-floor-agrees-with-handoff-week-line")
+def test_primary_reserved_widens_at_the_hooks_handoff_week_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks import config as hooks_config
+
+    monkeypatch.setattr(reservation, "primary_login", lambda: "main")
+    monkeypatch.setattr(hooks_config, "QUOTA_HANDOFF_WEEK_PCT", 97.0)
+    assert reservation.primary_reserved("main", 3.0, {}) is True
+    assert reservation.primary_reserved("main", 3.1, {}) is False

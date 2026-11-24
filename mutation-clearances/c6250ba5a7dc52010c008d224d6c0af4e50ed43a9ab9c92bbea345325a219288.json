@@ -1,0 +1,6 @@
+{
+  "scripts/review/record.py:scripts.review.record.x_mark:75fa65b2e06ca802cf2ab4ea584c3d285ba4047a7e542fc1f4e120bd545cac1d": {
+    "reader": "standards_reader",
+    "reason": "Replaces the empty task string that mark passes to _write with None. _write reads task in one place, the guard that decides whether the review tasks counter is incremented; an empty string and None are both falsy, so the guard is false for every input and the pipeline makes the same calls: hget, multi, hset and two expire calls, with no hincrby. The returned record comes from the mark update, which never reads task, and no exception path depends on it. No output, stored value, Redis call or exception differs; only the str annotation is violated, which the strict type gate grades separately."
+  }
+}

@@ -53,6 +53,7 @@ WRITE_VERBS = (
     "time-left",
     "claim",
     "plan-backfill",
+    "order",
 )
 FLAG = r"(?:--slug\s+\S+|--as\s+\S+)"
 PATTERN = re.compile(

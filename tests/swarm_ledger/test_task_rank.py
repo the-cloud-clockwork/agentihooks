@@ -431,8 +431,8 @@ def test_task_set_passes_the_operators_quote_with_the_rank(monkeypatch):
     assert sent == [("task_update", {"item": "tasks/t1", "fields": {"rank": "high"}, "quote": "his words"})]
 
 
-@pytest.mark.parametrize("action", [["add", "t5", "b", "--rank", "high"], ["group", "t1", "t2"]])
-def test_only_task_set_takes_a_quote(monkeypatch, action):
+@pytest.mark.parametrize("action", [["group", "t1", "t2"], ["split", "t1", "t2"]])
+def test_task_group_and_split_take_no_quote(monkeypatch, action):
     sent = []
     monkeypatch.setattr(ledger, "send", lambda args, kind, **f: sent.append((kind, f)))
     argv = ["--slug", SLUG, "--as", MASTER, "task", *action, "--quote", "his words"]

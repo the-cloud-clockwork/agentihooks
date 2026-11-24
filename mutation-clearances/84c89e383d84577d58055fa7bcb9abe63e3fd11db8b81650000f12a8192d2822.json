@@ -1,0 +1,6 @@
+{
+  "hooks/context/_strip.py:hooks.context._strip.x__without_heredocs:cfd059811b8d219b84ce66665849049bb3e9f0e3dc4b6e966e6322cd4de233f2": {
+    "reader": "standards_reader",
+    "reason": "Equivalent. A None start argument to bytes.rfind is treated as 0, so the call is identical."
+  }
+}

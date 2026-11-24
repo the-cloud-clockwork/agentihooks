@@ -72,6 +72,7 @@ def configured(bus: Bus, clock: lease.Clock = lease.wall_ms, source: "readiness.
     from scripts.hub.readiness import Readiness
     from scripts.hub.reconciler import Reconciler
     from scripts.hub.timers import Timers
+    from scripts.hub.wait_ends import WaitEnds
 
     inbox = InboxWake(bus, clock=clock)
     return Registry(
@@ -88,5 +89,6 @@ def configured(bus: Bus, clock: lease.Clock = lease.wall_ms, source: "readiness.
             Preemption(clock=clock, source=source).reactor(),
             Pulls(bus, clock=clock).reactor(),
             LaunchChecks(bus, clock=clock).reactor(),
+            *WaitEnds(clock=clock).reactors(),
         ]
     )
