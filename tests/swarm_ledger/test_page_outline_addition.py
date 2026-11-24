@@ -18,13 +18,13 @@ ANCHOR = '<section id="sec-followups"'
 ADDED = '<section id="sec-added" data-outline=""><details id="added-box"><summary>Added</summary></details></section>'
 CONTRACT = {"#sec-added": 1}
 STEPS = ("load", "outline", "outline all", "jump to", "reload")
-SIGNATURE = re.compile(r'<nav [^>]*id="outline"[^>]*>')
+SIGNATURE = re.compile(r'<nav [^>]*?id="outline"[^>]*? data-sig="([^"]*)"')
 JUMPS = re.compile(r'<select id="jump-to".*?</select>', re.DOTALL)
+GROUPS = re.compile(r'id="ol-(sec-[\w-]+)"')
 
 
 @pytest.fixture(scope="module")
 def outline_steps() -> Iterator[None]:
-    pytest.importorskip("playwright.sync_api")
     full = page_replay.steps
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(page_replay, "steps", lambda: [step for step in full() if step[0] in STEPS])
@@ -54,7 +54,7 @@ def traces(record: dict[str, Any]) -> list[str]:
     html = record["page"]["html"]
     signature, jumps = SIGNATURE.search(html), JUMPS.search(html)
     assert signature and jumps
-    return [signature.group(0), jumps.group(0)]
+    return [signature.group(1), jumps.group(0), " ".join(GROUPS.findall(html))]
 
 
 @pytest.mark.feature("page-equivalence-added-outline-section")
