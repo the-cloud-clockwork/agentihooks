@@ -345,14 +345,50 @@ def _edited(previous: Unit | None, unit: Unit) -> bool:
     return not isinstance(unit.node, ast.ClassDef) and ast.dump(previous.node) != ast.dump(unit.node)
 
 
+def _named(key: str) -> tuple[str, str]:
+    rel, _, path = key.partition("::")
+    scope, dot, name = path.rpartition(".")
+    return f"{rel}::{scope}" if dot else "", name.partition("#")[0]
+
+
+def _groups(found: dict[str, Unit]) -> dict[tuple[str, str], dict[str, str]]:
+    groups: dict[tuple[str, str], dict[str, str]] = {}
+    for key, unit in found.items():
+        groups.setdefault(_named(key), {})[key] = ast.dump(unit.node)
+    return groups
+
+
+def _matched(heads: dict[str, str], bases: dict[str, str]) -> dict[str, str | None]:
+    left = dict(bases)
+    found: dict[str, str] = {}
+    for key, content in heads.items():
+        same = next((base for base, text in left.items() if text == content), None)
+        if same is not None:
+            found[key] = same
+            del left[same]
+    rest = iter(left)
+    return {key: found[key] if key in found else next(rest, None) for key in heads}
+
+
+def _pair(before: dict[str, Unit], after: dict[str, Unit]) -> dict[str, Unit | None]:
+    paired: dict[str, str | None] = {"": ""}
+    bases = _groups(before)
+    for (scope, name), heads in _groups(after).items():
+        parent = paired[scope]
+        paired |= _matched(heads, {} if parent is None else bases.get((parent, name), {}))
+    return {key: None if base is None else before[base] for key, base in paired.items() if key}
+
+
 def _file_errors(
     index: Index, rel: str, old: str | None, classes: list[tuple[str, str, ast.ClassDef]]
 ) -> tuple[int, list[str]]:
     syntax, module = index.load(rel)
     before = {} if old is None else units(ast.parse(old, filename=rel), rel)
+    after = units(syntax, rel)
+    paired = _pair(before, after)
     changed, errors = 0, []
-    for key, unit in units(syntax, rel).items():
-        previous = before.get(key)
+    for key, unit in after.items():
+        previous = paired[key]
         if _edited(previous, unit):
             changed += 1
             errors += violations(index, module.name, key, unit, previous)
