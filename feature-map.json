@@ -15994,6 +15994,11 @@
       "id": "swarm-tick-spawn",
       "reason": "The legacy tick launch engine is removed; every swarm launches through hub events only, covered by swarm-events-only-launch.",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-legacy-events-only"
+    },
+    {
+      "id": "swarm-image-import-pins",
+      "reason": "The swarm image import pin check is reverted because its lock pins put the OpenTelemetry SDK and tree sitter into the swarm image, which the swarm image smoke forbids; the pin check returns in its own task under a new feature id.",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45389865223-0"
     }
   ]
 }
