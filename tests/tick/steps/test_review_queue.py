@@ -16,6 +16,7 @@ from scripts.swarm.ledger_client import LedgerRefused
 pytestmark = pytest.mark.unit
 
 SLUG = "crew"
+OTHER = "fleet"
 REPO = "https://github.com/acme/widgets"
 PULL = f"{REPO}/pull/7"
 NOW = 1_700_000_000_000
@@ -50,9 +51,11 @@ def doc(*extra: dict[str, Any]) -> dict[str, Any]:
     return {"tasks": [{"id": "t1", "pr_url": PULL, "phase": "p1"}, *extra], "phases": []}
 
 
-def publish(bus: MemoryBus, kind: str, data: dict[str, Any], key: str = "k", time: int = NOW) -> None:
-    event = Envelope(f"{kind}-{key}-{time}", kind, SLUG, kind.split(".")[0], key, 1, time, "github", data)
-    bus.events.publish(subject(SLUG, *kind.split(".")), event)
+def publish(
+    bus: MemoryBus, kind: str, data: dict[str, Any], key: str = "k", time: int = NOW, swarm: str = SLUG
+) -> None:
+    event = Envelope(f"{kind}-{key}-{time}", kind, swarm, kind.split(".")[0], key, 1, time, "github", data)
+    bus.events.publish(subject(swarm, *kind.split(".")), event)
 
 
 def run(bus: MemoryBus, ledger: Ledger, state: dict[str, Any] | None = None) -> list[str]:
@@ -86,6 +89,28 @@ def test_a_merge_group_and_a_release_each_queue_one_review_task() -> None:
     assert len({group["task"], release["task"]}) == 2
     assert group["title"] == "Review the merge queue group for pull request 7 of widgets"
     assert "No swarm task carries this change." in release["description"]
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_scoped_bus_review_pass_queues_only_its_own_swarm_events() -> None:
+    bus = open_bus(BusConfig(scoped=True))
+    events: dict[str, list[tuple[str, dict[str, Any]]]] = {
+        swarm: [
+            ("pull.opened", {"url": f"{REPO}/pull/{number}"}),
+            ("merge_group.requested", {"repository": REPO, "head": f"h{number}", "number": number}),
+            ("release.published", {"repository": REPO, "tag": f"v{number}", "url": f"{REPO}/releases/tag/v{number}"}),
+        ]
+        for swarm, number in ((SLUG, 7), (OTHER, 8))
+    }
+    for swarm, changes in events.items():
+        for kind, data in changes:
+            publish(bus, kind, data, key=swarm, swarm=swarm)
+    for swarm, changes in events.items():
+        ledger = Ledger()
+        assert len(review().review_pass(bus, swarm, doc(), ledger, NOW)) == 3
+        expected = {review().review_task(review().KINDS[kind], data, doc())["task"] for kind, data in changes}
+        assert {task["task"] for _, task, _ in ledger.added} == expected
+        assert {slug for slug, _, _ in ledger.added} == {swarm}
 
 
 @pytest.mark.feature("swarm-review-trigger")

@@ -1,6 +1,7 @@
 import { LS_KEY } from "./config.js";
 import { checks, doc, ops } from "./sync.js";
 import { clearFreeze, setFreeze } from "./freezes.js";
+import { PAGE_SIZE } from "./pages.js";
 
 export const tips = {};
 
@@ -8,20 +9,31 @@ export const app = {
 
 };
 
+export function sourceOf(item) {
+  return (withDefaults.sources && withDefaults.sources.get(item)) || item;
+}
+
 function entries(list) {
-  return (Array.isArray(list) ? list : []).filter((e) => e && typeof e === "object" && typeof e.id === "string");
+  if (!Array.isArray(list)) return [];
+  const kept = (entries.kept ||= new WeakMap());
+  if (!kept.has(list)) kept.set(list, list.filter((e) => e && typeof e === "object" && typeof e.id === "string"));
+  return kept.get(list);
 }
 
 export function withDefaults(d) {
   d = d && typeof d === "object" ? d : {};
+  const sources = (withDefaults.sources ||= new WeakMap());
   const list = (name, fields, threads) => (Array.isArray(d[name]) ? d[name] : []).map((i) => {
     const item = { ...i };
     for (const f of fields) if (item[f] === undefined && !["depends_on", "planning", "release"].includes(f)) item[f] = f === "done" || f === "out_of_scope" ? false : "";
     for (const t of threads) item[t] = entries(item[t]);
+    sources.set(item, i);
     return item;
   });
+  const notes = entries(d.notes).map((n) => ({ ...n, comments: entries(n.comments) }));
+  sources.set(notes, d.notes);
   return {
-    title: d.title || "", overview: d.overview || "", orchestrator: d.orchestrator || "", notes: entries(d.notes).map((n) => ({ ...n, comments: entries(n.comments) })), chat: entries(d.chat),
+    title: d.title || "", overview: d.overview || "", orchestrator: d.orchestrator || "", notes, chat: entries(d.chat),
     sources: Array.isArray(d.sources) ? d.sources : [],
     time_left_minutes: Number.isInteger(d.time_left_minutes) && d.time_left_minutes >= 0 ? d.time_left_minutes : null,
     closed_at: Number.isInteger(d.closed_at) ? d.closed_at : null,
@@ -44,10 +56,10 @@ export function withDefaults(d) {
 export function itemOf(d, list, id) { return d[list].find((i) => i.id === id); }
 
 function threadOf(d, path) {
-  if (path === "notes" || path === "chat") return d[path];
+  if (path === "notes" || path === "chat") return (d[path] = [...d[path]]);
   const [list, id, name] = path.split("/");
   const item = itemOf(d, list, id);
-  return item ? item[name] : null;
+  return item && Array.isArray(item[name]) ? (item[name] = [...item[name]]) : null;
 }
 
 function pendingKey(op) {
@@ -75,7 +87,7 @@ export function applyOp(d, op) {
   if (op.op === "verdict") {
     const [list, id] = op.item.split("/");
     const item = itemOf(d, list, id);
-    if (item && !item.comments.some((e) => e.id === op.id)) item.comments.push({ id: op.id, by: "operator", at: Date.now(), text: op.verdict, sending: true });
+    if (item && !item.comments.some((e) => e.id === op.id)) item.comments = [...item.comments, { id: op.id, by: "operator", at: Date.now(), text: op.verdict, sending: true }];
     return;
   }
   if (key) return;
@@ -114,6 +126,8 @@ export function setState(item, field, value) {
 
 let cacheWorker = null;
 let cacheVersion = 0;
+let cacheTimer = 0;
+const CACHE_WAIT_MS = 2000;
 
 export function lsRead() {
   try {
@@ -137,10 +151,28 @@ function cacheFits(value) {
 
 export function lsWrite() {
   try {
+    localStorage.setItem(`${LS_KEY}:pending`, JSON.stringify({ ops, checks, at: Date.now() }));
+  } catch (e) {
+    return false;
+  }
+  if (!cacheTimer) cacheTimer = setTimeout(() => { cacheTimer = 0; writeCache(); }, CACHE_WAIT_MS);
+  return true;
+}
+
+function firstScreen(d) {
+  const page = (items) => {
+    const { live, done } = workOrder(items);
+    return [...live.slice(0, PAGE_SIZE), ...done.slice(0, PAGE_SIZE).reverse()];
+  };
+  return { ...d, tasks: page(d.tasks), followups: page(d.followups) };
+}
+
+function writeCache() {
+  try {
     const at = Date.now();
-    localStorage.setItem(`${LS_KEY}:pending`, JSON.stringify({ ops, checks, at }));
+    const value = { doc: firstScreen(doc), ops, checks, at };
     cacheVersion++;
-    if (!cacheFits({ doc, ops, checks })) return false;
+    if (!cacheFits(value)) return false;
     if (!cacheWorker) {
       const main = document.querySelector("script[type=module]").src;
       cacheWorker = new Worker(new URL("cache_worker.js", main));
@@ -149,7 +181,7 @@ export function lsWrite() {
         try { localStorage.setItem(LS_KEY, data.value); return true; } catch (e) { return false; }
       };
     }
-    cacheWorker.postMessage({ version: cacheVersion, value: { doc, ops, checks, at } });
+    cacheWorker.postMessage({ version: cacheVersion, value });
     return true;
   } catch (e) {
     return false;
@@ -168,6 +200,16 @@ export function taskRank(item) {
   return taskRanks().includes(item.rank) ? item.rank : "normal";
 }
 
+export function workOrder(items) {
+  const live = items.filter((i) => !i.deleted && !i.done && i.state !== "done");
+  const done = items.filter((i) => !i.deleted && (i.done || i.state === "done"));
+  const states = { pr: 0, claimed: 1, open: 2, blocked: 3 };
+  const ranks = taskRanks();
+  const weight = new Map(live.map((i) => [i, (states[i.state || "open"] ?? 4) * ranks.length + ranks.indexOf(taskRank(i))]));
+  live.sort((a, b) => weight.get(a) - weight.get(b));
+  return { live, done: done.reverse() };
+}
+
 export function inScope(list) { return list.filter((i) => !i.out_of_scope); }
 
 export function itemState(list, i) {
@@ -179,14 +221,16 @@ export function itemState(list, i) {
 
 export function taskBlockers(task, tasks) {
   if ((task.state || "open") !== "open") return "";
-  const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
-  const title = (id) => (byId[id] ? byId[id].title : `task ${id}`);
-  const unfinished = (ids) => (ids || []).filter((id) => (byId[id] || {}).state !== "done");
+  const indexes = (taskBlockers.indexes ||= new WeakMap());
+  let byId = indexes.get(tasks);
+  if (!byId) indexes.set(tasks, (byId = new Map(tasks.map((t) => [t.id, t]))));
+  const title = (id) => (byId.has(id) ? byId.get(id).title : `task ${id}`);
+  const unfinished = (ids) => (ids || []).filter((id) => (byId.get(id) || {}).state !== "done");
   const done = (ids) => ids.map((id) => `${title(id)} is done`).join(", and ");
   const parked = unfinished(task.parked_on);
   if (parked.length) return `Parked on ${task.branch ? `branch ${task.branch}` : "its branch"} until ${done(parked)}`;
   const open = unfinished(task.depends_on);
-  const held = open.filter((id) => !(["claimed", "pr"].includes((byId[id] || {}).state) && byId[id].branch));
+  const held = open.filter((id) => !(["claimed", "pr"].includes((byId.get(id) || {}).state) && byId.get(id).branch));
   if (held.length) return `Waiting until ${done(held)}`;
-  return open.length ? `Ready to start on ${open.map((id) => `branch ${byId[id].branch} of ${title(id)}`).join(", and ")}` : "";
+  return open.length ? `Ready to start on ${open.map((id) => `branch ${byId.get(id).branch} of ${title(id)}`).join(", and ")}` : "";
 }

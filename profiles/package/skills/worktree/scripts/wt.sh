@@ -146,11 +146,35 @@ repo_name() {
   echo "${url,,}"
 }
 
+repo_owner() {
+  local url="${1,,}" path segment owner="" repository=""
+  local -a segments
+  if [[ "${url}" =~ ^[a-z][a-z0-9+.-]*:// ]]; then
+    [[ "${url}" != file://* ]] || return 0
+    path="${url#*://}"
+    [[ "${path}" == */* ]] || return 0
+    path="${path#*/}"
+  elif [[ "${url}" =~ ^[^/:]+: ]]; then
+    path="${url#*:}"
+  else
+    return 0
+  fi
+  IFS=/ read -r -a segments <<< "${path}"
+  for segment in "${segments[@]}"; do
+    [[ -n "${segment}" ]] || continue
+    owner="${repository}"
+    repository="${segment}"
+  done
+  printf '%s\n' "${owner}"
+}
+
 lab_remote() {
-  local url="${AGENTIHOOKS_LAB_REMOTE:-}" origin verb=add
+  local url="${AGENTIHOOKS_LAB_REMOTE:-}" origin owner verb=add
   [[ -n "${url}" ]] || return 0
   origin="$(git -C "${REPO}" config --get remote.origin.url)" || return 0
   [[ -n "$(repo_name "${url}")" && "$(repo_name "${url}")" == "$(repo_name "${origin}")" ]] || return 0
+  owner="$(repo_owner "${url}")"
+  [[ -z "${owner}" || "${owner}" == "$(repo_owner "${origin}")" ]] || return 0
   git -C "${REPO}" config --get remote.lab.url >/dev/null && verb=set-url
   git -C "${REPO}" remote "${verb}" lab "${url}" || return 1
   git -C "${REPO}" config "credential.${url}.helper" \

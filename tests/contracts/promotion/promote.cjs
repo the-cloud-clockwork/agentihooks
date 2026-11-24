@@ -2,6 +2,13 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const promote = require('../../../.github/scripts/promote.cjs');
 
+const pageSize = per_page => Math.min(per_page ?? 30, 100);
+
+const servedPage = (items, { page = 1, per_page }) => {
+  const size = pageSize(per_page);
+  return items.slice((page - 1) * size, page * size);
+};
+
 function fixture(options = {}) {
   const writes = [];
   const refs = [];
@@ -35,10 +42,10 @@ function fixture(options = {}) {
   const github = { rest: {
     actions: {
       getWorkflowRun: async () => ({ data: { workflow_id: 10, run_number: context.runId, created_at: '2026-10-28T01:00:00Z' } }),
-      listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
-      listJobsForWorkflowRun: async () => ({ data: { jobs: jobs.slice(0, 100) } }),
+      listWorkflowRuns: async args => ({ data: { workflow_runs: servedPage([], args) } }),
+      listJobsForWorkflowRun: async args => ({ data: { jobs: servedPage(jobs, args) } }),
     },
-    checks: { listForRef: async () => ({ data: { check_runs: checks.slice(0, 100) } }) },
+    checks: { listForRef: async args => ({ data: { check_runs: servedPage(checks, args) } }) },
     git: {
       getRef: async ({ ref }) => {
         if (ref === 'heads/dev') return { data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } };
@@ -60,7 +67,7 @@ function fixture(options = {}) {
       getCommit: async ({ ref }) => ({ data: ref === context.sha ? commit(context.sha, 'tree') :
         ref === 'main' && options.mainMoves && ++mainReads > 1 ? commit('moved', 'old', `Promote green dev to main (#8)\n\nGraded dev revision: ${options.mainMoves}\n`) :
         ref === 'main' ? commit('main', options.already ? 'tree' : 'old', options.promoted ? `Promote green dev to main (#6)\n\nGraded dev revision: ${options.promoted}\n` : '') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
-      listCommitStatusesForRef: async () => ({ data: statuses.slice(0, 100) }),
+      listCommitStatusesForRef: async args => ({ data: servedPage(args.ref === 'snapshot' ? [...grades].reverse() : statuses, args) }),
       compareCommits: async args => { refs.push(['compare', args]); return { data: { status: options.orders?.[args.base] || options.order || 'ahead' } }; },
     },
     pulls: {
@@ -76,13 +83,20 @@ function fixture(options = {}) {
       },
     },
   } };
-  github.paginate = async (method, args) => {
+  github.paginate = async (method, args, map) => {
     pages.push(args);
-    if (method === github.rest.actions.listWorkflowRuns) return [];
-    if (method === github.rest.actions.listJobsForWorkflowRun) return jobs;
-    if (method === github.rest.checks.listForRef) return checks;
-    if (method === github.rest.repos.listCommitStatusesForRef) return args.ref === 'snapshot' ? [...grades].reverse() : statuses;
-    throw new Error('Unexpected paginated endpoint');
+    const lists = [github.rest.actions.listWorkflowRuns, github.rest.actions.listJobsForWorkflowRun, github.rest.checks.listForRef,
+      github.rest.repos.listCommitStatusesForRef];
+    if (!lists.includes(method)) throw new Error('Unexpected paginated endpoint');
+    let items = [];
+    let done = false;
+    for (let page = 1; !done; page++) {
+      const response = await method({ ...args, page });
+      const data = Array.isArray(response.data) ? response.data : Object.values(response.data).find(Array.isArray);
+      items = items.concat(map ? map({ ...response, data }, () => { done = true; }) : data);
+      done ||= data.length < pageSize(args.per_page);
+    }
+    return items;
   };
   const summary = { addHeading() { return this; }, addTable() { return this; }, async write() {} };
   const core = { setOutput: (key, value) => { outputs[key] = value; }, summary, info: message => { infos.push(message); } };
@@ -227,6 +241,17 @@ for (const conclusion of ['failure', 'cancelled', 'timed_out', 'neutral', 'actio
   });
 }
 
+test('fails at once on a red job of its graded run past the first page of jobs', async () => {
+  const f = fixture();
+  f.jobs.push(...Array.from({ length: 100 - f.jobs.length }, (_, id) => ({ id: 100 + id, run_id: 42, name: `green-${id}`,
+    status: 'completed', conclusion: 'success' })), { id: 75, run_id: 42, name: 'lint', status: 'completed', conclusion: 'failure' });
+  await assert.rejects(promote(f), /Graded run jobs did not pass: lint failure$/);
+  assert.equal(f.now(), 0);
+  assert.equal(f.outputs.main, undefined);
+  assert.ok(f.grades.every(grade => grade.state !== 'success'));
+  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+});
+
 test('waits for the reported snapshot grade to appear before merging', async () => {
   const f = fixture();
   const paginate = f.github.paginate;
@@ -234,6 +259,18 @@ test('waits for the reported snapshot grade to appear before merging', async () 
   await promote(f);
   assert.equal(f.now(), 15000);
   assert.equal(f.grades.at(-1).state, 'success');
+});
+
+test('finds the reported snapshot grade behind a full first page of newer statuses', async () => {
+  const f = fixture();
+  const createCommitStatus = f.github.rest.repos.createCommitStatus;
+  f.github.rest.repos.createCommitStatus = async args => {
+    await createCommitStatus(args);
+    if (args.state === 'success') f.grades.push(...Array.from({ length: 100 }, (_, id) => ({ ...args, context: `newer-${id}` })));
+  };
+  await promote(f);
+  assert.equal(f.now(), 0);
+  assert.equal(f.outputs.main, 'rebased');
 });
 
 test('waits past four minutes for the snapshot required checks to turn green', async () => {

@@ -128,8 +128,10 @@ scan database for that build would lose those associations.
 
 ### Taking coverage as shards land
 
-The `sonar` job needs only `select`, `reuse`, `admission` and `lab-verdict`, so it
-starts beside the unit shards on a standard runner. Its runner wait, checkout
+The `sonar` job needs only `select`, `reuse`, `admission`, `lab-verdict` and
+`test-count`, so it starts beside the unit shards on a standard runner, after
+`test-count` has uploaded both reused test plan artifacts that its pattern
+download fetches by one listing of the run. Its runner wait, checkout
 and carried coverage finish while the shards run. The job holds that runner
 while it waits, because a light runner requests a quarter CPU and ran the scan
 three to four times slower. `Take each shard's coverage as it lands` runs

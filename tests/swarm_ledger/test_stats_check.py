@@ -110,7 +110,8 @@ def test_the_header_shows_the_check_beside_the_refresh_button():
 
 def test_the_stats_card_has_no_stats_check_row():
     script = (
-        "const nodes = {}; const $ = id => nodes[id] ||= {replaceChildren: (...rows) => {nodes[id].textContent = rows.join(' · ');}};\n"
+        "const nodes = {}; const $ = id => nodes[id] ||= {children: [], replaceChildren: (...rows) => {nodes[id].textContent = rows.join(' · ');}};\n"
+        "const place = (box, rows) => box.replaceChildren(...rows);\n"
         "const h = (tag, attrs, ...children) => attrs.text || children.filter(Boolean).join(' ');\n"
         "const when = () => 'now'; const span = () => '1m'; const inScope = list => list; const activeAgents = () => 0;\n"
         "const swarm = null; const inboxPending = () => 0; const document = {dispatchEvent: () => true};\n"
@@ -152,7 +153,8 @@ def test_a_tick_refresh_newer_than_the_stats_check_sets_the_refresh_age():
 
 def test_the_stats_card_counts_unfrozen_and_frozen_work_apart():
     script = (
-        "const nodes = {}; const $ = id => nodes[id] ||= {replaceChildren: (...rows) => {nodes[id].rows = rows;}};\n"
+        "const nodes = {}; const $ = id => nodes[id] ||= {children: [], replaceChildren: (...rows) => {nodes[id].rows = rows;}};\n"
+        "const place = (box, rows) => box.replaceChildren(...rows);\n"
         "const h = (tag, attrs, ...children) => [attrs.text, ...children].filter(Boolean).join(' ');\n"
         "const when = () => 'now'; const inScope = list => list; const activeAgents = () => 0;\n"
         "const swarm = null; const inboxPending = () => 0; const document = {dispatchEvent: () => true};\n"
