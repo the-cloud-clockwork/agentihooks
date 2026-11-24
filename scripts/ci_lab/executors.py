@@ -3,11 +3,11 @@ the pod cuts from its git mirror and answers the worker with the unit's outcome,
 
 A static unit runs the gate it names from the grader tree's workflow over the head, the base and grader trees bound
 read only. A test unit runs its batch on the venv of the head's lockfile digest with the pod's dependency manifest and
-flake ledger. A stats or mutant unit runs the mutation runner in the sandbox from a private tree of the head whose
-mutated sources sit behind trampolines, with the pod's stats cache, kill memory, unit budget and lane cap; a mutant
-unit's tests are the ones the stats records of that tree show reaching its function. `agentihooks ci-lab-worker` builds
-the pod from the worker contract environment and runs the worker until SIGTERM, serving its metrics registry on the
-contract metrics port.
+flake ledger. A stats or mutant unit runs the mutation runner in the sandbox from a private tree of the head in which
+the functions the head changes against the lease's base sit behind trampolines, with the pod's stats cache, kill
+memory, unit budget and lane cap; a mutant unit's tests are the ones the stats records of the test files its manifest
+names show reaching its function. `agentihooks ci-lab-worker` builds the pod from the worker contract environment and
+runs the worker until SIGTERM, serving its metrics registry on the contract metrics port.
 """
 
 import argparse
@@ -17,11 +17,9 @@ import json
 import os
 import signal
 import socket
-import subprocess
 import tempfile
 import threading
 import time
-import tomllib
 from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
@@ -34,9 +32,11 @@ from scripts.ci_lab import caches, contract, metrics, run_mutation, run_static, 
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
 from scripts.ci_lab.static_gates import REGISTRY, SECRETS, WORKFLOW, StaticGate, discover
+from scripts.ci_lab.units import Unit
 from scripts.ci_lab.venvs import Build
 from scripts.ci_lab.worker import Executor, Finished, Lease
 from scripts.ci_lab.worktrees import Mirror, Worktrees
+from scripts.ci_mutation import scope
 
 __all__ = [
     "MUTANT",
@@ -64,13 +64,9 @@ TEST = "test"
 STATS = run_mutation.STATS
 MUTANT = "mutant"
 KILLED = "killed"
-PYPROJECT = "pyproject.toml"
 INPUTS_BASE = "inputs.base"
 MASK = b"***"
 MUTANT_SUFFIX = "__mutmut_"
-TEST_FOLDER = "tests/"
-TEST_PREFIX = "test_"
-PYTHON = ".py"
 OPTIONS = ("-q", "-p", "no:cacheprovider")
 WHITELIST = {"LANG": "C.UTF-8"}
 TREES = 8
@@ -108,11 +104,11 @@ class Trees:
                     self.worktrees.release(head)
 
     @contextlib.contextmanager
-    def owned(self, head: str) -> Generator[tuple[Path, bool]]:
-        """Cut a private writable tree of the revision for the block, with whether the store fetched it, and drop it
-        after."""
+    def owned(self, head: str, base: str) -> Generator[tuple[Path, bool]]:
+        """Cut a private writable tree of the revision for the block, with the base its unit compares it against in
+        the store and whether the store fetched the revision, and drop it after."""
         with self.lock:
-            tree, fetched = self.worktrees.own(head)
+            tree, fetched = self.worktrees.own(head, base)
         try:
             yield tree, fetched
         finally:
@@ -238,7 +234,8 @@ def static(pod: Pod, lease: Lease) -> Finished:
 
 def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
     """Run the lease's test batch on its head with the venv of the head's lockfile digest, the manifest and the flake
-    ledger, on as many workers as its slots; the report counts the git and uv cache lookups it made."""
+    ledger, on as many workers as its slots; the report counts the git and uv cache lookups it made and carries the
+    flake ledger rows of a batch its retry passed, with the unit key as run and the attempt count as run_attempt."""
     with pod.trees.shared(lease.head) as ((tree,), fetched):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
         manifest = json.loads(lease.unit.manifest)
@@ -253,27 +250,27 @@ def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
         "attempts": verdict.attempts,
         "seconds": seconds,
         caches.KEY: caches.report(fetched, [built]),
+        "flakes": [{**row, "run": lease.unit.key, "run_attempt": verdict.attempts} for row in verdict.flakes],
     }
     return Finished(verdict.outcome, _report(pod, record), verdict.log)
 
 
-def _tracked(tree: Path) -> list[str]:
-    """List the Python files git tracks in the tree."""
-    listing = subprocess.run(["git", "-C", str(tree), "ls-files", "-z"], capture_output=True, check=True)
-    return [path for path in os.fsdecode(listing.stdout).split("\0") if path.endswith(PYTHON)]
+def _trampolined(tree: Path, base: str, head: str) -> list[str]:
+    """Put the functions head changes against base behind their trampolines in the tree and return the names of the
+    mutants written."""
+    changes = scope.changes_since(tree, base, head)
+    return [name for path in sorted(changes) for name in run_mutation.trampoline(tree, path, changes[path])]
 
 
-def _trampolined(tree: Path) -> None:
-    """Rewrite every Python file under the tree's mutmut source paths behind its trampolines."""
-    roots: list[str] = tomllib.loads((tree / PYPROJECT).read_text())["tool"]["mutmut"]["source_paths"]
-    for path in _tracked(tree):
-        if any(Path(path).is_relative_to(root) for root in roots):
-            run_mutation.trampoline(tree, path)
-
-
-def _test_files(tree: Path) -> list[str]:
-    """List the tracked test modules of the tree."""
-    return [path for path in _tracked(tree) if path.startswith(TEST_FOLDER) and Path(path).name.startswith(TEST_PREFIX)]
+def _traced(unit: Unit, written: Sequence[str]) -> list[str]:
+    """Return the test files a mutant unit's manifest names for its stats, refusing a unit that carries none and one
+    with a member the tree holds behind no trampoline."""
+    if not unit.manifest:
+        raise ValueError(f"mutant unit {unit.key} carries no manifest of the test files to trace")
+    missing = sorted(set(unit.members).difference(written))
+    if missing:
+        raise ValueError(f"mutant unit {unit.key} names mutants its tree holds behind no trampoline: {missing}")
+    return json.loads(unit.manifest)
 
 
 def function_of(mutant: str) -> str:
@@ -299,16 +296,17 @@ def _run(pod: Pod, tree: Path, venv: Path, request: Mapping[str, Any]) -> tuple[
 
 def mutation(pod: Pod, settings: Mutation, lease: Lease) -> Finished:
     """Run a stats unit with the tree as root and the stats cache, or a mutant unit with the kill memory, budget, cap
-    and the tests the tree's stats records show reaching its function, in a private trampolined tree of the head; the
+    and the tests the stats records of the test files its manifest names show reaching its function, in a private
+    tree of the head that holds behind trampolines the functions the head changes against the lease's base; the
     report counts the git and uv cache lookups it made."""
     unit = lease.unit
     named = {"kind": unit.kind, "key": unit.key, "options": list(OPTIONS)}
-    with pod.trees.owned(lease.head) as (tree, fetched):
+    with pod.trees.owned(lease.head, lease.base) as (tree, fetched):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
-        _trampolined(tree)
+        written = _trampolined(tree, lease.base, lease.head)
+        files = list(unit.members) if unit.kind == STATS else _traced(unit, written)
         started = pod.clock()
         stats = {**named, "kind": STATS, "root": str(tree), "cache": str(settings.cache)}
-        files = list(unit.members) if unit.kind == STATS else _test_files(tree)
         result, log = _run(pod, tree, venv, {**stats, "members": files})
         if result is not None and unit.kind == MUTANT:
             tests = covering(result["stats"], function_of(unit.members[0]))

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ready.py:scripts.swarm.ready.x__review:c224965015d0474e7ca55684a583293420d4be10c9fe0b700ee017fc1b5b0dd4": {
+    "reader": "standards_reader",
+    "reason": "cast(None, run.store) returns run.store unchanged because ready.py imports cast from typing and nothing rebinds it, so admit receives the same store."
+  }
+}

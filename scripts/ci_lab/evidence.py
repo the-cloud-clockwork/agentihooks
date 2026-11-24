@@ -6,12 +6,15 @@ python -m scripts.ci_lab evidence --grade RUN and agentihooks ci lab show SHA pr
 
 import argparse
 import json
+import os
 import sys
+import time
 from collections import Counter
 from collections.abc import Sequence, Set
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from scripts.ci_lab import flakes
 from scripts.ci_lab.digests import GradeInputs
 from scripts.ci_lab.objects import ROOT, LocalObjects, Objects, grade_prefix, unit_path
 
@@ -139,13 +142,17 @@ def main(argv: Sequence[str]) -> int:
 
 
 def ci(argv: Sequence[str]) -> int:
-    """Print every grade of a head in run order: agentihooks ci lab show SHA --objects ROOT."""
+    """Run agentihooks ci lab show SHA --objects ROOT, printing a head's grades in run order, or ci lab flakes."""
     parser = argparse.ArgumentParser(prog="agentihooks ci")
     lab = parser.add_subparsers(dest="group", required=True).add_parser("lab")
-    show_parser = lab.add_subparsers(dest="command", required=True).add_parser("show")
+    commands = lab.add_subparsers(dest="command", required=True)
+    show_parser = commands.add_parser("show")
     show_parser.add_argument("sha")
     show_parser.add_argument("--objects", type=Path, required=True)
+    flakes.declare(commands.add_parser("flakes"))
     arguments = parser.parse_args(argv)
+    if arguments.command == "flakes":
+        return flakes.command(arguments, os.environ, time.time())
     objects = LocalObjects(arguments.objects)
     prefix = head_prefix(arguments.sha)
     runs = sorted((path.removeprefix(prefix) for path in objects.keys(prefix)), key=lambda run: (len(run), run))

@@ -1,0 +1,6 @@
+{
+  "scripts/tick/steps/agents.py:scripts.tick.steps.agents.x__claim_unwritten:87f66eada94bfd6b09719492907d161cc24def328e9300ff8c9f780612731b9c": {
+    "reader": "standards_reader",
+    "reason": "typing.cast(typ, val) returns val unchanged at runtime (CPython source: def cast(typ, val): return val), so replacing the first argument with None alters no output; the change touches only the static type of the expression."
+  }
+}

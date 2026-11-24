@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.handoff.check import MARKER, problems
+from scripts.handoff.check import MARKER, problems, section
 
 pytestmark = pytest.mark.unit
 
@@ -41,6 +41,11 @@ def test_trailing_blank_lines_after_the_marker_are_fine():
     assert problems(VALID + "\n\n", lambda address: True) == []
 
 
+@pytest.mark.parametrize("blank", ["\n", "\n\n", "\n\n\n"])
+def test_blank_lines_after_the_marker_leave_the_last_section_as_it_was_written(blank: str) -> None:
+    assert section(VALID + blank, "Read first") == section(VALID, "Read first")
+
+
 def test_missing_title_is_refused():
     assert any("# Handoff v2" in p for p in problems(_swap("# Handoff v2\n", ""), lambda a: True))
 
@@ -76,6 +81,11 @@ def test_a_heading_inside_a_code_fence_is_not_a_heading():
 def test_an_empty_section_must_say_none():
     found = problems(_swap("## Decisions and promises\nNone\n", "## Decisions and promises\n\n"), lambda a: True)
     assert any("Decisions and promises" in p and "None" in p for p in found)
+
+
+def test_a_section_that_holds_only_blank_lines_is_empty() -> None:
+    found = problems(_swap("## Decisions and promises\nNone\n", "## Decisions and promises\n\n\n"), lambda a: True)
+    assert found == ["## Decisions and promises is empty; write None when there is nothing to say"]
 
 
 def test_the_marker_must_be_the_last_line():

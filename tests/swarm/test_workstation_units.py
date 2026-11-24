@@ -1,5 +1,6 @@
 import subprocess
 from argparse import Namespace
+from pathlib import Path
 
 import pytest
 
@@ -130,8 +131,8 @@ def test_every_systemctl_call_captures_text_output_within_thirty_seconds(tmp_pat
     assert seen == [unchecked, unchecked, {"capture_output": True, "text": True, "timeout": 30}]
 
 
-def test_a_distributed_install_retires_every_engine_unit_it_finds(tmp_path, distributed):
-    engine = [*timer.units(BINARY), *timer.tick_units(), *timer.DROPPED]
+def test_a_distributed_install_retires_every_engine_unit_it_finds(tmp_path: Path, distributed: object) -> None:
+    engine = list(timer.ENGINE)
     for name in engine:
         (tmp_path / name).write_text("[Unit]\n")
     calls = []
@@ -144,6 +145,16 @@ def test_a_distributed_install_retires_every_engine_unit_it_finds(tmp_path, dist
         ["systemctl", "--user", "daemon-reload"],
         ["systemctl", "--user", "enable", "--now", "agentihooks-spoke.service"],
     ]
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_distributed_reconciliation_keeps_the_host_writer(tmp_path: Path, distributed: object) -> None:
+    writer = tmp_path / "agentihooks-ledger-writer.service"
+    writer.write_text("host writer")
+    calls = []
+    assert timer.ensure(BINARY, tmp_path, run=systemctl(calls))
+    assert writer.read_text() == "host writer"
+    assert not any("agentihooks-ledger-writer.service" in call for call in calls)
 
 
 def test_a_current_distributed_install_reloads_nothing_and_reports_the_spoke_enable(tmp_path, distributed):
@@ -167,14 +178,19 @@ def test_a_distributed_reconcile_installs_the_spoke(tmp_path, monkeypatch, distr
     assert sorted(path.name for path in tmp_path.glob("agentihooks-*")) == ["agentihooks-spoke.service"]
 
 
-def test_a_distributed_reconcile_retires_current_engine_units_instead_of_scheduling(tmp_path, monkeypatch, distributed):
+def test_a_distributed_reconcile_retires_current_engine_units_instead_of_scheduling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, distributed: object
+) -> None:
     monkeypatch.setattr(timer, "reconcile", real_reconcile)
     for name, text in timer.units(BINARY).items():
         (tmp_path / name).write_text(text)
 
     assert timer.reconcile(BINARY, tmp_path, run=systemctl([]))
 
-    assert sorted(path.name for path in tmp_path.glob("agentihooks-*")) == ["agentihooks-spoke.service"]
+    assert sorted(path.name for path in tmp_path.glob("agentihooks-*")) == [
+        "agentihooks-ledger-writer.service",
+        "agentihooks-spoke.service",
+    ]
 
 
 def test_a_distributed_tick_ticks_no_swarm_and_names_the_hub(monkeypatch, capsys, distributed):

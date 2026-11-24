@@ -1,0 +1,27 @@
+rules:
+  - id: lab-static-step-env-without-type-workers
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The function that builds a lab static step's sandbox names no type checker count. The type gate then sizes its
+      pool to as many as four basedpyright checkers from the node's CPUs and load: on 24 November nine checkers of a
+      few type gate units held 7.73 GiB of a lab worker's 8 GiB memory limit and the kernel killed the worker. Name one
+      checker ahead of the whitelist and the step's own env so a step may still name another count.
+    paths:
+      include:
+        - /scripts/ci_lab/run_static.py
+        - lab-static-step-env-without-type-workers.py
+    patterns:
+      - pattern: |
+          def _sandbox(...):
+              ...
+      - pattern-not: |
+          def _sandbox(...):
+              ...
+              TYPE_WORKERS
+              ...
+      - pattern-not: |
+          def _sandbox(...):
+              ...
+              "AGENTIHOOKS_TYPE_WORKERS"
+              ...

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from scripts.hive import hive_state, purge, registry
+from scripts.hive import hive_state, master_notice, purge, registry
 
 OWNER = "tick"
 REASON = "quiet past the hive sweep window"
@@ -27,7 +27,8 @@ def sweep(store: Any, now_ms: int) -> list[str]:
         if record is None or not swept(record, now_ms):
             continue
         if record.get("draining") != "yes":
-            registry.update(store.redis, hive_id, ["draining=yes"], drain=registry.Drain(OWNER, REASON))
+            drained = registry.update(store.redis, hive_id, ["draining=yes"], drain=registry.Drain(OWNER, REASON))
+            master_notice.drained(store, hive_id, drained)
             lines.append(f"drained quiet ephemeral hive {hive_id}")
         if running := purge.hosted(store, hive_id):
             lines.append(f"kept quiet hive {hive_id} while {len(running)} agent records still run on it")

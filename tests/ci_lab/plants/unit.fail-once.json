@@ -1,0 +1,11 @@
+{
+  "gate": "unit/fail-once",
+  "reason": "fail once: the planted test fails its first lab attempt and passes the retry",
+  "edits": [
+    {
+      "path": "tests/ci_lab/test_lab_fail_once.py",
+      "before": "",
+      "after": "import pytest\n\nfrom tests.ci_lab.fail_once import fail_once\n\n\ndef test_a_planted_test_fails_its_first_lab_attempt_and_passes_the_retry(\n    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory\n) -> None:\n    fail_once(request.node.nodeid, tmp_path_factory.getbasetemp())\n"
+    }
+  ]
+}

@@ -12,6 +12,8 @@ agentihooks is bound to the `Delivery L2` gate, defined and bound in antoncore's
 | Duplicated lines | above 3 % |
 | Security hotspots reviewed | below 100 % |
 
+When the gate fails, the `SonarQube Quality Gate` step prints its error line and then the unresolved new bugs and vulnerabilities of the branch or pull request it graded, one line each: component, line, rule and message. It prints the first 100 and then how many more there are. Read a red gate's bugs there; the dashboard address in the error line exists only inside the job. The read is best effort: when it is refused, fails or finds nothing, or the server still does not answer once the retry waits reach 30 seconds, the step prints the error line alone.
+
 The job's `Hold the Delivery L2 conditions` step runs after the quality gate step and fails when:
 
 - the `Delivery L2` gate on the server holds conditions other than the five above, so a loosened threshold turns the job red;
@@ -126,8 +128,10 @@ scan database for that build would lose those associations.
 
 ### Taking coverage as shards land
 
-The `sonar` job needs only `select`, `reuse`, `admission` and `lab-verdict`, so it
-starts beside the unit shards on a standard runner. Its runner wait, checkout
+The `sonar` job needs only `select`, `reuse`, `admission`, `lab-verdict` and
+`test-count`, so it starts beside the unit shards on a standard runner, after
+`test-count` has uploaded both reused test plan artifacts that its pattern
+download fetches by one listing of the run. Its runner wait, checkout
 and carried coverage finish while the shards run. The job holds that runner
 while it waits, because a light runner requests a quarter CPU and ran the scan
 three to four times slower. `Take each shard's coverage as it lands` runs

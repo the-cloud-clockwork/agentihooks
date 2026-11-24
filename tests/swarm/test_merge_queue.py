@@ -861,17 +861,22 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
 
 
 @pytest.mark.parametrize("failed", [False, True])
-def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(monkeypatch, capsys, failed):
+def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failed: bool
+) -> None:
+    from scripts.review import gate as review
+
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     seen = []
 
-    def fresh(url, head):
+    def fresh(url: str, head: str) -> None:
         seen.append(("fresh", url, head))
         if failed:
             raise SwarmError(f"head {head} failed its last merge group run (Tests run)")
 
     monkeypatch.setattr(queue_exit, "require_fresh", fresh)
+    monkeypatch.setattr(review, "admit", lambda *args: seen.append(("review", args[4])))
     monkeypatch.setattr(cli, "_queue_intent", lambda store, args, agent, head: seen.append(("intent", head)))
     queued = []
     monkeypatch.setattr(
@@ -879,7 +884,7 @@ def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(monkeypat
     )
 
     assert cli.main(["sw", "merge", "queue", URL]) == (1 if failed else 0)
-    assert seen == [("intent", "abc"), ("fresh", URL, "abc")]
+    assert seen == [("intent", "abc"), ("review", "abc"), ("fresh", URL, "abc")]
     assert queued == ([] if failed else [URL])
     if failed:
         assert "head abc failed its last merge group run (Tests run)" in capsys.readouterr().err
@@ -1028,12 +1033,22 @@ def test_cli_queue_declares_no_checks_wait(monkeypatch, capsys):
         ("off", 0, False, None),
     ],
 )
-def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys, mode, code, warned, logged):
+def test_cli_queue_applies_the_judged_intent_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+    code: int,
+    warned: bool,
+    logged: str | None,
+) -> None:
     from types import SimpleNamespace
 
     from scripts.gates import intent
     from scripts.gates.verdicts import Verdicts
+    from scripts.review import gate as review
 
+    monkeypatch.setattr(review, "admit", lambda *args: None)
     store = swarm_of("eng")
 
     def config(slug):

@@ -245,6 +245,43 @@ def test_present_rule_and_live_check_pass_outside_operator(mapped_repo, origin):
     assert feature_map.validate(root, path) == 1
 
 
+def _incident_rules(root: Path) -> None:
+    incidents = root / ".semgrep-incidents"
+    incidents.mkdir()
+    (incidents / "outage.yml").write_text("rules:\n  - id: outage-first\n  - id: outage-second\n")
+    (incidents / "outage.test.yaml").write_text("rules:\n  - id: outage-fixture\n")
+
+
+@pytest.mark.parametrize("named", [[], ["outage-first"], ["outage-second"], ["outage-first", "feature-login"]])
+def test_rules_naming_declared_incident_or_feature_rules_pass(
+    mapped_repo: tuple[Path, Path, dict[str, object]], named: list[str]
+) -> None:
+    root, path, entry = mapped_repo
+    _incident_rules(root)
+    entry["rules"] = named
+    _rewrite(path, entry)
+    assert feature_map.validate(root, path) == 1
+
+
+@pytest.mark.parametrize("missing", ["outage-gone", "outage-fixture"])
+def test_a_rules_name_no_rule_declares_fails(mapped_repo: tuple[Path, Path, dict[str, object]], missing: str) -> None:
+    root, path, entry = mapped_repo
+    _incident_rules(root)
+    entry["rules"] = ["outage-first", missing]
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match=f"^login: missing rule {missing}$"):
+        feature_map.validate(root, path)
+
+
+def test_semgrep_rule_names_only_feature_rules(mapped_repo: tuple[Path, Path, dict[str, object]]) -> None:
+    root, path, entry = mapped_repo
+    _incident_rules(root)
+    entry["semgrep_rule"] = "outage-first"
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match="^login: missing rule outage-first$"):
+        feature_map.validate(root, path)
+
+
 def test_every_listed_test_must_exist_and_carry_the_marker(mapped_repo):
     root, path, entry = mapped_repo
     (root / "tests/test_more.py").write_text(
@@ -343,6 +380,13 @@ def test_cli_reports_the_complete_validated_feature_count(mapped_repo, monkeypat
 def test_duplicate_rule_ids_cannot_hide_a_rule(mapped_repo):
     root, path, _ = mapped_repo
     (root / ".semgrep/features/copy.yml").write_text("rules:\n  - id: feature-login\n")
+    with pytest.raises(ValueError, match="^duplicate feature rule id$"):
+        feature_map.validate(root, path)
+
+
+def test_duplicate_rule_ids_inside_one_rule_file_fail(mapped_repo: tuple[Path, Path, dict[str, object]]) -> None:
+    root, path, _ = mapped_repo
+    (root / ".semgrep/features/login.yml").write_text("rules:\n  - id: feature-login\n  - id: feature-login\n")
     with pytest.raises(ValueError, match="^duplicate feature rule id$"):
         feature_map.validate(root, path)
 
