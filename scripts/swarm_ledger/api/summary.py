@@ -39,13 +39,33 @@ def build(parts: dict[str, Any], tasks: list[Any], holds: tuple[str, bool], limi
     marks = swarm.freeze.marks(state, GRAPH.project(state)[0], *holds)
     status = swarm.phase_state.status(state)
     view, hidden = CLOSING.trimmed(state)
-    closed = {name: {key: entry[key] for key in CLOSED_KEPT if key in entry} for name, entry in hidden.items()}
+    named = referenced(state)
+    closed = {name: counted(entry, named) for name, entry in hidden.items()}
     raw: dict[str, Any] = parts.get("_meta") or {}
     meta = {key: value for key, value in raw.items() if key in META_KEPT}
     meta.update(closed=closed, limits=limits, events=(raw.get("events") or [])[-EVENTS_KEPT:])
     kept = {key: view.get(key, value) for key, value in parts.items() if key not in PAGED and key != "_meta"}
     sections = {name: section(name, state.get(name) or []) for name in PAGED}
     return {**kept, "marks": marks, "phase_status": status, "sections": sections, "_meta": meta}
+
+
+def referenced(state: dict[str, Any]) -> set[str]:
+    """The row ids the page resolves without holding their rows: task dependencies and priority targets."""
+    named = {
+        str(item)
+        for row in state.get("tasks") or []
+        if is_row(row)
+        for key in ("depends_on", "parked_on")
+        for item in row.get(key) or []
+    }
+    named.update(str(row.get("item") or "").partition("/")[2] for row in state.get("priorities") or [] if is_row(row))
+    return named
+
+
+def counted(entry: dict[str, Any], named: set[str]) -> dict[str, Any]:
+    kept = {key: entry[key] for key in CLOSED_KEPT if key in entry}
+    kept["ids"] = [row_id for row_id in entry.get("ids") or [] if row_id in named]
+    return kept
 
 
 def open_rows(name: str, rows: list[Any]) -> list[tuple[int, dict[str, Any]]]:

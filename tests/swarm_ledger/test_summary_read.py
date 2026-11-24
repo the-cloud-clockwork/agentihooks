@@ -100,7 +100,8 @@ def test_the_summary_derives_what_the_page_view_derives() -> None:
     assert built["marks"] == view["marks"]
     assert built["phase_status"] == view["phase_status"]
     hidden = cast(dict[str, dict[str, Any]], view["_meta"].get("closed", {}))
-    counted = {name: {key: entry[key] for key in summary.CLOSED_KEPT if key in entry} for name, entry in hidden.items()}
+    named = summary.referenced(state)
+    counted = {name: summary.counted(entry, named) for name, entry in hidden.items()}
     assert built["_meta"]["closed"] == counted
     assert built["_meta"]["limits"] == view["_meta"]["limits"]
 
@@ -119,11 +120,14 @@ def test_the_summary_of_a_production_sized_ledger_fits_one_reply() -> None:
     state["tasks"] += [
         {"id": f"t-gone-{n}", "title": "Gone", "state": "done", "done": True, "claimed_by": "eng"} for n in range(5300)
     ]
+    state["tasks"].append({"id": "t-waits", "title": "Waits", "state": "open", "depends_on": ["t-gone-0"]})
     state["followups"] += [{"id": f"f-gone-{n}", "text": "Closed", "done": True} for n in range(5700)]
     parts = {key: value for key, value in state.items() if key != "tasks"}
     built = summary.build(parts, state["tasks"], ("", False), ledger_server.PAGE_LIMITS)
     assert resources.reply_size({"data": built, "revision": resources.revision(built)}) < resources.MAX_REPLY
     assert not {"stamps", "join_history", "master_decisions", "members"} & set(built["_meta"])
     assert len(built["_meta"]["events"]) == summary.EVENTS_KEPT
-    assert {key for entry in built["_meta"]["closed"].values() for key in entry} <= set(summary.CLOSED_KEPT)
+    assert {key for entry in built["_meta"]["closed"].values() for key in entry} <= {*summary.CLOSED_KEPT, "ids"}
+    assert built["_meta"]["closed"]["tasks"]["ids"] == ["t-gone-0"]
+    assert built["_meta"]["closed"]["followups"]["ids"] == []
     assert built["_meta"]["closed"]["tasks"]["hidden"] == 5301 - ledger_closed.KEPT

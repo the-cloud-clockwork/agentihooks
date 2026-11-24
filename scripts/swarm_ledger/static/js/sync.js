@@ -118,7 +118,7 @@ export function closedLeftIn(name, key) {
 function keepDropped(previous, next) {
   for (const name of Object.keys(pulled)) {
     const closed = (next.closed || {})[name] || {};
-    if (closed.ids) {
+    if (closed.ids && closed.ids.length === closed.hidden) {
       const gone = hiddenDone(next, name);
       const have = new Set([...next[name], ...(older[name] || [])].map((i) => i.id));
       const dropped = previous[name].filter((i) => gone.has(i.id) && !have.has(i.id)).reverse();

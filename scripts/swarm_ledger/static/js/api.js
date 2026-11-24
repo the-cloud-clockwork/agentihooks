@@ -23,10 +23,6 @@ export function uploadImage(file) {
   return fetch(`${API_V1}/uploads/media`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
 }
 
-export function readMetadata() {
-  return fetch(API_V1, { cache: "no-store" });
-}
-
 export function readWorkspace(taskId) {
   return fetch(`${API_V1}/tasks/${encodeURIComponent(taskId)}/workspace`, { cache: "no-store" });
 }
