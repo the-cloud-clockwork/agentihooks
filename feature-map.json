@@ -12235,6 +12235,7 @@
         "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_on_a_confirmed_pull_request_passes_the_ledger_task_update_check",
         "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_records_every_confirmed_field_of_a_github_pull_request",
         "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_records_a_gitlab_merge_request_the_ledger_accepts",
+        "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_refuses_a_merge_request_gitlab_does_not_confirm",
         "tests/swarm/test_pull_confirm.py::test_the_pull_branch_confirms_a_gitlab_merge_request_through_the_forge",
         "tests/swarm/test_pull_confirm.py::test_the_pull_branch_reads_the_head_project_of_a_gitlab_fork",
         "tests/swarm/test_pull_confirm.py::test_the_pull_branch_refuses_a_merge_request_gitlab_does_not_confirm",

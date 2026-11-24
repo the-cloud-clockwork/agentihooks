@@ -1,6 +1,9 @@
 """Swarm pr on a confirmed pull request writes a task update the ledger accepts."""
 
-from typing import Any
+from collections.abc import Mapping
+from email.message import Message
+from typing import Any, NoReturn
+from urllib.error import HTTPError
 
 import pytest
 
@@ -11,7 +14,7 @@ from scripts.tick.ports.source_control import ChangeRef, ChangeState
 from tests.forge.fakes import Sent
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_intent_cli import started  # noqa: F401
-from tests.swarm.test_pull_confirm import GITLAB, GITLAB_HEAD, GITLAB_REPO, merge_request
+from tests.swarm.test_pull_confirm import GITLAB, GITLAB_HEAD, GITLAB_REPO, gitlab, merge_request
 
 URL = "https://github.com/o/r/pull/11024"
 HEAD = "0123456789abcdef0123456789abcdef01234567"
@@ -108,3 +111,24 @@ def test_swarm_pr_records_a_gitlab_merge_request_the_ledger_accepts(
         "pr_head": GITLAB_HEAD,
         "pr_url": GITLAB,
     }
+
+
+@pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
+def test_swarm_pr_refuses_a_merge_request_gitlab_does_not_confirm(
+    started: tuple[Any, Any, list],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, ledger, _ = started
+    sent = _checking(ledger)
+
+    def missing(method: str, url: str, headers: Mapping[str, str], data: bytes | None) -> NoReturn:
+        raise HTTPError(url, 404, "Not Found", Message(), None)
+
+    monkeypatch.setattr(cli, "pull_branch", lambda url: pull_head.pull_branch(url, forge=gitlab(missing)))
+    capsys.readouterr()
+    assert run("sw", "pr", GITLAB) != 0
+    refusal = f"GitLab does not confirm merge request {GITLAB}: HTTP Error 404: Not Found"
+    assert capsys.readouterr().err.strip().endswith(refusal)
+    assert not any(fields.get("pr_url") == GITLAB for fields in sent)
+    assert ledger.rows["t1"].get("pr_url") != GITLAB
