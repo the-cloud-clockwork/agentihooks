@@ -12807,6 +12807,24 @@
       ]
     },
     {
+      "id": "lab-completed-check-shadow",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-completed-check-observer",
+      "behaviour": "A completed check_run delivery reaches the CI lab scheduler: the hub ingress publishes it on ci.lab.head.check_completed carrying the delivery fields the shadow recorder reads, the scheduler's bus inbox hands each such envelope to its one observer in delivery order and acknowledges it, terminates one its observer cannot read with a logged reason and leaves the batch's heads unacknowledged when observing fails, and once AGENTIHOOKS_LAB_APP names the lab App the built scheduler's observer folds the lab repository's checks into the shadow recorder on its own metrics registry, mapping names to the static gates of dev read through its mirror, so a lab verdict that disagrees with Actions shows as ci_lab_verdict_mismatch_total on GET /metrics; without it completed checks are acknowledged unrecorded.",
+      "seam": "scripts.ci_lab.webhooks head_events and envelope, the hub Ingress.receive over a wired lab, scripts.ci_lab.scheduler BusInbox.heads over a fake bus consumer, and scheduler.build ticked once and scraped on its metrics port",
+      "tests": [
+        "tests/ci_lab/test_intake.py::test_a_completed_check_run_rides_its_own_subject_with_the_fields_the_shadow_comparison_reads",
+        "tests/hub/test_github_webhooks.py::test_a_wired_lab_publishes_a_completed_check_run_on_its_own_subject_for_the_shadow_comparison",
+        "tests/ci_lab/test_scheduler_shadow.py::test_the_bus_inbox_hands_each_completed_check_to_its_observer_in_delivery_order_and_still_reads_heads",
+        "tests/ci_lab/test_scheduler_shadow.py::test_the_bus_inbox_terminates_a_completed_check_its_observer_cannot_read_with_a_logged_reason",
+        "tests/ci_lab/test_scheduler_shadow.py::test_a_bus_inbox_whose_observer_fails_leaves_the_batch_heads_unacknowledged_for_redelivery",
+        "tests/ci_lab/test_scheduler_shadow.py::test_the_built_scheduler_counts_a_lab_verdict_that_disagrees_with_actions_on_its_metrics_endpoint",
+        "tests/ci_lab/test_scheduler_shadow.py::test_a_scheduler_built_without_the_lab_app_acknowledges_completed_checks_unrecorded",
+        "tests/ci_lab/test_scheduler_shadow.py::test_the_mirror_expander_reads_the_static_gate_ids_of_dev_as_the_shadow_report_reads_a_tree",
+        "tests/ci_lab/test_scheduler_shadow.py::test_a_static_gate_id_is_the_first_job_of_its_label"
+      ]
+    },
+    {
       "id": "lab-scheduler-grade",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-scheduler",

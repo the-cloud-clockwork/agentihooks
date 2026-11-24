@@ -1,8 +1,8 @@
 """Lab head events: GitHub webhook deliveries and the signed head notice turned into ci.lab.head envelopes.
 
-`head_events` reads the deliveries that move a head the lab may grade, `notice_event` reads the
-notice the agents' push path sends to `/lab/head`, and `LabIntake` publishes each head as an
-envelope whose type is its bus subject, `ci.lab.head.<event>`.
+`head_events` reads the deliveries that move a head the lab may grade and each completed check run the
+shadow comparison reads, `notice_event` reads the notice the agents' push path sends to `/lab/head`,
+and `LabIntake` publishes each as an envelope whose type is its bus subject, `ci.lab.head.<event>`.
 """
 
 import hashlib
@@ -10,7 +10,7 @@ import json
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 from scripts.events.envelope import Envelope
 
@@ -20,6 +20,8 @@ ENTITY = "head"
 NOTICE = "notice"
 PLANT = "plant"
 PUSHED = "pushed"
+COMPLETED = "completed"
+CHECK_COMPLETED = "check_completed"
 CHECK_PREFIX = "lab"
 BRANCHES = "refs/heads/"
 PLANT_PREFIX = "refs/heads/diffcheck/lab-plant-"
@@ -39,6 +41,18 @@ class HeadEvent:
     base: str
     actor: str
     action: str
+
+
+@dataclass(frozen=True)
+class CheckEvent:
+    """One completed check run: its repository, head and sender, and the delivery cut to the fields the shadow
+    comparison reads, in GitHub's shape."""
+
+    repo: str
+    head: str
+    actor: str
+    delivery: Mapping[str, Any]
+    event: ClassVar[str] = CHECK_COMPLETED
 
 
 def _push(payload: Mapping[str, Any]) -> list[HeadEvent]:
@@ -67,8 +81,23 @@ def _merge_group(payload: Mapping[str, Any]) -> list[HeadEvent]:
     return [HeadEvent("merge_group", repo, group["head_sha"], group["base_sha"], actor, payload["action"])]
 
 
-def _check_run(payload: Mapping[str, Any]) -> list[HeadEvent]:
+def _completed(payload: Mapping[str, Any]) -> CheckEvent:
+    run, repo = payload["check_run"], payload["repository"]["html_url"]
+    check = {
+        "name": run["name"],
+        "head_sha": run["head_sha"],
+        "conclusion": run["conclusion"],
+        "app": {"slug": run["app"]["slug"]},
+        "output": {"summary": run["output"]["summary"]},
+    }
+    delivery = {"action": COMPLETED, "repository": {"html_url": repo}, "check_run": check}
+    return CheckEvent(repo, run["head_sha"], payload["sender"]["login"], delivery)
+
+
+def _check_run(payload: Mapping[str, Any]) -> list[HeadEvent | CheckEvent]:
     run = payload["check_run"]
+    if payload["action"] == COMPLETED:
+        return [_completed(payload)]
     if payload["action"] != "rerequested" or not str(run["name"]).startswith(CHECK_PREFIX):
         return []
     pulls = run["pull_requests"]
@@ -77,7 +106,7 @@ def _check_run(payload: Mapping[str, Any]) -> list[HeadEvent]:
     return [HeadEvent("check_run", repo, run["head_sha"], base, actor, payload["action"])]
 
 
-HEADS: Mapping[str, Callable[[Mapping[str, Any]], list[HeadEvent]]] = {
+HEADS: Mapping[str, Callable[[Mapping[str, Any]], Sequence[HeadEvent | CheckEvent]]] = {
     "push": _push,
     "pull_request": _pull_request,
     "merge_group": _merge_group,
@@ -85,14 +114,15 @@ HEADS: Mapping[str, Callable[[Mapping[str, Any]], list[HeadEvent]]] = {
 }
 
 
-def head_events(name: str | None, payload: Mapping[str, Any]) -> list[HeadEvent]:
-    """Return the heads a GitHub delivery names for the lab.
+def head_events(name: str | None, payload: Mapping[str, Any]) -> Sequence[HeadEvent | CheckEvent]:
+    """Return the heads a GitHub delivery names for the lab, and the completed check run it carries.
 
     A pull request head's actor is the pull request's author, as `reconcile` reads it, so a trusted
     sender reopening an untrusted author's pull request admits nothing; every other head's actor is
     the delivery's sender. A rerequested check run with no pull request has no base. A push to a
     branch under `PLANT_PREFIX` names a plant head with no base, whatever its before, which the
-    scheduler bases on the head's merge base with dev.
+    scheduler bases on the head's merge base with dev. A completed check run of any name is a
+    `CheckEvent`, never a head.
     """
     if name is None or name not in HEADS:
         return []
@@ -108,10 +138,12 @@ def notice_event(payload: Mapping[str, Any]) -> HeadEvent:
     return HeadEvent(NOTICE, repo, head, base, actor, PUSHED)
 
 
-def envelope(event: HeadEvent) -> Envelope:
-    """Return the envelope recording a head, typed with its bus subject; one head event always has one id, so a resend is dropped."""
+def envelope(event: HeadEvent | CheckEvent) -> Envelope:
+    """Return the envelope recording a head or a completed check run, typed with its bus subject and carrying the head
+    event or the cut delivery; one event always has one id, so a resend is dropped."""
+    data = asdict(event) if isinstance(event, HeadEvent) else dict(event.delivery)
     return Envelope(
-        id=hashlib.sha256(json.dumps(asdict(event)).encode()).hexdigest(),
+        id=hashlib.sha256(json.dumps(data).encode()).hexdigest(),
         type=f"{HEAD_SUBJECT}.{event.event}",
         swarm=LAB,
         entity=ENTITY,
@@ -119,7 +151,7 @@ def envelope(event: HeadEvent) -> Envelope:
         version=0,
         time=time.time_ns() // 1_000_000,
         author=event.actor,
-        data=asdict(event),
+        data=data,
     )
 
 
