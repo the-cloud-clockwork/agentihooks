@@ -15917,6 +15917,18 @@
       ]
     },
     {
+      "id": "publish-unpushed-predecessor-fresh-branch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-publish-fresh-branch-unpushed-predecessor",
+      "behaviour": "Swarm publish from a fresh worktree branch accepts that branch and records it on the task when the branch the task records has no ref on origin, no open pull request delivers it and the task's pull request is absent or closed; it still refuses, writing nothing to the task, when the recorded branch exists on origin with commits the fresh head lacks or when the task's pull request is open.",
+      "seam": "scripts.swarm.publish.publish through delivery_branch and cut_from",
+      "tests": [
+        "tests/swarm/test_publish.py::test_publish_refuses_a_fresh_branch_while_the_recorded_branch_holds_commits_it_lacks",
+        "tests/swarm/test_publish.py::test_publish_refuses_a_fresh_branch_over_a_never_pushed_branch_while_its_pull_request_is_open",
+        "tests/swarm/test_publish.py::test_publish_records_a_fresh_branch_over_a_never_pushed_recorded_branch"
+      ]
+    },
+    {
       "id": "codex-error-variant-snapshot",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2691",
