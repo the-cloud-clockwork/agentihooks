@@ -15912,7 +15912,8 @@
       "seam": "agents._reap to swarm pending stops to Reconciler.poll and the owning hive stop stream",
       "tests": [
         "tests/swarm/test_events_claim_refunds.py::test_a_member_bind_tick_parks_its_stop_until_the_hub_sends_it",
-        "tests/hub/test_reconciler.py::test_a_refused_stop_does_not_hold_other_swarm_lifecycle_reconciliation"
+        "tests/hub/test_reconciler.py::test_a_refused_stop_does_not_hold_other_swarm_lifecycle_reconciliation",
+        "tests/hub/test_reconciler.py::test_a_lease_lost_mid_resend_leaves_the_other_parked_stops_for_the_next_poll"
       ]
     }
   ],

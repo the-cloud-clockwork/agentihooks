@@ -150,6 +150,34 @@ def test_a_refused_stop_does_not_hold_other_swarm_lifecycle_reconciliation(
     assert len(rig.returned) == 1
 
 
+@pytest.mark.feature("member-tick-stop-forwarded-by-hub")
+def test_a_lease_lost_mid_resend_leaves_the_other_parked_stops_for_the_next_poll(
+    rig: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import execution_stop
+    from scripts.hub import reconciler
+
+    pending = rig.store.key("rig", reconciler.PENDING_STOPS)
+    for name in ("first", "second"):
+        stopped = replace(rig.agent, name=name, execution_id=f"{name}-execution")
+        held = json.dumps({"agent": asdict(stopped), "reason": "ended", "forward": True})
+        rig.store.redis.hset(pending, stopped.execution_id, held)
+    sender = Mock(return_value=execution_stop.SENT)
+    monkeypatch.setattr(execution_stop, "stop", sender)
+    answers = iter([True, True])
+
+    rig.react.poll(lambda: next(answers, False))
+
+    sender.assert_called_once()
+    assert len(rig.store.redis.hgetall(pending)) == 1
+    assert reconciler.retry_stops(rig.store, "rig", rig.bus, lambda: False) == []
+    assert sender.call_count == 1
+    assert len(rig.store.redis.hgetall(pending)) == 1
+    assert len(reconciler.retry_stops(rig.store, "rig", rig.bus)) == 1
+    assert sender.call_count == 2
+    assert rig.store.redis.hgetall(pending) == {}
+
+
 def test_a_swarm_removed_mid_scan_does_not_stop_the_pass(rig):
     from scripts.swarm.store import PREFIX
 
