@@ -538,6 +538,49 @@ def test_a_closed_pull_request_leaves_a_grade_pushed_to_a_grade_ref(lab: Callabl
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_close_ends_the_live_grade_of_its_base_when_the_lane_names_a_grade_that_finished(
+    lab: Callable[..., Run],
+) -> None:
+    first, second = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (first,)})})
+    _deliver(run, _pull("opened", HEAD_A))
+    run.tick(1000)
+    live = run.grade(HEAD_A).run
+    run.lab.expander.plans[HEAD_A] = plan({"lint": (second,)})
+    run.cache(second)
+    _deliver(run, _pull("opened", HEAD_A, base=OTHER_BASE))
+    run.tick(1010)
+    assert run.lab.client.smembers(scheduler.LIVE) == {live}
+    assert run.lab.client.get(scheduler.LANES + PULL_LANE) != live
+    _deliver(run, _pull("closed", HEAD_A))
+    assert run.tick(1100) == [f"closed feature of {REPO}: retired {live}, dropped 1 pending units"]
+    assert run.lab.client.smembers(scheduler.LIVE) == set()
+    assert run.engine.queue.pending() == []
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_close_ends_the_live_grade_of_its_base_beside_a_grade_pushed_to_a_grade_ref_that_keeps_the_lane(
+    lab: Callable[..., Run],
+) -> None:
+    first, second = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (first,)})})
+    _deliver(run, _pull("opened", HEAD_A))
+    run.tick(1000)
+    plain = run.grade(HEAD_A).run
+    run.lab.expander.plans[HEAD_A] = plan({"lint": (second,)})
+    notice = HeadEvent("notice", REPO, HEAD_A, OTHER_BASE, ACTOR, "pushed")
+    run.lab.inbox.pending.append(scheduler.Head(notice, "feature", f"{scheduler.GRADE_REFS}feature"))
+    run.tick(1010)
+    pushed = run.lab.client.get(scheduler.LANES + PULL_LANE)
+    assert run.lab.client.smembers(scheduler.LIVE) == {plain, pushed}
+    _deliver(run, _pull("closed", HEAD_A))
+    assert run.tick(1100) == [f"closed feature of {REPO}: retired {plain}, dropped 0 pending units"]
+    assert run.lab.client.smembers(scheduler.LIVE) == {pushed}
+    assert run.lab.client.get(scheduler.LANES + PULL_LANE) == pushed
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, first), scheduler.job_id(HEAD_A, second)]
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
 def test_a_closed_pull_request_leaves_a_waiting_head_pushed_to_a_grade_ref(lab: Callable[..., Run]) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=500)
     run.push(HEAD_A, lane="feature", event="notice", action="pushed", ref=f"{scheduler.GRADE_REFS}feature")

@@ -755,6 +755,8 @@
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_with_nothing_held_names_that_and_the_batch_goes_on",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_keeps_the_pending_units_another_live_grade_grades",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_leaves_a_grade_pushed_to_a_grade_ref",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_ends_the_live_grade_of_its_base_when_the_lane_names_a_grade_that_finished",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_ends_the_live_grade_of_its_base_beside_a_grade_pushed_to_a_grade_ref_that_keeps_the_lane",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_leaves_a_waiting_head_pushed_to_a_grade_ref",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_leaves_the_same_lane_of_the_hotfix_class",
         "tests/ci_lab/test_scheduler_stale_heads.py::test_a_head_already_graded_takes_its_lane_and_supersedes_the_lanes_older_head",
