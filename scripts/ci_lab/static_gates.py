@@ -123,6 +123,12 @@ class StaticGate:
             and _step(name) not in produced
         )
 
+    @property
+    def rewrites_tree(self) -> bool:
+        """Whether the step rewrites its working tree, so it needs a tree of its own: a Semgrep scan against a
+        baseline commit resets the tree to that commit and back."""
+        return False
+
 
 @dataclass(frozen=True)
 class CiOnly:

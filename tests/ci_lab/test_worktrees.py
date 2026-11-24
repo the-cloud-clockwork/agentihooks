@@ -401,6 +401,7 @@ def test_an_own_copy_holds_the_base_its_unit_compares_it_against(tmp_path: Path,
     assert _git(known, "merge-base", later, head).strip() == fork
 
 
+@pytest.mark.feature("lab-static-baseline-gate-own-tree")
 def test_an_own_copy_takes_a_hard_reset_to_its_base_and_back_while_the_leased_tree_stays_sealed(
     tmp_path: Path, origin: Path
 ) -> None:

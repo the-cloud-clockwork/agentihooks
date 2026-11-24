@@ -14016,6 +14016,20 @@
       ]
     },
     {
+      "id": "lab-static-baseline-gate-own-tree",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "A CI lab static gate whose step passes --baseline-commit runs with its working directory in a private writable tree of the head, cut for the lease's head and base and dropped when the gate ends or raises, because Semgrep resets its working tree to the baseline commit and back whenever the current scan has a finding. Every other static gate runs in the shared tree of the head, which the worker seals read only and which the units of one head read at once. On 24 November the gate that bounds new test waits ran in that sealed tree, its reset was refused and the lab posted a red semgrep check on a head whose Semgrep jobs passed in Actions.",
+      "seam": "scripts.ci_lab.static_gates.discover over a workflow text, scripts.ci_lab.executors.static over fake worktrees and a recorded gate run, and scripts.ci_lab.worktrees.Worktrees.own over a real git store",
+      "tests": [
+        "tests/ci_lab/test_static_gates.py::test_a_gate_rewrites_its_tree_exactly_when_its_step_passes_a_baseline_commit",
+        "tests/ci_lab/test_static_gates.py::test_the_real_workflow_s_only_gates_that_rewrite_their_tree_are_its_two_baseline_scans",
+        "tests/ci_lab/test_executors.py::test_static_runs_only_a_gate_that_rewrites_its_tree_in_a_private_tree_of_the_head_and_drops_it",
+        "tests/ci_lab/test_executors.py::test_static_drops_the_private_tree_of_a_gate_that_raises",
+        "tests/ci_lab/test_worktrees.py::test_an_own_copy_takes_a_hard_reset_to_its_base_and_back_while_the_leased_tree_stays_sealed"
+      ]
+    },
+    {
       "id": "lab-static-step-env",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-step-env",
