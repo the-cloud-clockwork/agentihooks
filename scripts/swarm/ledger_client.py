@@ -250,6 +250,10 @@ class LedgerClient:
         """The ledger's freeze and focus records, read without its tasks."""
         return self._resource(slug, "freezes", collection=True)
 
+    def work_tree(self, slug: str) -> dict[str, list[dict[str, Any]]]:
+        """The ledger's plans, phases and slices keyed by collection, read without its tasks."""
+        return {name: self._resource(slug, name, collection=True) for name in ("plans", "phases", "slices")}
+
     def focus_verdicts(self, slug: str, target: str) -> dict[str, Any] | None:
         """The claim gate verdict on every task under a focus or freeze target, or None when no such target exists."""
         try:

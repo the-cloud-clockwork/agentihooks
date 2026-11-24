@@ -50,7 +50,8 @@ THIN: dict[str, Any] = {
 FULL = (
     "Add the step body seam scripts.tick.steps.thin so every open engineer task with a thin text gets one planner "
     "enhancement task and the master hears about it once, while tasks that already carry a plan stay untouched by "
-    "the pass. Done when the pull request is merged."
+    "the pass. Tests observe scripts.tick.steps.thin writes one planner enhancement per thin task. "
+    "Done when the pull request is merged."
 )
 
 
@@ -108,11 +109,16 @@ def _step() -> CallStep:
     return found
 
 
-def _run(tasks: list[dict[str, Any]], ledger: FakeLedger | None = None, deadline: Deadline | None = None) -> Pass:
+def _run(
+    tasks: list[dict[str, Any]],
+    ledger: FakeLedger | None = None,
+    deadline: Deadline | None = None,
+    doc: dict[str, Any] | None = None,
+) -> Pass:
     held = ledger or FakeLedger({})
     inbox = Inbox()
     values: dict[str, Any] = {
-        "doc": {"tasks": tasks},
+        "doc": {**(doc or {}), "tasks": tasks},
         "tools": replace(fake_tools(), ledger=held).for_effects(EFFECTS),
         "deadline": deadline or Deadline.after(5),
         "slug": SLUG,
@@ -309,6 +315,38 @@ def test_a_spent_deadline_takes_no_task() -> None:
     """A pass whose deadline is already spent takes no task and writes nothing."""
     found = _run([THIN], deadline=Deadline(0.0, clock=lambda: 1.0))
     assert (found.lines, found.calls(), found.inbox.sent) == ([], [], [])
+
+
+def _frozen(target: str) -> dict[str, Any]:
+    """A ledger with phase p1 under plan a, phase p2 under plan b and one freeze record on ``target``."""
+    return {
+        "plans": [{"id": "a", "title": "Claims"}, {"id": "b", "title": "Hives"}],
+        "phases": [{"id": "p1", "title": "Build", "plan": "plans/a"}, {"id": "p2", "title": "Ship", "plan": "plans/b"}],
+        "freezes": [
+            {"id": f"freeze-{target}", "verb": "freeze", "target": target, "by": "operator", "at": 1, "reason": ""}
+        ],
+    }
+
+
+@pytest.mark.feature("tick-thin-task-pass")
+@pytest.mark.parametrize(
+    "target", ["tasks/t1", "phases/p1", "plans/a"], ids=["task freeze", "phase freeze", "plan freeze"]
+)
+def test_a_thin_task_held_by_a_freeze_gets_no_enhancement_write(target: str) -> None:
+    """A thin open task under a freeze on itself, its phase or its phase's plan gets no ledger write, no action line
+    and no master notice."""
+    found = _run([THIN], doc=_frozen(target))
+    assert (found.lines, found.calls(), found.inbox.sent) == ([], [], [])
+
+
+@pytest.mark.feature("tick-thin-task-pass")
+def test_an_unfrozen_thin_task_beside_a_frozen_phase_still_gets_its_enhancement() -> None:
+    """In a ledger whose phase p1 is frozen, a thin task in the open phase p2 still gets its one enhancement write
+    and the master notice naming it."""
+    found = _run([{**THIN, "id": "t2", "phase": "p2"}], doc=_frozen("phases/p1"))
+    assert found.lines == ["queued enhance-t2 for thin task t2"]
+    assert [operation["id"] for operation in _operations(found)] == ["thin-add-t2", "thin-mark-t2"]
+    assert found.inbox.sent == [("swarm", f"master@{SLUG}", _notice("enhance-t2"), True)]
 
 
 @pytest.mark.feature("tick-thin-task-pass")

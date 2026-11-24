@@ -44,6 +44,7 @@ SKIPPED = {
 
 # A promotion gate the protected grader accepts before the pull request that adds it lands.
 ANNOUNCED = {"install-smoke", "dep-manifest", "type-gate"}
+SPLIT = {"collect", "lint-actions"}
 LAB_VERDICT = {"lab-verdict"}
 
 
@@ -201,7 +202,8 @@ def normalize(workflows: dict[str, dict[Any, Any]]) -> dict[str, dict[Any, Any]]
         ):
             raise ValueError("The early queue gate requires the existing whole queue reuse exclusion")
         expected = REQUIRED | SKIPPED | {"unit", "unit-lost", "unit-rerun", "queue-fail-fast"}
-        if set(summary.get("needs", [])) - LAB_VERDICT not in (expected, expected | ANNOUNCED):
+        announced = expected | ANNOUNCED
+        if set(summary.get("needs", [])) - LAB_VERDICT not in (expected, announced, announced | SPLIT):
             raise ValueError("The early queue gate must preserve the reviewed graded inventory")
         summary["name"] = "Gate — Required"
         early["name"] = "queue-fail-fast"
