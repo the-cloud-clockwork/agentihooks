@@ -4,6 +4,7 @@ import os
 import subprocess
 import zipfile
 from pathlib import Path
+from typing import cast
 
 import pytest
 import yaml
@@ -357,7 +358,15 @@ def test_a_failed_gate_lists_every_finding_page(tmp_path: Path, name: str, scope
         {name: findings[100:], "total": 101, "paging": {"pageIndex": 2, "pageSize": 100, "total": 101}},
     ]
     dashboard = f"http://sonar/dashboard?id=agentihooks&{scope}"
-    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=dashboard, **{name: pages})
+    answers = cast(list[dict[str, object] | int], pages)
+    result, _ = _gate(
+        tmp_path,
+        ["SUCCESS"],
+        "ERROR",
+        dashboard=dashboard,
+        issues=answers if name == "issues" else {},
+        hotspots=answers if name == "hotspots" else {},
+    )
     assert result.returncode == 1
     assert result.stdout.splitlines() == [
         f"::error::Quality Gate has FAILED (ERROR). Detailed information can be found at: {dashboard}",
@@ -385,7 +394,15 @@ def test_a_later_finding_page_cannot_lose_printed_findings(
     }
     final = {**last_page, name: []} if isinstance(last_page, dict) else last_page
     pages = [{name: [first], "total": 103, "paging": {"total": 103}}, final]
-    result, _ = _gate(tmp_path, ["SUCCESS"], "ERROR", dashboard=_BRANCH, **{name: pages})
+    answers = cast(list[dict[str, object] | int], pages)
+    result, _ = _gate(
+        tmp_path,
+        ["SUCCESS"],
+        "ERROR",
+        dashboard=_BRANCH,
+        issues=answers if name == "issues" else {},
+        hotspots=answers if name == "hotspots" else {},
+    )
     assert result.returncode == 1
     suffix = "hotspots " if name == "hotspots" else ""
     assert result.stdout.splitlines() == [
