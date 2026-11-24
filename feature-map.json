@@ -15346,6 +15346,16 @@
       ]
     },
     {
+      "id": "mutation-stats-lookup-digests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2728",
+      "behaviour": "One mutation stats cache lookup hashes each input file once and reuses that digest for every cached record that lists the file, so checking records that share most of their inputs costs one hash per file instead of one per file per record, while the next lookup hashes the files again, so a changed input still sends its records back to collection.",
+      "seam": "scripts.ci_mutation.stats_cache.collect_cached_stats and scripts.ci_mutation.stats_dependencies.StoredStats.load",
+      "tests": [
+        "tests/test_ci_mutation_stats_cache.py::test_one_stats_lookup_hashes_each_input_file_once_across_its_records"
+      ]
+    },
+    {
       "id": "mutation-stats-flake-ledger",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stats-flake-ledger",
