@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.swarm.autoscale import Decision, calculate
+from scripts.swarm.autoscale import Decision, Review, calculate
 
 MINUTE = 60_000
 
@@ -177,8 +177,9 @@ def test_ready_work_cap_replaces_the_unused_tick_limit_reason():
         previous = decision
 
 
-def test_ready_work_reason_counts_missing_lanes_as_zero():
-    decision = calculate({"eng": 9, "ci": 3}, {"claude": 22}, 22, {"eng": 1}, now_ms=0)
+@pytest.mark.parametrize("review", [None, Review(20, ("claude",))], ids=["no review share", "review share"])
+def test_ready_work_reason_counts_missing_lanes_as_zero(review: Review | None) -> None:
+    decision = calculate({"eng": 9, "ci": 3}, {"claude": 22}, 22, {"eng": 1}, now_ms=0, review=review)
     assert decision["reason"] == (
         "Quota seats 22 (claude 22); host room 22; ceiling 13 of 34; capped by ready work eng 1, ci 0, plan 0."
     )
@@ -189,16 +190,22 @@ def test_reaching_the_quota_target_does_not_report_a_ready_work_cap():
     assert decision["reason"] == "Quota seats 1 (claude 1); host room 22; ceiling 13 of 13."
 
 
-def test_idle_lanes_hold_only_their_live_agents():
+@pytest.mark.parametrize(
+    ("reviewers", "review"),
+    [({}, None), ({"review": 2}, Review(20, ("claude",)))],
+    ids=["no review lane", "live reviewers"],
+)
+def test_idle_lanes_hold_only_their_live_agents(reviewers: dict[str, int], review: Review | None) -> None:
     decision = calculate(
-        {"eng": 1, "ci": 3, "plan": 0},
+        {"eng": 1, "ci": 3, "plan": 0, **reviewers},
         {"claude": 14},
         20,
         {"eng": 0, "ci": 0, "plan": 0},
         {"ceilings": {"eng": 1, "ci": 18, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}},
         now_ms=0,
+        review=review,
     )
-    assert decision["ceilings"] == {"eng": 1, "ci": 3, "plan": 0}
+    assert decision["ceilings"] == {"eng": 1, "ci": 3, "plan": 0, **reviewers}
 
 
 def test_each_ready_lane_gets_a_spare_before_another_lanes_backlog():
