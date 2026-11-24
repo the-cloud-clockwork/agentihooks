@@ -19,7 +19,7 @@
     {
       "request": "GET /api/v1/ledgers/replay/orders",
       "order": "Master text: the ledger page shows a panel listing every open operator order with its title, his quoted words and its claimable, busy and done counts",
-      "matches": 2
+      "matches": 4
     }
   ]
 }
