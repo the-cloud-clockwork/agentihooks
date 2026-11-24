@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.swarm import cli
@@ -27,8 +29,14 @@ def test_swarm_set_accepts_both_mode_names(env, monkeypatch, mode, stored):  # n
     assert store.config("sw").gates == {"watch": stored}
 
 
+@pytest.mark.feature("review-queue-gate")
 @pytest.mark.parametrize("as_json", [False, True])
-def test_status_uses_new_names_in_modes_and_decisions(env, monkeypatch, capsys, as_json):  # noqa: F811
+def test_status_uses_new_names_in_modes_and_decisions(
+    env: tuple[Any, ...],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    as_json: bool,
+) -> None:
     import json
 
     from scripts.gates import log
@@ -46,6 +54,7 @@ def test_status_uses_new_names_in_modes_and_decisions(env, monkeypatch, capsys, 
         report = json.loads(output)
         assert report["gate_modes"]["identity"] == "deny"
         assert report["gate_modes"]["watch"] == "log only"
+        assert report["gate_modes"]["review"] == "log only"
         assert report["gates"][0]["kind"] == "log only"
     else:
         lines = output.splitlines()
@@ -56,6 +65,6 @@ def test_status_uses_new_names_in_modes_and_decisions(env, monkeypatch, capsys, 
             "claims=deny  "
             "trace-plan=log only  "
             "window=log only  stall=log only  nightwatch=deny  reset=log only  "
-            "feature=log only  talk=log only"
+            "feature=log only  review=log only  talk=log only"
         )
         assert lines[-1] == "gate  log only  watch  agent  work  budget spent"

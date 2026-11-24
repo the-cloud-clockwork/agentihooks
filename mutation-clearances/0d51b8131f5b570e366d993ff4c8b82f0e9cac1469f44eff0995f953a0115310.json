@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/scheduler.py:scripts.ci_lab.scheduler.x__request:7fcfcd18006e49ac294e94f941537ffe7ac8777327084d569ba9e47364cd384d": {
+    "reader": "Standards",
+    "reason": "For decoded held requests, replacing the missing plant default False with None preserves bool(False) == bool(None) == False. Present plant values are unchanged, so the restored GradeRequest and all observed behavior are identical."
+  }
+}

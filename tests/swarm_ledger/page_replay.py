@@ -1,10 +1,13 @@
 import argparse
 import datetime
 import json
+import re
 import sys
 import threading
 import time
 import urllib.parse
+from collections import Counter
+from collections.abc import Collection
 from contextlib import ExitStack
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -16,6 +19,8 @@ VIEWPORT = {"width": 1920, "height": 1080}
 START = datetime.datetime(2026, 10, 6, 15, 30, tzinfo=datetime.UTC)
 CLOCK_FROM_MS = int((START - datetime.timedelta(seconds=10)).timestamp() * 1000)
 CLOCK_STAMP = "<page clock>"
+REQUEST = re.compile(r"[A-Z]+ /[^\s?#]*")
+SIDES = {"removed": "base", "added": "head"}
 PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
     "1f15c4890000000d49444154789c6360f8cfc0f01f0005000201e22f7c2a0000000049454e44ae426082"
@@ -57,11 +62,20 @@ CAPTURE = """() => {
   const body = document.body.cloneNode(true);
   const removed = window.__removed || [];
   const kept = (el) => !removed.some((selector) => el.closest(selector));
+  const hidden = (id) => { const el = document.getElementById(id); return !!el && !kept(el); };
+  const parsed = (raw) => { try { return JSON.parse(raw); } catch { return null; } };
   for (const s of body.querySelectorAll("script")) s.remove();
   for (const selector of removed) for (const el of body.querySelectorAll(selector)) el.remove();
   for (const el of body.querySelectorAll('[class=""]')) el.removeAttribute("class");
   const storage = {};
   for (let i = 0; i < localStorage.length; i++) storage[localStorage.key(i)] = localStorage.getItem(localStorage.key(i));
+  if (removed.length) {
+    for (const [key, raw] of Object.entries(storage)) {
+      const value = parsed(raw);
+      if (!value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).some(hidden)) continue;
+      storage[key] = JSON.stringify(Object.fromEntries(Object.entries(value).filter(([id]) => !hidden(id))));
+    }
+  }
   const fields = [...document.querySelectorAll("input, textarea, select")].filter(kept).map((el) =>
     [el.id || el.dataset.focus || el.getAttribute("aria-label") || el.tagName, el.value, !!el.checked, !!el.disabled]);
   const boxes = [...document.querySelectorAll("[id]")].filter((el) => el.tagName !== "SCRIPT" && kept(el)).map((el) => {
@@ -201,50 +215,60 @@ def unclocked(results: list) -> list:
     return results
 
 
-def load_contract(path: Path) -> dict[str, int]:
+def valid_entry(entry: object) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    kinds = [kind for kind in ("selector", "request") if kind in entry]
+    if len(kinds) != 1 or set(entry) != {kinds[0], "order", "matches"}:
+        return False
+    name, order, matches = entry[kinds[0]], entry["order"], entry["matches"]
+    if not all(isinstance(text, str) and text.strip() for text in (name, order)):
+        return False
+    return type(matches) is int and matches > 0 and (kinds[0] == "selector" or bool(REQUEST.fullmatch(name)))
+
+
+def non_empty_texts(value: object) -> bool:
+    return isinstance(value, list) and bool(value) and all(isinstance(text, str) and text.strip() for text in value)
+
+
+def load_contract(path: Path, side: str = "removed") -> tuple[dict[str, int], dict[str, int]]:
     contract = json.loads(path.read_text())
-    removed = contract.get("removed") if isinstance(contract, dict) else None
-    reviewers = contract.get("reviewed_by") if isinstance(contract, dict) else None
-    entries_ok = (
-        isinstance(removed, list)
-        and removed
-        and all(
-            isinstance(entry, dict)
-            and set(entry) == {"selector", "order", "matches"}
-            and all(isinstance(entry[key], str) and entry[key].strip() for key in ("selector", "order"))
-            and type(entry["matches"]) is int
-            and entry["matches"] > 0
-            for entry in removed
-        )
-    )
-    reviewers_ok = (
-        isinstance(reviewers, list) and reviewers and all(isinstance(r, str) and r.strip() for r in reviewers)
-    )
+    contract = contract if isinstance(contract, dict) else {}
+    lists = [contract[key] for key in SIDES if key in contract]
     if (
-        not isinstance(contract, dict)
-        or set(contract) != {"removed", "reviewed_by"}
-        or not entries_ok
-        or not reviewers_ok
+        not set(contract) <= {"reviewed_by", *SIDES}
+        or not lists
+        or not all(isinstance(entries, list) and entries and all(map(valid_entry, entries)) for entries in lists)
+        or not non_empty_texts(contract.get("reviewed_by"))
     ):
         raise SystemExit(
-            f"{path}: an expected page change contract holds reviewed_by, a list of reviewers, and removed, "
-            "a list of entries with a selector, the operator order that removed it and how many elements it matches"
+            f"{path}: an expected page change contract holds reviewed_by, a list of reviewers, and removed or added, "
+            "lists of entries that each name a selector or a METHOD /path request, the operator order behind it "
+            "and how many it matches"
         )
-    selectors = {entry["selector"]: entry["matches"] for entry in removed}
-    if len(selectors) != len(removed):
-        raise SystemExit(f"{path}: each removed selector is named once")
-    return selectors
+    for key in SIDES:
+        entries = contract.get(key, [])
+        names = {(kind, entry[kind]) for entry in entries for kind in ("selector", "request") if kind in entry}
+        if len(names) != len(entries):
+            raise SystemExit(f"{path}: each {key} selector and request is named once")
+    entries = contract.get(side, [])
+    return (
+        {entry["selector"]: entry["matches"] for entry in entries if "selector" in entry},
+        {entry["request"]: entry["matches"] for entry in entries if "request" in entry},
+    )
 
 
-def removal(selectors) -> str:
+def removal(selectors: Collection[str]) -> str:
     hidden = json.dumps(",".join(selectors) + "{display:none !important}")
+    matches = json.dumps(",".join(selectors))
     return f"""(() => {{
   window.__removed = {json.dumps(list(selectors))};
-  document.addEventListener("DOMContentLoaded", () => {{
-    const style = document.createElement("style");
-    style.textContent = {hidden};
-    document.head.append(style);
-  }});
+  const sheet = new CSSStyleSheet();
+  sheet.replaceSync({hidden});
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  const hide = () => {{ for (const el of document.querySelectorAll({matches})) if (!el.hidden) el.hidden = true; }};
+  new MutationObserver(hide).observe(document, {{ childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] }});
+  hide();
 }})();"""
 
 
@@ -254,12 +278,26 @@ def seen(page, selectors) -> dict[str, int]:
     return dict(zip(selectors, counts, strict=True))
 
 
-def mismatched(contract: dict[str, int], shown: dict[str, int]) -> list[str]:
+def mismatched(contract: dict[str, int], shown: dict[str, int], side: str = "base") -> list[str]:
     return [
-        f"{selector} names {matches} elements but the most the base page shows at once is {shown.get(selector, 0)}"
+        f"{selector} names {matches} elements but the most the {side} page shows at once is {shown.get(selector, 0)}"
         for selector, matches in contract.items()
         if shown.get(selector, 0) != matches
     ]
+
+
+def miscounted(named: dict[str, int], made: Counter[str], side: str) -> list[str]:
+    return [
+        f"{request} names {matches} requests but the {side} page makes {made[request]}"
+        for request, matches in named.items()
+        if made[request] != matches
+    ]
+
+
+def unnamed(requests: list[dict], named: dict[str, int], made: Counter[str]) -> list[dict]:
+    calls = [f"{request['method']} {request['path']}" for request in requests]
+    made.update(call for call in calls if call in named)
+    return [request for request, call in zip(requests, calls, strict=True) if call not in named]
 
 
 def steps():
@@ -375,12 +413,20 @@ def serve(root: Path, folder: Path, stack: ExitStack):
     return f"http://{host}/{SLUG}"
 
 
-def record(root: Path, folder: Path, removed: dict[str, int] | None = None) -> list:
+def record(
+    root: Path,
+    folder: Path,
+    hidden: dict[str, int] | None = None,
+    named: dict[str, int] | None = None,
+    side: str = "base",
+) -> list:
     from playwright.sync_api import sync_playwright
 
-    removed = removed or {}
+    hidden = hidden or {}
+    named = named or {}
     results = []
     shown = {}
+    made: Counter[str] = Counter()
     with ExitStack() as stack:
         url = serve(root, folder, stack)
         pw = stack.enter_context(sync_playwright())
@@ -391,8 +437,8 @@ def record(root: Path, folder: Path, removed: dict[str, int] | None = None) -> l
 
         api = FakeApi(ledger_server.PAGE_LIMITS, ledger_server.ports.swarm().phase_state.status)
         context.add_init_script(DETERMINISTIC)
-        if removed:
-            context.add_init_script(removal(removed))
+        if hidden:
+            context.add_init_script(removal(hidden))
         context.route("**/media/**", api.media)
         context.route("**/artifacts/**", api.artifact)
         context.route("**/api/**", api.handle)
@@ -406,22 +452,22 @@ def record(root: Path, folder: Path, removed: dict[str, int] | None = None) -> l
         for name, act in steps():
             act(page)
             settle(page)
-            for selector, count in seen(page, removed).items():
+            for selector, count in seen(page, hidden).items():
                 shown[selector] = max(count, shown.get(selector, 0))
             requests, dialogs = api.take()
             results.append(
                 {
                     "step": name,
                     "page": page.evaluate(CAPTURE),
-                    "requests": requests,
+                    "requests": unnamed(requests, named, made),
                     "dialogs": dialogs,
                     "errors": errors[:],
                 }
             )
             errors.clear()
-    problems = mismatched(removed, shown)
+    problems = mismatched(hidden, shown, side) + miscounted(named, made, side)
     if problems:
-        raise SystemExit("the expected page change does not match the base page: " + "; ".join(problems))
+        raise SystemExit(f"the expected page change does not match the {side} page: " + "; ".join(problems))
     return results
 
 
@@ -430,10 +476,14 @@ def main() -> None:
     parser.add_argument("root", type=Path)
     parser.add_argument("folder", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--remove", type=Path)
+    change = parser.add_mutually_exclusive_group()
+    change.add_argument("--remove", type=Path)
+    change.add_argument("--add", type=Path)
     args = parser.parse_args()
-    removed = load_contract(args.remove) if args.remove else {}
-    results = unclocked(record(args.root.resolve(), args.folder, removed))
+    key = "added" if args.add else "removed"
+    contract = args.add or args.remove
+    hidden, named = load_contract(contract, key) if contract else ({}, {})
+    results = unclocked(record(args.root.resolve(), args.folder, hidden, named, SIDES[key]))
     args.output.write_text(json.dumps(results, indent=1, ensure_ascii=False) + "\n")
 
 

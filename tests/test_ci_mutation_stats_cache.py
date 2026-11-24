@@ -1727,6 +1727,17 @@ def test_the_discovery_digest_of_one_input_set_is_computed_once(tmp_path: Path) 
     assert reads == {"scripts/scan.py": 1, "scripts/plain.py": 2}
 
 
+def test_conftest_candidates_name_every_parent_folder_conftest_nearest_first() -> None:
+    from scripts.ci_mutation.stats_cache import conftest_candidates
+
+    assert conftest_candidates("tests/swarm/test_cli.py") == (
+        "tests/swarm/conftest.py",
+        "tests/conftest.py",
+        "conftest.py",
+    )
+    assert conftest_candidates("conftest.py") == ("conftest.py",)
+
+
 def test_selected_test_ids_read_the_collected_stats_once_not_once_per_id(tmp_path):
     from scripts.ci_mutation.stats_cache import collect_cached_stats
 

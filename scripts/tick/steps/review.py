@@ -104,7 +104,7 @@ def review_pass(bus: Bus, slug: str, doc: dict[str, Any], ledger: Any, now_ms: i
     known = {str(t["id"]) for t in doc["tasks"]}
     actions: list[str] = []
     for kind, short in KINDS.items():
-        consumer = bus.events.consumer(_durable(slug, short), subject(slug, *kind.split(".")))
+        consumer = bus.for_swarm(slug).events.consumer(_durable(slug, short), subject(slug, *kind.split(".")))
         for delivery in consumer.fetch(BATCH, FETCH_MS):
             if delivery.event.time >= now_ms - REPLAY_MS:
                 actions += _queue(delivery, short, slug, doc, ledger, known)
