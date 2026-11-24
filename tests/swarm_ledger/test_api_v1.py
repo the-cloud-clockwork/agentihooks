@@ -2523,6 +2523,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         plan="",
         plan_slice="",
         not_duplicate="",
+        covers_job="",
         scaffold=False,
         description="",
         phase="",

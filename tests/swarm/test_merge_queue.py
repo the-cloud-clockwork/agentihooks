@@ -1,5 +1,6 @@
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -860,17 +861,22 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
 
 
 @pytest.mark.parametrize("failed", [False, True])
-def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(monkeypatch, capsys, failed):
+def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failed: bool
+) -> None:
+    from scripts.review import gate as review
+
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     seen = []
 
-    def fresh(url, head):
+    def fresh(url: str, head: str) -> None:
         seen.append(("fresh", url, head))
         if failed:
             raise SwarmError(f"head {head} failed its last merge group run (Tests run)")
 
     monkeypatch.setattr(queue_exit, "require_fresh", fresh)
+    monkeypatch.setattr(review, "admit", lambda *args: seen.append(("review", args[4])))
     monkeypatch.setattr(cli, "_queue_intent", lambda store, args, agent, head: seen.append(("intent", head)))
     queued = []
     monkeypatch.setattr(
@@ -878,7 +884,7 @@ def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(monkeypat
     )
 
     assert cli.main(["sw", "merge", "queue", URL]) == (1 if failed else 0)
-    assert seen == [("intent", "abc"), ("fresh", URL, "abc")]
+    assert seen == [("intent", "abc"), ("review", "abc"), ("fresh", URL, "abc")]
     assert queued == ([] if failed else [URL])
     if failed:
         assert "head abc failed its last merge group run (Tests run)" in capsys.readouterr().err
@@ -1027,12 +1033,22 @@ def test_cli_queue_declares_no_checks_wait(monkeypatch, capsys):
         ("off", 0, False, None),
     ],
 )
-def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys, mode, code, warned, logged):
+def test_cli_queue_applies_the_judged_intent_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+    code: int,
+    warned: bool,
+    logged: str | None,
+) -> None:
     from types import SimpleNamespace
 
     from scripts.gates import intent
     from scripts.gates.verdicts import Verdicts
+    from scripts.review import gate as review
 
+    monkeypatch.setattr(review, "admit", lambda *args: None)
     store = swarm_of("eng")
 
     def config(slug):
@@ -1049,7 +1065,14 @@ def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys,
     queued, events = [], []
     monkeypatch.setattr(intent.log, "append", lambda slug, row, home=None: events.append((slug, row, home)))
 
-    def operate(action, url, admit, journal, attempts):
+    def operate(
+        action: str,
+        url: str,
+        admit: Callable[[str], Any],
+        journal: Any,
+        attempts: int,
+        priority: Callable[[], Any],
+    ) -> dict[str, Any]:
         assert journal.url == URL
         admit("abc")
         queued.append(url)
@@ -1260,13 +1283,18 @@ def plant_stall(store: Any, minutes: int) -> None:
 
 
 def stalled_master(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, rows: list[dict], focus: tuple[str, ...] = (), minutes: int = 10
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    rows: list[dict],
+    focus: tuple[str, ...] = (),
+    minutes: int | None = 10,
 ) -> list[dict]:
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "master-session")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     store = swarm_of(MASTER)
-    plant_stall(store, minutes)
+    if minutes is not None:
+        plant_stall(store, minutes)
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: stall_ledger(rows, focus))
     seen = []
@@ -1315,13 +1343,12 @@ def test_with_no_focus_open_every_urgent_task_counts_as_focused_for_the_stall_ro
 @pytest.mark.parametrize(
     "rows, focus, minutes",
     [
-        ([STALL_TASK], (), 9),
         ([{**STALL_TASK, "rank": "normal"}], (), 10),
         ([{**STALL_TASK, "state": "done"}], (), 10),
         ([STALL_TASK, OTHER_TASK], ("t2",), 10),
         ([], (), 10),
     ],
-    ids=["no stall yet", "not urgent", "done", "outside the focus", "no task"],
+    ids=["not urgent", "done", "outside the focus", "no task"],
 )
 def test_the_master_still_cannot_queue_without_a_stall_or_a_focused_urgent_task(
     monkeypatch: pytest.MonkeyPatch,
@@ -1340,6 +1367,69 @@ def test_the_master_still_cannot_queue_without_a_stall_or_a_focused_urgent_task(
 @pytest.mark.feature("stall-master-queue")
 def test_the_stall_route_never_opens_a_dequeue_for_the_master(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     seen = stalled_master(monkeypatch, tmp_path, [STALL_TASK])
+    assert cli.main(["sw", "merge", "dequeue", URL]) == 1
+    assert seen == []
+
+
+@pytest.mark.feature("focused-urgent-master-queue")
+def test_the_master_queues_a_focused_urgent_pull_request_on_any_branch_with_no_spawn_stall(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm import pull_head
+
+    reads: list[str] = []
+    monkeypatch.setattr(
+        pull_head, "pull_branch", lambda url: reads.append(url) or pull_head.PullHead("ci-a1b2c3-0004", "", 7, "abc")
+    )
+    seen = stalled_master(monkeypatch, tmp_path, [STALL_TASK, OTHER_TASK], focus=("t1",), minutes=None)
+    assert cli.main(["sw", "merge", "queue", URL]) == 0
+    assert reads == []
+    journal = seen[0]["journal"]
+    assert journal.context == {"route": "focused urgent", "task": "t1"}
+    journal.write("queue", URL, "abc", [], [])
+    record = json.loads((tmp_path / "merge-queue-events.jsonl").read_text().splitlines()[-1])
+    assert (record["route"], record["task"], record["pull"]) == ("focused urgent", "t1", URL)
+
+
+@pytest.mark.feature("focused-urgent-master-queue")
+@pytest.mark.parametrize("minutes", [None, 9], ids=["no stall planted", "stall below ten minutes"])
+def test_with_no_focus_open_the_master_queues_any_urgent_pull_request_with_no_spawn_stall(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, minutes: int | None
+) -> None:
+    seen = stalled_master(monkeypatch, tmp_path, [STALL_TASK, OTHER_TASK], minutes=minutes)
+    assert cli.main(["sw", "merge", "queue", URL]) == 0
+    assert seen[0]["journal"].context == {"route": "focused urgent", "task": "t1"}
+
+
+@pytest.mark.feature("focused-urgent-master-queue")
+@pytest.mark.parametrize(
+    "rows, focus",
+    [
+        ([{**STALL_TASK, "rank": "normal"}], ()),
+        ([{**STALL_TASK, "state": "done"}], ()),
+        ([STALL_TASK, OTHER_TASK], ("t2",)),
+        ([], ()),
+    ],
+    ids=["not urgent", "done", "outside the focus", "no task"],
+)
+def test_with_no_spawn_stall_the_master_is_refused_without_a_focused_urgent_task(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    rows: list[dict],
+    focus: tuple[str, ...],
+) -> None:
+    seen = stalled_master(monkeypatch, tmp_path, rows, focus=focus, minutes=None)
+    assert cli.main(["sw", "merge", "queue", URL]) == 1
+    assert seen == []
+    assert capsys.readouterr().err == "swarm: engineer@a1b2c3-0001 is the swarm master; the master works no task\n"
+
+
+@pytest.mark.feature("focused-urgent-master-queue")
+def test_the_focused_urgent_route_never_opens_a_dequeue_for_the_master(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen = stalled_master(monkeypatch, tmp_path, [STALL_TASK], minutes=None)
     assert cli.main(["sw", "merge", "dequeue", URL]) == 1
     assert seen == []
 

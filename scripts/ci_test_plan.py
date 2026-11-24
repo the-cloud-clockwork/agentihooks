@@ -23,6 +23,7 @@ read_jobs = cast("Callable[..., list[dict[str, Any]]]", scripts.ci_budget.jobs.r
 gh_api = cast("Callable[..., subprocess.CompletedProcess[Any]]", rate_limit.gh_api)
 
 UNIT_JOBS = frozenset(f"unit (3.12, {shard})" for shard in range(1, 21))
+COPY_JOB = "unit (3.12, copy)"
 # Full scope runs carry these into their own coverage for the tests they reuse.
 COVERAGE = frozenset(f"coverage-3.12-{shard}" for shard in range(1, 21))
 PACKED = "dep-manifest-packed"
@@ -148,7 +149,8 @@ def _usable(
         jobs = pool.submit(read_jobs, f"{actions}/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", JOB_PAGE)
         download = pool.submit(_api, f"{actions}/artifacts/{kept[0]['id']}/zip")
         tally["requests"] += 2
-        if not UNIT_JOBS <= {job["name"] for job in jobs.result() if job["conclusion"] == "success"}:
+        passed = {job["name"] for job in jobs.result() if job["conclusion"] == "success"}
+        if not (UNIT_JOBS <= passed or COPY_JOB in passed):
             tally["failed"] += 1
             continue
         try:

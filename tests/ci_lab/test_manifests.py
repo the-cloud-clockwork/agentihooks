@@ -247,6 +247,58 @@ def test_actions_marks_a_request_github_never_answered_or_answered_with_a_server
     assert not isinstance(unreadable.value, FetchUnanswered)
 
 
+@pytest.mark.feature("lab-token-mint-status")
+@pytest.mark.parametrize(
+    ("status", "refusal"), [(403, FetchRefused), (499, FetchRefused), (500, FetchUnanswered), (599, FetchUnanswered)]
+)
+def test_actions_classifies_the_real_token_mint_refusal_by_its_http_status(
+    monkeypatch: pytest.MonkeyPatch, status: int, refusal: type[FetchRefused]
+) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "fixture")
+    monkeypatch.setattr(github_app.jwt, "encode", Mock(return_value="signed"))
+    mint = Mock(return_value=answer(status))
+    monkeypatch.setattr(requests, "post", mint)
+    get = Mock()
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(refusal) as refused:
+        Actions("example/repo").archive(zipped(9))
+    assert type(refused.value) is refusal
+    assert str(refused.value) == (
+        "GET actions/artifacts/9/zip token mint failed: GitHub App cannot supply scoped actions read credentials: "
+        f"GitHub answered {status}"
+    )
+    assert isinstance(refused.value.__cause__, github_app.GitAuthRefused)
+    assert refused.value.__cause__.status_code == status
+    get.assert_not_called()
+    assert mint.call_count == 1
+
+
+@pytest.mark.feature("lab-token-mint-status")
+def test_actions_keeps_a_mint_scope_refusal_permanent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "fixture")
+    monkeypatch.setattr(github_app.jwt, "encode", Mock(return_value="signed"))
+    mint = Mock(
+        return_value=answer(201, {"repositories": [{"full_name": "example/repo"}], "permissions": {"actions": "write"}})
+    )
+    monkeypatch.setattr(requests, "post", mint)
+    get = Mock()
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(FetchRefused) as refused:
+        Actions("example/repo").json(COMMIT_RUNS_PATH)
+    assert type(refused.value) is FetchRefused
+    assert str(refused.value) == (
+        f"GET {COMMIT_RUNS_PATH} token mint failed: GitHub App cannot supply scoped actions read credentials: "
+        "GitHub answered 201 with a token outside that scope"
+    )
+    assert isinstance(refused.value.__cause__, github_app.GitAuthRefused)
+    assert refused.value.__cause__.status_code is None
+    get.assert_not_called()
+
+
 @pytest.mark.feature("lab-dev-manifest-fetch")
 def test_the_fetcher_reads_each_repository_through_one_reader_of_its_own() -> None:
     made: list[str] = []
@@ -331,6 +383,50 @@ def test_background_raises_pending_while_a_fetch_runs_and_answers_it_until_it_go
     held.release.set()
 
 
+@pytest.mark.feature("lab-manifest-search-outlives-absent-answers")
+def test_background_keeps_an_absent_answer_for_an_hour_and_fetches_it_again_after_it() -> None:
+    held = Held({COMMIT: None})
+    clock = Clock()
+    background = manifests.Background(held, clock=clock)
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    held.release.set()
+    finished(background.fetches)
+    held.release.clear()
+    for now in (300.0, 3599.0):
+        clock.now = now
+        assert background("example/repo", COMMIT) is None
+    assert held.asked == [("example/repo", COMMIT)]
+    clock.now = 3600.0
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    assert all(held.started.acquire(timeout=WAIT_S) for _ in range(2))
+    assert held.asked == [("example/repo", COMMIT), ("example/repo", COMMIT)]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-manifest-search-outlives-absent-answers")
+def test_background_forgets_a_found_manifest_on_its_fresh_window_and_an_absent_answer_on_its_own() -> None:
+    held = Held({COMMIT: None, OTHER: packed(OTHER)})
+    clock = Clock()
+    background = manifests.Background(held, fresh_s=5.0, clock=clock, absent_s=10.0)
+    for commit in (COMMIT, OTHER):
+        with pytest.raises(manifests.FetchPending):
+            background("example/repo", commit)
+    held.release.set()
+    finished(background.fetches)
+    held.release.clear()
+    clock.now = 5.0
+    assert background("example/repo", COMMIT) is None
+    assert list(background.fetches) == [("example/repo", COMMIT)]
+    clock.now = 9.0
+    assert background("example/repo", COMMIT) is None
+    clock.now = 10.0
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    held.release.set()
+
+
 @pytest.mark.feature("lab-manifest-fetch-off-pass")
 def test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next_call() -> None:
     held = Held({COMMIT: FetchUnanswered("GET runs answered 502")})
@@ -347,6 +443,27 @@ def test_background_answers_a_failed_fetch_once_and_fetches_it_again_on_the_next
         background("example/repo", COMMIT)
     assert all(held.started.acquire(timeout=WAIT_S) for _ in range(2))
     assert held.asked == [("example/repo", COMMIT), ("example/repo", COMMIT)]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-manifest-fetch-off-pass")
+def test_background_forgets_a_failed_fetch_nobody_asked_again_once_its_fresh_window_ends() -> None:
+    held = Held({COMMIT: FetchUnanswered("GET runs answered 502"), OTHER: None})
+    clock = Clock()
+    background = manifests.Background(held, clock=clock)
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", COMMIT)
+    held.release.set()
+    finished(background.fetches)
+    held.release.clear()
+    clock.now = 299.0
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", OTHER)
+    assert sorted(background.fetches) == [("example/repo", COMMIT), ("example/repo", OTHER)]
+    clock.now = 300.0
+    with pytest.raises(manifests.FetchPending):
+        background("example/repo", OTHER)
+    assert list(background.fetches) == [("example/repo", OTHER)]
     held.release.set()
 
 

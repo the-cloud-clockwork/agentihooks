@@ -20,7 +20,7 @@ NAME = "quiet"
 QUIET_MINUTES = 30
 MINUTE_MS = 60_000
 STATUS = "status line"
-WORKERS = frozenset({"eng", "ci"})
+WORKERS = frozenset({"eng", "ci", "review"})
 HELD = frozenset({"claimed", "pr"})
 GONE = frozenset({"finished", "awaiting-decision"})
 

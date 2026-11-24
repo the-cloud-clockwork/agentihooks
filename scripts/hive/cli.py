@@ -557,8 +557,15 @@ def _local_agents(redis: "Redis", reported: set[tuple[str, str]]) -> dict[str, l
 
 def _registry(args: argparse.Namespace) -> None:
     if args.command == "set":
+        from scripts.hive import master_notice
+        from scripts.swarm.store import RedisStore
+
+        client = redis_client()
         drain = registry.Drain(registry.drain_owner(), args.reason)
-        print(json.dumps(registry.update(redis_client(), args.id, args.settings, keep=args.keep, drain=drain)))
+        record = registry.update(client, args.id, args.settings, keep=args.keep, drain=drain)
+        if any(setting.startswith("draining=") for setting in args.settings):
+            master_notice.drained(RedisStore(client), args.id, record)
+        print(json.dumps(record))
     elif args.command == "show":
         record = registry.show(redis_client(), args.id)
         if record is None:
@@ -577,7 +584,7 @@ def _refresh_root_bus() -> None:
 
     try:
         path = root_bus.refresh(registry.home(), _signer, ROOT)
-    except auth.HiveError as exc:
+    except (auth.HiveError, OSError) as exc:
         print(f"hive kept the stored root bus credential ({exc})", file=sys.stderr)
         return
     if path is not None:

@@ -1,0 +1,6 @@
+{
+  "scripts/secret_env.py:scripts.secret_env.x__existing_lines:7bb2fad638974723ced7b3b5e22a56d75e8d18adff60f3508e1c53670f55d9ed": {
+    "reader": "standards_reader",
+    "reason": "Path.read_text opens the file through the same case-insensitive codecs.lookup, so \"UTF-8\" selects the same UTF-8 codec and yields the same lines."
+  }
+}

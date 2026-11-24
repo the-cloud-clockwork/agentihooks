@@ -545,7 +545,7 @@ def test_the_own_group_is_the_tick_service_cgroup_on_either_hierarchy(tmp_path, 
         assert str(found).startswith(str(tmp_path / "fs" / procs))
 
 
-def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
+def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path: Path) -> None:
     calls = []
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
     (tmp_path / "agentihooks-swarm.service").write_text("[Service]\nType=oneshot\n")
@@ -560,7 +560,7 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     ]
     calls.clear()
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
-    assert [argv[2] for argv, _ in calls] == ["enable"] * 5
+    assert [argv[2] for argv, _ in calls] == ["enable"] * 6
 
 
 def test_ensure_fails_and_keeps_the_tick_timer_when_registration_fails_before_any_delivery(tmp_path, monkeypatch):
@@ -1041,6 +1041,7 @@ def test_a_foreign_supervisor_is_recycled_and_the_timer_and_finding_clear_on_its
     assert order == ["drain 4242", "supervise", "supervise", "supervise"]
 
 
+@pytest.mark.feature("scheduler-credential-refusal-stop")
 def test_the_scheduler_is_its_own_restarting_user_service_apart_from_the_units_that_start_it(monkeypatch):
     monkeypatch.setattr(timer.sys, "executable", "/installed/bin/python")
     text = timer.units("/installed/bin/agentihooks")["agentihooks-scheduler.service"]
@@ -1051,7 +1052,7 @@ def test_the_scheduler_is_its_own_restarting_user_service_apart_from_the_units_t
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         'ExecStart="/installed/bin/python" -m scripts.scheduler.service supervise\n'
-        "Restart=always\nRestartSec=5\nRestartPreventExitStatus=2\nKillMode=process\n\n"
+        "Restart=always\nRestartSec=5\nRestartPreventExitStatus=2 4\nKillMode=process\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
 
@@ -1138,7 +1139,9 @@ def test_hosts_work_reads_the_swarm_store_and_keeps_the_units_when_it_cannot(mon
     assert real_hosts_work() is True
 
 
-def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anton(tmp_path, monkeypatch):
+def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anton(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     cancelled = []
     monkeypatch.setattr(timer, "unschedule", lambda: cancelled.append(True))
     monkeypatch.setattr(timer, "schedule", lambda caller: pytest.fail("the tick was scheduled"))
@@ -1158,6 +1161,7 @@ def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anto
         ["systemctl", "--user", "daemon-reload"],
     ]
     assert sorted(path.name for path in unit_dir.iterdir()) == [
+        "agentihooks-ledger-writer.service",
         "agentihooks-quota-prober.service",
         "agentihooks-scheduler.service",
     ]

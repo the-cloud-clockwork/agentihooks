@@ -19,7 +19,9 @@ WATCHED = "watched_focus"
 UNCACHED = object()
 
 
-def held(task: dict, doc: dict, graph: dict, fix_phase: str, admitted_queue: Any = UNCACHED) -> bool:
+def held(
+    task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix_phase: str, admitted_queue: Any = UNCACHED
+) -> bool:
     """A freeze, a focus with open work elsewhere or a watched focus keeps a claim off the open task.
 
     admitted_queue carries a result of ``admitted(doc, graph)`` a caller already computed for this doc and
@@ -30,6 +32,7 @@ def held(task: dict, doc: dict, graph: dict, fix_phase: str, admitted_queue: Any
     records, chain = doc.get("freezes") or [], ancestry(task, graph)
     return (
         frozen(task, records, chain)
+        or _enhancement_frozen(task, doc, graph)
         or unfocused(task, doc, graph, fix_phase, admitted_queue)
         or outside_watched(task, doc, fix_phase)
     )
@@ -70,6 +73,7 @@ def _nearest(records: list[dict[str, Any]], verb: str, task: dict[str, Any], cha
 
 
 _TARGETS: list[Any] = []
+_TASK_ROWS: list[Any] = []
 
 
 def _targets(records: list[dict[str, Any]]) -> dict[str, tuple[frozenset[str], tuple[tuple[str, str], ...]]]:
@@ -89,6 +93,16 @@ def _targets(records: list[dict[str, Any]]) -> dict[str, tuple[frozenset[str], t
 def _selects(target: str) -> bool:
     selector, _, value = target.partition(":")
     return selector in SELECTORS and bool(value)
+
+
+def _enhancement_frozen(task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any]) -> bool:
+    if task.get("lane") != "plan" or not task.get("enhances"):
+        return False
+    tasks = doc.get("tasks") or ()
+    if not _TASK_ROWS or _TASK_ROWS[0] is not tasks or _TASK_ROWS[1] != len(tasks):
+        _TASK_ROWS[:] = [tasks, len(tasks), {row["id"]: row for row in tasks}]
+    target = _TASK_ROWS[2].get(task["enhances"])
+    return target is not None and frozen(target, doc.get("freezes") or [], ancestry(target, graph))
 
 
 def unfocused(
@@ -131,7 +145,21 @@ def _admit(doc: dict[str, Any], graph: dict[str, Any]) -> frozenset[str] | None:
     seen: set[str] = set()
     for task_id in queue:
         _reach(task_id, rows, cold, waits_on, seen)
+    phases = {rows[task_id].get("phase") for task_id in queue} - {None}
+    seen |= _planning(tasks, phases, seen, lambda task_id: _stuck(task_id, rows, cold, waits_on))
     return frozenset(seen) if seen else None
+
+
+def _planning(tasks: list[dict[str, Any]], phases: set[Any], seen: set[str], stuck: Callable[[str], bool]) -> set[str]:
+    """The plan lane tasks focused work waits on, short of work stuck behind frozen work: a phase's planning while
+    it holds open focused work, and the enhancement of an admitted task."""
+    return {
+        task["id"]
+        for task in tasks
+        if task.get("lane") == "plan"
+        and (task.get("phase") in phases or task.get("enhances") in seen)
+        and not stuck(task["id"])
+    }
 
 
 def _reach(
@@ -171,6 +199,24 @@ def _waits(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> Callable[[dict[s
         return named + [member for phase in after.get(row.get("phase"), []) for member in members.get(phase, [])]
 
     return waits_on
+
+
+def waits(doc: dict[str, Any]) -> Callable[[dict[str, Any]], list[str]]:
+    """What a task of the ledger waits on, as the focus queue reads it."""
+    return _waits(doc, doc.get("tasks") or [])
+
+
+def reached(
+    seeds: Iterable[str],
+    rows: dict[str, dict[str, Any]],
+    cold: set[str],
+    next_of: Callable[[dict[str, Any]], list[str]],
+) -> set[str]:
+    """Every id a walk from the seeds meets along next_of, the seeds included, short of the cold ones."""
+    seen: set[str] = set()
+    for seed in seeds:
+        _reach(seed, rows, cold, next_of, seen)
+    return seen
 
 
 def _stuck(

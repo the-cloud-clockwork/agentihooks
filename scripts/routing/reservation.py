@@ -42,14 +42,23 @@ def master_five_floor() -> float:
     return 100.0 - config.QUOTA_HANDOFF_5H_PCT
 
 
+def master_week_floor(environ: Mapping[str, str]) -> float:
+    """The week percent left at which the primary login closes: the configured reserve, or the week complement of
+    the quota hook's handoff line, whichever reserves more room."""
+    from hooks import config
+
+    return max(primary_reserve_pct(environ), 100.0 - config.QUOTA_HANDOFF_WEEK_PCT)
+
+
 def primary_reserved(slug: str, week_left: float | None, environ: Mapping[str, str]) -> bool:
-    """Whether `slug` is the primary claude ai login with its week at or under the reserve: nothing new places there."""
+    """Whether `slug` is the primary claude ai login with its week at or under the master week floor: nothing new
+    places there."""
     primary = primary_login()
     return (
         bool(primary)
         and week_left is not None
         and account_key(slug) == account_key(primary)
-        and week_left <= primary_reserve_pct(environ)
+        and week_left <= master_week_floor(environ)
     )
 
 

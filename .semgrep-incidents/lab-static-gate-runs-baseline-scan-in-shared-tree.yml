@@ -1,0 +1,19 @@
+rules:
+  - id: lab-static-gate-runs-baseline-scan-in-shared-tree
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab worker runs a static gate without asking whether its step rewrites its working tree. Every static gate
+      of a head shares one tree that the worker seals read only, and a Semgrep scan against a baseline commit resets
+      its tree to that commit and back. On 24 November the gate that bounds new test waits ended on a refused git
+      reset in that tree and the lab posted a red semgrep check on a head whose Semgrep jobs passed in Actions. Read
+      the gate's rewrites_tree and give such a gate a private tree of the head before running it.
+    paths:
+      include:
+        - /scripts/ci_lab/executors.py
+        - lab-static-gate-runs-baseline-scan-in-shared-tree.py
+    patterns:
+      - pattern: run_static.run($GATE, $TREE, ...)
+      - pattern-not-inside: |
+          $TREE = <... $FOUND.rewrites_tree ...>
+          ...

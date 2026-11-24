@@ -9,14 +9,17 @@ import subprocess
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
 from scripts.hive import auth, cli, server
-from scripts.swarm import store
+from scripts.swarm import expert_lineage, store
 from scripts.swarm.keyspace import ROOT
 
 PUBLIC = "redis://hive.example:6380/2"
+COMPLETION_KEYS = (expert_lineage.LINEAGES, expert_lineage.ACTIVE, expert_lineage.PROOFS, expert_lineage.CLOSING)
+STARTER_KEYS = (expert_lineage.SEQUENCE, expert_lineage.MISSIONS, expert_lineage.LAUNCHES)
 
 
 @pytest.fixture
@@ -74,7 +77,7 @@ def test_a_member_can_drop_task_lifts_from_either_worker_version(redis_lib):
     assert admin.hget(drops, "t1") == "100.000005"
 
 
-def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patterns():
+def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patterns() -> None:
     calls = []
 
     class Recorder:
@@ -109,6 +112,7 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:codex-endpoints",
                     f"~{ROOT}:swarm:*:codex-openings",
                     f"~{ROOT}:swarm:*:codex-viewers",
+                    f"~{ROOT}:swarm:*:launch-endings",
                     f"~{ROOT}:swarm:*:identity-conflicts",
                     f"~{ROOT}:swarm:*:desired-routes",
                     f"~{ROOT}:swarm:*:state-since",
@@ -123,12 +127,21 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:checks:*",
                     f"~{ROOT}:swarm:*:merge-stall",
                     f"~{ROOT}:swarm:*:merge-stall-notice",
+                    f"~{ROOT}:swarm:*:queue-priority-active",
+                    f"~{ROOT}:swarm:*:queue-priority-displaced",
+                    f"~{ROOT}:swarm:*:merge-priority-order",
                     f"~{ROOT}:swarm:*:hive-placement-waits",
                     f"~{ROOT}:swarm:*:dev-red",
                     f"~{ROOT}:swarm:*:prerequisite-waits",
                     f"~{ROOT}:swarm:*:stage-covers",
                     f"~{ROOT}:swarm:*:gate-lifts:tasks:*",
                     f"~{ROOT}:swarm:*:gate-lift-drops",
+                    f"~{ROOT}:swarm:*:expert-lineages",
+                    f"~{ROOT}:swarm:*:expert-running",
+                    f"~{ROOT}:swarm:*:expert-proofs",
+                    f"~{ROOT}:swarm:*:expert-closing",
+                    f"~{ROOT}:swarm:*:review:*",
+                    f"~{ROOT}:swarm:*:review-tasks",
                     f"~{ROOT}:seat:*:recaps",
                     f"~{ROOT}:seat:*:learned",
                     f"~{ROOT}:seat-of:*:exit",
@@ -199,6 +212,7 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("swarm:proof:codex-endpoints", True),
         ("swarm:proof:codex-openings", True),
         ("swarm:proof:codex-viewers", True),
+        ("swarm:proof:launch-endings", True),
         ("seat:eng-1@proof:recaps", True),
         ("seat:eng-1@proof:learned", True),
         ("seat-of:engineer@0001-0001:exit", True),
@@ -213,7 +227,9 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("names:engineer@0001-0001", False),
     ],
 )
-def test_a_member_writes_the_keys_a_worker_uses_for_done_ready_park_wait_and_status(suffix, writable):
+def test_a_member_writes_the_keys_a_worker_uses_for_done_ready_park_wait_and_status(
+    suffix: str, writable: bool
+) -> None:
     from fnmatch import fnmatchcase
 
     key = f"{ROOT}:{suffix}"
@@ -232,6 +248,35 @@ def test_a_member_writes_the_keys_swarm_block_and_swarm_learned_write():
 
     for key in (dev_red.key("proof"), SeatMemory(None).key("eng-1@proof", "learned")):
         assert any(fnmatchcase(key, pattern) for pattern in patterns), key
+
+
+@pytest.mark.feature("review-record-post")
+@pytest.mark.parametrize("granted", [True, False])
+def test_a_member_reviewer_posts_findings_only_with_the_review_keys(granted: bool) -> None:
+    import fakeredis
+    from redis.exceptions import ResponseError
+
+    from scripts.review import record
+    from tests.review.fakes import HEAD, REVIEWER, URL, FakeForge
+
+    fake_server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=fake_server, decode_responses=True)
+    patterns = [pattern for pattern in auth._acl_keys("m1") if granted or ":review" not in pattern]
+    admin.acl_setuser(
+        "hive-m1", enabled=True, nopass=True, categories=auth.ACL_CATEGORIES, keys=patterns, channels=auth.ACL_PATTERNS
+    )
+    member = fakeredis.FakeRedis(server=fake_server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    host = store.RedisStore(admin)
+    if granted:
+        posted = record.post(store.RedisStore(member), "proof", FakeForge(), URL, REVIEWER, "r1", ["First"])
+        assert record.read(host, "proof", URL, HEAD) == posted
+        assert admin.hgetall(host.key("proof", "review-tasks")) == {"r1": "1"}
+    else:
+        with pytest.raises(ResponseError):
+            record.post(store.RedisStore(member), "proof", FakeForge(), URL, REVIEWER, "r1", ["First"])
+        assert record.read(host, "proof", URL, HEAD) is None
+        assert admin.hgetall(host.key("proof", "review-tasks")) == {}
 
 
 def test_the_grant_sizes_and_member_record(admin, redis_lib):
@@ -776,3 +821,162 @@ def test_the_member_acl_writes_every_key_the_fenced_record_batch_touches() -> No
     keys = _fenced_record_keys(fakeredis.FakeRedis(decode_responses=True))
 
     assert [key for key in keys if not any(fnmatchcase(key, pattern) for pattern in patterns)] == []
+
+
+@pytest.mark.feature("hive-member-queue-priority")
+@pytest.mark.parametrize("denied", ["", "queue-priority-active", "queue-priority-displaced", "merge-priority-order"])
+def test_a_member_queue_applies_priority_or_reports_a_permission_refusal(
+    monkeypatch: pytest.MonkeyPatch, denied: str
+) -> None:
+    from types import SimpleNamespace
+    from typing import Any
+
+    import fakeredis
+
+    from scripts.swarm import ledger_events, merge_queue, queue_priority, queue_record
+    from tests.swarm.test_merge_queue_priority import READ_PULL, URL, FakeQueue
+
+    fake_server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=fake_server, decode_responses=True)
+    patterns = [pattern for pattern in auth._acl_keys("m1") if not denied or not pattern.endswith(f":{denied}")]
+    admin.acl_setuser(
+        "hive-m1", enabled=True, nopass=True, categories=auth.ACL_CATEGORIES, keys=patterns, channels=auth.ACL_PATTERNS
+    )
+    reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "HVALS", "HMGET"}
+    writes: list[tuple[str, str]] = []
+
+    class Member(fakeredis.FakeRedis):
+        def execute_command(self, *args: Any, **options: Any) -> Any:
+            command = str(args[0]).upper()
+            if command in reads:
+                return admin.execute_command(*args, **options)
+            if command in {"SET", "DEL", "INCRBY", "INCR", "HSET", "HDEL"}:
+                writes.append((command, str(args[1])))
+            return super().execute_command(*args, **options)
+
+    member = Member(server=fake_server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    host = store.RedisStore(admin)
+    host.create(store.SwarmConfig("proof", "/repo", 1, 0, "running"))
+    swarm = store.RedisStore(member)
+    queue = FakeQueue()
+    ledger = SimpleNamespace(tasks_targeting=lambda slug, url: [{"id": "t9", "rank": "urgent", "pr_url": URL}])
+    original = merge_queue.prioritize
+
+    def prioritize(url: str, **kwargs: Any) -> dict[str, Any]:
+        return original(url, run=queue.run, **kwargs)
+
+    monkeypatch.setattr(ledger_events, "view", READ_PULL)
+    monkeypatch.setattr(merge_queue, "prioritize", prioritize)
+    monkeypatch.setattr(queue_record.Journal, "groups", lambda self: [])
+    monkeypatch.setattr(queue_record.Journal, "write", lambda *args, **kwargs: None)
+    monkeypatch.setattr(queue_priority.lab_control, "acknowledge", lambda *args: {"accepted": True})
+
+    result = merge_queue.operate(
+        "queue", URL, run=queue.run, priority=lambda: queue_priority.automatic(swarm, "proof", URL, ledger)
+    )
+
+    assert result["queued"] is True
+    if denied:
+        assert "permission" in "; ".join(result["priority"]["errors"]).lower()
+        assert [entry["pullRequest"]["id"] for entry in queue.entries] == ["P1", "P2", "P3", "P9"]
+        assert queue.mutations == [("queue", 9)]
+    else:
+        assert result["priority"]["errors"] == []
+        assert [entry["pullRequest"]["id"] for entry in queue.entries] == ["P1", "P9", "P2", "P3"]
+        assert queue.mutations == [("queue", 9), ("dequeue", 3), ("dequeue", 2), ("queue", 2), ("queue", 3)]
+        assert {key for _, key in writes} == {
+            swarm.key("proof", queue_priority.ACTIVE),
+            swarm.key("proof", queue_priority.DISPLACED),
+            swarm.key("proof", queue_priority.ORDER),
+        }
+        assert admin.get(swarm.key("proof", queue_priority.ORDER)) == "2"
+        assert not admin.exists(swarm.key("proof", queue_priority.DISPLACED))
+    assert not admin.exists(swarm.key("proof", queue_priority.ACTIVE))
+
+
+@pytest.mark.feature("hive-member-expert-complete")
+def test_a_member_writes_the_expert_keys_a_completion_writes_and_no_other_expert_key() -> None:
+    from fnmatch import fnmatchcase
+
+    patterns = [pattern[1:] for pattern in auth._acl_keys("m1") if pattern.startswith("~")]
+
+    def writable(slug: str, part: str) -> bool:
+        return any(fnmatchcase(f"{store.PREFIX}:{slug}:{part}", pattern) for pattern in patterns)
+
+    for slug in ("proof", "other"):
+        assert [part for part in COMPLETION_KEYS if not writable(slug, part)] == []
+        assert [part for part in STARTER_KEYS if writable(slug, part)] == []
+
+
+@pytest.mark.feature("hive-member-expert-complete")
+@pytest.mark.parametrize("denied", [(), *((key,) for key in COMPLETION_KEYS), COMPLETION_KEYS])
+def test_a_member_expert_ends_its_lineage_on_a_proof_and_is_refused_without_one_of_its_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, denied: tuple[str, ...]
+) -> None:
+    from typing import Any
+
+    import fakeredis
+    from redis.exceptions import NoPermissionError
+
+    from scripts.swarm import cli as swarm_cli
+    from scripts.swarm import ledger_events
+    from tests.handoff.test_mission_proof import VALID
+    from tests.swarm.test_expert_mission import GOOD
+
+    expert = "expert@a1b2c3-0001"
+    fake_server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=fake_server, decode_responses=True)
+    taken = tuple(f":{key}" for key in denied)
+    patterns = [pattern for pattern in auth._acl_keys("m1") if not pattern.endswith(taken)]
+    admin.acl_setuser(
+        "hive-m1", enabled=True, nopass=True, categories=auth.ACL_CATEGORIES, keys=patterns, channels=auth.ACL_PATTERNS
+    )
+    reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "HVALS", "HMGET"}
+
+    class Member(fakeredis.FakeRedis):
+        """The member's client: fakeredis drops the read only grant, so the reads it allows go through the admin."""
+
+        def execute_command(self, *args: Any, **options: Any) -> Any:
+            if str(args[0]).upper() in reads:
+                return admin.execute_command(*args, **options)
+            return super().execute_command(*args, **options)
+
+    member = Member(server=fake_server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://hive.example:6380/2")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", expert)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
+    host = store.RedisStore(admin)
+    host.create(store.SwarmConfig("sw", "/repo", 1, 0, "running"))
+    lineage = expert_lineage.start(host, "sw", GOOD, "/missions/batch.md", "xhigh", "master@a1b2c3-0001", 1_000)
+    host.put_agent("sw", store.AgentRecord(expert, "expert", lineage.id, seat=lineage.seat, state="working"))
+    swarm = store.RedisStore(member)
+    swarm.agents = host.agents
+    monkeypatch.setattr(swarm_cli, "connect", lambda: swarm)
+    monkeypatch.setattr(ledger_events, "view", lambda url: ledger_events.PullRequest("MERGED", 5, 1, False, True))
+    proof = tmp_path / "proof.md"
+    proof.write_text(VALID, encoding="utf-8")
+    complete = ["sw", "expert", "complete", str(proof)]
+
+    for refused in STARTER_KEYS:
+        with pytest.raises(NoPermissionError):
+            member.set(swarm.key("sw", refused), "write")
+    if denied:
+        with pytest.raises(NoPermissionError):
+            swarm_cli.main(complete)
+        assert expert_lineage.get(host, "sw", lineage.id) == lineage
+        assert not expert_lineage.proof(host, "sw", lineage.id)
+        assert expert_lineage.running(host, "sw") == [lineage] and expert_lineage.closing(host, "sw") == []
+        assert [agent.state for agent in host.agents("sw") if agent.name == expert] == ["working"]
+    else:
+        assert swarm_cli.main(complete) == 0
+        ended = expert_lineage.get(host, "sw", lineage.id)
+        assert (ended.state, ended.ended_by) == (expert_lineage.COMPLETE, expert)
+        assert expert_lineage.proof(host, "sw", lineage.id) == VALID
+        assert expert_lineage.running(host, "sw") == [] and expert_lineage.closing(host, "sw") == []
+        assert [agent.state for agent in host.agents("sw") if agent.name == expert] == ["finished"]

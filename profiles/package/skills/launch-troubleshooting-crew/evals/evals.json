@@ -5,7 +5,7 @@
     "expected_behavior": [
       "runs crew.py plan with the problem and one distinct hypothesis per scout before launching",
       "runs crew.py scout with the same arguments, which adds five eng troubleshoot scout tasks at opus max and focuses only the crew",
-      "sets the printed thirty minute cron with CronCreate carrying the operator's order verbatim"
+      "sets the printed thirty minute cron as a seat cron with agentihooks cron add --seat master@SLUG, never CronCreate, carrying the operator's order verbatim"
     ]
   },
   {
@@ -29,7 +29,7 @@
     "files": [],
     "expected_behavior": [
       "runs crew.py restore so the earlier focus and eng lane settings come back",
-      "deletes the thirty minute crew cron"
+      "removes the thirty minute crew seat cron with agentihooks cron remove"
     ]
   }
 ]
