@@ -469,6 +469,7 @@ export function receiveSnapshot(ledger) {
   heldRev = ledger._meta.rev;
   newest = Math.max(newest, heldRev);
   receiveLedger(held);
+  resume();
 }
 
 export function receiveChange(change) {
@@ -495,6 +496,7 @@ export function receiveChange(change) {
   held = next;
   heldRev = change.rev;
   receiveLedger(held);
+  resume();
   if (Object.keys(parts).some((key) => !(key in rows))) refreshSummary();
 }
 
