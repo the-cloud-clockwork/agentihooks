@@ -35,7 +35,7 @@ def _thin_task_pass(tick: Any, get: Get) -> list[str]:
     ids = {task["id"] for task in tasks}
     lines: list[str] = []
     queued: list[str] = []
-    for task in takewhile(lambda _: not deadline.expired, filter(_unfrozen(doc), filter(unchecked, tasks))):
+    for task in takewhile(lambda _: not deadline.expired, filter(unfrozen(doc), filter(unchecked, tasks))):
         if problems := thin_task.thin({"description": "", **task}):
             line, marked = enhance(tools.ledger, deadline, task, problems, ids)
             lines.append(line)
@@ -45,7 +45,7 @@ def _thin_task_pass(tick: Any, get: Get) -> list[str]:
     return lines
 
 
-def _unfrozen(doc: dict[str, Any]) -> Callable[[dict[str, Any]], bool]:
+def unfrozen(doc: dict[str, Any]) -> Callable[[dict[str, Any]], bool]:
     """Return the check that no freeze record of the ledger ``doc`` holds a task, as the swarm freeze check reads it
     over the ledger hierarchy projected once for the pass."""
     records: list[dict[str, Any]] = doc.get("freezes") or []

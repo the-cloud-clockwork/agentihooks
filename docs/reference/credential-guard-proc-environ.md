@@ -82,7 +82,7 @@ The alternatives answer the usual questions without printing a value:
 
 | Question | Command |
 |---|---|
-| Is one variable set in this shell? | `test -n "${REDIS_URL:-}" && echo set \|\| echo unset` |
+| Is one variable set in this shell? | <code>test -n "${REDIS_URL:-}" && echo set &#124;&#124; echo unset</code> |
 | Which variable names does this shell define? | the `awk` listing in the message above |
 | How many variables are set? | `env \| wc -l` |
 | How do I pass a value to a command? | reference it, as in `curl -H "Authorization: Bearer $API_TOKEN" …` |

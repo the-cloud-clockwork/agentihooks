@@ -1998,6 +1998,22 @@
       ]
     },
     {
+      "id": "controller-expired-codex-closed",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-view-expired-codex",
+      "behaviour": "The deployed controller counts a Codex login that a live hive reports expired as a closed account with zero free seats, so the capacity decision places no seat on it and the stall watch raises no free seat alert for it. An unexpired hive reading keeps its week band.",
+      "seam": "swarm_v2.quota._hive_reading and QuotaObservations.reading through kubernetes.approved.AccountRoute and FleetAccounts; swarm.capacity.calculate; swarm.stall_watch.stall_pass",
+      "tests": [
+        "tests/test_swarm_v2_approved_accounts.py::test_a_codex_key_with_a_live_unexpired_hive_reading_is_an_open_row_at_its_week_band",
+        "tests/test_swarm_v2_approved_accounts.py::test_an_expired_codex_hive_entry_reads_expired_with_no_cap",
+        "tests/test_swarm_v2_approved_accounts.py::test_the_controller_closes_an_expired_codex_key_with_no_free_seat",
+        "tests/test_swarm_v2_approved_accounts.py::test_the_stall_watch_fed_an_expired_codex_decision_raises_no_free_seat_alert"
+      ],
+      "rules": [
+        "hive-quota-reading-drops-expired"
+      ]
+    },
+    {
       "id": "nats-withdraw-gone-message",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-withdraw-gone-message",
@@ -2720,6 +2736,22 @@
         "tests/hive/test_review_lane_spawn.py::test_seat_spawn_places_a_review_seat",
         "tests/hive/test_orders.py::test_a_hive_order_launches_a_review_seat_with_the_reviewer_profile"
       ]
+    },
+    {
+      "id": "review-done-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-done-findings",
+      "behaviour": "Swarm done refuses a task in the review lane, or of kind review, until the post counter for that exact swarm and task holds at least one posted finding, and names the review post command in its refusal; the refusal runs before the proof check, a count under another swarm or task does not satisfy it, and every other lane and kind closes without reading the review record.",
+      "seam": "scripts.swarm.cli.cmd_done through swarm done, calling scripts.review.record require_done and done_refusal over the review-tasks counter",
+      "tests": [
+        "tests/review/test_done.py::test_swarm_done_never_reads_the_review_record_for_other_lanes_and_kinds",
+        "tests/review/test_done.py::test_swarm_done_refuses_a_review_task_that_posted_no_finding",
+        "tests/review/test_done.py::test_one_posted_finding_lets_a_review_task_reach_the_proof_check",
+        "tests/review/test_done.py::test_a_finding_posted_through_the_review_record_lets_its_task_reach_the_proof_check",
+        "tests/review/test_done.py::test_the_count_is_read_for_the_exact_swarm_and_task",
+        "tests/swarm/test_ready.py::test_a_merged_review_task_stays_open_for_swarm_done"
+      ],
+      "semgrep_rule": "feature-review-done-findings"
     },
     {
       "id": "review-record-post",
@@ -4515,6 +4547,17 @@
       ]
     },
     {
+      "id": "tick-finished-step-ends-at-lane-expiry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2893",
+      "behaviour": "When a tick lane expires, the pass engine ends every submitted step whose run already finished through the normal apply path with its real result, before it records any step cut or skipped: a step that finished inside its lane but was collected only after the lane ended keeps its outcome, its writes are applied and a dependent in a lane that has not expired runs. A step still running at the lane end is recorded cut, its writes are never applied and that dependent is dropped. Recording a step cut at a lane end without checking that its run is still going is the Semgrep incident cut-finished-step-at-lane-expiry.",
+      "seam": "tick.engine.run_graph in a parallel pass with appliers and a finished callback; semgrep incident rule cut-finished-step-at-lane-expiry",
+      "tests": [
+        "tests/tick/test_lane_expiry_collect.py::test_a_step_still_running_at_its_lane_expiry_is_recorded_cut_with_its_writes_and_dependent_dropped",
+        "tests/tick/test_lane_expiry_collect.py::test_a_step_that_finished_before_its_lane_expired_but_was_collected_after_keeps_its_result"
+      ]
+    },
+    {
       "id": "semgrep-feature-tests",
       "origin": "operator",
       "operator_words": "We need to put a fucking feature semgrep test. You know semgrep? We're going to start to establish testing for features. We're going to start establishing the use of semgrep for features and we're going to establish a system for semgrep. Semgrep is going to fucking put a feature test so that if it fails again we know that we had a regression.",
@@ -5678,7 +5721,7 @@
       "id": "swarm-enhance-sweep",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-sweep",
-      "behaviour": "agentihooks swarm <slug> enhance sweep reads every task of the swarm through the ledger API, selects per lane the open eng and ci tasks the thin task pass would queue, and queues each through the thin task pass writer with the same ledger writes, under its own thirty second deadline and three seconds after the previous one; with --dry-run it prints the thin task count and ids per lane and builds no ledger writer.",
+      "behaviour": "agentihooks swarm <slug> enhance sweep reads every task of the swarm through the ledger API, selects per lane the open eng and ci tasks the thin task pass would queue, leaving out every task the swarm freeze check reads as frozen (a freeze on the task, its slice, its phase or its plan, judged by the thin task pass's own freeze check over the tasks, freezes, plans, phases and slices collections), and queues each through the thin task pass writer with the same ledger writes, under its own thirty second deadline and three seconds after the previous one; with --dry-run it prints the thin task count and ids per lane and builds no ledger writer.",
       "seam": "agentihooks swarm <slug> enhance sweep [--dry-run] through scripts.swarm.cli.main into scripts.swarm.enhance_sweep.command, thin_by_lane and sweep",
       "tests": [
         "tests/swarm/test_enhance_sweep.py::test_the_sweep_selects_per_lane_the_thin_tasks_the_tick_step_would",
@@ -5686,7 +5729,10 @@
         "tests/swarm/test_enhance_sweep.py::test_each_thin_task_writes_under_its_own_thirty_second_deadline",
         "tests/swarm/test_enhance_sweep.py::test_the_sweep_pauses_three_seconds_between_thin_tasks_and_never_before_the_first",
         "tests/swarm/test_enhance_sweep.py::test_the_dry_run_prints_the_thin_task_count_and_ids_per_lane_and_writes_nothing",
-        "tests/swarm/test_enhance_sweep.py::test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_writes"
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_writes",
+        "tests/swarm/test_enhance_sweep.py::test_an_unfrozen_thin_task_beside_a_frozen_phase_is_still_listed",
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_lists_and_queues_no_thin_task_a_freeze_holds",
+        "tests/swarm/test_ledger_client_task.py::test_a_work_tree_read_asks_the_ledger_for_its_plans_phases_and_slices_alone"
       ]
     },
     {
@@ -10337,6 +10383,18 @@
       ]
     },
     {
+      "id": "master-floor-agrees-with-handoff-week-line",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/master2-1070-floor-fix",
+      "behaviour": "The master week floor that closes a hive's master Claude login, and the master login pick that skips a reserved primary login, both widen to the quota hook's AGENTIHOOKS_HANDOFF_WEEK_PCT handoff line when that line reserves more of the week than the configured primary login reserve, so a successor is never placed back on a login the hook already told the running master to leave.",
+      "seam": "scripts.routing.reservation.master_week_floor through scripts.hive.launch._master_floor and scripts.routing.reservation.primary_reserved",
+      "tests": [
+        "tests/routing/test_reservation.py::test_master_week_floor_widens_to_the_hooks_handoff_line",
+        "tests/routing/test_reservation.py::test_primary_reserved_widens_at_the_hooks_handoff_week_line",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_is_refused_at_the_master_floor_when_the_handoff_line_is_tighter"
+      ]
+    },
+    {
       "id": "docs-sanity-scan",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-public-docs-lan-scrub",
@@ -10363,6 +10421,17 @@
         "tests/test_docs_sanity.py::test_a_baseline_never_holds_addresses_or_secrets",
         "tests/test_docs_sanity.py::test_the_public_docs_pass_and_the_baseline_matches_them_exactly",
         "tests/test_docs_sanity.py::test_a_written_baseline_sorts_rules_and_indents_two_spaces"
+      ]
+    },
+    {
+      "id": "docs-table-double-pipe",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-docs-double-pipe",
+      "behaviour": "No markdown page under docs carries a table row whose code span escapes a double pipe, because kramdown keeps the backslash inside a code span and the Pages build would print a backslash before each pipe. A double pipe in table code is written as an inline code element with pipe entities, which renders a plain double pipe in the Pages build and in GitHub's view.",
+      "seam": "every markdown page under docs, read by the docs table pipe check",
+      "tests": [
+        "tests/test_docs_table_pipes.py::test_the_check_flags_an_escaped_double_pipe_and_passes_the_entity_form",
+        "tests/test_docs_table_pipes.py::test_no_docs_table_code_span_escapes_a_double_pipe"
       ]
     },
     {
