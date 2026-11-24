@@ -1,6 +1,7 @@
 """The step scaffold writes a step and its four artefacts so the tick pattern, catalogue and feature map gates pass."""
 
 import ast
+import difflib
 import json
 import shutil
 import subprocess
@@ -319,7 +320,7 @@ def test_a_mapped_feature_without_tests_gains_the_new_test_and_keeps_its_text(tr
     (tree / "feature-map.json").write_text(json.dumps({"features": [entry]}))
     assert scaffold(tree, STEP) == 0
     mapped = {"features": [{**entry, "tests": ["tests/tick/steps/test_probe_widgets.py::test_probe_widgets"]}]}
-    assert (tree / "feature-map.json").read_text() == json.dumps(mapped, indent=2) + "\n"
+    assert (tree / "feature-map.json").read_text() == json.dumps(mapped)
 
 
 def test_the_command_names_itself_and_what_a_step_needs(tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -407,3 +408,69 @@ def test_a_new_module_replaces_only_the_modules_tuple(tree: Path) -> None:
     module = new_step()
     (tree / module.INIT).write_text('MODULES = (\n    "a",\n)\nX = 1\n')
     assert module._join_modules(tree, "m") == (tree / module.INIT, 'MODULES = ("a", "scripts.tick.steps.m", )\nX = 1\n')
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_scaffold_adds_to_the_real_map_without_changing_any_existing_line(tree: Path) -> None:
+    path = tree / "feature-map.json"
+    original = (ROOT / "feature-map.json").read_bytes()
+    path.write_bytes(original)
+    assert scaffold(tree, STEP) == 0
+    changed = path.read_bytes()
+    changes = difflib.SequenceMatcher(None, original.splitlines(keepends=True), changed.splitlines(keepends=True))
+    assert [tag for tag, *_ in changes.get_opcodes() if tag != "equal"] == ["insert"]
+    added, *kept = json.loads(changed)["features"]
+    assert added["id"] == "tick-step-widgets"
+    assert added["tests"] == ["tests/tick/steps/test_probe_widgets.py::test_probe_widgets"]
+    assert kept == json.loads(original)["features"]
+
+
+@pytest.mark.feature("feature-map-stable-write")
+@pytest.mark.parametrize(
+    "original",
+    [
+        r'{"metadata": {"features": ["decoy"]}, "features": [{ "id":"kept", "behaviour":"Gate — Required", "nested":{"text":"}] \" features", "values":[1,2]} }], "tail":[3,4]}',
+        '{\n\t"features" : [\n\t\t{"id":"kept", "behaviour":"Gate — Required", "tests":[]}\n\t],\n\t"tail": [1,2]\n}\n',
+        '{\r\n  "features": [\r\n    {"id":"kept","tests":[]}\r\n  ],\r\n  "tail": "unchanged"\r\n}\r\n',
+    ],
+    ids=["compact_nested_unicode", "tabs", "crlf"],
+)
+def test_scaffold_inserts_one_entry_and_keeps_all_surrounding_bytes(tree: Path, original: str) -> None:
+    path = tree / "feature-map.json"
+    path.write_bytes(original.encode())
+    assert scaffold(tree, STEP) == 0
+    changed = path.read_bytes().decode()
+    old_entry = original.index('{"id":"kept"') if '{"id":"kept"' in original else original.index('{ "id":"kept"')
+    assert changed.startswith(original[:old_entry])
+    assert changed.endswith(original[old_entry:])
+    added, *kept = json.loads(changed)["features"]
+    assert added["id"] == "tick-step-widgets"
+    assert kept == json.loads(original)["features"]
+    assert json.loads(original)["tail"] == json.loads(changed)["tail"]
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_scaffold_updates_only_the_selected_entry(tree: Path) -> None:
+    path = tree / "feature-map.json"
+    selected = '{"id":"tick-step-widgets", "behaviour":"Widgets — counted", "tests":["old::test"]}'
+    prefix = '{"metadata":{"features":[]},"features":[{"id":"before","tests":[]}, '
+    suffix = ', {"id":"after","nested":{"value":"}]"}}],"tail": [1,2]}\n'
+    path.write_bytes((prefix + selected + suffix).encode())
+    assert scaffold(tree, STEP) == 0
+    changed = path.read_bytes().decode()
+    assert changed.startswith(prefix)
+    assert changed.endswith(suffix)
+    assert json.loads(changed)["features"][1] == {
+        "id": "tick-step-widgets",
+        "behaviour": "Widgets — counted",
+        "tests": ["old::test", "tests/tick/steps/test_probe_widgets.py::test_probe_widgets"],
+    }
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_scaffold_keeps_a_canonical_map_canonical(tree: Path) -> None:
+    assert scaffold(tree, STEP) == 0
+    assert scaffold(tree, OTHER) == 0
+    text = (tree / "feature-map.json").read_text()
+    assert text == json.dumps(json.loads(text), indent=2) + "\n"
+    assert len(json.loads(text)["features"][0]["tests"]) == 2

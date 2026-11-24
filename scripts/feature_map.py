@@ -16,6 +16,9 @@ from scripts import locked_tests
 
 ORIGINS = ("operator", "regression", "inventory")
 LEDGER_ITEM = r"ledger:[\w-]+/(tasks|phases|comments|chat)/[\w-]+"
+_DECODER = json.JSONDecoder()
+_TOKEN = re.compile(r"[^ \t\n\r]")
+_LEAD = re.compile(r"[ \t]*")
 
 
 def entry_path(map_path: Path, feature: str) -> Path:
@@ -35,6 +38,51 @@ def load(map_path: Path) -> dict[str, Any]:
             entries.append(entry)
         data["features"] = entries
     return data
+
+
+def _token(text: str, index: int) -> int:
+    """The index of the first character of ``text`` at or after ``index`` that is not JSON whitespace."""
+    return next(_TOKEN.finditer(text, index)).start()
+
+
+def _spans(text: str, start: int, count: int) -> list[tuple[int, int]]:
+    """The first and end index of each of the ``count`` values of the JSON object or array opening at ``start``."""
+    spans: list[tuple[int, int]] = []
+    index = start
+    for _ in range(count):
+        index = _token(text, index + 1)
+        if text[start] == "{":
+            index = _token(text, _token(text, _DECODER.raw_decode(text, index)[1]) + 1)
+        end = _DECODER.raw_decode(text, index)[1]
+        spans.append((index, end))
+        index = _token(text, end)
+    return spans
+
+
+def _encoded(text: str, index: int, value: object) -> str:
+    """``value`` as JSON on one line when ``index`` is on the first line of ``text``, else indented by two under the
+    leading whitespace of the line holding ``index`` and ended like that line."""
+    line = text[:index].rfind("\n") + 1
+    if not line:
+        return json.dumps(value)
+    ending = "\r\n" if text[line - 2 : line] == "\r\n" else "\n"
+    return json.dumps(value, indent=2).replace("\n", ending + next(_LEAD.finditer(text, line)).group())
+
+
+def with_entry(text: str, entry: dict[str, Any]) -> str:
+    """``text`` of a feature map with ``entry`` in place of the feature of its id, or first in the features array when
+    no feature has it, and every byte outside that entry unchanged."""
+    first = _token(text, 0)
+    root = _DECODER.raw_decode(text, first)[0]
+    start, end = dict(zip(root, _spans(text, first, len(root))))["features"]
+    spans = _spans(text, start, len(root["features"]))
+    for feature, (begin, finish) in zip(root["features"], spans):
+        if feature["id"] == entry["id"]:
+            return text[:begin] + _encoded(text, begin, entry) + text[finish:]
+    if not spans:
+        return text[:start] + _encoded(text, start, [entry]) + text[end:]
+    begin = spans[0][0]
+    return text[:begin] + _encoded(text, begin, entry) + "," + text[start + 1 : begin] + text[begin:]
 
 
 def _tests(root: Path) -> dict[str, str | None]:
