@@ -15577,7 +15577,7 @@
       "id": "ledger-cold-load",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-load-api",
-      "behaviour": "A browser with empty storage opening a ledger whose document holds about thirty megabytes shows its first task rows with under one megabyte transferred before them, at 1920 by 1080.",
+      "behaviour": "A browser with empty storage opening a ledger whose document holds about thirty megabytes shows its first task rows within one second of navigation, with under one megabyte transferred before them, at 1920 by 1080. The mapped test holds the one megabyte bound in every unit run. No automatic check holds the one second bound: only a manual Proofs tests dispatch of tests/swarm_ledger/cold_load_probe.py runs it, until a promotion lane for browser timing probes lands (proposed as a ledger follow up).",
       "seam": "GET /<slug> in Chromium against the live ledger server, timed from navigation start to the first task row",
       "tests": [
         "tests/swarm_ledger/test_cold_load.py::test_a_cold_browser_shows_the_first_task_rows_within_a_megabyte"
