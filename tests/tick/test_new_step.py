@@ -3,6 +3,7 @@
 import ast
 import difflib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -411,18 +412,27 @@ def test_a_new_module_replaces_only_the_modules_tuple(tree: Path) -> None:
 
 
 @pytest.mark.feature("feature-map-stable-write")
-def test_scaffold_adds_to_the_real_map_without_changing_any_existing_line(tree: Path) -> None:
+@pytest.mark.parametrize("fragmented", [False, True])
+def test_scaffold_adds_to_the_real_map_without_changing_any_existing_line(tree: Path, fragmented: bool) -> None:
     path = tree / "feature-map.json"
     original = (ROOT / "feature-map.json").read_bytes()
+    flag = b"true" if fragmented else b"false"
+    original = re.sub(rb'(?m)^(\s*"fragments"\s*:\s*)(?:true|false)', rb"\g<1>" + flag, original, count=1)
+    assert json.loads(original).get("fragments", False) is fragmented
     path.write_bytes(original)
     assert scaffold(tree, STEP) == 0
     changed = path.read_bytes()
-    changes = difflib.SequenceMatcher(None, original.splitlines(keepends=True), changed.splitlines(keepends=True))
-    assert [tag for tag, *_ in changes.get_opcodes() if tag != "equal"] == ["insert"]
-    added, *kept = json.loads(changed)["features"]
+    if fragmented:
+        assert changed == original
+        fragment = import_module("scripts.feature_map").entry_path(path, "tick-step-widgets")
+        added = json.loads(fragment.read_bytes())
+    else:
+        changes = difflib.SequenceMatcher(None, original.splitlines(keepends=True), changed.splitlines(keepends=True))
+        assert [tag for tag, *_ in changes.get_opcodes() if tag != "equal"] == ["insert"]
+        added, *kept = json.loads(changed)["features"]
+        assert kept == json.loads(original)["features"]
     assert added["id"] == "tick-step-widgets"
     assert added["tests"] == ["tests/tick/steps/test_probe_widgets.py::test_probe_widgets"]
-    assert kept == json.loads(original)["features"]
 
 
 @pytest.mark.feature("feature-map-stable-write")
