@@ -1,9 +1,10 @@
 """The heads a repository still wants graded, and the live pull request grades that are none of them.
 
 `OpenHeads` is the scheduler's listing port, read from GitHub through the lab App: the head of every open pull
-request and of every plant branch of a repository, each from a paged listing read twice and never one head at a time.
-`repositories` names the repositories the first pass of a scheduler lists, `stale` the grades it then retires and
-`listed` the line that counts them.
+request and of every plant branch of a repository, from paged listings read until two readings in a row agree and
+never one head at a time. `repositories` names the repositories the first pass of a scheduler lists, `stale` the
+grades it then retires and `listed` the line that counts them. `parting` names the grade a closed pull request ends
+when another pull request of its head branch still holds a live grade of the same head.
 """
 
 from collections.abc import Callable, Mapping
@@ -22,6 +23,7 @@ PULLS = "pulls"
 PLANTS = f"git/matching-refs/{PLANT_PREFIX.removeprefix('refs/')}"
 PER_PAGE = 100
 PAGES = 50
+READINGS = 5
 
 Origins = Mapping[str, Mapping[str, Any]]
 
@@ -32,8 +34,9 @@ def app(slug: str) -> Token:
 
 
 def _pages(slug: str, path: str, query: Mapping[str, str], auth: Token) -> list[Any]:
-    """Return every row of one GitHub listing, following its next links; raise when GitHub refuses a page or the
-    listing is longer than `PAGES` pages, so a caller never takes a part of it for the whole."""
+    """Return every row of one GitHub listing, following its next links; raise when GitHub refuses a page, when a
+    next link leaves the API, which would hand the token to another host, or when the listing is longer than
+    `PAGES` pages, so a caller never takes a part of it for the whole."""
     rows: list[Any] = []
     url = f"{API}/repos/{slug}/{path}?{urlencode({**query, 'per_page': PER_PAGE})}"
     for _ in range(PAGES):
@@ -44,6 +47,8 @@ def _pages(slug: str, path: str, query: Mapping[str, str], auth: Token) -> list[
         if "next" not in response.links:
             return rows
         url = response.links["next"]["url"]
+        if not url.startswith(f"{API}/"):
+            raise OSError(f"{path} of {slug} continues outside {API}")
     raise OSError(f"{path} of {slug} holds more than {PAGES} pages")
 
 
@@ -54,6 +59,18 @@ def _heads(slug: str, auth: Token) -> frozenset[str]:
     return frozenset([*(pull["head"]["sha"] for pull in pulls), *(plant["object"]["sha"] for plant in plants)])
 
 
+def _settled(slug: str, auth: Token) -> frozenset[str]:
+    """Return the first reading of the two listings that the reading after it repeats; raise when `READINGS`
+    readings hold no two in a row that agree, so a listing that changes under its reader names no heads."""
+    last = _heads(slug, auth)
+    for _ in range(READINGS - 1):
+        heads = _heads(slug, auth)
+        if heads == last:
+            return heads
+        last = heads
+    raise OSError(f"the listings of {slug} changed through {READINGS} readings")
+
+
 class OpenHeads:
     """The open pull request heads and plant branch heads of a repository."""
 
@@ -61,13 +78,12 @@ class OpenHeads:
         self.auth = auth
 
     def __call__(self, repo: str) -> frozenset[str]:
-        """Return the heads the repository still wants graded. The listings are read twice and a head either
-        reading names is wanted, since a pull request closed between two pages moves a later one out of a single
+        """Return the heads the repository still wants graded. The listings are read until two readings in a row
+        name the same heads, since a pull request closed between two pages moves a later one out of a single
         reading. Whatever keeps a listing from being read or understood is raised as an OSError."""
         slug = urlsplit(repo).path.removeprefix("/")
         try:
-            auth = self.auth(slug)
-            return _heads(slug, auth) | _heads(slug, auth)
+            return _settled(slug, self.auth(slug))
         except (KeyError, TypeError, ValueError) as error:
             raise OSError(f"the listings of {slug} cannot be read: {error!r}") from error
 
@@ -90,6 +106,22 @@ def stale(origins: Origins, wanted: Mapping[str, frozenset[str]]) -> dict[str, t
         for run, origin in origins.items()
         if _plain(origin) and origin["repo"] in wanted and origin["head"] not in wanted[origin["repo"]]
     }
+
+
+def twin(origin: Mapping[str, Any], other: Mapping[str, Any]) -> bool:
+    """Whether another live grade is a pull request grade with no grade ref of the same repository and head."""
+    return _plain(other) and other["repo"] == origin["repo"] and other["head"] == origin["head"]
+
+
+def parting(run: str, twins: Mapping[str, str], base: str) -> tuple[str, str]:
+    """Return the grade a closed pull request ends and the grade its lane names afterwards, given the lane's run and
+    the base of each twin grade another pull request of the same head branch holds: the twin graded against the
+    closed pull request's base ends and the lane keeps its run, else the lane's run ends and its first twin takes
+    the lane."""
+    for name in sorted(twins):
+        if twins[name] == base:
+            return name, run
+    return run, min(twins)
 
 
 def listed(repo: str, heads: int, origins: Origins, gone: Mapping[str, tuple[str, str]], dropped: int) -> str:

@@ -707,7 +707,7 @@ class Scheduler:
         self.held: defaultdict[str, int] = defaultdict(int)
         self._demand_cache: dict[str, tuple[str, _Demand]] = {}
         self._quiets: dict[str, _Quiet] = {}
-        self._swept = False
+        self._wanted = ports.wanted
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: on the first pass retire the pull request grades whose head nothing wants, then retire the
@@ -875,7 +875,7 @@ class Scheduler:
         actions: list[str] = []
         for head in heads:
             if head.event.action == CLOSED:
-                actions.append(self._close(head.event.repo, head.lane))
+                actions.append(self._close(head.event, head.lane))
                 continue
             request = admit(head.event, self.settings.trusted)
             if request is None:
@@ -913,27 +913,55 @@ class Scheduler:
         self.client.hset(WAITING, name, json.dumps(waiting))
         return f"received {request.head} on {lane}"
 
-    def _close(self, repo: str, lane: str) -> str:
+    def _close(self, closed: HeadEvent, lane: str) -> str:
         """End the pull request class work of a closed pull request's lane: its waiting head is dropped and its live
         grade forgotten, with the pending jobs of that grade's head unless another live grade of any repository
         grades the head, since a job names its head alone. Nothing is posted. A waiting head or a grade pushed to a
-        grade ref stays, and so does the same lane of the hotfix class."""
+        grade ref stays, and so does the same lane of the hotfix class. While another pull request of the same head
+        branch holds a live grade of that head in the lane, one grade ends, the one graded against the closed pull
+        request's base when a grade is, and the lane keeps its waiting head and names the grade that stays."""
+        repo = closed.repo
         name = f"{repo}|{lane}|{int(Priority.PULL_REQUEST)}"
-        ended: list[str] = []
+        origins = self._origins()
+        run = self.client.get(f"{LANES}{name}")
+        origin = None if run is None else origins.get(run)
+        if run is None or origin is None or origin["ref"]:
+            return f"closed {lane} of {repo}: {', '.join(self._unwait(name)) or 'nothing held'}"
+        twins = self._twins(run, lane, origins)
+        if twins:
+            gone, stays = stale_heads.parting(run, twins, closed.base)
+            self._forget(gone)
+            self.client.set(f"{LANES}{name}", stays)
+            return f"closed {lane} of {repo}: retired {gone}, {stays} still grades {origin['head']}"
+        ended = self._unwait(name)
+        kept = {other["head"] for live, other in origins.items() if live != run}
+        dropped = [] if origin["head"] in kept else self.queue.drop(origin["head"])
+        self._forget(run)
+        ended.append(f"retired {run}, dropped {len(dropped)} pending units")
+        return f"closed {lane} of {repo}: {', '.join(ended)}"
+
+    def _unwait(self, name: str) -> list[str]:
+        """Drop a lane's waiting head, unless it was pushed to a grade ref, and name what was dropped."""
         held = self.client.hget(WAITING, name)
         waiting = None if held is None else json.loads(held)
-        if waiting is not None and not waiting.get("ref"):
-            self.client.hdel(WAITING, name)
-            ended.append(f"dropped the waiting head {waiting['request']['head']}")
-        origins = self._origins()
-        run = self.client.get(f"{LANES}{name}") or ""
-        origin = origins.get(run)
-        if origin is not None and not origin["ref"]:
-            kept = {other["head"] for live, other in origins.items() if live != run}
-            dropped = [] if origin["head"] in kept else self.queue.drop(origin["head"])
-            self._forget(run)
-            ended.append(f"retired {run}, dropped {len(dropped)} pending units")
-        return f"closed {lane} of {repo}: {', '.join(ended) or 'nothing held'}"
+        if waiting is None or waiting.get("ref"):
+            return []
+        self.client.hdel(WAITING, name)
+        return [f"dropped the waiting head {waiting['request']['head']}"]
+
+    def _twins(self, run: str, lane: str, origins: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
+        """Return, by run, the base of every other live pull request grade of a run's head that names the same lane
+        and another base: the grades of the other pull requests of one head branch."""
+        mine = self.grade(run)
+        if mine is None:
+            return {}
+        same = [name for name in sorted(origins) if name != run and stale_heads.twin(origins[run], origins[name])]
+        grades = {name: self.grade(name) for name in same}
+        return {
+            name: grade.base
+            for name, grade in grades.items()
+            if grade is not None and grade.lane == lane and grade.base != mine.base
+        }
 
     def _release(self, now_ms: int) -> list[str]:
         """Start at most `STARTS_PER_PASS` held heads whose quiet window ended, except one a pause of its class holds:
@@ -1076,10 +1104,8 @@ class Scheduler:
     def _sweep(self) -> list[str]:
         """Retire the stale pull request grades once, on the first pass of a scheduler that holds a listing of the
         heads still wanted."""
-        if self._swept or self.ports.wanted is None:
-            return []
-        self._swept = True
-        return self._retire_heads(self.ports.wanted)
+        wanted, self._wanted = self._wanted, None
+        return [] if wanted is None else self._retire_heads(wanted)
 
     def _retire_heads(self, wanted: Callable[[str], frozenset[str]]) -> list[str]:
         """Close every live pull request grade with no grade ref whose head is neither an open pull request head nor

@@ -2606,28 +2606,35 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   lane in the pull request class and forgets the lane's live grade, with the pending jobs of that
   grade's head unless another live grade grades the head. Nothing is posted. A waiting head or a
   grade pushed to a grade ref stays, and so does the same lane of the hotfix class. The pass prints
-  `closed <lane> of <repo>:` and what it ended, or `nothing held`.
+  `closed <lane> of <repo>:` and what it ended, or `nothing held`. Two open pull requests from one
+  head branch share a lane and hold two live grades of one head against two bases. Closing one of
+  them ends one grade only: the one graded against the closed pull request's base, else the one
+  the lane names. The waiting head and the pending jobs stay, the lane names the grade that
+  stays, and the pass prints `retired <run>, <run> still grades <head>`.
 - On its first pass a scheduler retires the stale grades a restart finds live. For each repository
   with a live pull request grade that has no grade ref, `scripts.ci_lab.stale_heads.OpenHeads`
   reads the open pull request heads and the heads of the plant branches through the lab App: two
   paged listings, 100 open pull requests a page, each followed through its `next` links and
-  never asked one head at a time. It reads both listings twice and takes a head either reading
-  names as wanted, because a pull request closed between two pages moves a later one out of a
-  single reading. `Scheduler._retire_heads` then forgets every such grade whose head no reading
-  names, the way a gone merge group grade is forgotten. Each one prints `retired <run>: <head> is
+  never asked one head at a time. It reads both listings again until two readings in a row name
+  the same heads, at least twice and at most five times, because a pull request closed between
+  two pages moves a later one out of a single reading. `Scheduler._retire_heads` then forgets
+  every such grade whose head the settled reading does not name, the way a gone merge group grade
+  is forgotten. Each one prints `retired <run>: <head> is
   no open pull request head or plant head of <repo>, dropped <n> pending units`, and each listed
   repository one line counting the heads listed, its live pull request grades, the grades retired
   and the pending units dropped. When GitHub refuses a page, a listing is longer than 50 pages,
-  the App token is refused or a row cannot be read, the listing raises an `OSError`: the pass
+  a `next` link leaves the GitHub API, five readings never agree, the App token is refused or a
+  row cannot be read, the listing raises an `OSError`: the pass
   retires nothing of that repository and prints `cannot list the wanted heads of <repo>`; later
   passes do not list again. A head pushed with a signed notice before its pull request exists is
   in neither listing, so a restart retires its grade and the pull request's `opened` delivery
   grades it again.
 
 Known limits: a rerequested check run and a signed notice name no lane, so such a head's lane is
-its own sha until its pull request delivers it; two open pull requests from one head branch share
-a lane, so closing one forgets the grade the lane names while the other grade of their shared head
-keeps posting its checks; expansion keys static gates, test units
+its own sha until its pull request delivers it; two open pull requests from two branches whose
+heads are one commit graded against one base share a single grade, so closing one of them, or
+pushing a newer head to it, ends the pending units of that commit for both until the other is
+pushed or reopened; expansion keys static gates, test units
 and mutation units only, so the other jobs the lab does not run yet pass by their frame; a
 rerequested grade reuses the finished jobs of its own head.
 
