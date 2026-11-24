@@ -1,0 +1,21 @@
+rules:
+  - id: contextvar-token-kept-on-object
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A ContextVar token kept on an object is reset by whichever thread calls the closing method, and a tick site hook
+      runs on the first thread that asks for its site, so a slow lane thread running a copied context reset the reaper
+      scan token the pass thread set and died with a ValueError. Keep the value the set replaced and put it back only
+      where the object's value is still current, or set and reset the token in one function.
+    paths:
+      include:
+        - /scripts/
+        - /hooks/
+        - contextvar-token-kept-on-object.py
+    patterns:
+      - pattern-either:
+          - pattern: self.$ATTR = $VAR.set(...)
+          - pattern: "self.$ATTR: $TYPE = $VAR.set(...)"
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: ^(.*\.)?[A-Z][A-Z0-9_]*$

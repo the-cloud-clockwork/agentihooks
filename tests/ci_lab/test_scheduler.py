@@ -2305,7 +2305,7 @@ def test_a_promotion_head_keys_a_mutant_unit_by_the_tests_that_ran_its_function(
         suite.repo, {"tests/test_alpha.py": "def test_first():\n    assert True\n\n\ndef test_other():\n    pass\n"}
     )
     assert [executors.function_of(unit.members[0]) for unit in before] == [FIRST]
-    assert expander.expand(suite.request(Priority.PROMOTION, other)).gates["mutation"] == before
+    assert expander.expand(suite.request(Priority.PROMOTION, other)).gates["mutation"] != before
     after = expander.expand(suite.request(Priority.PROMOTION, own)).gates["mutation"]
     assert [unit.members for unit in after] == [unit.members for unit in before]
     assert after[0].key != before[0].key

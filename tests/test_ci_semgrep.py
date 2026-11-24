@@ -136,6 +136,7 @@ def test_outage_rules_for_tests_scan_every_test_file_with_the_head_and_the_grade
         ".semgrep-incidents/ledger-client-swapped-for-a-function.yml",
         ".semgrep-incidents/parametrize-id-carries-interpreter-path.yml",
         ".semgrep-incidents/fake-server-close-read-ignores-reset.yml",
+        ".semgrep-incidents/chart-grader-copy-keeps-source-modes.yml",
     ]
     configs = " ".join(f"--config {rule} --config {tmp_path}/grader/{rule}" for rule in rules)
     assert _run_test_rules(tmp_path, graded=True) == (

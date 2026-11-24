@@ -182,6 +182,17 @@ class TestRegisterTargetGlobal:
         assert state["targets"]["global"]["codex"]["profile"] == "smith"
         assert state["targets"]["global"]["claude"]["profile"] == "anton,brain"
 
+    def test_reregister_keeps_the_mcp_ledger_the_adapter_recorded(self):
+        install._register_target_global("smith", settings_profile="lean", target="codex")
+        state = install._load_state()
+        install._global_record(state, "codex")["managed_mcp"] = ["a"]
+        install._save_state(state)
+        install._register_target_global("smith,brain", target="codex")
+        rec = install._global_record(install._load_state(), "codex")
+        assert rec["managed_mcp"] == ["a"]
+        assert rec["profile"] == "smith,brain"
+        assert "settings_profile" not in rec
+
     @staticmethod
     def _installed(state: dict) -> tuple:
         """Mirror the installed-target extraction cmd_init_unified performs

@@ -217,9 +217,36 @@ def _read_name(record: dict[str, Any]) -> str:
 
 
 def _held(client: object, hive_id: str) -> set[str]:
-    """The names every other registered hive reads as."""
+    """The names every other live hive reads as; a stale or never beaten record holds no name."""
+    now = wall_ms()
     registered: list[dict[str, Any]] = hives(client)
-    return {str(record["name"]) for record in registered if record["id"] != hive_id}
+    return {str(record["name"]) for record in registered if record["id"] != hive_id and live(record, now)}
+
+
+def _base(record: dict[str, Any]) -> str:
+    """The name a hive asks for: MASTER_NAME for an interface hive, else the base kept beside a derived name."""
+    if record.get("ui") == "yes":
+        return MASTER_NAME
+    return str(record.get("base") or record["name"])
+
+
+def _named(client: object, hive_id: str, record: dict[str, Any]) -> dict[str, Any]:
+    """The record under its base name, or the first free suffix of it while another live hive holds the base; only a
+    headless hive keeps its base beside a suffix, since an interface hive's base is always MASTER_NAME."""
+    base = _base(record)
+    name = _unique(base, _held(client, hive_id))
+    named = {field: value for field, value in record.items() if field != "base"}
+    if name != _read_name(record):
+        named["name"] = name
+    return named if name == base or record.get("ui") == "yes" else {**named, "base": base}
+
+
+def _healed(client: object, hive_id: str, record: dict[str, Any]) -> dict[str, Any]:
+    """A derived name back at its base once no other live hive holds the base; any other record unchanged."""
+    base = _base(record)
+    if base == _read_name(record) or base in _held(client, hive_id):
+        return record
+    return {**{field: value for field, value in record.items() if field != "base"}, "name": base}
 
 
 def _unique(name: str, held: set[str]) -> str:
@@ -292,9 +319,10 @@ def update(
         }
         _check(_settle(hive_id, {**stored, **fields}))
         merged: dict[str, Any] = {**_seeded(hive_id), **stored, **fields}
-        settled = _read_name(merged)
-        if naming and (derived := _unique(settled, _held(client, hive_id))) != settled:
-            merged["name"] = derived
+        if "name" in fields:
+            merged.pop("base", None)
+        if naming:
+            merged = _named(client, hive_id, merged)
         if merged.get("max_agents") is None:
             merged.pop("max_agents", None)
         return _drained(merged, stored, drain)
@@ -307,7 +335,7 @@ def update(
 
 def beat(client: Any, hive_id: str, fields: dict[str, Any]) -> None:
     def write(stored: dict[str, Any] | None) -> dict[str, Any]:
-        merged = {**_seeded(hive_id), **(stored or {}), **fields}
+        merged = _healed(client, hive_id, {**_seeded(hive_id), **(stored or {}), **fields})
         registered = merged.get("registered_repos")
         return {**merged, "repos": sorted({*merged["repos"], *registered})} if registered else merged
 

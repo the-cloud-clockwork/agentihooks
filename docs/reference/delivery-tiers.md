@@ -1179,8 +1179,8 @@ Issue 5456 also records two diagnostic gaps: the rebuild cause reader reported `
 {% raw %}
 | Job key | `name:` in `test.yml` | Constant in `scripts.ci_gate_queue` | Name on `merge_group` | Name on other events |
 |---|---|---|---|---|
-| `queue-fail-fast` | `${{ github.event_name == 'merge_group' && 'Gate — Required' \|\| 'queue-fail-fast' }}` | `GATE_NAME` | `Gate — Required` | `queue-fail-fast` |
-| `gate-required` | `${{ github.event_name == 'merge_group' && 'Queue gate summary' \|\| 'Gate — Required' }}` | `SUMMARY_NAME` | `Queue gate summary` | `Gate — Required` |
+| `queue-fail-fast` | <code>${{ github.event_name == 'merge_group' && 'Gate — Required' &#124;&#124; 'queue-fail-fast' }}</code> | `GATE_NAME` | `Gate — Required` | `queue-fail-fast` |
+| `gate-required` | <code>${{ github.event_name == 'merge_group' && 'Queue gate summary' &#124;&#124; 'Gate — Required' }}</code> | `SUMMARY_NAME` | `Queue gate summary` | `Gate — Required` |
 {% endraw %}
 
 `gate_protected.grade` first runs `_pinned_names`. For every base workflow job whose `name` equals `GATE_NAME` or `SUMMARY_NAME`, the head job with the same workflow file and job key must carry the same `name` string, character for character. Each job that differs adds one problem:

@@ -31,8 +31,6 @@ MOVED = {
     ("changelog.yml", "changelog"): LIGHT,
     ("changelog-seed.yml", "seed"): LIGHT,
     ("chaos.yml", "chaos"): STANDARD,
-    ("chart-release.yml", "package"): LIGHT,
-    ("chart-release.yml", "publish"): LIGHT,
     ("ci-lab-image.yml", "image"): STANDARD,
     ("ci-lab-image.yml", "refresh"): LIGHT,
     ("mutation-line-selection-proof.yml", "compare"): BATCH,
