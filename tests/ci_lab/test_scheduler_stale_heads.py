@@ -511,6 +511,27 @@ def test_a_grade_of_the_same_head_in_another_lane_is_no_other_pull_request_of_th
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_close_whose_lane_names_a_grade_that_finished_leaves_the_grade_of_its_head_in_another_lane(
+    lab: Callable[..., Run],
+) -> None:
+    first, second = unit(1), unit(2)
+    run = lab({HEAD_A: plan({"lint": (first,)})})
+    _deliver(run, _pull("opened", HEAD_A, branch="other"))
+    run.tick(1000)
+    other = run.grade(HEAD_A).run
+    run.lab.expander.plans[HEAD_A] = plan({"lint": (second,)})
+    run.cache(second)
+    _deliver(run, _pull("opened", HEAD_A, base=OTHER_BASE))
+    run.tick(1010)
+    assert run.lab.client.smembers(scheduler.LIVE) == {other}
+    assert run.lab.client.get(scheduler.LANES + PULL_LANE) not in {None, other}
+    _deliver(run, _pull("closed", HEAD_A))
+    assert run.tick(1100) == [f"closed feature of {REPO}: nothing held"]
+    assert run.lab.client.smembers(scheduler.LIVE) == {other}
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, first)]
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
 def test_a_closed_pull_request_whose_live_grade_lost_its_document_is_still_forgotten(
     lab: Callable[..., Run],
 ) -> None:
