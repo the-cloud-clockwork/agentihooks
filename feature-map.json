@@ -16144,6 +16144,21 @@
       ]
     },
     {
+      "id": "lab-plant-required-verdict",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+      "behaviour": "A plant pull request grade folds by the Gate Required rules as a run of the full suite: its plan carries scope full and exactly the pull request jobs plus split, unit and shard-check, so its required check is success when every gate passes, with no test unit or with passing ones, and failure when a test unit or a static gate fails.",
+      "seam": "scripts.ci_lab.scheduler.frame for a plant pull request, and Scheduler.tick over fakeredis posting the checks of a plant grade",
+      "rules": [
+        "lab-pull-frame-names-unit-job-outside-its-scope"
+      ],
+      "tests": [
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_grade_with_a_failed_gate_posts_its_required_check_and_that_gates_check_as_failure",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_grade_whose_gates_all_pass_posts_its_required_check_as_success",
+        "tests/ci_lab/test_plant_test_units.py::test_a_plant_frame_is_a_full_scope_run_with_exactly_the_jobs_that_scope_requires"
+      ]
+    },
+    {
       "id": "build-gate-serena-repository-areas",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2844",

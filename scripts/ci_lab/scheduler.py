@@ -1402,8 +1402,9 @@ def frame(
     """Return a tier's plan: the lab's gates its `Gate — Required` rules require, and every other job they require as
     a gate without units, which passes, so only what the lab grades can turn the grade red.
 
-    A pull request or hotfix grade runs with no mutation; only a plant pull request runs test units. Each grades
-    under each required job the units
+    A pull request or hotfix grade runs with no mutation and no test scope. Only a plant pull request runs test
+    units, so it is framed as a run of the full suite: its select scope reads full and it carries the jobs that
+    scope requires, which the rules then demand of it. Each grades under each required job the units
     of every reusable workflow job it calls, which the expander files under the job, a slash and the called job, and
     names each authoritative gate it runs no unit of, which it posts as skipped; a merge group grade runs only the
     queue suite with no lost unit rerun; both keep the authoritative gates, which post as lab/<gate>; a promotion or
@@ -1416,13 +1417,14 @@ def frame(
         required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
         queued = {job: gates.get(job, ()) for job in required}
         return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed)
-    required = (*PULL_REQUIRED, UNIT_JOBS[0]) if tier == Priority.PULL_REQUEST and plant else PULL_REQUIRED
+    scope = "full" if tier == Priority.PULL_REQUEST and plant else "none"
+    required = (*PULL_REQUIRED, *SCOPED.get(scope, ()))
     framed = {
         job: tuple(unit for key, units in gates.items() if key == job or key.startswith(f"{job}/") for unit in units)
         for job in required
     }
     idle = frozenset(gate for gate in authoritative if not framed.get(gate))
-    return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}}, idle=idle, authoritative=listed)
+    return Plan(tree, grader, framed, outputs={"select": {"scope": scope}}, idle=idle, authoritative=listed)
 
 
 @dataclass(frozen=True)
