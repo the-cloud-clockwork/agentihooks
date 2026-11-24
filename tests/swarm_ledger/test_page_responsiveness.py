@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -122,7 +123,7 @@ def test_a_reconnect_naming_a_newer_revision_updates_without_serializing_the_ful
     page.close()
 
 
-def test_an_identical_reconnect_snapshot_frame_is_skipped_before_decoding(browser):
+def test_an_identical_reconnect_snapshot_frame_is_skipped_before_decoding(browser: Any) -> None:
     page = browser.new_page(viewport={"width": 1920, "height": 1080})
     page.add_init_script(
         """(() => {

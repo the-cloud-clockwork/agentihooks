@@ -1,4 +1,6 @@
 import inspect
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 
@@ -23,7 +25,13 @@ def beat_once_per_sequence(monkeypatch):
 
 @pytest.mark.parametrize("server_beat", [False, True])
 @pytest.mark.parametrize("heartbeats", [1, 3])
-def test_live_replay_finishes_with_forced_heartbeats(live, monkeypatch, capsys, heartbeats, server_beat):
+def test_live_replay_finishes_with_forced_heartbeats(
+    live: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    heartbeats: int,
+    server_beat: bool,
+) -> None:
     if server_beat:
         beat_once_per_sequence(monkeypatch)
     original = watch_ledger.stream
@@ -31,7 +39,9 @@ def test_live_replay_finishes_with_forced_heartbeats(live, monkeypatch, capsys, 
     frames = []
     received = []
 
-    def forced(slug, cursor=None, headers=None):
+    def forced(
+        slug: str, cursor: str | None = None, headers: dict[str, str] | None = None
+    ) -> Iterator[tuple[str, Any, str | None]]:
         if frames:
             assert inspect.getgeneratorstate(frames[-1]) == inspect.GEN_CLOSED
         source = original(slug, cursor, headers)

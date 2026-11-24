@@ -5,6 +5,7 @@ import time
 import types
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -162,13 +163,15 @@ def run_watch(monkeypatch, capsys, take, *flags):
     return calls, capsys.readouterr().out
 
 
-def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop(live, monkeypatch, capsys):
+def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop(
+    live: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     start = repository.get_document(SLUG)["_meta"]["rev"]
     original = watch_ledger.Watch.take
     seen_names = []
     written = []
 
-    def take(self, name, data):
+    def take(self: watch_ledger.Watch, name: str, data: dict[str, Any]) -> None:
         original(self, name, data)
         seen_names.append(name)
         if name not in {"open", "ledger"}:
@@ -192,13 +195,15 @@ def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop
     ]
 
 
-def test_an_expired_cursor_reconnects_without_one_and_prints_nothing_twice(live, monkeypatch, capsys):
+def test_an_expired_cursor_reconnects_without_one_and_prints_nothing_twice(
+    live: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     start = repository.get_document(SLUG)["_meta"]["rev"]
     server.repository.apply_ops(SLUG, ops=[note(3)])
     original = watch_ledger.Watch.take
     seen_names = []
 
-    def take(self, name, data):
+    def take(self: watch_ledger.Watch, name: str, data: dict[str, Any]) -> None:
         original(self, name, data)
         seen_names.append(name)
         if seen_names == ["open", "heartbeat"]:
