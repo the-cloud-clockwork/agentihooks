@@ -5,6 +5,9 @@ import pytest
 from scripts.ci_lab import leases, queue
 from scripts.ci_lab.units import Unit
 
+TYPE_GATE = "type-gate/hold-the-strict-type-checker-s-errors-per-file-to-the-base-baseline"
+FORMAT_GATE = "lint/format-check"
+
 
 class Clock:
     def __init__(self, now: int = 1000) -> None:
@@ -57,6 +60,10 @@ def found(jobs: queue.Queue, job: str) -> queue.Job:
 
 def unit(key: str) -> Unit:
     return Unit(kind="test", key=key, members=(f"tests/{key}.py::t",))
+
+
+def gate(name: str) -> Unit:
+    return Unit(kind="static", key=name.replace("/", "-"), members=(name,))
 
 
 def page_reads(jobs: queue.Queue, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
@@ -454,3 +461,33 @@ def test_a_grant_landing_while_the_last_lease_clears_its_cost_marks_the_worker_p
     assert lab.owns("h1:test:b", "raced")
     assert lab.complete("h1:test:b", "raced", "passed") is True
     assert kube.patches[3:] == [("w1", False)]
+
+
+def test_static_gates_of_other_jobs_fill_a_worker_at_one_slot_each(jobs: queue.Queue, lab: leases.Leases) -> None:
+    jobs.enqueue([gate(FORMAT_GATE)], "h1", {})
+    jobs.enqueue([gate(FORMAT_GATE)], "h2", {})
+
+    grants = lab.lease("w1", 2, frozenset(), 0)
+
+    assert [grant.job for grant in grants] == ["h1:static:lint-format-check", "h2:static:lint-format-check"]
+    assert [grant.slots for grant in grants] == [1, 1]
+
+
+def test_units_of_other_kinds_fill_a_worker_whatever_their_members_name(jobs: queue.Queue, lab: leases.Leases) -> None:
+    named = [Unit(kind="test", key=key, members=(TYPE_GATE,)) for key in ("a", "b")]
+    jobs.enqueue([*named, Unit(kind="stats", key="bare", members=())], "h1", {})
+
+    grants = lab.lease("w1", 3, frozenset(), 0)
+
+    assert [grant.job for grant in grants] == ["h1:test:a", "h1:test:b", "h1:stats:bare"]
+
+
+def test_a_lease_of_units_that_share_a_worker_reads_no_lease_record(
+    jobs: queue.Queue, lab: leases.Leases, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs.enqueue([unit("a"), gate(FORMAT_GATE)], "h1", {})
+    reads: list[str] = []
+    monkeypatch.setattr(jobs, "leased", lambda: reads.append("leased") or [])
+
+    assert len(lab.lease("w1", 2, frozenset(), 0)) == 2
+    assert reads == []
