@@ -458,10 +458,13 @@ def test_an_own_loop_on_standby_rests_the_idle_wait_and_ends_with_the_main_lane(
         [registry.Reactor("pulls", "swarm.*.pull.polled", lambda _: None, poll=poll)], own_loop=[_waiting()]
     )
     standby = runner.HubRunner(bus, reactors, "a", clock=rested, lease_ttl_ms=100)
-    started = time.monotonic()
-    assert standby.run_once(timeout_ms=0) == {"pulls": [], "wait-ends-checks": ["standby"]}
+    passes: list[dict[str, list[str]]] = []
+    serving = threading.Thread(target=lambda: passes.append(standby.run_once(timeout_ms=0)), daemon=True)
+    serving.start()
+    serving.join(30)
+    assert not serving.is_alive()
+    assert passes == [{"pulls": [], "wait-ends-checks": ["standby"]}]
     assert rested.calls == 1
-    assert time.monotonic() - started < 30
 
 
 def test_a_running_hub_keeps_its_leases_on_a_scheduled_interval(monkeypatch, hive):
