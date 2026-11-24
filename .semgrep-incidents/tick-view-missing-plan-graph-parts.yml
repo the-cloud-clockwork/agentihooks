@@ -1,0 +1,18 @@
+rules:
+  - id: tick-view-missing-plan-graph-parts
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The held tick view needs slices and plans so task ancestry reaches focused
+      phases and plans. Include both collections in LEDGER_PARTS.
+    paths:
+      include:
+        - /scripts/swarm_ledger/api/schemas.py
+        - tick-view-missing-plan-graph-parts.py
+    pattern-either:
+      - patterns:
+          - pattern: LEDGER_PARTS = (...)
+          - pattern-not: LEDGER_PARTS = (..., "slices", ...)
+      - patterns:
+          - pattern: LEDGER_PARTS = (...)
+          - pattern-not: LEDGER_PARTS = (..., "plans", ...)

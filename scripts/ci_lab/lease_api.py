@@ -1,8 +1,9 @@
-"""The lease API the scheduler serves: the only interface a lab worker calls, and the control routes a swarm calls with
-the lab's bearer token to mark heads hotfix, pause a class but its excepted heads and resume."""
+"""The lease API the scheduler serves: the only interface a lab worker calls, and the control routes a swarm calls on
+their own port with the lab's bearer token to mark heads hotfix, pause a class but its excepted heads and resume."""
 
 import hmac
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -21,10 +22,12 @@ __all__ = [
     "Reply",
     "UploadSigner",
     "answer",
+    "answer_control",
     "bind",
     "command",
     "respond",
     "serve",
+    "serve_control",
 ]
 
 MAX_WAIT_MS = 30_000
@@ -112,6 +115,7 @@ def _grant(grant: Grant) -> dict[str, Any]:
         "members": list(grant.unit.members),
         "slots": grant.slots,
         "expires_ms": grant.expires_ms,
+        **({"manifest": grant.unit.manifest} if grant.unit.manifest else {}),
     }
 
 
@@ -223,14 +227,23 @@ def command(routes: ControlRoutes, method: str, target: str, raw: bytes, authori
 def answer(
     leases: Leases,
     signer: UploadSigner,
-    routes: ControlRoutes,
     method: str,
     target: str,
     raw: bytes,
-    authorization: str | None,
+    _authorization: str | None,
 ) -> Reply:
-    """Answer one request: a control route with its bearer token, any other through the lease API."""
-    return command(routes, method, target, raw, authorization) or respond(leases, signer, method, target, raw)
+    """Answer one lease port request through the lease API; the control routes answer only on the control port."""
+    return respond(leases, signer, method, target, raw)
+
+
+def answer_control(routes: ControlRoutes, method: str, target: str, raw: bytes, authorization: str | None) -> Reply:
+    """Answer one control port request: a control route with its bearer token, any other request not found."""
+    return command(routes, method, target, raw, authorization) or (404, {"error": "not found"})
+
+
+def _log_request(request: BaseHTTPRequestHandler, code: int | str = "-", size: int | str = "-") -> None:
+    line = re.sub(r"\?[^ ]*", "", request.requestline)
+    request.log_message('"%s" %s %s', line, str(code), str(size))
 
 
 def bind(host: str, port: int, reply: Answer) -> ThreadingHTTPServer:
@@ -251,10 +264,19 @@ def bind(host: str, port: int, reply: Answer) -> ThreadingHTTPServer:
         request.end_headers()
         request.wfile.write(data)
 
-    handler = type(BaseHTTPRequestHandler.__name__, (BaseHTTPRequestHandler,), {"do_GET": handle, "do_POST": handle})
+    handler = type(
+        BaseHTTPRequestHandler.__name__,
+        (BaseHTTPRequestHandler,),
+        {"do_GET": handle, "do_POST": handle, "log_request": _log_request},
+    )
     return ThreadingHTTPServer((host, port), handler)
 
 
-def serve(host: str, port: int, leases: Leases, signer: UploadSigner, routes: ControlRoutes) -> ThreadingHTTPServer:
-    """Bind the lease API and its control routes on host and port; the caller runs serve_forever."""
-    return bind(host, port, partial(answer, leases, signer, routes))
+def serve(host: str, port: int, leases: Leases, signer: UploadSigner) -> ThreadingHTTPServer:
+    """Bind the lease API on host and port; the caller runs serve_forever."""
+    return bind(host, port, partial(answer, leases, signer))
+
+
+def serve_control(host: str, port: int, routes: ControlRoutes) -> ThreadingHTTPServer:
+    """Bind the control routes alone on host and port; the caller runs serve_forever."""
+    return bind(host, port, partial(answer_control, routes))

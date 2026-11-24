@@ -11,14 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.ci_lab.sandbox import CannotRun, PortAllocator, Sandbox
+from scripts.ci_mutation.stats_cache import EXCLUDES, LOCKFILE
 
 __all__ = ["BAKED", "BUILDS", "EXCLUDES", "LOCKFILE", "MARKER", "Build", "venv_for"]
 
 BAKED = Path("/opt/agentihooks-venv")
 MARKER = "lockfile.sha256"
 BUILDS = "builds"
-LOCKFILE = ".github/test-requirements.lock"
-EXCLUDES = ".github/test-excludes.txt"
 
 
 @dataclass(frozen=True)

@@ -56,3 +56,15 @@ def test_handoff_resolves_seat_and_work_folder_addresses_in_this_swarm(started, 
         doc.read_text().replace("- ledger:sw/tasks/t1", "- recap:eng-1@sw the seat\n- workspace:t1/progress")
     )
     assert cli.main(["sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)]) == 0
+
+
+@pytest.mark.feature("swarm-read-non-utf8")
+def test_handoff_refuses_a_document_that_is_not_utf8_text_by_name(env, started, tmp_path, capsys):
+    store, _, _ = env
+    doc = tmp_path / "handoff.md"
+    doc.write_bytes(b"# Handoff v2\n\xff\xfe not text\n")
+    capsys.readouterr()
+    assert cli.main(["sw", "--as", "engineer@a1b2c3-0001", "handoff", str(doc)]) == 1
+    assert capsys.readouterr().err == f"swarm: cannot read the handoff document {doc}: it is not UTF-8 text\n"
+    assert store.handoff("sw", "t1") == "" and store.handoff_envelope("sw", "t1") is None
+    assert [a.state for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001"] == ["working"]

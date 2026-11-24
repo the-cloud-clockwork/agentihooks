@@ -5,11 +5,15 @@ import re
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
-from scripts.inbox.seats import is_seat, of_swarm
+from scripts.inbox.seats import Occupancy, is_seat, of_swarm
 from scripts.inbox.store import _order, _present
 from scripts.swarm.naming import NameRegistry
-from scripts.swarm.store import MASTER, PREFIX
+from scripts.swarm.store import MASTER, PREFIX, AgentRecord
+
+if TYPE_CHECKING:
+    from scripts.doctor.inbox import Receiver
 
 BATCH = 1000
 MINUTE_MS = 60_000
@@ -122,7 +126,13 @@ def _bound_at(generation, history):
     return max((e["at"] for e in entries if e["generation"] == generation and "event" not in e), default=0)
 
 
-def _inbox_receiver(address, agent, seat, departed, configs):
+def _inbox_receiver(
+    address: str,
+    agent: AgentRecord | None,
+    seat: Occupancy | None,
+    departed: dict[str, dict[str, str]],
+    configs: dict[str, dict[str, str]],
+) -> "Receiver":
     from scripts.doctor.inbox import Receiver
     from scripts.inbox import exits
 
@@ -143,6 +153,7 @@ def _inbox_receiver(address, agent, seat, departed, configs):
             max_eng=int(raw["max_eng"]),
             max_ci=int(raw["max_ci"]),
             max_plan=int(raw.get("max_plan", 1)),
+            max_review=int(raw.get("max_review", 0)),
         )
         if raw
         else None

@@ -22,6 +22,7 @@ function ancestors(d, key, seen = new Set()) {
 }
 
 export function prepareFrozenView(d) {
+  if (!hiding) return markFrozenToggle();
   visible = new Set(revealed);
   const parents = new Set();
   for (const list of MARKED) for (const item of d[list]) {
@@ -42,6 +43,7 @@ export function viewVisible(key) {
 }
 
 export function viewItems(list, items) {
+  if (!hiding) return items.filter((i) => !i.deleted);
   return items.filter((i) => !i.deleted && viewVisible(list === "priorities" ? i.item : `${list}/${i.id}`));
 }
 
@@ -61,6 +63,7 @@ export function revealFrozenTarget(d, id) {
 
 function markFrozenToggle() {
   const button = $("frozen-view");
+  if (button.getAttribute("aria-pressed") === String(hiding) && button.childElementCount) return;
   button.setAttribute("aria-pressed", String(hiding));
   const icon = snowflake("");
   icon.removeAttribute("role");

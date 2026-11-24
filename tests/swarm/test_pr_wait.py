@@ -296,10 +296,16 @@ def covered(store):
     idle.declare_wait(store.redis, "sw", OTHER, 10_000_000, "", 1, on={"kind": "merge", "target": URL})
 
 
+def lab_held(store: RedisStore) -> None:
+    pr_wait.mark(store.redis, "sw", OTHER, 100, "", "refs/grade/t2", SHA)
+    idle.declare_wait(store.redis, "sw", OTHER, 10_000_000, "accepted lab push", 1, on={"kind": "lab", "target": GRADE})
+
+
 SKIPS = {
     "finished": (lambda store: mark(store, OTHER), "finished", URL),
     "unread": (lambda store: mark(store, OTHER), "working", "https://github.com/o/r/pull/9"),
     "covered": (covered, "working", URL),
+    "lab": (lab_held, "working", URL),
 }
 
 
@@ -403,6 +409,23 @@ def test_a_later_push_drops_the_head_of_an_earlier_grade_push(store: RedisStore)
     assert pushed(store) == {"pushed_at": "200", "pushed_repo": "o/r", "pushed_branch": "t1"}
 
 
+@pytest.mark.feature("swarm-push-wait")
+@pytest.mark.parametrize("where", [("", ""), ("o/r", "b"), ("o/r", ""), ("", "b")])
+def test_outer_publish_preserves_a_precise_head_only_without_a_push_destination(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, where: tuple[str, str]
+) -> None:
+    pr_wait.mark(store.redis, "sw", ME, 100, "", "refs/grade/t1", SHA)
+    monkeypatch.setattr(pr_wait, "pushed_where", lambda command, cwd: where)
+    monkeypatch.setattr(pr_wait, "pushed_head", lambda command, cwd: "")
+    assert swarm_heartbeat.push_mark(shell(PUBLISH), ENV, store.redis, 200) is True
+    expected = (
+        {"pushed_at": "200", "pushed_repo": where[0], "pushed_branch": where[1]}
+        if any(where)
+        else {"pushed_at": "100", "pushed_repo": "", "pushed_branch": "refs/grade/t1", "pushed_head": SHA}
+    )
+    assert pushed(store) == expected
+
+
 def grade_mark(store: RedisStore) -> None:
     pr_wait.mark(store.redis, "sw", ME, 100, "", "refs/grade/t1", SHA)
 
@@ -446,6 +469,36 @@ def test_a_grade_push_of_a_task_with_a_pull_request_waits_on_its_checks(store: R
     ]
 
 
+@pytest.mark.feature("swarm-push-wait")
+@pytest.mark.parametrize(
+    ("kind", "target", "until", "preserved"),
+    [
+        ("lab", GRADE, 5_001, True),
+        ("lab", GRADE, 5_000, False),
+        ("lab", GRADE.replace(SHA, "0" * 40), 5_001, False),
+        ("checks", "https://github.com/o/r/pull/99", 5_001, False),
+        ("lab", None, 5_001, False),
+    ],
+)
+def test_only_the_live_lab_wait_for_the_pushed_head_precedes_existing_pr_checks(
+    store: RedisStore, kind: str, target: str | None, until: int, preserved: bool
+) -> None:
+    grade_mark(store)
+    on = {"kind": kind, **({"target": target} if target is not None else {})}
+    idle.declare_wait(store.redis, "sw", ME, until, "accepted lab push", 100, on)
+    held = idle.wait(store.redis, "sw", ME)
+    rows = {"t1": {"id": "t1", "pr_url": URL}}
+    actions = enforce(store, rows, {URL: OPEN})
+    if preserved:
+        assert actions == []
+        assert idle.wait(store.redis, "sw", ME) == held
+        assert (pushed(store) or {})["pushed_head"] == SHA
+    else:
+        assert actions == [f"set the wait of {ME} on checks of {URL} from its push"]
+        assert (idle.wait(store.redis, "sw", ME) or {})["on"] == {"kind": "checks", "target": URL, "head": OPEN.head}
+        assert pushed(store) is None
+
+
 def test_a_pull_request_the_forge_finds_wins_over_the_lab_grade(store: RedisStore) -> None:
     grade_mark(store)
     assert enforce(store, UNPULLED, {URL: OPEN}, forge=lambda repo, branch: URL, grade=lambda head: GRADE) == [
@@ -458,7 +511,7 @@ def test_a_live_lab_wait_on_the_grade_covers_the_push(store: RedisStore) -> None
     grade_mark(store)
     assert enforce(store, UNPULLED, {}, grade=lambda head: GRADE) == []
     assert (idle.wait(store.redis, "sw", ME) or {})["until"] == 10_000_000
-    assert pr_wait.read(store.redis, "sw", ME) is None
+    assert (pr_wait.read(store.redis, "sw", ME) or {})["pushed_head"] == SHA
 
 
 def test_a_push_without_a_grade_head_never_asks_the_lab(store: RedisStore) -> None:

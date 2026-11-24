@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/plant_publish.py:scripts.ci_lab.plant_publish.x__tree:89ec604a6e68b5eeced10873c1142edeb1efcc03fe3f104f57c6ae7436cb5eb2": {
+    "reader": "Standards",
+    "reason": "Removing maxsplit cannot change element zero of split('\\t'): both expressions return exactly the text before the first tab, even if the filename contains more tabs."
+  }
+}

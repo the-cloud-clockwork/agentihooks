@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,6 +21,50 @@ INTENT = (
 )
 TAIL = "reason += f\"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats\""
 CLEAN = 'label = "changed 9m ago"'
+ORDERS_PANEL = """import { $, h } from "./dom.js";
+import { readOrders } from "./api.js";
+
+let loading = false;
+let pending = false;
+
+export function mountOrders() {
+  const box = h("details", { id: "orders-box", class: "sources-box fold", open: true },
+    h("summary", { text: "Operator orders " }, h("span", { id: "orders-count", class: "count" })),
+    h("ul", { id: "orders" }),
+    h("p", { id: "orders-status", class: "desc", role: "status", text: "Loading operator orders…" }));
+  $("sec-priorities").before(h("section", { id: "sec-orders", "data-outline": "orders" }, box));
+}
+
+function orderRow(order) {
+  return h("li", { class: "item" },
+    h("div", { class: "item-title", text: order.title }),
+    order.quote ? h("div", { class: "his-words" }, h("blockquote", { text: order.quote })) : null,
+    h("div", { class: "task-meta" },
+      h("span", { text: `${order.claimable} claimable` }),
+      h("span", { text: `${order.busy} busy` }),
+      h("span", { text: `${order.done.length} done` })));
+}
+
+export async function loadOrders() {
+  if (loading) { pending = true; return; }
+  loading = true;
+  try {
+    const resp = await readOrders();
+    if (!resp.ok) throw new Error();
+    const { data } = await resp.json();
+    $("orders").replaceChildren(...(data.length ? data.map(orderRow)
+      : [h("li", { class: "empty", text: "No open operator orders." })]));
+    $("orders-count").textContent = `· ${data.length} open`;
+    $("orders-status").textContent = "";
+  } catch {
+    $("orders-status").textContent = "Operator orders unavailable.";
+  } finally {
+    loading = false;
+    if (pending) { pending = false; loadOrders(); }
+  }
+}
+"""
+DENIED = {"data-outline", "orders", "item", "span", "orders-count"}
 
 
 @pytest.fixture
@@ -102,6 +147,26 @@ def test_project_filter_covers_ledger_producers(shipped_filters, stub, path):
     effect = conditions.pre_effect(_edit('label = "value; because quota is available"', path))
     assert effect is not None and effect.block
     assert len(fake.calls) == 1
+
+
+@pytest.mark.feature("filter-web-single-token-literals")
+def test_saved_orders_panel_passes_the_ledger_filter_when_its_identifiers_score_above_the_threshold(
+    shipped_filters: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[str] = []
+
+    def judge(state: dict[str, Any], questions: dict[str, Any], **kwargs: Any) -> classifier.DecisionResult:
+        answers: dict[str, classifier.Answer] = {}
+        for name, question in questions.items():
+            finding = question.instructions.split("\nFinding: ", 1)[1].split("\nReason: ", 1)[0]
+            asked.append(finding)
+            answers[name] = classifier.Answer(type="noul", noul=0.62 if finding in DENIED else 0.12)
+        return classifier.DecisionResult(answers=answers, source="stub")
+
+    monkeypatch.setattr("hooks.classifier.decide", judge)
+    effect = conditions.pre_effect(_edit(ORDERS_PANEL, "scripts/swarm_ledger/static/js/orders.js", "Write"))
+    assert effect is not None and not effect.block
+    assert asked and DENIED.isdisjoint(asked)
 
 
 @pytest.mark.parametrize("path", ["scripts/swarm/other.py", "web/server.js", "scripts/swarm_ledger_other/page.py"])

@@ -128,6 +128,7 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
 |---|---|
 | The operator asks for a swarm from an accepted plan | `$init-swarm`; the swarm starts its master, `master@<code>-<n>`, which the operator talks to on the page chat or in its pane |
 | Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full effort-min=E effort-max=E`; the ledger page's swarm panel calls the same api. Codex is one more account in the session rotation, judged on its week alone with the top band. Every lane agent starts inside the effort range (default medium to xhigh) |
+| One hard mission needs one mind to its proof | Master or operator: `agentihooks swarm <slug> expert template`, `expert start <mission-file> [--effort xhigh\|max]`, `expert status [<lineage>]`, `expert stop <lineage> --note "<why>"`, `expert proof <lineage>`. The expert on the seat: `expert mission`, `handoff <doc>` with the expert handoff, `expert complete <proof file>` |
 | Working a ledger | `agentihooks api --slug <slug> --as <name> join`, act on every OPERATOR line, then `ack`. In a swarm each operator write arrives as an inbox message at the next tool call and the tick wakes an idle pane, so no Monitor is needed; a ledger without a swarm wakes an idle session only through a `Monitor` on `agentihooks ledger watch <slug> --as <name>` |
 | Work lands, or a blocker appears | `api comment phases/<id> "<text>"`, `api followup add "<text>"`, `api say "<text>"`; plain words for the operator |
 | A question while the operator is away (in a swarm bound session the question tool and the plan prompt stay refused until he types `operator on` in that pane; a standalone session always has them) | `agentihooks msg send master@<slug> "<text>"`; the ledger refuses agent questions, and no agent writes to the operator first |
@@ -357,7 +358,7 @@ Every `AH_CC_TOKEN_<slug>` is one Claude subscription.
 | Directive | Fires when | Do |
 |---|---|---|
 | `QUOTA HANDOFF REQUIRED` | 7d used ≥ 98%, or 5h used ≥ 99% while another account has room | Write the handoff document at the path given, run the `agentihooks init-agent --handoff …` command given, report where the work moved, stop; the old terminal closes at that stop (`AGENTIHOOKS_HANDOFF_CLOSE_OLD=0` keeps it) |
-| `QUOTA WAIT` | 5h used ≥ 99%, the week has ≥ 10% left, and no other account qualifies | `CronCreate` the one-shot job given for the 5h reset, tell the operator when work resumes, stop |
+| `QUOTA WAIT` | 5h used ≥ 99%, the week has ≥ 10% left, and no other account qualifies | In a swarm, run the given `agentihooks swarm <slug> wait <minutes> --reason "quota reset at <time>"`, at most 60 minutes, repeating until reset. Outside a swarm, run the given `agentihooks timer add --at <time> --session <session id> <prompt>`. Both keep the two minute reset buffer. Tell the operator when work resumes, stop |
 | `QUOTA STOP` | Nothing has room | Stop and tell the operator to add another account or say "keep pushing" |
 | `QUOTA PUSH` | The operator said "keep pushing" | Continue on this account until 100% |
 

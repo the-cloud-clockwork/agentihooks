@@ -1,11 +1,15 @@
+import inspect
 import json
+import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key, write_part
 
 SELECTED = {"hooks/a.py": ({3, 1}, ["tests/test_b.py", "tests/test_a.py"]), "hooks/b.py": (set(), [])}
+RECORDER = (("mutmut", "__main__.py"), "record_trampoline_hit")
 
 
 def test_key_covers_the_head_and_every_selected_path_line_and_test():
@@ -170,8 +174,25 @@ def test_measured_dependencies_keep_only_the_test_modules_a_node_runs(
     }
 
 
+def place_flake_ledger(tests: Path) -> None:
+    (tests / "__init__.py").touch()
+    shutil.copy(Path(__file__).with_name("flake_ledger.py"), tests)
+
+
+def stats_recorder_only() -> SimpleNamespace:
+    """Stand in for mutmut's Config.get: answer its stats recorder, which reads the config on every trampolined call
+    while a mutation run collects stats, and fail every other reader."""
+    frame = inspect.currentframe()
+    caller = frame.f_back.f_code if frame and frame.f_back else None
+    if caller is None or (Path(caller.co_filename).parts[-2:], caller.co_name) != RECORDER:
+        raise AssertionError("mutmut config read")
+    return SimpleNamespace(source_paths=[], max_stack_depth=-1)
+
+
 @pytest.mark.parametrize("inherited", ["before", None])
-def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch, inherited):
+def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inherited: str | None
+) -> None:
     import os
     import subprocess
     import sys
@@ -192,6 +213,7 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
             (root / name).write_text(text)
     for root in (original, work / "mutants"):
         (root / "scripts/untracked.py").write_text("value = 2\n")
+    place_flake_ledger(work / "mutants" / "tests")
     subprocess.run(["git", "init", "-q", str(original)], check=True)
     subprocess.run(["git", "add", *files], cwd=original, check=True)
     monkeypatch.chdir(work)
@@ -242,7 +264,9 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     assert "scripts/untracked.py" not in result["dependencies"][node]
 
 
-def test_a_stats_bucket_of_only_wall_clock_tests_collects_nothing_and_succeeds(tmp_path, monkeypatch):
+def test_a_stats_bucket_of_only_wall_clock_tests_collects_nothing_and_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import os
     import subprocess
     import sys
@@ -254,6 +278,7 @@ def test_a_stats_bucket_of_only_wall_clock_tests_collects_nothing_and_succeeds(t
     test = work / "mutants" / "tests" / "test_sample.py"
     test.parent.mkdir(parents=True)
     test.write_text("import pytest\n@pytest.mark.wall_clock\ndef test_value():\n    assert True\n")
+    place_flake_ledger(test.parent)
     monkeypatch.chdir(work)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
@@ -336,6 +361,193 @@ def test_a_stats_rerun_passes_a_class_based_property_test_on_its_fresh_instance(
     collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), [str(module)], output, str(tmp_path / "base"))
     assert json.loads(output.read_text())["status"] == 0, outputs
     assert "1 passed" in outputs[0] and "1 rerun" in outputs[0], outputs
+
+
+def stats_bucket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> tuple[Path, list[str]]:
+    import os
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import collect_shard_stats
+
+    root = Path(__file__).resolve().parents[1]
+    work = tmp_path / "work"
+    work.mkdir()
+    module = work / "test_bucket.py"
+    module.write_text(source)
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
+    monkeypatch.setenv("PY_IGNORE_IMPORTMISMATCH", os.environ.get("PY_IGNORE_IMPORTMISMATCH", ""))
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    outputs: list[str] = []
+
+    class Runner:
+        _pytest_add_cli_args: list[str] = []
+
+        def run_stats(self, *, tests: list[str]) -> int:
+            done = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", *self._pytest_add_cli_args, *tests],
+                cwd=root,
+                env=dict(os.environ),
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            outputs.append(done.stdout + done.stderr)
+            return done.returncode
+
+    output = tmp_path / "stats-0.json"
+    collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), [str(module)], output, str(tmp_path / "base"))
+    return output, outputs
+
+
+@pytest.mark.feature("mutation-stats-flake-ledger")
+def test_a_stats_bucket_records_a_test_that_fails_once_then_passes_its_rerun_in_the_flake_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts = tmp_path / "attempts"
+    output, outputs = stats_bucket(
+        tmp_path,
+        monkeypatch,
+        "from pathlib import Path\n"
+        "def test_value():\n"
+        f"    attempts = Path({str(attempts)!r})\n"
+        "    first = not attempts.exists()\n"
+        "    attempts.touch()\n"
+        "    assert not first, 'first attempt fails'\n",
+    )
+    result = json.loads(output.read_text())
+    assert result["status"] == 0, outputs
+    assert set(result) == {"status", "cpu", "tests", "durations", "files", "modules"}
+    rows = [json.loads(line) for line in output.with_suffix(".flakes.jsonl").read_text().splitlines()]
+    assert [(row["test"].rpartition("/")[2], row["outcome"], row["attempts"]) for row in rows] == [
+        ("test_bucket.py::test_value", "flaky", 2)
+    ], outputs
+    assert len(rows[0]["errors"]) == 1 and "first attempt fails" in rows[0]["errors"][0]
+    assert "first attempt fails" in rows[0]["tracebacks"][0]
+    assert "Retry failure reports: " in outputs[0], outputs
+
+
+@pytest.mark.feature("mutation-stats-flake-ledger")
+def test_a_stats_bucket_with_no_rerun_points_the_flake_ledger_beside_its_output_and_writes_no_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen = tmp_path / "seen"
+    stale = tmp_path / "stats-0.flakes.jsonl"
+    stale.write_text('{"test": "an earlier run"}\n')
+    output, outputs = stats_bucket(
+        tmp_path,
+        monkeypatch,
+        "import os\n"
+        "from pathlib import Path\n"
+        "def test_value():\n"
+        f"    Path({str(seen)!r}).write_text(os.environ['CI_FLAKES'])\n",
+    )
+    assert json.loads(output.read_text())["status"] == 0, outputs
+    assert seen.read_text() == str(stale)
+    assert not stale.exists()
+    assert "Retry failure reports" not in outputs[0], outputs
+
+
+@pytest.mark.feature("mutation-stats-flake-ledger")
+@pytest.mark.parametrize("caller", ["caller-flakes.jsonl", "", None])
+@pytest.mark.parametrize("fails", [False, True])
+def test_a_stats_bucket_gives_the_caller_back_its_flake_ledger_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caller: str | None, fails: bool
+) -> None:
+    import os
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import collect_shard_stats
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
+    monkeypatch.setenv("PY_IGNORE_IMPORTMISMATCH", os.environ.get("PY_IGNORE_IMPORTMISMATCH", ""))
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    if caller is None:
+        monkeypatch.delenv("CI_FLAKES", raising=False)
+    else:
+        monkeypatch.setenv("CI_FLAKES", caller)
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    seen: list[str | None] = []
+
+    class Runner:
+        _pytest_add_cli_args: list[str] = []
+
+        def run_stats(self, *, tests: list[str]) -> int:
+            seen.append(os.environ.get("CI_FLAKES"))
+            if fails:
+                os.environ.pop("CI_FLAKES")
+                raise RuntimeError("stats failed")
+            return 0
+
+    output = tmp_path / "stats-0.json"
+    if fails:
+        with pytest.raises(RuntimeError, match="stats failed"):
+            collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), [], output, str(tmp_path / "base"))
+    else:
+        collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), [], output, str(tmp_path / "base"))
+    assert seen == [str(tmp_path / "stats-0.flakes.jsonl")]
+    assert os.environ.get("CI_FLAKES") == caller
+
+
+@pytest.mark.feature("mutation-stats-flake-ledger")
+@pytest.mark.parametrize("mutants", [False, True])
+@pytest.mark.parametrize(
+    "rows", [[], ['{"test": "a::t", "outcome": "flaky"}\n', '{"test": "b::t", "outcome": "failed"}\n']]
+)
+def test_a_collected_stats_part_keeps_its_bucket_flake_rows_beside_the_part_and_out_of_the_stats_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: list[str], mutants: bool
+) -> None:
+    from collections.abc import Callable
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import load_or_collect_stats
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("MUTATION_STATS_ROOT", str(tmp_path))
+    (tmp_path / "changed-lines.json").write_text(json.dumps({"scripts/a.py": {"lines": [1]}}))
+    config = SimpleNamespace(source_paths=[Path("scripts")], pytest_add_cli_args_test_selection=["tests/test_a.py"])
+    runner = SimpleNamespace(
+        Config=SimpleNamespace(get=lambda: config),
+        SourceFileMutationData=lambda **kwargs: SimpleNamespace(
+            load=lambda: None, exit_code_by_key={"m": None} if mutants else {}
+        ),
+    )
+    results = [{"status": 0, "tests": {}, "durations": {}, "cpu": 0}]
+    options: list[list[str]] = []
+
+    def cached(
+        root: Path,
+        folder: Path,
+        scope: dict[str, list[int]],
+        files: list[str],
+        given: list[str],
+        collect: Callable[[list[str]], list[dict[str, object]]],
+    ) -> list[dict[str, object]]:
+        options.append(list(given))
+        for index, row in enumerate(rows):
+            Path(f"stats-{index}.flakes.jsonl").write_text(row)
+        return results
+
+    monkeypatch.setattr("scripts.ci_mutation.stats_cache.collect_cached_stats", cached)
+    folder = tmp_path / ".mutation-stats" / "group-0"
+    with pytest.raises(SystemExit) as done:
+        load_or_collect_stats(
+            runner,
+            SimpleNamespace(_pytest_add_cli_args=["-q"]),
+            ["scripts/a.py"],
+            "collect",
+            (str(folder / "part-0.json"), "key", "0", "1"),
+        )
+    assert done.value.code == 0
+    assert options == ([["-q"]] if mutants else [])
+    assert (folder / "flakes-0.jsonl").read_text() == ("".join(rows) if mutants else "")
+    assert load_parts(folder, "key") == (results if mutants else [], "")
 
 
 @pytest.mark.wall_clock
