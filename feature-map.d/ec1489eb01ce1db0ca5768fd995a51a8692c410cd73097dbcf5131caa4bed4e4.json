@@ -12,5 +12,8 @@
     "tests/test_ci_lab_image.py::test_the_start_refuses_a_worker_that_exits_before_its_first_lease_call",
     "tests/test_ci_lab_image.py::test_the_start_refuses_a_worker_that_leaves_a_planted_entry_in_its_root",
     "tests/test_ci_lab_image.py::test_the_start_refuses_a_worker_that_does_not_exit_zero_on_sigterm"
+  ],
+  "rules": [
+    "lab-empty-chmods-folder-unconditionally"
   ]
 }
