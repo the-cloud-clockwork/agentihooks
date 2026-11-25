@@ -85,6 +85,28 @@ def test_a_failed_launch_stamps_its_absent_binding_when_it_fails(setup, monkeypa
     assert retry["at"] == 101
 
 
+@pytest.mark.feature("expert-launch-failure-reason")
+def test_a_failed_launch_keeps_the_reason_it_is_given_in_place_of_the_fixed_words(
+    setup: tuple[RedisStore, AgentRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2")
+    store.seats.occupy(new.seat, new.name, 3)
+    monkeypatch.setattr(transfers, "now_ms", lambda: 101)
+    transfers.attach(store, "sw", new)
+    transfers.failed(store, "sw", new, "herdr refused the pane: exit 3")
+    result = transfers.get(store, "sw", transfer["id"])
+    assert result["binding"] == {
+        "state": "absent",
+        "at": 101,
+        "session": "sw-eng-2",
+        "reason": "herdr refused the pane: exit 3",
+    }
+    retry = next(row for row in transfers.list_transfers(store, "sw") if row.get("retry_of") == transfer["id"])
+    assert retry["binding"] == {"state": "pending"}
+
+
 @pytest.mark.parametrize("state", ["starting", "launching"])
 @pytest.mark.parametrize("lane", ["eng", "ci", "master"])
 def test_a_successor_whose_launch_is_unrecorded_keeps_a_pending_binding(setup, state, lane):

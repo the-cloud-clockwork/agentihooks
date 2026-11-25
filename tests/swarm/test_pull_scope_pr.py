@@ -14,6 +14,7 @@ ME = "engineer@a1b2c3-0001"
 FIRST = "https://github.com/o/r/pull/9"
 SECOND = "https://github.com/o/r/pull/10"
 FINAL = "https://github.com/o/r/pull/11"
+GITLAB = "https://gitlab.example.com/group/sub/project/-/merge_requests/7"
 
 
 @pytest.fixture
@@ -86,8 +87,20 @@ def test_swarm_pr_refuses_a_declaration_on_a_url_that_is_no_pull_request(started
     _, ledger, stamped = started
     other = "https://example.com/o/r/pull/9"
     assert run("sw", "pr", other, "--stage", "the gate") != 0
-    assert capsys.readouterr().err.strip().endswith(f"--stage needs a GitHub pull request URL, not {other}")
+    refusal = f"--stage needs a GitHub pull request or GitLab merge request URL, not {other}"
+    assert capsys.readouterr().err.strip().endswith(refusal)
     assert stamped == [] and not ledger.rows["t1"].get("pr_url")
+
+
+@pytest.mark.feature("ledger-task-update-takes-confirmed-pull-request")
+@pytest.mark.parametrize("kind", ["stage", "prerequisite"])
+def test_swarm_pr_records_the_scope_a_gitlab_merge_request_delivers(
+    started: tuple[RedisStore, Any, list[tuple[str, Any, Any]]],  # noqa: F811
+    kind: str,
+) -> None:
+    _, ledger, _ = started
+    assert run("sw", "pr", GITLAB, f"--{kind}", "the gate") == 0
+    assert ledger.rows["t1"]["pull_scopes"] == {GITLAB: {"kind": kind, "scope": "the gate"}}
 
 
 def test_a_prerequisite_recorded_after_the_main_pull_request_keeps_the_main_one(started, monkeypatch):  # noqa: F811

@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__tar_targets:6599c49c3b1a7bee6a902b1866616414fd219396a9b951a1317e751536d14950": {
+    "reader": "standards_reader",
+    "reason": "\"XXXX\" gives set {\"X\"}, which does not intersect TAR_WRITES."
+  }
+}

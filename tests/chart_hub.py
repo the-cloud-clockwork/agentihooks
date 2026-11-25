@@ -25,6 +25,12 @@ def hub_problems(deployment: dict) -> list[str]:
         found.append(f"the hub runs {deployment['spec'].get('replicas')} replicas, expected 2")
     spec = deployment["spec"]["template"]["spec"]
     container = spec["containers"][0]
+    volumes = {row["name"]: row for row in spec.get("volumes", [])}
+    mounts = {row["name"]: row.get("mountPath") for row in container.get("volumeMounts", [])}
+    if volumes.get("cache", {}).get("emptyDir") != {"medium": "Memory", "sizeLimit": "512Mi"}:
+        found.append("the hub ledger caches are not on a bounded memory volume")
+    if mounts.get("cache") != "/home/swarm/.agentihooks":
+        found.append("the hub ledger cache volume does not cover its export and entry copy folders")
     if container.get("command") != ["agentihooks", "hub", "run"]:
         found.append(f"the hub container runs {container.get('command')}, expected agentihooks hub run")
     env = {row["name"]: row.get("value") for row in container.get("env", [])}

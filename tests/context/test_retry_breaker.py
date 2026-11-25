@@ -364,6 +364,31 @@ class TestClearState:
         clear_session_state("clear-session")
         assert _get_state("clear-session", "bash:npm")["count"] == 0
 
+    def test_clears_memory_and_logs_when_redis_delete_raises(self):
+        from hooks.context.retry_breaker import _get_state, _set_state, clear_session_state
+
+        _set_state(
+            "redis-error-session",
+            "bash:npm",
+            {"count": 4, "last_error_key": "x", "last_error_text": "y", "last_input": "z"},
+        )
+        assert _get_state("redis-error-session", "bash:npm")["count"] == 4
+
+        class _RaisingRedis:
+            def delete(self, key: str) -> None:
+                raise RuntimeError("boom")
+
+        with (
+            patch.object(_breaker_mod, "get_redis", return_value=_RaisingRedis()),
+            patch.object(_breaker_mod, "log") as mock_log,
+        ):
+            clear_session_state("redis-error-session")
+
+        assert _get_state("redis-error-session", "bash:npm")["count"] == 0
+        mock_log.assert_called_once()
+        assert mock_log.call_args[0][0] == "retry_breaker: Redis delete error"
+        assert "boom" in mock_log.call_args[0][1]["error"]
+
 
 class TestFileToolKeys:
     def test_file_tools_keyed_per_path(self):

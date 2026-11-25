@@ -1,4 +1,6 @@
 from copy import deepcopy
+from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -262,3 +264,53 @@ def test_tick_document_records_and_acknowledges_its_revision_without_another_rea
 
     assert [(row["state"], row["revision"]) for row in read(box, "ledger_events")] == [("claimed", 1), ("done", 2)]
     assert ledger.calls[-1] == ("ack", "example", 2)
+
+
+class Sink:
+    def __init__(self) -> None:
+        self.up = True
+
+    def send(self, sink: metrics_outbox.Settings | None, query: str, body: bytes) -> bool:
+        return self.up
+
+
+def snapshot_times(box: metrics_outbox.Outbox) -> list[int]:
+    return sorted({row["ts_ms"] for row in read(box, "ledger_snapshots")})
+
+
+def record_cycle(box: metrics_outbox.Outbox, cycle: int, ledger: Ledger) -> int:
+    from scripts.swarm import metrics_ledger
+    from scripts.swarm.ledger_client import LedgerClient
+
+    at = NOW + cycle * metrics_ledger.SNAPSHOT_MS
+    metrics_ledger.record(box, "example", at, cast("LedgerClient", ledger))
+    return at
+
+
+@pytest.mark.feature("metrics-spool-drops-shipped-ledger-snapshots")
+def test_unshipped_snapshots_and_shipped_ledger_events_survive_the_next_record(tmp_path: Path) -> None:
+    ledger, sink = Ledger(), Sink()
+    ledger.move("claimed", 1, NOW)
+    box = metrics_outbox.Outbox(tmp_path / "outbox.sqlite", metrics_outbox.Settings("http://sink", "", ""), sink.send)
+    try:
+        box.flush(record_cycle(box, 0, ledger))
+        sink.up = False
+        kept = [record_cycle(box, cycle, ledger) for cycle in (1, 2)]
+        box.flush(kept[-1])
+        assert [(row["state"], row["revision"]) for row in read(box, "ledger_events")] == [("claimed", 1)]
+        assert snapshot_times(box)[-2:] == kept
+    finally:
+        box.close()
+
+
+@pytest.mark.feature("metrics-spool-drops-shipped-ledger-snapshots")
+def test_the_spool_keeps_only_the_newest_snapshot_cycle_once_earlier_ones_shipped(tmp_path: Path) -> None:
+    ledger, sink = Ledger(), Sink()
+    box = metrics_outbox.Outbox(tmp_path / "outbox.sqlite", metrics_outbox.Settings("http://sink", "", ""), sink.send)
+    try:
+        for cycle in range(4):
+            at = record_cycle(box, cycle, ledger)
+            assert snapshot_times(box) == [at]
+            box.flush(at)
+    finally:
+        box.close()

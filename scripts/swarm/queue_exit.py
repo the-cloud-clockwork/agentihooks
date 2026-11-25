@@ -1,6 +1,8 @@
 import re
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any
 
 from scripts.swarm import merge_queue
 from scripts.swarm.store import SwarmError
@@ -9,6 +11,7 @@ PULL = re.compile(r"https://github\.com/([^/]+/[^/]+)/pull/(\d+)")
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
 CLEAN = ("success", "cancelled", "skipped", "neutral")
 FAILED_JOB = ("failure", "timed_out", "startup_failure")
+SUMMARY = "Queue gate summary"
 PAGE = 100
 PAGES = 5
 
@@ -29,7 +32,7 @@ def _listed(repo: str, since: str, run) -> list[dict] | None:
     return listed if len(listed) >= body["total_count"] else None
 
 
-def _failed(repo: str, item: dict, run) -> bool:
+def _failed(repo: str, item: dict, run: Callable[..., Any]) -> bool:
     if item["conclusion"] not in CLEAN:
         return True
     if item["conclusion"] != "cancelled":
@@ -40,7 +43,9 @@ def _failed(repo: str, item: dict, run) -> bool:
         jobs += body["jobs"]
         if len(jobs) >= body["total_count"] or not body["jobs"]:
             break
-    return len(jobs) < body["total_count"] or any(job["conclusion"] in FAILED_JOB for job in jobs)
+    return len(jobs) < body["total_count"] or any(
+        job["conclusion"] in FAILED_JOB and job["name"] != SUMMARY for job in jobs
+    )
 
 
 def own_failures(url: str, since_ms: int, run=subprocess.run) -> list[str] | None:

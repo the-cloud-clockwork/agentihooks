@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from scripts.ci_lab import delivery, shadow
+from scripts.ci_lab import checks, delivery, shadow
 from scripts.doctor import cli as doctor
 from scripts.doctor import detect, lab
 from scripts.swarm import cli as swarm_cli
@@ -135,7 +135,8 @@ def test_an_authoritative_gate_with_a_mismatch_is_a_finding() -> None:
             "the authoritative gate lint disagrees with GitHub Actions on 2 of the newest 10 pull request heads",
             (
                 "gate lint is authoritative in delivery.yaml",
-                "python -m scripts.ci_lab shadow report --gate lint --heads 10",
+                "lab check lab/lint or lab-shadow/lint, the newer, against the github-actions job on the newest 10 "
+                "pull request heads",
             ),
             "any mismatch on an authoritative gate",
             2,
@@ -177,7 +178,7 @@ def answers(gate: str) -> dict[str, dict[str, Any]]:
 
 
 @pytest.mark.feature("doctor-lab-health")
-def test_mismatches_count_each_authoritative_gate_through_the_acceptance_rule_report() -> None:
+def test_mismatches_count_a_listed_gate_over_the_newest_heads_reading_each_head_once() -> None:
     asked: list[str] = []
     found = answers("lint")
 
@@ -220,6 +221,61 @@ def test_the_gate_reader_asks_github_only_for_authoritative_gates(monkeypatch: p
     [windowed] = lab.read_gates(store, SLUG, named, lambda path: asked.append(path) or found[path])
     assert windowed == lab.gate_findings({"lint": 1}, 1)[0]
     assert asked == list(found)[:2]
+
+
+GATES = ("lint", "type-gate", "test-count")
+RUNS = f"repos/{REPOSITORY}/actions/workflows/test.yml/runs?event=pull_request&status=completed&per_page=100&page=1"
+
+
+def checks_path(sha: str, page: int = 1) -> str:
+    return f"repos/{REPOSITORY}/commits/{sha}/check-runs?filter=latest&per_page=100&page={page}"
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_a_pass_reads_the_newest_ten_heads_once_for_every_listed_gate() -> None:
+    heads = [f"{index:040x}" for index in range(12)]
+    skipped = [check_run(gate, "skipped", 10, "github-actions") for gate in GATES]
+    posted = [check_run(checks.name(gate, shadow=False), "success", 5, APP) for gate in GATES]
+    filler = [check_run(f"unit (3.12, {index})", "success", 10, "github-actions") for index in range(97)]
+    found: dict[str, dict[str, Any]] = {
+        RUNS: {"workflow_runs": [{"head_sha": sha} for sha in [heads[0], *heads]]},
+        **{checks_path(sha): {"check_runs": [*skipped, *posted]} for sha in heads},
+        checks_path(heads[0]): {"check_runs": [*skipped, *filler]},
+        checks_path(heads[0], 2): {"check_runs": posted},
+    }
+    asked: list[str] = []
+
+    def fetch(path: str) -> dict[str, Any]:
+        asked.append(path)
+        return found[path]
+
+    sources = shadow.Sources(frozenset(GATES), APP)
+    assert lab.mismatches(fetch, REPOSITORY, GATES, sources, 10) == dict.fromkeys(GATES, 0)
+    assert asked == [RUNS, checks_path(heads[0]), checks_path(heads[0], 2), *map(checks_path, heads[1:10])]
+    asked.clear()
+    found[checks_path(heads[3])] = {"check_runs": [check_run("type-gate", "failure", 10, "github-actions"), *posted]}
+    assert lab.mismatches(fetch, REPOSITORY, GATES, sources, 10) == {"lint": 0, "type-gate": 1, "test-count": 0}
+    assert len(asked) == 12
+    asked.clear()
+    assert lab.mismatches(fetch, REPOSITORY, (), sources, 10) == {}
+    assert asked == []
+
+
+@pytest.mark.feature("doctor-lab-health")
+def test_a_listed_gate_is_compared_under_the_name_the_lab_posts() -> None:
+    def counted(*runs: dict[str, Any], app: str = APP) -> dict[str, int]:
+        found = {RUNS: {"workflow_runs": [{"head_sha": HEAD}]}, checks_path(HEAD): {"check_runs": list(runs)}}
+        return lab.mismatches(found.__getitem__, REPOSITORY, ("lint",), shadow.Sources(frozenset({"lint"}), app), 10)
+
+    assert (checks.name("lint", shadow=False), checks.name("lint", shadow=True)) == ("lab/lint", "lab-shadow/lint")
+    passed = check_run("lint", "success", 10, "github-actions")
+    refused = check_run("lab/lint", "failure", 5, APP)
+    assert counted(passed, refused) == {"lint": 1}
+    assert counted(passed, refused, app="other") == {"lint": 0}
+    assert counted(check_run("lint", "skipped", 10, "github-actions"), refused) == {"lint": 0}
+    assert counted(passed, check_run("lab/type-gate", "failure", 5, APP)) == {"lint": 0}
+    assert counted(passed, check_run("lab-shadow/lint", "success", 4, APP), refused) == {"lint": 1}
+    assert counted(passed, refused, check_run("lab-shadow/lint", "success", 6, APP)) == {"lint": 0}
 
 
 @pytest.fixture

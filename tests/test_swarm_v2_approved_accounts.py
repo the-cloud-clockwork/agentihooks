@@ -502,7 +502,7 @@ def test_a_runtime_with_a_fleet_source_sizes_its_lanes_without_reading_local_acc
     herdr = HerdrRuntime()
     herdr.quota_accounts = approved.FleetAccounts(route, 2)
     decision = _sizing(herdr)
-    assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}
+    assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0, "review": 0}
     assert decision["placeable"] == {"claude": 3, "codex": 0}
     assert [(row["name"], row["sessions"]) for row in decision["accounts"]] == [("akey", 1), ("bkey", 0)]
 
@@ -561,7 +561,7 @@ def test_a_workstation_runtime_still_sizes_its_lanes_from_its_local_accounts(mon
     assert herdr.quota_accounts is None
     decision = _sizing(herdr)
     assert asked == [(NOW_MS / 1000, False)]
-    assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}
+    assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0, "review": 0}
     assert decision["placeable"] == {"claude": 3, "codex": 0}
 
 
@@ -715,3 +715,76 @@ def test_fleet_launch_picker_keeps_the_reserved_account_for_the_master_lane(
     routes = approved.HarnessRoutes({"claude": route})
     assert routes.choose(2, None, None, "claude", "master") == "reserved-key"
     assert routes.choose(2, None, None, "claude", "dispatch") is None
+
+
+def _codex_hive_reading(store: RedisStore, slot: str, expired: bool) -> None:
+    import json
+
+    from scripts.hive import registry
+
+    registry.update(store.redis, "hive-a", ["max-agents=8"])
+    cap = 0 if expired else session_bands.TOP_BAND
+    registry.beat(
+        store.redis,
+        "hive-a",
+        {"heartbeat_at": NOW_MS, "slots": [{"harness": "codex", "account": slot, "kind": "subscription", "cap": cap}]},
+    )
+    unread = {"used": None, "resets_at": None}
+    week = unread if expired else {"used": 40.0, "resets_at": NOW_MS // 1000 + 48 * HOUR}
+    reading: dict[str, object] = {"five_hour": unread, "seven_day": week, "observed_at": NOW_MS / 1000}
+    if expired:
+        reading["expired"] = True
+    store.redis.set(f"{registry.key('hive-a')}:quota", json.dumps({f"codex:{slot}": reading}))
+
+
+def _codex_routes(expired: bool) -> approved.HarnessRoutes:
+    routes = _harness_routes(set(), {"beta-business"})
+    _codex_hive_reading(routes.routes["codex"].quota.store, "beta_business", expired)
+    return routes
+
+
+def _expired_codex_rows() -> list[capacity.Account]:
+    return approved.FleetAccounts(_codex_routes(expired=True), 1)({}, NOW_MS / 1000, refresh=False)
+
+
+@pytest.mark.feature("controller-expired-codex-closed")
+def test_a_codex_key_with_a_live_unexpired_hive_reading_is_an_open_row_at_its_week_band() -> None:
+    rows = approved.FleetAccounts(_codex_routes(expired=False), 1)({}, NOW_MS / 1000, refresh=False)
+    assert rows == [
+        capacity.Account(
+            "codex", "beta-business", "OPEN", 0, None, 60.0, session_bands.TOP_BAND, NOW_MS // 1000 + 48 * HOUR
+        )
+    ]
+
+
+@pytest.mark.feature("controller-expired-codex-closed")
+def test_an_expired_codex_hive_entry_reads_expired_with_no_cap() -> None:
+    observations = _codex_routes(expired=True).routes["codex"].quota
+    found = quota.hive_observation(observations.store.redis, "beta-business", "codex", NOW_MS)
+    assert found is not None and found.provider_status == "expired"
+    assert observations.reading("beta-business", "codex") == quota.Reading("beta-business", "codex", "expired", 0.0)
+    assert observations.cap("beta-business", "codex") == 0
+
+
+@pytest.mark.feature("controller-expired-codex-closed")
+def test_the_controller_closes_an_expired_codex_key_with_no_free_seat() -> None:
+    rows = _expired_codex_rows()
+    assert rows == [capacity.Account("codex", "beta-business", "CLOSED", 0, None, None, 0)]
+    assert capacity.free_seats(rows[0]) == 0
+    decision = capacity.calculate(SwarmConfig(SLUG, "agentihooks", max_eng=1, max_ci=1), rows, [])
+    assert decision["placeable"] == {"claude": 0, "codex": 0}
+
+
+@pytest.mark.feature("controller-expired-codex-closed")
+def test_the_stall_watch_fed_an_expired_codex_decision_raises_no_free_seat_alert() -> None:
+    import json
+
+    from tests.swarm.test_stall_watch import MINUTE, RUNNING, START, Swarm, _full_lane
+    from tests.swarm.test_stall_watch import SLUG as STALL_SLUG
+
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm, free=0)
+    decision = capacity.calculate(SwarmConfig(STALL_SLUG, "/repo", 1, 1), _expired_codex_rows(), [])
+    swarm.store.redis.set(swarm.store.key(STALL_SLUG, "quota-capacity"), json.dumps(decision))
+    swarm.tick(START)
+    assert swarm.tick(START + 30 * MINUTE) == [] and swarm.inbox() == []

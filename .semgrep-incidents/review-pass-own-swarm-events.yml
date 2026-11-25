@@ -1,0 +1,41 @@
+rules:
+  - id: review-pass-own-swarm-events
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A consumer of one swarm's subject is opened on the routed events log. On a scoped bus that log merges every
+      swarm's scoped log, so its fetch asks each foreign swarm's log for this subject, scoped_subject raises and the
+      held step error fails every tick pass of the swarm. Open the consumer on the swarm's own log,
+      bus.for_swarm(slug).events.
+    paths:
+      include:
+        - /scripts/
+        - review-pass-own-swarm-events.py
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: $BUS.events.consumer(..., subject(...), ...)
+              - pattern: $BUS.events.consumer(..., subjects.subject(...), ...)
+              - patterns:
+                  - pattern-either:
+                      - pattern-inside: |
+                          $S = subject(...)
+                          ...
+                      - pattern-inside: |
+                          $S = subjects.subject(...)
+                          ...
+                  - pattern: $BUS.events.consumer(..., $S, ...)
+          - pattern-not: $B.for_swarm(...).events.consumer(...)
+          - pattern-not-inside: |
+              $BUS = $B.for_swarm(...)
+              ...
+      - patterns:
+          - pattern-inside: |
+              $LOG = $BUS.events
+              ...
+          - pattern-not-inside: |
+              $LOG = $B.for_swarm(...).events
+              ...
+          - pattern-either:
+              - pattern: $LOG.consumer(..., subject(...), ...)
+              - pattern: $LOG.consumer(..., subjects.subject(...), ...)

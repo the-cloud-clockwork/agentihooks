@@ -3936,6 +3936,88 @@
      "result": "success"
     }
    }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope full",
+   "outputs": {
+    "select": {
+     "scope": "full"
+    }
+   },
+   "passes": true,
+   "results": {
+    "shard-check": "success",
+    "split": "success",
+    "unit": "success",
+    "unit-selected": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope full unit failure",
+   "outputs": {
+    "select": {
+     "scope": "full"
+    }
+   },
+   "passes": false,
+   "results": {
+    "shard-check": "success",
+    "split": "success",
+    "unit": "failure",
+    "unit-selected": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope full unit skipped",
+   "outputs": {
+    "select": {
+     "scope": "full"
+    }
+   },
+   "passes": false,
+   "results": {
+    "shard-check": "success",
+    "split": "success",
+    "unit": "skipped",
+    "unit-selected": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope none with every test job skipped",
+   "outputs": {
+    "select": {
+     "scope": "none"
+    }
+   },
+   "passes": true,
+   "results": {
+    "coverage-ratchet": "skipped",
+    "shard-check": "skipped",
+    "split": "skipped",
+    "unit": "skipped",
+    "unit-selected": "skipped"
+   }
+  },
+  {
+   "base": "pull_request",
+   "name": "pull request scope none with a unit job that ran",
+   "outputs": {
+    "select": {
+     "scope": "none"
+    }
+   },
+   "passes": false,
+   "results": {
+    "coverage-ratchet": "skipped",
+    "shard-check": "skipped",
+    "split": "skipped",
+    "unit": "success",
+    "unit-selected": "skipped"
+   }
   }
  ],
  "source": "Gate \u2014 Required step of .github/workflows/test.yml; needs recorded from Actions runs"

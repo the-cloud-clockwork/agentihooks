@@ -1,7 +1,35 @@
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
 from typing import Any
 
-from hooks.observability import presence
+import pytest
+
+from hooks import config
+from hooks.observability import otel, presence, token_monitor
 from scripts.hive import daemon
+
+ENV = {
+    "AGENTIHOOKS_AGENT_NAME": "engineer@1-2",
+    "AGENTIHOOKS_SWARM": "rig",
+    "AGENTIHOOKS_SWARM_LANE": "eng",
+    "AGENTIHOOKS_SWARM_TASK": "t1",
+    "AGENTIHOOKS_HIVE_ID": "hive-003",
+    "AH_CC_TOKEN_work": "x",
+}
+ATTRS = {
+    "session.id": "sess-1",
+    "agent": "engineer@1-2",
+    "swarm": "rig",
+    "lane": "eng",
+    "task": "t1",
+    "account": "work",
+    "hive": "hive-003",
+    "harness": "claude",
+}
 
 
 def emitted(monkeypatch, shown):
@@ -28,3 +56,176 @@ def test_a_headed_hive_emits_its_registered_name_release_and_agents(monkeypatch)
 def test_an_unregistered_hive_emits_under_its_id_as_headless(monkeypatch):
     calls = emitted(monkeypatch, None)
     assert calls == [("hive-9", "hive-9", False, "7.7.7", {"claude": 2, "codex": 0}, 12.5)]
+
+
+def recorded(monkeypatch):
+    calls = []
+    monkeypatch.setattr(otel, "record_gauge", lambda name, value, attrs: calls.append((name, value, attrs)))
+    return calls
+
+
+def daemon_pass(monkeypatch, now_ms):
+    redis: Any = object()
+    monkeypatch.setattr(daemon.registry, "show", lambda client, hive: None)
+    monkeypatch.setattr(daemon.account_sessions, "local_processes", lambda: {})
+    monkeypatch.setattr(daemon.updater, "installed_version", lambda: "7.7.7")
+    monkeypatch.setattr(presence, "hive", lambda *args: None)
+    daemon.emit_presence(redis, "hive-9", now_ms)
+
+
+def seen_folder():
+    return config.AGENTIHOOKS_HOME / "telemetry" / "presence"
+
+
+@pytest.mark.feature("presence-agent-hive-daemon")
+def test_a_daemon_pass_sends_each_fresh_session_seen_gauge_with_its_attributes_and_last_seen_seconds(monkeypatch):
+    calls = recorded(monkeypatch)
+    presence.agent("sess-1", ENV, 1_000.0)
+    presence.agent("sess-1", ENV, 1_001.0)
+    calls.clear()
+    daemon_pass(monkeypatch, 1_181_000)
+    assert calls == [("agentihooks.presence.agent", 1_001.0, ATTRS)]
+
+
+@pytest.mark.feature("presence-agent-hive-daemon")
+def test_a_daemon_pass_skips_a_stale_session_and_removes_records_seen_over_a_day_ago_or_unreadable(monkeypatch):
+    calls = recorded(monkeypatch)
+    presence.agent("sess-stale", ENV, 100_000.0)
+    presence.agent("sess-kept", ENV, 13_781.0)
+    presence.agent("sess-gone", ENV, 13_780.0)
+    (seen_folder() / "sess-bad.json").write_text("{")
+    (seen_folder() / "sess-list.json").write_text("[]")
+    (seen_folder() / "sess-bare.json").write_text(json.dumps({"seen_s": 100_100.0}))
+    calls.clear()
+    daemon_pass(monkeypatch, 100_181_000)
+    assert calls == []
+    assert sorted(path.name for path in seen_folder().glob("*.json")) == [
+        "sess-bare.json",
+        "sess-kept.json",
+        "sess-stale.json",
+    ]
+
+
+@pytest.mark.feature("presence-agent-hive-daemon")
+def test_a_session_sends_its_own_seen_gauge_only_once_the_daemon_beat_is_older_than_its_live_window(monkeypatch):
+    calls = recorded(monkeypatch)
+    daemon_pass(monkeypatch, 1_000_000)
+    presence.agent("sess-1", ENV, 1_030.0)
+    presence.agent("sess-1", ENV, 1_031.0)
+    assert calls == [("agentihooks.presence.agent", 1_031.0, ATTRS)]
+
+
+@pytest.mark.feature("presence-agent-hive-daemon")
+def test_a_record_removed_by_another_pass_mid_export_still_lets_the_daemon_beat(monkeypatch):
+    calls = recorded(monkeypatch)
+    presence.agent("sess-gone", ENV, 1_000.0)
+    read = presence.read_record
+
+    def read_then_vanish(path):
+        found = read(path)
+        path.unlink()
+        return found
+
+    monkeypatch.setattr(presence, "read_record", read_then_vanish)
+    daemon_pass(monkeypatch, 100_000_000)
+    monkeypatch.setattr(presence, "read_record", read)
+    calls.clear()
+    presence.agent("sess-1", ENV, 100_010.0)
+    assert calls == []
+
+
+@pytest.mark.feature("presence-agent-hive-daemon")
+def test_a_dispatcher_mark_after_a_daemon_pass_never_starts_the_otel_worker_or_sdk(monkeypatch):
+    daemon_pass(monkeypatch, int((time.time() + 3_600) * 1000))
+    probe = (
+        "import json, threading\n"
+        "from hooks.observability import otel, presence\n"
+        "presence.mark({'session_id': 'sess-hook'})\n"
+        "worker = any(thread.name == 'otel-worker' for thread in threading.enumerate())\n"
+        "print(json.dumps({'initialized': otel._initialized, 'worker': worker}))\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, **ENV, "AGENTIHOOKS_HOME": str(config.AGENTIHOOKS_HOME)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    assert json.loads(done.stdout.splitlines()[-1]) == {"initialized": False, "worker": False}
+    assert (seen_folder() / "daemon.beat").exists()
+    assert (seen_folder() / "sess-hook.json").exists()
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_daemon_pass_sends_the_last_token_fill_and_burn_rate_under_the_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = recorded(monkeypatch)
+    presence.agent("sess-1", ENV, 1_000.0)
+    token_monitor.record_tokens("sess-1", 20.0, 900.0, 1_000.0, {})
+    token_monitor.record_tokens("sess-1", 25.5, 1_200.0, 1_001.0, {})
+    calls.clear()
+    daemon_pass(monkeypatch, 1_180_000)
+    assert calls == [
+        ("agentihooks.presence.agent", 1_000.0, ATTRS),
+        ("agentihooks.tokens.fill_pct", 25.5, {"session.id": "sess-1"}),
+        ("agentihooks.tokens.burn_rate", 1_200.0, {"session.id": "sess-1"}),
+    ]
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_daemon_pass_sends_only_the_fill_for_a_record_without_a_burn_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = recorded(monkeypatch)
+    token_monitor.record_tokens("sess-2", 10.0, None, 1_000.0, {})
+    daemon_pass(monkeypatch, 1_180_000)
+    assert calls == [("agentihooks.tokens.fill_pct", 10.0, {"session.id": "sess-2"})]
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_daemon_pass_sends_no_token_gauge_for_values_written_before_the_fresh_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = recorded(monkeypatch)
+    token_monitor.record_tokens("sess-3", 10.0, 5.0, 1_000.0, {})
+    daemon_pass(monkeypatch, 1_181_000)
+    assert calls == []
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_the_daemon_token_gauges_carry_the_session_agent_and_profile_from_the_seen_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = recorded(monkeypatch)
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"state": "validated", "validation": {"profile": "engineer"}}))
+    token_monitor.record_tokens("sess-4", 30.0, 700.0, 1_000.0, {**ENV, "AGENTIHOOKS_PROFILE_REPORT": str(report)})
+    daemon_pass(monkeypatch, 1_010_000)
+    session = {
+        "session.id": "sess-4",
+        "agentihooks.correlation.agent.name": "engineer@1-2",
+        "agentihooks.correlation.profile.resolved": "engineer",
+    }
+    assert calls == [
+        ("agentihooks.tokens.fill_pct", 30.0, session),
+        ("agentihooks.tokens.burn_rate", 700.0, session),
+    ]
+
+
+@pytest.mark.feature("tokens-gauges-hive-daemon")
+def test_a_daemon_pass_skips_token_values_it_cannot_read_and_sends_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = recorded(monkeypatch)
+    seen_folder().mkdir(parents=True, exist_ok=True)
+    fresh = {"fill_pct": 5.0, "burn_rate": None, "at_s": 1_000.0}
+    records = {
+        "sess-a": {"seen_s": 1_000.0, "tokens": {"session_id": "sess-a", "at_s": 1_000.0}},
+        "sess-b": {"seen_s": 1_000.0, "tokens": fresh},
+        "sess-c": {"seen_s": 1_000.0, "tokens": [5.0]},
+        "sess-d": {"seen_s": 1_000.0},
+        "sess-e": {"seen_s": 1_000.0, "tokens": {**fresh, "session_id": "sess-e"}},
+    }
+    for name, record in records.items():
+        (seen_folder() / f"{name}.json").write_text(json.dumps(record))
+    daemon_pass(monkeypatch, 1_010_000)
+    assert calls == [("agentihooks.tokens.fill_pct", 5.0, {"session.id": "sess-e"})]

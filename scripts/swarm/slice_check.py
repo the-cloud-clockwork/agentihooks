@@ -1,6 +1,7 @@
 """The deterministic check of a planner's slice: one plain-words line per problem, never a refusal by itself."""
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,7 +21,7 @@ class Limits:
     flag_confidence: float = 0.7
 
     @classmethod
-    def from_env(cls, env):
+    def from_env(cls, env: Mapping[str, str]) -> "Limits":
         return cls(
             int(env.get("AGENTIHOOKS_PLAN_MAX_TASKS", 12)),
             int(env.get("AGENTIHOOKS_PLAN_MAX_AREAS", 6)),
@@ -32,8 +33,9 @@ def slice_ids(plan):
     return [item.strip() for item in plan["proof"]["slice"].split(",") if item.strip()]
 
 
-def plan_task(phase, doc):
-    return next(t for t in doc["tasks"] if t.get("phase") == phase["id"] and ledger_kinds.kind(t) == "plan")
+def plan_task(phase: dict[str, Any], doc: dict[str, Any]) -> dict[str, Any]:
+    owned = (t for t in doc["tasks"] if t.get("phase") == phase["id"] and ledger_kinds.kind(t) == "plan")
+    return next(t for t in owned if not t.get("enhances"))
 
 
 def short(text: str, words: int = MIN_WORDS) -> bool:
@@ -59,6 +61,11 @@ def check(phase, doc, limits):
         mine.append(task)
         problems += _task(task, phase, doc, limits)
     return problems + _cycle(mine) + _unlined(phase, doc)
+
+
+def task_problems(task: dict[str, Any], doc: dict[str, Any], limits: Limits) -> list[str]:
+    """The slice check's single task rules for one task, graded in the task's own phase."""
+    return _task(task, {"id": task.get("phase")}, doc, limits)
 
 
 def _count(ids, limits):

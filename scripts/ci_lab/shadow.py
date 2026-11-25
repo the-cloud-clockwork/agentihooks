@@ -41,6 +41,7 @@ __all__ = [
     "Shadow",
     "Sources",
     "ancestor",
+    "gate_ids",
     "gate_of",
     "grader_revision",
     "main",
@@ -115,10 +116,14 @@ def grader_revision(summary: str | None) -> str:
     return "" if match is None else match.group(1)
 
 
+def gate_ids(found: Iterable[static_gates.StaticGate]) -> frozenset[str]:
+    """Return the gate id of each discovered static gate's job, a reusable workflow's job counting as its caller."""
+    return frozenset(item.job.partition("/")[0] for item in found)
+
+
 def static_jobs(root: Path) -> frozenset[str]:
     """Return the gate id of every static job of the workflow tree at root whose steps gate."""
-    found = static_gates.discover((root / static_gates.WORKFLOW).read_text(), reusable=ci_wiring.load(root))
-    return frozenset(item.job for item in found)
+    return gate_ids(static_gates.discover((root / static_gates.WORKFLOW).read_text(), reusable=ci_wiring.load(root)))
 
 
 def _fold(stored: Mapping[str, str], side: str) -> str | None:

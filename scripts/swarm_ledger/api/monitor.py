@@ -31,9 +31,9 @@ def capacity(measured: dict) -> tuple[float, float, int, int]:
 
 
 def labels(live: list[dict[str, Any]]) -> dict[str, str]:
-    """Each live hive's row name by hive id: swarm-master for an interface hive, else its registered name, and its
+    """Each live hive's row name by hive id: the name the hive registry holds, the one hive list prints, and its
     member names instead when another live hive shares that name and it has members."""
-    base = {hive["id"]: LOCAL if hive.get("ui") == "yes" else hive["name"] for hive in live}
+    base = {hive["id"]: hive["name"] for hive in live}
     shared = Counter(base.values())
     named = {hive["id"]: ", ".join(sorted(hive.get("members") or {})) for hive in live}
     return {hive: named[hive] if shared[name] > 1 and named[hive] else name for hive, name in base.items()}

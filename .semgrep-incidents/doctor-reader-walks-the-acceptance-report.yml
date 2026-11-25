@@ -1,0 +1,16 @@
+rules:
+  - id: doctor-reader-walks-the-acceptance-report
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A Doctor reader calls the acceptance report's collect. collect reads pull request heads until enough of them
+      hold a GitHub Actions verdict for one gate, through every page of runs, and Actions skips the job of a gate
+      delivery.yaml lists as lab authoritative, so on a listed gate the walk never fills its window. The lab gate
+      reader ran it once per listed gate on every Doctor pass, which with three gates listed could spend the GitHub
+      limit every agent of the machine shares. Read a fixed number of heads with heads_of and each head's check
+      runs once with check_runs, for every gate together.
+    paths:
+      include:
+        - /scripts/doctor/**/*.py
+        - doctor-reader-walks-the-acceptance-report.py
+    pattern: shadow_report.collect(...)

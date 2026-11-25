@@ -1,0 +1,6 @@
+{
+  "hooks/context/read_only_shell.py:hooks.context.read_only_shell.x__simple_commands:f8cd05c92d53a0e7daf1b895518e02cc494734e08bc1f667f78dca20767b2e94": {
+    "reader": "standards_reader",
+    "reason": "isolated is read only as \"not simple.isolated\"; None and False are both falsy."
+  }
+}

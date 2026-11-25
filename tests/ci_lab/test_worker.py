@@ -2,6 +2,7 @@
 
 import email.message
 import http.client
+import json
 import threading
 import time
 import urllib.error
@@ -10,6 +11,7 @@ from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -71,6 +73,10 @@ class Calls(worker.Client):
         return super().complete(job, token, outcome)
 
 
+class SinkServer(ThreadingHTTPServer):
+    request_queue_size = 40
+
+
 class Sink:
     def __init__(self) -> None:
         self.bodies: dict[str, bytes] = {}
@@ -82,7 +88,7 @@ class Sink:
             request.end_headers()
 
         handler = type("SinkHandler", (BaseHTTPRequestHandler,), {"do_PUT": put})
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.server = SinkServer(("127.0.0.1", 0), handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
 
@@ -248,6 +254,23 @@ def test_every_slot_runs_a_unit_at_once(scheduler: str, jobs: queue.Queue, tmp_p
     assert len(wide.run_once()) == 40
     assert wide.drain() == []
     assert [found(jobs, f"h1:test:{key}").outcome for key in keys] == ["passed"] * 40
+
+
+@pytest.mark.feature("lab-worker-sink-backlog")
+def test_the_sink_listens_with_room_for_forty_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
+    backlogs: list[int] = []
+    activate = ThreadingHTTPServer.server_activate
+
+    def observed(server: ThreadingHTTPServer) -> None:
+        backlogs.append(server.request_queue_size)
+        activate(server)
+
+    monkeypatch.setattr(ThreadingHTTPServer, "server_activate", observed)
+    upload = Sink()
+    upload.server.server_close()
+
+    assert len(backlogs) == 1
+    assert backlogs[0] >= 40
 
 
 @pytest.mark.feature("lab-worker-pod-loop")
@@ -641,6 +664,59 @@ def test_a_lease_call_the_scheduler_answers_with_a_client_error_still_raises(
     assert "lease call failed" not in capsys.readouterr().err
 
 
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_lease_call_the_scheduler_answers_426_stops_the_worker_without_raising_or_backing_off(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class Stale(worker.Client):
+        def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[worker.Lease]:
+            raised = email.message.Message()
+            raise urllib.error.HTTPError("http://scheduler:8800/lease", 426, "Upgrade Required", raised, None)
+
+    paced = Paced()
+    stale = worker.Worker(Stale("http://scheduler:8800"), {}, "pod-1", 1, wait_ms=0, stopping=paced)
+
+    assert stale.run_once() == []
+
+    assert stale.stopping.is_set()
+    assert paced.waits == []
+    logged = capsys.readouterr().err
+    assert "lease call failed" not in logged
+    assert "ci-lab worker: the lab wants another image, restarting\n" in logged
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_stale_restart_lets_a_running_unit_finish_within_the_grace_then_run_returns(
+    scheduler: str, jobs: queue.Queue, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    release = threading.Event()
+    calls = [0]
+
+    def held(lease: worker.Lease) -> worker.Finished:
+        release.wait(10)
+        return finished(tmp_path, lease)
+
+    class Stale(worker.Client):
+        def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[worker.Lease]:
+            calls[0] += 1
+            if calls[0] == 1:
+                return super().lease(worker, free_slots, capabilities, wait_ms)
+            raised = email.message.Message()
+            raise urllib.error.HTTPError(f"{scheduler}/lease", 426, "Upgrade Required", raised, None)
+
+    restarting = worker.Worker(Stale(scheduler), {"test": held}, "pod-1", 2, wait_ms=0, grace_s=10)
+    assert len(restarting.run_once()) == 1
+
+    threading.Timer(0.2, release.set).start()
+    guard = threading.Timer(10, restarting.stop)
+    guard.start()
+
+    assert restarting.run() == []
+    guard.cancel()
+    assert found(jobs, "h1:test:a").outcome == "passed"
+
+
 @pytest.mark.wall_clock
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_stop_ends_a_lease_backoff_at_once() -> None:
@@ -706,6 +782,27 @@ def test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none(
     assert error.value.code == 400
     assert client.complete(lease.job, lease.token, "passed") is True
     assert found(jobs, lease.job).outcome == "passed"
+
+
+@pytest.mark.feature("lab-worker-pod-loop")
+def test_the_lease_request_body_carries_exactly_worker_free_slots_capabilities_and_wait_ms() -> None:
+    seen: list[bytes] = []
+
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> tuple[int, dict[str, Any]]:
+        seen.append(raw)
+        return 200, {"leases": []}
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    _serving(server)
+    try:
+        client = worker.Client(f"http://127.0.0.1:{server.server_address[1]}")
+        client.lease("pod-1", 2, frozenset({"net"}), 10)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    [raw] = seen
+    assert json.loads(raw) == {"worker": "pod-1", "free_slots": 2, "capabilities": ["net"], "wait_ms": 10}
 
 
 @pytest.mark.feature("lab-worker-pod-loop")

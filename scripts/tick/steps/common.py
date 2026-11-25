@@ -9,7 +9,7 @@ from dataclasses import replace
 from importlib import import_module
 from typing import Any
 
-from scripts.swarm import claim_lost
+from scripts.swarm import claim_lost, expert_lineage
 
 DROP_REFUSED = ", the store refused its drop, retrying next pass"
 
@@ -70,7 +70,7 @@ def _drop(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, 
     reopen = held and tick._reopen(slug, ledger, rows, agent.task, expected)
     if reopen and agent.seat:
         store.keep_seat(slug, agent.task, agent.seat)
-    _settle_exit(store, agent.name, agent.seat if reopen else "")
+    _settle_exit(store, agent.name, agent.seat if reopen or expert_lineage.goes_on(store, slug, agent) else "")
     return handed or (f", task {agent.task} reopened" if reopen else "")
 
 
@@ -110,15 +110,14 @@ def _stop_hive(slug: str, store: Any, agent: Any, reason: str, dropped: str) -> 
     return dropped
 
 
-def _retire_or_stop(slug: str, runtime: Any, agent: Any, reason: str) -> bool:
-    """True once ``agent`` is retired: its runtime reaped it, or, for an agent whose hive recorded its start and that
-    the runtime could not reach, the hub's execution stop reached that hive, which then reaps it."""
+def _retire_or_stop(slug: str, runtime: Any, agent: Any, reason: str, store: Any) -> bool:
+    """True once the runtime retires the agent or its hive stop is accepted for delivery."""
     from scripts.hive import execution_stop
     from scripts.hub.reconciler import stop_admitted
 
     if runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task)):
         return True
-    return stop_admitted(slug, agent, reason) in {execution_stop.SENT, execution_stop.PENDING}
+    return stop_admitted(slug, agent, reason, store=store) in {execution_stop.SENT, execution_stop.PENDING}
 
 
 def _settle_exit(store: Any, name: str, seat: str) -> None:

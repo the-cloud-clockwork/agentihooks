@@ -53,6 +53,12 @@ class Swarm(ports.Swarm):
         return focus_check
 
     @property
+    def order_check(self) -> ModuleType:
+        from scripts.swarm.health import order_check
+
+        return order_check
+
+    @property
     def idle(self):
         from scripts.swarm import idle
 
