@@ -12955,7 +12955,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-intake-drain",
       "behaviour": "One scheduler intake drains successive head consumer batches until a short or empty fetch or a ten second monotonic budget ends, including batches containing only completed checks, while preserving delivery order and keeping collected heads unacknowledged if a later fetch or observer fails. Remaining heads are read on the next call so release and admission can continue each pass.",
       "seam": "scripts.ci_lab.scheduler.BusInbox.heads over a paginated bus consumer and a controlled monotonic clock",
-      "rules": [".semgrep-incidents/lab-intake-single-batch.yml"],
+      "rules": ["lab-intake-single-batch"],
       "tests": [
         "tests/ci_lab/test_scheduler_intake.py::test_one_intake_drains_a_backlog_larger_than_the_default_batch",
         "tests/ci_lab/test_scheduler_intake.py::test_a_short_or_empty_batch_ends_intake_without_another_fetch",
