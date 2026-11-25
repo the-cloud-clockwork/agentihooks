@@ -12722,8 +12722,7 @@
       "seam": "scripts.quick.launch.force and registry.bind",
       "tests": [
         "tests/quick/test_room_tick_launch.py::test_force_ends_the_master_and_starts_a_bound_successor"
-      ],
-      "semgrep_rule": "quick-master-force-return"
+      ]
     },
     {
       "id": "quick-launcher-survival",
