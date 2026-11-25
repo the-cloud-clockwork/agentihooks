@@ -1,6 +1,7 @@
 import json
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -48,7 +49,7 @@ def test_full_account_offers_keep_their_owner_generation_and_delivery_until_a_se
         },
     }
     hub = Hub(admitted)
-    slots.serve(bus, admitter=hub)
+    slots.serve(cast(Any, bus), admitter=cast(Any, hub))
     config = SwarmConfig("rig", "/repo", 1, 1, scaling="manual", lanes={"eng": {"agent": "auto"}})
     store = SimpleNamespace(slugs=lambda: ["rig"], config=lambda _slug: config)
     local = Mock()
