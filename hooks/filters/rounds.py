@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 
+from hooks.compat import fcntl
 from hooks.context import conditions
 from hooks.filters import extract
 

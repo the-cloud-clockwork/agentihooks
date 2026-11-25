@@ -157,20 +157,17 @@ The step `Refuse a command substitution as a for loop word list` runs in the
 - name: Refuse a command substitution as a for loop word list
   if: ${{ !cancelled() }}
   run: |
-    if [[ -f "$RUNNER_TEMP/grader/scripts/ci_for_substitution.py" ]]; then
-      cd "$RUNNER_TEMP/grader"
-    fi
+    cd "$RUNNER_TEMP/grader"
     python -m scripts.ci_for_substitution --root "$GITHUB_WORKSPACE"
 ```
 
 - The `lint` job runs on pull requests and admitted manual dispatches, and is
   skipped on `merge_group` and `push` events and when the
   [CI lab](ci-lab.md) holds an authoritative verdict for it.
-- When the [protected grader checkout](grader-gate-steps.md#the-protected-grader-checkout)
-  holds the script, the grader's copy grades the head tree under `--root`, so a
-  pull request cannot loosen the gate by editing it. When the grader has no
-  copy, the head's copy runs from the workspace. An edit to the gate therefore
-  grades the pull requests after it merges into `dev`.
+- The [protected grader checkout](grader-gate-steps.md#the-protected-grader-checkout)
+  always grades the head tree under `--root`, so a pull request cannot loosen
+  the gate by editing its own copy. A grader without the module fails the step
+  closed. An edit to the gate grades pull requests after it merges into `dev`.
 - `if: ${{ !cancelled() }}` makes the step report even after an earlier lint
   step fails.
 - A red step fails the `lint` job, which `Gate — Required` needs, so the pull

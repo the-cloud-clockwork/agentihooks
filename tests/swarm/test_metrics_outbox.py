@@ -382,7 +382,8 @@ def test_the_spool_folder_is_created(tmp_path, sink):
     assert path.exists()
 
 
-def test_the_spool_lives_under_the_swarm_home(monkeypatch, tmp_path):
+def test_the_spool_lives_under_the_swarm_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
     monkeypatch.setattr(metrics_outbox.Path, "home", lambda: tmp_path)
     assert metrics_outbox.spool_path() == tmp_path / ".agentihooks" / "swarm" / "metrics-outbox.sqlite"
 

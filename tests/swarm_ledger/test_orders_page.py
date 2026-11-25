@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from copy import deepcopy
 from typing import Any
@@ -44,11 +45,15 @@ def orders_page(browser: Any, request: pytest.FixtureRequest) -> Iterator[tuple[
         del doc["phases"][0]["ordered"]
     context = browser.new_context(viewport={"width": 1920, "height": 1080})
     html = shell_html()
+    written: list[str] = []
 
     def route(call: Any) -> None:
         url = call.request.url
         if is_events(url):
-            return fulfill_events(call, ledger_state(doc), SWARM)
+            stored = json.dumps(doc, sort_keys=True)
+            if not written or written[-1] != stored:
+                written.append(stored)
+            return fulfill_events(call, ledger_state(doc, len(written)), SWARM)
         if url.endswith("/orders"):
             return call.fulfill(json={"data": order_check.read(doc, ""), "revision": "orders", "next_cursor": None})
         if url.startswith(URL):

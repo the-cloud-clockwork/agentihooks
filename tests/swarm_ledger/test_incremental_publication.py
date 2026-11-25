@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger.events import patch
@@ -33,7 +34,8 @@ def test_a_write_copies_only_changed_parts_and_keeps_published_state_isolated(mo
     assert len(events) == 1
     update = events[0][3]["patch"]
     assert "tasks" not in update["o"]
-    assert patch.apply(before, update)["notes"] == [{"id": "n1", "text": "new note"}]
+    applied: Any = patch.apply(before, update)
+    assert applied["notes"] == [{"id": "n1", "text": "new note"}]
     state["notes"][0]["text"] = "caller mutation"
     state["tasks"][0]["title"] = "caller mutation"
     assert hub.resource("s", "ledger")["notes"] == [{"id": "n1", "text": "new note"}]
@@ -64,10 +66,11 @@ def test_a_resource_published_during_initial_loading_owns_its_nested_values(monk
         server.publish_ledger("s", state)
         return {}
 
-    _, first = hub.open("s", load)
+    seq, first = hub.open("s", load)
     state["tasks"][0]["title"] = "changed"
     state["_meta"]["rev"] = 2
-    assert first[0][3]["ledger"]["tasks"] == [{"id": "t1", "title": "first"}]
+    assert first[0][3] == {"rev": 1}
+    assert hub.resource("s", "ledger")["tasks"] == [{"id": "t1", "title": "first"}]
     server.publish_ledger("s", state)
-    events = hub.wait("s", 0, 0)
+    events = hub.wait("s", seq, 0)
     assert events[0][3]["patch"]["o"]["tasks"]["u"] == [{"id": "t1", "title": "changed"}]

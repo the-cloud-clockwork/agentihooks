@@ -488,6 +488,43 @@ def test_a_wired_lab_keeps_the_check_suite_events_and_publishes_no_head_for_them
     assert drain(lab) == []
 
 
+def check_run_delivery(
+    action: str = "rerequested", name: str = "lab-shadow/lint", conclusion: str | None = None
+) -> dict[str, Any]:
+    return {
+        "action": action,
+        "repository": {"html_url": REPO},
+        "sender": {"login": "nestorcolt"},
+        "check_run": {
+            "id": 11,
+            "name": name,
+            "head_sha": "a1",
+            "conclusion": conclusion,
+            "app": {"slug": "github-actions"},
+            "output": {"title": None, "summary": None},
+            "pull_requests": [{"number": 7, "base": {"sha": "b0"}}],
+        },
+    }
+
+
+def test_a_wired_lab_publishes_a_rerequested_lab_check_run_as_a_head() -> None:
+    ingress, _, lab = lab_setup()
+    assert deliver(ingress, "check_run", check_run_delivery()) == 200
+    assert [(e.type, e.key, e.author, e.data["base"], e.data["action"]) for e in drain(lab)] == [
+        ("ci.lab.head.check_run", f"{REPO}@a1", "nestorcolt", "b0", "rerequested")
+    ]
+
+
+@pytest.mark.feature("lab-completed-check-shadow")
+def test_a_wired_lab_publishes_a_completed_check_run_on_its_own_subject_for_the_shadow_comparison() -> None:
+    ingress, _, lab = lab_setup()
+    assert deliver(ingress, "check_run", check_run_delivery("completed", "lint", "success")) == 200
+    run = {"name": "lint", "head_sha": "a1", "conclusion": "success", "app": {"slug": "github-actions"}}
+    assert [(e.type, e.key, e.author, e.data["check_run"]) for e in drain(lab)] == [
+        ("ci.lab.head.check_completed", f"{REPO}@a1", "nestorcolt", {**run, "output": {"summary": None}})
+    ]
+
+
 def test_a_wired_lab_answers_400_for_a_head_payload_it_cannot_read():
     ingress, swarm, lab = lab_setup()
     assert deliver(ingress, "merge_group", {"action": "checks_requested"}) == 400

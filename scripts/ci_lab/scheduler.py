@@ -50,6 +50,8 @@ from scripts.ci_lab import (
     lease_api,
     metrics,
     service,
+    shadow,
+    shadow_report,
     stale_heads,
     static_exclusions,
 )
@@ -69,12 +71,13 @@ from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
 from scripts.ci_lab.store import PREFIX, Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
-from scripts.ci_lab.webhooks import CLOSED, HEAD_SUBJECT, PLANT, HeadEvent
+from scripts.ci_lab.webhooks import CHECK_COMPLETED, CLOSED, HEAD_SUBJECT, PLANT, HeadEvent
 from scripts.ci_lab.worktrees import Lab, Mirror, lab
 from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
-from scripts.events.bus import Consumer
+from scripts.events.bus import Consumer, Delivery
 from scripts.github_app import GitAuthRefused
+from scripts.swarm import metrics_outbox
 
 __all__ = [
     "GRADES",
@@ -147,8 +150,10 @@ NOTES = "outside/"
 DEV = "dev"
 DURABLE = "ci-lab-scheduler"
 SUBJECT = f"{HEAD_SUBJECT}.>"
+CHECKS = f"{HEAD_SUBJECT}.{CHECK_COMPLETED}"
 BATCH = 50
 FETCH_MS = 100
+INTAKE_SECONDS = 10
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
 UNANSWERED_FETCHES = 10
@@ -1461,34 +1466,71 @@ class Scheduler:
         return tuple(logs)
 
 
+def _unobserved(check: Mapping[str, Any]) -> None:
+    """Leave a completed check unrecorded: the observer of an inbox that feeds no shadow recorder."""
+
+
 class BusInbox:
     """Lab head events read from the bus consumer of `ci.lab.head.>`, each acknowledged once read, or terminated."""
 
-    def __init__(self, consumer: Consumer, batch: int = BATCH, timeout_ms: int = FETCH_MS) -> None:
+    def __init__(
+        self,
+        consumer: Consumer,
+        batch: int = BATCH,
+        timeout_ms: int = FETCH_MS,
+        observe: Callable[[Mapping[str, Any]], object] = _unobserved,
+    ) -> None:
         self.consumer = consumer
         self.batch = batch
         self.timeout_ms = timeout_ms
+        self.observe = observe
 
     def heads(self) -> list[Head]:
-        """Return the heads of the next batch of envelopes; a head's lane is the lane its envelope names, else its
-        branch, else the head itself, and its ref the grade ref a lab remote notice names. An envelope missing a
-        required head field is terminated with a logged warning, never redelivered to the dead letter cap.
+        """Return heads from successive batches until a short fetch or the intake deadline. A head's lane is the lane
+        its envelope names, else its branch, else the head itself, and its ref the grade ref a lab remote notice names.
+        An envelope missing a required head field is terminated with a logged warning. Completed checks reach the
+        observer in delivery order; heads are acknowledged after the whole intake succeeds, so a later fetch or
+        observer failure leaves them replayable.
         """
         heads: list[Head] = []
-        for delivery in self.consumer.fetch(self.batch, self.timeout_ms):
-            data = cast(Mapping[str, Any], delivery.event.data)  # pragma: no mutate
-            missing = [name for name in HEAD_FIELDS if name not in data]
-            if missing:
-                logging.getLogger(__name__).warning(
-                    "terminated lab head %s missing %s", delivery.event.id, ", ".join(missing)
-                )
-                delivery.term()
-                continue
-            event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
-            lane = str(data.get("lane") or data.get("branch") or event.head)
-            heads.append(Head(event, lane, str(data.get("ref") or "")))
+        read: list[Delivery] = []
+        deadline = time.monotonic() + INTAKE_SECONDS
+        while time.monotonic() < deadline:
+            deliveries = self.consumer.fetch(self.batch, self.timeout_ms)
+            for delivery in deliveries:
+                data = cast(Mapping[str, Any], delivery.event.data)  # pragma: no mutate
+                if delivery.event.type == CHECKS:
+                    self._observe(delivery, data)
+                    continue
+                missing = [name for name in HEAD_FIELDS if name not in data]
+                if missing:
+                    logging.getLogger(__name__).warning(
+                        "terminated lab head %s missing %s", delivery.event.id, ", ".join(missing)
+                    )
+                    delivery.term()
+                    continue
+                event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
+                lane = str(data.get("lane") or data.get("branch") or event.head)
+                heads.append(Head(event, lane, str(data.get("ref") or "")))
+                read.append(delivery)
+            if len(deliveries) < self.batch:
+                break
+        for delivery in read:
             delivery.ack()
         return heads
+
+    def _observe(self, delivery: Delivery, check: Mapping[str, Any]) -> None:
+        """Hand one completed check to the observer and acknowledge it; terminate one it cannot read with a logged
+        reason."""
+        try:
+            self.observe(check)
+        except (KeyError, TypeError) as error:
+            logging.getLogger(__name__).warning(
+                "terminated lab check %s unreadable: %s", delivery.event.id, type(error).__name__
+            )
+            delivery.term()
+            return
+        delivery.ack()
 
 
 def _within(files: Mapping[str, str], paths: Sequence[str]) -> dict[str, str]:
@@ -1526,8 +1568,9 @@ def frame(
     """Return a tier's plan: the lab's gates its `Gate — Required` rules require, and every other job they require as
     a gate without units, which passes, so only what the lab grades can turn the grade red.
 
-    A pull request or hotfix grade runs with no mutation; only a plant pull request runs test units. Each grades
-    under each required job the units
+    A pull request or hotfix grade runs with no mutation and no test scope. Only a plant pull request runs test
+    units, so it is framed as a run of the full suite: its select scope reads full and it carries the jobs that
+    scope requires, which the rules then demand of it. Each grades under each required job the units
     of every reusable workflow job it calls, which the expander files under the job, a slash and the called job, and
     names each authoritative gate it runs no unit of, which it posts as skipped; a merge group grade runs only the
     queue suite with no lost unit rerun; both keep the authoritative gates, which post as lab/<gate>; a promotion or
@@ -1540,13 +1583,14 @@ def frame(
         required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
         queued = {job: gates.get(job, ()) for job in required}
         return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed)
-    required = (*PULL_REQUIRED, UNIT_JOBS[0]) if tier == Priority.PULL_REQUEST and plant else PULL_REQUIRED
+    scope = "full" if tier == Priority.PULL_REQUEST and plant else "none"
+    required = (*PULL_REQUIRED, *SCOPED.get(scope, ()))
     framed = {
         job: tuple(unit for key, units in gates.items() if key == job or key.startswith(f"{job}/") for unit in units)
         for job in required
     }
     idle = frozenset(gate for gate in authoritative if not framed.get(gate))
-    return Plan(tree, grader, framed, outputs={"select": {"scope": "none"}}, idle=idle, authoritative=listed)
+    return Plan(tree, grader, framed, outputs={"select": {"scope": scope}}, idle=idle, authoritative=listed)
 
 
 @dataclass(frozen=True)
@@ -1736,6 +1780,14 @@ class MirrorExpander:
         """Return the retry policy of the lab block of delivery.yaml on the repository's dev branch."""
         return policy(_lab_block(self._on_dev(repo, DELIVERY)))
 
+    def static_jobs(self, repo: str) -> frozenset[str]:
+        """Return the gate id of every static job of the workflow on the repository's dev branch whose steps gate,
+        read as `shadow.static_jobs` reads a tree."""
+        mirror = self._mirror(repo)
+        dev = self._dev_head(repo, mirror)
+        workflow = self._git(mirror, "show", f"{dev}:{WORKFLOW.as_posix()}")
+        return shadow.gate_ids(discover(workflow, reusable=self._workflows(mirror, dev)))
+
     def _exclusions(self, mirror: Mirror, grader: str, files: Mapping[str, str]) -> dict[str, str]:
         if static_exclusions.PATH not in files:
             return {}
@@ -1909,11 +1961,36 @@ class MirrorExpander:
         return {path: found[blob] for path, blob in files.items()}
 
 
+class _Unshipped(metrics.Sink):
+    """The table sink of the scheduler's shadow recorder: the scheduler runs no metrics outbox, so lab_shadow table rows
+    are dropped while each shadow row still lands in Redis and the object store."""
+
+    def append(self, table: metrics_outbox.Table, rows: list[dict[str, object]]) -> None:
+        """Drop the rows."""
+
+
+def _shadow_observer(
+    scheduler: Scheduler, sources: shadow.Sources, repository: str
+) -> Callable[[Mapping[str, Any]], None]:
+    """Return the observer that folds each completed check of the repository into a shadow recorder on the
+    scheduler's Redis, objects and registry; a check of another repository is left unrecorded."""
+    recorder = shadow.Shadow(scheduler.client, scheduler.objects, _Unshipped(), scheduler.registry, sources)
+    compared = _slug(repository).removesuffix(".git")
+
+    def observe(check: Mapping[str, Any]) -> None:
+        if _slug(check["repository"]["html_url"]) == compared:
+            recorder.observe(check)
+
+    return observe
+
+
 def build(
     environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer, spending: budget.Budget
 ) -> Scheduler:
     """Return the service's scheduler over its clients and the day's budget, trusting the runner trust list of the
-    repository's dev, its mirrors falling back to the lab remote the environment names."""
+    repository's dev, its mirrors falling back to the lab remote the environment names. Once `AGENTIHOOKS_LAB_APP`
+    names the lab's GitHub App, its bus inbox hands each completed check of the repository to a shadow recorder on
+    the scheduler's registry; without it completed checks are acknowledged unrecorded."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
     expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get, lab(environ))
@@ -1924,11 +2001,16 @@ def build(
             checks[repo] = Checks(repo, registry=scheduler.registry)
         return checks[repo]
 
+    inbox = BusInbox(consumer)
     hotfixes, pods = control.Priorities(client, _now_ms), worker_pods(environ)
-    ports = Ports(BusInbox(consumer), expander, poster, hotfixes, pods, stale_heads.OpenHeads())
+    ports = Ports(inbox, expander, poster, hotfixes, pods, stale_heads.OpenHeads())
     repository = environ[REPOSITORY]
     settings = Settings(expander.trusted(repository), retries=expander.retries(repository))
     scheduler = Scheduler(client, objects, ports, settings, spending)
+    app = environ.get(shadow_report.LAB_APP)
+    if app:
+        sources = shadow.Sources(expander.static_jobs(repository), app)
+        inbox.observe = _shadow_observer(scheduler, sources, repository)
     return scheduler
 
 

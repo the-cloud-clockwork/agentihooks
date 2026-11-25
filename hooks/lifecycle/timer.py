@@ -1,10 +1,12 @@
 import json
 import os
-import pwd
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from hooks.compat import real_home
 
 if TYPE_CHECKING:
     from scripts.events.bus import StateStore
@@ -19,7 +21,7 @@ def unit_dir() -> Path:
 
 
 def _live_home() -> bool:
-    return Path.home().resolve() == Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+    return Path.home().resolve() == real_home().resolve()
 
 
 def _systemctl(*args: str) -> bool:
@@ -95,6 +97,8 @@ def remove_timer() -> str:
 
 
 def reconcile_units(python: str, root: str, enabled: bool) -> str:
+    if sys.platform == "win32":
+        return "lifecycle timer and host guard: not used on Windows"
     from scripts.host_guard.sync import reconcile
 
     schedule = install_timer(python, root) if enabled else remove_timer()

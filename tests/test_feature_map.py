@@ -898,3 +898,46 @@ def test_feature_fragment_filename_must_match_its_id(mapped_repo: tuple[Path, Pa
     (directory / "wrong.json").write_text(json.dumps(entry))
     with pytest.raises(ValueError, match="filename does not match id"):
         feature_map.load(path)
+
+
+def _canonical(features: list[dict[str, object]], ending: str) -> str:
+    """A feature map with metadata around ``features`` in the layout of an indent two dump, lines ended by ``ending``."""
+    root = {"head": [1], "features": features, "after": {"id": "x"}}
+    return (json.dumps(root, indent=2) + "\n").replace("\n", ending)
+
+
+@pytest.mark.feature("feature-map-stable-write")
+@pytest.mark.parametrize("ending", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_with_entry_keeps_a_canonical_map_canonical(ending: str) -> None:
+    old, new = {"id": "a", "tests": ["t::a"]}, {"id": "b", "tests": []}
+    grown = {**old, "tests": ["t::a", "t::b"]}
+    assert feature_map.with_entry(_canonical([], ending), old) == _canonical([old], ending)
+    assert feature_map.with_entry(_canonical([old], ending), new) == _canonical([new, old], ending)
+    assert feature_map.with_entry(_canonical([new, old], ending), grown) == _canonical([new, grown], ending)
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_with_entry_writes_one_line_entries_into_a_one_line_map() -> None:
+    text = '{"head":[1],"features":[{"id":"a"},{"id":"b","x":[]}],"after":{"id":"x"}}'
+    inserted = '{"head":[1],"features":[{"id": "c"},{"id":"a"},{"id":"b","x":[]}],"after":{"id":"x"}}'
+    replaced = '{"head":[1],"features":[{"id":"a"},{"id": "b", "x": [1]}],"after":{"id":"x"}}'
+    assert feature_map.with_entry(text, {"id": "c"}) == inserted
+    assert feature_map.with_entry(text, {"id": "b", "x": [1]}) == replaced
+    assert feature_map.with_entry('{"features":[]}', {"id": "c"}) == '{"features":[{"id": "c"}]}'
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_with_entry_indents_a_new_entry_like_the_line_of_the_first_entry() -> None:
+    tabbed = '{\n"features": [\n\t{"id": "a"}\n]\n}\n'
+    flush = '{\n"features": [\n{"id": "a"}\n]\n}\n'
+    tabbed_after = '{\n"features": [\n\t{\n\t  "id": "b"\n\t},\n\t{"id": "a"}\n]\n}\n'
+    flush_after = '{\n"features": [\n{\n  "id": "b"\n},\n{"id": "a"}\n]\n}\n'
+    assert feature_map.with_entry(tabbed, {"id": "b"}) == tabbed_after
+    assert feature_map.with_entry(flush, {"id": "b"}) == flush_after
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_with_entry_keeps_whitespace_before_the_root() -> None:
+    old: dict[str, object] = {"id": "a"}
+    new: dict[str, object] = {"id": "b"}
+    assert feature_map.with_entry("\n " + _canonical([old], "\n"), new) == "\n " + _canonical([new, old], "\n")

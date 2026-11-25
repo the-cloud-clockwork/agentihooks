@@ -4,6 +4,7 @@ import sys
 import types
 import urllib.error
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -52,6 +53,23 @@ class Marks:
     def mark(self, name, ref):
         self.calls.append((name, ref))
         return True
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_a_newer_ledger_frame_with_a_from_revision_resyncs_directly(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    fresh = {"_meta": {"rev": 2}}
+
+    def polled(slug: str) -> list[tuple[str, dict[str, Any], None]]:
+        calls.append(slug)
+        return [("snapshot", {"ledger": fresh}, None)]
+
+    monkeypatch.setattr(watch_ledger, "polled", polled)
+    watch = watch_ledger.Watch(args(), "source", Marks())
+    watch.state = {"_meta": {"rev": 1}}
+    watch.take("ledger", {"from": 1, "rev": 2})
+    assert calls == [SLUG]
+    assert watch.state == fresh
 
 
 def test_say_flushes_each_line(monkeypatch):

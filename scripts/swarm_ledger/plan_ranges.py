@@ -211,7 +211,8 @@ def invalid_tasks(plan: dict, doc: dict, ids: list[str]) -> list[str]:
 
 
 def _ranged(doc: dict, phase: dict, task: dict) -> bool:
+    plan_url = str(task.get("plan_url") or "")  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     try:
-        return task.get("plan_lines") == task_slice(doc, phase, task["plan_slice"])
+        return task.get("plan_lines") == task_slice(doc, phase, task["plan_slice"], plan_url)
     except (KeyError, ValueError):
         return False

@@ -1,0 +1,10 @@
+{
+  "id": "api-private-ledger-home",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-kingston-disk-writers",
+  "behaviour": "The API environment mirror permits the ledger private cache home to differ while still refusing a missing shared database setting.",
+  "seam": "rendered API and ledger environment parity through chart_api.mirror_problems",
+  "tests": [
+    "tests/test_swarm_chart_api.py::test_api_mirrors_the_database_but_not_the_ledgers_private_home"
+  ]
+}
