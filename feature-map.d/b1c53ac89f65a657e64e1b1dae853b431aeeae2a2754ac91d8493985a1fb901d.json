@@ -9,5 +9,8 @@
     "tests/context/test_prompt_quota_policy.py::test_typed_operator_prompt_still_authorizes_quota_push",
     "tests/context/test_prompt_quota_policy.py::test_negated_operator_prompt_does_not_authorize_quota_push",
     "tests/context/test_prompt_quota_policy.py::test_subagent_prompt_does_not_authorize_quota_push"
+  ],
+  "rules": [
+    "quota-push-operator-only"
   ]
 }
