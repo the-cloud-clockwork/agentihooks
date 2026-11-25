@@ -789,6 +789,7 @@ def test_old_launchers_with_live_started_pids_survive_cleanup(tmp_path: Path) ->
     removed: list[Path] = []
     for name, marker_text in (
         ("live", "77\n"),
+        ("one", "1\n"),
         ("dead", "99\n"),
         ("malformed", "wrong"),
         ("zero", "0"),
@@ -803,12 +804,16 @@ def test_old_launchers_with_live_started_pids_survive_cleanup(tmp_path: Path) ->
             stamp = launcher.stat().st_mtime
             os.utime(marker, (stamp, stamp))
             files.append(marker)
-        (kept if name == "live" else removed).extend(files)
+        (kept if name in ("live", "one") else removed).extend(files)
     unreadable = aged(folder / "unreadable-261125-010101-123.sh", day + 60)
     unreadable.with_suffix(".started").mkdir()
     removed.append(unreadable)
     now = kept[0].stat().st_mtime + day + 60
-    alive = {77}.__contains__
+
+    def alive(pid: int) -> bool:
+        assert pid > 0
+        return pid in (1, 77)
+
     assert herdr_gc.clean_run_dir(folder, now, False, alive) == [
         f"would remove {path.name}" for path in sorted(removed)
     ]

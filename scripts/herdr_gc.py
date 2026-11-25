@@ -320,11 +320,22 @@ def _alive(pid: int, kill: Callable[[int, int], None] = os.kill) -> bool:
     return True
 
 
-def _launch_file(path: Path, alive) -> bool:
+def _launch_pid(path: Path) -> int | None:
+    try:
+        pid = int(path.with_suffix(".started").read_text())
+    except (OSError, ValueError):
+        return None
+    return pid if pid > 0 else None
+
+
+def _launch_file(path: Path, alive: Callable[[int], bool]) -> bool:
     if path.name.startswith("closing-"):
         pid = path.name.removeprefix("closing-")
         return pid.isdigit() and not alive(int(pid))
-    return path.suffix in RUN_SUFFIXES or (path.name.startswith("profile-") and path.suffix == ".json")
+    if path.suffix not in RUN_SUFFIXES and not (path.name.startswith("profile-") and path.suffix == ".json"):
+        return False
+    launcher_pid = _launch_pid(path)
+    return launcher_pid is None or not alive(launcher_pid)
 
 
 def _older(path: Path, now_s: float) -> bool:

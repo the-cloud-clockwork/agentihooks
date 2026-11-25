@@ -824,11 +824,16 @@ def test_a_quick_launcher_survives_exit_until_a_successor_replaces_it(
     assert prompt is not None and prompt.is_file()
     marker = launcher.with_suffix(".started")
     assert marker.read_text() == f"{process.pid}\n"
+    route = launcher.with_suffix(".route")
+    route.write_text("old route")
+    opening = launcher.with_suffix(".opening")
+    opening.write_text("old opening")
 
     successor, successor_prompt = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010102")
     assert not launcher.exists()
     assert not marker.exists()
     assert not prompt.exists()
+    assert not route.exists() and not opening.exists()
     assert successor.is_file()
     assert successor_prompt is not None and successor_prompt.is_file()
 
@@ -845,6 +850,29 @@ def test_successor_cleanup_keeps_live_launchers_and_other_agent_names(
     assert live.is_file() and other.is_file() and successor.is_file()
     assert live_prompt is not None and live_prompt.is_file()
     assert other_prompt is not None and other_prompt.is_file()
+
+
+@pytest.mark.feature("quick-launcher-survival")
+@pytest.mark.parametrize("quick", [False, True])
+def test_only_a_quick_successor_removes_dead_launchers_with_a_recorded_pid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, quick: bool
+) -> None:
+    dead, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010101")
+    dead.with_suffix(".started").write_text("999999999\n")
+    unknown, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010102", quick=False)
+    unknown.with_suffix(".started").write_text("unknown")
+    successor, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010103", quick=quick)
+    assert dead.exists() is (not quick)
+    assert unknown.is_file() and successor.is_file()
+
+
+@pytest.mark.feature("quick-launcher-survival")
+def test_a_successor_written_at_the_same_path_is_kept(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    previous, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010101")
+    previous.with_suffix(".started").write_text("999999999\n")
+    successor, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010101")
+    assert successor == previous
+    assert successor.is_file()
 
 
 @pytest.mark.feature("quick-launcher-survival")
