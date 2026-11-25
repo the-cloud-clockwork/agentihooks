@@ -5812,7 +5812,8 @@
       "tests": [
         "tests/swarm/test_dispatcher.py::test_small_lanes_keep_a_positive_focus_share",
         "tests/swarm/test_dispatcher.py::test_small_lanes_yield_focus_when_disabled_or_full"
-      ]
+      ],
+      "rules": ["focus-share-floor-division"]
     },
     {
       "id": "swarm-review-dispatcher-lane-cap",
