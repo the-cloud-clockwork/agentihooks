@@ -1685,10 +1685,11 @@ class MirrorExpander:
     def expand(self, request: GradeRequest) -> Plan:
         """Return one unit per supported static gate outside the protected exclusion catalog, with Actions retaining
         authority for jobs with exclusions, keyed by the files each gate reads at head and at the merge base of head
-        and base, which the plan names when it is not the base itself, the unit job's test
+        and base, the unit job's test
         units of a plant pull request, merge group, promotion or backfill head and the mutation stats and mutant units of a promotion or
         backfill head, framed by the request's tier with the authoritative gates of the grader's delivery.yaml for a
-        hotfix or pull request head, with the dev commit of the manifest its test units are keyed on.
+        hotfix or pull request head, with the dev commit of the manifest its test units are keyed on. The plan names
+        the merge base when it is not the base itself.
         """
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base

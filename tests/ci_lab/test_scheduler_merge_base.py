@@ -95,6 +95,17 @@ def test_a_head_whose_base_is_its_ancestor_keeps_its_keys_and_names_no_merge_bas
 
 
 @pytest.mark.feature("lab-grade-diffs-against-merge-base")
+def test_a_head_its_base_descends_from_diffs_against_itself(
+    tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, older, newer = origin
+    request = GradeRequest(f"file://{repo}", older, newer, Priority.PULL_REQUEST, ACTOR, False)
+    found = _expander(tmp_path, monkeypatch).expand(request)
+    framed = scheduler.frame(Priority.PULL_REQUEST, _tree(repo, older), newer, _size(repo, older, older, newer))
+    assert found == replace(framed, merge_base=older)
+
+
+@pytest.mark.feature("lab-grade-diffs-against-merge-base")
 def test_an_exclusion_the_base_gained_after_the_fork_point_still_excludes_its_gate(
     tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

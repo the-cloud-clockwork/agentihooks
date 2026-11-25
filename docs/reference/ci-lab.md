@@ -2659,7 +2659,8 @@ else its name (or the first line of its run) in lower case words joined by `-`, 
 its key is `static_key` over the gate name, the head files under the gate's registry paths, the
 files under its base paths at the merge base of the head and its base, the grader revision and the
 toolchain (see [Inputs per kind](#inputs-per-kind)). A grade diffs against that merge base, which
-is the delivered base whenever that base is an ancestor of the head: GitHub delivers a pull
+is the delivered base whenever that base is an ancestor of the head and the head itself when the
+base descends from it: GitHub delivers a pull
 request's base with its head, and a base ahead of the fork point would read what dev gained since
 as removed by the head. The grader, the run key and the base a grade names stay the delivered
 base, and a head that shares no history with its base fails expansion. The plan groups units by
@@ -3488,7 +3489,8 @@ Each grade is `scripts.ci_lab.scheduler.summary` of its state:
 from the scheduler and runs each through `scripts.ci_lab.executors`, the adapter its unit kind
 names. Every grant of `POST /lease` carries the job's `head`, `base` and `grader` revisions: the
 scheduler enqueues a grade's misses with its plan's grader revision and with the merge base of the
-grade's head and base, which is the grade's base whenever that base is an ancestor of the head.
+grade's head and base, which is the grade's base whenever that base is an ancestor of the head
+and the head itself when the base descends from it.
 `POST /lease` answers `426` with no grant, and records no offer, for a worker whose pod runs a
 digest other than `CI_LAB_IMAGE` under a floating tag; a pod pinned by digest is never stale, so a
 release that leaves the chart's tag pinned changes nothing live. Every other request is answered
