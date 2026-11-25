@@ -26,7 +26,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field, fields, replace
+from dataclasses import MISSING, asdict, dataclass, field, fields, replace
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
@@ -52,6 +52,7 @@ from scripts.ci_lab import (
     service,
     shadow,
     shadow_report,
+    stale_heads,
     static_exclusions,
 )
 from scripts.ci_lab.capacity import Load
@@ -70,7 +71,7 @@ from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
 from scripts.ci_lab.store import PREFIX, Store, Verdict
 from scripts.ci_lab.units import Priority, Unit
-from scripts.ci_lab.webhooks import CHECK_COMPLETED, HEAD_SUBJECT, PLANT, HeadEvent
+from scripts.ci_lab.webhooks import CHECK_COMPLETED, CLOSED, HEAD_SUBJECT, PLANT, HeadEvent
 from scripts.ci_lab.worktrees import Lab, Mirror, lab
 from scripts.ci_mutation import scope
 from scripts.ci_runner_trust import ACTORS, validate_actors
@@ -141,7 +142,7 @@ MUTANT_JOB = "mutation"
 MANIFEST_KINDS = (expand_tests.KIND, "mutant")
 ALWAYS_SKIPPABLE = frozenset({"unit-lost", "unit-rerun", "queue-baseline", "unit-selected"})
 PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
-HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent))
+HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent) if item.default is MISSING)
 STATIC = "static"
 WHOLE_TREE = "."
 DURATIONS = ".test_durations"
@@ -404,14 +405,16 @@ class Relaying(Protocol):
 
 @dataclass(frozen=True)
 class Ports:
-    """The scheduler's outside world: heads in, plans, check runs out per repository, the heads marked hotfix and the
-    worker pods whose deletion cost follows their leases."""
+    """The scheduler's outside world: heads in, plans, check runs out per repository, the heads marked hotfix, the
+    worker pods whose deletion cost follows their leases and, when the service holds one, the listing of the heads a
+    repository still wants graded, which raises an OSError when it cannot name them all."""
 
     inbox: Inbox
     expander: Expander
     checks: Callable[[str], Poster]
     hotfixes: Callable[[], frozenset[str]]
     pods: Pods = unmanaged
+    wanted: Callable[[str], frozenset[str]] | None = None
 
 
 @dataclass(frozen=True)
@@ -695,6 +698,8 @@ def summary(state: State) -> dict[str, Any]:
 class Scheduler:
     """The lab's grading over its Redis state, verdict store, object store and ports."""
 
+    _swept = False
+
     def __init__(
         self, client: Any, objects: Objects, ports: Ports, settings: Settings, spending: budget.Budget | None = None
     ) -> None:
@@ -712,16 +717,18 @@ class Scheduler:
         self._quiets: dict[str, _Quiet] = {}
 
     def tick(self, now_ms: int) -> list[str]:
-        """Run one pass: retire the merge group grades whose merge group is gone, intake, release quiet lanes, reap
-        expired leases, refresh the live grade summaries, enqueue the held units the budget admits, then advance every
-        live grade, counting each finished job in the most urgent tier of the live grades holding it."""
+        """Run one pass: on the first pass retire the pull request grades whose head nothing wants, then retire the
+        merge group grades whose merge group is gone, intake, release quiet lanes, reap expired leases, refresh the
+        live grade summaries, enqueue the held units the budget admits, then advance every live grade, counting each
+        finished job in the most urgent tier of the live grades holding it."""
+        swept = self._sweep()
         actions = [*self._retire_groups(), *self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms)]
         self._survey()
         actions.extend(self._admit(now_ms))
         tiers, _, _ = self._demand()
         for run in sorted(self.client.smembers(LIVE)):
             actions.extend(self._advance(run, tiers, now_ms))
-        return actions
+        return swept + actions
 
     def grade(self, run: str) -> State | None:
         """Return a grade's state, or None for an unknown run."""
@@ -874,6 +881,9 @@ class Scheduler:
         fixes = self.ports.hotfixes() if heads else frozenset[str]()
         actions: list[str] = []
         for head in heads:
+            if head.event.action == CLOSED:
+                actions.append(self._close(head.event, head.lane))
+                continue
             request = admit(head.event, self.settings.trusted)
             if request is None:
                 actions.append(f"untrusted {head.event.actor} head {head.event.head}")
@@ -909,6 +919,79 @@ class Scheduler:
         waiting = {"request": asdict(request), "lane": lane, "ref": ref, "since": now_ms}
         self.client.hset(WAITING, name, json.dumps(waiting))
         return f"received {request.head} on {lane}"
+
+    def _close(self, closed: HeadEvent, lane: str) -> str:
+        """End what a closed pull request holds in its lane of the pull request class, told by its base, which
+        GitHub sets at a pull request's last head and repeats when it closes: the waiting head of that base and the
+        live grades of the lane's head of that base, with the pending jobs of that head unless another live grade of
+        any repository grades it, since a job names its head alone. Nothing is posted. A waiting head or a grade
+        pushed to a grade ref stays, so does the same lane of the hotfix class, and so does what carries another
+        base, the work of another pull request of the same head branch: while the lane holds live grades of one
+        head against two bases, the lane also keeps its waiting head."""
+        repo = closed.repo
+        name = f"{repo}|{lane}|{int(Priority.PULL_REQUEST)}"
+        origins = self._origins()
+        run = self._pivot(name, closed, lane, origins)
+        if run is None:
+            ended = self._unwait(name, closed.base)
+        else:
+            ended = self._end(name, run, self._bases(run, lane, origins, closed.base), closed.base, origins)
+        return f"closed {lane} of {repo}: {', '.join(ended) or 'nothing held'}"
+
+    def _pivot(self, name: str, closed: HeadEvent, lane: str, origins: Mapping[str, Mapping[str, Any]]) -> str | None:
+        """Return the live grade a close starts from: the run the lane names while it is live and pushed to no
+        grade ref, else the first live pull request grade of the closed head, pushed to no grade ref, that names
+        the lane, since the lane may name a grade that finished or was pushed to a grade ref while an older grade
+        of that head still runs; none when the lane holds neither."""
+        named = self.client.get(f"{LANES}{name}")
+        origin = None if named is None else origins.get(named)
+        if named is not None and origin is not None and not origin["ref"]:
+            return named
+        head = {"repo": closed.repo, "head": closed.head}
+        grades = ((run, self.grade(run)) for run in sorted(origins) if stale_heads.twin(head, origins[run]))
+        return next((run for run, grade in grades if grade is not None and grade.lane == lane), None)
+
+    def _bases(self, run: str, lane: str, origins: Mapping[str, Mapping[str, Any]], lost: str) -> dict[str, str]:
+        """Return the base of a lane's run and of every other live pull request grade of its head that names the
+        lane, by run; the lane's run counts as of the given base when its grade document is gone."""
+        same = [name for name in sorted(origins) if name == run or stale_heads.twin(origins[run], origins[name])]
+        grades = {name: self.grade(name) for name in same}
+        return {
+            name: lost if grade is None else grade.base
+            for name, grade in grades.items()
+            if name == run or (grade is not None and grade.lane == lane)
+        }
+
+    def _end(
+        self, name: str, run: str, bases: Mapping[str, str], base: str, origins: Mapping[str, Mapping[str, Any]]
+    ) -> list[str]:
+        """End, of the live grades a lane holds of its head, those of the closed pull request's base, and the
+        waiting head of that base unless the lane holds grades of two bases. A grade of another base that stays
+        keeps the lane; when none stays, the pending jobs of the head go unless another live grade grades it."""
+        gone, stay = stale_heads.closing(bases, base)
+        ended = [] if len(set(bases.values())) > 1 else self._unwait(name, base)
+        if not gone:
+            return ended
+        head = origins[run]["head"]
+        kept = {origin["head"] for live, origin in origins.items() if live not in gone}
+        dropped = [] if head in kept else self.queue.drop(head)
+        for each in gone:
+            self._forget(each)
+        if not stay:
+            return [*ended, f"retired {', '.join(gone)}, dropped {len(dropped)} pending units"]
+        if self.client.get(f"{LANES}{name}") in gone:
+            self.client.set(f"{LANES}{name}", stay[0])
+        return [f"retired {', '.join(gone)}, {stay[0]} still grades {head}"]
+
+    def _unwait(self, name: str, base: str) -> list[str]:
+        """Drop a lane's waiting head when it carries the given base and was pushed to no grade ref, and name what
+        was dropped."""
+        held = self.client.hget(WAITING, name)
+        waiting = None if held is None else json.loads(held)
+        if waiting is None or waiting.get("ref") or waiting["request"]["base"] != base:
+            return []
+        self.client.hdel(WAITING, name)
+        return [f"dropped the waiting head {waiting['request']['head']}"]
 
     def _release(self, now_ms: int) -> list[str]:
         """Start at most `STARTS_PER_PASS` held heads whose quiet window ended, except one a pause of its class holds:
@@ -1048,6 +1131,39 @@ class Scheduler:
             actions.append(f"retired {run}: {reason}, dropped {len(dropped)} pending units")
         return actions
 
+    def _sweep(self) -> list[str]:
+        """Retire the stale pull request grades once, on the first pass of a scheduler that holds a listing of the
+        heads still wanted; the listing port is read on that pass, so a scheduler built with no ports builds."""
+        swept, self._swept = self._swept, True
+        wanted = None if swept else self.ports.wanted
+        return [] if wanted is None else self._retire_heads(wanted)
+
+    def _retire_heads(self, wanted: Callable[[str], frozenset[str]]) -> list[str]:
+        """Close every live pull request grade with no grade ref whose head is neither an open pull request head nor
+        a plant branch head, listing the wanted heads of each such repository once and never asking about one head:
+        the run is forgotten and the pending jobs of its head are dropped unless another live grade of any repository
+        grades that head. Nothing is posted. A listing that fails retires nothing of that repository and is named in
+        the actions, and each listed repository gets one line counting the heads listed, its live pull request
+        grades, the grades retired and the pending units dropped."""
+        origins = self._origins()
+        actions: list[str] = []
+        heads: dict[str, frozenset[str]] = {}
+        for repo in stale_heads.repositories(origins):
+            try:
+                heads[repo] = wanted(repo)
+            except OSError as error:
+                actions.append(f"cannot list the wanted heads of {repo}: {error}")
+        gone = stale_heads.stale(origins, heads)
+        kept = {origin["head"] for run, origin in origins.items() if run not in gone}
+        units: defaultdict[str, int] = defaultdict(int)
+        for run, (repo, head) in sorted(gone.items()):
+            dropped = [] if head in kept else self.queue.drop(head)
+            self._forget(run)
+            units[repo] += len(dropped)
+            reason = f"{head} is no open pull request head or plant head of {repo}"
+            actions.append(f"retired {run}: {reason}, dropped {len(dropped)} pending units")
+        return [*actions, *(stale_heads.listed(repo, len(heads[repo]), origins, gone, units[repo]) for repo in heads)]
+
     def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
         and hold the store's misses for the budget; a request that bypasses negative verdicts grades again under a run
@@ -1060,6 +1176,7 @@ class Scheduler:
         run = grade_key(inputs)
         if self.client.exists(GRADES + run):
             if not request.bypass_negative:
+                self._take_lane(request, lane, run)
                 return f"already graded {run}"
             run = f"{run}-{now_ms}"
         carried = self._supersede(request, lane)
@@ -1119,6 +1236,12 @@ class Scheduler:
             for ref, slot in old.units.items()
             if slot.job and not slot.outcome and slot.job not in dropped
         }
+
+    def _take_lane(self, request: GradeRequest, lane: str, run: str) -> None:
+        """Give a head whose grade already exists its lane: the lane's older head is superseded and the lane names
+        the head's run, so a head first graded outside its pull request lane still holds that lane."""
+        self._supersede(request, lane)
+        self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
 
     def _place(self, state: State, unit: Unit, bypass: bool, carried: Mapping[str, str], misses: list[Unit]) -> str:
         """Answer a unit from the store, a carried job or a new job held for the budget, counting the store lookup, and
@@ -1366,10 +1489,11 @@ class BusInbox:
         self.observe = observe
 
     def heads(self) -> list[Head]:
-        """Return heads from successive batches until a short fetch or the intake deadline. A head's lane is its
-        branch, else the head itself, and its ref the grade ref a lab remote notice names. An envelope missing a head
-        field is terminated with a logged warning. Completed checks reach the observer in delivery order; heads are
-        acknowledged after the whole intake succeeds, so a later fetch or observer failure leaves them replayable.
+        """Return heads from successive batches until a short fetch or the intake deadline. A head's lane is the lane
+        its envelope names, else its branch, else the head itself, and its ref the grade ref a lab remote notice names.
+        An envelope missing a required head field is terminated with a logged warning. Completed checks reach the
+        observer in delivery order; heads are acknowledged after the whole intake succeeds, so a later fetch or
+        observer failure leaves them replayable.
         """
         heads: list[Head] = []
         read: list[Delivery] = []
@@ -1389,7 +1513,8 @@ class BusInbox:
                     delivery.term()
                     continue
                 event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
-                heads.append(Head(event, str(data.get("branch") or event.head), str(data.get("ref") or "")))
+                lane = str(data.get("lane") or data.get("branch") or event.head)
+                heads.append(Head(event, lane, str(data.get("ref") or "")))
                 read.append(delivery)
             if len(deliveries) < self.batch:
                 break
@@ -1880,7 +2005,8 @@ def build(
         return checks[repo]
 
     inbox = BusInbox(consumer)
-    ports = Ports(inbox, expander, poster, control.Priorities(client, _now_ms), worker_pods(environ))
+    hotfixes, pods = control.Priorities(client, _now_ms), worker_pods(environ)
+    ports = Ports(inbox, expander, poster, hotfixes, pods, stale_heads.OpenHeads())
     repository = environ[REPOSITORY]
     settings = Settings(expander.trusted(repository), retries=expander.retries(repository))
     scheduler = Scheduler(client, objects, ports, settings, spending)
