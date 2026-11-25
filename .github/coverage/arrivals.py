@@ -153,6 +153,7 @@ class Results:
         if not isinstance(url, str) or not url:
             return False
         staged = folder.with_name(folder.name + PART)
+        shutil.rmtree(staged, ignore_errors=True)
         try:
             with urllib.request.urlopen(url, timeout=TIMEOUT) as response:
                 archive = zipfile.ZipFile(io.BytesIO(response.read()))
