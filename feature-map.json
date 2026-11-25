@@ -491,6 +491,7 @@
         "tests/swarm_ledger/test_summary_read.py::test_a_cursor_read_uses_only_the_requested_repository_record",
         "tests/swarm_ledger/test_summary_read.py::test_summary_sections_apply_collection_specific_closure",
         "tests/swarm_ledger/test_summary_read.py::test_summary_sections_count_repeated_states_and_exclude_deleted_rows",
+        "tests/swarm_ledger/test_summary_read.py::test_the_open_route_guard_refuses_query_and_cursor_keys_directly",
         "tests/swarm_ledger/test_open_read_bounds.py::test_open_page_without_an_explicit_offset_or_limit_uses_the_defaults",
         "tests/swarm_ledger/test_open_read_bounds.py::test_open_page_includes_a_single_row_whose_reply_lands_exactly_at_the_reply_limit",
         "tests/swarm_ledger/test_open_read_bounds.py::test_open_page_stops_before_an_oversized_second_row_and_returns_the_rows_already_selected",
@@ -498,6 +499,7 @@
         "tests/swarm_ledger/test_open_read_bounds.py::test_open_read_tasks_path_reads_task_rows_and_folds_in_the_frozen_marks",
         "tests/swarm_ledger/test_open_read_bounds.py::test_open_read_non_tasks_path_skips_marks_and_uses_an_empty_frozen_set",
         "tests/swarm_ledger/test_open_read_bounds.py::test_active_crew_keeps_members_with_future_last_seen_and_drops_those_missing_it_at_the_window_boundary",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_active_crew_keeps_a_member_seen_exactly_at_the_window_start",
         "tests/swarm_ledger/test_open_read_bounds.py::test_ledger_summary_reuses_the_cached_build_for_unchanged_stored_rows",
         "tests/swarm_ledger/test_open_read_bounds.py::test_ledger_summary_keeps_a_separate_build_lock_for_each_slug",
         "tests/swarm_ledger/test_open_read_bounds.py::test_ledger_summary_builds_meta_page_version_crew_and_limits_from_doctor_holds",
@@ -524,6 +526,9 @@
         "tests/swarm_ledger/test_hub.py::test_changed_rows_keeps_reading_later_keys_after_one_key_has_no_ids",
         "tests/swarm_ledger/test_hub.py::test_changed_rows_upserts_the_updated_and_added_rows_when_the_list_was_patched_incrementally",
         "tests/swarm_ledger/test_hub.py::test_changed_rows_upserts_the_whole_after_list_when_the_part_carries_a_full_value",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_keeps_later_rows_after_a_non_list_field",
+        "tests/swarm_ledger/test_hub.py::test_a_first_ledger_publication_advances_an_existing_resource_cursor",
+        "tests/swarm_ledger/test_watch_events.py::test_a_newer_ledger_frame_with_a_from_revision_resyncs_directly",
         "tests/swarm_ledger/test_watch_ledger.py::test_take_never_applies_a_ledger_patch_whose_frame_carries_a_from_field_while_caught_up"
       ]
     },

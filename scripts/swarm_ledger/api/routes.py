@@ -129,7 +129,7 @@ def open_read(services: Services, slug: str, path: str, query: dict[str, Any]) -
 
 
 def collection(services: Services, slug: str, path: str) -> list[Any]:
-    found = cast(dict[str, Any], services.repository.read(slug, path))
+    found: dict[str, Any] = services.repository.read(slug, path)
     return found.get(path) or []
 
 

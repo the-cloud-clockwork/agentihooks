@@ -133,7 +133,8 @@ def open_page(rows: list[tuple[int, dict[str, Any]]], query: dict[str, Any]) -> 
     limit: int = query.get("limit", OPEN_LIMIT)
     selected: list[dict[str, Any]] = []
     for at, row in rows[offset : offset + limit]:
-        item = {**cast(dict[str, Any], project(row)), "position": at}
+        projected: Any = project(row)
+        item = {**projected, "position": at}
         if reply_size(closed_reply([*selected, item], len(rows), offset)) > MAX_REPLY:
             if not selected:
                 raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")

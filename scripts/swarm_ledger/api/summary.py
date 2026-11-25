@@ -61,7 +61,7 @@ def referenced(state: dict[str, Any]) -> set[str]:
     priorities: list[Any] = state.get("priorities") or []
     for row in priorities:
         if is_row(row):
-            named.add(str(row.get("item") or "").partition("/")[2])
+            named.add(str(row.get("item")).partition("/")[2])
     return named
 
 

@@ -540,3 +540,24 @@ def test_changed_rows_upserts_the_whole_after_list_when_the_part_carries_a_full_
     new = {"tasks": [{"id": "z"}]}
     change = {"o": {"tasks": {"v": [{"id": "z"}], "u": [{"id": "other"}], "add": [{"id": "other2"}]}}}
     assert events_hub.changed_rows(old, new, change) == {"tasks": {"u": ["z"], "gone": ["a"]}}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_keeps_later_rows_after_a_non_list_field() -> None:
+    old = {"meta": {"rev": 1}, "tasks": [{"id": "a"}]}
+    new = {"meta": {"rev": 2}, "tasks": [{"id": "b"}]}
+    change = {"o": {"meta": {"o": {"rev": {"v": 2}}}, "tasks": {"v": [{"id": "b"}]}}}
+    assert events_hub.changed_rows(old, new, change) == {"tasks": {"u": ["b"], "gone": ["a"]}}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_a_first_ledger_publication_advances_an_existing_resource_cursor() -> None:
+    hub = Hub()
+    hub.open(SLUG, lambda: {"swarm": {"state": "running"}})
+    assert hub.publish(SLUG, "swarm", {"state": "paused"})
+    prior = hub.channels[SLUG].log[-1][1]
+    assert hub.publish(SLUG, "ledger", ledger(9))
+    assert [event[0] for event in hub.channels[SLUG].log] == [1, 2]
+    seq, replay = hub.open(SLUG, unloaded, prior)
+    assert seq == 1
+    assert [(at, name, data) for at, _, name, data in replay] == [(2, "open", {"rev": 9})]

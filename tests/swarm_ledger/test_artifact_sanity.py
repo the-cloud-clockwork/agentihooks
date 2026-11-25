@@ -383,9 +383,10 @@ def test_feed_answers_404_for_a_path_it_does_not_recognize() -> None:
 
 
 @pytest.mark.feature("ledger-summary-read")
-def test_feed_routes_a_path_naming_swarm_in_the_middle_to_the_swarm_route() -> None:
+@pytest.mark.parametrize("suffix", ["/swarm", "/swarm/agents"])
+def test_feed_routes_a_path_naming_swarm_in_the_middle_to_the_swarm_route(suffix: str) -> None:
     doc: dict[str, Any] = {"_meta": {"rev": 1}}
-    url = "http://x/api/v1/ledgers/artifact-sanity/swarm/agents"
+    url = f"http://x/api/v1/ledgers/artifact-sanity{suffix}"
     assert answered(lambda r: sanity._feed(r, doc), url) == {"json": {"data": {}, "collections": []}}
 
 
@@ -410,13 +411,18 @@ def test_open_page_names_the_section_from_the_last_path_segment_and_numbers_its_
 
 @pytest.mark.feature("ledger-summary-read")
 def test_summary_reads_each_paged_section_by_its_own_name_and_answers_revision_r() -> None:
-    doc: dict[str, Any] = {"title": "x", "slices": [{"id": "s1"}], "_meta": {"rev": 1}}
+    doc: dict[str, Any] = {
+        "title": "x",
+        "tasks": [{"id": "t1", "state": "blocked"}],
+        "slices": [{"id": "s1"}],
+        "_meta": {"rev": 1},
+    }
     assert answered(lambda r: sanity._summary(r, doc))["json"] == {
         "data": {
             "title": "x",
             "_meta": {"rev": 1},
             "sections": {
-                "tasks": {"open": 0, "states": {}},
+                "tasks": {"open": 1, "states": {"blocked": 1}},
                 "phases": {"open": 0, "states": {}},
                 "followups": {"open": 0, "states": {}},
                 "alerts": {"open": 0, "states": {}},

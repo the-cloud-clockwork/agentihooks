@@ -119,6 +119,14 @@ def test_active_crew_keeps_members_with_future_last_seen_and_drops_those_missing
 
 
 @pytest.mark.feature("ledger-summary-read")
+def test_active_crew_keeps_a_member_seen_exactly_at_the_window_start() -> None:
+    now = ledger_server.CREW_WINDOW_MS + 5
+    meta = {"members": {"agent-boundary": {"role": "member", "last_seen": 5}}}
+    crew = ledger_server.active_crew(meta, now)
+    assert [row["last_seen"] for row in crew] == [5]
+
+
+@pytest.mark.feature("ledger-summary-read")
 def test_ledger_summary_reuses_the_cached_build_for_unchanged_stored_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     slug = "ledger-cache"
     stored_rows = (1, {"rev": 1}, [])

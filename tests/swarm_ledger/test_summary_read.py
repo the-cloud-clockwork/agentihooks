@@ -11,6 +11,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_closed, ledger_server
 from scripts.swarm_ledger.api import resources, routes, summary, task_list
+from scripts.swarm_ledger.api.errors import APIError
 from tests.swarm_ledger.test_api_v1 import authority_live, live, request, stored
 
 __all__ = ["authority_live", "live"]
@@ -330,3 +331,13 @@ def test_summary_sections_count_repeated_states_and_exclude_deleted_rows() -> No
         {"id": "done", "done": True},
     ]
     assert summary.section("tasks", rows) == {"open": 4, "states": {"open": 3, "out": 1}}
+
+
+@pytest.mark.feature("ledger-summary-read")
+@pytest.mark.parametrize("query", ["q=x", f"cursor={'0' * 64}:0"])
+def test_the_open_route_guard_refuses_query_and_cursor_keys_directly(query: str) -> None:
+    handler = SimpleNamespace(path=f"/api/v1/ledgers/selected-ledger/tasks?state=open&{query}", headers={})
+    with pytest.raises(APIError) as caught:
+        routes.ledger_get(handler, cast(Any, SimpleNamespace()), "selected-ledger", "tasks")
+    assert caught.value.status == 400
+    assert caught.value.envelope() == {"error": {"code": "schema_invalid", "message": routes.OPEN_ONLY}}
