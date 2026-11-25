@@ -1,5 +1,5 @@
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any, cast
@@ -209,7 +209,17 @@ def _command(
     from tests.swarm.client_class import client_class
 
     monkeypatch.setattr(ledger_client, "LedgerClient", client_class(client))
-    monkeypatch.setattr(ledger, "resource_client", lambda slug: lambda remaining: client)
+
+    def clients(slug: str) -> Callable[[float], _Client]:
+        assert slug == "proof"
+
+        def build(remaining: float) -> _Client:
+            assert 0 < remaining <= 30.0
+            return client
+
+        return build
+
+    monkeypatch.setattr(ledger, "resource_client", clients)
     ticks = iter(index * duration for index in range(1000))
     clock = SimpleNamespace(monotonic=lambda: next(ticks), sleep=client.pauses.append)
     monkeypatch.setattr(thin_task, "time", clock, raising=False)
@@ -418,3 +428,63 @@ def test_command_usage_describes_the_repair_and_requires_an_explicit_swarm(
         )
     else:
         assert "\n\nBackfill phases for claimable enhancement plans\n\n" in output.out
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_an_ineligible_pair_does_not_hide_a_later_eligible_pair() -> None:
+    tasks = _pair() + _pair("second")
+    batches = _backfill(tasks, set(), {"enhance-second"})
+    assert len(batches) == 1
+    rows, phases = _apply(tasks, batches)
+    assert rows[:2] == tasks[:2]
+    assert rows[2]["phase"] == rows[3]["phase"] == "enhance-second"
+    assert phases == {"enhance-second"}
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_the_command_reuses_an_existing_phase_from_the_api(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client = _Client(_pair())
+    client.phases.add("enhance-legacy")
+    assert _command(monkeypatch, client) == 0
+    assert json.loads(capsys.readouterr().out) == {"before": 1, "moved": 1, "after": 0, "batch_seconds": [0.125]}
+    assert [operation["op"] for operation in client.writes[0]] == ["task_update", "task_update"]
+    assert client.phases == {"enhance-legacy"}
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_the_completion_flag_is_kept_in_the_api_projection(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client = _Client(_pair())
+    client.tasks[1]["done"] = True
+    assert _command(monkeypatch, client) == 0
+    assert json.loads(capsys.readouterr().out) == {"before": 0, "moved": 0, "after": 0, "batch_seconds": []}
+    assert client.writes == []
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_a_newly_held_batch_does_not_stop_a_later_claimable_batch(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client = _Client([task for index in range(51) for task in _pair(f"legacy-{index}")])
+    mutate = client.mutate
+
+    def held(slug: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
+        result = mutate(slug, operations)
+        if len(client.writes) == 1:
+            client.held.update(f"enhance-legacy-{index}" for index in range(25, 50))
+        return result
+
+    monkeypatch.setattr(client, "mutate", held)
+    assert _command(monkeypatch, client) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "before": 51,
+        "moved": 26,
+        "after": 0,
+        "batch_seconds": [0.125, 0.125],
+    }
+    assert len(client.writes) == 2
+    assert all(task["phase"] == "" for task in client.tasks[50:100])
+    assert client.tasks[100]["phase"] == client.tasks[101]["phase"] == "enhance-legacy-50"

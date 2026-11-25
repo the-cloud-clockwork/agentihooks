@@ -23,6 +23,10 @@
     "tests/swarm/test_thin_task_backfill.py::test_a_later_batch_rechecks_concurrent_scope_and_hold_changes",
     "tests/swarm/test_thin_task_backfill.py::test_a_phase_change_after_the_batch_read_refuses_the_stale_moves",
     "tests/swarm/test_thin_task_backfill.py::test_the_native_command_reads_its_arguments_from_the_process",
-    "tests/swarm/test_thin_task_backfill.py::test_command_usage_describes_the_repair_and_requires_an_explicit_swarm"
+    "tests/swarm/test_thin_task_backfill.py::test_command_usage_describes_the_repair_and_requires_an_explicit_swarm",
+    "tests/swarm/test_thin_task_backfill.py::test_an_ineligible_pair_does_not_hide_a_later_eligible_pair",
+    "tests/swarm/test_thin_task_backfill.py::test_the_command_reuses_an_existing_phase_from_the_api",
+    "tests/swarm/test_thin_task_backfill.py::test_the_completion_flag_is_kept_in_the_api_projection",
+    "tests/swarm/test_thin_task_backfill.py::test_a_newly_held_batch_does_not_stop_a_later_claimable_batch"
   ]
 }
