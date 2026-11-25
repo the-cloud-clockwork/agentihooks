@@ -15,12 +15,13 @@ Design constraints:
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import os
 import time
 from pathlib import Path
 from typing import Any, cast
+
+from hooks.compat import fcntl
 
 _tracer = None
 _meter = None

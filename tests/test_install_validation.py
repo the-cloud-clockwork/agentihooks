@@ -281,6 +281,19 @@ class TestSymlinkMerge:
         agents_dir = install_env["claude_home"] / "agents"
         assert sum(1 for p in agents_dir.iterdir() if p.is_symlink()) == 3
 
+    def test_falls_back_to_a_copy_where_the_platform_refuses_a_symlink(self, install_env, monkeypatch):
+        """Windows without Developer Mode or admin rights raises OSError on symlink_to."""
+
+        def _refuse(self, target):
+            raise OSError("A required privilege is not held by the client")
+
+        monkeypatch.setattr(Path, "symlink_to", _refuse)
+        self._run_symlink_merge(install_env)
+        agents_dir = install_env["claude_home"] / "agents"
+        linked = [p for p in agents_dir.iterdir() if not p.is_symlink()]
+        assert linked, "no copy fallback landed when symlink_to was refused"
+        assert all(p.read_text() for p in linked)
+
 
 # ---------------------------------------------------------------------------
 # CLAUDE.md linking tests
