@@ -207,7 +207,6 @@ def test_worker_stops_live_children_when_the_hive_ends_or_startup_is_terminated(
 
 
 @pytest.mark.feature("ledger-writer-hosts")
-@pytest.mark.feature("ledger-writer-two-arenas")
 @pytest.mark.parametrize("writer_status", ["0", "7"])
 def test_worker_restarts_the_writer_with_the_database_env_and_stops_with_the_hive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer_status: str

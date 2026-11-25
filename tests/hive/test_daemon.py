@@ -1061,7 +1061,6 @@ def test_install_writes_the_service_and_enables_it(tmp_path: Path) -> None:
 
 
 @pytest.mark.feature("ledger-writer-hosts")
-@pytest.mark.feature("ledger-writer-two-arenas")
 def test_writer_unit_uses_the_installed_binary_and_restarts_after_every_exit() -> None:
     from scripts.swarm import timer
 
