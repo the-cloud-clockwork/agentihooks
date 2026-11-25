@@ -1373,8 +1373,8 @@ Pull request unit runner pods prefer nodes that run no batch runner pod. The
 `anton`, `anton-oss` and `anton-oss-queue` runner scale sets carry a preferred
 pod anti affinity, weight 100 per node, against pods of the `anton-oss-batch`
 and `anton-batch` scale sets. Batch runners are never refused a node by it, and
-the batch lane keeps its limits: `anton-oss-batch` now has `maxRunners` 6
-and a three CPU runner limit. [antoncore pull request 973](https://github.com/the-cloud-clockwork/antoncore/pull/973)
+the batch lane keeps its limits: `anton-oss-batch` has `maxRunners` 6, since antoncore pull request 2079
+on 25 November 2026, and a three CPU runner limit. [antoncore pull request 973](https://github.com/the-cloud-clockwork/antoncore/pull/973)
 delivered the rule; ArgoCD applied it at 01:23:52 UTC on 20 October 2026.
 
 ### Cause
