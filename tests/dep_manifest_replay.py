@@ -100,7 +100,12 @@ def _command(script: str, environment: dict[str, str]) -> dict[str, Any]:
         text=True,
         timeout=600,
     )
-    return {"exit": completed.returncode, "seconds": time.monotonic() - start}
+    return {
+        "exit": completed.returncode,
+        "seconds": time.monotonic() - start,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
 
 
 def _workflow(text: str) -> dict[str, str]:
@@ -112,15 +117,15 @@ def _run_commands(workflow: dict[str, str], folder: Path, head: str) -> dict[str
     folder.mkdir()
     environment = {**os.environ, "RUNNER_TEMP": str(folder), "GITHUB_SHA": head, "ENVIRONMENT": "py3.12-shared"}
     validation = _command(workflow["Check the shard coverage downloads"], environment)
-    assert validation["exit"] == 0
+    assert validation["exit"] == 0, validation
     build = workflow["Build the test dependency manifest"]
     combine, marker, cli = build.partition("python -m scripts.dep_manifest build")
     assert marker
     combined = _command(combine, environment)
-    assert combined["exit"] == 0
+    assert combined["exit"] == 0, combined
     profile = folder / "manifest.profile"
     built = _command(f'python -m cProfile -o "{profile}" -m scripts.dep_manifest build{cli}', environment)
-    assert built["exit"] == 0
+    assert built["exit"] == 0, built
     stats = pstats.Stats(str(profile)).get_stats_profile().func_profiles
     phases = {name: stats[name].cumtime for name in ("build", "pack", "dumps")}
     return {"validation": validation, "combine": combined, "cli": built, "profile_seconds": phases}
@@ -249,6 +254,13 @@ def test_real_promotion_archives_produce_identical_workflow_outputs(
     report = {
         "head": head,
         "source_run": RUN,
+        "commands": {
+            name: before[name]
+            for name in (
+                "Check the shard coverage downloads",
+                "Build the test dependency manifest",
+            )
+        },
         "grader": BASE,
         "artifacts": fingerprints,
         "member_fingerprints": _members(bulk),

@@ -361,6 +361,24 @@ def test_a_fetched_artifact_is_unpacked_into_its_own_folder(
     assert sorted(path.name for path in out.iterdir()) == ["coverage-3.12-1"]
 
 
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+def test_a_replaced_archive_does_not_keep_files_from_an_interrupted_extraction(
+    results: tuple[str, list[tuple[str, str, dict[str, object]]]], tmp_path: Path
+) -> None:
+    base, _ = results
+    folder = tmp_path / "artifacts/coverage-3.12-1"
+    staged = folder.with_name(folder.name + arrivals.PART)
+    (staged / "dep-inputs").mkdir(parents=True)
+    (staged / "dep-inputs/stale.jsonl").write_text('{"test":"old","files":["old"],"escapes":false}\n')
+    service = arrivals.Results(base, _token("run-1", "job-2"))
+    assert service.listed() is not None
+    assert service.fetch("coverage-3.12-1", folder) is True
+    assert (folder / ".coverage").read_text() == "database"
+    assert (folder / "reused-coverage/.coverage").read_text() == "reused"
+    assert not (folder / "dep-inputs/stale.jsonl").exists()
+    assert not staged.exists()
+
+
 def test_a_download_is_signed_for_the_job_that_uploaded_the_artifact(
     results: tuple[str, list[tuple[str, str, dict[str, object]]]], tmp_path: Path
 ) -> None:

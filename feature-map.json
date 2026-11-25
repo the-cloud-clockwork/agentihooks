@@ -20,7 +20,8 @@
         "tests/test_dep_manifest_parallel.py::test_manifest_renews_observation_for_the_entire_raw_collection_window",
         "tests/test_queue_watch.py::test_raw_watch_accepts_the_copy_producer_without_numeric_jobs",
         "tests/test_queue_watch.py::test_a_renewed_observer_sees_completion_after_the_first_observer_ends",
-        "tests/dep_manifest_replay.py::test_real_promotion_archives_produce_identical_workflow_outputs"
+        "tests/test_sonar_arrivals.py::test_a_replaced_archive_does_not_keep_files_from_an_interrupted_extraction",
+        "tests/test_queue_watch.py::test_raw_watch_uses_the_latest_producer_shape"
       ]
     },
     {

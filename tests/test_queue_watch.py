@@ -260,7 +260,10 @@ def test_raw_watch_requires_a_complete_successful_final_matrix(
     monkeypatch.setattr("sys.argv", ["queue_watch.py", "unit ("])
     assert queue_watch.main() == 0
     state = json.loads((tmp_path / f"{queue_watch.STATE}.complete").read_text())
-    assert state == {"run": "9", "attempt": 2, "complete": complete}
+    expected = {"run": "9", "attempt": 2, "complete": complete}
+    if history == [("unit (3.12, 1)", 2, "success"), ("unit (3.12, 2)", 2, "failure")]:
+        expected["failed"] = True
+    assert state == expected
     assert any("filter=all" in path for path, _ in calls)
 
 
@@ -339,3 +342,49 @@ def test_a_renewed_observer_sees_completion_after_the_first_observer_ends(
     jobs[0].update(status="completed", conclusion="success")
     assert _observe_raw_jobs(jobs_api, tmp_path, monkeypatch, "renewed-token")["complete"] is True
     assert {authorization for path, authorization in calls} == {"Bearer first-token", "Bearer renewed-token"}
+
+
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+@pytest.mark.parametrize(
+    ("rows", "complete", "failed"),
+    [
+        (
+            [("unit (3.12, 1)", 1, "success"), ("unit (3.12, 2)", 1, "success"), ("unit (3.12, copy)", 2, "queued")],
+            False,
+            False,
+        ),
+        (
+            [("unit (3.12, copy)", 1, "success"), ("unit (3.12, 1)", 2, "queued"), ("unit (3.12, 2)", 2, "queued")],
+            False,
+            False,
+        ),
+        (
+            [("unit (3.12, 1)", 1, "success"), ("unit (3.12, 2)", 1, "success"), ("unit (3.12, copy)", 2, "failure")],
+            False,
+            True,
+        ),
+    ],
+    ids=["new-copy-queued", "new-numeric-queued", "new-copy-failed"],
+)
+def test_raw_watch_uses_the_latest_producer_shape(
+    rows: list[tuple[str, int, str]],
+    complete: bool,
+    failed: bool,
+    jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api, jobs, calls = jobs_api
+    for ident, (name, attempt, result) in enumerate(rows, 1):
+        jobs.append(
+            {
+                "id": ident,
+                "name": name,
+                "run_attempt": attempt,
+                "status": "queued" if result == "queued" else "completed",
+                "conclusion": result,
+            }
+        )
+    state = _observe_raw_jobs(jobs_api, tmp_path, monkeypatch)
+    assert state["complete"] is complete
+    assert bool(state.get("failed")) is failed

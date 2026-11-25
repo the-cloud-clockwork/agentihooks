@@ -84,6 +84,8 @@ class Jobs(Protocol):
 
     def completed(self) -> bool: ...
 
+    def failed(self) -> bool: ...
+
 
 class Wall(Timer):
     """The monotonic clock and a real sleep."""
@@ -181,18 +183,29 @@ class FileJobs:
             return None
         return True if content == "started" else False if content == "queued" else None
 
-    def completed(self) -> bool:
+    def _outcome(self) -> bool | None:
         path = self.path.with_name(self.path.name + ".complete")
         try:
             fresh = time.time() - path.stat().st_mtime <= STALE
             state = json.loads(path.read_text())
         except (OSError, ValueError):
+            return None
+        if (
+            not fresh
+            or not isinstance(state, dict)
+            or state.get("run") != os.environ.get("GITHUB_RUN_ID", "")
+            or state.get("attempt") != int(os.environ["GITHUB_RUN_ATTEMPT"])
+        ):
+            return None
+        if state.get("failed") is True:
             return False
-        return fresh and state == {
-            "run": os.environ.get("GITHUB_RUN_ID", ""),
-            "attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
-            "complete": True,
-        }
+        return True if state.get("complete") is True else None
+
+    def completed(self) -> bool:
+        return self._outcome() is True
+
+    def failed(self) -> bool:
+        return self._outcome() is False
 
 
 def shard_of(name: str, scope: str, shards: int) -> int | None:
@@ -292,6 +305,8 @@ def arrive(
     queue = [] if raw else [path for path in sorted(out.glob(CARRIED)) if path.stat().st_size]
     flattening: Flattening | None = None
     while True:
+        if raw and jobs is not None and jobs.failed():
+            break
         complete = not raw or jobs is not None and jobs.completed()
         listed = service.listed()
         if listed is not None:

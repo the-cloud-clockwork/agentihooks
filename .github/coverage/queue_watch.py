@@ -73,27 +73,31 @@ def history(api: str, repo: str, run_id: str, token: str) -> list[dict[str, Any]
         page += 1
 
 
-def raw_state(jobs: list[dict[str, Any]], attempt: int, prefix: str, shards: int) -> tuple[bool | None, bool]:
-    expected = {f"{prefix}3.12, {shard})" for shard in range(1, shards + 1)}
+def raw_state(jobs: list[dict[str, Any]], attempt: int, prefix: str, shards: int) -> tuple[bool | None, bool, bool]:
+    numbered = {f"{prefix}3.12, {shard})" for shard in range(1, shards + 1)}
+    copy = f"{prefix}3.12, copy)"
     latest = {
         job["name"]: job
         for job in sorted(jobs, key=lambda job: job["id"])
-        if job["name"] in expected and int(job["run_attempt"]) <= attempt
+        if job["name"] in numbered | {copy} and int(job["run_attempt"]) <= attempt
     }
     if not latest:
-        return None, False
+        return None, False, False
+    newest = max(latest.values(), key=lambda job: (int(job["run_attempt"]), job["id"]))
+    expected = {copy} if newest["name"] == copy else numbered
+    selected = {name: job for name, job in latest.items() if name in expected}
     upstream = any(
         int(job["run_attempt"]) == attempt and job["name"] in {"select", "split", "reuse", "admission", "lab-verdict"}
         for job in jobs
     )
-    materialized = not upstream or all(int(job["run_attempt"]) == attempt for job in latest.values())
-    complete = (
-        set(latest) == expected
-        and materialized
-        and all(completed(job) and job.get("conclusion") == "success" for job in latest.values())
+    materialized = not upstream or all(int(job["run_attempt"]) == attempt for job in selected.values())
+    ended = set(selected) == expected and materialized and all(completed(job) for job in selected.values())
+    complete = ended and all(job.get("conclusion") == "success" for job in selected.values())
+    failed = ended and any(
+        int(job["run_attempt"]) == attempt and job.get("conclusion") != "success" for job in selected.values()
     )
-    remaining = [job for job in latest.values() if not completed(job)]
-    return materialized and all(not queued(job) for job in remaining), complete
+    remaining = [job for job in selected.values() if not completed(job)]
+    return materialized and all(not queued(job) for job in remaining), complete, failed
 
 
 def main() -> int:
@@ -109,8 +113,10 @@ def main() -> int:
     while time.monotonic() < deadline:
         if raw:
             jobs = history(api, repo, run_id, token)
-            state, complete = (
-                (None, False) if jobs is None else raw_state(jobs, int(attempt), prefix, int(os.environ["SHARDS"]))
+            state, complete, failed = (
+                (None, False, False)
+                if jobs is None
+                else raw_state(jobs, int(attempt), prefix, int(os.environ["SHARDS"]))
             )
             Path(STATE + ".complete").write_text(
                 json.dumps(
@@ -118,6 +124,7 @@ def main() -> int:
                         "run": run_id,
                         "attempt": int(attempt),
                         "complete": complete,
+                        **({"failed": True} if failed else {}),
                     }
                 )
             )
