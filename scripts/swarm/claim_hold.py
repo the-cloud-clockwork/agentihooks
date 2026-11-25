@@ -1,5 +1,5 @@
 """Why the tick may not claim an open task: its phase, a freeze or focus, an open dependency, a thin task waiting for
-its enhancement plan, or a lab behind on grading.
+its enhancement plan, an enhancement plan whose target is done, or a lab behind on grading.
 
 Every claim filter asks here, so the urgent hold health finding reports exactly what keeps a task from a seat.
 """
@@ -31,10 +31,18 @@ LAB_FRESH_MS = 600_000
 LAB_BEHIND = "the lab is {minutes} minutes behind on pull request grading"
 THIN_LANES = ("eng", "ci")
 THIN = "it waits for its enhancement plan task {}"
+SETTLED = "its enhancement target {} is done"
 
 
 def hold(task: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix: str) -> str:
-    return verification(task) or phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows) or thin(task)
+    return (
+        verification(task)
+        or phased(task, doc)
+        or frozen(task, doc, graph, fix)
+        or waits(task, rows)
+        or thin(task)
+        or settled(task, rows)
+    )
 
 
 def holds(
@@ -49,7 +57,7 @@ def holds(
     return (
         bool(verification(task) or phased(task, doc))
         or freeze.claim_gate(task, doc, graph, fix, admitted_queue)  # pyright: ignore[reportUnknownMemberType]
-        or bool(waits(task, rows) or thin(task))
+        or bool(waits(task, rows) or thin(task) or settled(task, rows))
     )
 
 
@@ -59,6 +67,14 @@ def thin(task: dict[str, Any]) -> str:
     if task.get("enhancement") != "needed" or task.get("pr_url") or task.get("lane", LAB_LANE) not in THIN_LANES:
         return ""
     return THIN.format(thin_task.ENHANCE.format(task["id"]))
+
+
+def settled(task: dict[str, Any], rows: dict[str, Any]) -> str:
+    """Why a claim stays off an enhancement plan task whose target task is done: nothing is left to plan."""
+    target = task.get("enhances")
+    if not target or rows.get(target, {}).get("state") != "done":
+        return ""
+    return SETTLED.format(target)
 
 
 def verification(task: dict) -> str:
@@ -122,7 +138,7 @@ def freezes(task: dict, doc: dict, graph: dict) -> str:
 
 
 def urgent(task: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix: str) -> str:
-    return phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows) or thin(task)
+    return phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows) or thin(task) or settled(task, rows)
 
 
 def waits(task: dict, rows: dict) -> str:
