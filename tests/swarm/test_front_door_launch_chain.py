@@ -113,8 +113,7 @@ def _terminal(command: list[str], environ: dict[str, str]) -> None:
     """Start the launcher the terminal command names: write its started marker and run its harness line in process."""
     assert Path(environ[binding.REPORT]).is_file()
     lines = Path(command[-1]).read_text().splitlines()
-    (marker,) = [shlex.split(text)[2] for text in lines if text.startswith(": > ")]
-    Path(marker).touch()
+    init_agent._started_marker(Path(command[-1])).touch()
     (line,) = [text for text in lines if " select-profile " in text]
     words = shlex.split(line)
     install.cmd_claude(words[words.index("--") + 1 :])
