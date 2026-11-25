@@ -59,6 +59,13 @@ def _started_marker(launcher: Path) -> Path:
     return launcher.with_suffix(".started")
 
 
+def _started_at(marker: Path, environ: dict[str, str]) -> int:
+    started_at = int(marker.stat().st_mtime * 1000)
+    if not environ.get("AGENTIHOOKS_QUICK_SWARM"):
+        marker.unlink(missing_ok=True)
+    return started_at
+
+
 def _route_report(launcher: Path) -> Path:
     return launcher.with_suffix(".route")
 
@@ -590,7 +597,7 @@ def _write_launcher(
         "set -u\n"
         "set -m\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
-        f"echo $$ > {shlex.quote(str(_started_marker(launcher)))}\n"
+        f'echo "$$" > {shlex.quote(str(_started_marker(launcher)))}\n'
         f"{operator_env.source_line(environ)}"
         f"{_access_export()}"
         f"{_predecessor_export(environ)}"
@@ -1292,9 +1299,7 @@ def main(
             )
             return 2
         time.sleep(0.25)
-    launcher_at = int(marker.stat().st_mtime * 1000)
-    if not active_env.get("AGENTIHOOKS_QUICK_SWARM"):
-        marker.unlink(missing_ok=True)
+    launcher_at = _started_at(marker, active_env)
     report.append("status=started")
     report.append(f"launcher_at={launcher_at}")
     if _detached(args, active_env):
