@@ -2684,6 +2684,7 @@ jobs:
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_READ_TOKEN: ${{ secrets.SONAR_READ_TOKEN }}
         run: |
           [[ "${SONAR_TEST_ONLY:-false}" != true ]] || exit 0
           set -o pipefail
@@ -2711,7 +2712,23 @@ jobs:
           dashboard=$(sed -n 's/^dashboardUrl=//p' .scannerwork/report-task.txt)
           if [[ "$gate" != OK ]]; then
             echo "::error::Quality Gate has FAILED ($gate). Detailed information can be found at: $dashboard"
-            { GITHUB_STEP_SUMMARY= SONAR_RETRY_SECONDS=30 api "issues/search?componentKeys=${dashboard#*\?id=}&types=BUG,VULNERABILITY&inNewCodePeriod=true&resolved=false&ps=100" | jq -r '(.issues[] | "\(.component):\(.line // 0) \(.rule) \(.message)"), (select(.total > (.issues | length)) | "\(.total - (.issues | length)) more not shown")'; } 2> /dev/null || true
+            findings() {
+              local url="$1/search?$2" page=1 shown=0 total=0 body counts
+              while body=$(api "$url") && counts=$(jq -er --arg name "$1" '"\(.[$name] // [] | length) \(.paging.total // .total // 0 | floor)"' <<<"$body"); do
+                jq -r --arg name "$1" '.[$name] // [] | .[] | "\(.component):\(.line // 0) \(.rule // .ruleKey) \(.message)"' <<<"$body"
+                total=${counts#* }
+                shown=$((shown + ${counts% *}))
+                [[ "${counts% *}" -gt 0 && "$shown" -lt "$total" ]] || break
+                page=$((page + 1))
+                url="$1/search?$2&p=$page"
+              done
+              [[ "$shown" -ge "$total" ]] || echo "$((total - shown)) more $3not shown"
+            }
+            export -f api findings
+            scope=${dashboard#*\?id=}
+            GITHUB_STEP_SUMMARY= SONAR_RETRY_SECONDS=30 SONAR_TOKEN="$SONAR_READ_TOKEN" timeout 30s bash -c 'findings issues "$1" ""; findings hotspots "$2" "hotspots "' _ \
+              "componentKeys=$scope&types=BUG,VULNERABILITY&inNewCodePeriod=true&resolved=false&ps=100" \
+              "project=$scope&inNewCodePeriod=true&status=TO_REVIEW&ps=100" 2> /dev/null || true
             exit 1
           fi
           echo "Quality Gate has PASSED. $dashboard"
