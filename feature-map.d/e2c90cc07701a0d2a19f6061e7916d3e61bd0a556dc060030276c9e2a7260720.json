@@ -1,0 +1,13 @@
+{
+  "id": "codex-planner-sandbox-canary",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-planner-canary",
+  "behaviour": "A read only sandboxed Codex planner validates its mounted profile against the supervisor recorded outer launch and rejects missing or foreign execution evidence while retaining its existing filesystem grants.",
+  "seam": "binding.validate, Codex supervisor thread binding and planner launch permissions",
+  "tests": [
+    "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_planner_validates_its_recorded_outer_launch",
+    "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_canary_refuses_another_execution",
+    "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_canary_requires_the_complete_launch_record",
+    "tests/profiles/test_codex_planner_canary.py::test_planner_permissions_keep_the_repository_read_only"
+  ]
+}
