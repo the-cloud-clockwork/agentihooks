@@ -75,3 +75,32 @@ def test_windows_pre_tool_use_skips_the_quota_policy(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(sys, "platform", "win32")
     hook_manager.on_pre_tool_use({"session_id": "windows", "tool_name": "Read", "tool_input": {}, "cwd": str(tmp_path)})
     policy.assert_not_called()
+
+
+def test_deps_kick_starts_nothing_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The dev-tool refresh runs agentihooks deps ensure, which a Windows assistant never needs and cannot stop."""
+    from hooks.lifecycle import deps_kick
+
+    popen = Mock(side_effect=AssertionError("started agentihooks deps ensure"))
+    monkeypatch.setattr(deps_kick.subprocess, "Popen", popen)
+    monkeypatch.setattr(deps_kick.shutil, "which", lambda name: name)
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert deps_kick.kick(tmp_path) is False
+    popen.assert_not_called()
+
+
+@pytest.mark.parametrize(("platform", "calls"), [("win32", 0), ("linux", 1)])
+def test_notification_reaches_remote_control_only_off_windows(
+    monkeypatch: pytest.MonkeyPatch, platform: str, calls: int
+) -> None:
+    """The remote control notice belongs to the swarm, so a Windows notification never reaches it."""
+    from hooks import hook_manager
+
+    notice = Mock(return_value=False)
+    monkeypatch.setattr("scripts.swarm.remote_control.on_notification", notice)
+    monkeypatch.setattr(sys, "platform", platform)
+    payload = {"message": "Remote Control failed"}
+    hook_manager.on_notification(payload)
+    assert notice.call_count == calls
+    if calls:
+        notice.assert_called_once_with(payload)

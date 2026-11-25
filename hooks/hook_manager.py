@@ -2677,8 +2677,10 @@ def on_status_line(payload: dict) -> None:
 
 
 def on_notification(payload: dict) -> None:
-    """Handle Notification event."""
+    """Handle Notification event; Windows records no swarm remote control notice."""
     log("Notification", payload)
+    if sys.platform == "win32":
+        return
     try:
         from scripts.swarm import remote_control
 
