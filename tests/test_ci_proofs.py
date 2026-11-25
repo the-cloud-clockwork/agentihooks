@@ -80,7 +80,7 @@ def test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota(
         "set -euo pipefail\n"
         'if [[ "$1 $2" == "-m scripts.ci_cpu_quota" ]]; then echo "$PROOF_QUOTA"; exit 0; fi\n'
         'if [[ "$1 $2" == "-m pytest" ]]; then printf "%s\\n" "$@" > "$PROOF_ARGUMENTS"; '
-        'echo "1 passed in 0.1s"; exit 0; fi\n'
+        'echo "=== 1 passed in 0.10s ==="; exit 0; fi\n'
         f'exec "{sys.executable}" "$@"\n'
     )
     stub.chmod(0o755)
