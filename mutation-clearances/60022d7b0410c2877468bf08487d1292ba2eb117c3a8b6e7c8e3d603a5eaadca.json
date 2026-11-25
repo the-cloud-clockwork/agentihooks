@@ -1,0 +1,6 @@
+{
+  "hooks/hook_manager.py:hooks.hook_manager.x__prompt_quota_policy:b65fe2d2b5da7260c3f0faeb024d0ff150d55b5b0730b93631f9b14754749ee7": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: omitting dict.get's default produces None only when prompt is absent. _signal_match rejects both None and the original empty string before lowercasing; no push state, logging or guidance output changes."
+  }
+}

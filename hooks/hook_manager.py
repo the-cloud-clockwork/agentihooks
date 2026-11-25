@@ -734,7 +734,7 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
     run("swarm_ledger", _swarm_ledger, payload)
     run("trace_flush", _request_trace_flush, payload, "prompt")
     run("quota_usage", _prompt_quota_usage, session_id)
-    run("quota_policy", _prompt_quota_policy, payload, session_id)
+    run("quota_policy", _prompt_quota_policy, payload, session_id, typed)
     run("claude_md_cap", _prompt_claude_md_cap, payload, session_id)
     run("enforcements", _prompt_enforcements, payload, session_id)
     run("ci_manifesto", _prompt_ci_manifesto, session_id)
@@ -762,7 +762,7 @@ def _prompt_quota_usage(session_id: str) -> None:
         log("quota usage user prompt failed", {"error": str(e)})
 
 
-def _prompt_quota_policy(payload: dict, session_id: str) -> None:
+def _prompt_quota_policy(payload: dict, session_id: str, typed: bool) -> None:
     if sys.platform == "win32":
         return
     try:
@@ -772,7 +772,11 @@ def _prompt_quota_policy(payload: dict, session_id: str) -> None:
             from hooks.common import inject_context as _inject_quota_policy
             from hooks.context.quota_policy import prompt_context, record_push_signal
 
-            if session_id not in _KNOWN_SUBAGENT_IDS and record_push_signal(session_id, payload.get("prompt", "")):
+            if (
+                typed
+                and session_id not in _KNOWN_SUBAGENT_IDS
+                and record_push_signal(session_id, payload.get("prompt", ""))
+            ):
                 log("quota policy: operator push-to-100 signal", {"session_id": session_id})
             _policy_text = prompt_context(session_id, payload.get("cwd", ""))
             if _policy_text:
@@ -2677,8 +2681,10 @@ def on_status_line(payload: dict) -> None:
 
 
 def on_notification(payload: dict) -> None:
-    """Handle Notification event."""
+    """Handle Notification event; Windows records no swarm remote control notice."""
     log("Notification", payload)
+    if sys.platform == "win32":
+        return
     try:
         from scripts.swarm import remote_control
 

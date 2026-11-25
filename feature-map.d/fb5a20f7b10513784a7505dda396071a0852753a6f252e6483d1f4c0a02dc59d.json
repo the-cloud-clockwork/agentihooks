@@ -1,0 +1,12 @@
+{
+  "id": "feature-map-records",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-feature-map-records",
+  "behaviour": "Independent feature records merge without conflicts and load alongside existing inline entries.",
+  "seam": "scripts.feature_map.load and the record path command",
+  "tests": [
+    "tests/test_feature_map.py::test_two_branches_adding_one_record_each_merge_clean_and_both_load",
+    "tests/test_feature_map.py::test_the_repository_feature_map_keeps_new_entries_as_records",
+    "tests/test_feature_map.py::test_record_option_prints_the_record_path_for_a_feature_id"
+  ]
+}
