@@ -9076,7 +9076,7 @@
       "ordered_at": "2026-11-07",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-db-ledger",
       "behaviour": "A tick pass serves its ledger export, resource reads and operations in process through the ledger API route code over the shared ledger store, judged as the swarm's own service, every write keeping the controller epoch stamp and every refusal surfacing as the same HTTP error, so passes complete with the ledger server down; no setting or fallback sends a tick read or write to the ledger server.",
-      "seam": "scripts.tick.adapters.database_ledger.client, the only client scripts.swarm_ledger.ledger.client returns, used by the tick ledger port adapter and the pass LedgerClient inside scripts.swarm_ledger.ledger_route.tick",
+      "seam": "scripts.tick.adapters.writer_client.client, imported back as scripts.tick.adapters.database_ledger.client, the only client scripts.swarm_ledger.ledger.client returns, used by the tick ledger port adapter and the pass LedgerClient inside scripts.swarm_ledger.ledger_route.tick",
       "semgrep_rule": "feature-tick-database-ledger",
       "live_check": [
         "python",
@@ -9150,6 +9150,21 @@
         "tests/swarm_ledger/test_warm_writer_parity.py::test_each_refusal_answers_alike_over_the_socket_and_in_process",
         "tests/swarm_ledger/test_warm_writer_parity.py::test_a_conflicting_write_retries_once_and_lands_alike_over_the_socket_and_in_process",
         "tests/swarm_ledger/test_warm_writer_parity.py::test_each_audit_effect_is_left_alike_over_the_socket_and_in_process"
+      ]
+    },
+    {
+      "id": "ledger-slim-write-client",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-write-slim-client",
+      "behaviour": "A command line ledger write through the ledger command client goes to this host's warm writer socket as the caller, with the worktree header, and is never run in process when the writer answers; with no writer listening, or inside a tick pass, it runs in process through the database ledger request with its slug, path and payload; a writer that holds the reply past the client timeout raises a timeout; the client addresses the ledger server its own slug selects; a fresh interpreter that sends such a write loads neither the ledger API service, the ledger server nor the database ledger adapter.",
+      "seam": "scripts.swarm_ledger.ledger.client, the client every command line ledger write builds, over the host writer socket, and the modules a fresh interpreter holds after one write",
+      "tests": [
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_goes_to_the_host_writer_socket",
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_runs_in_process_when_no_writer_listens",
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_inside_a_tick_pass_runs_in_process_while_a_writer_listens",
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_the_writer_holds_past_the_client_timeout_raises_a_timeout",
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_addresses_the_ledger_server_its_slug_selects",
+        "tests/swarm_ledger/test_writer_client.py::test_a_fresh_interpreter_write_through_a_live_writer_leaves_the_api_service_and_ledger_server_unloaded"
       ]
     },
     {
