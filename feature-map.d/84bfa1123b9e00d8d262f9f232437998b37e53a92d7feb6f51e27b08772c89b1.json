@@ -2,7 +2,7 @@
   "id": "thin-enhancement-phase-backfill",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-phaseless-enhance-backfill",
-  "behaviour": "Previously queued open enhancement plans without phases and their targets get a shared manual phase, preserving existing scope and metadata, and repeated passes perform no writes.",
+  "behaviour": "Previously queued claimable enhancement plans without phases and their targets get a shared manual phase, preserving frozen and held work, existing scope and metadata. Preview reports the eligible count, writes are paced and bounded, a slow write stops the pass, and repeated passes perform no writes.",
   "seam": "scripts.swarm.thin_task.backfill and its explicit module command",
   "tests": [
     "tests/swarm/test_thin_task_backfill.py::test_an_existing_enhancement_target_is_already_skipped_by_the_thin_pass",
@@ -14,6 +14,10 @@
     "tests/swarm/test_thin_task_backfill.py::test_a_missing_target_refuses_the_pass_before_any_writes",
     "tests/swarm/test_thin_task_backfill.py::test_the_command_reads_bounded_targets_and_reports_verified_before_and_after_counts",
     "tests/swarm/test_thin_task_backfill.py::test_a_refused_api_write_is_visible_and_never_reports_zero_remaining",
-    "tests/swarm/test_thin_task_backfill.py::test_the_command_fails_if_readback_still_finds_an_unphased_plan"
+    "tests/swarm/test_thin_task_backfill.py::test_the_command_fails_if_readback_still_finds_an_unphased_plan",
+    "tests/swarm/test_thin_task_backfill.py::test_a_plan_missing_from_the_claimable_set_is_unchanged",
+    "tests/swarm/test_thin_task_backfill.py::test_the_command_leaves_frozen_and_held_pairs_untouched",
+    "tests/swarm/test_thin_task_backfill.py::test_preview_reports_the_eligible_count_without_writes",
+    "tests/swarm/test_thin_task_backfill.py::test_a_write_over_two_seconds_stops_the_pass_before_another_batch"
   ]
 }

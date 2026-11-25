@@ -1,6 +1,7 @@
 import json
 from collections.abc import Iterable
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -8,9 +9,12 @@ import pytest
 from scripts.swarm import thin_task
 
 
-def _backfill(tasks: list[dict[str, Any]], phases: set[str]) -> list[list[dict[str, Any]]]:
+def _backfill(
+    tasks: list[dict[str, Any]], phases: set[str], eligible: set[str] | None = None
+) -> list[list[dict[str, Any]]]:
     module = cast(Any, thin_task)
-    return cast(list[list[dict[str, Any]]], module.backfill(tasks, phases))
+    allowed = {task["id"] for task in tasks} if eligible is None else eligible
+    return cast(list[list[dict[str, Any]]], module.backfill(tasks, phases, allowed))
 
 
 def _pair(name: str = "legacy") -> list[dict[str, Any]]:
@@ -133,6 +137,8 @@ class _Client:
         self.writes: list[list[dict[str, Any]]] = []
         self.reads: list[tuple[str, ...]] = []
         self.refuse = refuse
+        self.held: set[str] = set()
+        self.pauses: list[float] = []
 
     def tasks_where(
         self,
@@ -152,6 +158,16 @@ class _Client:
             if (not wanted or task["id"] in wanted) and (not states or task["state"] in states)
         ]
 
+    def focus_verdicts(self, slug: str, target: str) -> dict[str, Any]:
+        assert (slug, target) == ("proof", "lane:plan")
+        return {
+            "tasks": [
+                {"id": task["id"], "verdict": "held" if task["id"] in self.held else "claimable"}
+                for task in self.tasks
+                if task["lane"] == "plan" and task["state"] == "open"
+            ]
+        }
+
     def collection(self, slug: str, name: str) -> list[dict[str, Any]]:
         assert (slug, name) == ("proof", "phases")
         return [{"id": phase} for phase in sorted(self.phases)]
@@ -166,14 +182,22 @@ class _Client:
         return {}
 
 
-def _command(monkeypatch: pytest.MonkeyPatch, client: _Client) -> int:
+def _command(
+    monkeypatch: pytest.MonkeyPatch,
+    client: _Client,
+    extra: tuple[str, ...] = (),
+    duration: float = 0.125,
+) -> int:
     from scripts.swarm import ledger_client
     from scripts.tick.adapters import ledger
 
     monkeypatch.setattr(ledger_client, "LedgerClient", lambda: client)
     monkeypatch.setattr(ledger, "resource_client", lambda slug: lambda remaining: client)
+    ticks = iter(index * duration for index in range(1000))
+    clock = SimpleNamespace(monotonic=lambda: next(ticks), sleep=client.pauses.append)
+    monkeypatch.setattr(thin_task, "time", clock, raising=False)
     module = cast(Any, thin_task)
-    return cast(int, module.main(["--slug", "proof"]))
+    return cast(int, module.main(["--slug", "proof", *extra]))
 
 
 @pytest.mark.feature("thin-enhancement-phase-backfill")
@@ -183,14 +207,20 @@ def test_the_command_reads_bounded_targets_and_reports_verified_before_and_after
     client = _Client([task for index in range(101) for task in _pair(f"legacy-{index}")])
 
     assert _command(monkeypatch, client) == 0
-    assert json.loads(capsys.readouterr().out) == {"before": 101, "moved": 101, "after": 0}
-    assert [len(ids) for ids in client.reads if ids] == [100, 1]
-    assert len(client.writes) == 101
-    assert all(len(batch) == 3 for batch in client.writes)
+    assert json.loads(capsys.readouterr().out) == {
+        "before": 101,
+        "moved": 101,
+        "after": 0,
+        "batch_seconds": [0.125] * 5,
+    }
+    assert [len(ids) for ids in client.reads if ids] == [100, 1, 100, 1, 100, 1]
+    assert len(client.writes) == 5
+    assert [len(batch) for batch in client.writes] == [75, 75, 75, 75, 3]
+    assert client.pauses == [1.0] * 4
 
     assert _command(monkeypatch, client) == 0
-    assert json.loads(capsys.readouterr().out) == {"before": 0, "moved": 0, "after": 0}
-    assert len(client.writes) == 101
+    assert json.loads(capsys.readouterr().out) == {"before": 0, "moved": 0, "after": 0, "batch_seconds": []}
+    assert len(client.writes) == 5
 
 
 @pytest.mark.feature("thin-enhancement-phase-backfill")
@@ -213,4 +243,57 @@ def test_the_command_fails_if_readback_still_finds_an_unphased_plan(
     client = _Client(_pair())
     monkeypatch.setattr(client, "mutate", lambda slug, operations: {})
     assert _command(monkeypatch, client) == 1
-    assert json.loads(capsys.readouterr().out) == {"before": 1, "moved": 1, "after": 1}
+    assert json.loads(capsys.readouterr().out) == {"before": 1, "moved": 1, "after": 1, "batch_seconds": [0.125]}
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_a_plan_missing_from_the_claimable_set_is_unchanged() -> None:
+    tasks = _pair()
+    assert _backfill(tasks, set(), set()) == []
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_the_command_leaves_frozen_and_held_pairs_untouched(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tasks = _pair() + _pair("frozen") + _pair("held")
+    client = _Client(tasks)
+    client.held = {"enhance-frozen", "enhance-held"}
+
+    assert _command(monkeypatch, client) == 0
+    assert json.loads(capsys.readouterr().out) == {"before": 1, "moved": 1, "after": 0, "batch_seconds": [0.125]}
+    assert client.tasks[2:] == tasks[2:]
+    assert len(client.writes) == 1
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_preview_reports_the_eligible_count_without_writes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client = _Client(_pair())
+    assert _command(monkeypatch, client, ("--dry-run",)) == 0
+    assert json.loads(capsys.readouterr().out) == {"before": 1, "moved": 0, "after": 1, "batch_seconds": []}
+    assert client.writes == []
+    assert client.pauses == []
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+@pytest.mark.parametrize("duration, moved, remaining", [(2.0, 26, 0), (2.5, 25, 1)])
+def test_a_write_over_two_seconds_stops_the_pass_before_another_batch(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    duration: float,
+    moved: int,
+    remaining: int,
+) -> None:
+    client = _Client([task for index in range(26) for task in _pair(f"legacy-{index}")])
+    assert _command(monkeypatch, client, duration=duration) == int(bool(remaining))
+    writes = 1 if remaining else 2
+    assert json.loads(capsys.readouterr().out) == {
+        "before": 26,
+        "moved": moved,
+        "after": remaining,
+        "batch_seconds": [duration] * writes,
+    }
+    assert len(client.writes) == writes
+    assert client.pauses == [1.0] * (writes - 1)
