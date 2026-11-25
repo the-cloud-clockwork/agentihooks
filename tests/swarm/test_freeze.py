@@ -504,7 +504,6 @@ def test_marks_derives_the_admitted_queue_once_whatever_the_open_task_count(
     ]
     found = doc(record("lane:ci", "focus"), tasks=rows)
     graph = hierarchy.project(found)[0]
-    expected = freeze.marks(found, graph, "", False)
     calls: list[int] = []
     original = freeze.admitted
 
@@ -513,8 +512,9 @@ def test_marks_derives_the_admitted_queue_once_whatever_the_open_task_count(
         return original(ledger, nodes)
 
     monkeypatch.setattr(freeze, "admitted", counting)
-    assert freeze.marks(found, graph, "", False) == expected
-    assert expected["held"]
+    marked = freeze.marks(found, graph, "", False)
+    assert sorted(marked["held"]) == sorted(f"tasks/t{index}" for index in range(open_tasks) if index % 3)
+    assert marked["frozen"] == []
     assert calls == [1]
 
 

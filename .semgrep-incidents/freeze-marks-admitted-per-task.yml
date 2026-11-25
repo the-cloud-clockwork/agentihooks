@@ -4,9 +4,8 @@ rules:
     severity: ERROR
     message: >-
       freeze.marks builds the page view of every new ledger generation. Calling unfocused there without the admitted
-      queue makes admitted rebuild its memo key over every task once per open task, so one view of an 8000 task
-      ledger cost 7.6 s of CPU and a watched ledger held the ledger server at a full core. Compute the queue once with
-      admitted and pass it to unfocused.
+      queue makes admitted rebuild its memo key over every task once per open task, so the view costs open tasks
+      times all tasks. Compute the queue once with admitted and pass it to unfocused.
     paths:
       include:
         - /scripts/swarm/freeze.py
@@ -18,4 +17,6 @@ rules:
       - metavariable-regex:
           metavariable: $MARKS
           regex: ^marks(_\w+)?$
-      - pattern: unfocused($TASK, $DOC, $GRAPH, $FIX)
+      - pattern: unfocused(...)
+      - pattern-not: unfocused($TASK, $DOC, $GRAPH, $FIX, $QUEUE)
+      - pattern-not: unfocused(..., admitted_queue=$QUEUE, ...)
