@@ -1,5 +1,5 @@
 {
-  "gate": "semgrep/scan/outage-rules-for-tests-hold-on-every-test-file",
+  "gate": "semgrep/test-rules/outage-rules-for-tests-hold-on-every-test-file",
   "reason": "ledger-client-swapped-for-a-function: a test swaps the ledger client for a lambda",
   "edits": [
     {

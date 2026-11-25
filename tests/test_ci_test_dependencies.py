@@ -1122,8 +1122,10 @@ def test_each_intentional_install_smoke_is_a_measured_install_with_a_reason() ->
 PINNED_TOOL_STEPS = {
     (".github/workflows/semgrep.yml", "charts", "Install PyYAML and Semgrep"): ("pyyaml", "semgrep"),
     (".github/workflows/semgrep.yml", "feature-tests", "Install Semgrep"): ("semgrep",),
-    (".github/workflows/semgrep.yml", "scan", "Install PyYAML"): ("pyyaml",),
+    (".github/workflows/semgrep.yml", "own-rules", "Install PyYAML"): ("pyyaml",),
+    (".github/workflows/semgrep.yml", "own-rules", "Install Semgrep"): ("semgrep",),
     (".github/workflows/semgrep.yml", "scan", "Install Semgrep"): ("semgrep",),
+    (".github/workflows/semgrep.yml", "test-rules", "Install Semgrep"): ("semgrep",),
     (".github/workflows/test.yml", "coverage-baseline", "Install coverage"): ("coverage",),
     (".github/workflows/test.yml", "coverage-ratchet", "Install coverage"): ("coverage",),
     (".github/workflows/test.yml", "dep-manifest", "Install coverage"): ("coverage", "pyyaml"),

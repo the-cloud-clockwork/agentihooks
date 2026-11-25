@@ -54,6 +54,8 @@ LANE_USERS = {
     *DIRECT,
 }
 CALLED = {
+    "semgrep.yml:own-rules": "own rule scans run in a called workflow and must not hold the caller lane",
+    "semgrep.yml:test-rules": "test rule scans run in a called workflow and must not hold the caller lane",
     "semgrep.yml:feature-tests": "feature fixtures run in a called workflow and must not hold the caller lane",
     "semgrep.yml:charts": "a job added to a called workflow needs the called lane form for the branch lane grader",
     "docs-sanity.yml:scan": "the reusable docs sanity scan runs in its caller's repository and must not hold a lane there",

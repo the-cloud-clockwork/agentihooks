@@ -1,5 +1,5 @@
 {
-  "gate": "semgrep/scan/rule-exceptions-only-shrink",
+  "gate": "semgrep/own-rules/rule-exceptions-only-shrink",
   "reason": "exceptions grew: a rule exception list grew",
   "edits": [
     {

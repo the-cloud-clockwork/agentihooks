@@ -27,8 +27,8 @@ def _workflow(name):
     return yaml.safe_load((_ROOT / ".github/workflows" / name).read_text())
 
 
-def test_wrapper_runs_the_inline_scan_feature_tests_and_chart_guard():
-    assert set(_jobs()) == {"scan", "feature-tests", "charts"}
+def test_wrapper_runs_the_inline_scan_feature_tests_and_chart_guard() -> None:
+    assert set(_jobs()) == {"scan", "own-rules", "test-rules", "feature-tests", "charts"}
 
 
 def test_scan_runs_inline_without_private_organization_workflow_calls():
@@ -41,27 +41,63 @@ def test_scan_runs_inline_without_private_organization_workflow_calls():
         )
 
 
+@pytest.mark.feature("semgrep-strict-scans-independent-jobs")
 def test_scan_keeps_the_reusable_workflow_steps() -> None:
-    steps = _jobs()["scan"]["steps"]
-    assert steps[0] == {"uses": "actions/checkout@v4", "with": {"ref": "${{ github.sha }}", "fetch-depth": 0}}
-    assert steps[1] == {"name": "Set up Python", "uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}}
-    assert [step.get("name") for step in steps[2:]] == [
-        "Install Semgrep",
-        "Install PyYAML",
-        "Check out the protected grader",
-        "Own rules hold on their fixtures and the code",
-        "Outage rules for tests hold on every test file",
-        "New test waits keep a bound of ten seconds or more",
-        "Rule exceptions only shrink",
-        "Resolve the merge base of the head and the base",
-        "Fail on findings new against the base",
-    ]
-    assert steps[2]["env"] == {"SEMGREP_VERSION": "1.177.0"}
-    assert steps[3] == {
+    jobs = _jobs()
+    expected = {
+        "own-rules": [
+            "Install Semgrep",
+            "Install PyYAML",
+            "Check out the protected grader",
+            "Own rules hold on their fixtures and the code",
+            "Rule exceptions only shrink",
+        ],
+        "test-rules": [
+            "Install Semgrep",
+            "Check out the protected grader",
+            "Outage rules for tests hold on every test file",
+            "New test waits keep a bound of ten seconds or more",
+        ],
+        "scan": [
+            "Install Semgrep",
+            "Check out the protected grader",
+            "Resolve the merge base of the head and the base",
+            "Fail on findings new against the base",
+        ],
+    }
+    for job, names in expected.items():
+        steps = jobs[job]["steps"]
+        assert steps[0] == {"uses": "actions/checkout@v4", "with": {"ref": "${{ github.sha }}", "fetch-depth": 0}}
+        assert steps[1] == {
+            "name": "Set up Python",
+            "uses": "actions/setup-python@v5",
+            "with": {"python-version": "3.12"},
+        }
+        assert [step.get("name") for step in steps[2:]] == names
+        assert steps[2]["env"] == {"SEMGREP_VERSION": "1.177.0"}
+        assert jobs[job]["timeout-minutes"] == 5
+    assert jobs["own-rules"]["steps"][3] == {
         "name": "Install PyYAML",
         "run": "python -m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2",
     }
-    assert _jobs()["scan"]["timeout-minutes"] == 5
+
+
+@pytest.mark.feature("semgrep-strict-scans-independent-jobs")
+def test_strict_scans_run_in_independent_jobs() -> None:
+    jobs = _jobs()
+    scans = {name: jobs[name] for name in ("own-rules", "test-rules", "scan")}
+    assert all("needs" not in job for job in scans.values())
+    assert all(job["timeout-minutes"] == 5 for job in scans.values())
+    groups = [job.get("concurrency", {}).get("group") for job in scans.values()]
+    assert len(set(groups)) == len(groups)
+    names = {job: {step.get("name") for step in body["steps"]} for job, body in scans.items()}
+    expected = {
+        "own-rules": "Own rules hold on their fixtures and the code",
+        "test-rules": "Outage rules for tests hold on every test file",
+        "scan": "Fail on findings new against the base",
+    }
+    for job, step in expected.items():
+        assert {owner for owner, steps in names.items() if step in steps} == {job}
 
 
 def test_scan_grades_new_findings_against_the_caller_base():
@@ -104,7 +140,7 @@ SCAN_STUB = '#!/usr/bin/env bash\necho "$*" >> "$STUBS/calls"\nexit "$SCAN_EXIT"
 
 
 def _test_rules_step() -> dict[str, Any]:
-    return next(step for step in _jobs()["scan"]["steps"] if step.get("name") == TEST_RULES)
+    return next(step for step in _jobs()["test-rules"]["steps"] if step.get("name") == TEST_RULES)
 
 
 def _run_test_rules(tmp_path: Path, graded: bool, scan_exit: int = 0) -> tuple[int, list[str]]:
@@ -190,7 +226,7 @@ WAIT_SCAN = "scan --error --strict --timeout 30 --metrics off --x-ignore-semgrep
 
 
 def _wait_bounds_step() -> dict[str, Any]:
-    return next(step for step in _jobs()["scan"]["steps"] if step.get("name") == WAIT_BOUNDS)
+    return next(step for step in _jobs()["test-rules"]["steps"] if step.get("name") == WAIT_BOUNDS)
 
 
 def _run_wait_bounds(
@@ -302,7 +338,7 @@ def test_every_semgrep_test_mode_command_runs_strict() -> None:
         if "--test" in arguments.split()
     ]
     assert {
-        ("semgrep.yml", "scan", "Own rules hold on their fixtures and the code"),
+        ("semgrep.yml", "own-rules", "Own rules hold on their fixtures and the code"),
         ("semgrep.yml", "feature-tests", "Operator feature regressions and passing fixtures"),
         ("semgrep.yml", "feature-tests", "Outage rules fire on their planted faults and pass their clean cases"),
     } <= {call[:3] for call in calls}
@@ -348,7 +384,7 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
 
 @pytest.mark.feature("tick-unbounded-read-rule")
 def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
-    steps = _jobs()["scan"]["steps"]
+    steps = _jobs()["own-rules"]["steps"]
     step = next(step for step in steps if step.get("name") == "Rule exceptions only shrink")
     assert step["env"]["BASE"] == "${{ inputs.base }}"
     assert "for list in .semgrep/*-allowlist.json; do" in step["run"]
@@ -485,7 +521,7 @@ def _commit(repo: Path, files: dict[str, str | None], message: str) -> str:
 def _run_exceptions_step(
     tmp_path: Path, dev: dict[str, str | None], head: dict[str, str | None]
 ) -> subprocess.CompletedProcess[str]:
-    step = next(step for step in _jobs()["scan"]["steps"] if step.get("name") == "Rule exceptions only shrink")
+    step = next(step for step in _jobs()["own-rules"]["steps"] if step.get("name") == "Rule exceptions only shrink")
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "dev")
@@ -529,7 +565,9 @@ def test_scan_excludes_only_the_mutable_action_tag_rule():
 
 def test_scan_reads_the_domain_rules_folder_that_holds_rule_files() -> None:
     step = next(
-        step for step in _jobs()["scan"]["steps"] if step.get("name") == "Own rules hold on their fixtures and the code"
+        step
+        for step in _jobs()["own-rules"]["steps"]
+        if step.get("name") == "Own rules hold on their fixtures and the code"
     )
     rules_dir = _ROOT / step["env"]["RULES"]
     assert rules_dir == _ROOT / ".semgrep"
@@ -540,7 +578,9 @@ def test_scan_reads_the_domain_rules_folder_that_holds_rule_files() -> None:
 
 def test_own_rules_scan_gives_each_rule_thirty_seconds_on_a_file() -> None:
     step = next(
-        step for step in _jobs()["scan"]["steps"] if step.get("name") == "Own rules hold on their fixtures and the code"
+        step
+        for step in _jobs()["own-rules"]["steps"]
+        if step.get("name") == "Own rules hold on their fixtures and the code"
     )
     assert "semgrep scan --error --strict --timeout 30 --metrics off" in step["run"]
 
@@ -548,7 +588,8 @@ def test_own_rules_scan_gives_each_rule_thirty_seconds_on_a_file() -> None:
 def test_scan_runs_on_the_lint_runner_expression_and_charts_on_the_select_expression() -> None:
     jobs = _jobs()
     caller = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
-    assert jobs["scan"]["runs-on"] == caller["lint"]["runs-on"]
+    for job in ("own-rules", "test-rules", "scan"):
+        assert jobs[job]["runs-on"] == caller["lint"]["runs-on"]
     assert jobs["charts"]["runs-on"] == caller["select"]["runs-on"]
 
 
@@ -667,13 +708,15 @@ def test_feature_tests_bound_the_semgrep_install_below_the_job_timeout() -> None
 
 def test_feature_tests_install_semgrep_with_the_scan_check_and_pin() -> None:
     steps = {(job, step.get("name")): step for job, spec in _jobs().items() for step in spec["steps"]}
-    feature, scan = steps["feature-tests", "Install Semgrep"], steps["scan", "Install Semgrep"]
-    assert (feature["run"], feature["env"]) == (scan["run"], scan["env"])
+    feature = steps["feature-tests", "Install Semgrep"]
+    for job in ("own-rules", "test-rules", "scan"):
+        scan = steps[job, "Install Semgrep"]
+        assert (feature["run"], feature["env"]) == (scan["run"], scan["env"])
 
 
-def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error():
+def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error() -> None:
     jobs = _jobs()
-    assert not {"if", "continue-on-error"} & (set(jobs["scan"]) | set(jobs["charts"]))
+    assert not any({"if", "continue-on-error"} & set(job) for job in jobs.values())
     assert all("if" not in step and "continue-on-error" not in step for job in jobs.values() for step in job["steps"])
 
 
@@ -681,16 +724,18 @@ def test_wrapper_holds_only_read_permission():
     assert _semgrep()["permissions"] == {"contents": "read"}
 
 
-def test_feature_tests_and_charts_have_runner_classes():
+def test_feature_tests_and_charts_have_runner_classes() -> None:
     classes = json.loads((_ROOT / ".github/runner-classes.json").read_text())
     assert {key for key in classes if key.startswith("semgrep.yml/")} == {
         "semgrep.yml/charts",
         "semgrep.yml/feature-tests",
+        "semgrep.yml/own-rules",
         "semgrep.yml/scan",
+        "semgrep.yml/test-rules",
     }
 
 
-def test_exactly_one_step_per_ratchet_grades_against_the_base():
+def test_exactly_one_step_per_ratchet_grades_against_the_base() -> None:
     ratchets = [
         (job, step)
         for job, body in _jobs().items()
@@ -698,7 +743,7 @@ def test_exactly_one_step_per_ratchet_grades_against_the_base():
         if "check --base FETCH_HEAD" in step.get("run", "") or "--baseline-commit" in step.get("run", "")
     ]
     assert [(job, step["name"]) for job, step in ratchets] == [
-        ("scan", "New test waits keep a bound of ten seconds or more"),
+        ("test-rules", "New test waits keep a bound of ten seconds or more"),
         ("scan", "Fail on findings new against the base"),
         ("charts", "Guard rules hold on their fixtures and at their computed floors"),
     ]

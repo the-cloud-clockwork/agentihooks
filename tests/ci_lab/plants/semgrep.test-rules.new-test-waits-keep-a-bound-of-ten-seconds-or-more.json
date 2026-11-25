@@ -1,5 +1,5 @@
 {
-  "gate": "semgrep/scan/new-test-waits-keep-a-bound-of-ten-seconds-or-more",
+  "gate": "semgrep/test-rules/new-test-waits-keep-a-bound-of-ten-seconds-or-more",
   "reason": "test-wait-bound-under-ten-seconds: a successful event wait has a one second bound",
   "edits": [
     {

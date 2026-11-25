@@ -441,8 +441,8 @@ def test_the_real_semgrep_scan_and_rule_exception_gates_carry_the_env_they_read(
     registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
     workflow = (ROOT / static_gates.WORKFLOW).read_text()
     gates = {gate.name: gate for gate in static_gates.discover(workflow, registry, ci_wiring.load(ROOT))}
-    assert ("RULES", ".semgrep") in gates["semgrep/scan/own-rules-hold-on-their-fixtures-and-the-code"].env
-    assert ("BASE", "${{ inputs.base }}") in gates["semgrep/scan/rule-exceptions-only-shrink"].env
+    assert ("RULES", ".semgrep") in gates["semgrep/own-rules/own-rules-hold-on-their-fixtures-and-the-code"].env
+    assert ("BASE", "${{ inputs.base }}") in gates["semgrep/own-rules/rule-exceptions-only-shrink"].env
     assert "!cancelled()" in gates["lint/lint-check"].condition
 
 
@@ -482,7 +482,7 @@ def test_the_real_workflow_s_only_gates_that_rewrite_their_tree_are_its_two_base
     workflow = (ROOT / static_gates.WORKFLOW).read_text()
     gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
     assert [gate.name for gate in gates if gate.rewrites_tree] == [
-        "semgrep/scan/new-test-waits-keep-a-bound-of-ten-seconds-or-more",
+        "semgrep/test-rules/new-test-waits-keep-a-bound-of-ten-seconds-or-more",
         "semgrep/scan/fail-on-findings-new-against-the-base",
     ]
 
