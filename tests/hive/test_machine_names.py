@@ -22,6 +22,7 @@ def admin():
 
     redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
     registry.update(redis, "root", ["ui=yes"])
+    registry.beat(redis, "root", {"heartbeat_at": registry.wall_ms()})
     return redis
 
 

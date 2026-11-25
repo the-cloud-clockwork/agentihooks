@@ -1,0 +1,13 @@
+rules:
+  - id: placement-marker-only-worker-census
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Hive placement counted subscription masters as workers because only interactive login markers were removed.
+      Exclude reported master executions by seat role, retaining marker fallback without subtracting a master twice.
+    paths:
+      include:
+        - /scripts/hive/launch.py
+        - placement-marker-only-worker-census.py
+    pattern: |
+      $MASTERS = sum($COUNT for $KEY, $COUNT in $COUNTS.items() if $KEY.startswith("interactive:"))

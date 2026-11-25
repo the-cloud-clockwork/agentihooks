@@ -65,6 +65,8 @@ WORKER_KEYS = (
     "swarm:*:expert-running",
     "swarm:*:expert-proofs",
     "swarm:*:expert-closing",
+    "swarm:*:review:*",
+    "swarm:*:review-tasks",
     "seat:*:recaps",
     "seat:*:learned",
     "seat-of:*:exit",

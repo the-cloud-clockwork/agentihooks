@@ -1,0 +1,6 @@
+{
+  "scripts/review/gate.py:scripts.review.gate.x__author:ecfe16a97ec298564be9aa28c4f4bad9bebf7892dae115f0f91821690d95c384": {
+    "reader": "standards_reader",
+    "reason": "cast(None, LedgerClient().task) returns the same bound method because gate.py imports cast from typing and nothing rebinds it, so read_task and the author it reads are unchanged."
+  }
+}

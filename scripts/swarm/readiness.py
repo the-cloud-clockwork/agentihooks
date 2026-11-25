@@ -50,6 +50,11 @@ class Snapshot:
         """The classes of the snapshot's offers, worked out once for every read of the snapshot."""
         return _classes(self.doc)
 
+    @cached_property
+    def admitted(self) -> frozenset[str] | None:
+        """The focus queue of the snapshot's document, worked out once for every claimable check over it."""
+        return freeze.admitted(self.doc, self.graph)
+
 
 def _classes(doc: dict[str, Any]) -> Classes:
     """Class each task of the document: urgent or under a focus first, then under an operator order, oldest order
@@ -130,19 +135,19 @@ class Source:
         )
 
 
-def ready(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> bool:
+def ready(task: dict, rows: dict, doc: dict, graph: dict, fix: str, admitted_queue: Any = freeze.UNCACHED) -> bool:
     return (
         task.get("state") == "open"
         and not task.get("out_of_scope")
         and not task.get("merged_into")
-        and not claim_hold.holds(task, rows, doc, graph, fix)  # pyright: ignore[reportUnknownArgumentType]
+        and not claim_hold.holds(task, rows, doc, graph, fix, admitted_queue)  # pyright: ignore[reportUnknownArgumentType]
     )
 
 
 def claimable(task: dict, lane: str, view: Snapshot) -> bool:
     return (
         task.get("lane") == lane
-        and ready(task, view.rows, view.doc, view.graph, view.fix)
+        and ready(task, view.rows, view.doc, view.graph, view.fix, admitted_queue=view.admitted)
         and not view.claimed(task["id"])
         and view.admits(task)
     )

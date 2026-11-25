@@ -31,7 +31,7 @@ from scripts.swarm_ledger import (
 from scripts.swarm_ledger.api import resources, schemas
 from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.swarm_ledger.repository import postgres
-from scripts.tick.adapters import database_ledger
+from scripts.tick.adapters import database_ledger, writer_client
 
 URL = os.environ.get("LEDGER_TEST_POSTGRES_URL", "")
 STORES = ["sqlite", "postgres"] if URL else ["sqlite"]
@@ -181,7 +181,7 @@ def writer(store: Any, memory_path: Path, monkeypatch: pytest.MonkeyPatch) -> It
 
 def over_socket(where: Path, slug: str, path: str, payload: dict[str, Any] | None = None) -> tuple[int, bytes]:
     """The status and body the writer on ``where`` answers one request with."""
-    return warm_writer.ask(warm_writer.connected(10.0, where), slug, path, payload)
+    return writer_client.ask(writer_client.connected(10.0, where), slug, path, payload)
 
 
 def in_process(slug: str, path: str, payload: dict[str, Any] | None = None) -> tuple[int, bytes]:

@@ -122,3 +122,14 @@ def test_a_lease_reads_the_stored_manifest_of_a_test_unit_only(tmp_path: Path) -
     assert objects.keys(ROOT) == sorted(unit_path(unit.kind, unit.key, "manifest") for unit in (test, static))
     assert [scheduler.stored_manifest(objects, unit) for unit in (test, static, bare)] == ['{"tests": {}}', "", ""]
     assert leases.unstored(test) == ""
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_a_lease_reads_the_stored_manifest_of_a_mutant_unit(tmp_path: Path) -> None:
+    objects = LocalObjects(tmp_path)
+    traced = '["tests/test_alpha.py"]'
+    mutant = Unit("mutant", key("mutant", 4), ("scripts.alpha.x_first__mutmut_1",), traced)
+    bare = Unit("mutant", key("mutant", 5), ("scripts.alpha.x_second__mutmut_1",))
+    stats = Unit("stats", key("stats", 6), ("tests/test_alpha.py",), "stats text")
+    assert scheduler.keep_manifests(objects, [mutant, bare, stats]) == 2
+    assert [scheduler.stored_manifest(objects, unit) for unit in (mutant, bare, stats)] == [traced, "", ""]

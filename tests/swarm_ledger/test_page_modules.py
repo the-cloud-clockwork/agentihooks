@@ -87,7 +87,8 @@ def test_worker_dependency_inventory_refuses_a_missing_script(tmp_path, monkeypa
         test_every_module_the_page_imports_exists_and_no_module_holds_the_whole_script()
 
 
-def test_the_source_view_for_text_checks_covers_every_module():
+@pytest.mark.feature("ledger-orders-panel")
+def test_the_source_view_for_text_checks_covers_every_module() -> None:
     from tests.swarm_ledger.ledger_page import worker_modules
 
     workers = {Path(worker).stem for name in ORDER for worker in worker_modules(f"{name}.js")}

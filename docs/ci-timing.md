@@ -1910,7 +1910,7 @@ fifteen minute target.
 
 Browser jobs share the [verified Chromium cache](reference/browser-cache.md): restore is attempted on every ref when no verified baked browser is available, while only `dev` pushes save after a miss and successful installation. The guide covers workflow setup, GitHub cache scope, recovery and cache inventory checks.
 
-Hosted lane users share three lanes, the concurrency groups `hosted-lane-a`, `hosted-lane-b` and `hosted-lane-c`. A run picks its lane from the last digit of its run id: 0 to 2 is lane a, 3 to 5 lane b and 6 to 9 lane c. Each lane runs one run at a time and queues the rest (`queue: max`), so at most three such runs hold hosted runners at once. The table lists each lane user and the runs of it that take a lane, and `tests/test_ci_hosted_lanes.py` fails when the lane users in the table differ from the ones it pins. Every `proofs.yml` dispatch, whatever its proof, stays off the lanes in its own `focused-proof-<run id>` group, so a short proof never waits behind a full Tests dispatch on its lane.
+Hosted lane users share three lanes, the concurrency groups `hosted-lane-a`, `hosted-lane-b` and `hosted-lane-c`. A run picks its lane from the last digit of its run id: 0 to 2 is lane a, 3 to 5 lane b and 6 to 9 lane c. Each lane runs one run at a time and queues the rest (`queue: max`), so at most three such runs hold hosted runners at once. The table lists each lane user and the runs of it that take a lane, and `tests/test_ci_hosted_lanes.py` fails when the lane users in the table differ from the ones it pins. Every `proofs.yml` dispatch, whatever its proof, stays off the lanes in its own `focused-proof-<run id>` group, so a short proof never waits behind a full Tests dispatch on its lane. The Gate Required status workflow stays off them as well: each run joins `gate-required-status-<head sha>`, the group of the head its Tests run reports, with `queue: max` and no cancelling, so the status posts as soon as Tests ends while runs of one head still post in order.
 
 | Lane user | Workflow file | Runs on a lane |
 |---|---|---|
@@ -1924,10 +1924,9 @@ Hosted lane users share three lanes, the concurrency groups `hosted-lane-a`, `ho
 | CI templates | `ci-templates.yml` | runs under its own name |
 | Events launch smoke | `events-smoke.yml` | runs under its own name |
 | Feature suite | `feature-suite.yml` | runs under its own name |
-| Gate Required status | `gate-required.yml` | every run |
 | Helm chart in kind | `helm-kind.yml` | runs under its own name |
-| Helm chart release | `chart-release.yml` | every run |
 | Hierarchy CPU proof | `hierarchy-cpu.yml` | runs under its own name |
+| Lab check | `lab-check.yml`, job `post` | every run |
 | Ledger server load | `ledger-load.yml` | runs under its own name |
 | Lost runner | `lost-runner.yml` | every run |
 | Mutation line selection proof | `mutation-line-selection-proof.yml` | every run |
@@ -1956,6 +1955,7 @@ Branch pushes of the Startup stages and Worker resources workflows stay off the 
 | Either workflow, called by another workflow | `startup-stages-<run id>` or `worker-resources-<run id>` | single |
 | Worker resources, dispatch | `hosted-lane-<a, b or c>` | max |
 | `proofs.yml`, every proof | `focused-proof-<run id>` | max |
+| `gate-required.yml`, every run | `gate-required-status-<head sha>` | max |
 
 Before this split, a Startup stages push measurement held a lane for minutes and every proof dispatch hashed to that lane waited behind it: a push created at 03:55:26 queued on lane a until 04:21:36 and held it until 04:27:39, and a swarm worker image dispatch on the same lane, created at 04:06:34, never got a job and was cancelled after 20 minutes in the queue. After it, on lane c, a Startup stages push created at 08:47:30 ran from 08:47:43 to 08:52:00, and a worker image proof dispatch created at 08:50:49, while that push was still running, started its first jobs at 08:50:50 and passed at 08:53:58 (runs 39018691198 and 39018894036, pull request #3956).
 

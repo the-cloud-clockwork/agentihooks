@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/entry.py:scripts.swarm_ledger.repository.entry.x_thawed:188f628b29b567d9ca58d6271d15a5e518e0b7419ad95547a473242bd9717761": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None or another string changes no output, because cast is typing.cast imported with no rebinding in entry.py and tracked.py, returns its second argument unchanged and never evaluates the first at runtime."
+  }
+}

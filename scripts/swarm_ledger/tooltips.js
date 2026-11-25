@@ -52,6 +52,7 @@
     ['[data-gate-name="nightwatch"]', "Watches the front door master seat, ready work without a launch and dev merges every tick."],
     ['[data-gate-name="reset"]', "Recycles a master held on a question, permission or interrupted prompt while operator items wait fifteen minutes."],
     ['[data-gate-name="feature"]', "Checks that done on live proof names a mapped feature with tests."],
+    ['[data-gate-name="review"]', "Checks that a pull request head entering the merge queue has an independent review whose findings its author read."],
     ["#quota-refresh", "Probe every Claude and Codex account now and redraw the quota table."],
     ['[data-scaling="auto"]', "Auto scaling. The swarm sets each lane ceiling from live quota and host room."],
     ['[data-scaling="manual"]', "Manual scaling. Lane ceilings stay at the values you set."],

@@ -101,9 +101,13 @@ Its ceiling calculation does not allocate an automatic reviewer share. Quota
 output combines the fixed review ceiling with the autoscaled ceilings of the
 other lanes and can still read decisions saved before review was added.
 
-No `--max-review-agents` creation flag or `max-review-agents` setting
-exists. Configure the review cap in the template used for
-new swarm creation; changing a template file does not change a running swarm.
+Set the review cap of a running swarm with
+`agentihooks swarm <slug> set max-review-agents=N` (or the bare pair
+`agentihooks swarm <slug> max-review-agents=N`), a whole number stored as
+`max_review` beside the other lane caps; it applies at the next tick and does
+not pin the autoscaled caps. `swarm <slug> status` shows it as `review N`.
+No `--max-review-agents` creation flag exists: a new swarm takes its review cap
+from the template, and changing a template file does not change a running swarm.
 
 ## Add and inspect a review task
 
@@ -148,11 +152,16 @@ own task listings and caps. On the `events` engine the readiness reactor also
 offers a ready review task on the review ready queue, where a review spoke
 takes it.
 
-The review kind names no proof fields, so `done` closes a review task with no
-verdict, proof or pull request. A review task that records a pull request,
-through `--pr` or its stored one, closes only after that pull request merges,
-unless `--filed` names a follow up. The `--must`, `--check` and `--judge`
-contract goes into the agent's prompt as its proof contract line.
+The review kind names no proof fields, but `done` refuses a review task until
+it has posted at least one finding with `agentihooks review post`. The refusal
+reads the post count kept for that swarm and task, runs before any other proof
+check and applies to every task in the review lane or of the review kind. A
+review task handed to the merge pass with `swarm ready` goes back open after
+its pull request merges, so it still closes through `done`. A review task that
+records a pull request, through `--pr` or its stored one, closes only after
+that pull request merges, unless `--filed` names a follow up. The `--must`,
+`--check` and `--judge` contract goes into the agent's prompt as its proof
+contract line.
 
 ## Where reviewers launch
 
@@ -245,8 +254,9 @@ and autoscale has no reviewer share.
 | Symptom | Check or action |
 |---|---|
 | Task creation says review tasks must use the review lane | Supply `--lane review --kind review` together. A review kind on another lane, or another kind on the review lane, is refused. |
+| `swarm done` says a review task is done only after it posts at least one finding | The task has no finding counted for this swarm and task. Post the findings with `agentihooks review post <url> --slug <slug> --finding <text>` as the reviewer seat, then repeat `done`. |
 | A template has no visible review entry | Check the installed version and the configuration home used by `swarm templates`. Parsed templates include review even when the JSON omits it. |
-| An older swarm has zero reviewer capacity | Configurations missing `max_review` default to zero. Editing a template or repeating `init` does not migrate that stored cap. |
+| An older swarm has zero reviewer capacity | Configurations missing `max_review` default to zero. Editing a template or repeating `init` does not migrate that stored cap; raise it with `agentihooks swarm <slug> set max-review-agents=N`. |
 | Autoscale changes the other ceilings but leaves review unchanged | Review retains its configured cap; autoscale has no reviewer share. |
 | Review capacity is below its configured ceiling | Inspect account capacity, host room and claimable review demand. A cap permits capacity but does not reserve an account or force placement. |
 | A review task is listed but no reviewer starts | Check that the review cap is above zero and the reviewer profile is installed where the launch lands. On the `events` engine, check that a hive logs `hive spoke for swarm <slug> lane review takes swarm.<slug>.ready.review`; a hive whose `HIVE_EXCLUDED` names `review` runs no review spoke. |
