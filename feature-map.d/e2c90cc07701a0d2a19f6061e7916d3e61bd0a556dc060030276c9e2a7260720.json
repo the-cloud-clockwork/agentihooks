@@ -8,6 +8,7 @@
     "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_planner_validates_its_recorded_outer_launch",
     "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_canary_refuses_another_execution",
     "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_canary_requires_the_complete_launch_record",
-    "tests/profiles/test_codex_planner_canary.py::test_planner_permissions_keep_the_repository_read_only"
+    "tests/profiles/test_codex_planner_canary.py::test_planner_permissions_keep_the_repository_read_only",
+    "tests/profiles/test_codex_planner_canary.py::test_only_codex_planner_reports_move_into_the_existing_write_grant"
   ]
 }

@@ -101,3 +101,29 @@ def test_planner_permissions_keep_the_repository_read_only(tmp_path: Path) -> No
         "-c",
         'default_permissions="planner"',
     ]
+
+
+@pytest.mark.parametrize(("target", "profile"), [("codex", "planner"), ("codex", "engineer"), ("claude", "planner")])
+def test_only_codex_planner_reports_move_into_the_existing_write_grant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], target: str, profile: str
+) -> None:
+    from argparse import Namespace
+
+    from scripts import init_agent
+
+    home = tmp_path / profile / target
+    home.mkdir(parents=True)
+    (home / binding.PERSONAS[target]).write_text(binding.persona("Use the selected persona.\n"))
+    (home.parent / f"{target}.sources.json").write_text("[]")
+    binding.write(home, profile, target)
+    runtime_dir = tmp_path / "runtime"
+    monkeypatch.setattr(init_agent, "_runtime_dir", lambda environ: runtime_dir)
+    monkeypatch.setattr(init_agent, "model_effort", lambda *args: ("model", "high"))
+    env = {"HOME": str(tmp_path / "user"), binding.HOMES[target]: str(home)}
+    init_agent._binding_request(Namespace(profile=profile, defer_canary=False), target, "Start.", env, [])
+    report = Path(env[binding.REPORT])
+    expected = tmp_path / "user" / ".agentihooks" / "swarm" / "profile-reports"
+    assert report.parent == (expected if (target, profile) == ("codex", "planner") else runtime_dir)
+    assert report.is_file()
+    assert report.stat().st_mode & 0o777 == 0o600
+    assert f"profile_report={report}" in capsys.readouterr().out
