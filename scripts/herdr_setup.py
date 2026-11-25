@@ -6,7 +6,6 @@ import sys
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import cast
 
 import tomlkit
 from tomlkit import TOMLDocument
@@ -84,7 +83,7 @@ def _table(doc: TOMLDocument, name: str) -> Table:
     table = doc.get(name)
     if table is None:
         table = doc[name] = tomlkit.table()
-    return cast("Table", table)
+    return table
 
 
 def resume_off(environ: Mapping[str, str] | None = None) -> bool:
@@ -101,7 +100,7 @@ def resume_off(environ: Mapping[str, str] | None = None) -> bool:
 def _herdr_state() -> dict[str, object]:
     state: dict[str, object] = getattr(_install_module(), "_load_state")()
     herdr = state.get("herdr")
-    return cast("dict[str, object]", herdr) if isinstance(herdr, dict) else {}
+    return herdr if isinstance(herdr, dict) else {}
 
 
 def _released() -> bool:

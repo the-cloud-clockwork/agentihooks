@@ -116,21 +116,29 @@ def test_an_unrouted_session_never_calls_herdr():
 
 @pytest.mark.feature("herdr-native-resume")
 @pytest.mark.parametrize(
-    "run",
-    [Recorder(returncode=1, stdout='{"error":{"code":"resume_not_accepted"}}'), Recorder(raises=OSError("gone"))],
+    "run, error",
+    [
+        (
+            Recorder(returncode=1, stdout=' {"error":{"code":"resume_not_accepted"}} '),
+            '{"error":{"code":"resume_not_accepted"}}',
+        ),
+        (Recorder(returncode=1, stdout="x" * 300), "x" * 200),
+        (Recorder(raises=OSError("gone")), "OSError"),
+        (Recorder(raises=subprocess.TimeoutExpired("herdr", herdr_resume.TIMEOUT_S)), "TimeoutExpired"),
+    ],
 )
-def test_a_refused_or_failed_report_is_logged_and_dropped(monkeypatch, run):
+def test_a_refused_or_failed_report_is_logged_and_dropped(monkeypatch, run, error):
     logged = []
     monkeypatch.setattr(herdr_resume, "log", lambda message, data: logged.append((message, data)))
     assert herdr_resume.report({"session_id": SESSION}, ROUTED, run) is False
-    assert logged and logged[0][0] == herdr_resume.FAILED
+    assert logged == [(herdr_resume.FAILED, {"error": error})]
 
 
 @pytest.mark.feature("herdr-native-resume")
-def test_a_timed_out_report_is_dropped(monkeypatch):
-    monkeypatch.setattr(herdr_resume, "log", lambda message, data: None)
-    run = Recorder(raises=subprocess.TimeoutExpired("herdr", herdr_resume.TIMEOUT_S))
-    assert herdr_resume.report({"session_id": SESSION}, ROUTED, run) is False
+def test_failures_reach_the_agentihooks_log():
+    from hooks import common
+
+    assert herdr_resume.log is common.log
 
 
 @pytest.mark.feature("herdr-native-resume")

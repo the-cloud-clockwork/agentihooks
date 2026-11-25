@@ -15,9 +15,7 @@ FAILED = "herdr resume report failed"
 HOMES = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
 
 
-def log(message: str, data: dict[str, str]) -> None:
-    write: Callable[[str, dict[str, str]], None] = getattr(common, "log")
-    write(message, data)
+log: Callable[[str, dict[str, str]], None] = getattr(common, "log")
 
 
 def routed(environ: Mapping[str, str], target: str) -> bool:

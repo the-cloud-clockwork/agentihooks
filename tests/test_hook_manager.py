@@ -305,13 +305,13 @@ def test_a_failing_herdr_resume_report_never_breaks_session_start(quiet_session_
     from hooks import hook_manager
 
     def refuse(payload):
-        raise RuntimeError("herdr socket gone")
+        raise OSError("herdr socket gone")
 
     logged = []
     monkeypatch.setattr("hooks.lifecycle.herdr_resume.kick", refuse)
     monkeypatch.setattr(hook_manager, "log", lambda message, data=None: logged.append((message, data)))
     hook_manager.EVENT_HANDLERS["SessionStart"]({"session_id": "herdr-session"})
-    assert ("herdr resume report failed", {"error": "RuntimeError"}) in logged
+    assert ("herdr resume report failed", {"error": "OSError"}) in logged
 
 
 def test_start_condition_failure_fails_open(quiet_session_start, monkeypatch, tmp_path):

@@ -256,6 +256,16 @@ def test_the_resume_switch_turns_agent_resume_off(monkeypatch, runner, tmp_path,
 
 
 @pytest.mark.feature("herdr-native-resume")
+def test_the_resume_switch_leaves_a_resume_off_config_alone(monkeypatch, runner, tmp_path, capsys):
+    monkeypatch.setenv(herdr_setup.RESUME_ENV, "off")
+    existing = "[ui]\ncopy_on_select = true\n" + RESUME_OFF
+    monkeypatch.setattr(herdr_setup, "tomlkit", types.SimpleNamespace(parse=tomlkit.parse, dumps=_no_rewrite))
+    assert _configured(monkeypatch, runner, tmp_path, existing) == existing
+    assert ["/bin/herdr", "server", "reload-config"] not in runner.calls
+    assert "[herdr] config:" not in capsys.readouterr().out
+
+
+@pytest.mark.feature("herdr-native-resume")
 @pytest.mark.parametrize("value", ["", "on", "true", "1"])
 def test_resume_stays_on_unless_switched_off(value):
     assert herdr_setup.resume_off({herdr_setup.RESUME_ENV: value}) is False

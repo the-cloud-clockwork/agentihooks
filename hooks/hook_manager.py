@@ -1170,7 +1170,7 @@ def _herdr_resume(payload: Any) -> None:
         from hooks.lifecycle.herdr_resume import kick
 
         kick(payload)
-    except Exception as exc:
+    except (ImportError, OSError, ValueError) as exc:
         log("herdr resume report failed", {"error": type(exc).__name__})
 
 
