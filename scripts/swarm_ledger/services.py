@@ -1,5 +1,6 @@
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from scripts.swarm_ledger.api.services import Authority, LedgerCore
 
@@ -17,6 +18,7 @@ class Ledger:
     bin_ledger: Callable[[str], None]
     workspace_tails: Callable[[str, str], dict]
     stream_resources: Callable[[str], dict]
+    summary: Callable[[str], dict[str, Any]]
     layout: Callable[[], dict]
     write_layout: Callable[[dict], dict]
     write_gate: Callable[[str], object]

@@ -14,6 +14,7 @@ LEDGER = {
     "bin_ledger": "ledger_bin.delete",
     "workspace_tails": "workspace_tails",
     "stream_resources": "stream_resources",
+    "summary": "ledger_summary",
     "layout": "ledger_layout.read",
     "write_layout": "ledger_layout.write",
     "write_gate": "write_gate",
