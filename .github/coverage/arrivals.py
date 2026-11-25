@@ -304,9 +304,7 @@ def arrive(
     left = list(range(1, run.shards + 1))
     queue = [] if raw else [path for path in sorted(out.glob(CARRIED)) if path.stat().st_size]
     flattening: Flattening | None = None
-    while True:
-        if raw and jobs is not None and jobs.failed():
-            break
+    while not (raw and jobs is not None and jobs.failed()):
         complete = not raw or jobs is not None and jobs.completed()
         listed = service.listed()
         if listed is not None:
