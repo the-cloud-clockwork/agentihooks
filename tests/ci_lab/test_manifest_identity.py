@@ -170,6 +170,9 @@ def test_old_records_without_identity_are_parsed_then_refused_after_claiming(
             for slot in state.units.values():
                 run.lab.client.hdel(queue._job(slot.job), "manifest_digest")
     lease = leased(run)
+    decoded = run.engine.queue.job(lease.job)
+    assert decoded is not None
+    assert decoded.unit.manifest_digest == ""
     assert lease.unit.manifest_digest == ""
     pod = support.pod_of(tmp_path, support.FakeWorktrees({}))
     suite = executors.Suite(tmp_path / "absent", tmp_path / "flakes")
