@@ -113,6 +113,7 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:codex-openings",
                     f"~{ROOT}:swarm:*:codex-viewers",
                     f"~{ROOT}:swarm:*:launch-endings",
+                    f"~{ROOT}:swarm:*:spawned",
                     f"~{ROOT}:swarm:*:identity-conflicts",
                     f"~{ROOT}:swarm:*:desired-routes",
                     f"~{ROOT}:swarm:*:state-since",

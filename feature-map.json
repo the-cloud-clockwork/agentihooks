@@ -16693,7 +16693,9 @@
         "tests/swarm/test_spawn_counts.py::test_a_same_name_master_resume_adds_a_new_launch",
         "tests/swarm/test_spawn_counts.py::test_a_local_launch_refused_during_admission_adds_no_spawn",
         "tests/hive/test_resume_order.py::test_a_native_hive_resume_records_its_spawn_before_answering_done",
-        "tests/hive/test_resume_order.py::test_a_native_hive_resume_closes_the_new_process_when_spawn_recording_fails"
+        "tests/hive/test_resume_order.py::test_a_native_hive_resume_closes_the_new_process_when_spawn_recording_fails",
+        "tests/swarm/test_spawn_counts.py::test_a_resumed_process_stays_counted_when_its_metadata_write_fails",
+        "tests/swarm/test_spawn_counts.py::test_a_local_launch_is_retired_when_its_spawn_cannot_be_recorded"
       ]
     }
   ],

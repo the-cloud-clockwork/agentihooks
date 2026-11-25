@@ -156,7 +156,7 @@ def test_a_same_name_master_resume_adds_a_new_launch(store: RedisStore) -> None:
     original = local_spawn(store, "claude", now - 1000)
     agent = replace(original, harness="claude", profile="engineer", launched_at=now - 1000)
     runtime = SimpleNamespace(resume=lambda *args: Placed("resumed:pane", "claude", launched_at=now))
-    master_launch._resume(store, SLUG, runtime, now, master_launch.Previous(agent, now - 1000))
+    master_launch._resume(store, SLUG, runtime, now - HOUR - 1, master_launch.Previous(agent, now - 1000))
     assert store.spawns(SLUG) == {"claude": 2}
 
 
@@ -175,3 +175,48 @@ def test_a_local_launch_refused_during_admission_adds_no_spawn(
     with pytest.raises(seat_spawn.SeatFailed, match="admission refused"):
         local_spawn(store, "claude", now_ms())
     assert store.spawns(SLUG) == {}
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+def test_a_resumed_process_stays_counted_when_its_metadata_write_fails(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typing import Any
+
+    from scripts.swarm import resume, snapshot
+
+    now = now_ms()
+    agent = AgentRecord("eng-a", "eng", "t1", harness="claude", pane_id="old")
+    runtime = SimpleNamespace(resume=lambda *args: Placed("new", "claude", launched_at=now))
+    context = SimpleNamespace(runtime=runtime, at=now)
+    monkeypatch.setattr(snapshot, "worktrees", lambda *args: {})
+    monkeypatch.setattr(resume, "blocker", lambda *args: "")
+    monkeypatch.setattr(resume, "_recovery_current", lambda *args: True)
+
+    def refused(*args: Any) -> None:
+        raise OSError("metadata write refused")
+
+    monkeypatch.setattr(store, "put_agent", refused)
+    assert resume._recover_process(store, SLUG, agent, {}, context, "resume") == "metadata write refused"
+    assert store.spawns(SLUG) == {"claude": 1}
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+def test_a_local_launch_is_retired_when_its_spawn_cannot_be_recorded(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typing import Any
+    from unittest.mock import Mock
+
+    def refused(*args: Any) -> None:
+        raise OSError("spawn record refused")
+
+    runtime = SimpleNamespace(spawn=lambda *args: Placed("local:pane", "claude", launched_at=now_ms()), retire=Mock())
+    monkeypatch.setattr(spawn_counts, "record", refused)
+    with pytest.raises(seat_spawn.SeatFailed, match="spawn record refused"):
+        seat_spawn.place_seat(
+            SLUG, store.config(SLUG), store, runtime, seat_spawn.Seat("master", "master"), now_ms(), lambda record: {}
+        )
+    retired = runtime.retire.call_args.args[0]
+    assert (retired.pane_id, retired.harness) == ("local:pane", "claude")
+    runtime.retire.assert_called_once()
