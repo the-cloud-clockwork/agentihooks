@@ -5984,7 +5984,23 @@
         "tests/swarm/test_enhance_sweep.py::test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_writes",
         "tests/swarm/test_enhance_sweep.py::test_an_unfrozen_thin_task_beside_a_frozen_phase_is_still_listed",
         "tests/swarm/test_enhance_sweep.py::test_the_sweep_lists_and_queues_no_thin_task_a_freeze_holds",
-        "tests/swarm/test_ledger_client_task.py::test_a_work_tree_read_asks_the_ledger_for_its_plans_phases_and_slices_alone"
+        "tests/swarm/test_ledger_client_task.py::test_a_work_tree_read_asks_the_ledger_for_its_plans_phases_and_slices_alone",
+        "tests/swarm/test_enhance_sweep.py::test_a_refused_enhancement_write_leaves_the_sweep_writing_the_next_thin_task",
+        "tests/swarm/test_enhance_sweep.py::test_a_sweep_where_every_write_lands_reports_one_queued_line_per_thin_task_in_ledger_order"
+      ]
+    },
+    {
+      "id": "swarm-enhance-sweep-continues-past-timeout",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-sweep-timeout-continue",
+      "behaviour": "The enhance sweep reports ordered task outcomes and counts, continues after timeout, transport, unreachable or refused writes with fresh deadlines and pacing, skips frozen thin tasks without writing, and flushes each line to stderr while retaining one stdout JSON document with actions and counts.",
+      "seam": "scripts.swarm.enhance_sweep.sweep and command through scripts.swarm.cli.main",
+      "tests": [
+        "tests/swarm/test_enhance_sweep.py::test_a_failed_second_write_is_counted_and_the_sweep_continues",
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_leaves_programming_errors_visible",
+        "tests/swarm/test_enhance_sweep.py::test_a_frozen_thin_task_is_reported_in_order_without_a_write_or_extra_pause",
+        "tests/swarm/test_enhance_sweep.py::test_the_command_flushes_each_outcome_to_stderr_before_the_next_write",
+        "tests/swarm/test_enhance_sweep.py::test_the_command_reports_frozen_skips_without_constructing_a_writer_in_a_dry_run"
       ]
     },
     {
