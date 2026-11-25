@@ -56,6 +56,10 @@ def _master(found: Member) -> str:
         "the seat started on it or queued it; if the text still sits unsent, press Enter again and recheck, and "
         "if it still cannot be confirmed, report NOT SENT and send it through the room instead with "
         '`agentihooks quick send <seat> "<text>"`.',
+        "Pack each delivery into as few merge or pull requests as possible, one per repository, at most 20 "
+        "changed files each; split only above 20 files. Follow-ups go into the change already open in that "
+        "repository. Approve an engineer's new merge or pull request only when no change is open in that "
+        "repository, or the open one would pass 20 files.",
         HANDOFF.format(handoff=paths.handoff(found.folder, MASTER), learned=paths.learned(found.folder, MASTER)),
     ]
     return "\n".join(lines)
@@ -75,6 +79,9 @@ def _engineer(found: Member) -> str:
         f"Report progress, blockers and the finished plan to the master: {_reach(seat, master)}. Read what other "
         "seats sent you with `agentihooks quick room`.",
         "When the plan is complete, report it to the master and wait for the next instruction.",
+        "Pack each delivery into as few merge or pull requests as possible, one per repository, at most 20 "
+        "changed files each; split only above 20 files. Follow-ups go into the change already open in that "
+        'repository. Ask the master through `agentihooks quick send master "<text>"` before opening any new one.',
         HANDOFF.format(handoff=paths.handoff(found.folder, seat.seat), learned=paths.learned(found.folder, seat.seat)),
     ]
     return "\n".join(lines)
@@ -97,6 +104,15 @@ def block(found: Member) -> str:
     )
     if seat.seat == MASTER:
         head += " Load the quick-swarm-master skill before any other action."
+    head += (
+        " Pack each delivery into as few merge or pull requests as possible, one per repository, at most 20 "
+        "changed files each, split only above 20; follow-ups go into the change already open in that repository."
+    )
+    head += (
+        " Approve a new one only when no change is open in that repository, or the open one would pass 20 files."
+        if seat.seat == MASTER
+        else ' Ask the master through `agentihooks quick send master "<text>"` before opening any new one.'
+    )
     waiting = room.waiting(found.folder, seat.seat)
     head += f" Room: {waiting} message(s) for you; read them with `agentihooks quick room`." if waiting else ""
     culture = paths.read_text(paths.culture(found.folder)).strip()

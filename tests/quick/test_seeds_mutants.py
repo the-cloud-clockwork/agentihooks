@@ -38,6 +38,10 @@ def test_the_master_seed_pins_every_exact_sentence(tmp_path: Path) -> None:
             "the seat started on it or queued it; if the text still sits unsent, press Enter again and recheck, and "
             "if it still cannot be confirmed, report NOT SENT and send it through the room instead with "
             '`agentihooks quick send <seat> "<text>"`.',
+            "Pack each delivery into as few merge or pull requests as possible, one per repository, at most 20 "
+            "changed files each; split only above 20 files. Follow-ups go into the change already open in that "
+            "repository. Approve an engineer's new merge or pull request only when no change is open in that "
+            "repository, or the open one would pass 20 files.",
             seeds.HANDOFF.format(handoff=paths.handoff(tmp_path, MASTER), learned=paths.learned(tmp_path, MASTER)),
         ]
     )
@@ -58,6 +62,9 @@ def test_an_engineer_seed_pins_every_exact_sentence_for_a_claude_seat(tmp_path: 
             'Report progress, blockers and the finished plan to the master: `agentihooks quick send master "<text>"`. '
             "Read what other seats sent you with `agentihooks quick room`.",
             "When the plan is complete, report it to the master and wait for the next instruction.",
+            "Pack each delivery into as few merge or pull requests as possible, one per repository, at most 20 "
+            "changed files each; split only above 20 files. Follow-ups go into the change already open in that "
+            'repository. Ask the master through `agentihooks quick send master "<text>"` before opening any new one.',
             seeds.HANDOFF.format(handoff=paths.handoff(tmp_path, "eng-1"), learned=paths.learned(tmp_path, "eng-1")),
         ]
     )
@@ -78,6 +85,9 @@ def test_an_engineer_seed_pins_every_exact_sentence_for_a_codex_seat(tmp_path: P
             'Report progress, blockers and the finished plan to the master: `agentihooks quick send master "<text>"`. '
             "Read what other seats sent you with `agentihooks quick room`.",
             "When the plan is complete, report it to the master and wait for the next instruction.",
+            "Pack each delivery into as few merge or pull requests as possible, one per repository, at most 20 "
+            "changed files each; split only above 20 files. Follow-ups go into the change already open in that "
+            'repository. Ask the master through `agentihooks quick send master "<text>"` before opening any new one.',
             seeds.HANDOFF.format(handoff=paths.handoff(tmp_path, "eng-2"), learned=paths.learned(tmp_path, "eng-2")),
         ]
     )
@@ -92,6 +102,9 @@ def test_block_pins_the_role_and_the_no_plan_default_for_the_master(tmp_path: Pa
         "QUICK SWARM — you are master of quick swarm quick-abc, herdr pane 1 (master: the operator's front door). "
         f"Seat folder {paths.seat_dir(tmp_path, 'master')}. Plan: no plan yet. "
         "Load the quick-swarm-master skill before any other action. "
+        "Pack each delivery into as few merge or pull requests as possible, one per repository, at most 20 "
+        "changed files each, split only above 20; follow-ups go into the change already open in that repository. "
+        "Approve a new one only when no change is open in that repository, or the open one would pass 20 files. "
         "Room: 1 message(s) for you; read them with `agentihooks quick room`.\n"
         "Culture: Ship small."
     )
@@ -103,6 +116,9 @@ def test_block_pins_the_role_and_the_next_none_default_for_an_engineer(tmp_path:
     paths.plan(tmp_path, "eng-1").write_text("- [x] build\n- [x] ship\n")
     expected = (
         "QUICK SWARM — you are eng-1 of quick swarm quick-abc, herdr pane 2 (engineer: follow your plan). "
-        f"Seat folder {paths.seat_dir(tmp_path, 'eng-1')}. Plan: 2 of 2 stages done; next: none."
+        f"Seat folder {paths.seat_dir(tmp_path, 'eng-1')}. Plan: 2 of 2 stages done; next: none. "
+        "Pack each delivery into as few merge or pull requests as possible, one per repository, at most 20 "
+        "changed files each, split only above 20; follow-ups go into the change already open in that repository. "
+        'Ask the master through `agentihooks quick send master "<text>"` before opening any new one.'
     )
     assert seeds.block(found) == expected

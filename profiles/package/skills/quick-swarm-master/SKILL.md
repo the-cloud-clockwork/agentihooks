@@ -109,3 +109,14 @@ hand instead: open a new session in the master's pane with its quick
 variables set (`AGENTIHOOKS_QUICK_SWARM`, `AGENTIHOOKS_QUICK_SEAT=master`,
 `AGENTIHOOKS_QUICK_DIR`), then from that pane run `agentihooks quick relaunch
 master --folder <folder> --adopt`. An open operator order is changing this.
+
+## Enforcing the merge request discipline
+
+Every seat's seed and cadence block already carry the rule: pack each
+delivery into as few merge or pull requests as possible, one per repository,
+at most 20 changed files each, and split only above 20. A follow-up goes into
+the change already open in that repository, never a new one. An engineer
+asks the master through `agentihooks quick send master "<text>"` before
+opening any new merge or pull request; the master approves a new one only
+when no change is open in that repository, or the open one would pass 20
+files once the follow-up lands.
