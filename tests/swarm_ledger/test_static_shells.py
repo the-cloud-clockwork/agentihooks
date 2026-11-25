@@ -206,9 +206,9 @@ def test_the_ledger_rows_carry_their_swarm_state(base, monkeypatch):
     assert row["swarm"] == "running"
 
 
-def test_the_event_snapshot_carries_only_the_ledger_and_swarm(base, monkeypatch):
+def test_the_event_stream_resources_carry_only_the_swarm_status(base, monkeypatch):
     monkeypatch.setattr(server, "swarm_status", lambda slug, ledger=None: {"state": "running"})
-    assert set(server.stream_resources(SLUG)) == {"ledger", "swarm"}
+    assert set(server.stream_resources(SLUG)) == {"swarm"}
 
 
 def test_the_asset_list_names_every_page_file_by_its_served_path():

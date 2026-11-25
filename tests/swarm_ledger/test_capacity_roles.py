@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from playwright.sync_api import Page
 
 from tests.swarm_ledger.ledger_page import fulfill_events, is_events
@@ -65,8 +67,13 @@ def test_an_unreadable_status_renders_the_unavailable_notice_and_no_empty_inputs
 def test_a_failed_read_after_a_status_keeps_the_last_counts_under_the_unavailable_notice(tab):
     reads = []
 
+    def stream_connect(url):
+        return urlsplit(url).path.endswith("/events")
+
     def events(route):
-        if not is_events(route.request.url):
+        if not stream_connect(route.request.url):
+            if is_events(route.request.url):
+                return fulfill_events(route, swarm=SWARM)
             return route.fallback()
         reads.append(route.request.url)
         if len(reads) == 1:
