@@ -1,0 +1,25 @@
+{
+  "id": "codex-planner-sandbox-canary",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-planner-canary",
+  "behaviour": "A read only sandboxed Codex planner validates its mounted profile against the supervisor recorded outer launch and rejects missing or foreign execution evidence while retaining its existing filesystem grants.",
+  "seam": "binding.validate, Codex supervisor thread binding and planner launch permissions",
+  "tests": [
+    "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_planner_validates_its_recorded_outer_launch",
+    "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_canary_refuses_another_execution",
+    "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_canary_requires_the_complete_launch_record",
+    "tests/profiles/test_codex_planner_canary.py::test_planner_permissions_keep_the_repository_read_only",
+    "tests/profiles/test_codex_planner_canary.py::test_only_codex_planner_reports_move_into_the_existing_write_grant",
+    "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_canary_refuses_a_foreign_launch_record",
+    "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_planner_keeps_canary_and_revalidation_checks",
+    "tests/profiles/test_codex_planner_canary.py::test_the_supervisor_records_the_launch_before_the_canary_turn",
+    "tests/profiles/test_codex_planner_canary.py::test_a_sandboxed_canary_requires_native_thread_identity",
+    "tests/profiles/test_codex_planner_canary.py::test_unavailable_process_evidence_cannot_use_the_sandbox_record",
+    "tests/profiles/test_codex_planner_canary.py::test_recording_refuses_a_different_live_planner",
+    "tests/profiles/test_codex_planner_canary.py::test_recording_leaves_other_launches_unchanged"
+  ],
+  "rules": [
+    "codex-planner-canary-ancestor-only",
+    "codex-planner-canary-recorded-late"
+  ]
+}

@@ -162,12 +162,14 @@ def unlisted_units(
     noted: Mapping[str, Sequence[str]] = manifest.get(UNLISTED, {})
     files = sorted(set(paths).intersection(unlisted_modules(manifest, tree)))
     keys = fingerprints({"units": [], "tests": {path: {"files": list(noted.get(path, ()))} for path in files}}, tree)
+    payload = json.dumps({"tests": {}})
     return tuple(
         Unit(
             KIND,
             test_key(TestInputs({path: keys[path]}, {}, PYTEST_INVOCATION, toolchain)),
             (path,),
-            json.dumps({"tests": {}}),
+            payload,
+            hashlib.sha256(payload.encode()).hexdigest(),
         )
         for path in files
     )
@@ -221,9 +223,6 @@ def units(
         outside = {path for test in batch for path in manifest["tests"][test].get("outside", ())}
         opened = {path: blobs[path] for path in outside if path in blobs}
         inputs = TestInputs({test: keys[test] for test in batch}, opened, PYTEST_INVOCATION, toolchain)
-        found.append(
-            Unit(
-                KIND, test_key(inputs), batch, json.dumps({"tests": {test: manifest["tests"][test] for test in batch}})
-            )
-        )
+        payload = json.dumps({"tests": {test: manifest["tests"][test] for test in batch}})
+        found.append(Unit(KIND, test_key(inputs), batch, payload, hashlib.sha256(payload.encode()).hexdigest()))
     return tuple(found)
