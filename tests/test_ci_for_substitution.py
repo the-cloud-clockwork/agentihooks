@@ -152,6 +152,7 @@ def test_lint_grades_the_head_tree_with_the_protected_grader() -> None:
     step = next(step for step in workflow["jobs"]["lint"]["steps"] if step.get("name") == STEP)
     assert step["if"] == "${{ !cancelled() }}"
     assert 'cd "$RUNNER_TEMP/grader"' in step["run"]
+    assert "if [[ -f" not in step["run"]
     assert 'python -m scripts.ci_for_substitution --root "$GITHUB_WORKSPACE"' in step["run"]
 
 

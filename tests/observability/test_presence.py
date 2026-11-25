@@ -64,6 +64,36 @@ def test_with_no_hive_daemon_a_session_sends_its_seen_gauge_at_most_once_per_int
     assert [value for _, value, _ in calls] == [1_000.0, 1_060.0, 4_600.0]
 
 
+@pytest.mark.feature("tokens-gauges-hook-fallback")
+def test_with_no_hive_daemon_a_session_sends_its_token_fill_and_burn_rate_once_a_minute_and_none_more_often(
+    monkeypatch,
+):
+    from hooks.observability import token_monitor
+
+    calls = recorded(monkeypatch)
+    for now_s, fill_pct in ((1_000.0, 10.0), (1_001.0, 11.0), (1_059.0, 12.0), (1_060.0, 13.0), (1_119.0, 14.0)):
+        token_monitor.record_tokens("sess-8", fill_pct, 900.0 + fill_pct, now_s, {})
+        presence.agent("sess-8", ENV, now_s)
+    session = {"session.id": "sess-8"}
+    assert [call for call in calls if call[0] != presence.AGENT] == [
+        ("agentihooks.tokens.fill_pct", 10.0, session),
+        ("agentihooks.tokens.burn_rate", 910.0, session),
+        ("agentihooks.tokens.fill_pct", 13.0, session),
+        ("agentihooks.tokens.burn_rate", 913.0, session),
+    ]
+
+
+@pytest.mark.feature("tokens-gauges-hook-fallback")
+def test_with_a_live_hive_daemon_a_session_with_fresh_tokens_sends_no_gauge_itself(monkeypatch):
+    from hooks.observability import token_monitor
+
+    calls = recorded(monkeypatch)
+    presence.write_record(presence.seen_dir() / presence.BEAT, {"beat_s": 1_000.0})
+    token_monitor.record_tokens("sess-9", 20.0, 900.0, 1_000.0, {})
+    presence.agent("sess-9", ENV, 1_030.0)
+    assert calls == []
+
+
 @pytest.mark.feature("presence-agent-hive-daemon")
 def test_an_unreadable_or_non_numeric_daemon_beat_leaves_the_session_sending_its_own_gauge(monkeypatch):
     from hooks import config

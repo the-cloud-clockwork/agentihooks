@@ -176,7 +176,7 @@ def _markdown(measure, expected):
     return failures
 
 
-def ledger_doc(files: list[Path]) -> dict:
+def ledger_doc(files: list[Path]) -> dict[str, Any]:
     rows = [
         {"id": f"art-{n}", "title": path.name, "file": {"id": path.name, "type": TYPES[path.suffix]}}
         for n, path in enumerate(files)
@@ -207,9 +207,44 @@ def _asset(route, served):
     return route.fulfill(body=path.read_text(), content_type=f"{kind}; charset=utf-8")
 
 
-def _events(route, doc):
-    data = json.dumps({"ledger": doc, "swarm": None})
-    route.fulfill(body=f"id: c0\nevent: snapshot\ndata: {data}\n\n", content_type="text/event-stream")
+def _events(route: Any, doc: dict[str, Any]) -> None:
+    data = json.dumps({"rev": doc["_meta"]["rev"], "swarm": None})
+    route.fulfill(body=f"id: c0\nevent: open\ndata: {data}\n\n", content_type="text/event-stream")
+
+
+def _summary(route: Any, doc: dict[str, Any]) -> None:
+    from scripts.swarm_ledger.api import summary
+
+    data = {key: value for key, value in doc.items() if key not in summary.PAGED}
+    data["sections"] = {name: summary.section(name, doc.get(name) or []) for name in summary.PAGED}
+    route.fulfill(json={"data": data, "revision": "r"})
+
+
+def _open_page(route: Any, doc: dict[str, Any]) -> None:
+    url: str = route.request.url
+    name = urlsplit(url).path.rsplit("/", 1)[1]
+    rows: list[dict[str, Any]] = [
+        {**row, "position": at} for at, row in enumerate(doc.get(name) or []) if isinstance(row, dict)
+    ]
+    route.fulfill(json={"data": rows, "revision": "r", "total": len(rows), "next_offset": None})
+
+
+def _swarm(route: Any) -> None:
+    route.fulfill(json={"data": {}, "collections": []})
+
+
+def _feed(route: Any, doc: dict[str, Any]) -> None:
+    url: str = route.request.url
+    parts = urlsplit(url)
+    if parts.path.endswith("/events"):
+        return _events(route, doc)
+    if parts.path.endswith("/summary"):
+        return _summary(route, doc)
+    if parts.path.endswith("/swarm") or "/swarm/" in parts.path:
+        return _swarm(route)
+    if "state=open" in parts.query:
+        return _open_page(route, doc)
+    return route.fulfill(status=404, body="no such route")
 
 
 def run(browser: Any, files: list[Path], pages: Path | None = None) -> dict[str, list[str]]:
@@ -217,6 +252,10 @@ def run(browser: Any, files: list[Path], pages: Path | None = None) -> dict[str,
     doc, served = ledger_doc(files), assets(pages)
     tab = browser.new_page(viewport=VIEWPORT)
     try:
+        html = page_html(pages)
+        tab.route(PAGE_URL, lambda route: route.fulfill(body=html, content_type="text/html; charset=utf-8"))
+        tab.route("**/static/*/**", lambda route: _asset(route, served))
+        tab.route("**/api/v1/ledgers/**", lambda route: _feed(route, doc))
         tab.route(
             "**/artifacts/**",
             lambda route: route.fulfill(
@@ -224,10 +263,6 @@ def run(browser: Any, files: list[Path], pages: Path | None = None) -> dict[str,
                 content_type=TYPES[Path(route.request.url).suffix],
             ),
         )
-        html = page_html(pages)
-        tab.route(PAGE_URL, lambda route: route.fulfill(body=html, content_type="text/html; charset=utf-8"))
-        tab.route("**/static/*/**", lambda route: _asset(route, served))
-        tab.route("**/api/v1/ledgers/*/events", lambda route: _events(route, doc))
         tab.goto(PAGE_URL)
         tab.wait_for_function(FIRST_STATE)
         return {path.name: _view(tab, path) for path in files}

@@ -46,10 +46,10 @@ LANE_USERS = {
     "hive-worker.yml",
     "lost-runner.yml",
     "ci-lab-image.yml",
-    "gate-required.yml",
     "changelog.yml",
     "changelog-seed.yml",
     "tick-scale.yml",
+    "lab-check.yml:post",
     *DIRECT,
 }
 CALLED = {
@@ -75,6 +75,13 @@ if (_WORKFLOWS / "access-audit.yml").exists():
 SERIAL = {
     ("swarm-node-image.yml:hive", "hive-worker-release"): "every release's hive job queues behind the last one, so a "
     "newer published hive image always decides the release tag and no waiting hive job is replaced",
+    (
+        "gate-required.yml",
+        "${{ format('gate-required-status-{0}', github.event.workflow_run.head_sha) }}",
+    ): "status runs of one head post in order and none is replaced, while other heads and other workflows never "
+    "wait on them",
+    ("lab-check.yml", "lab-check-${{ github.event.client_payload.sha }}"): "every lab check dispatch of one head "
+    "queues behind the last one, so the dispatch of one gate never replaces the pending dispatch of another",
 }
 CALLERS = ("test.yml", "proofs.yml")
 REQUIRED = ("pull_request", "merge_group", "pull_request_target")
@@ -173,6 +180,7 @@ def _open(events):
     return "workflow_dispatch" in events or ("push" in events and push.get("branches") != ["dev"])
 
 
+@pytest.mark.feature("hosted-lane-users-pinned")
 def test_every_non_required_trigger_is_on_a_lane_or_excluded_with_a_reason():
     open_triggers = {path.name for path in _WORKFLOWS.glob("*.yml") if _open(yaml.safe_load(path.read_text())[True])}
     users = {where.split(":")[0] for where in LANE_USERS}
@@ -201,6 +209,7 @@ def test_every_lane_user_names_the_same_three_lanes():
             assert LANE in block["group"], where
 
 
+@pytest.mark.feature("hosted-lane-users-pinned")
 def test_a_run_on_a_lane_queues_and_is_never_cancelled() -> None:
     seen = set()
     assert set(SERIAL) <= {(where, str(block.get("group"))) for where, block in _blocks()}
@@ -211,7 +220,10 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled() -> None:
                 seen.add(where)
                 assert resolved["queue"] == "max", (where, github)
                 assert not resolved["cancel-in-progress"], (where, github)
-            elif (where, resolved["group"]) in {*SERIAL, ("proofs.yml", f"focused-proof-{github['run_id']}")}:
+            elif (where, str(block.get("group"))) in SERIAL or (where, resolved["group"]) == (
+                "proofs.yml",
+                f"focused-proof-{github['run_id']}",
+            ):
                 assert resolved["queue"] == "max" and not resolved["cancel-in-progress"], (where, github)
             else:
                 dev_push = (github["event_name"], github["ref"]) == ("push", "refs/heads/dev")
@@ -244,6 +256,20 @@ def test_every_proof_dispatch_runs_in_its_own_focused_proof_group_and_never_wait
     for run_id, proof in product(range(1000, 1010), options):
         resolved = _resolve(block, inputs={"proof": proof}, run_id=run_id, **github)
         assert resolved == {"group": f"focused-proof-{run_id}", "queue": "max", "cancel-in-progress": False}, proof
+
+
+@pytest.mark.feature("gate-required-status-runs-in-its-own-head-group")
+def test_the_gate_required_status_runs_in_one_own_group_per_reported_head_and_never_on_a_lane() -> None:
+    block = _block("gate-required.yml")
+    heads = ("a" * 40, "b" * 40, "a" * 40)
+    resolved = [
+        _resolve(block, event_name="workflow_run", run_id=run_id, event={"workflow_run": {"head_sha": head}})
+        for run_id, head in zip((1000, 1003, 1006), heads)
+    ]
+    assert resolved == [
+        {"group": f"gate-required-status-{head}", "queue": "max", "cancel-in-progress": False} for head in heads
+    ]
+    assert "\n  cancel-in-progress: false\n" in (_WORKFLOWS / "gate-required.yml").read_text()
 
 
 def test_a_pull_request_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait_on() -> None:
@@ -331,5 +357,6 @@ def _guide_lane_users() -> set[str]:
     return {":".join(re.findall(r"`([^`]+)`", row.split(" | ")[1])) for row in table.splitlines()}
 
 
+@pytest.mark.feature("hosted-lane-users-pinned")
 def test_the_ci_timing_guide_lists_every_pinned_lane_user() -> None:
     assert _guide_lane_users() == LANE_USERS

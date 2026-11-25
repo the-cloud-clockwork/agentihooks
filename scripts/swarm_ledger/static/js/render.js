@@ -2,6 +2,7 @@ import { $, closedText, excerpt, h, headCount, newId } from "./dom.js";
 import { forget, kept, place, rebuildAll, renderCycle } from "./render_cycle.js";
 import { hiddenDone, itemState, pendingOf, sourceOf, taskBlockers, taskRank, taskRanks, workOrder } from "./state.js";
 import { checks, closedLeft, closedLeftIn, doc, ops, queue, renderSync, toggle } from "./sync.js";
+import { openStates } from "./seed.js";
 import { renderArtifacts } from "./artifacts.js";
 import { commentsView, taskLink, threadView } from "./threads.js";
 import { renderAlerts, renderNotifications, renderPriorities } from "./notices.js";
@@ -11,7 +12,7 @@ import { renderChat, renderChatBadge } from "./chat.js";
 import { renderSwarm, swarm } from "./swarm.js";
 import { renderStats } from "./stats.js";
 import { readWorkspace } from "./api.js";
-import { closedMore, firstPage, moreButton } from "./pages.js";
+import { closedMore, firstPage, moreButton, openMore } from "./pages.js";
 import { frozen, held, ownFreeze, snowflake } from "./freezes.js";
 import { prepareFrozenView, viewCount, viewItems, viewVisible } from "./frozen_view.js";
 import { phaseReview, phaseStatus } from "./phase_review.js";
@@ -272,6 +273,7 @@ function taskCounts(tasks) {
   const order = ["open", "claimed", "pr", "blocked", "done"];
   const n = {};
   for (const t of tasks) n[t.state || "open"] = (n[t.state || "open"] || 0) + 1;
+  for (const [st, left] of Object.entries(openStates("tasks"))) if (left) n[st] = (n[st] || 0) + left;
   if (closedLeft("tasks")) n.done = (n.done || 0) + closedLeft("tasks");
   const states = [...order, ...Object.keys(n).filter((st) => !order.includes(st))];
   return headCount(states.map((st) => [n[st], st]));
@@ -283,6 +285,7 @@ function stateCounts(list, labels) {
     const st = itemState(list, i);
     n[st] = (n[st] || 0) + 1;
   }
+  for (const [st, left] of Object.entries(openStates(list))) if (left) n[st] = (n[st] || 0) + left;
   if (closedLeft(list)) n.done = (n.done || 0) + closedLeft(list);
   return headCount(Object.entries(labels).map(([st, label]) => [n[st], label]));
 }
@@ -360,7 +363,7 @@ function groupedWork(name, items, row) {
   if (!sectionOpen(name)) return;
   const idOf = (i) => `item-${name}-${i.id}`;
   const { live, done } = workOrder(items);
-  const nodes = [...firstPage(name, live, idOf).map(row), steady(`more ${name}`, moreButton(name, live.length, `more ${NOUNS[name]}`, render))];
+  const nodes = [...firstPage(name, live, idOf).map(row), steady(`more ${name}`, moreButton(name, live.length, `more ${NOUNS[name]}`, render) || openMore(name, `open ${NOUNS[name]}`, render))];
   nodes.push(steady(`empty ${name}`, !items.length && doc[name].some((i) => !i.deleted) ? h("li", { class: "empty", text: "All items are hidden." }) : null));
   if (done.length || closedLeft(name)) {
     const key = `${name}-done`;

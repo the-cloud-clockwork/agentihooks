@@ -18,6 +18,7 @@ REF = "preempt"
 WAITING = "preempt-waiting"
 ASKED = "preempt-asked"
 VICTIMS = "preempt-victims"
+EPISODE = "preempt-episode"
 ANSWER_MS = 10 * 60_000
 URGENT = "urgent"
 YIELDED = 0.5
@@ -127,7 +128,7 @@ def step(
     for lane, (ready, holders) in full.items():
         for task in (t for t in ready if preferred(t, doc, graph)):
             waiting.add(task["id"])
-            if task["id"] not in seen or _pending(asked, task["id"], now_ms):
+            if task["id"] not in seen or _pending(redis, store.key(slug, EPISODE, task["id"]), now_ms):
                 continue
             if _refused(refused.get(task["id"]), lane, now_ms):
                 continue
@@ -136,6 +137,7 @@ def step(
                 asked[victim.name] = json.dumps([task["id"], now_ms])
                 redis.hset(store.key(slug, ASKED), victim.name, asked[victim.name])
                 redis.hset(store.key(slug, VICTIMS), victim.name, task["id"])
+                redis.set(store.key(slug, EPISODE, task["id"]), now_ms, px=ANSWER_MS)
                 actions += _ask(inbox_store.InboxStore(redis), slug, lane, victim, task["id"], now_ms)
     redis.delete(store.key(slug, WAITING))
     if waiting:
@@ -144,8 +146,13 @@ def step(
     return actions
 
 
-def _pending(asked: dict, task_id: str, now_ms: int) -> bool:
-    return any(target == task_id and now_ms - at < ANSWER_MS for target, at in map(json.loads, asked.values()))
+def _pending(redis: Any, key: str, now_ms: int) -> bool:
+    at = redis.get(key)
+    return at is not None and now_ms - int(at) < ANSWER_MS
+
+
+def attempted(store: RedisStore, slug: str, task_id: str, now_ms: int) -> None:
+    store.redis.set(store.key(slug, EPISODE, task_id), now_ms, px=ANSWER_MS, xx=True)
 
 
 def _refused(wait, lane, now_ms):

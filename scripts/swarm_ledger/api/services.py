@@ -1,7 +1,7 @@
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from re import Pattern
-from typing import Protocol
+from typing import Any, Protocol
 
 from scripts.swarm_ledger.repository import LedgerRepository
 
@@ -50,6 +50,8 @@ class LedgerService(Protocol):
     def workspace_tails(self, slug: str, task_id: str) -> dict: ...
 
     def stream_resources(self, slug: str) -> dict: ...
+
+    def summary(self, slug: str) -> dict[str, Any]: ...
 
     def layout(self) -> dict: ...
 

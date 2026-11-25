@@ -196,7 +196,7 @@ per-node verification; a Ready cache pod alone does not prove either cache is wa
 | `AGENTIHOOKS_BUS*` | yes | yes | Event bus connection settings |
 | `CI_LAB_MINIO_*` | yes | yes | Object store endpoint, bucket and credentials, passed by reference |
 | `CI_LAB_SECRET_*` | no | yes | A secret a static unit's step reads by name: `CI_LAB_SECRET_<NAME>` is `${{ secrets.<NAME> }}`, passed by reference and given only to a step whose env reads it (see [What a gate's steps read](#what-a-gates-steps-read)) |
-| `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs and read dev push manifest artifacts; the App needs checks write and actions read |
+| `GITHUB_APP_*` | yes | never | GitHub App identity used to post check runs, send the relay's `lab-check` repository dispatches and read dev push manifest artifacts; the App needs checks write, contents write and actions read |
 | `CI_LAB_REDIS_URL` | yes | no | Queue, lease and verdict index store |
 | `CI_LAB_REINDEX_ON_START` | yes | no | Only the literal string `true` rebuilds missing verdict index entries from report objects before the listeners start and prints `reindexed N verdicts`; unset or any other value skips it. See [Recovery](#recovery) |
 | `CI_LAB_RUNTIME_CONFIG` | yes | no | Path of the mounted runtime config the scheduler reads at start, before it connects anywhere; its budget sets the budget fraction and shed classes of `/capacity` and `/metrics`; `python -m scripts.ci_lab runtime <path>` validates it |
@@ -293,7 +293,7 @@ the served load's age and the GitHub calls left, on one `scripts.ci_lab.metrics.
 | `ci_lab_units_redelivered_total`, `ci_lab_units_lost_total` | Each expired lease a pass requeues or marks lost |
 | `ci_lab_mirror_age_seconds` | `metrics.observe_mirror` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the epoch second in the `fetched-at` stamp under `CI_LAB_GIT_MIRROR`, never below zero; no sample while the stamp is missing or holds no whole number. The node cache writes that stamp; the scheduler's own fetch writes none |
 | `ci_lab_load_age_seconds` | `metrics.observe_age` at each GET of `/metrics` or `/capacity` on 9108: the seconds since the build of the load snapshot the port serves started, never below zero; see [Capacity document](#capacity-document) |
-| `ci_lab_github_rate_remaining` | `metrics.observe_rate` on every check runs answer the scheduler's and the relay's `Checks` posters get, retries and refusals included: its `x-ratelimit-remaining` header when that holds a whole number; an answer without one keeps the last value |
+| `ci_lab_github_rate_remaining` | `metrics.observe_rate` on every check runs answer the scheduler's `Checks` poster gets and every dispatch answer the relay's `Dispatches` poster gets, retries and refusals included: its `x-ratelimit-remaining` header when that holds a whole number; an answer without one keeps the last value |
 
 A worker unit's report carries `caches` from `scripts.ci_lab.caches.report`: per revision it
 leased, a git hit when the pod store already held the commit and a miss when `Mirror.fetch`
@@ -700,7 +700,7 @@ lines of a metric with no sample, so Prometheus stores no series for it until th
 | `ci_lab_verdict_mismatch_total` | `CILabVerdictMismatch`, Shadow mismatches per gate | No service. `shadow.Shadow` counts it on the registry its caller passes, and no service builds a `Shadow`, so the alert cannot fire and the panel stays empty |
 | `ci_lab_mirror_age_seconds` | No alert or panel | `metrics.observe_mirror`, on every scheduler scrape, from its local mirror's `fetched-at` stamp. A missing or invalid stamp removes the sample |
 | `ci_lab_load_age_seconds` | No alert or panel | `metrics.observe_age`, on every scheduler scrape, from the start of the build of the load snapshot the port serves |
-| `ci_lab_github_rate_remaining` | No alert or panel | `metrics.observe_rate`, called by `Checks._request` with each check runs response. A valid `x-ratelimit-remaining` header sets the sample; a missing or invalid header leaves the previous sample unchanged |
+| `ci_lab_github_rate_remaining` | No alert or panel | `metrics.observe_rate`, called by `Checks._request` with each check runs response and `Dispatches._request` with each dispatch response. A valid `x-ratelimit-remaining` header sets the sample; a missing or invalid header leaves the previous sample unchanged |
 
 The kube-state-metrics series need the lab chart's objects in the `ci-lab` namespace: the
 `ci-lab-scheduler` and `ci-lab-worker` Deployments, the worker pods, and the KEDA ScaledObject
@@ -1893,9 +1893,33 @@ Git gets `AGENTIHOOKS_LAB_REMOTE_TOKEN` as the basic password of the user `lab` 
 through its environment config, and no store or log keeps it. Worker units run with the sandbox
 whitelist alone, so no unit sees the token. A grade of a head pushed
 to a `refs/grade/*` ref keeps the ref and records each check's status and conclusion. It posts no
-GitHub check run; the relay posts them once it has pushed the head. The relay's push token asks
+GitHub check run; the relay has them posted once it has pushed the head. The relay's push token asks
 for contents write and workflows write, so a relayed branch that changes workflow files is
 accepted.
+
+The relay sends each check run as a `lab-check` repository dispatch with an App token holding
+contents write, because the lab's App holds no checks write. The dispatch carries the head sha, the
+check run name, its status, conclusion, details link and output. The output takes at most half of
+GitHub's check run text limit, counted as the characters it takes in the JSON body with its escapes,
+and its failed unit log tails at most half of that, because GitHub refuses a dispatch body of 64 KB
+or more and a full limit listing of a large grade, or log tails full of escaped characters, passes
+it. The `Lab check` workflow
+(`.github/workflows/lab-check.yml`) runs on that dispatch with `checks: write` and `contents: read`
+and runs `python -m scripts.ci_lab.checks`. That entry reads the dispatch from the event file,
+refuses a head that is not a full sha, a name outside `lab/` and `lab-shadow/` and a bad status or
+conclusion, and posts with the workflow token. `Checks` takes `GITHUB_TOKEN` whenever
+`GITHUB_ACTIONS` is `true` and keeps the App token everywhere else. The post is an upsert: it lists
+the head's check runs of that name and advances the one whose external id is `lab:<sha>`, else
+creates it, stamping a completed run with its completed time. Every dispatch and every rerun for one
+head and name therefore leaves one check run, and the workflow's concurrency group per head sha
+queues runs of that head behind each other without cancelling any. Its post job also waits on the
+shared hosted lane group, as the branch lane gate requires of every new workflow job. GitHub runs a repository
+dispatch workflow only from the default branch, so a change to the workflow or the entry takes
+effect once promotion carries it to `main`.
+
+```bash
+gh api "repos/<owner>/<repo>/commits/<sha>/check-runs?check_name=lab/<gate>" --jq '.total_count'
+```
 
 | Name | Meaning |
 |---|---|
@@ -2525,6 +2549,12 @@ units, with no test scope and no mutation; a merge group grade does the same for
 promotion or backfill grade keeps every lab gate. A gate without units passes, so a grade turns red only
 through what the lab grades.
 
+A plant pull request grade is the one pull request grade that runs test units, so it is framed as a run
+of the full suite: its select scope reads `full` and it carries the jobs that scope requires, `split`,
+`unit` and `shard-check`, beside the pull request jobs. The rules then require its `unit` job, so the
+grade folds green when every gate passes, with no test unit or with passing ones, and red when a test
+unit fails. `split` and `shard-check` hold no unit and post no check run.
+
 A pull request or hotfix grade reads `lab.authoritative` from the `delivery.yaml` of its base, the
 grader revision, so the head cannot widen it. Each listed gate the frame gives no unit, such as `unit`,
 `unit-selected`, `shard-check` or `mutation`, which those classes never expand, lands in the grade
@@ -2546,13 +2576,13 @@ prints the relay's actions after the pass's own. `main` builds the relay once at
 lab heads consumer, the `ci-lab-relay` durable filtered to `ci.lab.head.notice`, which bus
 provisioning creates beside the scheduler's `ci-lab-scheduler` durable. A green grade of a pushed
 `refs/grade/<task>` head with a `branch` option then reaches that branch, its check runs and its
-draft pull request. The relay keeps the id of each check run it creates on the grade's state under
-the check run's name as GitHub answers and seeds its poster with those ids before it posts, so a
-relay retried after the service restarts, such as one whose pull request call failed after its
-posts, creates no second completed check run. The ids the scheduler keeps under gate names for its
+draft pull request. The relay keeps a mark for each check run it dispatches on the grade's state
+under the check run's name as GitHub accepts the dispatch and seeds its poster with those marks
+before it posts, so a relay retried after the service restarts, such as one whose pull request call
+failed after its posts, sends no second dispatch. The ids the scheduler keeps under gate names for its
 own posts, such as shadow check runs of the same grade, never seed the relay. A relay whose git or
 HTTP call fails is named `retry <head> for <branch>: <error>` and stays pending for the next tick.
-A relay whose push, check runs or pull requests token the App refuses is named
+A relay whose push, dispatch or pull requests token the App refuses is named
 `held <head> for <branch> for a later pass: <refusal>`, stays pending and holds every pending head
 of its repository for `POST_HOLD_MS`; the heads of other repositories still relay in the same
 tick, and the first tick after the hold relays the held heads again. The hold lives in the relay's
@@ -2909,6 +2939,7 @@ batch. A test that `.test_durations` does not list counts 0 seconds, and a head 
 | Head | Unit job |
 |---|---|
 | Pull request, hotfix | No test units; the manifest is not read |
+| Plant pull request | The listed batches whose test module the plant changed and each test module it added or changed that the manifest does not list; none when it touches no test module |
 | Merge group | The batches that hold a test the group's entries invalidate, or every batch when `interaction.decide` returns `FULL` |
 | Promotion, backfill | Every batch; the verdict store is not consulted for the choice |
 
@@ -3261,7 +3292,7 @@ refuses a key of that form with `ValueError: not a <kind> unit key: <key>`, so t
 
 #### How a worker runs them
 
-Both kinds run through `scripts.ci_lab.executors.mutation` in a private copy of the head, as
+Both kinds run through `scripts.ci_lab.executors.mutation`, with the grader tree's runner grading a private copy of the head, as
 [Worker executors](#worker-executors) describes. The executor first makes the lease's base present
 in the pod's store and puts behind trampolines only the functions the head changes against that
 base: for each file `scope.changes_since` names, `run_mutation.trampoline` rewrites the functions
@@ -3471,13 +3502,15 @@ as before.
 
 | Kind | Trees | Executor inputs |
 |---|---|---|
-| `static` | head, base and grader, read only, shared by the pod's units | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
+| `static` | head, base and grader, read only, shared by the pod's units; a gate whose step passes `--baseline-commit` runs in a private writable tree of the head | the gate the unit names from the grader tree's workflow, input registry and reusable workflows (see [The worker reads the same workflows](#the-worker-reads-the-same-workflows)), the venv of the head's `.github/test-requirements.lock` digest and the lease fields and secrets its steps read (see [What a gate's steps read](#what-a-gates-steps-read)) |
 | `test` | head, read only | the batch and its selected manifest records, read from the object store into its lease, the venv of the head's lockfile digest, `CI_LAB_FLAKES` and one pytest worker per slot |
-| `stats` | a private copy of the head with the functions the head changes against the lease's base behind their trampolines, and the base present in the pod's store | the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
-| `mutant` | the same private trampolined copy | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of the test files its manifest names show reaching the mutant's function, with their seconds |
+| `stats` | a private copy of the head with the functions the head changes against the lease's base behind their trampolines, the base present in the pod's store, and the grader bound read only |  the tree as root, `CI_LAB_MUTATION_CACHE` and the venv of the copy's `.github/test-requirements.lock` digest |
+| `mutant` | the same private trampolined copy and read only grader | the same venv, `CI_LAB_KILLERS`, `CI_LAB_MUTATION_BUDGET`, `CI_LAB_MUTATION_CAP` and the tests that the stats records of the test files its manifest names show reaching the mutant's function, with their seconds |
 
 The mutation runner runs in the sandbox as `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT`
-from the private tree. A mutant unit passes only when every mutant is killed; a runner that exits
+from the grader tree, so the grader revision's copy of the runner grades the unit and a head change
+to the runner changes no verdict. Each request names the private copy as its `tree`; every pytest
+session the runner starts runs there and imports that copy's `scripts` package. A mutant unit passes only when every mutant is killed; a runner that exits
 non zero fails its unit. The scheduler splits a function whose mutants price over the 30 minute
 unit time limit into several mutant units, as
 [Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) describes. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
@@ -4538,12 +4571,17 @@ verdict.
 |---|---|---|---|
 | `run_static.run(gate, head_tree, base_tree, grader_tree, settings)` | The head tree | The grader tree and the base tree | Never |
 | `run_tests.run(batch, tree, venv, slots, lab)` | The tree the batch runs from | None | `lab.net` |
+| `python -m scripts.ci_lab.run_mutation REQUEST OUTPUT` | The grader tree; its pytest sessions run in the request's `tree` | The grader tree | Never |
 
 `run_static.run` prepares the step the way the workflow runs it:
 
 - `RUNNER_TEMP` is a fresh folder under `settings.root`. Its `grader` and `base` entries are
   symlinks to the real tree paths, and it holds the empty `GITHUB_STEP_SUMMARY` file.
-- `GITHUB_WORKSPACE` and the working folder are the head tree.
+- `GITHUB_WORKSPACE` and the working folder are the head tree. For a gate whose step passes
+  `--baseline-commit` (`StaticGate.rewrites_tree`) that is a private writable tree of the head,
+  cut for the lease's head and base and dropped when the gate ends: Semgrep resets its working
+  tree to the baseline commit and back whenever the current scan has a finding, and the leased
+  tree is sealed and read by every unit of the head at once.
 - `PATH` is `settings.venv/bin`, then `/usr/local/bin`, where the worker image installs semgrep
   and helm, then `/bin:/usr/bin`. `RUFF_CACHE_DIR` is the `ruff` folder inside `RUNNER_TEMP`,
   since the worker seals the leased head tree and ruff would otherwise write `.ruff_cache` into
