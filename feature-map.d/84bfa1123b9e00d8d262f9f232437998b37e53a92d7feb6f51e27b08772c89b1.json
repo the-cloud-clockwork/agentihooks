@@ -11,6 +11,9 @@
     "tests/swarm/test_thin_task_backfill.py::test_a_scoped_target_keeps_its_phase_and_only_its_orphan_plan_moves",
     "tests/swarm/test_thin_task_backfill.py::test_unrelated_finished_and_scoped_plan_tasks_are_unchanged",
     "tests/swarm/test_thin_task_backfill.py::test_target_state_and_completion_metadata_are_preserved",
-    "tests/swarm/test_thin_task_backfill.py::test_a_missing_target_refuses_the_pass_before_any_writes"
+    "tests/swarm/test_thin_task_backfill.py::test_a_missing_target_refuses_the_pass_before_any_writes",
+    "tests/swarm/test_thin_task_backfill.py::test_the_command_reads_bounded_targets_and_reports_verified_before_and_after_counts",
+    "tests/swarm/test_thin_task_backfill.py::test_a_refused_api_write_is_visible_and_never_reports_zero_remaining",
+    "tests/swarm/test_thin_task_backfill.py::test_the_command_fails_if_readback_still_finds_an_unphased_plan"
   ]
 }

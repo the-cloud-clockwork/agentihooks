@@ -1,3 +1,5 @@
+import json
+from collections.abc import Iterable
 from copy import deepcopy
 from typing import Any, cast
 
@@ -122,3 +124,93 @@ def test_a_missing_target_refuses_the_pass_before_any_writes() -> None:
     _, plan = _pair()
     with pytest.raises(KeyError, match="legacy"):
         _backfill([plan], set())
+
+
+class _Client:
+    def __init__(self, tasks: list[dict[str, Any]], *, refuse: bool = False) -> None:
+        self.tasks = deepcopy(tasks)
+        self.phases: set[str] = set()
+        self.writes: list[list[dict[str, Any]]] = []
+        self.reads: list[tuple[str, ...]] = []
+        self.refuse = refuse
+
+    def tasks_where(
+        self,
+        slug: str,
+        *,
+        ids: Iterable[str] = (),
+        states: Iterable[str] = (),
+        fields: Iterable[str] = (),
+    ) -> list[dict[str, Any]]:
+        assert slug == "proof"
+        wanted = tuple(ids)
+        self.reads.append(wanted)
+        assert wanted or tuple(states) == ("open",)
+        return [
+            {key: value for key, value in task.items() if key in fields}
+            for task in self.tasks
+            if (not wanted or task["id"] in wanted) and (not states or task["state"] in states)
+        ]
+
+    def collection(self, slug: str, name: str) -> list[dict[str, Any]]:
+        assert (slug, name) == ("proof", "phases")
+        return [{"id": phase} for phase in sorted(self.phases)]
+
+    def mutate(self, slug: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
+        assert slug == "proof"
+        self.writes.append(operations)
+        if self.refuse:
+            return {"rejected": ["refused"], "_meta": {"warnings": ["repair refused"]}}
+        self.tasks, added = _apply(self.tasks, [operations])
+        self.phases.update(added)
+        return {}
+
+
+def _command(monkeypatch: pytest.MonkeyPatch, client: _Client) -> int:
+    from scripts.swarm import ledger_client
+    from scripts.tick.adapters import ledger
+
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: client)
+    monkeypatch.setattr(ledger, "resource_client", lambda slug: lambda remaining: client)
+    module = cast(Any, thin_task)
+    return cast(int, module.main(["--slug", "proof"]))
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_the_command_reads_bounded_targets_and_reports_verified_before_and_after_counts(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client = _Client([task for index in range(101) for task in _pair(f"legacy-{index}")])
+
+    assert _command(monkeypatch, client) == 0
+    assert json.loads(capsys.readouterr().out) == {"before": 101, "moved": 101, "after": 0}
+    assert [len(ids) for ids in client.reads if ids] == [100, 1]
+    assert len(client.writes) == 101
+    assert all(len(batch) == 3 for batch in client.writes)
+
+    assert _command(monkeypatch, client) == 0
+    assert json.loads(capsys.readouterr().out) == {"before": 0, "moved": 0, "after": 0}
+    assert len(client.writes) == 101
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_a_refused_api_write_is_visible_and_never_reports_zero_remaining(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    client = _Client(_pair(), refuse=True)
+    with pytest.raises(LedgerRefused, match="repair refused"):
+        _command(monkeypatch, client)
+    assert capsys.readouterr().out == ""
+    assert all(task["phase"] == "" for task in client.tasks)
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_the_command_fails_if_readback_still_finds_an_unphased_plan(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    client = _Client(_pair())
+    monkeypatch.setattr(client, "mutate", lambda slug, operations: {})
+    assert _command(monkeypatch, client) == 1
+    assert json.loads(capsys.readouterr().out) == {"before": 1, "moved": 1, "after": 1}
