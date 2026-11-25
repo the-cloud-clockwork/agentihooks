@@ -12,6 +12,7 @@ import pytest
 from scripts.swarm import lab_control
 
 URL = "http://lab:8800"
+CONTROL = "http://lab:8801"
 ENVIRON = {lab_control.TOKEN: "tok"}
 LAB = lab_control.Lab(URL, "tok")
 
@@ -50,8 +51,18 @@ def failing(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
 
 
 @pytest.mark.feature("panic-reaches-lab")
-def test_lab_names_the_address_and_the_token_from_the_environment() -> None:
-    assert lab_control.lab(URL, ENVIRON) == LAB
+@pytest.mark.parametrize(
+    ("url", "control"),
+    [
+        (URL, CONTROL),
+        (f"{URL}/lab/?x=1", CONTROL),
+        ("https://lab.example", "https://lab.example:8801"),
+        ("http://[::1]:8800", "http://[::1]:8801"),
+    ],
+    ids=["port", "path", "no-port", "ipv6"],
+)
+def test_lab_names_the_control_port_of_the_lab_host_and_the_token_from_the_environment(url: str, control: str) -> None:
+    assert lab_control.lab(url, ENVIRON) == lab_control.Lab(control, "tok")
 
 
 @pytest.mark.feature("panic-reaches-lab")
@@ -61,8 +72,9 @@ def test_lab_names_the_address_and_the_token_from_the_environment() -> None:
         ("", ENVIRON, "the swarm has no lab url"),
         (URL, {}, "CI_LAB_CONTROL_TOKEN is not set on this host"),
         (URL, {lab_control.TOKEN: ""}, "CI_LAB_CONTROL_TOKEN is not set on this host"),
+        ("http://lab:port", ENVIRON, "the swarm lab url http://lab:port names no valid port"),
     ],
-    ids=["no-url", "no-token", "empty-token"],
+    ids=["no-url", "no-token", "empty-token", "bad-port"],
 )
 def test_lab_refuses_a_swarm_without_a_lab_or_a_host_without_a_token(
     url: str, environ: dict[str, str], why: str
@@ -129,7 +141,7 @@ def test_acknowledge_returns_the_lab_reply_to_a_head_priority(monkeypatch: pytes
     asked = answering(monkeypatch, reply)
     assert lab_control.acknowledge(URL, "head9", ENVIRON) == reply
     assert [(path, body) for _, path, _, body, _ in asked] == [
-        (f"{URL}/priority", {"heads": ["head9"], "class": "hotfix"})
+        (f"{CONTROL}/priority", {"heads": ["head9"], "class": "hotfix"})
     ]
 
 
@@ -137,6 +149,6 @@ def test_acknowledge_returns_the_lab_reply_to_a_head_priority(monkeypatch: pytes
 def test_acknowledge_returns_why_the_lab_was_not_told(monkeypatch: pytest.MonkeyPatch) -> None:
     failing(monkeypatch, URLError("down"))
     assert lab_control.acknowledge(URL, "head9", ENVIRON) == {
-        "error": f"the lab at {URL} is unreachable: <urlopen error down>"
+        "error": f"the lab at {CONTROL} is unreachable: <urlopen error down>"
     }
     assert lab_control.acknowledge("", "head9", ENVIRON) == {"error": "the swarm has no lab url"}

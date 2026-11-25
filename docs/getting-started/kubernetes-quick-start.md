@@ -86,7 +86,7 @@ kubectl rollout status deployment/agentihooks-swarm-hub -n agentihooks
 helm test agentihooks-swarm --namespace agentihooks
 ```
 
-Each rollout reports `successfully rolled out` and `helm test` runs the ledger health pod to `Succeeded`. Reach the ledger page locally:
+Each rollout reports `successfully rolled out` and `helm test` runs the ledger health pod to `Succeeded`. A hub pod counts as ready only once it has subscribed to slot requests from hives, so the hub rollout finishes after both replicas serve; see [Hub readiness and rollouts](../reference/deployment-modes.md#hub-readiness-and-rollouts). Reach the ledger page locally:
 
 ```bash
 kubectl -n agentihooks port-forward service/agentihooks-swarm-ledger 8765:8765
@@ -133,6 +133,8 @@ The hub runs no agents. Each machine or worker pod that runs agents joins as a h
 | Pods stay `Pending` | `kubectl -n agentihooks describe pod <pod>`; a missing storage class or node capacity holds the volumes or the pods |
 | The ledger or controller cannot reach Redis | `kubectl -n agentihooks logs statefulset/agentihooks-swarm-ledger`; with `existingSecret`, the Secret name or key does not match, or the URL is unreachable from the namespace |
 | The hub logs bus connection errors | `kubectl -n agentihooks logs deployment/agentihooks-swarm-hub`; with the bundled NATS check its pod is ready, with an external NATS check `hub.bus.url` |
+| The hub rollout does not finish and a hub pod stays `0/1` ready | The pod has not created its serving file, `/tmp/hub.serving` unless `hub.servingFile` names another path, because its hub has not subscribed to slot requests; the old pod keeps serving meanwhile. Read that pod's log and follow [Hub readiness troubleshooting](../reference/deployment-modes.md#hub-readiness-troubleshooting) |
+| `helm upgrade` fails with `hub.servingFile is required` | The values set `hub.servingFile` empty; remove that override or set a path the hub can write |
 | `helm test` fails | `kubectl -n agentihooks logs agentihooks-swarm-ledger-healthz`; the ledger did not answer its health route |
 | Hive agents get `403 forbidden` with `Host not allowed` on every ledger call, others still write | The address the hives use is not listed; add it to `ledger.allowedHosts`, see [Host names the ledger answers](#host-names-the-ledger-answers) |
 

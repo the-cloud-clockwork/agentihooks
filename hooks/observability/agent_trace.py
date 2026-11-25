@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import logging
@@ -14,6 +13,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from hooks.compat import fcntl
 from hooks.config import AGENTIHOOKS_HOME
 from hooks.memory.records import is_inbox_delivery
 

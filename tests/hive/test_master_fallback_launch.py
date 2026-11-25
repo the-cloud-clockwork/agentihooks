@@ -715,6 +715,29 @@ def test_a_master_wait_other_than_a_missing_claude_slot_names_no_master_floor(
     )
 
 
+@pytest.mark.feature("master-floor-agrees-with-handoff-week-line")
+def test_the_front_door_master_is_refused_at_the_master_floor_when_the_handoff_line_is_tighter(
+    setup: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hooks import config as hooks_config
+    from scripts.hive import placement
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr(hooks_config, "QUOTA_HANDOFF_WEEK_PCT", 97.0)
+    task = {**master(setup), "seat": "master@fixture"}
+    master_login_hive(setup)
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "room", 0, 80, 80, 6),
+        Account("claude", "login", "CLOSED", 0, 80, 3.0, 0),
+        Account("claude", "spare", "OPEN", 0, 80, 1, 6),
+        Account("claude", "other", "CLOSED", 0, 80, 1, 0),
+        Account("codex", "login", "CLOSED", 0, None, 1, 0),
+    ]
+    assert setup.launcher.select(setup.config, "master", task) == placement.Wait(
+        "no hive for master advertises a claude slot; login is at the master floor with 3% of its week left"
+    )
+
+
 @pytest.mark.feature("hive-front-door-master-floor")
 def test_master_fill_checks_a_seat_two_master_against_its_own_seat_not_the_front_door(
     setup: Any, monkeypatch: pytest.MonkeyPatch

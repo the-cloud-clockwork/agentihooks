@@ -108,9 +108,11 @@ def _run_once(step: Step, ctx: Context) -> StepRecord:
 
     A step still running at its budget is recorded late and left running in its daemon thread; its result is dropped.
     While that earlier run is alive, a new run of the same step for the same swarm is held: no thread starts and the
-    record reads held. Another swarm's run of that step is never held by it.
+    record reads held. Another swarm's run of that step is never held by it. The budget is read once, in the pass's
+    context, and the deadline, the join and the worker's timed step record use that value.
     """
-    deadline = ctx.deadline.child(step.budget_s)
+    budget_s = step.budget_s
+    deadline = ctx.deadline.child(budget_s)
     clock = deadline.clock
     started = clock()
     outcome: list[Result | BaseException] = []
@@ -123,11 +125,13 @@ def _run_once(step: Step, ctx: Context) -> StepRecord:
         tools = None if ctx.tools is None else ctx.tools.for_effects(step.effects)
         run = _Run()
         worker = Thread(
-            target=_record, args=(outcome, caller, step, Context(ctx.view, deadline, tools), run), daemon=True
+            target=_record,
+            args=(outcome, caller, step, Context(ctx.view, deadline, tools), run, budget_s),
+            daemon=True,
         )
         _RUNNING[key] = worker
         worker.start()
-    worker.join(step.budget_s)
+    worker.join(budget_s)
     if run.give_up():
         return _left(step, outcome, clock() - started)
     worker.join(END_GRACE_S)
@@ -223,12 +227,15 @@ def _finished(step: Step, outcome: list[Result | BaseException], wall_s: float) 
     return StepRecord(step.name, wall_s, step.budget_s, result=found)
 
 
-def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context, run: _Run) -> None:
-    """Run ``step`` in the caller's copied context, recorded under its registered name, and append its result or the
-    error it raised; the run reads abandoned when ``run`` was given up at its budget before it ended."""
+def _record(
+    outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context, run: _Run, budget_s: float
+) -> None:
+    """Run ``step`` in the caller's copied context, recorded under its registered name with ``budget_s``, the budget
+    the pass joins it on, and append its result or the error it raised; the run reads abandoned when ``run`` was
+    given up at its budget before it ended."""
     try:
         outcome.append(
-            caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane, name=step.name, on_end=run.end)
+            caller.run(timing.within, budget_s, step.run, ctx, lane=step.lane, name=step.name, on_end=run.end)
         )
     except BaseException as exc:
         outcome.append(exc)
@@ -289,6 +296,7 @@ def _scheduled(
     names = {step.name for step in later}
     first = tuple(step for step in ordered if step.name not in names)
     if later:
+        pool.budget_slow(found, {step.name: step.budget_s for step in later})
         awaited = frozenset[str]().union(*(step.needs for step in later)) & {step.name for step in first}
         found.hand(names)
         found.track(awaited)
@@ -618,6 +626,12 @@ def _placing(step: Step) -> bool:
     return bool(getattr(step, "placing", False))
 
 
+def _kept_first(steps: Iterable[Step]) -> list[Step]:
+    """Return ``steps`` with the kept ones first, each part in its given order, so a kept placing step never queues on
+    the pass's one placement worker behind a sibling that became ready in the same sweep."""
+    return sorted(steps, key=lambda step: not _kept(step))
+
+
 def _kept_after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass, start: _Start) -> StepRecord:
     """Run the kept ``step`` once every handed off step of an earlier group in ``earlier`` ended, waiting at most its
     own budget for them, and run it even when one of them was dropped, unless the pass ended before it started."""
@@ -633,17 +647,25 @@ def _expire(
     records: dict[str, StepRecord],
     found: pool.Pass,
     clock: Callable[[], float],
+    apply: Appliers,
 ) -> None:
-    """Stop waiting on every submitted step whose lane expired, recording it ended on the pass and in the dropped set
-    of ``lost``, or in its cut set when only the reserve it leaves to a step that needs it ran out.
+    """End every submitted step whose run ended, then stop waiting on every one whose lane expired, recording it
+    ended on the pass and in the dropped set of ``lost``, or in its cut set when only the reserve it leaves to a step
+    that needs it ran out.
 
-    A step that had not started is skipped and never starts. A step already running is recorded cut, its wall counted
+    A step whose run ended is ended with its own record, its writes applied through ``apply`` on this thread and a
+    skipped one joining the dropped set, before any step is recorded cut or skipped, whether or not its lane expired.
+    A step that had not started is skipped and never starts. A step still running is recorded cut, its wall counted
     from its own start and its writes dropped; its run goes on under its own budget, and only a run past that budget
-    journals it abandoned.
+    journals it abandoned. A step whose run ends while those writes are applied is left for the next collection.
     """
     dropped, cut = lost
+    for future in [future for future in running if future.done()]:
+        step, _, _ = running.pop(future)
+        records[step.name] = _ended(found, _applied(future.result(), apply))
+        dropped.update({step.name} if records[step.name].skipped else ())
     for future, (step, start, lane) in list(running.items()):
-        if lane.expired:
+        if lane.expired and not future.done():
             running.pop(future)
             (dropped if _drops(step, dropped, found) else cut).add(step.name)
             began = start.close()
@@ -668,6 +690,8 @@ def _eager(
     that another schedule of the pass runs included.
 
     Each finished step's writes are applied through ``apply`` on this scheduling thread before its dependents start.
+    The kept steps ready in one sweep are submitted before its other ready steps, so a kept placing step never waits
+    on the one placement worker for a sibling that became ready with it.
     A step in ``rest`` starts no thread and ends at once for its dependents. A kept step starts even after its lane
     expired or a step it needs was dropped, bounded by its own budget and the pass deadline. A sweep that ends a step
     without a thread sweeps again at once, so a step whose needs that ended starts before the running steps end.
@@ -684,11 +708,11 @@ def _eager(
     held_back = _held_back(ordered, found.reserves)
     try:
         while pending or running:
-            ready = [
+            ready = _kept_first(
                 step
                 for step in pending
                 if step.needs & names <= records.keys() and not _waiting(step, names, found, awaited)
-            ]
+            )
             for step in ready:
                 pending.remove(step)
                 lane = _lane_of(step, found, held_back)
@@ -726,12 +750,8 @@ def _eager(
                     time.sleep(SETTLE_S)
                 continue
             timeout = min([lane.remaining for _, _, lane in running.values()] + ([SETTLE_S] if held else []) + ended)
-            done, _ = wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
-            for future in done:
-                step, _, _ = running.pop(future)
-                records[step.name] = _ended(found, _applied(future.result(), apply))
-                dropped.update({step.name} if records[step.name].skipped else ())
-            _expire(running, (dropped, cut), records, found, clock)
+            wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
+            _expire(running, (dropped, cut), records, found, clock, apply)
     finally:
         for future in submitted:
             future.cancel()

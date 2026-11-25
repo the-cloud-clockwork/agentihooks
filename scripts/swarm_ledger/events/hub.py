@@ -6,8 +6,12 @@ import secrets
 import threading
 import time
 from collections.abc import Callable
+from typing import Any, TypeGuard
 
 from . import patch
+from .patch import ids_of
+
+Event = tuple[int, str, str, Any]
 
 RETAINED = 256
 IDLE_EVICT_S = 300.0
@@ -22,11 +26,13 @@ class Closed(Exception):
 
 
 class Channel:
-    def __init__(self, retained):
+    idle_since: float
+
+    def __init__(self, retained: int) -> None:
         self.epoch = secrets.token_hex()
         self.seq = 0
-        self.log = collections.deque(maxlen=retained)
-        self.resources = {}
+        self.log: collections.deque[Event] = collections.deque(maxlen=retained)
+        self.resources: dict[str, Any] = {}
         self.subscribers = 0
 
 
@@ -34,12 +40,34 @@ def revision(value):
     return value["_meta"]["rev"]
 
 
+def changed_rows(old: dict[str, Any], new: dict[str, Any], change: dict[str, Any]) -> dict[str, dict[str, list[Any]]]:
+    rows: dict[str, dict[str, list[Any]]] = {}
+    parts: dict[str, dict[str, Any]] = change.get("o", {})
+    for key, part in parts.items():
+        before: object = old.get(key) or []
+        after: object = new.get(key) or []
+        if not listed(before) or not listed(after):
+            continue
+        before_ids: list[Any] | None = ids_of(before)
+        after_ids: list[Any] | None = ids_of(after)
+        if before_ids is None or after_ids is None:
+            continue
+        upserted: list[dict[str, Any]] = after if "v" in part else [*part.get("u", []), *part.get("add", [])]
+        kept = set(after_ids)
+        rows[key] = {"u": [row["id"] for row in upserted], "gone": [i for i in before_ids if i not in kept]}
+    return rows
+
+
+def listed(value: object) -> TypeGuard[list[Any]]:
+    return isinstance(value, list)
+
+
 class Hub:
     def __init__(self, retained: int = RETAINED, *, clock: Callable[[], float] | None = None) -> None:
         self.retained = retained
         self.clock = time.monotonic if clock is None else clock
         self.changed = threading.Condition()
-        self.channels = {}
+        self.channels: dict[str, Channel] = {}
         self.closing = False
 
     @staticmethod
@@ -68,13 +96,13 @@ class Hub:
         with self.changed:
             return [slug for slug, channel in self.channels.items() if channel.subscribers]
 
-    def resource(self, slug, name):
+    def resource(self, slug: str, name: str) -> Any:
         with self.changed:
             channel = self.channels.get(slug)
             return channel.resources.get(name) if channel else None
 
-    def open(self, slug, load, cursor=None):
-        """Subscribe and answer (seq, first events): a snapshot without a cursor, the retained events after one."""
+    def open(self, slug: str, load: Callable[[], dict[str, Any]], cursor: str | None = None) -> tuple[int, list[Event]]:
+        """Subscribe and answer (seq, first events): an open event without a cursor, the retained events after one."""
         with self.changed:
             if cursor is not None:
                 seq = self.position(slug, cursor)
@@ -93,12 +121,15 @@ class Hub:
         with self.changed:
             if cursor is not None:
                 return seq, [entry for entry in channel.log if entry[0] > seq]
-            return self.snapshot(slug)
+            return self.opening(slug)
 
-    def snapshot(self, slug: str) -> tuple[int, list]:
+    def opening(self, slug: str) -> tuple[int, list[Event]]:
         with self.changed:
             channel = self.channels[slug]
-            return channel.seq, [(channel.seq, self.cursor(channel, channel.seq), "snapshot", dict(channel.resources))]
+            ledger: dict[str, Any] | None = channel.resources.get("ledger")
+            data: dict[str, Any] = {"rev": None if ledger is None else revision(ledger)}
+            data.update((name, value) for name, value in channel.resources.items() if name != "ledger")
+            return channel.seq, [(channel.seq, self.cursor(channel, channel.seq), "open", data)]
 
     def close(self, slug):
         with self.changed:
@@ -115,14 +146,19 @@ class Hub:
         """The finite JSON generation and all its descendants must remain immutable."""
         return self._publish(slug, name, value, True)
 
-    def _publish(self, slug, name, value, shared):
+    def _publish(self, slug: str, name: str, value: Any, shared: bool) -> bool:
         with self.changed:
             channel = self.channels.get(slug)
             if channel is None:
                 return False
             if name not in channel.resources:
                 channel.resources[name] = value if shared else copy.deepcopy(value)
-                return False
+                if name != "ledger":
+                    return False
+                channel.seq += 1
+                channel.log.append((channel.seq, self.cursor(channel, channel.seq), "open", {"rev": revision(value)}))
+                self.changed.notify_all()
+                return True
             old = channel.resources[name]
             if name == "ledger" and revision(value) < revision(old):
                 return False
@@ -135,7 +171,10 @@ class Hub:
                 change = copy.deepcopy(change)
                 channel.resources[name] = patch.apply(old, change)
             channel.seq += 1
-            data = {"patch": change, "rev": revision(value)} if name == "ledger" else {"patch": change}
+            data: dict[str, Any] = {"patch": change}
+            if name == "ledger":
+                data.update(rev=revision(value), rows=changed_rows(old, value, change))
+                data["from"] = revision(old)
             channel.log.append((channel.seq, self.cursor(channel, channel.seq), name, data))
             self.changed.notify_all()
             return True

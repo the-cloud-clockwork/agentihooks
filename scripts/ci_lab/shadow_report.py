@@ -22,6 +22,7 @@ from typing import Any, cast
 
 import scripts.ci_budget.rate_limit
 from scripts.ci_lab import shadow
+from scripts.ci_lab.webhooks import CHECK_PREFIX
 
 __all__ = [
     "Head",
@@ -29,10 +30,12 @@ __all__ = [
     "Tally",
     "Verdict",
     "actions",
+    "check_runs",
     "claims",
     "collect",
     "first",
     "head",
+    "heads_of",
     "holds",
     "lab",
     "main",
@@ -49,6 +52,7 @@ gh_api = cast("Callable[..., subprocess.CompletedProcess[str]]", scripts.ci_budg
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = "the-cloud-clockwork/agentihooks"
 LAB_APP = "AGENTIHOOKS_LAB_APP"
+LISTED_NAME = f"{CHECK_PREFIX}/"
 WORKFLOW = "test.yml"
 PULL_REQUEST = "pull_request"
 MERGE_GROUP = "merge_group"
@@ -138,10 +142,12 @@ def actions(runs: Sequence[Mapping[str, Any]], gate: str, static: Collection[str
     return Verdict(shadow.FAIL if shadow.FAIL in outcomes else shadow.PASS, max(map(completed, graded)))
 
 
-def lab(runs: Sequence[Mapping[str, Any]], gate: str, app: str) -> Verdict | None:
-    """Return the lab App's newest lab-shadow verdict on the gate, or None when it posted no completed pass or fail."""
-    name = f"{shadow.LAB_NAME}{gate}"
-    posted = [run for run in runs if run["name"] == name and run["app"]["slug"] == app]
+def lab(runs: Sequence[Mapping[str, Any]], gate: str, app: str, listed: bool = False) -> Verdict | None:
+    """Return the lab App's newest verdict on the gate, or None when it posted no completed pass or fail: its
+    lab-shadow/<gate> check run and, for a listed gate, also the lab/<gate> check run it posts under authority."""
+    prefixes = (shadow.LAB_NAME, LISTED_NAME) if listed else (shadow.LAB_NAME,)
+    names = {f"{prefix}{gate}" for prefix in prefixes}
+    posted = [run for run in runs if run["name"] in names and run["app"]["slug"] == app]
     if not posted:
         return None
     newest = max(posted, key=lambda run: int(run["id"]))
@@ -149,10 +155,12 @@ def lab(runs: Sequence[Mapping[str, Any]], gate: str, app: str) -> Verdict | Non
     return None if outcome is None else Verdict(outcome, completed(newest))
 
 
-def head(sha: str, runs: Sequence[Mapping[str, Any]], gate: str, sources: shadow.Sources) -> Head | None:
+def head(
+    sha: str, runs: Sequence[Mapping[str, Any]], gate: str, sources: shadow.Sources, listed: bool = False
+) -> Head | None:
     """Return the head's verdicts on the gate, or None when it holds no Actions verdict."""
     found = actions(runs, gate, sources.static)
-    return None if found is None else Head(sha, found, lab(runs, gate, sources.lab_app))
+    return None if found is None else Head(sha, found, lab(runs, gate, sources.lab_app, listed))
 
 
 def mismatch(found: Head) -> bool:
@@ -222,12 +230,16 @@ def heads_of(fetch: Fetch, repository: str, event: str) -> Iterator[str]:
             yield sha
 
 
+def check_runs(fetch: Fetch, repository: str, sha: str) -> list[Mapping[str, Any]]:
+    """Return the latest check runs of a head, every page of them."""
+    return list(pages(fetch, f"repos/{repository}/commits/{sha}/check-runs?filter=latest", "check_runs"))
+
+
 def collect(fetch: Fetch, repository: str, event: str, gate: str, sources: shadow.Sources, count: int) -> list[Head]:
     """Return the newest count heads of the event that hold an Actions verdict on the gate."""
     found: list[Head] = []
     for sha in heads_of(fetch, repository, event):
-        runs = list(pages(fetch, f"repos/{repository}/commits/{sha}/check-runs?filter=latest", "check_runs"))
-        graded = head(sha, runs, gate, sources)
+        graded = head(sha, check_runs(fetch, repository, sha), gate, sources)
         if graded is not None:
             found.append(graded)
         if len(found) == count:

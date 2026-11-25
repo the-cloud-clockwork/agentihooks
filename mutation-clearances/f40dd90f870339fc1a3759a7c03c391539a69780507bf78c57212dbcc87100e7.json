@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/lab.py:scripts.doctor.lab.x__differs:09bdff5e10ee7ed5199543c54c14e2cf76e9d145ba396821b1ba84d0e99ba39f": {
+    "reader": "standards_reader",
+    "reason": "_differs only passes sha into shadow_report.head, which stores it in Head(sha, ...). The return value comes from mismatch(found), which reads only found.lab.outcome and found.actions.outcome, so None and sha give the same bool. No log, GitHub read or exception depends on it, and Head.sha is read only by shadow_report.line, which the Doctor reader never calls."
+  }
+}

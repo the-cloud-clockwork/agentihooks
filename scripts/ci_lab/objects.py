@@ -1,4 +1,5 @@
-"""The lab object layout, lab/<kind>/<digest>/{report.json,log.txt} and lab/grades/<run>/, on local or S3 storage."""
+"""The lab object layout, lab/<kind>/<digest>/{report.json,log.txt,manifest.json}, lab/flakes/<kind>/<digest>.jsonl and
+lab/grades/<run>/, on local or S3 storage."""
 
 import os
 import re
@@ -16,6 +17,7 @@ __all__ = [
     "Objects",
     "S3Objects",
     "Uploads",
+    "flakes_path",
     "grade_prefix",
     "is_report",
     "manifest_folder",
@@ -24,7 +26,7 @@ __all__ = [
 ]
 
 ROOT = "lab/"
-FILES = {"report": "report.json", "log": "log.txt"}
+FILES = {"report": "report.json", "log": "log.txt", "manifest": "manifest.json"}
 UPLOAD_SECONDS = 900
 KEY = re.compile(r"(?P<kind>[a-z]+)-v[0-9]+-(?P<digest>[0-9a-f]{64})")
 REPORT = re.compile(ROOT + r"[a-z]+/[0-9a-f]{64}/report\.json")
@@ -41,8 +43,6 @@ class Objects(Protocol):
 
     def upload_url(self, path: str, expires_s: int) -> str: ...
 
-    def download_url(self, path: str, expires_s: int) -> str: ...
-
 
 def unit_path(kind: str, key: str, name: str) -> str:
     """Return the path of a unit's report or log, lab/<kind>/<digest>/<file>, refusing a key of another kind."""
@@ -50,6 +50,14 @@ def unit_path(kind: str, key: str, name: str) -> str:
     if match is None or match["kind"] != kind:
         raise ValueError(f"not a {kind} unit key: {key}")
     return f"{ROOT}{kind}/{match['digest']}/{FILES[name]}"
+
+
+def flakes_path(kind: str, key: str) -> str:
+    """Return the path of a unit's flake rows, lab/flakes/<kind>/<digest>.jsonl, refusing a key of another kind."""
+    match = KEY.fullmatch(key)
+    if match is None or match["kind"] != kind:
+        raise ValueError(f"not a {kind} unit key: {key}")
+    return f"{ROOT}flakes/{kind}/{match['digest']}.jsonl"
 
 
 def grade_prefix(run: str) -> str:
@@ -107,10 +115,6 @@ class LocalObjects:
         """Return the file URL a local worker writes the object to; a local file never expires."""
         return contain(self.root, path).as_uri()
 
-    def download_url(self, path: str, expires_s: int) -> str:
-        """Return the file URL a local worker reads the object from; a local file never expires."""
-        raise NotImplementedError(path)
-
 
 class S3Objects:
     """Objects in an S3 compatible bucket such as MinIO: conditional puts and presigned PUT URLs."""
@@ -142,10 +146,6 @@ class S3Objects:
         params = {"Bucket": self.bucket, "Key": self.prefix + path}
         return self.client.generate_presigned_url("put_object", Params=params, ExpiresIn=expires_s)
 
-    def download_url(self, path: str, expires_s: int) -> str:
-        """Return a presigned GET URL for the object."""
-        raise NotImplementedError(path)
-
 
 class Uploads:
     """The lease API upload signer: presigned PUT URLs for a leased job's report and log."""
@@ -157,7 +157,3 @@ class Uploads:
     def upload_url(self, job: str, name: str) -> str:
         """Return the URL a worker puts the job's report or log to."""
         return self.objects.upload_url(upload_path(job, name), self.expires_s)
-
-    def manifest_url(self, path: str) -> str:
-        """Return the URL a worker fetches the stored dependency manifest at the path from."""
-        raise NotImplementedError(path)

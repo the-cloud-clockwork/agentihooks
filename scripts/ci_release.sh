@@ -32,8 +32,8 @@ case "$1" in
     test "$(git rev-parse "v$3^{commit}")" = "$2"
     ;;
   verify)
-    python -m pip install build
-    python -m build
+    python -m pip install --constraint .github/ci-tools/build.lock build==1.6.1
+    python -m build --dependency-constraints-txt .github/ci-tools/build.lock
     python - "$3" <<'PY'
 import sys
 import zipfile

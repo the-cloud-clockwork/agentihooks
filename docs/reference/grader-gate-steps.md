@@ -27,8 +27,9 @@ closed instead of grading the base's own charts.
 
 The other lint gate steps are outside the step table. Several of them look
 for their module in the grader and run the head's copy when it is missing. The
-[For loop word list gate](for-loop-word-list-gate.md) is one of them. The
-[Tick pattern gate](tick-pattern-gate.md) fails instead. The protected gate
+[For loop word list gate](for-loop-word-list-gate.md) and the
+[Tick pattern gate](tick-pattern-gate.md) run only the grader's copy and fail
+when it is missing. The protected gate
 step runs `scripts.gate_protected` from the grader, and runs the head's
 `scripts.ci_runner_trust` when the grader has no `scripts/ci_runner_trust.py`.
 [Protected gate step in lint](#protected-gate-step-in-lint) covers that step
@@ -83,8 +84,9 @@ holds an authoritative verdict for it.
 
 The ruff steps run `python -P`, which keeps the current directory off the
 import path. A head that ships its own `ruff` package therefore cannot stand in
-for the installed one. Every lint gate step carries `if: ${{ !cancelled() }}`,
-so each one reports even after an earlier step turns red.
+for the installed one. Every lint gate step carries
+{% raw %}`if: ${{ !cancelled() }}`{% endraw %}, so each one reports even after
+an earlier step turns red.
 
 The marker vector step compares the head's fixture byte for byte with
 `tests/fixtures/marker-idempotency-vectors.json` from `agentibrain-kernel` on
@@ -467,7 +469,7 @@ does not exist.
 | `The head changes tests/registry/FROZEN_GATES.json and the frozen gate file <path> together; ...` from `Require trusted actors before private runner admission`, on a pull request whose own commits leave `<path>` unchanged | The step graded a revision that carries `dev`'s frozen changes: a run of the step text from before pull request 11515, or a head that merged in `dev` commits newer than the event base. See [Why the step grades the head instead of the synthetic merge](#why-the-step-grades-the-head-instead-of-the-synthetic-merge) | Compare the sha on the `graded` line with the pull request head sha. Run `git diff --name-only <merge base> <head> -- tests/registry/FROZEN_GATES.json <path>` with the two shas from that line to list what the graded revision changed |
 | `The head drops the frozen gate file <path> from tests/registry/FROZEN_GATES.json; a frozen file stays frozen.` from the same step | The head's registry no longer lists a file the event base registry freezes | Restore the entry in `tests/registry/FROZEN_GATES.json`. A frozen file stays frozen |
 | `The head changes the frozen gate file <path> to content tests/registry/FROZEN_GATES.json on the base does not accept; ...` from the same step | The head changes a frozen file to a blob the event base registry does not list | Land a pull request that adds the blob to the registry first. See [Change the job](ci-lab.md#change-the-job) |
-| Semgrep reports `protected-gate-grades-synthetic-merge` | A new workflow line runs `scripts.gate_protected` with `--head` set to the run sha | Pass the pull request head instead, through {% raw %}`HEAD_SHA: ${{ github.event.pull_request.head.sha \|\| github.sha }}`{% endraw %}, as in [Protected gate step in lint](#protected-gate-step-in-lint) |
+| Semgrep reports `protected-gate-grades-synthetic-merge` | A new workflow line runs `scripts.gate_protected` with `--head` set to the run sha | Pass the pull request head instead, through {% raw %}<code>HEAD_SHA: ${{ github.event.pull_request.head.sha &#124;&#124; github.sha }}</code>{% endraw %}, as in [Protected gate step in lint](#protected-gate-step-in-lint) |
 
 ## Tests and feature map
 
@@ -477,9 +479,9 @@ step, `tests/test_gate_protected.py`:
 
 | Feature | What its tests hold |
 | --- | --- |
-| `grader-gates-fail-closed-on-stale-base` | A stale grader copy that refuses `--root` fails the marker step with exit 2 and each chart step with the refusal, exit 1, and a planted head copy that exits 0 never runs |
+| `grader-gates-fail-closed-on-stale-base` | A stale grader copy that refuses `--root` fails the marker step with exit 2 and each chart step with the refusal, exit 1. A grader without the for loop gate fails that step with exit 1. A planted head copy that exits 0 never runs |
 | `chart-checks-refuse-a-grader-that-ignores-root` | A grader copy that ignores its arguments, prints a clean summary and exits 0 makes each chart step refuse with exit 1, and its summary never reaches the step output |
-| `lint-gates-grade-from-grader` | A head that drops a ruff rule, ships a shadow `ruff` package, changes the formatter config, or rewrites the wiring, marker or chart check to pass itself stays red. The marker check reads the fixture under its `--root` and runs after the grader checkout. Each Semgrep job checks out the caller's `base` as the grader and scans with both rule sets |
+| `lint-gates-grade-from-grader` | A head that drops a ruff rule, ships a shadow `ruff` package, changes the formatter config, or rewrites the wiring, marker, for loop or chart check to pass itself stays red. The marker check reads the fixture under its `--root` and runs after the grader checkout. Each Semgrep job checks out the caller's `base` as the grader and scans with both rule sets |
 | `protected-lint-grades-the-pull-request-head` | The protected gate step grades the pull request head, or `github.sha` outside a pull request, so frozen changes that landed on `dev` after the event base are never blamed on a pull request behind `dev`, and a frozen file edit in the head is still refused. See [Guards](#guards) |
 
 `tests/context/test_marker_key_vectors.py::test_vector_check_is_on_the_required_tests_path`

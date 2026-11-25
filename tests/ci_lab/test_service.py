@@ -2,6 +2,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from dataclasses import replace
 from functools import partial
 from typing import Any
 
@@ -20,9 +21,6 @@ class Signer:
     def upload_url(self, job: str, name: str) -> str:
         return f"https://objects.test/{job}/{name}"
 
-    def manifest_url(self, path: str) -> str:
-        return f"https://objects.test/{path}"
-
 
 @pytest.fixture
 def jobs() -> queue.Queue:
@@ -34,18 +32,27 @@ def jobs() -> queue.Queue:
 @pytest.fixture
 def routes(jobs: queue.Queue) -> service.Routes:
     lab = leases.Leases(jobs, ttl_ms=500, clock=lambda: 1000, sleep=lambda ms: None, poll_ms=50)
-    control = lease_api.ControlRoutes(jobs.client, "tok", lambda: 1000)
 
     def grades(head: str) -> list[dict[str, Any]]:
         return [{"run": f"run-of-{head}"}] if head == HEAD else []
 
-    return service.Routes(partial(lease_api.answer, lab, Signer(), control), lambda: LOAD, grades)
+    return service.Routes(partial(lease_api.answer, lab, Signer()), lambda: LOAD, grades)
 
 
 @pytest.mark.feature("lab-scheduler-service")
 def test_the_scheduler_port_answers_capacity_from_the_load_snapshot(routes: service.Routes) -> None:
     assert routes.respond("GET", "/capacity", b"", None) == (200, document(LOAD))
     assert routes.respond("GET", "/capacity?fresh=1", b"", None) == (200, document(LOAD))
+
+
+@pytest.mark.feature("lab-scheduler-first-build-at-bind")
+def test_the_scheduler_port_answers_capacity_not_built_before_the_first_build(routes: service.Routes) -> None:
+    unbuilt = replace(routes, snapshot=lambda: None)
+    assert unbuilt.respond("GET", "/capacity", b"", None) == (503, {"error": "the load snapshot is not built yet"})
+    assert unbuilt.respond("GET", f"/grades/{HEAD}", b"", None) == (
+        200,
+        {"head": HEAD, "grades": [{"run": f"run-of-{HEAD}"}]},
+    )
 
 
 @pytest.mark.feature("lab-scheduler-service")
@@ -75,8 +82,8 @@ def test_the_scheduler_port_keeps_every_lease_route(routes: service.Routes, jobs
     assert routes.respond("POST", "/capacity", b"", None) == (404, {"error": "not found"})
     assert routes.respond("POST", f"/grades/{HEAD}", b"", None) == (404, {"error": "not found"})
     assert routes.respond("GET", "/missing", b"", None) == (404, {"error": "not found"})
-    assert routes.respond("POST", "/resume", b"", None) == (401, {"error": "control token refused"})
-    assert routes.respond("POST", "/resume", b"", "Bearer tok") == (200, {"resumed": []})
+    assert routes.respond("POST", "/resume", b"", None) == (404, {"error": "not found"})
+    assert routes.respond("POST", "/resume", b"", "Bearer tok") == (404, {"error": "not found"})
 
 
 @pytest.mark.feature("lab-scheduler-service")

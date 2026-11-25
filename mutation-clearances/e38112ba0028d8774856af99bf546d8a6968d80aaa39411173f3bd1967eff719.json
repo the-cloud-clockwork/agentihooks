@@ -1,0 +1,6 @@
+{
+  "scripts/pr_body.py:scripts.pr_body.x__body_from_event:d28f84e41c254e255a3abbc09b46224b0c009ccb5c00958d1c74ad015a87b453": {
+    "reader": "standards-reader",
+    "reason": "Equivalent through current public outputs: the private helper has only main as caller. Empty text and XXXX both contain no headings, so main prints exactly the same nine missing-section labels and returns 1 without writing a file."
+  }
+}

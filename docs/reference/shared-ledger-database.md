@@ -301,7 +301,7 @@ The values are constants in the Postgres repository module (`LOCK_WAIT`, `LOCK_T
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Writes fail with `the ledger writer lock was not granted in 3 waits of 10 seconds` | Writers queued for over 30 seconds: a long write, a schema setup building indexes, or many writers at once | Run the holder query to see who holds the lock and for how long; retry the command once the queue drains |
+| Writes fail with `the ledger writer lock was not granted in 3 waits of 10 seconds` | Writers queued for over 30 seconds: a long write, a schema setup building indexes, or many writers at once | Run the holder query to see who holds the lock and for how long; retry the command once the queue drains. When task writes on a ledger with many stamp records each hold the lock for about a second, check that every writer runs code with the [writer copy rebuild](presentation-layer.md#writer-copy-rebuild) |
 | `cannot start a transaction within a transaction` | Code asked for the writer lock after its transaction had already run a statement | Take the writer lock as the transaction's first statement |
 | A holder shows `idle in transaction` for minutes | The session did not receive the settings, for example through a pooler that drops startup options, or the process predates this change | Run the `SHOW` check; restart the ledger server on current code; end the backend with `SELECT pg_terminate_backend(<pid>)` only as a stopgap |
 | `canceling statement due to statement timeout` in the server log | One statement ran past 60 seconds | Find the statement in `pg_stat_activity.query` while it runs and fix the query or its index in code |
@@ -319,9 +319,17 @@ test passes when the second writer commits within 30 seconds and the holder's ba
 `tests/swarm_ledger/test_postgres_repository.py` runs the translated statements against the same service: every
 hierarchy read must match the SQLite repository, and an imported ledger, a write with its events and the relay
 journal must round trip. The Tests workflow calls it on every pull request push, on pushes to `dev` and on manual
-dispatch, `Gate — Required` needs it on pull requests, and its step fails unless all fourteen writer lock, outbox,
-writer floor and repository scenarios ran. Unit tests in `tests/swarm_ledger/test_postgres.py` pin the connection settings and the
-three-wait retry.
+dispatch, `Gate — Required` needs it on pull requests, and its step fails unless the log reports ` 23 passed` for the
+writer lock, outbox, writer floor, repository and session memory parity scenarios. Unit tests in
+`tests/swarm_ledger/test_postgres.py` pin the connection settings and the three-wait retry.
+
+That step, `Run the idle writer lock holder scenario`, then runs `tests/swarm_ledger/test_warm_writer_parity.py` on
+the SQLite test store and on the same Postgres database, and fails with
+`The warm writer parity scenarios on SQLite and Postgres did not all run.` unless the log reports ` 25 passed`. Each
+case sends the same request over the warm writer socket and in process and requires the same answer, rows and write
+hooks from both: each listed refusal, the revision conflict retry, each listed audit effect, and the writer floor
+refusal above on Postgres. [Parity with the in-process call](ledger-write-path.md#parity-with-the-in-process-call)
+lists the cases.
 
 `tests/swarm_ledger/test_postgres_writer_floor.py` runs the writer floor in the same workflow against real Postgres:
 

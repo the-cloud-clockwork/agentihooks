@@ -1,0 +1,55 @@
+{
+  "reviewed_by": [
+    "standards-reader",
+    "spec-reader"
+  ],
+  "removed": [
+    {
+      "request": "GET /api/v1/ledgers/replay",
+      "order": "Operator: the ledger is a presentation layer and it must only be api; it cannot take two minutes to load the data",
+      "matches": 2
+    }
+  ],
+  "added": [
+    {
+      "request": "GET /api/v1/ledgers/replay/alerts",
+      "order": "Operator: the ledger is a presentation layer and it must only be api; it cannot take two minutes to load the data",
+      "matches": 2
+    },
+    {
+      "request": "GET /api/v1/ledgers/replay/followups",
+      "order": "Operator: the ledger is a presentation layer and it must only be api; it cannot take two minutes to load the data",
+      "matches": 2
+    },
+    {
+      "request": "GET /api/v1/ledgers/replay/freezes",
+      "order": "Operator: the ledger is a presentation layer and it must only be api; it cannot take two minutes to load the data",
+      "matches": 2
+    },
+    {
+      "request": "GET /api/v1/ledgers/replay/phases",
+      "order": "Operator: the ledger is a presentation layer and it must only be api; it cannot take two minutes to load the data",
+      "matches": 2
+    },
+    {
+      "request": "GET /api/v1/ledgers/replay/slices",
+      "order": "Operator: the ledger is a presentation layer and it must only be api; it cannot take two minutes to load the data",
+      "matches": 2
+    },
+    {
+      "request": "GET /api/v1/ledgers/replay/summary",
+      "order": "Operator: the ledger is a presentation layer and it must only be api; it cannot take two minutes to load the data",
+      "matches": 2
+    },
+    {
+      "request": "GET /api/v1/ledgers/replay/swarm",
+      "order": "Operator: the ledger is a presentation layer and it must only be api; it cannot take two minutes to load the data",
+      "matches": 2
+    },
+    {
+      "request": "GET /api/v1/ledgers/replay/tasks",
+      "order": "Operator: the ledger is a presentation layer and it must only be api; it cannot take two minutes to load the data",
+      "matches": 2
+    }
+  ]
+}

@@ -163,6 +163,19 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate() -> None:
     assert steps.index(download) < steps.index(check)
 
 
+@pytest.mark.feature("config-import-without-yaml")
+def test_shard_check_installs_pyyaml_before_the_import_chain_that_needs_it() -> None:
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["shard-check"]["steps"]
+    install = next(
+        step
+        for step in steps
+        if step.get("run", "").strip()
+        == "python -m pip install --constraint .github/test-requirements.lock PyYAML==6.0.3"
+    )
+    gate = next(step for step in steps if "python -m scripts.ci_gate_shards" in step.get("run", ""))
+    assert steps.index(install) < steps.index(gate)
+
+
 def _plan(tmp_path, tests):
     path = tmp_path / "reused-tests.json"
     path.write_text(json.dumps({"run": "7", "tests": tests}))

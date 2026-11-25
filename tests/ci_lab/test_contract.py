@@ -31,6 +31,7 @@ EXPECTED_METRICS = {
     "ci_lab_workers_ready": (),
     "ci_lab_github_rate_remaining": (),
     "ci_lab_verdict_mismatch_total": ("gate",),
+    "ci_lab_load_age_seconds": (),
 }
 
 NAMED_CONSTANTS = {
@@ -54,11 +55,12 @@ NAMED_CONSTANTS = {
     "WORKERS_READY": "ci_lab_workers_ready",
     "GITHUB_RATE_REMAINING": "ci_lab_github_rate_remaining",
     "VERDICT_MISMATCH_TOTAL": "ci_lab_verdict_mismatch_total",
+    "LOAD_AGE_SECONDS": "ci_lab_load_age_seconds",
 }
 
 SCHEDULER_DESCRIPTION = {
     "service": "scheduler",
-    "ports": [8800, 9108],
+    "ports": [8800, 8801, 9108],
     "environment": {
         "prefixes": ["AGENTIHOOKS_BUS", "CI_LAB_MINIO_", "GITHUB_APP_"],
         "names": ["CI_LAB_REDIS_URL", "CI_LAB_RUNTIME_CONFIG", "CI_LAB_URL"],
@@ -77,6 +79,7 @@ WORKER_DESCRIPTION = {
             "CI_LAB_GIT_MIRROR",
             "UV_CACHE_DIR",
             "CI_LAB_WORK_ROOT",
+            "CI_LAB_MANIFEST",
             "CI_LAB_FLAKES",
             "CI_LAB_MUTATION_CACHE",
             "CI_LAB_KILLERS",
@@ -104,6 +107,7 @@ ENVIRONMENT_NAMES = (
     "CI_LAB_GIT_MIRROR",
     "UV_CACHE_DIR",
     "CI_LAB_WORK_ROOT",
+    "CI_LAB_MANIFEST",
     "CI_LAB_FLAKES",
     "CI_LAB_MUTATION_CACHE",
     "CI_LAB_KILLERS",
@@ -122,6 +126,7 @@ def test_delegates_route_to_the_two_services() -> None:
 
 def test_ports_are_fixed() -> None:
     assert contract.SCHEDULER_PORT == 8800
+    assert contract.CONTROL_PORT == 8801
     assert contract.METRICS_PORT == 9108
 
 
@@ -147,6 +152,7 @@ def test_environment_names() -> None:
     assert contract.RUNTIME_CONFIG == "CI_LAB_RUNTIME_CONFIG"
     assert contract.LAB_URL == "CI_LAB_URL"
     assert contract.WORK_ROOT == "CI_LAB_WORK_ROOT"
+    assert contract.MANIFEST == "CI_LAB_MANIFEST"
     assert contract.FLAKES == "CI_LAB_FLAKES"
     assert contract.MUTATION_CACHE == "CI_LAB_MUTATION_CACHE"
     assert contract.KILLERS == "CI_LAB_KILLERS"
@@ -329,7 +335,7 @@ def test_doc_lists_the_contract() -> None:
         assert f"`{name}`" in text, name
     for name in ENVIRONMENT_NAMES:
         assert f"`{name}" in text, name
-    for port in ("8800", "9108"):
+    for port in ("8800", "8801", "9108"):
         assert f"`{port}`" in text, port
     for command in ("agentihooks ci-lab-scheduler --self-test", "agentihooks ci-lab-worker --self-test"):
         assert command in text, command

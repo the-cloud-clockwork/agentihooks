@@ -452,7 +452,7 @@ def test_the_grader_refuses_another_ruff_version(tmp_path, capsys, monkeypatch, 
     assert f"needs ruff {size_limits.RUFF_VERSION}, found {shown}, so it cannot grade" in capsys.readouterr().out
 
 
-def test_size_runs_in_lint_graded_by_the_base_with_the_pinned_ruff():
+def test_size_runs_in_lint_graded_by_the_base_with_the_pinned_ruff() -> None:
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     job = jobs["lint"]
     assert "size" not in jobs
@@ -461,7 +461,10 @@ def test_size_runs_in_lint_graded_by_the_base_with_the_pinned_ruff():
     steps = {step.get("name"): step for step in job["steps"]}
     install, base = steps["Install ruff"], steps["Check out the base revision"]
     grader, grade = steps["Check out the protected grader"], steps["Hold the size and complexity limits"]
-    assert install["run"] == f"python -m pip install ruff=={size_limits.RUFF_VERSION}"
+    assert (
+        install["run"]
+        == f"python -m pip install --constraint .github/ci-tools/lint-tools.lock ruff=={size_limits.RUFF_VERSION}"
+    )
     assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"'
     assert grader["run"] in (
         'git fetch --no-tags origin dev\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n',
@@ -492,3 +495,9 @@ def test_size_refuses_a_dev_without_its_grader(tmp_path):
     result = subprocess.run(["bash", "-e", "-c", grade["run"]], env=env, capture_output=True, text=True)
     assert result.returncode == 1
     assert "dev carries no scripts/size_limits.py, so nothing trusted can grade." in result.stdout
+
+
+@pytest.mark.feature("merge-queue-grades-size-limits-on-the-combined-tree")
+def test_the_checked_out_tree_holds_the_size_limits() -> None:
+    recorded = size_limits.load(_ROOT)
+    assert size_limits.grade(recorded or {}, size_limits.measure(_ROOT), recorded) == []

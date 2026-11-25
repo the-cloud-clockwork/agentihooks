@@ -670,6 +670,74 @@ def test_hive_run_re_mints_a_root_credential_that_does_not_decode(
     )
 
 
+def _unreadable(monkeypatch: pytest.MonkeyPatch, creds: Path, error: OSError) -> None:
+    read = Path.read_text
+
+    def read_text(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        if path == creds:
+            raise error
+        return read(path, encoding, errors)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+@pytest.mark.parametrize(
+    "error", [PermissionError(13, "Permission denied"), OSError(5, "Input/output error")], ids=["denied", "io-error"]
+)
+def test_hive_run_re_mints_a_root_credential_that_cannot_be_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], error: OSError
+) -> None:
+    home = _root_host(monkeypatch, tmp_path)
+    signer = _signer(ROOT)
+    env = root_bus.write(home, signer, "root")
+    creds = _stored(home, signer, _without_stop_grants(signer))
+    for key, value in dotenv_values(env).items():
+        monkeypatch.setenv(key, value or "")
+    monkeypatch.setattr(cli, "_signer", lambda: signer)
+    _unreadable(monkeypatch, creds, error)
+    served: list = []
+    _hive_run(monkeypatch, served)
+
+    assert cli._daemon("run") == 0
+
+    assert served == ["env", "alpha", "telemetry"]
+    assert nkey.claims(nkey.parse_creds(creds.read_bytes().decode())[0])["nats"] == _fresh(signer)
+    assert capsys.readouterr().err == (
+        f"hive re-minted the root bus credential in {env}: its grant differed from a fresh mint\n"
+    )
+
+
+@pytest.mark.feature("hive-root-bus-re-mint")
+def test_hive_run_keeps_the_stored_root_credential_when_it_can_be_neither_read_nor_rewritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = _root_host(monkeypatch, tmp_path)
+    signer = _signer(ROOT)
+    root_bus.write(home, signer, "root")
+    creds = home / "root-bus" / "bus.creds"
+    stored = creds.read_bytes()
+    denied = PermissionError(13, "Permission denied", str(creds))
+    _unreadable(monkeypatch, creds, denied)
+
+    def refuse(path: Path, text: str) -> Path:
+        raise denied
+
+    monkeypatch.setattr(auth, "write_private", refuse)
+    monkeypatch.delenv("AGENTIHOOKS_BUS_SWARMS", raising=False)
+    monkeypatch.setattr(cli, "_signer", lambda: signer)
+    served: list = []
+    _hive_run(monkeypatch, served)
+
+    assert cli._daemon("run") == 0
+
+    assert served == ["env", None, "telemetry"]
+    assert creds.read_bytes() == stored
+    assert capsys.readouterr().err == (
+        f"hive kept the stored root bus credential ([Errno 13] Permission denied: '{creds}')\n"
+    )
+
+
 @pytest.mark.feature("hive-root-bus-re-mint")
 def test_hive_run_keeps_the_stored_root_credential_when_the_signer_cannot_mint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

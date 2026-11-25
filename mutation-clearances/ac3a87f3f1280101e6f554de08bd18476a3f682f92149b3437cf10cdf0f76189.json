@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_update_refusal:50d19cf82b1861238018ee2a14c638fb5b76a9c727d83ea2be4305f977168304": {
+    "reader": "standards_reader",
+    "reason": "op.get(\"by\", ) is op.get(\"by\") with default None; lane_of(None) returns '' as parse and LEGACY_RE match on name or \"\", so expert_refusal returns \"\" as it does for the original's \"\"."
+  }
+}

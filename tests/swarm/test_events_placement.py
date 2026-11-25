@@ -19,6 +19,7 @@ from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.probe import ROOT
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
+from tests.helpers import narrow_ledger
 from tests.swarm.test_readiness import NOW, SLUG, Clock, bus, clock, doc, snapshot, task  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, store, tasks  # noqa: F401
 
@@ -223,11 +224,8 @@ def rig() -> Iterator[SimpleNamespace]:
         slugs=lambda: [SLUG],
         snapshot=lambda slug: snapshot(found, claimed=[t for t in rows if swarm.claimant(slug, t)]),
     )
-    yield SimpleNamespace(
-        store=swarm,
-        redis=redis,
-        admitter=admission.Admission(swarm, cast(LedgerClient, ledger), cast(readiness.Source, source), lambda: 7_000),
-    )
+    admitter = admission.Admission(swarm, cast(LedgerClient, ledger), cast(readiness.Source, source), lambda: 7_000)
+    yield SimpleNamespace(store=swarm, redis=redis, admitter=narrow_ledger.viewed(admitter))
     redis.close()
 
 
@@ -372,6 +370,7 @@ def test_root_keeps_a_slot_for_a_workstation_task_another_events_swarm_holds_wai
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _capped(rig, monkeypatch, {ROOT: 1})
+    rig.store.create(SwarmConfig(OTHER, "/repo", 2, 2))
     claimed: list[str] = []
     views = {
         SLUG: snapshot(doc([task("plain")])),
@@ -397,6 +396,7 @@ def test_root_keeps_one_slot_for_each_waiting_workstation_task_of_every_events_s
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _capped(rig, monkeypatch, {ROOT: 2})
+    rig.store.create(SwarmConfig(OTHER, "/repo", 2, 2))
     views = {
         SLUG: snapshot(doc([task("plain"), task("desk", workstation=True)])),
         OTHER: replace(snapshot(doc([task("desk", workstation=True)])), slug=OTHER),

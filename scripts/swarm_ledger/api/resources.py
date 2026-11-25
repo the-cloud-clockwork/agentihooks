@@ -1,7 +1,7 @@
 import hashlib
 import json
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 from scripts.swarm_ledger import ledger_closed, models, ports
 
@@ -18,30 +18,30 @@ def reply_size(reply: object) -> int:
     return len(json.dumps(reply, ensure_ascii=False).encode())
 
 
-def bounded(reply: dict) -> dict:
+def bounded(reply: dict, message: str = "Use the explicit export operation for this resource") -> dict:
     if reply_size(reply) > MAX_REPLY:
-        raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
+        raise APIError(413, "resource_too_large", message)
     return reply
 
 
+METADATA_FIELDS = (
+    "size",
+    "title",
+    "overview",
+    "orchestrator",
+    "chat_instructions",
+    "policy",
+    "time_left_minutes",
+    "closed_at",
+    "summary",
+)
+METADATA_META = ("rev", "updated_at", "created_at", "size", "seed_error")
+METADATA_KEYS = (*METADATA_FIELDS, *(f"_meta.{key}" for key in METADATA_META))
+
+
 def metadata(doc: dict) -> dict:
-    fields = (
-        "size",
-        "title",
-        "overview",
-        "orchestrator",
-        "chat_instructions",
-        "policy",
-        "time_left_minutes",
-        "closed_at",
-        "summary",
-    )
-    result = {key: doc[key] for key in fields if key in doc}
-    result["_meta"] = {
-        key: doc["_meta"][key]
-        for key in ("rev", "updated_at", "created_at", "size", "seed_error")
-        if key in doc["_meta"]
-    }
+    result = {key: doc[key] for key in METADATA_FIELDS if key in doc}
+    result["_meta"] = {key: doc["_meta"][key] for key in METADATA_META if key in doc["_meta"]}
     return result
 
 
@@ -123,14 +123,30 @@ def closed_page(doc: dict, path: str, query: dict) -> dict:
     return closed_reply(selected, len(rows), offset)
 
 
-def closed_reply(rows: list, total: int, offset: int) -> dict:
+def closed_reply(rows: list[Any], total: int, offset: int) -> dict[str, Any]:
     end = offset + len(rows)
     return {"data": rows, "revision": revision(rows), "total": total, "next_offset": end if end < total else None}
+
+
+def open_page(rows: list[tuple[int, dict[str, Any]]], query: dict[str, Any]) -> dict[str, Any]:
+    offset: int = query.get("offset", 0)
+    limit: int = query.get("limit", OPEN_LIMIT)
+    selected: list[dict[str, Any]] = []
+    for at, row in rows[offset : offset + limit]:
+        projected: Any = project(row)
+        item = {**projected, "position": at}
+        if reply_size(closed_reply([*selected, item], len(rows), offset)) > MAX_REPLY:
+            if not selected:
+                raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
+            break
+        selected.append(item)
+    return closed_reply(selected, len(rows), offset)
 
 
 COLLECTIONS = models.COLLECTIONS
 THREADS = models.THREADS
 MAX_REPLY = 262144
+OPEN_LIMIT = 50
 DONE_ONLY = "State and offset read the done rows of a collection"
 
 

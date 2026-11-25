@@ -1,0 +1,6 @@
+{
+  "scripts/secret_env.py:scripts.secret_env.x__read_value:93a681ddabba284a74c089a4403709ba22ac71e485f62db543f010f34143b56c": {
+    "reader": "standards_reader",
+    "reason": "bytes.decode normalizes codec names case-insensitively, and CPython maps \"UTF-8\" to the same UTF-8 decoder with the same strict error handler, so the decoded value and every refusal are identical."
+  }
+}

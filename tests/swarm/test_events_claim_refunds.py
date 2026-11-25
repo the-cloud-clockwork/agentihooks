@@ -10,7 +10,7 @@ from unittest.mock import Mock
 import pytest
 
 from scripts.events.bus import Bus
-from scripts.events.config import BusConfig
+from scripts.events.config import BIND_ENV, BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
 from scripts.hive import execution_events, execution_stop
@@ -326,7 +326,7 @@ def test_a_reachable_agent_is_retired_through_its_runtime_with_its_task_scratch_
     runtime = SimpleNamespace(retire=lambda agent, **kwargs: retired.append((agent.name, kwargs)) or True)
     monkeypatch.setattr(tick_module.reaper, "scratch_homes", lambda slug, task: [f"{slug}/{task}"])
 
-    assert tick_module._retire_or_stop(SLUG, runtime, AgentRecord(name="a1", lane="eng", task="t1"), "idle")
+    assert tick_module._retire_or_stop(SLUG, runtime, AgentRecord(name="a1", lane="eng", task="t1"), "idle", Mock())
 
     assert retired == [("a1", {"homes": [f"{SLUG}/t1"]})]
 
@@ -429,7 +429,7 @@ def test_the_reap_step_judges_an_admitted_agent_by_its_pane_and_whether_its_work
     monkeypatch.setattr(
         reconciler,
         "stop_admitted",
-        lambda slug, stopped, reason: stops.append((slug, stopped.name, reason)) or execution_stop.SENT,
+        lambda slug, stopped, reason, *, store: stops.append((slug, stopped.name, reason)) or execution_stop.SENT,
     )
     judging = SimpleNamespace(
         slug=SLUG, store=None, ledger=None, runtime=None, rows={}, live={"a1"} if live else set(), now_ms=NOW
@@ -609,7 +609,7 @@ def test_an_ended_admitted_agent_is_retired_only_once_its_stop_answers_ended_or_
     returned: list[tuple[Any, ...]] = []
     monkeypatch.setattr(tick, "_acknowledging", lambda *_args: False)
     monkeypatch.setattr(tick, "_ended", lambda *_args: True)
-    monkeypatch.setattr(reconciler, "stop_admitted", lambda _slug, _agent, _reason: outcome)
+    monkeypatch.setattr(reconciler, "stop_admitted", lambda _slug, _agent, _reason, *, store: outcome)
     monkeypatch.setattr(
         reconciler, "settled_admitted", lambda slug, checked: asked.append((slug, checked.name)) or settled
     )
@@ -885,10 +885,12 @@ def test_a_pass_stops_sending_again_at_the_first_stop_the_bus_still_refuses(
 
 
 @pytest.mark.feature("events-refused-stop-resent")
+@pytest.mark.parametrize("bind", [False, True])
 def test_a_refused_stop_for_an_agent_with_no_execution_is_not_kept(
-    env: tuple[RedisStore, Any, Any], bus: Bus, monkeypatch: pytest.MonkeyPatch
+    env: tuple[RedisStore, Any, Any], bus: Bus, monkeypatch: pytest.MonkeyPatch, bind: bool
 ) -> None:
     store, _, _ = env
+    monkeypatch.setenv(BIND_ENV, "1" if bind else "0")
     monkeypatch.setattr(execution_stop, "stop", refused_stop)
 
     assert reconciler.stop_dropped(store, SLUG, AgentRecord(name="a1", lane="eng", task="t1"), "idle") == REFUSED
@@ -907,3 +909,67 @@ def test_a_stop_the_bus_takes_for_a_dropped_agent_keeps_nothing_pending(
     assert reconciler.stop_dropped(store, SLUG, agent, "idle") == execution_stop.SENT
 
     assert pending_stops(store) == {}
+
+
+@pytest.mark.feature("member-tick-stop-forwarded-by-hub")
+@pytest.mark.parametrize("reason", ["ended", "idle", "mismatch", "refused", "revoked", "stuck"])
+@pytest.mark.parametrize("refuse", [False, True])
+def test_a_member_bind_tick_parks_its_stop_until_the_hub_sends_it(
+    env: tuple[RedisStore, Any, Any],
+    bus: Bus,
+    seat: Callable[..., AgentRecord],
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+    refuse: bool,
+) -> None:
+    store, ledger, rt = env
+    agent, event = launched(env, bus, seat)
+    spoke_started(bus)
+    original = execution_stop.stop
+    refusal = Mock(side_effect=[ConnectionError("controller stop refused"), None] if refuse else [None])
+
+    def send(controller: Bus, slug: str, stopped: AgentRecord, why: str) -> str:
+        if controller is not bus:
+            raise PermissionError("member cannot publish execution stops")
+        refusal()
+        return original(controller, slug, stopped, why)
+
+    sender = Mock(side_effect=send)
+    monkeypatch.setattr(execution_stop, "stop", sender)
+    monkeypatch.setenv(BIND_ENV, "1")
+    if reason == "ended":
+        finish(env, agent, "finished")
+        reap_pass(env, NOW + 1)
+    elif reason in WATCH_FREES:
+        WATCH_FREES[reason](SLUG, store, ledger, rt, {row["id"]: row for row in ledger.tasks(SLUG)}, agent, NOW + 1)
+    else:
+        monkeypatch.setattr(rt, "retire", Mock(return_value=False))
+        retire(reason, env, agent)
+    reap_pass(env, NOW + 2)
+
+    sender.assert_not_called()
+    queued = pending_stops(store)
+    held = json.loads(queued[agent.execution_id])
+    assert (held["agent"]["execution_id"], held["agent"]["name"], held["reason"]) == (
+        agent.execution_id,
+        agent.name,
+        reason,
+    )
+    assert [seated.name for seated in store.agents(SLUG)] == ([agent.name] if reason == "ended" else [])
+    assert sent_stops(bus, agent) == []
+
+    clock = Mock(return_value=NOW + 3)
+    hub = reconciler.Reconciler(bus, store, clock=clock)
+    if refuse:
+        hub.poll()
+        assert pending_stops(store) == queued
+        clock.return_value += reconciler.INTERVAL_MS
+    hub.poll()
+
+    assert sender.call_count == 1 + int(refuse)
+    assert sender.call_args.args[0] is bus
+    sent = sent_stops(bus, agent)
+    assert [(stop.key, stop.cause, stop.data["reason"]) for stop in sent] == [(agent.execution_id, event.id, reason)]
+    assert pending_stops(store) == {}
+    hub.poll()
+    assert sender.call_count == 1 + int(refuse)

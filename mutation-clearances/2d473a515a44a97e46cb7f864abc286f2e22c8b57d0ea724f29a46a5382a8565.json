@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/plant_grade.py:scripts.ci_lab.plant_grade.x__verdict:1917bc6293550c76e27622df167d5a51d4a37140894cead6f1afef8090c29576": {
+    "reader": "Standards",
+    "reason": "Changing the fallback dictionary key from text to XXtextXX still makes output.get('text') or '' evaluate to the identical empty string. Truthy real output is unchanged."
+  }
+}

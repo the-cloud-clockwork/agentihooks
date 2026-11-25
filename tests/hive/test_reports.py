@@ -104,6 +104,18 @@ def test_remote_host_is_another_hive_than_this_one(remote):
     assert remote.reports.host(replace(remote.agent, runtime_backend="kubernetes")) == ""
 
 
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_the_work_folder_host_is_the_host_target_else_the_hive_on_the_record(remote: SimpleNamespace) -> None:
+    named = remote.reports.workspace_host
+    assert named(replace(remote.agent, hive="elsewhere")) == HIVE
+    assert named(replace(remote.agent, runtime_target={})) == HIVE
+    assert named(replace(remote.agent, runtime_target={"pid": 12, "pid_start": 34})) == HIVE
+    assert named(replace(remote.agent, runtime_target={}, hive="controller")) == ""
+    assert named(replace(remote.agent, runtime_target={"host_id": "controller"}, hive="elsewhere")) == ""
+    assert named(replace(remote.agent, runtime_target={}, hive="")) == ""
+    assert named(replace(remote.agent, runtime_backend="kubernetes")) == HIVE
+
+
 def test_a_remote_claude_worker_is_seen_live_from_its_hive_report(remote):
     _publish(remote, typed="half a line", provider_error="overloaded", provider_error_id="529")
     runtime, agent = remote.runtime, remote.agent
@@ -258,6 +270,54 @@ def test_the_controller_reads_a_hub_admitted_codex_workers_binding_from_the_hive
     live_binding.record(remote.store, "fixture", agent, facts[agent.name], 1)
     stored = json.loads(remote.redis.hget(remote.store.key("fixture", "live-bindings"), agent.name))
     assert (stored["state"], stored["unobserved"]) == ("matching", {})
+
+
+@pytest.mark.feature("live-binding-process-provenance")
+@pytest.mark.parametrize("remote", [{"target": {}}], indirect=True)
+def test_a_hub_admitted_workers_process_absence_keeps_the_hive_host_that_observed_it(
+    remote: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import daemon
+    from scripts.swarm import live_binding
+    from scripts.swarm import runtime as runtime_module
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord
+
+    codex = AgentRecord(
+        remote.store.next_name("fixture", "eng"),
+        "eng",
+        "codex",
+        seat="eng-2@fixture",
+        harness="codex",
+        profile="engineer",
+        account="account",
+        hive=HIVE,
+        transport=APP_SERVER_TRANSPORT,
+    )
+    agent = remote.store.start_execution("fixture", codex)
+    remote.store.put_agent("fixture", agent)
+    monkeypatch.setattr(runtime_module, "connect", lambda: remote.store)
+    herdr = Mock()
+    herdr.live_names.return_value = {agent.name}
+    herdr.observe.return_value = PaneObservation("working")
+    herdr.bindings.return_value = {agent.name: {"process": False}}
+    monkeypatch.setattr("socket.gethostname", lambda: "hive-host")
+    report = daemon.execution_report(remote.redis, HIVE, herdr)
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+    monkeypatch.setattr("socket.gethostname", lambda: "controller-host")
+
+    facts = remote.runtime.bindings([agent])
+    differences = live_binding.record(remote.store, "fixture", agent, facts[agent.name], 1)
+
+    assert report["admitted"][agent.execution_id]["binding"] == {"process": False, "observer": "hive-host"}
+    assert differences == {
+        "process": {
+            "expected": True,
+            "actual": False,
+            "observer": "hive-host",
+            "owner": {"transport": APP_SERVER_TRANSPORT, "host": HIVE},
+        }
+    }
 
 
 @pytest.mark.feature("live-binding-reads-hub-admitted-bindings-from-their-hive")
