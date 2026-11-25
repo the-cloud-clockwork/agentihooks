@@ -195,7 +195,7 @@ supervise_writer() {
   trap 'kill "$(jobs -pr)" 2>/dev/null || true; wait 2>/dev/null || true' EXIT
   trap 'exit 0' TERM INT
   while true; do
-    agentihooks ledger writer serve &
+    MALLOC_ARENA_MAX=2 agentihooks ledger writer serve &
     wait "$!" || true
     python3 -c 'from scripts.swarm_ledger.ledger_server import scheduled_wait; scheduled_wait(5, timeout=5)' &
     wait "$!" || true
