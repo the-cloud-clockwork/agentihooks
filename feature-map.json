@@ -16629,7 +16629,7 @@
       "id": "ledger-writer-hosts",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-hosts",
-      "behaviour": "Workstation hive installation and shared systemd units keep the warm ledger writer running after clean or failed termination. Worker startup restarts the writer beside hive run with inherited database settings and stops it when the hive ends.",
+      "behaviour": "Workstation hive installation and shared systemd units keep the warm ledger writer running after clean or failed termination. Every writer launch sets MALLOC_ARENA_MAX to two. Worker startup restarts the writer beside hive run with inherited database settings and stops it when the hive ends.",
       "seam": "timer.units, hive.daemon.install and deploy worker startup",
       "tests": [
         "tests/hive/test_daemon.py::test_writer_unit_uses_the_installed_binary_and_restarts_after_every_exit",
