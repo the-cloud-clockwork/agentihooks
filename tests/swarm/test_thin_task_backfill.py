@@ -139,6 +139,7 @@ class _Client:
         self.refuse = refuse
         self.held: set[str] = set()
         self.pauses: list[float] = []
+        self.versions = {task["id"]: 0 for task in tasks}
 
     def tasks_where(
         self,
@@ -172,13 +173,28 @@ class _Client:
         assert (slug, name) == ("proof", "phases")
         return [{"id": phase} for phase in sorted(self.phases)]
 
+    def request(self, slug: str, path: str) -> dict[str, Any]:
+        assert slug == "proof"
+        task_id = path.removeprefix("tasks/")
+        task = next(task for task in self.tasks if task["id"] == task_id)
+        return {"data": deepcopy(task), "revision": f"{self.versions[task_id]:064x}"}
+
     def mutate(self, slug: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
         assert slug == "proof"
         self.writes.append(operations)
         if self.refuse:
             return {"rejected": ["refused"], "_meta": {"warnings": ["repair refused"]}}
+        for operation in operations:
+            if operation["op"] == "task_update":
+                task_id = operation["item"].removeprefix("tasks/")
+                expected = operation.get("expected_revision")
+                if expected and expected != f"{self.versions[task_id]:064x}":
+                    return {"rejected": ["conflict"], "_meta": {"warnings": ["revision conflict"]}}
         self.tasks, added = _apply(self.tasks, [operations])
         self.phases.update(added)
+        for operation in operations:
+            if operation["op"] == "task_update":
+                self.versions[operation["item"].removeprefix("tasks/")] += 1
         return {}
 
 
@@ -213,7 +229,7 @@ def test_the_command_reads_bounded_targets_and_reports_verified_before_and_after
         "after": 0,
         "batch_seconds": [0.125] * 5,
     }
-    assert [len(ids) for ids in client.reads if ids] == [100, 1, 100, 1, 100, 1]
+    assert [len(ids) for ids in client.reads if ids] == [100, 1, 100, 1]
     assert len(client.writes) == 5
     assert [len(batch) for batch in client.writes] == [75, 75, 75, 75, 3]
     assert client.pauses == [1.0] * 4
@@ -297,3 +313,68 @@ def test_a_write_over_two_seconds_stops_the_pass_before_another_batch(
     }
     assert len(client.writes) == writes
     assert client.pauses == [1.0] * (writes - 1)
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_an_unavailable_claim_verdict_prevents_every_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _Client(_pair())
+    monkeypatch.setattr(client, "focus_verdicts", lambda slug, target: None)
+    with pytest.raises(ValueError) as caught:
+        _command(monkeypatch, client)
+    assert str(caught.value) == "Planner claim verdict is unavailable"
+    assert client.writes == []
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+@pytest.mark.parametrize("change", ["scope", "hold"])
+def test_a_later_batch_rechecks_concurrent_scope_and_hold_changes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], change: str
+) -> None:
+    client = _Client([task for index in range(26) for task in _pair(f"legacy-{index}")])
+    mutate = client.mutate
+
+    def changed(slug: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
+        result = mutate(slug, operations)
+        if len(client.writes) == 1:
+            if change == "scope":
+                client.tasks[50]["phase"] = "assigned"
+                client.phases.add("assigned")
+                client.versions["legacy-25"] += 1
+            else:
+                client.held.add("enhance-legacy-25")
+        return result
+
+    monkeypatch.setattr(client, "mutate", changed)
+    assert _command(monkeypatch, client) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["after"] == 0
+    if change == "scope":
+        assert result["moved"] == 26
+        assert client.tasks[50]["phase"] == client.tasks[51]["phase"] == "assigned"
+        assert len(client.writes[1]) == 1
+    else:
+        assert result["moved"] == 25
+        assert client.tasks[50]["phase"] == client.tasks[51]["phase"] == ""
+        assert len(client.writes) == 1
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_a_phase_change_after_the_batch_read_refuses_the_stale_moves(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    client = _Client(_pair())
+    mutate = client.mutate
+
+    def raced(slug: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
+        client.tasks[0]["phase"] = "assigned"
+        client.phases.add("assigned")
+        client.versions["legacy"] += 1
+        return mutate(slug, operations)
+
+    monkeypatch.setattr(client, "mutate", raced)
+    with pytest.raises(LedgerRefused, match="revision conflict"):
+        _command(monkeypatch, client)
+    assert client.tasks[0]["phase"] == "assigned"
+    assert client.tasks[1]["phase"] == ""
+    assert client.phases == {"assigned"}
+    assert len(client.writes) == 1

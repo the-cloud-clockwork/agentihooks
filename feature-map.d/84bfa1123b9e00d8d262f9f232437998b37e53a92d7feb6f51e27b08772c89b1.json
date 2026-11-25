@@ -18,6 +18,9 @@
     "tests/swarm/test_thin_task_backfill.py::test_a_plan_missing_from_the_claimable_set_is_unchanged",
     "tests/swarm/test_thin_task_backfill.py::test_the_command_leaves_frozen_and_held_pairs_untouched",
     "tests/swarm/test_thin_task_backfill.py::test_preview_reports_the_eligible_count_without_writes",
-    "tests/swarm/test_thin_task_backfill.py::test_a_write_over_two_seconds_stops_the_pass_before_another_batch"
+    "tests/swarm/test_thin_task_backfill.py::test_a_write_over_two_seconds_stops_the_pass_before_another_batch",
+    "tests/swarm/test_thin_task_backfill.py::test_an_unavailable_claim_verdict_prevents_every_write",
+    "tests/swarm/test_thin_task_backfill.py::test_a_later_batch_rechecks_concurrent_scope_and_hold_changes",
+    "tests/swarm/test_thin_task_backfill.py::test_a_phase_change_after_the_batch_read_refuses_the_stale_moves"
   ]
 }

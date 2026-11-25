@@ -112,10 +112,9 @@ def _legacy_plan(task: dict[str, Any]) -> bool:
 
 
 def backfill(tasks: list[dict[str, Any]], phases: set[str], eligible: set[str]) -> list[list[dict[str, object]]]:
-    from scripts.tick.steps.thin import _move, _own_phase
+    from scripts.tick.steps.thin import _move, _own_phase  # pyright: ignore[reportPrivateUsage]
 
     rows = {task["id"]: task for task in tasks}
-    known = set(phases)
     batches: list[list[dict[str, object]]] = []
     for plan in filter(_legacy_plan, tasks):
         if plan["id"] not in eligible:
@@ -124,22 +123,24 @@ def backfill(tasks: list[dict[str, Any]], phases: set[str], eligible: set[str]) 
         phase = target.get("phase") or plan["id"]
         operations: list[dict[str, object]] = []
         if not target.get("phase"):
-            if phase not in known:
+            if phase not in phases:
                 operations.append(_own_phase(target, phase))
-                known.add(phase)
             operations.append(_move(target, phase))
         operations.append(_move(plan, phase))
         batches.append(operations)
     return batches
 
 
-def _backfill_candidates(client: Any, slug: str) -> list[dict[str, Any]]:
+def _claimable_plans(client: Any, slug: str) -> set[str]:
     verdict = client.focus_verdicts(slug, "lane:plan")
     if verdict is None:
         raise ValueError("Planner claim verdict is unavailable")
-    ids = [task["id"] for task in verdict["tasks"] if task["verdict"] == "claimable"]
+    return {task["id"] for task in verdict["tasks"] if task["verdict"] == "claimable"}
+
+
+def _backfill_candidates(client: Any, slug: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for group in batched(ids, 100):
+    for group in batched(sorted(_claimable_plans(client, slug)), 100):
         rows.extend(
             client.tasks_where(
                 slug,
@@ -150,10 +151,37 @@ def _backfill_candidates(client: Any, slug: str) -> list[dict[str, Any]]:
     return list(filter(_legacy_plan, rows))
 
 
+def _backfill_batch(
+    client: Any,
+    ledger: Any,
+    resource: Any,
+    slug: str,
+    plans: tuple[dict[str, Any], ...],
+    phases: set[str],
+) -> tuple[int, float] | None:
+    from scripts.tick.deadline import Deadline
+
+    eligible = _claimable_plans(client, slug)
+    ids = dict.fromkeys(
+        task_id for plan in plans if plan["id"] in eligible for task_id in (plan["id"], plan["enhances"])
+    )
+    replies = {task_id: resource.request(slug, f"tasks/{task_id}") for task_id in ids}
+    pairs = backfill([reply["data"] for reply in replies.values()], phases, eligible)
+    if not pairs:
+        return None
+    operations = [operation for pair in pairs for operation in pair]
+    for operation in operations:
+        if operation["op"] == "task_update":
+            task_id = str(operation["item"]).removeprefix("tasks/")
+            operation["expected_revision"] = replies[task_id]["revision"]
+    started = time.monotonic()
+    ledger.mutate(operations, deadline=Deadline.after(BACKFILL_BUDGET))
+    return len(pairs), time.monotonic() - started
+
+
 def main(argv: list[str] | None = None) -> int:
     from scripts.swarm.ledger_client import LedgerClient
     from scripts.tick.adapters.ledger import ClientLedger, resource_client
-    from scripts.tick.deadline import Deadline
 
     parser = argparse.ArgumentParser(description="Backfill phases for claimable enhancement plans")
     parser.add_argument("--slug", required=True)
@@ -166,23 +194,19 @@ def main(argv: list[str] | None = None) -> int:
     moved = 0
     timings: list[float] = []
     if plans and not args.dry_run:
-        targets: list[dict[str, Any]] = []
-        ids = list(dict.fromkeys(plan["enhances"] for plan in plans))
-        for group in batched(ids, 100):
-            targets.extend(client.tasks_where(args.slug, ids=group, fields=("id", "title", "phase")))
         clients = resource_client(args.slug)
         resource: Any = clients(BACKFILL_BUDGET)
         phases = {phase["id"] for phase in resource.collection(args.slug, "phases")}
         ledger = ClientLedger(args.slug, clients)
-        batches = backfill(plans + targets, phases, {plan["id"] for plan in plans})
-        for group in batched(batches, BACKFILL_PAIRS):
+        for group in batched(plans, BACKFILL_PAIRS):
             if moved:
                 time.sleep(BACKFILL_PAUSE)
-            started = time.monotonic()
-            ledger.mutate([operation for pair in group for operation in pair], deadline=Deadline.after(BACKFILL_BUDGET))
-            elapsed = time.monotonic() - started
+            result = _backfill_batch(client, ledger, resource, args.slug, group, phases)
+            if result is None:
+                continue
+            count, elapsed = result
             timings.append(elapsed)
-            moved += len(group)
+            moved += count
             if elapsed > BACKFILL_MAX_WRITE:
                 break
         after = len(_backfill_candidates(client, args.slug))
