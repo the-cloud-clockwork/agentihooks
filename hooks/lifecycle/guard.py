@@ -27,7 +27,9 @@ def _setting(key: str, default: str) -> str:
 
 
 def enabled() -> bool:
-    return sys.platform != "win32" and _setting("LIFECYCLE_GC_ENABLED", "true").lower() in ("1", "true", "yes")
+    if sys.platform == "win32":
+        return False
+    return _setting("LIFECYCLE_GC_ENABLED", "true").lower() in ("1", "true", "yes")
 
 
 def caller_holder(session_id: str, proc: Path = Path("/proc"), start: int | None = None) -> Holder | None:

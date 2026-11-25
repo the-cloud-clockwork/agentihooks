@@ -105,6 +105,21 @@ def brain_dispatch(monkeypatch):
     return fork
 
 
+def test_stop_hands_its_payload_to_the_handed_off_close(brain_dispatch: object, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Stop hook gives the handed-off session close the payload it received."""
+    from unittest.mock import Mock
+
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    close = Mock(return_value=False)
+    monkeypatch.setattr("hooks.lifecycle.handoff_close.on_stop", close)
+    payload = {"session_id": "session", "transcript_path": "", "last_assistant_message": ""}
+
+    EVENT_HANDLERS["Stop"](payload)
+
+    close.assert_called_once_with(payload)
+
+
 @pytest.mark.parametrize("event, task_name", [("Stop", "brain_writer"), ("SubagentStop", "brain_writer_subagent")])
 @pytest.mark.parametrize(
     "transcript_path, last_message", [("transcript.jsonl", ""), ("", "marker"), ("transcript.jsonl", "marker")]
@@ -304,6 +319,29 @@ def test_start_conditions_skip_a_target_that_cannot_inject_at_session_start(quie
     EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
 
     start_effect.assert_not_called()
+
+
+def test_windows_session_start_registers_no_broadcast_session(
+    quiet_session_start: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Windows keeps no session registry, so its session start registers nothing for broadcasts."""
+    from unittest.mock import Mock
+
+    from hooks import config
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    register, deliver = Mock(), Mock()
+    monkeypatch.setattr(config, "BROADCAST_ENABLED", True)
+    monkeypatch.setattr("hooks.context.account_sessions.agent_pid", Mock(return_value=1))
+    monkeypatch.setattr("hooks.context.account_sessions.session_account", Mock(return_value=""))
+    monkeypatch.setattr("hooks.context.broadcast.register_session", register)
+    monkeypatch.setattr("hooks.context.broadcast.check_and_inject_broadcasts", deliver)
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    EVENT_HANDLERS["SessionStart"]({"session_id": "windows", "cwd": str(tmp_path)})
+
+    register.assert_not_called()
+    deliver.assert_not_called()
 
 
 def test_pretool_blocks_handed_off_session(monkeypatch, tmp_path):

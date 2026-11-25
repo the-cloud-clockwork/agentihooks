@@ -236,7 +236,8 @@ def _is_ours(group: object, wrapper: Path) -> bool:
 
 def _runs_wrapper(command: str, wrapper: Path) -> bool:
     """True for a hook command that runs our wrapper, quoted, bare or through cmd.exe, or the bash wrapper an earlier install wrote."""
-    bare = command.removeprefix(WINDOWS_RUNNER).strip('"')
+    command = command.removeprefix(WINDOWS_RUNNER)
+    bare = command.strip('"')
     return _command_is_wrapper(bare, wrapper) or _command_is_wrapper(bare, wrapper.with_name(LEGACY_WRAPPER))
 
 

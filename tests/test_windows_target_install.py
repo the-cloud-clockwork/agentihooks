@@ -120,6 +120,21 @@ def test_windows_reinstall_replaces_quoted_wrapper_hooks(monkeypatch):
     assert [hook["command"] for group in groups for hook in group["hooks"]] == [f'cmd.exe /d /c "{wrapper}"']
 
 
+def test_windows_reinstall_keeps_one_cmd_hook_per_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second install recognises its own cmd.exe hooks and does not add them again."""
+    from scripts.targets import codex_target
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setattr(codex_target, "WINDOWS", True)
+    home = codex_target.codex_home()
+    home.mkdir(parents=True, exist_ok=True)
+    codex_target.CodexAdapter().write_settings({})
+    codex_target.CodexAdapter().write_settings({})
+    doc = json.loads((home / "hooks.json").read_text())
+    counts = {event: sum(len(group["hooks"]) for group in groups) for event, groups in doc["hooks"].items()}
+    assert counts and set(counts.values()) == {1}
+
+
 @pytest.mark.parametrize("takes_package", [True, False])
 def test_package_features_false_leaves_out_package_rules_and_fleet_preamble(tmp_path, monkeypatch, takes_package):
     """A single-user assistant profile opts out of agentihooks' own rules and the fleet identity preamble."""
