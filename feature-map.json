@@ -12950,6 +12950,21 @@
       ]
     },
     {
+      "id": "lab-intake-drain",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-intake-drain",
+      "behaviour": "One scheduler intake drains successive head consumer batches until a short or empty fetch or a ten second monotonic budget ends, including batches containing only completed checks, while preserving delivery order and keeping collected heads unacknowledged if a later fetch or observer fails. Remaining heads are read on the next call so release and admission can continue each pass.",
+      "seam": "scripts.ci_lab.scheduler.BusInbox.heads over a paginated bus consumer and a controlled monotonic clock",
+      "rules": [".semgrep-incidents/lab-intake-single-batch.yml"],
+      "tests": [
+        "tests/ci_lab/test_scheduler_intake.py::test_one_intake_drains_a_backlog_larger_than_the_default_batch",
+        "tests/ci_lab/test_scheduler_intake.py::test_a_short_or_empty_batch_ends_intake_without_another_fetch",
+        "tests/ci_lab/test_scheduler_intake.py::test_a_full_completed_check_batch_does_not_hide_the_head_in_the_next_batch",
+        "tests/ci_lab/test_scheduler_intake.py::test_intake_stops_at_its_deadline_and_the_next_call_reads_the_remaining_heads",
+        "tests/ci_lab/test_scheduler_intake.py::test_a_later_batch_failure_leaves_all_collected_heads_unacknowledged"
+      ]
+    },
+    {
       "id": "lab-head-missing-field-terminate",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-head-missing-field-terminate",
