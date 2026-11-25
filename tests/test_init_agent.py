@@ -96,7 +96,11 @@ def test_the_claude_ai_route_is_never_handed_to_codex_rotation(monkeypatch, tmp_
     project.mkdir()
     runtime = tmp_path / "runtime"
     _, profile_env = _profile(monkeypatch, tmp_path)
-    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("codex", "rotation"))
+    monkeypatch.setattr(
+        init_agent.agent_choice,
+        "choose",
+        lambda requested, environ: (requested, "requested") if requested else ("codex", "rotation"),
+    )
     monkeypatch.setattr(
         init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
     )
