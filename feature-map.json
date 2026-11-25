@@ -529,6 +529,7 @@
         "tests/swarm_ledger/test_hub.py::test_changed_rows_keeps_later_rows_after_a_non_list_field",
         "tests/swarm_ledger/test_hub.py::test_a_first_ledger_publication_advances_an_existing_resource_cursor",
         "tests/swarm_ledger/test_watch_events.py::test_a_newer_ledger_frame_with_a_from_revision_resyncs_directly",
+        "tests/swarm_ledger/test_watch_ledger.py::test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop",
         "tests/swarm_ledger/test_watch_ledger.py::test_take_never_applies_a_ledger_patch_whose_frame_carries_a_from_field_while_caught_up"
       ]
     },

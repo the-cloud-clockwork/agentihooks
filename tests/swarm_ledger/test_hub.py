@@ -561,3 +561,4 @@ def test_a_first_ledger_publication_advances_an_existing_resource_cursor() -> No
     seq, replay = hub.open(SLUG, unloaded, prior)
     assert seq == 1
     assert [(at, name, data) for at, _, name, data in replay] == [(2, "open", {"rev": 9})]
+    assert hub.open(SLUG, unloaded, replay[0][1]) == (2, [])

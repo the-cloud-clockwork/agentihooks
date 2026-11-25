@@ -163,6 +163,7 @@ def run_watch(monkeypatch, capsys, take, *flags):
     return calls, capsys.readouterr().out
 
 
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
 def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop(
     live: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -173,6 +174,8 @@ def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop
 
     def take(self: watch_ledger.Watch, name: str, data: dict[str, Any]) -> None:
         original(self, name, data)
+        if name == "ledger":
+            assert self.since >= data["rev"]
         seen_names.append(name)
         if name not in {"open", "ledger"}:
             return
