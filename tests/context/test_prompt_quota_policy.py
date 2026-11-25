@@ -6,9 +6,9 @@ import pytest
 
 from hooks import common, config, hook_manager
 from hooks.context import account_sessions, quota_policy, quota_usage
-from scripts.inbox import delivery
 from scripts.inbox.store import Item
 from scripts.routing import reservation
+from scripts.swarm import delivery
 from scripts.swarm_v2 import quota
 
 
