@@ -206,8 +206,9 @@ def _command(
 ) -> int:
     from scripts.swarm import ledger_client
     from scripts.tick.adapters import ledger
+    from tests.swarm.client_class import client_class
 
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: client)
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(client))
     monkeypatch.setattr(ledger, "resource_client", lambda slug: lambda remaining: client)
     ticks = iter(index * duration for index in range(1000))
     clock = SimpleNamespace(monotonic=lambda: next(ticks), sleep=client.pauses.append)
@@ -378,3 +379,42 @@ def test_a_phase_change_after_the_batch_read_refuses_the_stale_moves(monkeypatch
     assert client.tasks[1]["phase"] == ""
     assert client.phases == {"assigned"}
     assert len(client.writes) == 1
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+def test_the_native_command_reads_its_arguments_from_the_process(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import sys
+
+    client = _Client(_pair())
+    assert _command(monkeypatch, client, ("--dry-run",)) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(sys, "argv", ["phase-backfill", "--slug", "proof", "--dry-run"])
+    assert thin_task.main() == 0
+    assert json.loads(capsys.readouterr().out) == {"before": 1, "moved": 0, "after": 1, "batch_seconds": []}
+    assert client.writes == []
+
+
+@pytest.mark.feature("thin-enhancement-phase-backfill")
+@pytest.mark.parametrize("arguments, status", [(["--help"], 0), ([], 2)])
+def test_command_usage_describes_the_repair_and_requires_an_explicit_swarm(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    arguments: list[str],
+    status: int,
+) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["phase-backfill"])
+    with pytest.raises(SystemExit) as caught:
+        thin_task.main(arguments)
+    assert caught.value.code == status
+    output = capsys.readouterr()
+    if status:
+        assert output.err == (
+            "usage: phase-backfill [-h] --slug SLUG [--dry-run]\n"
+            "phase-backfill: error: the following arguments are required: --slug\n"
+        )
+    else:
+        assert "\n\nBackfill phases for claimable enhancement plans\n\n" in output.out
