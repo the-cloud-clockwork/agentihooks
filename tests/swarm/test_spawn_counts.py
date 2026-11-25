@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.hub import claims
-from scripts.swarm import seat_spawn, status
+from scripts.swarm import seat_spawn, spawn_counts, status
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed
 from tests.hub.test_admission import SLUG, ask
@@ -82,3 +82,96 @@ def test_text_status_prints_the_last_hour_spawns_per_harness(
     cli.cmd_status(store, SimpleNamespace(slug=SLUG, json=False))
 
     assert line in capsys.readouterr().out.splitlines()
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+def test_spawn_window_includes_both_boundaries_ignores_future_and_reads_without_writes(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 10_000_000
+    monkeypatch.setattr(spawn_counts.time, "time", lambda: now / 1000)
+    store.redis.hset(store.key(SLUG, "spawns"), "claude", 99)
+    for name, harness, at in (
+        ("old", "claude", now - HOUR - 1),
+        ("lower", "claude", now - HOUR),
+        ("upper", "codex", now),
+        ("future", "codex", now + 1),
+    ):
+        spawn_counts.record(store, SLUG, harness, name, at)
+    assert store.redis.zcard(store.key(SLUG, "spawned")) == 3
+    before = store.export(SLUG)
+    assert store.spawns(SLUG) == {"claude": 1, "codex": 1}
+    assert store.export(SLUG) == before
+    monkeypatch.setattr(spawn_counts.time, "time", lambda: (now + HOUR + 2) / 1000)
+    assert store.spawns(SLUG) == {}
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+def test_spawn_identity_preserves_relaunches_and_deduplicates_replayed_launches(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 10_000_000
+    monkeypatch.setattr(spawn_counts.time, "time", lambda: now / 1000)
+    for harness, name, at in (
+        ("claude", "same", now - 1),
+        ("claude", "same", now),
+        ("claude", "other", now),
+        ("codex", "same", now),
+    ):
+        spawn_counts.record(store, SLUG, harness, name, at)
+        spawn_counts.record(store, SLUG, harness, name, at)
+    assert store.spawns(SLUG) == {"claude": 3, "codex": 1}
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+@pytest.mark.parametrize(("harness", "at"), [("", 1), ("claude", 0), ("codex", -1)])
+def test_an_unplaced_record_adds_no_spawn(
+    store: RedisStore, harness: str, at: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(spawn_counts.time, "time", lambda: 0.001)
+    before = store.export(SLUG)
+    spawn_counts.record(store, SLUG, harness, "unplaced", at)
+    assert store.export(SLUG) == before
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+def test_a_start_already_counted_as_a_claim_still_repairs_its_missing_spawn(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event = started(rig.admitter.admit(SLUG, ask()))
+    event = replace(event, data={**event.data, "harness": "codex", "launched_at": now_ms()})
+    with monkeypatch.context() as patch:
+        patch.setattr(spawn_counts, "record", lambda *args: None)
+        claims.Claims(rig.store).handle(event)
+    assert rig.store.spawns(SLUG) == {}
+    claims.Claims(rig.store).handle(event)
+    assert rig.store.spawns(SLUG) == {"codex": 1}
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+def test_a_same_name_master_resume_adds_a_new_launch(store: RedisStore) -> None:
+    from scripts.swarm import master_launch
+
+    now = now_ms()
+    original = local_spawn(store, "claude", now - 1000)
+    agent = replace(original, harness="claude", profile="engineer", launched_at=now - 1000)
+    runtime = SimpleNamespace(resume=lambda *args: Placed("resumed:pane", "claude", launched_at=now))
+    master_launch._resume(store, SLUG, runtime, now, master_launch.Previous(agent, now - 1000))
+    assert store.spawns(SLUG) == {"claude": 2}
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+def test_a_local_launch_refused_during_admission_adds_no_spawn(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typing import Any
+
+    from scripts.swarm_v2.runtime import codex
+
+    def refuse(*args: Any) -> None:
+        raise RuntimeError("admission refused")
+
+    monkeypatch.setattr(codex, "admit_legacy", refuse)
+    with pytest.raises(seat_spawn.SeatFailed, match="admission refused"):
+        local_spawn(store, "claude", now_ms())
+    assert store.spawns(SLUG) == {}

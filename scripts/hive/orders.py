@@ -355,6 +355,9 @@ class Consumer:
         launched = placed.launched_at or lease.now_ms(store)
         try:
             store.put_agent(order.slug, replace(current, pane_id=placed.pane_id, launched_at=launched, idle_ticks=0))
+            from scripts.swarm import spawn_counts
+
+            spawn_counts.record(store, order.slug, current.harness, current.name, launched)
         except Exception:
             runtime.terminate(replace(held, pane_id=placed.pane_id))
             raise

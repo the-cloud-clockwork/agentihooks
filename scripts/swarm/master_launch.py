@@ -20,6 +20,7 @@ from scripts.swarm import (
     model_pick,
     seat_heads,
     seat_spawn,
+    spawn_counts,
     take_master,
 )
 from scripts.swarm.resume import blocker
@@ -157,6 +158,7 @@ def _resume(store: RedisStore, slug: str, runtime: Any, at: int, previous: Previ
             idle_ticks=0,
         )
         store.revive_agent(slug, record)
+        spawn_counts.record(store, slug, record.harness, record.name, record.launched_at)
     except Exception:
         runtime.retire(replace(agent, pane_id=placed.pane_id))
         store.seats.record_exit(agent.name, seat, "its resumed record was refused")
@@ -222,7 +224,7 @@ def _new(store: RedisStore, slug: str, runtime: Any, at: int, forced: bool) -> L
     occupant = store.execution_occupants(slug).get(record.seat)
     record = placed_record(occupant if occupant and occupant.name == name else record, placed)
     reported = runtime.reported(record)
-    store.put_agent(slug, replace(record, state="working" if reported else "starting"))
+    spawn_counts.placed(store, slug, replace(record, state="working" if reported else "starting"))
     launch_check.begin(store, slug, record, at)
     if reported:
         store.redis.delete(store.key(slug, "master-start"))

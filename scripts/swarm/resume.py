@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from scripts import agent_choice
 from scripts.handoff import transfers
-from scripts.swarm import deliberate_exit, expert_launch, fencing, idle, outage, profile_choice
+from scripts.swarm import deliberate_exit, expert_launch, fencing, idle, outage, profile_choice, spawn_counts
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
@@ -161,7 +161,9 @@ def _attempt(
             )
     if why:
         agent = replace(agent, state=AWAITING)
-    store.put_agent(slug, agent)
+        store.put_agent(slug, agent)
+    else:
+        spawn_counts.placed(store, slug, agent)
     live = context.runtime.live_names() if context.runtime else set()
     transfers.observe(store, slug, live)
     return Outcome(
@@ -444,7 +446,7 @@ def recover_outages(
     return actions
 
 
-def _recover_process(store, slug, agent, task, context, text):
+def _recover_process(store: Any, slug: str, agent: Any, task: Any, context: Any, text: str) -> str:
     from scripts.swarm import snapshot
     from scripts.swarm.tick import SpawnError
 
@@ -460,7 +462,8 @@ def _recover_process(store, slug, agent, task, context, text):
                 if error.status != "unsupported":
                     raise
             else:
-                store.put_agent(
+                spawn_counts.placed(
+                    store,
                     slug,
                     replace(
                         agent,
@@ -480,7 +483,7 @@ def _recover_process(store, slug, agent, task, context, text):
         return str(error) or type(error).__name__
 
 
-def _restart_from_handoff(store, slug, agent, task, context):
+def _restart_from_handoff(store: Any, slug: str, agent: Any, task: Any, context: Any) -> str:
     from scripts.swarm.tick import SpawnError, placed_record, primed
 
     if not _recovery_current(store, slug, agent, context):
@@ -498,7 +501,8 @@ def _restart_from_handoff(store, slug, agent, task, context):
         if error.status != "unsupported":
             raise
         placed = context.runtime.spawn(config, agent.lane, agent.name, {**task, profile_choice.FRESH: True})
-    store.put_agent(
+    spawn_counts.placed(
+        store,
         slug,
         replace(
             placed_record(agent, placed), conversation_id=placed.conversation_id, launched_at=context.at, idle_ticks=0

@@ -754,8 +754,10 @@ class RedisStore:
         }
         return json.dumps({**row, **placement, "ended_at": ended, "reason": reason})
 
-    def spawns(self, slug):
-        return {harness: int(count) for harness, count in self.redis.hgetall(self.key(slug, "spawns")).items()}
+    def spawns(self, slug: str) -> dict[str, int]:
+        from scripts.swarm import spawn_counts
+
+        return spawn_counts.read(self, slug)
 
     def refund_held_claim(self, slug: str, task: str, agent: str, generation: int) -> bool:
         from redis.exceptions import WatchError
