@@ -48,7 +48,7 @@ def test_planner_grants_the_client_export_directory(
     options = runtime.codex_plan_mode(environ)
     assert options[::2] == ["-c", "-c"]
     assert options[3] == 'default_permissions="planner"'
-    assert str(export_file("proof", environ).parent) == exports
+    assert str(export_file("https://ledger.example", "proof", environ).parent) == exports
     assert tomllib.loads(options[1]) == {
         "permissions": {
             "planner": {

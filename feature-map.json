@@ -4344,9 +4344,7 @@
     },
     {
       "id": "tick-lost-agent-keeps-record-until-retired",
-      "rules": [
-        "lost-reap-drops-after-refused-retire"
-      ],
+      "rules": ["lost-reap-drops-after-refused-retire"],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lost-master-recovery-pane",
       "behaviour": "A lost agent stays recorded while pane retirement refuses, records the refusal and retries next tick; successful retirement closes the pane and drops the record. Deliberate termination also preserves its record on retirement refusal.",
@@ -11436,7 +11434,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
@@ -13187,9 +13185,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-intake-drain",
       "behaviour": "One scheduler intake drains successive head consumer batches until a short or empty fetch or a ten second monotonic budget ends, including batches containing only completed checks, while preserving delivery order and keeping collected heads unacknowledged if a later fetch or observer fails. Remaining heads are read on the next call so release and admission can continue each pass.",
       "seam": "scripts.ci_lab.scheduler.BusInbox.heads over a paginated bus consumer and a controlled monotonic clock",
-      "rules": [
-        "lab-intake-single-batch"
-      ],
+      "rules": ["lab-intake-single-batch"],
       "tests": [
         "tests/ci_lab/test_scheduler_intake.py::test_one_intake_drains_a_backlog_larger_than_the_default_batch",
         "tests/ci_lab/test_scheduler_intake.py::test_a_short_or_empty_batch_ends_intake_without_another_fetch",
