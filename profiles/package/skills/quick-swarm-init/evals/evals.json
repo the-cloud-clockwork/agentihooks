@@ -10,5 +10,9 @@
   {
     "query": "start a quick swarm (session not inside herdr)",
     "expected_behavior": "Runs agentihooks quick up, which refuses because the session is not inside a herdr pane; reports that refusal word for word and stops."
+  },
+  {
+    "query": "master types a message into an engineer's pane",
+    "expected_behavior": "Reads the pane back and confirms the seat started working on the message or queued it, instead of assuming delivery; if the text still sits unsent presses Enter again and rechecks, and if it still cannot confirm delivery reports NOT SENT and sends the message through the room with agentihooks quick send <seat> \"<text>\"."
   }
 ]
