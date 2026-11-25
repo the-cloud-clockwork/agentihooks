@@ -446,6 +446,47 @@ def test_the_real_semgrep_scan_and_rule_exception_gates_carry_the_env_they_read(
     assert "!cancelled()" in gates["lint/lint-check"].condition
 
 
+BASELINE = r"""
+on: pull_request
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: New findings
+        run: |
+          baseline="$(git merge-base "$BASE" HEAD)"
+          semgrep scan --error --config rules.yml --baseline-commit "$baseline" tests
+      - name: New findings in one word
+        run: semgrep scan --error --config rules.yml --baseline-commit="$BASE" tests
+      - name: Every finding
+        run: semgrep scan --error --config rules.yml tests
+      - name: A name that only looks like the option
+        run: semgrep scan --error --config baseline-commit.yml --baseline-commits tests
+"""
+
+
+@pytest.mark.feature("lab-static-baseline-gate-own-tree")
+def test_a_gate_rewrites_its_tree_exactly_when_its_step_passes_a_baseline_commit() -> None:
+    gates = static_gates.discover(BASELINE)
+    assert [(gate.step, gate.rewrites_tree) for gate in gates] == [
+        ("New findings", True),
+        ("New findings in one word", True),
+        ("Every finding", False),
+        ("A name that only looks like the option", False),
+    ]
+
+
+@pytest.mark.feature("lab-static-baseline-gate-own-tree")
+def test_the_real_workflow_s_only_gates_that_rewrite_their_tree_are_its_two_baseline_scans() -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+    assert [gate.name for gate in gates if gate.rewrites_tree] == [
+        "semgrep/test-rules/new-test-waits-keep-a-bound-of-ten-seconds-or-more",
+        "semgrep/scan/fail-on-findings-new-against-the-base",
+    ]
+
+
 PRODUCED = r"""
 on: pull_request
 jobs:

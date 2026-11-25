@@ -18,7 +18,6 @@ local store is mutable through CLI commands carrying --local. Counters are per s
 a cap so sessions that never reached SessionEnd cannot grow them forever.
 """
 
-import fcntl
 import functools
 import json
 import os
@@ -28,6 +27,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from hooks.compat import fcntl
 from hooks.config import (
     ENFORCEMENT_COUNTER_FILE,
     ENFORCEMENT_DELIVERY_STATE_FILE,
@@ -195,21 +195,21 @@ def _load_bundle_enforcements() -> list[dict]:
     bp = _get_bundle_path()
     if not bp:
         return []
-    return _load_json_enforcements(bp / "enforcements.json", "bundle")
+    return _load_json_enforcements(profile_chain.layer_root(bp) / "enforcements.json", "bundle")
 
 
 def _load_shared_bundle_enforcements() -> list[dict]:
     sp = _get_shared_bundle_path()
     if not sp:
         return []
-    return _load_json_enforcements(sp / "enforcements.json", "shared_bundle")
+    return _load_json_enforcements(profile_chain.layer_root(sp) / "enforcements.json", "shared_bundle")
 
 
 def _load_user_bundle_enforcements() -> list[dict]:
     up = _get_user_bundle_path()
     if not up:
         return []
-    return _load_json_enforcements(up / "enforcements.json", "user_bundle")
+    return _load_json_enforcements(profile_chain.layer_root(up) / "enforcements.json", "user_bundle")
 
 
 def _load_profile_enforcements() -> list[dict]:
@@ -221,9 +221,9 @@ def _load_profile_enforcements() -> list[dict]:
     home = {"claude": claude_home, "codex": codex_home, "copilot": copilot_home}[current_target()]()
     profile = ",".join([profile, *rendered_overlays(home, os.environ.get("AGENTIHOOKS_AGENT_NAME"))])
     entries = []
-    for _name, profile_dir in profile_chain.rendered_dirs(
-        _get_bundle_path(), profile, _get_linked_profiles(), _get_user_bundle_path(), _get_shared_bundle_path()
-    ):
+    bundle, user, shared = _get_bundle_path(), _get_user_bundle_path(), _get_shared_bundle_path()
+    chain = profile_chain.rendered_dirs(bundle, profile, _get_linked_profiles(), user, shared)
+    for _name, profile_dir in profile_chain.unlayered(chain, (bundle, shared, user)):
         entries.extend(_load_json_enforcements(profile_dir / "enforcements.json", "profile"))
     return entries
 

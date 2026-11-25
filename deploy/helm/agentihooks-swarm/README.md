@@ -8,6 +8,19 @@
 | `hive-only.yaml` | one worker hive that joins a swarm installed elsewhere, without NATS |
 | `external-nats.yaml` | the hub on a NATS outside the release |
 
+# Ledger cache home
+
+The ledger stores regenerable entry and export caches in a memory volume at
+`/run/agentihooks`, selected by `AGENTIHOOKS_HOME`. Set `ledger.cache.sizeLimit`
+to bound that volume; its default is `512Mi`. The persistent data claim at
+`/data` and the authoritative database retain their existing storage.
+
+A replacement pod rebuilds its caches from the database. Memory files count
+against the container memory limit, and atomic replacement can hold both old
+and staged cache files. The default memory request remains `512Mi`; the default
+limit is `2560Mi`, preserving the prior two GiB process allowance with a full
+cache. Installations that override the memory limit must allow for both.
+
 # Join a hive with one invite
 
 `agentihooks hive join /path/to/invite` enrolls a machine with the private member

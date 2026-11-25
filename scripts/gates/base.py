@@ -2,7 +2,7 @@
 
 import os
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -11,14 +11,18 @@ class Call:
     tool_input: dict = field(default_factory=dict)
     cwd: str = ""
     session: str = ""
+    agent: str = ""
+    tool_use_id: str = ""
 
     @classmethod
-    def from_payload(cls, payload):
+    def from_payload(cls, payload: dict[str, Any]) -> "Call":
         return cls(
             tool=str(payload.get("tool_name") or ""),
             tool_input=payload.get("tool_input") or {},
             cwd=str(payload.get("cwd") or ""),
             session=str(payload.get("session_id") or ""),
+            agent=str(payload.get("agent_id") or ""),
+            tool_use_id=str(payload.get("tool_use_id") or ""),
         )
 
     @property

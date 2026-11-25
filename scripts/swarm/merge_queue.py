@@ -8,7 +8,6 @@ from typing import Any
 
 from scripts.swarm import github_reads, ledger_events, run_wait, staged_compatibility
 from scripts.swarm.store import SwarmError
-from scripts.tick import pool
 from scripts.tick.adapters.github import GitHubSourceControl
 from scripts.tick.deadline import Deadline
 
@@ -64,7 +63,7 @@ def graphql(
     query: str, variables: dict[str, str], run: Callable[..., Any] = subprocess.run, timeout: float = TIMEOUT
 ) -> dict[str, Any]:
     try:
-        with pool.limit("github"), github_reads.calling(github_reads.CALLER.get()):
+        with github_reads.calling(github_reads.CALLER.get()):
             response = _port(run).graph(query, variables, deadline=Deadline.after(timeout))
         if response.get("errors"):
             raise SwarmError("; ".join(error["message"] for error in response["errors"]))
@@ -192,7 +191,15 @@ def journaled(journal, action: str, url: str, head: str, call: Callable[[], dict
         journal.write(action, url, head, before, journal.groups(), errors)
 
 
-def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None, attempts: int = 1) -> dict:
+def operate(
+    action: str,
+    url: str,
+    run: Callable[..., Any] = subprocess.run,
+    admit: Callable[[str], Any] | None = None,
+    journal: Any = None,
+    attempts: int = 1,
+    priority: Callable[[], Any] | None = None,
+) -> dict:
     raw = graphql(STATE, {"url": url}, run)["resource"]
     if not raw:
         raise SwarmError("GitHub URL does not identify a pull request")
@@ -212,6 +219,8 @@ def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None,
             require_green(url, raw["headRefOid"], run)
             variables = {"id": raw["id"], "head": raw["headRefOid"]}
             journaled(journal, "queue", url, raw["headRefOid"], lambda: graphql(QUEUE, variables, run))
+            if priority is not None:
+                merged = {"priority": priority()}
         raw = graphql(STATE, {"url": url}, run)["resource"]
     if action == "dequeue":
         journaled(journal, "dequeue", url, raw["headRefOid"], lambda: graphql(DEQUEUE, {"id": raw["id"]}, run))
@@ -226,7 +235,7 @@ def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None,
     }
 
 
-def waiting_around(url: str, target: str, run) -> tuple[list[dict], list[dict]]:
+def waiting_around(url: str, target: str, run: Callable[..., Any], lift: bool) -> tuple[list[dict], list[dict]]:
     query = """query($url: URI!, $after: String) { resource(url: $url) { ... on PullRequest {
       repository { mergeQueue(branch: "dev") { entries(first: 100, after: $after) {
         nodes { state pullRequest { id url headRefOid } }
@@ -241,7 +250,7 @@ def waiting_around(url: str, target: str, run) -> tuple[list[dict], list[dict]]:
         for entry in page["nodes"]:
             if entry["pullRequest"]["id"] == target:
                 waiting = behind
-            elif entry["state"] == "QUEUED":
+            elif lift or entry["state"] == "QUEUED":
                 waiting.append(entry["pullRequest"])
         if not page["pageInfo"]["hasNextPage"]:
             return ahead, behind
@@ -256,12 +265,19 @@ class Untracked:
         pass
 
 
-def displace(waiting: list[dict], run, displaced, removed: list[dict], steps: list) -> None:
+def displace(
+    waiting: list[dict],
+    run: Callable[..., Any],
+    displaced: Any,
+    removed: list[dict],
+    steps: list,
+    lift: bool,
+) -> None:
     for pull in waiting:
         displaced.add(pull)
     for pull in reversed(waiting):
         current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
-        if current["mergeQueueEntry"] is not None and current["mergeQueueEntry"]["state"] == "QUEUED":
+        if current["mergeQueueEntry"] is not None and (lift or current["mergeQueueEntry"]["state"] == "QUEUED"):
             removed.append(pull)
             steps.append(["dequeue", pull["url"]])
             graphql(DEQUEUE, {"id": pull["id"]}, run)
@@ -293,6 +309,7 @@ def prioritize(
     ahead: Collection[str] = (),
     displaced: Any = None,
     lab: Callable[[str], dict[str, Any]] | None = None,
+    lift: bool = False,
 ) -> dict[str, Any]:
     """Move the pull request to the front of the dev merge queue, restore every entry it displaced in order and mark
     its head hotfix through ``lab``, whether or not a queue step failed; the journal's priority record carries the
@@ -307,7 +324,7 @@ def prioritize(
         raise SwarmError("queue priority requires a dev merge queue")
     staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
     require_green(url, raw["headRefOid"], run)
-    displacing, behind = waiting_around(url, raw["id"], run)
+    displacing, behind = waiting_around(url, raw["id"], run, lift=lift)
     waiting = [pull for pull in [*displacing, *behind] if pull["url"] not in ahead]
     before = journal.groups() if journal is not None else None
     errors = []
@@ -316,7 +333,7 @@ def prioritize(
     try:
         removed = []
         try:
-            displace(waiting, run, displaced, removed, steps)
+            displace(waiting, run, displaced, removed, steps, lift=lift)
         except SwarmError as exc:
             errors.append(str(exc))
         target_queued = raw["mergeQueueEntry"] is not None

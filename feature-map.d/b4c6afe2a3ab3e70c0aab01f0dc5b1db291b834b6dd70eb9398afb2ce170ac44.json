@@ -1,0 +1,13 @@
+{
+  "id": "ledger-memory-home",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-kingston-disk-writers",
+  "behaviour": "The ledger keeps regenerable entry and export caches in a bounded memory home while preserving persistent data, ownership, scheduling requests and its process memory allowance.",
+  "seam": "ledger StatefulSet home environment, memory volume, cache path resolvers and rendered chart storage guard",
+  "tests": [
+    "tests/test_swarm_chart_ledger_home.py::test_ledger_keeps_its_authoritative_storage_and_ownership",
+    "tests/test_swarm_chart_ledger_home.py::test_ledger_entry_and_export_caches_use_the_bounded_memory_home",
+    "tests/test_swarm_chart_ledger_home.py::test_ledger_cache_budget_preserves_requests_and_the_process_allowance",
+    "tests/test_swarm_chart_ledger_rollout.py::test_rendered_ledger_home_guard_rejects_each_storage_fault"
+  ]
+}

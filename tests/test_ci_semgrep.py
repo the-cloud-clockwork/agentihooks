@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -40,6 +41,7 @@ def test_scan_runs_inline_without_private_organization_workflow_calls():
         )
 
 
+@pytest.mark.feature("semgrep-strict-scans-independent-jobs")
 def test_scan_keeps_the_reusable_workflow_steps() -> None:
     jobs = _jobs()
     expected = {
@@ -74,9 +76,13 @@ def test_scan_keeps_the_reusable_workflow_steps() -> None:
         assert [step.get("name") for step in steps[2:]] == names
         assert steps[2]["env"] == {"SEMGREP_VERSION": "1.177.0"}
         assert jobs[job]["timeout-minutes"] == 5
-    assert jobs["own-rules"]["steps"][3] == {"name": "Install PyYAML", "run": "python -m pip install pyyaml==6.0.2"}
+    assert jobs["own-rules"]["steps"][3] == {
+        "name": "Install PyYAML",
+        "run": "python -m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2",
+    }
 
 
+@pytest.mark.feature("semgrep-strict-scans-independent-jobs")
 def test_strict_scans_run_in_independent_jobs() -> None:
     jobs = _jobs()
     scans = {name: jobs[name] for name in ("own-rules", "test-rules", "scan")}
@@ -125,7 +131,7 @@ def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step() -> None:
     assert 'copy="$(mktemp -d -p "$RUNNER_TEMP")"' in fixture_run
     assert 'cp -r .semgrep-incidents "$copy/rules"' in fixture_run
     assert ': > "$copy/.semgrepignore"' in fixture_run
-    assert '(cd "$copy" && semgrep --metrics off --test --config rules rules)' in fixture_run
+    assert '(cd "$copy" && semgrep --metrics off --test --strict --config rules rules)' in fixture_run
     assert ".semgrep-incidents/" in (_ROOT / ".semgrepignore").read_text().splitlines()
 
 
@@ -166,6 +172,7 @@ def test_outage_rules_for_tests_scan_every_test_file_with_the_head_and_the_grade
         ".semgrep-incidents/ledger-client-swapped-for-a-function.yml",
         ".semgrep-incidents/parametrize-id-carries-interpreter-path.yml",
         ".semgrep-incidents/fake-server-close-read-ignores-reset.yml",
+        ".semgrep-incidents/chart-grader-copy-keeps-source-modes.yml",
     ]
     configs = " ".join(f"--config {rule} --config {tmp_path}/grader/{rule}" for rule in rules)
     assert _run_test_rules(tmp_path, graded=True) == (
@@ -312,9 +319,30 @@ def test_the_wait_bound_rule_reaches_the_tests_and_its_fixture_under_ten_seconds
 def test_feature_fixture_command_runs_recursively():
     job = _jobs()["feature-tests"]
     commands = [step["run"] for step in job["steps"] if "run" in step]
-    assert "semgrep --metrics off --test .semgrep/features" in commands
+    assert "semgrep --metrics off --test --strict .semgrep/features" in commands
     assert "if" not in job and "continue-on-error" not in job
     assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
+
+
+SEMGREP_CALL = re.compile(r"(?<![\w-])semgrep\s+([^;&|()\n]*)")
+
+
+@pytest.mark.feature("semgrep-test-mode-strict")
+def test_every_semgrep_test_mode_command_runs_strict() -> None:
+    calls = [
+        (workflow.name, job_name, step.get("name"), arguments.split())
+        for workflow in sorted((_ROOT / ".github/workflows").glob("*.yml"))
+        for job_name, job in yaml.safe_load(workflow.read_text())["jobs"].items()
+        for step in job.get("steps", [])
+        for arguments in SEMGREP_CALL.findall(step.get("run", "").replace("\\\n", " "))
+        if "--test" in arguments.split()
+    ]
+    assert {
+        ("semgrep.yml", "own-rules", "Own rules hold on their fixtures and the code"),
+        ("semgrep.yml", "feature-tests", "Operator feature regressions and passing fixtures"),
+        ("semgrep.yml", "feature-tests", "Outage rules fire on their planted faults and pass their clean cases"),
+    } <= {call[:3] for call in calls}
+    assert [call[:3] for call in calls if "--strict" not in call[3]] == []
 
 
 def test_no_semgrep_job_runs_the_head_feature_map_validator() -> None:
@@ -544,7 +572,7 @@ def test_scan_reads_the_domain_rules_folder_that_holds_rule_files() -> None:
     rules_dir = _ROOT / step["env"]["RULES"]
     assert rules_dir == _ROOT / ".semgrep"
     assert any(_ROOT.glob(".semgrep/*.yml"))
-    assert "semgrep --metrics off --test --config rules rules" in step["run"]
+    assert "semgrep --metrics off --test --strict --config rules rules" in step["run"]
     assert '--config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .' in step["run"]
 
 
@@ -557,10 +585,12 @@ def test_own_rules_scan_gives_each_rule_thirty_seconds_on_a_file() -> None:
     assert "semgrep scan --error --strict --timeout 30 --metrics off" in step["run"]
 
 
-def test_scan_and_charts_run_on_the_select_runner_expression() -> None:
+def test_scan_runs_on_the_lint_runner_expression_and_charts_on_the_select_expression() -> None:
     jobs = _jobs()
-    select = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["select"]
-    assert jobs["scan"]["runs-on"] == jobs["own-rules"]["runs-on"] == jobs["charts"]["runs-on"] == select["runs-on"]
+    caller = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    for job in ("own-rules", "test-rules", "scan"):
+        assert jobs[job]["runs-on"] == caller["lint"]["runs-on"]
+    assert jobs["charts"]["runs-on"] == caller["select"]["runs-on"]
 
 
 def test_charts_run_the_chart_timer_guard() -> None:
@@ -631,17 +661,26 @@ def _run_install(
     return done.returncode, calls.read_text().splitlines() if calls.exists() else []
 
 
-def test_charts_use_the_runner_semgrep_when_it_matches_the_pin(tmp_path):
-    assert _run_install(tmp_path, "1.177.0") == (0, ["-m pip install pyyaml==6.0.2"])
+def test_charts_use_the_runner_semgrep_when_it_matches_the_pin(tmp_path: Path) -> None:
+    assert _run_install(tmp_path, "1.177.0") == (
+        0,
+        ["-m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2"],
+    )
 
 
 @pytest.mark.parametrize("installed", ["", "1.176.0"])
-def test_charts_install_the_pinned_semgrep_without_a_matching_runner_copy(tmp_path, installed):
-    assert _run_install(tmp_path, installed) == (0, ["-m pip install pyyaml==6.0.2 semgrep==1.177.0"])
+def test_charts_install_the_pinned_semgrep_without_a_matching_runner_copy(tmp_path: Path, installed: str) -> None:
+    assert _run_install(tmp_path, installed) == (
+        0,
+        ["-m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2 semgrep==1.177.0"],
+    )
 
 
-def test_charts_fail_when_the_install_leaves_another_semgrep(tmp_path):
-    assert _run_install(tmp_path, "", pip_gives="1.176.0") == (1, ["-m pip install pyyaml==6.0.2 semgrep==1.177.0"])
+def test_charts_fail_when_the_install_leaves_another_semgrep(tmp_path: Path) -> None:
+    assert _run_install(tmp_path, "", pip_gives="1.176.0") == (
+        1,
+        ["-m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2 semgrep==1.177.0"],
+    )
 
 
 def test_feature_tests_use_the_runner_semgrep_when_it_matches_the_pin(tmp_path: Path) -> None:
@@ -653,12 +692,12 @@ def test_feature_tests_install_the_pinned_semgrep_without_a_matching_runner_copy
     tmp_path: Path, installed: str
 ) -> None:
     install = _run_install(tmp_path, installed, job="feature-tests", name="Install Semgrep")
-    assert install == (0, ["-m pip install semgrep==1.177.0"])
+    assert install == (0, ["-m pip install --constraint .github/ci-tools/semgrep.lock semgrep==1.177.0"])
 
 
 def test_feature_tests_fail_when_the_install_leaves_another_semgrep(tmp_path: Path) -> None:
     install = _run_install(tmp_path, "", pip_gives="1.176.0", job="feature-tests", name="Install Semgrep")
-    assert install == (1, ["-m pip install semgrep==1.177.0"])
+    assert install == (1, ["-m pip install --constraint .github/ci-tools/semgrep.lock semgrep==1.177.0"])
 
 
 def test_feature_tests_bound_the_semgrep_install_below_the_job_timeout() -> None:
@@ -669,13 +708,15 @@ def test_feature_tests_bound_the_semgrep_install_below_the_job_timeout() -> None
 
 def test_feature_tests_install_semgrep_with_the_scan_check_and_pin() -> None:
     steps = {(job, step.get("name")): step for job, spec in _jobs().items() for step in spec["steps"]}
-    feature, scan = steps["feature-tests", "Install Semgrep"], steps["scan", "Install Semgrep"]
-    assert (feature["run"], feature["env"]) == (scan["run"], scan["env"])
+    feature = steps["feature-tests", "Install Semgrep"]
+    for job in ("own-rules", "test-rules", "scan"):
+        scan = steps[job, "Install Semgrep"]
+        assert (feature["run"], feature["env"]) == (scan["run"], scan["env"])
 
 
-def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error():
+def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error() -> None:
     jobs = _jobs()
-    assert not {"if", "continue-on-error"} & (set(jobs["scan"]) | set(jobs["charts"]))
+    assert not any({"if", "continue-on-error"} & set(job) for job in jobs.values())
     assert all("if" not in step and "continue-on-error" not in step for job in jobs.values() for step in job["steps"])
 
 

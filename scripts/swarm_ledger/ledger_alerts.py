@@ -9,7 +9,7 @@ SETTLING = ("alert_claim", "alert_close")
 OPS = (*SETTLING, "alert_raise")
 SIZE, SYNC, PROMOTION, RELEASE = "size", "sync", "promotion", "release"
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
-INBOX, SETUP = "inbox", "setup"
+INBOX, SETUP, AUTOSCALER = "inbox", "setup", "autoscaler"
 WRITER = "writer"
 TARGETS = {
     WRITER: "master",
@@ -22,8 +22,9 @@ TARGETS = {
     MERGE: "master",
     INBOX: "master",
     SETUP: "master",
+    AUTOSCALER: "master",
 }
-RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE, INBOX, SETUP)
+RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE, INBOX, SETUP, AUTOSCALER)
 ITEMIZED = (INBOX, SETUP)
 OPEN, CLAIMED, DONE = "open", "claimed", "done"
 OPERATOR = "operator"

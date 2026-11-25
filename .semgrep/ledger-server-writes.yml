@@ -33,8 +33,9 @@ rules:
     message: >-
       Incident 16 November: swarm clients wrote the ledger over HTTP through the ledger server. A ResourceClient
       without a transport sends its operations over HTTP to the ledger server, the old write path. Build it with
-      scripts.tick.adapters.database_ledger.client or scripts.swarm_ledger.ledger.client, or give it the in process
-      transport, which runs the ledger API route code over the shared database.
+      scripts.tick.adapters.writer_client.client or scripts.swarm_ledger.ledger.client, whose one transport sends
+      each request to this host's warm writer socket and otherwise runs the ledger API route code in process over
+      the shared database, or give it the in process transport.
     options:
       symbolic_propagation: true
     pattern-either:

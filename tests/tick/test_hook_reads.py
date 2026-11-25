@@ -20,6 +20,28 @@ class _Store:
         return f"config of {slug}"
 
 
+class _Redis:
+    def __init__(self) -> None:
+        self.deleted: list[str] = []
+
+    def delete(self, *keys: str) -> int:
+        self.deleted.extend(keys)
+        return len(keys)
+
+
+class _PassStore:
+    def __init__(self) -> None:
+        self.redis = _Redis()
+
+    def key(self, slug: str, name: str) -> str:
+        return f"{slug}:{name}"
+
+
+class _Ledger:
+    def binned(self, slug: str) -> bool:
+        return False
+
+
 def _lines(caplog: pytest.LogCaptureFixture) -> list[tuple[str, int, str]]:
     return [(r.name, r.levelno, r.getMessage()) for r in caplog.records if r.name == LOGGER]
 
@@ -76,17 +98,38 @@ def test_the_real_hook_bodies_read_only_their_declared_keys_in_enforce_mode(monk
     assert wrapper.checked == ["checked"]
     assert dict(wrapper.box) == {
         "agents": ["a"],
-        "view": "view",
         "doc": doc,
         "config": "config of sw",
         "rows": {"t1": {"id": "t1"}},
     }
 
 
+@pytest.mark.feature("swarm-wrapper-phases-hook-reads")
+@pytest.mark.parametrize("chosen", ["enforce", "observe"])
+def test_the_phases_hook_reads_back_the_pass_state_it_stores_without_an_undeclared_read(
+    chosen: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv(ENV, chosen)
+    doc = {"tasks": [{"id": "t1"}]}
+    kept: list[tuple[str, list[dict[str, str]]]] = []
+    monkeypatch.setattr(cli.ledger_client, "pass_state", lambda ledger, slug: doc)
+    monkeypatch.setattr(cli.panic, "keep_fixers", lambda store, slug, tasks: kept.append((slug, tasks)))
+    store = _PassStore()
+    wrapper = _wrapper(PassBox(), PassBox())
+    wrapper.state = {"store": store, "slug": "sw", "ledger": _Ledger()}
+    caplog.set_level(logging.WARNING, logger=LOGGER)
+    assert wrapper.hooks()["wrapper phases"]() is True
+    assert _lines(caplog) == []
+    assert dict(wrapper.box) == {"doc": doc}
+    assert kept == [("sw", doc["tasks"])]
+    assert store.redis.deleted == [f"sw:{mark}" for mark in cli.tick_heartbeat.HALTS]
+
+
 @pytest.mark.feature("swarm-tick-hook-reads")
 def test_each_site_hook_declares_exactly_the_box_keys_it_reads() -> None:
     assert sites.TICK_HOOK_READS == {"agents": frozenset({"config", "doc", "rows"}), "tasks": frozenset({"config"})}
     assert cli.WRAPPER_HOOK_READS == {
+        "wrapper phases": frozenset({"doc"}),
         "wrapper relay": frozenset({"judged"}),
         "wrapper view": frozenset({"agents"}),
     }

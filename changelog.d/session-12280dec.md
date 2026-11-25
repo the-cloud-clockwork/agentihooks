@@ -1,0 +1,3 @@
+### Added
+
+- A bundle, shared bundle or user bundle can commit a `bundle.yml` whose `layer` names the directory it ships from, such as `profiles/core`. Every reader of bundle content (features, settings and MCP for each harness, shared doctrine, manifestos, `deps.json`, enforcements, conditions, workflows, lifecycle roots, classifiers, the Serena context) reads that directory, profiles are still found under the root, and the root's own `.claude/` and `CLAUDE.md` no longer reach installs. A chain profile that is the layer adds only its persona, so hooks, doctrine and rules land once. `agentihooks bundle layer [--shared|--user]` prints the resolved directory and `bundle list` shows it.

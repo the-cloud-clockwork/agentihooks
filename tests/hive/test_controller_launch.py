@@ -1084,6 +1084,26 @@ def test_a_live_acknowledgement_releases_its_admission_reservation(setup: Simple
     assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == []
 
 
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_a_live_acknowledgement_records_the_hive_holding_the_task_work_folder(setup: SimpleNamespace) -> None:
+    _, order, ack = live_order(setup)
+    pointer = setup.store.key("fixture", "work-folder", order.task)
+    assert setup.store.redis.get(pointer) is None
+    assert setup.launcher.complete(order, ack).ok
+    assert setup.store.redis.get(pointer) == order.hive == "remote"
+
+
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_a_failed_launch_leaves_the_task_work_folder_pointer_alone(setup: SimpleNamespace) -> None:
+    from scripts.hive.orders import Ack
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("failed", {}, "prompt"))
+    assert not setup.launcher.wait(order).ok
+    assert setup.store.redis.get(setup.store.key("fixture", "work-folder", order.task)) is None
+
+
 @pytest.mark.parametrize(
     "bad", ["target", "pane", "host", "generation", "state", "missing occupant", "replaced occupant"]
 )
@@ -1369,6 +1389,29 @@ def test_legacy_launch_ending_allows_replacement_before_projection_catches_up(se
     assert admitted.generation == previous.generation + 1
     assert admitted.name == next_request.name
     assert admitted.profile_decision == selected.profile.record()
+
+
+@pytest.mark.feature("codex-adopt-refusal-fields")
+def test_an_adoption_refusal_does_not_allow_replacing_a_live_hive_execution(setup: SimpleNamespace) -> None:
+    from scripts.codex_session import supervisor
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, SwarmError
+
+    request = request_for(setup)
+    request = replace(request, config=replace(request.config, codex_inbox_transport=APP_SERVER_TRANSPORT))
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    selected = replace(selected, account=replace(selected.account, harness="codex"))
+    admitted = setup.launcher.admit(request, selected)
+    current = replace(admitted, state="working")
+    setup.store.put_agent("fixture", current)
+    spec = supervisor.Launch("fixture", current, ".", "fixture", {}, execution_id=current.execution_id)
+
+    with pytest.raises(supervisor.LaunchFailure):
+        supervisor.adopt(setup.store, spec, APP_SERVER_TRANSPORT, current.hive)
+
+    with pytest.raises(SwarmError, match="replacement does not match the current execution"):
+        setup.launcher.admit(request_for(setup), selected)
+
+    assert setup.store.execution("fixture", current.execution_id) == current
 
 
 def test_unavailable_placement_does_not_admit_or_reserve(setup):

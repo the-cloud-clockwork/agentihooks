@@ -1,3 +1,4 @@
+import re
 from functools import cache
 from itertools import product
 from pathlib import Path
@@ -44,12 +45,12 @@ LANE_USERS = {
     "swarm-node-image.yml",
     "hive-worker.yml",
     "lost-runner.yml",
-    "chart-release.yml",
     "ci-lab-image.yml",
     "gate-required.yml",
     "changelog.yml",
     "changelog-seed.yml",
     "tick-scale.yml",
+    "lab-check.yml:post",
     *DIRECT,
 }
 CALLED = {
@@ -77,6 +78,8 @@ if (_WORKFLOWS / "access-audit.yml").exists():
 SERIAL = {
     ("swarm-node-image.yml:hive", "hive-worker-release"): "every release's hive job queues behind the last one, so a "
     "newer published hive image always decides the release tag and no waiting hive job is replaced",
+    ("lab-check.yml", "lab-check-${{ github.event.client_payload.sha }}"): "every lab check dispatch of one head "
+    "queues behind the last one, so the dispatch of one gate never replaces the pending dispatch of another",
 }
 CALLERS = ("test.yml", "proofs.yml")
 REQUIRED = ("pull_request", "merge_group", "pull_request_target")
@@ -175,6 +178,7 @@ def _open(events):
     return "workflow_dispatch" in events or ("push" in events and push.get("branches") != ["dev"])
 
 
+@pytest.mark.feature("hosted-lane-users-pinned")
 def test_every_non_required_trigger_is_on_a_lane_or_excluded_with_a_reason():
     open_triggers = {path.name for path in _WORKFLOWS.glob("*.yml") if _open(yaml.safe_load(path.read_text())[True])}
     users = {where.split(":")[0] for where in LANE_USERS}
@@ -203,6 +207,7 @@ def test_every_lane_user_names_the_same_three_lanes():
             assert LANE in block["group"], where
 
 
+@pytest.mark.feature("hosted-lane-users-pinned")
 def test_a_run_on_a_lane_queues_and_is_never_cancelled() -> None:
     seen = set()
     assert set(SERIAL) <= {(where, str(block.get("group"))) for where, block in _blocks()}
@@ -325,3 +330,14 @@ def test_only_the_dev_push_worker_image_build_stays_uncapped_because_it_publishe
 def test_lane_titles_match_the_workflow_names():
     for name, (title, _) in DIRECT.items():
         assert _workflow(name)["name"] == title, name
+
+
+def _guide_lane_users() -> set[str]:
+    section = (_ROOT / "docs/ci-timing.md").read_text().split("\n## Proof dispatch lanes\n", 1)[1].split("\n## ", 1)[0]
+    table = section.split("| Lane user | Workflow file | Runs on a lane |\n|---|---|---|\n", 1)[1].split("\n\n", 1)[0]
+    return {":".join(re.findall(r"`([^`]+)`", row.split(" | ")[1])) for row in table.splitlines()}
+
+
+@pytest.mark.feature("hosted-lane-users-pinned")
+def test_the_ci_timing_guide_lists_every_pinned_lane_user() -> None:
+    assert _guide_lane_users() == LANE_USERS

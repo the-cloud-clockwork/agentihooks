@@ -689,8 +689,7 @@ class CopilotAdapter:
             profile_chain,
             bundle_dir,
             self._pending_rules,
-            _MANAGED_HEADER,
-            _MANAGED_FOOTER,
+            (_MANAGED_HEADER, _MANAGED_FOOTER),
             {"shared bundle": shared_dir, "user bundle": user_dir},
         )
         dst = self.home() / "copilot-instructions.md"

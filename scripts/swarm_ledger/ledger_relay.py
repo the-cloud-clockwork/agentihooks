@@ -83,18 +83,31 @@ def relayed(op, meta) -> str:
     return verified(op["by"], op["quote"]) if master else ""
 
 
-def orchestrator_words(op: dict[str, Any], ctx: Any) -> str:
-    """The verified quoted span of an orchestrator's relay, or empty with the refusal recorded on ctx."""
-    if ctx.meta["members"].get(op["by"], {}).get("role") != "orchestrator":
-        ctx.refused.append(f"relay on {op['item']} refused: {op['by']} is not an orchestrator of this ledger")
+def orchestrator(op: dict[str, Any], ctx: Any, what: str) -> bool:
+    """Whether the op's author is the ledger's orchestrator, with the refusal recorded on ctx when it is not."""
+    if ctx.meta["members"].get(op["by"], {}).get("role") == "orchestrator":
+        return True
+    ctx.refused.append(f"{what} on {op['item']} refused: {op['by']} is not an orchestrator of this ledger")
+    return False
+
+
+def orchestrator_words(op: dict[str, Any], ctx: Any, what: str = "relay") -> str:
+    """The verified quoted span of an orchestrator's op, or empty with the refusal recorded on ctx."""
+    if not orchestrator(op, ctx, what):
         return ""
     words = verified(op["by"], op["quote"])
     if not words:
         ctx.refused.append(
-            f"relay on {op['item']} refused: the server could not verify at least three quoted operator words "
+            f"{what} on {op['item']} refused: the server could not verify at least three quoted operator words "
             "in its recorded prompts or answers"
         )
     return words
+
+
+def marks_of(op: dict[str, Any], proof: dict[str, str]) -> dict[str, str]:
+    """The marks an entry relayed for the operator carries, in the order they are stored: who relayed it, from where,
+    then the proof it rests on, his quoted words or the entry he wrote."""
+    return {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, **proof}
 
 
 def add_note(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
@@ -104,7 +117,7 @@ def add_note(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     words = orchestrator_words(op, ctx)
     if not words:
         return False
-    marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
+    marks = marks_of(op, {"quote": words})
     text = op["text"].strip()
     doc["notes"].append({"id": op["id"], "by": "operator", "at": ctx.at, "text": text, "comments": [], **marks})
     ctx.record("operator", "note added", "", id=op["id"], text=text, **marks)
@@ -126,7 +139,7 @@ def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     words = orchestrator_words(op, ctx)
     if not words:
         return False
-    marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
+    marks = marks_of(op, {"quote": words})
     text = op["text"].strip()
     item[thread].append({"id": op["id"], "by": "operator", "at": ctx.at, "text": text, **marks})
     noun = "answer" if thread == "answers" else "comment"

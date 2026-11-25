@@ -14,6 +14,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
@@ -183,13 +184,14 @@ def current() -> LedgerView | None:
 def view_file(base: str, slug: str, directory: Path, scope: live_rows.Scope | None = None) -> Path:
     """The file holding the view of ledger ``slug`` on the server at ``base`` read with ``scope``."""
     scope = TICK_SCOPE if scope is None else scope
-    key = f"{base} {slug} live closed={scope.closed} frozen={scope.frozen}"
+    key = f"{base} {slug} {PARTS} live closed={scope.closed} frozen={scope.frozen}"
     return directory / "ledger-views" / f"{hashlib.sha256(key.encode()).hexdigest()[:32]}.json"
 
 
-def refreshed(path: Path, reader: Reader) -> LedgerView:
+def refreshed(path: Path, reader: Reader, renew: bool = False) -> LedgerView:
     """The view stored at path patched with one delta read, stored back when its generation moved or a stored
-    view that no longer fits was replaced by a full read."""
+    view that no longer fits was replaced by a full read; a ``renew`` of the view a pass holds stores it back only
+    after a full read."""
     exported = read_export_file(path)
     generation, held = exported if exported is not None else (0, {})
     reply = reader(generation, PARTS, last_revision(held))
@@ -198,7 +200,7 @@ def refreshed(path: Path, reader: Reader) -> LedgerView:
     except (KeyError, IndexError, TypeError, AttributeError):
         reply, generation = reader(0, PARTS, None), None
         state = reply["data"]
-    if exported is None or reply["generation"] != generation:
+    if exported is None or (reply["generation"] != generation and (not renew or "changes" not in reply)):
         write_export_file(path, reply["generation"], state)
     return counted(LedgerView(reply["generation"], state))
 
@@ -229,9 +231,12 @@ def start(slug: str, timeout: float | None = None) -> LedgerView | None:
     client: Any = ledger.client(slug, timeout or ledger.REQUEST_TIMEOUT)
     path = view_file(base, slug, scheduler.runtime_dir())
 
-    def refresh() -> LedgerView:
-        """The held view patched with one delta read, dropping the task fields offline passes queued."""
-        answered = refreshed(path, lambda since, parts, after: client.changes(slug, since, parts, TICK_SCOPE, after))
+    def refresh(renew: bool = False) -> LedgerView:
+        """The held view patched with one delta read, dropping the task fields offline passes queued; a ``renew``
+        stores the view back only after a full read."""
+        answered = refreshed(
+            path, lambda since, parts, after: client.changes(slug, since, parts, TICK_SCOPE, after), renew
+        )
         queued_file(path).unlink(missing_ok=True)
         return answered
 
@@ -243,7 +248,7 @@ def start(slug: str, timeout: float | None = None) -> LedgerView | None:
         print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
         queued_file(path).unlink(missing_ok=True)
         view = None
-    _hold(slug, view, _kept(refresh), path)
+    _hold(slug, view, _kept(partial(refresh, renew=True)), path)
     return view
 
 

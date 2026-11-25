@@ -14,10 +14,12 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+from typing import Any
 
 from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from scripts.gates import log as gate_log
+from scripts.gates.base import Who
 from scripts.swarm.slice_screen import ONE_PR, levels
 from scripts.swarm_ledger import ledger_comments
 
@@ -34,6 +36,9 @@ NO_ANSWER = "the classifier did not answer"
 FAIL_KINDS = {"enforce": "deny", "observe": "observe"}
 CLEARANCE = PurePosixPath("mutation-cleared.txt")
 CLEARANCE_FOLDER = PurePosixPath("mutation-clearances")
+FEATURE_MAP = PurePosixPath("feature-map.json")
+REGISTRIES = (("tests",), ("feature-map.d",))
+NAME = re.compile(r"[^\s`'\"(),;]+")
 REPO_AREA = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*):.")
 OWN_REPO = "the task's own repository"
 
@@ -145,14 +150,40 @@ def _covering(answers, covers, slot, covered):
     )
 
 
-def _row(piece: Piece, probability: float | None, off_intent: float | None, authorized: str | None = None) -> dict:
-    kept = _kept(_ruling(piece.areas) or authorized is not None, probability, off_intent)
+def _row(piece: Piece, probability: float | None, off_intent: float | None, authorized: str | None, named: str) -> dict:
+    kept = _kept(_ruling(piece.areas, named) or authorized is not None, probability, off_intent)
     row = {"what": piece.what, "areas": list(piece.areas), "why": piece.why, "probability": probability, "kept": kept}
     return row | ({"repo": piece.repo} if piece.repo else {}) | ({"authorized": authorized} if authorized else {})
 
 
-def _ruling(areas) -> bool:
-    return all(is_clearance(area) for area in areas) or (len(areas) == 1 and _changelog_fragment(areas[0]))
+def _ruling(areas: tuple[str, ...], named: str) -> bool:
+    """True when code keeps the piece whatever the classifier says: clearances, one changelog fragment, or regression
+    test and feature map areas the task's recon plan names."""
+    return (
+        all(is_clearance(area) for area in areas)
+        or (len(areas) == 1 and _changelog_fragment(areas[0]))
+        or all(_registered(area, named) for area in areas)
+    )
+
+
+def _registered(area: str, named: str) -> bool:
+    """True when area is a regression test or feature map area that a whole path in named, the recon plan's area
+    text, names or sits under."""
+    shown = _plain(area)
+    path = PurePosixPath(shown)
+    registry = path == FEATURE_MAP or path.parts[:1] in REGISTRIES
+    names = {_plain(word.rstrip(".:")) for word in NAME.findall(named)}
+    return registry and ".." not in path.parts and any(name == shown or name.startswith(f"{shown}/") for name in names)
+
+
+def _plain(text: str) -> str:
+    """text as a path inside its repository, without a leading repository name or ./"""
+    repo = _repository(text)
+    return PurePosixPath(text[len(repo) + 1 :] if repo else text).as_posix()
+
+
+def _digest(named: str) -> str:
+    return hashlib.sha256(named.encode()).hexdigest() if named else ""
 
 
 def _kept(ruling, probability, off_intent) -> bool:
@@ -163,9 +194,11 @@ def _row_key(row):
     return Piece(row["what"], tuple(row["areas"]), row["why"]).key
 
 
-def _known(previous: dict, pieces: list[Piece], ids: list[str], state: dict) -> list[dict]:
+def _known(previous: dict, pieces: list[Piece], ids: list[str], state: dict, recon: str) -> list[dict]:
     rows = previous.get("pieces") or []
     if previous.get("verdict") != PASS or len(rows) >= len(pieces) or previous.get("authorizations", []) != ids:
+        return []
+    if previous.get("recon", "") != recon:
         return []
     if [_row_key(row) for row in rows] != [piece.key for piece in pieces[: len(rows)]]:
         return []
@@ -176,16 +209,16 @@ def _known(previous: dict, pieces: list[Piece], ids: list[str], state: dict) -> 
     return list(rows)
 
 
-def _params(fresh: list[Piece], start: int, sized: bool, ids: list[str]) -> dict:
+def _params(fresh: list[Piece], start: int, sized: bool, ids: list[str], named: str) -> dict:
     return {
         "pieces": [
-            {"slot": start + i, "number": start + i + 1, "what": piece.what, "ruling": _ruling(piece.areas)}
+            {"slot": start + i, "number": start + i + 1, "what": piece.what, "ruling": _ruling(piece.areas, named)}
             for i, piece in enumerate(fresh)
         ],
         "covers": [
             {"slot": start + i, "number": start + i + 1, "what": piece.what, "grant": g, "id": auth}
             for i, piece in enumerate(fresh)
-            if not _ruling(piece.areas)
+            if not _ruling(piece.areas, named)
             for g, auth in enumerate(ids)
         ],
         "sized": [
@@ -262,9 +295,9 @@ def _source_areas(areas: tuple) -> list[str]:
     return [area for area in areas if PurePosixPath(area).parts[:1] != ("tests",) and not is_clearance(area)]
 
 
-def trace(pieces: list[Piece], state: dict, previous: dict | None, now_ms: int | None = None) -> dict:
-    previous, ids = previous or {}, _ids(state)
-    known = _known(previous, pieces, ids, state)
+def trace(pieces: list[Piece], state: dict, previous: dict | None, now_ms: int | None = None, named: str = "") -> dict:
+    previous, ids, recon = previous or {}, _ids(state), _digest(named)
+    known = _known(previous, pieces, ids, state, recon)
     start, fresh = len(known), pieces[len(known) :]
     wire = [
         {"piece": start + i + 1, "what": p.what, "areas": _source_areas(p.areas), "why": p.why}
@@ -279,12 +312,13 @@ def trace(pieces: list[Piece], state: dict, previous: dict | None, now_ms: int |
         "at": int(time.time() * 1000) if now_ms is None else now_ms,
         "authorizations": ids,
         "sizes": list(previous.get("sizes", [])) if known else [],
+        "recon": recon,
     }
-    params = _params(fresh, start, not known, ids)
+    params = _params(fresh, start, not known, ids, named)
     try:
         output = runner.run(PURPOSE, {**state, "pieces": wire}, params, decider=decide)
     except ClassifierError:
-        rows = known + [_row(piece, None, None) for piece in fresh]
+        rows = known + [_row(piece, None, None, None, named) for piece in fresh]
         return _record(UNCHECKED, rows, previous.get("size") if known else None, [NO_ANSWER], "", False, base)
     result, off_intent = output.raw, output.thresholds["off_intent"]
     rows = known + [
@@ -293,6 +327,7 @@ def trace(pieces: list[Piece], state: dict, previous: dict | None, now_ms: int |
             result.answers[f"piece_{start + i}"].noul,
             off_intent,
             _covering(result.answers, params["covers"], start + i, output.thresholds["covered"]),
+            named,
         )
         for i, piece in enumerate(fresh)
     ]
@@ -326,6 +361,7 @@ def _record(
         }
         | ({"sizes": base["sizes"]} if base["sizes"] else {})
         | ({"authorizations": base["authorizations"]} if base["authorizations"] else {})
+        | ({"recon": base["recon"]} if base["recon"] else {})
     )
 
 
@@ -383,17 +419,28 @@ def _read(folder, who, state):
     return parse(text, who.task, state.get("task ids", ()))
 
 
-def run(folder, state, ledger, who, mode, home=None, now_ms=None):
+def run(
+    folder: Path,
+    state: dict[str, Any],
+    ledger: Any,
+    who: Who,
+    mode: str,
+    home: Path | str | None = None,
+    now_ms: int | None = None,
+) -> tuple[dict[str, Any], bool]:
     """Trace the plan in folder; returns the verdict record and whether the task must be blocked."""
+    from scripts.gates import recon
+
     try:
         pieces = _read(folder, who, state)
     except ValueError as exc:
         if mode in FAIL_KINDS:
             gate_log.append(who.swarm, gate_log.Row.of(GATE.name, FAIL_KINDS[mode], who, reason=str(exc)), home)
         raise
-    record, block = load(folder), False
-    if record.get("plan_hash") != plan_hash(pieces, state) or record.get("authorizations", []) != _ids(state):
-        record = trace(pieces, state, record, now_ms)
+    record, block, named = load(folder), False, recon.named(folder)
+    changed = record.get("plan_hash") != plan_hash(pieces, state) or record.get("authorizations", []) != _ids(state)
+    if changed or record.get("recon", "") != _digest(named):
+        record = trace(pieces, state, record, now_ms, named)
         _log(record, who, mode, home)
         save(folder, record)
         block = record["verdict"] == FAIL and record["failures"] > RETURNS and mode == "enforce"
