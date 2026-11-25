@@ -21,9 +21,16 @@ SLUG = "sw"
 
 
 @pytest.fixture
-def rig():
+def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     import fakeredis
 
+    from scripts.swarm import capacity
+
+    accounts = [
+        capacity.Account("claude", "claude-a", "OPEN", 0, None, 90, 6),
+        capacity.Account("codex", "codex-a", "OPEN", 0, None, 90, 6),
+    ]
+    monkeypatch.setattr(capacity, "accounts", Mock(side_effect=lambda *_args, **_kwargs: list(accounts)))
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, "/repo", 2, 2))
     found = doc([task("t1"), task("t2", lane="ci", pr_url="https://example.invalid/pull/1")])

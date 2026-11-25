@@ -1,6 +1,7 @@
 import itertools
 import json
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -138,6 +139,50 @@ def test_an_offer_carries_the_task_lane_and_generation():
         "cause": None,
         "schema_version": 1,
     }
+
+
+@pytest.mark.feature("event-offer-account-seats")
+def test_an_offer_carries_only_the_quota_restrictions_needed_before_claim() -> None:
+    row = task(
+        "a",
+        lane="plan",
+        claim_generation=2,
+        requires_harness="claude",
+        profile="planner",
+        launch_assignment={"harness": "claude", "profile": "planner", "account": "claude-a", "command": "omit"},
+    )
+    view = snapshot(doc([row]))
+    event = readiness.offer(row, view, NOW)
+    assert event.data.get("quota") == {
+        "requires_harness": "claude",
+        "profile": "planner",
+        "launch_assignment": {"harness": "claude", "profile": "planner", "account": "claude-a"},
+    }
+    assert (event.id, event.version, event.key) == ("ready:sw:a:2", 2, "a")
+
+
+@pytest.mark.feature("event-offer-account-seats")
+@pytest.mark.parametrize("legacy", [True, False], ids=["legacy", "changed-requirement"])
+def test_publish_refreshes_quota_metadata_without_a_new_claim_generation(bus: Bus, clock: Clock, legacy: bool) -> None:
+    row = task("a", lane="plan", claim_generation=2, requires_harness="claude", profile="planner")
+    view = snapshot(doc([row]))
+    event = readiness.offer(row, view, NOW)
+    data: dict[str, Any] = {"lane": "plan", "generation": 2}
+    if not legacy:
+        data["quota"] = {"requires_harness": "codex", "profile": "planner"}
+    old = replace(event, data=data)
+    queue = bus.queue(readiness.queue_name(SLUG, "plan"), QueuePolicy())
+    assert queue.offer(old)
+    clock.now += 1
+    assert readiness.publish(bus, view, clock.now) == []
+    assert queue.take(0) is None
+    clock.now += WINDOW
+    assert readiness.publish(bus, view, clock.now) == [event.id]
+    delivery = queue.take(0)
+    assert delivery is not None
+    assert (delivery.event.id, delivery.event.version, delivery.attempt) == ("ready:sw:a:2", 2, 1)
+    assert delivery.event.data["quota"] == {"requires_harness": "claude", "profile": "planner"}
+    delivery.ack()
 
 
 def test_offers_cover_every_ready_task_in_its_own_lane_and_skip_frozen_claimed_and_laneless():
