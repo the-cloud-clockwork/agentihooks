@@ -1,5 +1,6 @@
 """The in process ledger transport pinned to the exact statuses, bodies, headers and clients the server path gives."""
 
+import functools
 import io
 import logging
 import urllib.error
@@ -10,7 +11,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm_ledger.api import task_list
-from scripts.tick.adapters import database_ledger
+from scripts.tick.adapters import database_ledger, writer_client
 
 pytestmark = [pytest.mark.unit]
 
@@ -130,7 +131,7 @@ def _answered(monkeypatch: pytest.MonkeyPatch, status: int, body: bytes) -> list
         return status, body
 
     monkeypatch.setattr(database_ledger, "answer", answer)
-    monkeypatch.setattr(database_ledger, "writer_header", lambda: {"X-Ledger-Worktree": "%2Fw"})
+    monkeypatch.setattr(writer_client, "writer_header", lambda: {"X-Ledger-Worktree": "%2Fw"})
     return calls
 
 
@@ -189,10 +190,13 @@ def test_a_reply_below_400_is_returned(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.feature("swarm-tick-database-ledger")
-def test_the_database_client_carries_the_base_timeout_and_in_process_transport() -> None:
+def test_the_database_client_carries_the_base_timeout_and_the_writer_first_transport() -> None:
     built = database_ledger.client("http://ledger", 2.5)
     assert (built.base, built.credentials, built.timeout) == ("http://ledger", {}, 2.5)
-    assert built.transport is database_ledger.request
+    transport: Any = built.transport
+    assert isinstance(transport, functools.partial)
+    assert (transport.func.__module__, transport.func.__name__) == (writer_client.__name__, "routed")
+    assert (transport.args, transport.keywords) == ((2.5,), {})
 
 
 @pytest.mark.feature("swarm-tick-database-ledger")

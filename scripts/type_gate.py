@@ -74,13 +74,32 @@ def runs(files: list[str]) -> list[list[str]]:
     return [files[start : start + size] for start in range(0, len(files), size)]
 
 
+def worker_count() -> int:
+    override = os.environ.get("AGENTIHOOKS_TYPE_WORKERS")
+    if override is not None:
+        try:
+            return max(1, min(_WORKERS, int(override)))
+        except ValueError as exc:
+            raise GradeError("AGENTIHOOKS_TYPE_WORKERS must be an integer") from exc
+    try:
+        cpus = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        cpus = os.cpu_count() or 1
+    try:
+        load = os.getloadavg()[0]
+    except (AttributeError, OSError):
+        return 1
+    return max(1, min(_WORKERS, math.floor(cpus - load)))
+
+
 def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
     """Count the type errors of the given sources, every source when None, each in its run of the head's sources.
 
     basedpyright keeps the types it infers across the files of one process, so the files it checks before a source
     can change what it counts there, while the files after it cannot. A source is therefore counted in its run of the
     head's every source layout whichever sources are graded: each run holding a graded source is checked from its
-    first source through its last graded one, four runs at a time, one process each. An empty list measures nothing,
+    first source through its last graded one, up to four runs at a time according to CPU availability and load,
+    one process each. AGENTIHOOKS_TYPE_WORKERS overrides concurrency within one through four. An empty list measures nothing,
     and a path the head has no source for is refused. Each checker's Node heap is limited to 5120 MB. Once its heap
     use, plus the five percent it adds, passes ninety percent of that limit, 4388 MB, basedpyright empties its whole
     type cache at points garbage collection decides and can count other errors on another runner, so a measurement
@@ -97,7 +116,7 @@ def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
             checks.append(run[: graded[-1] + 1])
     if not checks:
         return {}
-    with ThreadPoolExecutor(_WORKERS) as pool:
+    with ThreadPoolExecutor(worker_count()) as pool:
         reports = list(pool.map(partial(_check, head), checks))
     root = head.resolve()
     counts: dict[str, int] = {}

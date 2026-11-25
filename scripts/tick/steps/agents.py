@@ -281,7 +281,7 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
             store.refresh(slug, agent.task, agent.name, tick.LEASE_MS)
             return []
         return [tick.timing.timed(tick._drop_remote, slug, store, ledger, rows, agent, reason)]
-    ended = tick._ended(agent, rows)
+    ended = tick._ended(agent, rows) and not _claim_unwritten(judging, agent)
     if agent.state == "retiring" and not ended:
         return []
     if ended:
@@ -302,6 +302,17 @@ def _reap_agent(judging: _Reaping, agent: AgentRecord) -> list[str]:
     if now_ms - max(agent.started_at, agent.launched_at) > tick.STARTUP_GRACE_MS:
         return tick.timing.timed(tick._lost, slug, store, ledger, runtime, rows, agent, now_ms)
     return []
+
+
+def _claim_unwritten(judging: _Reaping, agent: AgentRecord) -> bool:
+    """True when only the empty claimant of its pass row would end a starting, never launched agent that still holds
+    its Redis claim: the hub admitted it after the pass read that row and before its ledger claim write landed."""
+    row = judging.rows.get(agent.task)
+    if agent.state != "starting" or agent.launched_at or not row or row.get("claimed_by"):
+        return False
+    if tick._ended(agent, {agent.task: {**row, "claimed_by": agent.name}}):
+        return False
+    return cast(Any, judging.store).claimant(judging.slug, agent.task) == agent.name
 
 
 def _reap_admitted(judging: _Reaping, agent: AgentRecord) -> list[str]:
@@ -335,7 +346,7 @@ def _stop_ended(judging: _Reaping, agent: AgentRecord) -> list[str]:
     from scripts.hub.reconciler import settled_admitted, stop_admitted
 
     slug = judging.slug
-    outcome = stop_admitted(slug, agent, ENDED)
+    outcome = stop_admitted(slug, agent, ENDED, store=judging.store)
     if outcome == execution_stop.SENT:
         return [f"sent the stop for {agent.name} to its hive: its work {ENDED}"]
     if outcome.startswith(execution_stop.FAILED):
@@ -501,7 +512,7 @@ def _watch_idle(
     )
     if tick.timing.timed(tick.resume.recovery_holds, store, slug, agent, now_ms):
         return nudged
-    if idle.idle_ticks >= tick.IDLE_KILL_TICKS and tick._retire_or_stop(slug, runtime, idle, "idle"):
+    if idle.idle_ticks >= tick.IDLE_KILL_TICKS and tick._retire_or_stop(slug, runtime, idle, "idle", store):
         why = (
             f"; outage recovery could not proceed: {tick.timing.timed(tick.resume.recovery_blocker, store, slug, agent)}"
             if pending

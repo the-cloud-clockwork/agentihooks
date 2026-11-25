@@ -1022,6 +1022,7 @@ statistics cache entries. This happens automatically in the pull request
 | Test import index | `mentions` caches Unicode-normalized tokens and relative import detection. `imported_names` caches parsed imports by test text and package. `select_tests` parses a file only when it names a reached module's last component or contains a relative import; its import walk visits statements | In-process reuse by content and package, including repeated selection for changed sources. Each selection still reads test text; unrelated files avoid AST parsing |
 | Test duration map | `stats_part_count` computes `file_seconds` once, then passes the same map to every candidate part count and worker bucket. `partition` splits the files using that map without rereading durations | One statistics part sizing calculation. A new plan reads its current duration input |
 | Statistics dependency fingerprints | `StatsInputs.for_test` retains a test file's dependency trace when multiple selectors name that file, and the import closure of each distinct measured dependency list; `StatsInputs.discovery` retains the digest of each distinct input set. Test ids with equal measured lists cost one closure walk when their records are saved and one when they are checked for reuse. `test_inputs` materializes each module's AST walk once while recording its dependencies | One `StatsInputs` instance, separately for measured and unmeasured dependencies. Recorded coverage and dynamically loaded inputs still participate in validation |
+| Statistics cache input digests | `collect_cached_stats` passes one path to digest map to every `StoredStats.load` call of a cache lookup, so each input file the cached records list is read and hashed once, and every other record that lists the file reuses that digest | One cache lookup. The next lookup hashes its inputs again, so a changed or deleted input still misses; a `load` call without a map hashes every input it checks |
 
 These in-memory values reduce repeated planning work. The persisted statistics
 cache still validates its inputs before reusing collected results, as described
@@ -1115,7 +1116,8 @@ files. These are delivery measurements, not a current runner speed guarantee.
 
 The `mutation-plan` job of the Tests run installs only the third party
 packages that the shard planner and the empty change grade import: mutmut,
-pytest, pyyaml and tomlkit, at the specifiers `pyproject.toml` declares. Before
+pytest, pyyaml and tomlkit, at the exact pins `.github/test-requirements.lock`
+holds. Before
 [pull request 5439](https://github.com/the-cloud-clockwork/agentihooks/pull/5439)
 the job installed the whole project with `.[dev,all]`, 95 packages, only to
 size shards. It now resolves and installs 20 packages in about one second. The
@@ -1127,15 +1129,15 @@ still install `.[dev,all]`.
 
 ```yaml
       - name: Install dependencies
-        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "pytest==9.1.1" "pyyaml==6.0.3" "tomlkit==0.15.2"
 ```
 
-| Package | Specifier | Declared in `pyproject.toml` | Planner module that imports it at module level |
+| Package | Pin in `.github/test-requirements.lock` | Declared in `pyproject.toml` | Planner module that imports it at module level |
 |---|---|---|---|
 | `mutmut` | `==3.6.0` | `dev` extra | `scripts.ci_mutation.selection` |
-| `pytest` | `>=8.0` | `dev` extra | `scripts.ci_mutation.killers`, `scripts.ci_mutation.selection` |
-| `pyyaml` | `>=6.0` | project dependencies | `scripts.dep_manifest` (imported as `yaml`) |
-| `tomlkit` | `>=0.12` | project dependencies | `scripts.ci_mutation.runner` |
+| `pytest` | `==9.1.1` | `dev` extra | `scripts.ci_mutation.killers`, `scripts.ci_mutation.selection` |
+| `pyyaml` | `==6.0.3` | project dependencies | `scripts.dep_manifest` (imported as `yaml`) |
+| `tomlkit` | `==0.15.2` | project dependencies | `scripts.ci_mutation.runner` |
 
 - The packages go into the runner's system Python 3.12. The project itself is
   not installed: **Size mutation shards from stored timings** runs
@@ -1156,9 +1158,9 @@ still install `.[dev,all]`.
 ### Adding a planner dependency
 
 `test_mutation_plan_installs_only_what_the_planner_imports_at_the_project_pins`
-in `tests/test_ci_workflow.py` keeps the step, the planner and `pyproject.toml`
-in agreement. `PLANNER_PACKAGES` in the same file maps each installed
-distribution to its import name:
+in `tests/test_ci_workflow.py` keeps the step, the planner and
+`.github/test-requirements.lock` in agreement. `PLANNER_PACKAGES` in the same
+file maps each installed distribution to its import name:
 
 ```python
 PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "tomlkit": "tomlkit"}
@@ -1167,9 +1169,9 @@ PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "t
 The test makes two checks:
 
 1. The step's `run` line equals the retry wrapper followed by
-   `uv pip install --system` and the `pyproject.toml` specifier of every
-   `PLANNER_PACKAGES` distribution, quoted and sorted by distribution name.
-   Specifiers are looked up in the project dependencies and the `dev` extra.
+   `uv pip install --system --constraint` with the workflow revision's test
+   requirements lock and the exact lock pin of every `PLANNER_PACKAGES`
+   distribution, quoted and sorted by distribution name.
 2. The third party top level modules imported by `scripts.ci_mutation.plan`,
    `scripts.ci_mutation.__main__` and every `scripts` or `tests` module they
    reach equal the `PLANNER_PACKAGES` import names. Module level imports count,
@@ -1181,17 +1183,18 @@ When a planner module gains a module level import of another third party
 package, change three places in one pull request:
 
 1. Declare the package in the project dependencies or the `dev` extra of
-   `pyproject.toml`, if it is not there yet.
+   `pyproject.toml`, if it is not there yet, and regenerate
+   `.github/test-requirements.lock` so it pins the package.
 2. Add it to `PLANNER_PACKAGES`, distribution name to import name.
-3. Add its `pyproject.toml` specifier to the step, in sorted order. For a
-   hypothetical `packaging>=24.0` dependency the step becomes:
+3. Add its exact lock pin to the step, in sorted order. For a hypothetical
+   `packaging==24.2` lock pin the step becomes:
 
 ```yaml
-        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "packaging>=24.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
+        run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system --constraint "$RUNNER_TEMP/workflow/.github/test-requirements.lock" "mutmut==3.6.0" "packaging==24.2" "pytest==9.1.1" "pyyaml==6.0.3" "tomlkit==0.15.2"
 ```
 
-A changed specifier in `pyproject.toml`, such as a new mutmut pin, also needs
-the same change in the step, or the test fails.
+A changed pin in `.github/test-requirements.lock`, such as a new mutmut
+version, also needs the same change in the step, or the test fails.
 
 ### Inspect the plan job
 
@@ -1225,9 +1228,9 @@ Stats parts: 1
 | Symptom | Cause and fix |
 |---|---|
 | **Size mutation shards from stored timings** or **Grade the empty change set** fails with `ModuleNotFoundError` | A planner path imports a package the step does not install. A module level import also fails the contract test; an import inside a function does not. Add the package as described in [Adding a planner dependency](#adding-a-planner-dependency). |
-| The contract test fails on the `run` line | The step and `pyproject.toml` disagree on a specifier, the order or the retry wrapper. Copy the specifier from `pyproject.toml` into the step. |
+| The contract test fails on the `run` line | The step and `.github/test-requirements.lock` disagree on a pin, the order, the constraint or the retry wrapper. Copy the exact pin from `.github/test-requirements.lock` into the step. |
 | The contract test fails on the import set | A planner module gained or dropped a third party import. Add or remove the package in `PLANNER_PACKAGES` and in the step. |
-| The test raises `KeyError` with a package name | A `PLANNER_PACKAGES` entry is declared in neither the project dependencies nor the `dev` extra. Declare it there. |
+| The test raises `KeyError` with a package name | A `PLANNER_PACKAGES` distribution has no exact pin in `.github/test-requirements.lock`. Declare it in the project dependencies or the `dev` extra, then regenerate the lock with `bash .github/scripts/lock-test-deps.sh`. |
 | The step fails with `Python package index unavailable` | The package index did not answer within the retry window. This is not a code verdict; rerun the job. |
 
 ### Plan job dependency delivery evidence
@@ -1486,8 +1489,24 @@ A pull request run saves its `mutation-test-stats-v2-<os>-` cache on the pull re
 `scripts.ci_stats_seed` works in this order:
 
 1. **Merged pull requests.** It starts from the commit in `seeded.sha` in the cache folder, the head the last saved seed reached, or from `--before` when that file is missing. When that commit is not an ancestor of the head, it starts from the head's parent. It reads at most 50 commit subjects up to the head and keeps the number of each subject that ends in `(#N)`.
-2. **Harvest, newest pull request first.** For each number it reads the pull request's head commit. A 404 prints `Mutation stats seed: #N is not a readable pull request` and moves on. It lists up to ten `pull_request` Tests runs at that head and, for each run, up to a hundred artifacts, keeping the unexpired ones named `mutation-test-stats-cache-*`, which the `mutation-plan` and `mutation-stats` jobs upload with seven day retention. It downloads them lowest id first and copies their `.json`, `.index` and `.shared` files and `context.sha` into the folder. The first run that has any stats artifact ends that pull request. An `.index` pointer that a newer pull request already supplied is not replaced by an older one.
+2. **Harvest, newest pull request first.** For each number it reads the pull request's head commit. A 404 prints `Mutation stats seed: #N is not a readable pull request` and moves on. It lists up to ten `pull_request` Tests runs at that head and, for each run, up to ten pages of a hundred artifacts, stopping at the first page with fewer than a hundred. Each page is a separate gh call that is asked again under [Retry](#retry) when it fails with anything other than a timeout or an HTTP 404 answer. It keeps the unexpired artifacts named `mutation-test-stats-cache-*`, which the `mutation-plan` and `mutation-stats` jobs upload with seven day retention. It downloads them lowest id first and copies their `.json`, `.index` and `.shared` files and `context.sha` into the folder. The first run that has any stats artifact ends that pull request. An `.index` pointer that a newer pull request already supplied is not replaced by an older one.
 3. **Prune and record.** It drops `.index` pointers that are broken or name a record made under another `context.sha`, the records no kept pointer names, and the shared input files no kept record names. It writes the head to `seeded.sha` and prints one summary line.
+
+### Call the seed
+
+```bash
+python -m scripts.ci_stats_seed FOLDER --head HEAD_SHA --before BEFORE_SHA
+```
+
+| Argument | Meaning |
+|---|---|
+| `FOLDER` | The stats cache folder, required. It is created with its parents when missing and reused when present |
+| `--head` | The pushed head commit, required. Subjects are read up to it, and it is written to `seeded.sha` at the end |
+| `--before` | The push's previous head, required. It is the start only when `seeded.sha` is missing |
+
+A missing `--head` or `--before` stops the seed with an argparse usage error and exit status 2, before any git or gh call. The seed runs `git` in the current directory, so it needs a clone that holds both commits; the job checks out the full history.
+
+The seed takes no credential argument. Each call runs `gh api repos/{owner}/{repo}/<path>`, where gh fills the owner and repository from the current directory's repository, or from `GH_REPO` when it is set, and authenticates with `GH_TOKEN`. The workflow step sets `GH_TOKEN` to the App token with actions read and pull requests read, `--head` to `$GITHUB_SHA` and `--before` to the push event's `before` commit.
 
 ### Budget and timeouts
 

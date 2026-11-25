@@ -74,6 +74,12 @@ With a remote ledger, `agentihooks hub run` first issues the replica its own ser
 | `preemption` | A one minute poll; it also subscribes to `swarm.*.preemption.requested`, which nothing publishes yet | Asks the lowest ranked holder of a full lane to hand off when an urgent or focused task of a running `events` swarm still waits one poll later. |
 | `pulls` | `swarm.*.task.*` and a poll | Publishes pull request, merge queue and check events, also fed by `agentihooks github-webhook`. |
 | `launch-checks` | A ten second poll; it also subscribes to `swarm.*.launch-checks.requested`, which nothing publishes yet | Judges the launch check of each worker the hub admitted, from the launch time its execution started write records. A worker whose hive reports no launch fails 300 seconds after admission. A failed worker is stopped on its hive, and its task relaunches once. |
+| `wait-ends-merged` | `swarm.*.pull.merged` | Re-checks every checks or merge wait on the merged pull request through the waits pass's own resolution and ends a resolved one at once, with the same ended item, woke key and wait history the polled pass writes. With no such wait it reads nothing from GitHub; the minute tick pass still ends what no event names. |
+| `wait-ends-closed` | `swarm.*.pull.closed` | The same re-check for a pull request closed unmerged. |
+| `wait-ends-dequeued` | `swarm.*.merge.dequeued` | The same re-check for a pull request that left the merge queue. |
+| `wait-ends-checks` | `swarm.*.checks.completed` | The same re-check when a check suite on the pull request completes. |
+| `task-wait-ends` | `swarm.*.task.*` | On a task changed event to done or blocked, re-reads that task and ends every task wait naming it through the same single wait end. When the task is done, it also sends the live holder of every claimed open task whose `depends_on` names it one inbox item naming the closed dependency, once per dependency and dependent. |
+| `reply-wait-ends` | `swarm.*.inbox-wake.requested` | When the woken inbox item is a reply, ends every reply wait on the item it answers through the same single wait end. A send that answers nothing ends no wait. |
 
 ### Hub readiness and rollouts
 
@@ -491,8 +497,8 @@ moved the gate onto the shared client mode rule.
 
 A workstation swarm can run its engineer and CI work on a Kubernetes cluster while its master, planners and
 dispatcher stay on the workstation. The swarm first moves to the hosted ledger, which hands its controller lease to
-the cluster's controller; the chart's controller then serves that swarm and launches only its `eng` and `ci` lanes
-as worker Pods. The Anton deployment runs `rig-grade-swarm` this way; the values and names below are Anton's.
+the cluster's controller; the chart's controller then serves that swarm and launches only its `eng`, `ci` and
+`review` lanes as worker Pods. The Anton deployment runs `rig-grade-swarm` this way; the values and names below are Anton's.
 
 ### Move the swarm to the hosted ledger
 
@@ -595,7 +601,7 @@ The routed runtime places each launch by lane and profile:
 
 | Work | Where it runs |
 |---|---|
-| `eng` and `ci` lanes | A worker Pod on the cluster. |
+| `eng`, `ci` and `review` lanes | A worker Pod on the cluster. |
 | A task whose profile is `frontend`, on any lane | The workstation. |
 | Master seats owned by the controller's own hive | A worker Pod on the cluster. |
 | Master seats owned by the workstation, planners (`plan`) and the dispatcher (`dispatch`) | The workstation. |
@@ -603,7 +609,7 @@ The routed runtime places each launch by lane and profile:
 `controller.workers.cap` is the launch cap per approved account: each account the worker route offers takes at most
 that many live workers. With one approved account and `cap: 1`, as on Anton, one worker runs at a time. The swarm's
 own caps (`max-eng-agents`, `max-ci-agents`) still apply on top. With hive placement on, worker hive Pods take
-`eng`, `ci`, `plan` and `dispatch` as described on the [Hives](../pillars/hives.md#placement) page instead.
+`eng`, `ci`, `review`, `plan` and `dispatch` as described on the [Hives](../pillars/hives.md#placement) page instead.
 
 ### The hive endpoint on Anton and its render checks
 

@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
+from itertools import batched
 from typing import TYPE_CHECKING, Any, cast
 
 from scripts.inbox.seats import SCAN_PAGE, SeatMemory, SeatRegistry, SwarmCulture
@@ -84,6 +85,7 @@ DEFAULT_SWAP_FLOOR_MB = 4096
 DEFAULT_MASTERS_STEP = 12
 DEFAULT_MASTER_MOVE_GRACE = 300
 DEFAULT_LOCAL_MAX_AGENTS = 15
+DEFAULT_REVIEW_SHARE = 20
 EVENTS_ENGINE = "events"
 MAX_LOAD = 10.0
 CODEX_TRANSPORTS = ("legacy", "app_server")
@@ -153,12 +155,16 @@ class SwarmConfig:
     tick_mode: str = SEQUENTIAL_TICK
     control_url: str = ""
     lab_url: str = ""
+    max_review: int = 0
+    review_share: int = DEFAULT_REVIEW_SHARE
 
     def __post_init__(self) -> None:
         if self.tick_mode not in TICK_MODES:
             raise SwarmError(f"tick mode must be one of {', '.join(TICK_MODES)}")
         if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
             raise SwarmError("focus weight must be a whole number from 0 to 100")
+        if type(self.review_share) is not int or self.review_share not in range(101):
+            raise SwarmError("review share must be a whole number from 0 to 100")
         if self.placement_mode not in PLACEMENT_MODES:
             raise SwarmError(f"placement mode must be one of {', '.join(PLACEMENT_MODES)}")
         if type(self.placement_nodes) is not int or self.placement_nodes < 0:
@@ -340,6 +346,8 @@ class RedisStore:
             raw.get("tick_mode") or SEQUENTIAL_TICK,
             raw.get("control_url", ""),
             raw.get("lab_url", ""),
+            int(raw.get("max_review", 0)),
+            int(raw.get("review_share", DEFAULT_REVIEW_SHARE)),
         )
 
     def update(self, slug: str, **changes: Any) -> SwarmConfig:
@@ -872,18 +880,23 @@ class RedisStore:
     def clear_peer(self, slug):
         self.redis.delete(self.key(slug, "peer"))
 
-    def remove(self, slug):
+    def remove(self, slug: str) -> None:
         if not slug or set(slug) & set("*?[]\\"):
             raise SwarmError(f"refusing to remove swarm {slug!r}: an empty or pattern name would match other swarms")
         self.config(slug)
         if self.agents(slug):
             raise SwarmError(f"swarm {slug} still has agents; stop it with stop --now first")
         from scripts.swarm import fencing
+        from scripts.swarm_ledger import ledger_workspace
 
         fencing.write(self, slug, lambda doc: doc.update({**fencing.EMPTY, "epoch": doc["epoch"]}))
-        keys = list(self.redis.scan_iter(match=self.key(slug, "*")))
-        if keys:
-            self.redis.delete(*keys)
+        keys = [
+            key
+            for pattern in (self.key(slug, "*"), ledger_workspace.task_files_key("*", slug, "*"))
+            for key in self.redis.scan_iter(match=pattern, count=SCAN_PAGE)
+        ]
+        for page in batched(keys, SCAN_PAGE):
+            self.redis.delete(*page)
         self.redis.srem(f"{PREFIX}:index", slug)
         self.names.release(slug)
 

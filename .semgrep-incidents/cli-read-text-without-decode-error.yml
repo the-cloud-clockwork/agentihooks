@@ -1,0 +1,56 @@
+rules:
+  - id: cli-read-text-without-decode-error
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A swarm command line file read decodes text inside a try that catches OSError alone. A file that is not UTF-8
+      raises UnicodeDecodeError, a ValueError that dispatch does not turn into a plain error, so the command ends in
+      a traceback. Catch UnicodeDecodeError after OSError and raise a SwarmError that names the file.
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - cli-read-text-without-decode-error.py
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  try:
+                      ...
+                  except OSError as $EXC:
+                      ...
+              - pattern: $FILE.read_text(...)
+          - patterns:
+              - pattern-inside: |
+                  try:
+                      ...
+                  except OSError:
+                      ...
+              - pattern: $FILE.read_text(...)
+      - pattern-not-inside: |
+          try:
+              ...
+          except OSError as $EXC:
+              ...
+          except UnicodeDecodeError as $ERR:
+              ...
+      - pattern-not-inside: |
+          try:
+              ...
+          except OSError as $EXC:
+              ...
+          except UnicodeDecodeError:
+              ...
+      - pattern-not-inside: |
+          try:
+              ...
+          except OSError:
+              ...
+          except UnicodeDecodeError as $ERR:
+              ...
+      - pattern-not-inside: |
+          try:
+              ...
+          except OSError:
+              ...
+          except UnicodeDecodeError:
+              ...

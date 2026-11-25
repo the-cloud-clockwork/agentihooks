@@ -20,7 +20,15 @@ from scripts.swarm.keyspace import ROOT
 from scripts.swarm.name_state import KEEP, NameState, NamingError, row, state_key
 
 PREFIX = f"{ROOT}:names"
-TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner", "dispatch": "dispatcher"}
+TYPES = {
+    "master": "master",
+    "eng": "engineer",
+    "ci": "ci",
+    "plan": "planner",
+    "dispatch": "dispatcher",
+    "review": "reviewer",
+    "expert": "expert",
+}
 LANES = {kind: lane for lane, kind in TYPES.items()}
 OPERATOR = "operator"
 _KINDS = "|".join(TYPES.values())

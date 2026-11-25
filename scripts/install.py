@@ -7,7 +7,6 @@ exit
 
 import argparse
 import contextlib
-import fcntl
 import json
 import os
 import re
@@ -26,7 +25,7 @@ from urllib.request import url2pathname
 
 import yaml
 
-from scripts import balance_cli, runtime_env
+from scripts import balance_cli, platform_compat, runtime_env
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
 from scripts.cli_delegates import delegated_cli
@@ -704,13 +703,13 @@ def _register_target_global(profile: str, settings_profile: str = "", target: st
     """Record the global install for *target* in state.json (per-target record)."""
     state = _load_state()
     adapter_home = CLAUDE_HOME if target == DEFAULT_TARGET else get_adapter(target).home()
-    entry = {
+    entry: dict[str, Any] = {
         "path": str(adapter_home),
         "profile": profile,
         "installed_at": datetime.now(timezone.utc).isoformat(),
+        **({"settings_profile": settings_profile} if settings_profile else {}),
+        **{key: value for key, value in _global_record(state, target).items() if key == "managed_mcp"},
     }
-    if settings_profile:
-        entry["settings_profile"] = settings_profile
     state.setdefault("targets", {}).setdefault("global", {})[target] = entry
     # Last-used target, consulted only as the interactive TTY prompt's
     # default. It is NOT scoped to a target's own record and is never
@@ -748,15 +747,8 @@ def _sync_lock(*, blocking: bool = True):
 
     Default ``blocking=True`` waits for any concurrent install to finish.
     """
-    _SYNC_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fd = open(_SYNC_LOCK_FILE, "w")  # noqa: SIM115
-    try:
-        flags = fcntl.LOCK_EX if blocking else (fcntl.LOCK_EX | fcntl.LOCK_NB)
-        fcntl.flock(fd, flags)
+    with platform_compat.file_lock(_SYNC_LOCK_FILE, blocking=blocking):
         yield
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        fd.close()
 
 
 # ---------------------------------------------------------------------------
@@ -817,11 +809,25 @@ def _bundle_roots(layer: bool = False) -> list[tuple[str, Path]]:
     return bundle_roots({key: {"path": str(path)} for key, path in found if path}, layer)
 
 
-def _bundle_feature_layers(subdir: str, label: str) -> list[tuple[str, Path]]:
+def _codex_native_skill_layers(
+    subdir: str, install_target: str, content_dirs: list[tuple[str, Path]], chain_len: int
+) -> list[tuple[str, Path]]:
+    if subdir != "skills" or install_target != "codex":
+        return []
+    native = _TARGET_SUBDIR["codex"]
+    extra = _bundle_feature_layers(subdir, "skill", native)
+    for pname, pdir in content_dirs:
+        root = pdir / native / subdir
+        if root.is_dir():
+            extra.append((f"profile({pname}) codex skill" if chain_len > 1 else "profile codex skill", root))
+    return extra
+
+
+def _bundle_feature_layers(subdir: str, label: str, subdir_root: str = _CLAUDE_SUBDIR) -> list[tuple[str, Path]]:
     return [
-        (f"{_BUNDLE_LABELS[kind]} {label}", root / _CLAUDE_SUBDIR / subdir)
+        (f"{_BUNDLE_LABELS[kind]} {label}", root / subdir_root / subdir)
         for kind, root in _bundle_roots(True)
-        if (root / _CLAUDE_SUBDIR / subdir).is_dir()
+        if (root / subdir_root / subdir).is_dir()
     ]
 
 
@@ -2831,7 +2837,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     bundle_dir = _get_bundle_path()
     user_dir = _get_user_bundle_path()
     shared_dir = _get_shared_bundle_path()
-    from hooks.context.profile_chain import unlayered
+    from hooks.context.profile_chain import package_layer, unlayered
 
     content_dirs = unlayered(profile_dirs, (bundle_dir, shared_dir, user_dir))
     for subdir, label, filter_fn in [
@@ -2840,19 +2846,13 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         ("commands", "command", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ("rules", "rule", lambda p: p.suffix == ".md" and p.name != "README.md"),
     ]:
-        # Layer resolution is target-agnostic; what happens to each layer
-        # (symlink, translate, compile into persona, skip) is the adapter's call.
-        layers: list[tuple[str, Path]] = []
-        # Layer 1: agentihooks built-in (packaged under profiles/package/, the
-        # emulated .claude tree — shipped in the wheel, unlike the old repo-root .claude/)
-        layers.append((label, PACKAGE_FEATURES_DIR / subdir))
-        # Layer 2: bundle top-level .claude/ (inherits to all profiles)
+        layers = package_layer(profile_dirs, (label, PACKAGE_FEATURES_DIR / subdir))
         layers.extend(_bundle_feature_layers(subdir, label))
-        # Layer 3+: each profile in chain (later profiles override earlier for same-name files)
         for pname, pdir in content_dirs:
             if (pdir / _CLAUDE_SUBDIR / subdir).is_dir():
                 chain_label = f"profile({pname}) {label}" if len(profile_chain) > 1 else f"profile {label}"
                 layers.append((chain_label, pdir / _CLAUDE_SUBDIR / subdir))
+        layers.extend(_codex_native_skill_layers(subdir, install_target, content_dirs, len(profile_chain)))
         adapter.install_features(subdir, layers, filter_fn)
 
     # --- 5 + 5a + 5b. Persona install (target-specific writer) ---
@@ -3885,7 +3885,7 @@ def _link_cli_tool() -> None:
         return
     link.parent.mkdir(parents=True, exist_ok=True)
     link.unlink(missing_ok=True)
-    link.symlink_to(target)
+    platform_compat.make_link(target, link)
     _cprint(f"  [OK] CLI linked: {link} -> {target}")
 
 
@@ -4026,13 +4026,13 @@ def _link_item(item: Path, link: Path, label: str) -> tuple[Path, Path, str] | N
             _cprint(f"  [--] {label} '{item.name}' already linked → {item}")
         else:
             link.unlink()
-            link.symlink_to(item)
+            platform_compat.make_link(item, link)
             _cprint(f"  [OK] Re-linked {label} '{item.name}' → {item}")
         return (link, item, kind)
     if link.exists():
         _cprint(f"  [!!] {label} '{item.name}' exists at {link} and is not a symlink – skipping (remove manually)")
         return None
-    link.symlink_to(item)
+    platform_compat.make_link(item, link)
     _cprint(f"  [OK] Linked {label} '{item.name}' → {item}")
     return (link, item, kind)
 

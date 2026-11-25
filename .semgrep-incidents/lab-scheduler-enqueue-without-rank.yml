@@ -1,0 +1,14 @@
+rules:
+  - id: lab-scheduler-enqueue-without-rank
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab scheduler enqueues a grade's units with no class rank. On 23 November the live queue leased in one first
+      in first out order, so a pull request grade's units sat behind 394,956 unfinished merge group units and a plant
+      grade timed out at 900 seconds with no check posted. Pass the grade's tier as the rank, so workers lease the most
+      urgent class first.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-scheduler-enqueue-without-rank.py
+    pattern: $QUEUE.enqueue($UNITS, $HEAD, $REQUIREMENTS, $BASE, $GRADER)

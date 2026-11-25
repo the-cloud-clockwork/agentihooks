@@ -251,7 +251,7 @@ def test_a_local_launch_over_the_swarm_share_is_refused_with_its_reason(setup, m
     fenced = local_fenced(setup, monkeypatch, 3)
     local_agents(setup, 2)
     reason = (
-        ", and the local machine runs 2 of its 2 agents: cpu: 2 swarm agents at 0.5 CPU each on 3 CPUs, "
+        ", and the local machine runs 2 of its 2 agents: cpu: 2 swarm agents at 0.5 CPU each by default on 3 CPUs, "
         "fits 0 more under the 40 percent swarm share"
     )
     assert fenced.placement_refusal(lane, {"id": "task"}) == reason
@@ -313,7 +313,7 @@ def test_a_local_launch_over_the_host_line_is_refused_when_it_is_tighter_than_th
         fenced.spawn(setup.config, "eng", "next", {"id": "task"})
     assert str(raised.value) == (
         ", and the local machine runs 0 of its 0 agents: cpu: five minute load 8.00 on 10 CPUs, "
-        "0.5 CPU per agent, fits 0 more under the 80 percent line"
+        "0.5 CPU per agent by default, fits 0 more under the 80 percent line"
     )
     setup.herdr.spawn.assert_not_called()
 
@@ -326,7 +326,7 @@ def test_an_over_budget_local_master_still_starts_and_counts_against_the_worksta
     assert fenced.spawn(setup.config, "master", "master-new", {"id": "master"}) == setup.herdr.spawn.return_value
     assert admission.pending(setup.store.redis, "workstation") == 1
     assert fenced.placement_refusal("eng", {"id": "task"}).endswith(
-        "0.5 CPU per agent with 1 pending launches, fits 0 more under the 80 percent line"
+        "0.5 CPU per agent by default with 1 pending launches, fits 0 more under the 80 percent line"
     )
 
 

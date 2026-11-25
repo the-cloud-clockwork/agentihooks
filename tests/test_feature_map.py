@@ -245,6 +245,43 @@ def test_present_rule_and_live_check_pass_outside_operator(mapped_repo, origin):
     assert feature_map.validate(root, path) == 1
 
 
+def _incident_rules(root: Path) -> None:
+    incidents = root / ".semgrep-incidents"
+    incidents.mkdir()
+    (incidents / "outage.yml").write_text("rules:\n  - id: outage-first\n  - id: outage-second\n")
+    (incidents / "outage.test.yaml").write_text("rules:\n  - id: outage-fixture\n")
+
+
+@pytest.mark.parametrize("named", [[], ["outage-first"], ["outage-second"], ["outage-first", "feature-login"]])
+def test_rules_naming_declared_incident_or_feature_rules_pass(
+    mapped_repo: tuple[Path, Path, dict[str, object]], named: list[str]
+) -> None:
+    root, path, entry = mapped_repo
+    _incident_rules(root)
+    entry["rules"] = named
+    _rewrite(path, entry)
+    assert feature_map.validate(root, path) == 1
+
+
+@pytest.mark.parametrize("missing", ["outage-gone", "outage-fixture"])
+def test_a_rules_name_no_rule_declares_fails(mapped_repo: tuple[Path, Path, dict[str, object]], missing: str) -> None:
+    root, path, entry = mapped_repo
+    _incident_rules(root)
+    entry["rules"] = ["outage-first", missing]
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match=f"^login: missing rule {missing}$"):
+        feature_map.validate(root, path)
+
+
+def test_semgrep_rule_names_only_feature_rules(mapped_repo: tuple[Path, Path, dict[str, object]]) -> None:
+    root, path, entry = mapped_repo
+    _incident_rules(root)
+    entry["semgrep_rule"] = "outage-first"
+    _rewrite(path, entry)
+    with pytest.raises(ValueError, match="^login: missing rule outage-first$"):
+        feature_map.validate(root, path)
+
+
 def test_every_listed_test_must_exist_and_carry_the_marker(mapped_repo):
     root, path, entry = mapped_repo
     (root / "tests/test_more.py").write_text(
@@ -343,6 +380,13 @@ def test_cli_reports_the_complete_validated_feature_count(mapped_repo, monkeypat
 def test_duplicate_rule_ids_cannot_hide_a_rule(mapped_repo):
     root, path, _ = mapped_repo
     (root / ".semgrep/features/copy.yml").write_text("rules:\n  - id: feature-login\n")
+    with pytest.raises(ValueError, match="^duplicate feature rule id$"):
+        feature_map.validate(root, path)
+
+
+def test_duplicate_rule_ids_inside_one_rule_file_fail(mapped_repo: tuple[Path, Path, dict[str, object]]) -> None:
+    root, path, _ = mapped_repo
+    (root / ".semgrep/features/login.yml").write_text("rules:\n  - id: feature-login\n  - id: feature-login\n")
     with pytest.raises(ValueError, match="^duplicate feature rule id$"):
         feature_map.validate(root, path)
 
@@ -921,3 +965,46 @@ def test_record_option_prints_the_record_path_for_a_feature_id(
     assert capsys.readouterr().out == (
         "feature-map.d/fb5a20f7b10513784a7505dda396071a0852753a6f252e6483d1f4c0a02dc59d.json\n"
     )
+
+
+def _canonical(features: list[dict[str, object]], ending: str) -> str:
+    """A feature map with metadata around ``features`` in the layout of an indent two dump, lines ended by ``ending``."""
+    root = {"head": [1], "features": features, "after": {"id": "x"}}
+    return (json.dumps(root, indent=2) + "\n").replace("\n", ending)
+
+
+@pytest.mark.feature("feature-map-stable-write")
+@pytest.mark.parametrize("ending", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_with_entry_keeps_a_canonical_map_canonical(ending: str) -> None:
+    old, new = {"id": "a", "tests": ["t::a"]}, {"id": "b", "tests": []}
+    grown = {**old, "tests": ["t::a", "t::b"]}
+    assert feature_map.with_entry(_canonical([], ending), old) == _canonical([old], ending)
+    assert feature_map.with_entry(_canonical([old], ending), new) == _canonical([new, old], ending)
+    assert feature_map.with_entry(_canonical([new, old], ending), grown) == _canonical([new, grown], ending)
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_with_entry_writes_one_line_entries_into_a_one_line_map() -> None:
+    text = '{"head":[1],"features":[{"id":"a"},{"id":"b","x":[]}],"after":{"id":"x"}}'
+    inserted = '{"head":[1],"features":[{"id": "c"},{"id":"a"},{"id":"b","x":[]}],"after":{"id":"x"}}'
+    replaced = '{"head":[1],"features":[{"id":"a"},{"id": "b", "x": [1]}],"after":{"id":"x"}}'
+    assert feature_map.with_entry(text, {"id": "c"}) == inserted
+    assert feature_map.with_entry(text, {"id": "b", "x": [1]}) == replaced
+    assert feature_map.with_entry('{"features":[]}', {"id": "c"}) == '{"features":[{"id": "c"}]}'
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_with_entry_indents_a_new_entry_like_the_line_of_the_first_entry() -> None:
+    tabbed = '{\n"features": [\n\t{"id": "a"}\n]\n}\n'
+    flush = '{\n"features": [\n{"id": "a"}\n]\n}\n'
+    tabbed_after = '{\n"features": [\n\t{\n\t  "id": "b"\n\t},\n\t{"id": "a"}\n]\n}\n'
+    flush_after = '{\n"features": [\n{\n  "id": "b"\n},\n{"id": "a"}\n]\n}\n'
+    assert feature_map.with_entry(tabbed, {"id": "b"}) == tabbed_after
+    assert feature_map.with_entry(flush, {"id": "b"}) == flush_after
+
+
+@pytest.mark.feature("feature-map-stable-write")
+def test_with_entry_keeps_whitespace_before_the_root() -> None:
+    old: dict[str, object] = {"id": "a"}
+    new: dict[str, object] = {"id": "b"}
+    assert feature_map.with_entry("\n " + _canonical([old], "\n"), new) == "\n " + _canonical([new, old], "\n")

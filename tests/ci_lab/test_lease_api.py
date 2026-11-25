@@ -1,12 +1,15 @@
+import http.client
 import json
+import socket
 import threading
 import urllib.error
 import urllib.request
-from typing import Any
+from http.server import BaseHTTPRequestHandler
+from typing import Any, cast
 
 import pytest
 
-from scripts.ci_lab import control, lease_api, leases, queue
+from scripts.ci_lab import control, lease_api, leases, pods, queue
 from scripts.ci_lab.units import Unit
 
 TOKEN = "control-token"
@@ -104,6 +107,34 @@ def test_lease_returns_the_grant_payload(lab: leases.Leases, signer: Signer, job
     }
 
 
+@pytest.mark.feature("lab-worker-executors")
+def test_lease_ignores_a_request_field_it_does_not_know(lab: leases.Leases, signer: Signer, jobs: queue.Queue) -> None:
+    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {}, "b1", "g1")
+
+    status, body = post(
+        lab,
+        signer,
+        "/lease",
+        {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0, "priority": "high"},
+    )
+
+    assert status == 200
+    grant = body["leases"][0]
+    token = grant.pop("token")
+    assert isinstance(token, str) and len(token) == 32
+    assert grant == {
+        "job": "h1:test:a",
+        "head": "h1",
+        "base": "b1",
+        "grader": "g1",
+        "kind": "test",
+        "key": "a",
+        "members": ["tests/a.py::t"],
+        "slots": 1,
+        "expires_ms": 1500,
+    }
+
+
 def test_lease_passes_capabilities_and_caps_the_wait(
     lab: leases.Leases, signer: Signer, jobs: queue.Queue, clock: Clock
 ) -> None:
@@ -186,6 +217,58 @@ def test_upload_url_needs_the_token(lab: leases.Leases, signer: Signer, jobs: qu
         400,
         {"error": "upload name must be report or log"},
     )
+
+
+def staled_lab(jobs: queue.Queue, clock: Clock, stale_workers: frozenset[str]) -> leases.Leases:
+    running = pods.Images("repo/lab-worker:dev", "repo/lab-worker@sha256:running")
+
+    def reader(worker: str) -> pods.Images | None:
+        return running if worker in stale_workers else None
+
+    return leases.Leases(
+        jobs,
+        ttl_ms=500,
+        clock=clock,
+        sleep=clock.sleep,
+        poll_ms=50,
+        image="repo/lab-worker@sha256:wanted",
+        images=reader,
+    )
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_stale_workers_lease_is_answered_426_with_no_grant_and_records_no_offer(
+    jobs: queue.Queue, signer: Signer, clock: Clock
+) -> None:
+    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {})
+    stale = staled_lab(jobs, clock, frozenset({"w1"}))
+
+    assert post(stale, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0}) == (
+        426,
+        {"error": "stale worker"},
+    )
+    assert jobs.offers(0) == {}
+    assert found(jobs, "h1:test:a").state == "pending"
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_malformed_body_from_a_stale_worker_is_still_400(jobs: queue.Queue, signer: Signer, clock: Clock) -> None:
+    stale = staled_lab(jobs, clock, frozenset({"w1"}))
+    assert post(stale, signer, "/lease", {"worker": "w1", "free_slots": "x", "capabilities": [], "wait_ms": 0}) == (
+        400,
+        {"error": "bad request"},
+    )
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_a_worker_that_is_not_stale_is_answered_200_as_today(jobs: queue.Queue, signer: Signer, clock: Clock) -> None:
+    jobs.enqueue([Unit(kind="test", key="a", members=("tests/a.py::t",))], "h1", {})
+    stale = staled_lab(jobs, clock, frozenset({"w2"}))
+
+    status, body = post(stale, signer, "/lease", {"worker": "w1", "free_slots": 1, "capabilities": [], "wait_ms": 0})
+
+    assert status == 200
+    assert [grant["job"] for grant in body["leases"]] == ["h1:test:a"]
 
 
 @pytest.mark.parametrize(
@@ -304,6 +387,62 @@ def test_server_round_trip(lab: leases.Leases, signer: Signer, jobs: queue.Queue
         server.shutdown()
         server.server_close()
         thread.join(10)
+
+
+@pytest.mark.feature("lab-scheduler-access-log-query-redaction")
+@pytest.mark.parametrize(("method", "status"), [("GET", 200), ("GET", 403), ("POST", 200)])
+@pytest.mark.parametrize(
+    ("target", "logged_path"),
+    [("/upload-url?job=example&token=synthetic-lease-value&name=log", "/upload-url"), ("/health", "/health")],
+)
+def test_access_logs_omit_upload_query_strings(
+    method: str, status: int, target: str, logged_path: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: list[tuple[str, str, bytes, str | None]] = []
+
+    def reply(method: str, target: str, raw: bytes, authorization: str | None) -> tuple[int, dict[str, Any]]:
+        seen.append((method, target, raw, authorization))
+        return status, {}
+
+    server = lease_api.bind("127.0.0.1", 0, reply)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=10)
+    try:
+        connection.request(method, target)
+        response = connection.getresponse()
+        assert response.status == status
+        assert json.loads(response.read()) == {}
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(10)
+    assert seen == [(method, target, b"", None)]
+    logged = capsys.readouterr().err
+    assert "synthetic-lease-value" not in logged
+    assert "?job=" not in logged
+    assert f'"{method} {logged_path} HTTP/1.1" {status} -\n' in logged
+
+
+@pytest.mark.feature("lab-scheduler-access-log-query-redaction")
+def test_access_logs_keep_default_status_and_size(
+    lab: leases.Leases, signer: Signer, capsys: pytest.CaptureFixture[str]
+) -> None:
+    server = lease_api.serve("127.0.0.1", 0, lab, signer)
+    client, connection = socket.socketpair()
+    try:
+        client.sendall(b"GET /upload-url?token=synthetic-lease-value HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        request = cast(BaseHTTPRequestHandler, server.RequestHandlerClass(connection, ("127.0.0.1", 0), server))
+        capsys.readouterr()
+        request.log_request()
+        logged = capsys.readouterr().err
+        assert '"GET /upload-url HTTP/1.1" - -\n' in logged
+        assert "synthetic-lease-value" not in logged
+    finally:
+        client.close()
+        connection.close()
+        server.server_close()
 
 
 def order(routes: lease_api.ControlRoutes, path: str, body: object, authorization: str = BEARER) -> object:
