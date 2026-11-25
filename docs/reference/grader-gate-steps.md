@@ -27,8 +27,9 @@ closed instead of grading the base's own charts.
 
 The other lint gate steps are outside the step table. Several of them look
 for their module in the grader and run the head's copy when it is missing. The
-[For loop word list gate](for-loop-word-list-gate.md) is one of them. The
-[Tick pattern gate](tick-pattern-gate.md) fails instead. The protected gate
+[For loop word list gate](for-loop-word-list-gate.md) and the
+[Tick pattern gate](tick-pattern-gate.md) run only the grader's copy and fail
+when it is missing. The protected gate
 step runs `scripts.gate_protected` from the grader, and runs the head's
 `scripts.ci_runner_trust` when the grader has no `scripts/ci_runner_trust.py`.
 [Protected gate step in lint](#protected-gate-step-in-lint) covers that step
@@ -478,9 +479,9 @@ step, `tests/test_gate_protected.py`:
 
 | Feature | What its tests hold |
 | --- | --- |
-| `grader-gates-fail-closed-on-stale-base` | A stale grader copy that refuses `--root` fails the marker step with exit 2 and each chart step with the refusal, exit 1, and a planted head copy that exits 0 never runs |
+| `grader-gates-fail-closed-on-stale-base` | A stale grader copy that refuses `--root` fails the marker step with exit 2 and each chart step with the refusal, exit 1. A grader without the for loop gate fails that step with exit 1. A planted head copy that exits 0 never runs |
 | `chart-checks-refuse-a-grader-that-ignores-root` | A grader copy that ignores its arguments, prints a clean summary and exits 0 makes each chart step refuse with exit 1, and its summary never reaches the step output |
-| `lint-gates-grade-from-grader` | A head that drops a ruff rule, ships a shadow `ruff` package, changes the formatter config, or rewrites the wiring, marker or chart check to pass itself stays red. The marker check reads the fixture under its `--root` and runs after the grader checkout. Each Semgrep job checks out the caller's `base` as the grader and scans with both rule sets |
+| `lint-gates-grade-from-grader` | A head that drops a ruff rule, ships a shadow `ruff` package, changes the formatter config, or rewrites the wiring, marker, for loop or chart check to pass itself stays red. The marker check reads the fixture under its `--root` and runs after the grader checkout. Each Semgrep job checks out the caller's `base` as the grader and scans with both rule sets |
 | `protected-lint-grades-the-pull-request-head` | The protected gate step grades the pull request head, or `github.sha` outside a pull request, so frozen changes that landed on `dev` after the event base are never blamed on a pull request behind `dev`, and a frozen file edit in the head is still refused. See [Guards](#guards) |
 
 `tests/context/test_marker_key_vectors.py::test_vector_check_is_on_the_required_tests_path`

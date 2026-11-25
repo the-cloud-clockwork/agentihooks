@@ -988,7 +988,7 @@ def test_the_forced_runner_runs_master_up_replace_bounded_with_the_launch_env(
     master_fallback.forced("sw", at, environ)
 
     [(command, options)] = ran
-    assert command == [sys.executable, "-m", "scripts.install", "swarm", "sw", "master", "up", "--replace"]
+    assert command == [sys.executable, "-P", "-m", "scripts.install", "swarm", "sw", "master", "up", "--replace"]
     assert options == {
         "capture_output": True,
         "text": True,

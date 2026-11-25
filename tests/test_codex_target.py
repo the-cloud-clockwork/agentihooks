@@ -2,6 +2,7 @@
 
 import json
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -769,6 +770,26 @@ class TestPersona:
         )
         assert backups, "legacy managed AGENTS.md without a footer marker must be backed up once"
 
+    def test_codex_only_profile_persona_comes_from_dot_codex_agents_md(self, adapter, tmp_path):
+        prof = tmp_path / "donna"
+        (prof / ".codex").mkdir(parents=True)
+        (prof / ".codex" / "AGENTS.md").write_text("# Donna persona\n")
+        adapter.install_persona([("donna", prof)], ["donna"], None)
+        text = (codex_home() / "AGENTS.md").read_text()
+        assert "<!-- profile: donna -->" in text
+        assert "# Donna persona" in text
+
+    def test_claude_md_wins_when_a_profile_has_both(self, adapter, tmp_path):
+        prof = tmp_path / "mixed"
+        prof.mkdir()
+        (prof / "CLAUDE.md").write_text("claude persona")
+        (prof / ".codex").mkdir()
+        (prof / ".codex" / "AGENTS.md").write_text("codex persona")
+        adapter.install_persona([("mixed", prof)], ["mixed"], None)
+        text = (codex_home() / "AGENTS.md").read_text()
+        assert "codex persona" in text
+        assert "claude persona" not in text
+
 
 class TestPrompts:
     def _commands(self, tmp_path):
@@ -1034,6 +1055,24 @@ class TestMcp:
 
         assert (agents_skills_home() / "my-skill").exists()
 
+    def test_native_key_reference_forwards_without_a_shell(self, adapter):
+        import tomllib
+
+        adapter.register_mcp({"loc": {"command": "/py", "env": {"GOOGLE_API_KEY": "${GOOGLE_API_KEY}"}}})
+        entry = tomllib.loads((codex_home() / "config.toml").read_text())["mcp_servers"]["loc"]
+        assert entry == {"command": "/py", "env_vars": ["GOOGLE_API_KEY"]}
+
+    def test_renamed_reference_uses_cmd_exe_when_bash_is_missing(self, adapter, monkeypatch):
+        import tomllib
+
+        monkeypatch.setattr(shutil, "which", lambda name: None if name == "bash" else f"/usr/bin/{name}")
+        adapter.register_mcp({"pw": {"command": "node", "args": ["srv.js"], "env": {"TOKEN": "${SRC_TOKEN}"}}})
+        entry = tomllib.loads((codex_home() / "config.toml").read_text())["mcp_servers"]["pw"]
+        assert entry["command"] == "cmd.exe"
+        assert entry["args"] == ["/d", "/s", "/c", 'set "TOKEN=${SRC_TOKEN}" && "node" "srv.js"']
+        assert entry["env_vars"] == ["SRC_TOKEN"]
+        assert "env" not in entry
+
 
 @pytest.fixture
 def said(monkeypatch):
@@ -1237,6 +1276,30 @@ class TestCodexEntry:
         empty = {"env_vars": [], "env_http_headers": {}, "cwd": "", "enabled": False}[key]
         assert codex_mcp_entry("a", {"command": "/a", key: empty}) == ({"command": "/a", key: empty}, "")
         assert codex_mcp_entry("a", {"command": "/a", key: None}) == ({"command": "/a"}, "")
+
+    def test_oauth_client_id_carried_to_the_entry(self, said: list[str]) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        spec = {"url": "https://gmail.example/mcp", "oauth": {"client_id": "abc123.apps.googleusercontent.com"}}
+        assert codex_mcp_entry("google-gmail", spec) == (
+            {"url": "https://gmail.example/mcp", "oauth": {"client_id": "abc123.apps.googleusercontent.com"}},
+            "",
+        )
+
+    def test_claude_shaped_oauth_client_id_is_mapped(self, said: list[str]) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        spec = {"command": "/py", "oauth": {"clientId": "abc123.apps.googleusercontent.com"}}
+        entry, _ = codex_mcp_entry("google-drive", spec)
+        assert entry is not None
+        assert entry["oauth"] == {"client_id": "abc123.apps.googleusercontent.com"}
+
+    def test_oauth_without_a_client_id_is_dropped(self, said: list[str]) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        entry, _ = codex_mcp_entry("gw", {"command": "/py", "oauth": {}})
+        assert entry is not None
+        assert "oauth" not in entry
 
 
 class TestPersonaIdentityNaming:

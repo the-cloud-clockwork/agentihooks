@@ -332,9 +332,7 @@ def on_session_start(payload: dict) -> None:
     )
 
     _request_trace_flush(payload, "start")
-    from hooks.context import documentation_session
-
-    documentation_session.start(payload)
+    _start_documentation_session(payload)
 
     tracer = otel.get_tracer()
     if tracer:
@@ -1064,7 +1062,39 @@ def _confirm_inbox(session_id: str) -> None:
         log("inbox confirmation failed", {"error": str(e)})
 
 
+def _start_documentation_session(payload: dict) -> None:
+    """Start the documentation session; on Windows it is skipped, because it reaches the swarm ledger."""
+    if sys.platform == "win32":
+        return
+    from hooks.context import documentation_session
+
+    documentation_session.start(payload)
+
+
+def _recycle_directive(session_id: str) -> str | None:
+    """The context recycle directive; none on Windows, which runs no quota routing."""
+    if sys.platform == "win32":
+        return None
+    from hooks.context.context_recycle import directive
+
+    return directive(session_id)
+
+
+def _stop_block_for(payload: dict) -> str | None:
+    """The condition that blocks this Stop, then the operator-mode refusal, which Windows does not run."""
+    from hooks.context import conditions
+
+    block = conditions.stop_block(payload) or None
+    if block is None and sys.platform != "win32":
+        from hooks.context import operator_mode
+
+        block = operator_mode.reply_refusal(payload) or None
+    return block
+
+
 def _inject_after_tool(payload: dict) -> None:
+    if sys.platform == "win32":
+        return
     from hooks.common import inject_context
     from hooks.context.quota_policy import posttool_context
 
@@ -1983,7 +2013,6 @@ def on_post_tool_use(payload: dict) -> None:
         if not can_inject_context("PreToolUse"):
             from hooks.common import inject_context
             from hooks.config import BROADCAST_ENABLED
-            from hooks.context.context_recycle import directive as _recycle_directive
 
             recycle_context = _recycle_directive(_trace_session_id)
             if recycle_context:
@@ -2267,9 +2296,7 @@ def on_stop(payload: dict) -> None:
     """
     _stop_block = None
     try:
-        from hooks.context import conditions, operator_mode
-
-        _stop_block = conditions.stop_block(payload) or operator_mode.reply_refusal(payload) or None
+        _stop_block = _stop_block_for(payload)
     except Exception as e:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:

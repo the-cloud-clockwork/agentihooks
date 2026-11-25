@@ -68,7 +68,7 @@ def start(slug: str) -> int:
 
 def master_up(slug: str, choice: str) -> list[str]:
     """agentihooks swarm SLUG master up CHOICE through this interpreter, so no service PATH can miss the command."""
-    return [sys.executable, "-m", "scripts.install", "swarm", slug, "master", "up", choice]
+    return [sys.executable, "-P", "-m", "scripts.install", "swarm", slug, "master", "up", choice]
 
 
 def launch_env(environ: Mapping[str, str]) -> dict[str, str]:
@@ -81,7 +81,7 @@ def launch_env(environ: Mapping[str, str]) -> dict[str, str]:
 def force(slug: str, at: int) -> int:
     """Start the forced master up of a critical swarm in its own session, whose runner records its own outcome;
     returns the runner process id."""
-    return subprocess.Popen([sys.executable, "-m", MODULE, "force", slug, str(at)], start_new_session=True).pid
+    return subprocess.Popen([sys.executable, "-P", "-m", MODULE, "force", slug, str(at)], start_new_session=True).pid
 
 
 def forced(slug: str, at: int, environ: Mapping[str, str]) -> None:
@@ -156,7 +156,7 @@ def run(environ: Mapping[str, str]) -> None:
 
     while True:
         try:
-            subprocess.run([sys.executable, "-m", MODULE, "pass"], check=False, timeout=PASS_TIMEOUT_S)
+            subprocess.run([sys.executable, "-P", "-m", MODULE, "pass"], check=False, timeout=PASS_TIMEOUT_S)
         except subprocess.TimeoutExpired:
             print(json.dumps({"error": f"pass timed out after {PASS_TIMEOUT_S}s"}), flush=True)
         process_timer.wait(INTERVAL_S, timeout=2 * INTERVAL_S)
@@ -197,7 +197,7 @@ def unit_text(python: str, repo: str, environ: Mapping[str, str]) -> str:
         f"WorkingDirectory={repo}\n"
         f"Environment={SWARMS}={environ.get(SWARMS, '')}\n"
         f"Environment={MINUTES}={minutes(environ):g}\n"
-        f'ExecStart="{python}" -m scripts.swarm.master_fallback run\n'
+        f'ExecStart="{python}" -P -m scripts.swarm.master_fallback run\n'
         "Restart=always\nRestartSec=10\n\n"
         "[Install]\nWantedBy=default.target\n"
     )

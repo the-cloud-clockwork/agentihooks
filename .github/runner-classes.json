@@ -28,6 +28,7 @@
   "hive-join.yml/smoke": "standard",
   "hive-worker.yml/contracts": "light",
   "hive-worker.yml/kind": "standard",
+  "lab-check.yml/post": "light",
   "ledger-load.yml/compare": "standard",
   "ledger-load.yml/compare-grade": "light",
   "ledger-load.yml/load": "standard",

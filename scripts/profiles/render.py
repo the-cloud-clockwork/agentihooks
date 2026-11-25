@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import os
-import pwd
 import re
 import shutil
 import subprocess
@@ -14,6 +13,8 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+
+from hooks.compat import real_home
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -55,7 +56,7 @@ def rendered_root() -> Path:
 
 
 def live_root() -> Path:
-    return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".agentihooks" / "profiles"
+    return real_home() / ".agentihooks" / "profiles"
 
 
 def _refuse_live_render_from_another_checkout(name: str) -> None:
@@ -385,7 +386,7 @@ def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str,
     sources.write(sources.path(root.name, target, root.parent), sources.rows(bundle, dirs, items, user, shared))
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
     later = {"shared bundle": shared, "user bundle": user}
-    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER, later))
+    text = quarantine.passages(build_persona(dirs, chain, bundle, rules, (HEADER, FOOTER), later))
     ending = f"\n\n{FOOTER}\n"
     text = binding.persona(text.removesuffix(ending)) + ending
     if len(text) > 150_000:

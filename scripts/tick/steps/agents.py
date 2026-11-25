@@ -346,7 +346,7 @@ def _stop_ended(judging: _Reaping, agent: AgentRecord) -> list[str]:
     from scripts.hub.reconciler import settled_admitted, stop_admitted
 
     slug = judging.slug
-    outcome = stop_admitted(slug, agent, ENDED)
+    outcome = stop_admitted(slug, agent, ENDED, store=judging.store)
     if outcome == execution_stop.SENT:
         return [f"sent the stop for {agent.name} to its hive: its work {ENDED}"]
     if outcome.startswith(execution_stop.FAILED):
@@ -512,7 +512,7 @@ def _watch_idle(
     )
     if tick.timing.timed(tick.resume.recovery_holds, store, slug, agent, now_ms):
         return nudged
-    if idle.idle_ticks >= tick.IDLE_KILL_TICKS and tick._retire_or_stop(slug, runtime, idle, "idle"):
+    if idle.idle_ticks >= tick.IDLE_KILL_TICKS and tick._retire_or_stop(slug, runtime, idle, "idle", store):
         why = (
             f"; outage recovery could not proceed: {tick.timing.timed(tick.resume.recovery_blocker, store, slug, agent)}"
             if pending

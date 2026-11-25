@@ -466,7 +466,7 @@ def delivery_branch(root: Path, task: dict, branch: str) -> str:
 def cut_from(root: Path, recorded: str) -> bool:
     head = remote_head(root, recorded)
     if not head:
-        return False
+        return True
     return git(root, "merge-base", head, "HEAD") == head
 
 
