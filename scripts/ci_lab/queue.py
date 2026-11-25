@@ -172,7 +172,12 @@ def _decode(job: str, record: Mapping[str, str]) -> Job | None:
     return Job(
         id=job,
         head=record["head"],
-        unit=Unit(kind=record["kind"], key=record["key"], members=tuple(json.loads(record["members"]))),
+        unit=Unit(
+            kind=record["kind"],
+            key=record["key"],
+            members=tuple(json.loads(record["members"])),
+            manifest_digest=record.get("manifest_digest", ""),
+        ),
         requirement=Requirement(slots=int(record["slots"]), capabilities=frozenset(json.loads(record["capabilities"]))),
         state=record["state"],
         attempts=int(record["attempts"]),
@@ -223,6 +228,7 @@ class Queue:
                 "kind": unit.kind,
                 "key": unit.key,
                 "members": json.dumps(unit.members),
+                "manifest_digest": unit.manifest_digest,
                 "slots": need.slots,
                 "capabilities": json.dumps(sorted(need.capabilities)),
                 "state": "pending",

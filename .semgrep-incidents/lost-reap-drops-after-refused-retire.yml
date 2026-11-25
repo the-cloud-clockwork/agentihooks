@@ -1,0 +1,16 @@
+rules:
+  - id: lost-reap-drops-after-refused-retire
+    languages: [python]
+    severity: ERROR
+    message: Check lost agent retirement before dropping its record so a refused pane close can retry next tick.
+    paths:
+      include:
+        - /scripts/tick/steps/agents.py
+        - lost-reap-drops-after-refused-retire.py
+    pattern: |
+      def $F(...):
+          ...
+          $RUNTIME.retire(...)
+          ...
+          return <... $TICK._drop(...) ...>
+          ...
