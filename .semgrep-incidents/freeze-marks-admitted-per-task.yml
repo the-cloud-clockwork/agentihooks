@@ -13,6 +13,9 @@ rules:
         - freeze-marks-admitted-per-task.py
     patterns:
       - pattern-inside: |
-          def marks(...):
+          def $MARKS(...):
               ...
+      - metavariable-regex:
+          metavariable: $MARKS
+          regex: ^marks(_\w+)?$
       - pattern: unfocused($TASK, $DOC, $GRAPH, $FIX)
