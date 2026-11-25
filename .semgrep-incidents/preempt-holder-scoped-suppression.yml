@@ -1,0 +1,13 @@
+rules:
+  - id: preempt-holder-scoped-suppression
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A waiting urgent task's handoff suppression is read from the holder keyed ask records, which each pass prunes
+      once the asked holder leaves, so a refused launch or a lower task relaunched into the freed seat asks another
+      holder again. Read the task keyed episode record that the ask sets and each admitted launch refreshes.
+    paths:
+      include:
+        - /scripts/swarm/preempt.py
+        - preempt-holder-scoped-suppression.py
+    pattern: map(json.loads, $ASKED.values())

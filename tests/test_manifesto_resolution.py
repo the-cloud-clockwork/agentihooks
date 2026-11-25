@@ -192,9 +192,10 @@ def test_persona_holds_only_the_role_manifestos_without_front_matter(monkeypatch
     _clean_env(monkeypatch)
     off = _profile(tmp_path, "off", env={"CI_MANIFESTO_ENABLED": "false"})
 
-    engineer = build_persona([_role("engineer")], ["package:engineer"], root, [], "<!-- head -->", "<!-- foot -->")
-    cicd = build_persona([_role("cicd")], ["package:cicd"], root, [], "<!-- head -->", "<!-- foot -->")
-    silent = build_persona([off, _role("cicd")], ["off"], root, [], "<!-- head -->", "<!-- foot -->")
+    markers = ("<!-- head -->", "<!-- foot -->")
+    engineer = build_persona([_role("engineer")], ["package:engineer"], root, [], markers)
+    cicd = build_persona([_role("cicd")], ["package:cicd"], root, [], markers)
+    silent = build_persona([off, _role("cicd")], ["off"], root, [], markers)
 
     assert engineer.endswith(
         "<!-- ci-manifesto -->\n<!-- manifesto: core.md -->\n# Core\ncore body\n\n---\n\n"

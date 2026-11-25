@@ -174,9 +174,9 @@ def test_autoscale_reads_a_scaled_lane_missing_from_ready_work_as_zero_demand() 
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="auto", max_review=2)
     inputs = capacity.fixture_inputs({**_readings(), "previous": {}})
     zero = capacity.ScaleInputs(inputs.observations, inputs.agents, {"eng": 0, "ci": 0, "plan": 0}, lambda: None, {})
-    review_only = capacity.ScaleInputs(inputs.observations, inputs.agents, {"review": 2}, lambda: None, {})
+    partial = capacity.ScaleInputs(inputs.observations, inputs.agents, {"ci": 0}, lambda: None, {})
     _, idle = capacity.autoscaled(config, zero)
-    _, missing = capacity.autoscaled(config, review_only)
+    _, missing = capacity.autoscaled(config, partial)
     assert idle is not None and missing is not None
     assert missing["ceilings"] == idle["ceilings"]
     assert missing["reason"] == idle["reason"]

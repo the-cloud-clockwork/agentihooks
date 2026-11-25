@@ -1,0 +1,16 @@
+rules:
+  - id: lab-pull-frame-names-unit-job-outside-its-scope
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A lab pull request frame names a unit job by hand beside the pull request jobs. The required gate rules require
+      a unit job only under the select scope that names it, and refuse any other job unless it was skipped, so on
+      24 November every plant pull request grade posted required failure although all its gates passed. Take the test
+      jobs of a pull request plan from SCOPED by the scope the plan writes in its select output.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-pull-frame-names-unit-job-outside-its-scope.py
+    pattern-either:
+      - pattern: (..., *PULL_REQUIRED, ..., UNIT_JOBS[$INDEX], ...)
+      - pattern: PULL_REQUIRED + (..., UNIT_JOBS[$INDEX], ...)

@@ -161,6 +161,17 @@ def manifestos(path: Path) -> dict:
     return picks if isinstance(picks, dict) else {}
 
 
+def takes_package_features(dirs: list[tuple[str, Path]]) -> bool:
+    """False when a profile in the chain sets `package_features: false`: a single-user assistant that leaves out
+    agentihooks' own skills, agents, commands and rules, which serve swarm and fleet development."""
+    return all(_manifest(path).get("package_features", True) is not False for _, path in dirs)
+
+
+def package_layer(dirs: list[tuple[str, Path]], layer: tuple[str, Path]) -> list[tuple[str, Path]]:
+    """The package feature layer as a one-item list, or empty when the chain leaves package features out."""
+    return [layer] if takes_package_features(dirs) else []
+
+
 def overlays(path: Path) -> list[str]:
     import yaml
 

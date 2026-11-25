@@ -74,7 +74,7 @@ def test_a_refused_credential_on_a_remote_resource_read_is_unauthenticated(remot
 def test_a_request_uses_the_bounded_timeout_by_default(remote: None) -> None:
     client = Mock()
     client.return_value.snapshot.return_value = {"tasks": []}
-    with patch("scripts.tick.adapters.database_ledger.client", client):
+    with patch("scripts.tick.adapters.writer_client.client", client):
         assert ledger.request(SLUG) == {"tasks": []}
     client.assert_called_once_with("https://hub.example", 10)
 

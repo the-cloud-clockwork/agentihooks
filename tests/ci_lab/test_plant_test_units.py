@@ -6,11 +6,15 @@ from pathlib import Path
 import pytest
 
 from scripts.ci_lab import intake, scheduler
-from scripts.ci_lab.units import Priority
+from scripts.ci_lab.units import Priority, Unit
 from tests.ci_lab import test_scheduler as fixtures
 from tests.ci_lab.test_intake import head
 from tests.ci_lab.test_scheduler import lab as lab
 from tests.ci_lab.test_scheduler import staticless as staticless
+
+
+def plant_plan(gates: dict[str, tuple[Unit, ...]]) -> scheduler.Plan:
+    return scheduler.frame(Priority.PULL_REQUEST, fixtures.TREE, fixtures.BASE, gates, plant=True)
 
 
 @pytest.mark.feature("lab-plant-test-units")
@@ -75,7 +79,7 @@ def test_a_pull_request_plant_grades_only_its_added_and_changed_test_modules(
     assert found.manifest == "dev"
     assert found.grader == suite.base
     assert found.tree == fixtures._tree(suite, commit)
-    assert set(found.gates) == {*scheduler.PULL_REQUIRED, "unit"}
+    assert set(found.gates) == {*scheduler.PULL_REQUIRED, "split", "unit", "shard-check"}
 
 
 @pytest.mark.feature("lab-plant-test-units")
@@ -135,3 +139,52 @@ def test_a_plant_selects_changed_test_modules_whose_tests_are_class_methods(tmp_
     request = replace(suite.request(Priority.PULL_REQUEST, commit), plant=True)
     found = fixtures.Port(manifest).expander(tmp_path).expand(request)
     assert [unit.members for unit in found.gates["unit"]] == [(method,)]
+
+
+@pytest.mark.feature("lab-plant-required-verdict")
+@pytest.mark.parametrize("failed", ["lint", "unit"])
+def test_a_plant_grade_with_a_failed_gate_posts_its_required_check_and_that_gates_check_as_failure(
+    lab: Callable[..., fixtures.Run], failed: str
+) -> None:
+    linted, tested = fixtures.unit(1), fixtures.unit(2)
+    run = lab({fixtures.HEAD_A: plant_plan({"lint": (linted,), "unit": (tested,)})})
+    run.cache(linted, passed=failed != "lint")
+    run.cache(tested, passed=failed != "unit")
+    run.push(fixtures.HEAD_A, event="plant")
+    run.tick(1000)
+    assert run.grade(fixtures.HEAD_A).conclusion == "failure"
+    assert run.lab.poster.moves(fixtures.HEAD_A, failed) == [("completed", "failure")]
+    assert run.lab.poster.moves(fixtures.HEAD_A, scheduler.REQUIRED) == [("completed", "failure")]
+
+
+@pytest.mark.feature("lab-plant-required-verdict")
+@pytest.mark.parametrize("tested", [(), (fixtures.unit(2),)], ids=["no test unit", "a passing test unit"])
+def test_a_plant_grade_whose_gates_all_pass_posts_its_required_check_as_success(
+    lab: Callable[..., fixtures.Run], tested: tuple[Unit, ...]
+) -> None:
+    linted = fixtures.unit(1)
+    run = lab({fixtures.HEAD_A: plant_plan({"lint": (linted,), "unit": tested})})
+    for item in (linted, *tested):
+        run.cache(item)
+    run.push(fixtures.HEAD_A, event="plant")
+    run.tick(1000)
+    assert run.grade(fixtures.HEAD_A).conclusion == "success"
+    assert run.lab.poster.moves(fixtures.HEAD_A, scheduler.REQUIRED) == [("completed", "success")]
+    assert run.lab.poster.moves(fixtures.HEAD_A, "lint") == [("completed", "success")]
+    assert run.lab.poster.moves(fixtures.HEAD_A, "unit") == [("completed", "success")] * len(tested)
+    assert run.lab.poster.moves(fixtures.HEAD_A, "split") == []
+    assert run.lab.poster.moves(fixtures.HEAD_A, "shard-check") == []
+
+
+@pytest.mark.feature("lab-plant-required-verdict")
+def test_a_plant_frame_is_a_full_scope_run_with_exactly_the_jobs_that_scope_requires() -> None:
+    linted, tested = (fixtures.unit(1),), (fixtures.unit(2),)
+    found = plant_plan({"lint": linted, "unit": tested, "other": (fixtures.unit(3),)})
+    assert found.outputs == {"select": {"scope": "full"}}
+    assert found.gates == {
+        **{job: linted if job == "lint" else () for job in scheduler.PULL_REQUIRED},
+        "split": (),
+        "unit": tested,
+        "shard-check": (),
+    }
+    assert (found.skipped, found.idle, found.flags) == (frozenset(), frozenset(), scheduler.Flags())

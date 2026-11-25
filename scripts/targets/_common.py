@@ -466,12 +466,29 @@ def clear_managed_mcp(target: str) -> None:
         _i._save_state(state)
 
 
-def shared_directive(bundle_dir: Path | None) -> str:
+def _persona_source(root: Path, native: tuple[str, str] | None) -> Path | None:
+    """A layer's persona file: the target-native one first, then ``CLAUDE.md``.
+
+    ``native`` is ``(subdir, filename)`` for a target that keeps its persona
+    outside the Claude shape, e.g. ``(".codex", "AGENTS.md")`` for a
+    Codex-only layer with no ``CLAUDE.md`` at all.
+    """
+    if native:
+        candidate = root / native[0] / native[1]
+        if candidate.exists():
+            return candidate
+    legacy = root / "CLAUDE.md"
+    return legacy if legacy.exists() else None
+
+
+def shared_directive(bundle_dir: Path | None, native: tuple[str, str] | None = None) -> str:
     from hooks.context.profile_chain import doctrine
 
     if not bundle_dir:
         return ""
     bundle_md = doctrine(bundle_dir)
+    if not bundle_md.exists() and native:
+        bundle_md = _persona_source(bundle_dir, native) or bundle_md
     return bundle_md.read_text().strip() if bundle_md.exists() else ""
 
 
@@ -480,28 +497,40 @@ def build_persona(
     profile_chain: list[str],
     bundle_dir: Path | None,
     pending_rules: list[tuple[str, str, str]],
-    managed_header: str,
-    managed_footer: str,
+    markers: tuple[str, str],
     user_dir: Path | None | Mapping[str, Path | None] = None,
+    native: tuple[str, str] | None = None,
 ) -> str:
     """Assemble the managed region of a compiled instruction file.
 
-    ``user_dir`` is the user bundle, or a mapping of label to directory for every bundle after the
-    root, in precedence order (``shared bundle`` then ``user bundle``).
-    """
-    from hooks.context.profile_chain import inherited
+    ``markers`` is ``(managed_header, managed_footer)``. ``user_dir`` is the
+    user bundle, or a mapping of label to directory for every bundle after
+    the root, in precedence order (``shared bundle`` then ``user bundle``).
 
+    ``native`` names a target-specific persona source (see ``_persona_source``);
+    a layer with no ``CLAUDE.md`` at all, such as a Codex-only profile with
+    ``.codex/AGENTS.md`` instead, still contributes its persona through it.
+    """
+    from hooks.context.profile_chain import inherited, takes_package_features
+
+    managed_header, managed_footer = markers
     later = user_dir if isinstance(user_dir, Mapping) else {"user bundle": user_dir}
     parents = inherited(profile_dirs)
-    parts: list[str] = [managed_header, identity_preamble([name for name in profile_chain if name not in parents])]
+    names = [name for name in profile_chain if name not in parents]
+    opening = (
+        identity_preamble(names)
+        if takes_package_features(profile_dirs)
+        else f"# Identity\n\nYou are **{names[0] if names else 'the assistant'}**. Everything below is who you are."
+    )
+    parts: list[str] = [managed_header, opening]
 
     for label, directory in (("bundle", bundle_dir), *later.items()):
-        if content := shared_directive(directory):
+        if content := shared_directive(directory, native):
             parts.append(f"<!-- {label} shared directives -->\n{content}")
 
     for pname, pdir in profile_dirs:
-        src = pdir / "CLAUDE.md"
-        if src.exists():
+        src = _persona_source(pdir, native)
+        if src is not None:
             content = src.read_text().strip()
             if content:
                 parts.append(f"<!-- profile: {pname} -->\n{content}")

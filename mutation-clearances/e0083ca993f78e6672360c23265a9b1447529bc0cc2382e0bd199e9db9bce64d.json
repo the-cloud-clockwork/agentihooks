@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/enhance_sweep.py:scripts.swarm.enhance_sweep.x_sweep:e972bca00d0edf5dfe426f1d06b38035de8affbcd21be78df75a17f7fac9ac89": {
+    "reader": "/root/standards_reader",
+    "reason": "Equivalent: sweep first reads id from every task dictionary, so every accepted task is nonempty. In _thin, filter(None, ...) therefore retains exactly the same tasks as the always true predicate. Lines, writes, timing and counts are unchanged."
+  }
+}
