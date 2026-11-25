@@ -14,7 +14,7 @@ from scripts.ci_lab.objects import unit_path
 from scripts.ci_lab.outcomes import PASSED
 from scripts.ci_lab.units import Unit
 from tests.ci_lab import test_executors as support
-from tests.ci_lab.test_scheduler import BASE, HEAD_A, HEAD_B, TREE, Run
+from tests.ci_lab.test_scheduler import BASE, HEAD_A, HEAD_B, TREE, Run, key
 from tests.ci_lab.test_scheduler import lab as lab
 from tests.ci_lab.test_worker import Signer
 
@@ -67,7 +67,7 @@ def test_a_swapped_stored_manifest_is_refused_and_the_next_unit_still_runs(
     original = batch(unlisted)
     expected = hashlib.sha256(original.manifest.encode()).hexdigest()
     unit = replace(original, manifest_digest=expected)
-    second = replace(unit, key="second")
+    second = replace(unit, key=key("test", 2))
     plans = {
         HEAD_A: scheduler.Plan(TREE, BASE, {"unit": (unit,)}),
         HEAD_B: scheduler.Plan(TREE, BASE, {"unit": (second,)}),
