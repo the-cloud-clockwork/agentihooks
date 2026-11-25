@@ -45,7 +45,11 @@ Both services run from the installed wheel, which ships `hooks`, `scripts` and `
 | Import the lab scheduler's modules inside the swarm image | Swarm container smoke | The built swarm image cannot import a module of `scripts.ci_lab`, the executors and mutation expansion the scheduler loads at call time included, or the CI test planner |
 
 `docker/ci-lab/smoke.sh` also imports the worker's executors, test runner and pricing inside the
-built CI lab image.
+built CI lab image. It then starts the worker as the lab chart runs it, as user and group 1001 with
+a read only root filesystem, every capability dropped and no network, on a work root owned by root
+that holds a sealed tree, a locked folder and a file. The smoke fails when the worker does not reach
+its first lease call, leaves a planted entry in the root or does not exit 0 on SIGTERM, each within
+two minutes, so a release whose worker cannot start in the lab pod never moves the release tag.
 
 ## Run the scheduler service
 
@@ -3515,7 +3519,10 @@ its process exits 0, so the kubelet restarts the container in the same pod and p
 tag; its running units finish or are left to reap exactly as on a SIGTERM drain. The entry point
 empties `CI_LAB_WORK_ROOT` first, sealed trees and folders without owner access included, so a
 restarted or freshly scheduled pod always starts from an empty root: the venvs, mutation cache and
-killers a worker built under it are built again after any container restart, a crash included. A
+killers a worker built under it are built again after any container restart, a crash included.
+Emptying changes a folder's mode only when the folder lacks one of its three owner bits, as a sealed
+tree does: the work root itself is an `emptyDir` owned by root with mode 777, which the worker's
+user may not change, and it is emptied as it is. A
 worker answered `426` again after its restart, because the node has not pulled the wanted digest
 yet, exits again at once; the kubelet's restart backoff is the only pause between those attempts.
 
