@@ -853,6 +853,37 @@ def test_successor_cleanup_keeps_live_launchers_and_other_agent_names(
 
 
 @pytest.mark.feature("quick-launcher-survival")
+def test_successor_cleanup_reaches_dead_launchers_after_every_skipped_entry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from collections.abc import Iterator
+
+    current, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010105", quick=False)
+    live, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010101", quick=False)
+    other, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master-extra", "261125-010102", quick=False)
+    unknown, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010103", quick=False)
+    dead, dead_prompt = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010104", quick=False)
+    current.with_suffix(".started").write_text("999999999")
+    live.with_suffix(".started").write_text(str(os.getpid()))
+    other.with_suffix(".started").write_text("999999999")
+    unknown.with_suffix(".started").write_text("unknown")
+    dead.with_suffix(".started").write_text("999999999")
+    original_glob = Path.glob
+
+    def ordered_glob(path: Path, pattern: str) -> Iterator[Path]:
+        if path == current.parent and pattern == "quick-abc-master-*.sh":
+            return iter([current, other, live, unknown, dead])
+        return original_glob(path, pattern)
+
+    monkeypatch.setattr(Path, "glob", ordered_glob)
+    successor, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010105")
+    assert successor == current
+    assert all(path.is_file() for path in (current, other, live, unknown))
+    assert not dead.exists() and not dead.with_suffix(".started").exists()
+    assert dead_prompt is not None and not dead_prompt.exists()
+
+
+@pytest.mark.feature("quick-launcher-survival")
 @pytest.mark.parametrize("quick", [False, True])
 @pytest.mark.parametrize("dead_pid", ["999999999", str(10**100)], ids=["dead", "out-of-range"])
 def test_only_a_quick_successor_removes_dead_launchers_with_a_recorded_pid(

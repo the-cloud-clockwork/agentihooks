@@ -12733,6 +12733,7 @@
       "tests": [
         "tests/test_init_agent.py::test_a_quick_launcher_survives_exit_until_a_successor_replaces_it",
         "tests/test_init_agent.py::test_successor_cleanup_keeps_live_launchers_and_other_agent_names",
+        "tests/test_init_agent.py::test_successor_cleanup_reaches_dead_launchers_after_every_skipped_entry",
         "tests/test_init_agent.py::test_only_a_quick_successor_removes_dead_launchers_with_a_recorded_pid",
         "tests/test_init_agent.py::test_a_successor_written_at_the_same_path_is_kept",
         "tests/test_init_agent.py::test_an_ordinary_launcher_still_removes_itself_after_exit",
