@@ -43,6 +43,7 @@ def test_beat_advertises_every_stored_login_and_the_best_legacy_account(
     )
     daemon.beat(redis, "machine")
     record = registry.show(redis, "machine")
+    assert record is not None
     assert record["master_login"] == {"claude": "spare"}
     assert record["master_logins"] == [advertised()[1], advertised()[0]]
     assert record["master_login_enabled"] == "yes"
