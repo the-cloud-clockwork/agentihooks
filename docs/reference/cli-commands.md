@@ -399,7 +399,7 @@ agenti --route claude-ai        # a stored claude ai login; only a front door ma
 `--route claude-ai` picks a stored claude ai login by
 `AGENTIHOOKS_MASTER_LOGIN_ORDER` and prints
 `[agenti] account=<name> route=claude-ai slot=<n>`; see
-[Standalone sessions on a claude ai login](account-login.md#standalone-sessions-on-a-claude-ai-login).
+[Live sessions on a claude ai login](account-login.md#live-sessions-on-a-claude-ai-login).
 
 The launch line reports `account`, `routing_left` and `sessions=n/cap`, or
 `account=api kind=api` for the api side. The api weight decides which side a

@@ -148,16 +148,19 @@ the latest grant native Claude saved is copied to that slot's record with its
 owner epoch, never replacing a newer copy; a launch whose home has no login
 restores it from there.
 
-## Standalone sessions on a claude ai login
+## Live sessions on a claude ai login
 
 ```bash
 agentihooks claude --route claude-ai
 agentihooks init-agent --dir ~/dev/project -- --route claude-ai
 ```
 
-Route `claude-ai` launches a normal standalone session, outside any swarm seat,
-on one of the stored master claude ai logins instead of a quota token. It works
-whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is on.
+Route `claude-ai` launches a live session — also called a live login, live
+agent or interactive agent — a normal standalone session, outside any swarm
+seat, on one of the stored master claude ai logins instead of a quota token.
+`init-agent -- --route claude-ai` with no `--agent` resolves to Claude, never
+Codex rotation. It works whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is
+on.
 
 - **Choice.** Logins are tried in `AGENTIHOOKS_MASTER_LOGIN_ORDER` (a comma
   list of emails, for example
