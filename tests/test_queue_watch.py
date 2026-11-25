@@ -71,7 +71,7 @@ def test_a_running_or_completed_shard_job_says_the_scope_has_started(
     api, jobs, calls = jobs_api
     jobs.extend(
         [
-            {"name": "unit (3.12, 1)", "status": "queued"},
+            {"name": "unit (3.12, 1)", "status": "in_progress"},
             {"name": "unit (3.12, 2)", "status": "in_progress"},
         ]
     )
@@ -79,6 +79,28 @@ def test_a_running_or_completed_shard_job_says_the_scope_has_started(
     path, authorization = calls[0]
     assert path == "/repos/o/r/actions/runs/9/attempts/1/jobs?per_page=100"
     assert authorization == "Bearer token-x"
+
+
+@pytest.mark.feature("queue-watch-job-states")
+@pytest.mark.parametrize("prefix", ["unit (", "unit-selected ("])
+@pytest.mark.parametrize(
+    "statuses",
+    [("queued", "in_progress"), ("in_progress", "queued")],
+    ids=["queued-first", "running-first"],
+)
+def test_a_queued_shard_among_running_ones_reports_not_started(
+    jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
+    prefix: str,
+    statuses: tuple[str, str],
+) -> None:
+    api, jobs, _ = jobs_api
+    jobs.extend(
+        [
+            {"name": f"{prefix}3.12, 1)", "status": statuses[0]},
+            {"name": f"{prefix}3.12, 2)", "status": statuses[1]},
+        ]
+    )
+    assert queue_watch.started(api, "o/r", "9", "1", "token-x", prefix) is False
 
 
 @pytest.mark.feature("queue-watch-job-states")

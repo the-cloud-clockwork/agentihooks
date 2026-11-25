@@ -47,7 +47,7 @@ def started(api: str, repo: str, run_id: str, attempt: str, token: str, prefix: 
     if not shards:
         return None
     remaining = [job for job in shards if not completed(job)]
-    return True if not remaining else any(not queued(job) for job in remaining)
+    return True if not remaining else all(not queued(job) for job in remaining)
 
 
 def main() -> int:
