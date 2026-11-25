@@ -324,3 +324,50 @@ def test_manifest_tracks_queued_and_completed_producers_before_fallback() -> Non
     assert names.index("Take raw shard coverage as it lands") < boundary
     assert boundary < names.index("Download shard coverage")
     assert boundary < names.index("Check the shard coverage downloads")
+
+
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+def test_raw_cli_stops_immediately_after_a_current_producer_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, archives = _corpus(tmp_path)
+    clock = Clock()
+    service = _transport(archives, monkeypatch, clock)
+    folder = tmp_path / "raw"
+    _producer_state(folder, False)
+    (folder / "queue.complete").write_text(
+        json.dumps(
+            {
+                "run": "9",
+                "attempt": 2,
+                "complete": False,
+                "failed": True,
+            }
+        )
+    )
+    monkeypatch.setattr(arrivals, "WAIT", arrivals.INTERVAL * 3)
+    assert _raw_cli(service, clock, folder, monkeypatch) == 1
+    assert clock.pauses == []
+    assert not (folder / "shards/coverage-3.12-1").exists()
+
+
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+def test_manifest_renews_observation_for_the_entire_raw_collection_window() -> None:
+    manifest = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["dep-manifest"]
+    steps = {step.get("name"): step for step in manifest["steps"]}
+    first = steps["Take raw shard coverage as it lands"]
+    second = steps["Resume raw shard coverage collection"]
+    assert first["timeout-minutes"] == 55
+    assert second["timeout-minutes"] == 20
+    assert second["if"] == "steps.raw-shard-coverage.outcome == 'failure'"
+    mint = steps["Renew the token that reads this run's job states"]
+    assert mint["if"] == second["if"]
+    assert mint["with"]["permission-actions"] == "read"
+    watch = steps["Renew the shard job watch"]
+    assert watch["env"]["GH_APP_TOKEN"] == "${{ steps.renewed-jobs-token.outputs.token }}"
+    assert watch["env"]["COVERAGE_RAW"] == "true"
+    assert watch["if"] == second["if"]
+    assert "always()" in steps["Stop the renewed queue watch"]["if"]
+    names = [step.get("name") for step in manifest["steps"]]
+    assert names.index("Stop the queue watch") < names.index("Renew the token that reads this run's job states")
+    assert names.index("Resume raw shard coverage collection") < names.index("Require completed unit producers")

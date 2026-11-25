@@ -262,3 +262,80 @@ def test_raw_watch_requires_a_complete_successful_final_matrix(
     state = json.loads((tmp_path / f"{queue_watch.STATE}.complete").read_text())
     assert state == {"run": "9", "attempt": 2, "complete": complete}
     assert any("filter=all" in path for path, _ in calls)
+
+
+def _observe_raw_jobs(
+    jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
+    folder: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    token: str = "token-x",
+) -> dict[str, object]:
+    api, jobs, calls = jobs_api
+    monkeypatch.chdir(folder)
+    for name, value in {
+        "GH_APP_TOKEN": token,
+        "GITHUB_API_URL": api,
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_RUN_ID": "9",
+        "GITHUB_RUN_ATTEMPT": "2",
+        "COVERAGE_RAW": "true",
+        "SHARDS": "2",
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(queue_watch, "INTERVAL", 0)
+    monkeypatch.setattr(queue_watch, "BOUND", 0.03)
+    monkeypatch.setattr("sys.argv", ["queue_watch.py", "unit ("])
+    assert queue_watch.main() == 0
+    return json.loads((folder / f"{queue_watch.STATE}.complete").read_text())
+
+
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+@pytest.mark.parametrize(
+    ("attempt", "result", "upstream", "complete"),
+    [
+        (2, "success", False, True),
+        (1, "success", False, True),
+        (2, "queued", False, False),
+        (2, "failure", False, False),
+        (1, "success", True, False),
+    ],
+    ids=["copy-success", "copy-manifest-only", "copy-queued", "copy-failure", "copy-not-recreated"],
+)
+def test_raw_watch_accepts_the_copy_producer_without_numeric_jobs(
+    attempt: int,
+    result: str,
+    upstream: bool,
+    complete: bool,
+    jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api, jobs, calls = jobs_api
+    jobs.append(
+        {
+            "id": 1,
+            "name": "unit (3.12, copy)",
+            "run_attempt": attempt,
+            "status": "queued" if result == "queued" else "completed",
+            "conclusion": result,
+        }
+    )
+    if upstream:
+        jobs.append({"id": 2, "name": "select", "run_attempt": 2, "status": "completed", "conclusion": "success"})
+    state = _observe_raw_jobs(jobs_api, tmp_path, monkeypatch)
+    assert state["complete"] is complete
+    assert bool(state.get("failed")) is (result == "failure")
+
+
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+def test_a_renewed_observer_sees_completion_after_the_first_observer_ends(
+    jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api, jobs, calls = jobs_api
+    jobs.append({"id": 1, "name": "unit (3.12, copy)", "run_attempt": 2, "status": "queued", "conclusion": None})
+    assert _observe_raw_jobs(jobs_api, tmp_path, monkeypatch, "first-token")["complete"] is False
+    jobs[0].update(status="completed", conclusion="success")
+    assert _observe_raw_jobs(jobs_api, tmp_path, monkeypatch, "renewed-token")["complete"] is True
+    assert {authorization for path, authorization in calls} == {"Bearer first-token", "Bearer renewed-token"}

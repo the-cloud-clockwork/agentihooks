@@ -15,7 +15,11 @@
         "tests/test_dep_manifest_parallel.py::test_raw_rerun_reselects_replaced_archives_after_producers_finish",
         "tests/test_dep_manifest_parallel.py::test_raw_cli_does_not_spend_its_budget_while_shards_are_queued",
         "tests/test_dep_manifest_parallel.py::test_manifest_tracks_queued_and_completed_producers_before_fallback",
-        "tests/test_queue_watch.py::test_raw_watch_requires_a_complete_successful_final_matrix"
+        "tests/test_queue_watch.py::test_raw_watch_requires_a_complete_successful_final_matrix",
+        "tests/test_dep_manifest_parallel.py::test_raw_cli_stops_immediately_after_a_current_producer_failed",
+        "tests/test_dep_manifest_parallel.py::test_manifest_renews_observation_for_the_entire_raw_collection_window",
+        "tests/test_queue_watch.py::test_raw_watch_accepts_the_copy_producer_without_numeric_jobs",
+        "tests/test_queue_watch.py::test_a_renewed_observer_sees_completion_after_the_first_observer_ends"
       ]
     },
     {
