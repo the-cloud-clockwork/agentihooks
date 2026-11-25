@@ -69,6 +69,33 @@ def test_elevenlabs_request_honours_the_overrides(
     assert json.loads(request.data)["model_id"] == "model-z"
 
 
+def test_elevenlabs_request_without_a_key_sends_an_empty_key(
+    opened: Mock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With the key unset the header is present and empty, so ElevenLabs answers with a refusal the quota check reads."""
+    monkeypatch.delenv("ELEVENLABS_API_KEY")
+
+    voice_output._fetch_elevenlabs("Hi", str(tmp_path / "clip.ogg"))
+
+    assert opened.call_args.args[0].get_header("Xi-api-key") == ""
+
+
+def test_speak_hands_the_text_key_and_clip_path_to_the_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fetch receives the spoken text, the service, the service key and a fresh Ogg clip path."""
+    from hooks import config
+
+    fetch = Mock(return_value="500")
+    monkeypatch.setattr(config, "VOICE_API_KEY", "key-v")
+    monkeypatch.setattr(voice_output, "_fetch_audio", fetch)
+
+    voice_output._speak_and_play("Hola", "http://voice")
+
+    text, url, key, path = fetch.call_args.args
+    assert (text, url, key) == ("Hola", "http://voice", "key-v")
+    assert path.endswith(".ogg")
+    assert Path(path).exists()
+
+
 def test_elevenlabs_error_keeps_its_body_for_the_quota_check(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A refused request returns its status and leaves the error body where the caller reads it."""
     refusal = urllib.error.HTTPError(

@@ -32,6 +32,8 @@ ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 ELEVENLABS_MODEL = "eleven_flash_v2_5"
 ELEVENLABS_API_BASE = "https://api.elevenlabs.io"
 ELEVENLABS_FORMAT = "opus_48000_64"
+ELEVENLABS_KEY_HEADER = "xi-api-key"
+JSON_HEADER = {"Content-Type": "application/json"}
 
 _RE_ENABLE = re.compile(r"\b(enable|turn\s+on|activate)\s+voice\b", re.IGNORECASE)
 _RE_DISABLE = re.compile(r"\b(disable|turn\s+off|deactivate)\s+voice\b", re.IGNORECASE)
@@ -349,7 +351,7 @@ def _fetch_elevenlabs(text: str, path: str) -> str:
     request = urllib.request.Request(
         f"{base}/v1/text-to-speech/{voice}?output_format={ELEVENLABS_FORMAT}",
         data=json.dumps({"text": text, "model_id": model}).encode(),
-        headers={"Content-Type": "application/json", "xi-api-key": os.getenv("ELEVENLABS_API_KEY", "")},
+        headers={**JSON_HEADER, ELEVENLABS_KEY_HEADER: os.getenv("ELEVENLABS_API_KEY", "")},
     )
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
