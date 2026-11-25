@@ -5889,6 +5889,16 @@
       ]
     },
     {
+      "id": "ledger-page-marks-admission-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-local-ledger-follow-cpu",
+      "behaviour": "The page view's freeze marks derive the admitted-focus queue once per view and hand it to every open task, so publishing each new generation of a watched ledger costs work linear in its tasks instead of open tasks times all tasks.",
+      "seam": "scripts.swarm.freeze.marks through unfocused and admitted",
+      "tests": [
+        "tests/swarm/test_freeze.py::test_marks_derives_the_admitted_queue_once_whatever_the_open_task_count"
+      ]
+    },
+    {
       "id": "swarm-focus",
       "origin": "inventory",
       "behaviour": "A focus holds every other unfrozen task until the focus queue is empty, only Doctor fixes pass it, and focused work takes the whole lane before free work.",
