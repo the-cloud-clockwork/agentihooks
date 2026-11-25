@@ -29,8 +29,9 @@ REPOSITORY = "the-cloud-clockwork/agentihooks"
 def _request(path: str) -> Any:
     request = urllib.request.Request(
         f"https://api.github.com/repos/{REPOSITORY}/{path}",
-        headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}", "Accept": "application/vnd.github+json"},
+        headers={"Accept": "application/vnd.github+json"},
     )
+    request.add_unredirected_header("Authorization", f"Bearer {os.environ['GH_TOKEN']}")
     return urllib.request.urlopen(request, timeout=60)
 
 
@@ -125,6 +126,49 @@ def _run_commands(workflow: dict[str, str], folder: Path, head: str) -> dict[str
     return {"validation": validation, "combine": combined, "cli": built, "profile_seconds": phases}
 
 
+def _reject_commands(workflow: dict[str, str], folder: Path, head: str) -> list[int]:
+    folder.mkdir(parents=True)
+    environment = {**os.environ, "RUNNER_TEMP": str(folder), "GITHUB_SHA": head, "ENVIRONMENT": "py3.12-shared"}
+    validation = _command(workflow["Check the shard coverage downloads"], environment)["exit"]
+    if validation:
+        return [validation]
+    return [0, _command(workflow["Build the test dependency manifest"], environment)["exit"]]
+
+
+def _malformed(before: dict[str, str], after: dict[str, str], corpus: Path, head: str) -> dict[str, Any]:
+    link = ROOT / ".coverage-shards"
+    reports = {}
+    cases = [
+        ("malformed-jsonl", next(corpus.rglob("*.jsonl")), b"{\n"),
+        ("torn-sqlite", next(corpus.glob("coverage-3.12-*/.coverage")), b"broken"),
+    ]
+    for name, path, broken in cases:
+        original = path.read_bytes()
+        link.symlink_to(corpus, target_is_directory=True)
+        try:
+            path.write_bytes(broken)
+            reports[name] = {
+                label: _reject_commands(workflow, corpus.parent / "invalid" / name / label, head)
+                for label, workflow in (("before", before), ("after", after))
+            }
+            assert reports[name]["before"] == reports[name]["after"] == [1]
+        finally:
+            path.write_bytes(original)
+            link.unlink()
+    empty = corpus.parent / "empty"
+    empty.mkdir()
+    link.symlink_to(empty, target_is_directory=True)
+    try:
+        reports["missing-inputs"] = {
+            label: _reject_commands(workflow, corpus.parent / "invalid" / "missing" / label, head)
+            for label, workflow in (("before", before), ("after", after))
+        }
+        assert reports["missing-inputs"]["before"] == reports["missing-inputs"]["after"] == [0, 1]
+    finally:
+        link.unlink()
+    return reports
+
+
 @pytest.mark.feature("dep-manifest-raw-arrivals")
 @pytest.mark.timeout(850)
 def test_real_promotion_archives_produce_identical_workflow_outputs(
@@ -208,6 +252,7 @@ def test_real_promotion_archives_produce_identical_workflow_outputs(
         "grader": BASE,
         "artifacts": fingerprints,
         "member_fingerprints": _members(bulk),
+        "invalid_inputs": _malformed(before, after, bulk, head),
         "outputs": outputs,
         "peak_child_rss_kib": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
         "free_disk_bytes": shutil.disk_usage(tmp_path).free,
