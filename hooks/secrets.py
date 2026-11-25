@@ -78,7 +78,7 @@ _STANDARD_PATTERNS: list[_Pattern] = [
     _Pattern(
         "generic_secret",
         re.compile(
-            rf"""(?P<reference_quote>["'])(?P<reference>(?-i:{_SECRET_REFERENCE_RE.pattern}))(?P=reference_quote)|"""
+            rf"""(?P<reference_quote>["'])(?P<reference>(?-i:{_SECRET_REFERENCE_RE.pattern}))(?P=reference_quote)(?!\s*:)|"""
             r"(?:PASSWORD|(?<!/)PASSWD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_TOKEN)(?:\s*(?:=(?!=)|:)\s*"
             r"""(?:(?P<quote>["'])(?P<quoted>[^\s"'$<{]{8,})|(?P<bare>[^\s"'$<{]{8,}))"""
             r"""|["']\s*:\s*(?P<json_quote>["'])(?P<json_quoted>[^\s"'$<{]{8,}))""",
