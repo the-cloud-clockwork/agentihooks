@@ -62,6 +62,8 @@ ledger:
   persistence:
     size: 1Gi
     storageClassName: ""
+  cache:
+    sizeLimit: 512Mi
   env: {}
   # Secret env only the ledger container reads, such as the shared database URL workers must never hold.
   secretEnv: []
@@ -71,7 +73,7 @@ ledger:
       memory: 512Mi
       ephemeral-storage: 64Mi
     limits:
-      memory: 2Gi
+      memory: 2560Mi
       ephemeral-storage: 256Mi
 
 api:
