@@ -23,20 +23,6 @@ if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
 fi
 python3 tests/kind_request.py
 sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
-python3 tests/chart_examples.py "$chart"
-python3 tests/chart_github_auth.py "$chart"
-python3 tests/chart_hive_home.py "$chart"
-python3 tests/chart_hive_rollout.py
-python3 tests/chart_hive_only.py "$chart"
-python3 tests/chart_hub.py "$chart"
-python3 tests/chart_ledger_rollout.py "$chart"
-python3 tests/chart_api.py "$chart"
-python3 tests/chart_controller_rollout.py "$chart"
-python3 tests/chart_scheduler_state.py "$chart"
-python3 tests/chart_nats.py "$chart"
-python3 tests/chart_scratch_swarms.py "$chart"
-python3 tests/chart_hive_capabilities.py "$chart"
-python3 tests/chart_hive_pinned.py "$chart"
 
 finish() {
   status=$?
@@ -120,6 +106,21 @@ build=$!
 cluster_setup=$!
 load_lock="$(mktemp)"
 trap finish EXIT
+
+python3 tests/chart_examples.py "$chart"
+python3 tests/chart_github_auth.py "$chart"
+python3 tests/chart_hive_home.py "$chart"
+python3 tests/chart_hive_rollout.py
+python3 tests/chart_hive_only.py "$chart"
+python3 tests/chart_hub.py "$chart"
+python3 tests/chart_ledger_rollout.py "$chart"
+python3 tests/chart_api.py "$chart"
+python3 tests/chart_controller_rollout.py "$chart"
+python3 tests/chart_scheduler_state.py "$chart"
+python3 tests/chart_nats.py "$chart"
+python3 tests/chart_scratch_swarms.py "$chart"
+python3 tests/chart_hive_capabilities.py "$chart"
+python3 tests/chart_hive_pinned.py "$chart"
 
 helm lint --strict "$chart"
 helm lint --strict "$chart" -f "$chart/ci/kind-values.yaml"
