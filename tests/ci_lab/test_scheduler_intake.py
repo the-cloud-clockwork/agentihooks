@@ -16,7 +16,7 @@ from tests.ci_lab.test_scheduler_shadow import completed_check
 class Pages:
     remaining: list[bus.Delivery]
     asked: list[tuple[int, int]] = field(default_factory=list)
-    step: float = 0.0
+    step: float = 1.0
     now: float = 100.0
     fail_after: int | None = None
 
@@ -93,7 +93,7 @@ def test_intake_stops_at_its_deadline_and_the_next_call_reads_the_remaining_head
 
     assert [item.event.head for item in first] == [f"{number:040x}" for number in range(count)]
     assert [delivery.acked for delivery in deliveries] == [number < count for number in range(5)]
-    pages.step = 0.0
+    pages.step = 1.0
     assert [item.event.head for item in inbox.heads()] == [f"{number:040x}" for number in range(count, 5)]
 
 
