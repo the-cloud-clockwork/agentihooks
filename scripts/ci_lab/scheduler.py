@@ -350,6 +350,7 @@ class Plan:
     manifest: str = ""
     idle: frozenset[str] = frozenset()
     authoritative: frozenset[str] = frozenset()
+    merge_base: str = ""
 
 
 class Inbox(Protocol):
@@ -467,6 +468,7 @@ class State:
     idle: list[str] = field(default_factory=list[str])
     authoritative: list[str] = field(default_factory=list[str])
     hold: int = 0
+    merge_base: str = ""
 
 
 def _parse(raw: str | bytes) -> State:
