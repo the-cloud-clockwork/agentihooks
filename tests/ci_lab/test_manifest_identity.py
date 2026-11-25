@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from threading import Thread
+from typing import cast
 
 import pytest
 
@@ -101,7 +102,7 @@ def test_a_swapped_stored_manifest_is_refused_and_the_next_unit_still_runs(
         executors.tests(pod, suite, first)
     assert type(refused.value).__name__ == "ManifestRefused"
     assert first.unit.key in str(refused.value)
-    assert pod.trees.calls == []
+    assert cast(support.FakeWorktrees, pod.trees).calls == []
     assert venv.calls == []
     assert ran.calls == []
     run.push(HEAD_B, lane=HEAD_B)
@@ -139,7 +140,7 @@ def test_manifest_refusal_precedes_all_test_execution_resources(tmp_path: Path, 
         executors.tests(pod, suite, lease)
     assert type(refused.value).__name__ == "ManifestRefused"
     assert unit.key in str(refused.value)
-    assert pod.trees.calls == []
+    assert cast(support.FakeWorktrees, pod.trees).calls == []
 
 
 @pytest.mark.feature("lab-test-manifest-identity")
@@ -174,4 +175,4 @@ def test_old_records_without_identity_are_parsed_then_refused_after_claiming(
     suite = executors.Suite(tmp_path / "absent", tmp_path / "flakes")
     with pytest.raises(ValueError, match="missing manifest digest"):
         executors.tests(pod, suite, lease)
-    assert pod.trees.calls == []
+    assert cast(support.FakeWorktrees, pod.trees).calls == []
