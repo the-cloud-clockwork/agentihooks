@@ -105,7 +105,9 @@ def brain_dispatch(monkeypatch):
     return fork
 
 
-def test_stop_hands_its_payload_to_the_handed_off_close(brain_dispatch: object, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_hands_its_payload_to_the_handed_off_close(
+    brain_dispatch: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The Stop hook gives the handed-off session close the payload it received."""
     from unittest.mock import Mock
 
