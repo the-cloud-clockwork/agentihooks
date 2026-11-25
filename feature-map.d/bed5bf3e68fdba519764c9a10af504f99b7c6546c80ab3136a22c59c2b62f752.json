@@ -1,0 +1,11 @@
+{
+  "id": "semgrep-strict-scans-independent-jobs",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-scans-parallel",
+  "behaviour": "The strict Semgrep scans of the reusable Semgrep workflow run as three jobs with no needs between them, own-rules, test-rules and scan, each with its own five minute timeout and concurrency group, and each strict scan step belongs to exactly one of them, so no job runs the scans in sequence against one timeout.",
+  "seam": "The jobs of the Semgrep workflow: their step lists, needs, timeout-minutes and concurrency groups",
+  "tests": [
+    "tests/test_ci_semgrep.py::test_strict_scans_run_in_independent_jobs",
+    "tests/test_ci_semgrep.py::test_scan_keeps_the_reusable_workflow_steps"
+  ]
+}
