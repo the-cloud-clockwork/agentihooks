@@ -1,6 +1,9 @@
 import json
 import subprocess
+import time
 from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import yaml
@@ -544,3 +547,209 @@ def test_main_requeues_once_the_queue_drops_the_pull_request(monkeypatch, tmp_pa
     assert json.loads(capsys.readouterr().out)["requeue"] is True
     assert asked == [("o/r", 3259)] * 2
     assert slept == [30]
+
+
+def retry_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    states: list[dict[str, Any]],
+    pages: list[list[dict[str, Any]]] | None = None,
+    failure: str = SHUTDOWN,
+) -> list[str]:
+    calls: list[str] = []
+    run = {**RUN, "id": 9, "head_branch": QUEUE_BRANCH, "created_at": REMOVED["createdAt"]}
+    inventory = pages if pages is not None else [[run]]
+
+    def api(path: str, *flags: str) -> str:
+        calls.append(path)
+        if path == "repos/o/r/actions/runs/9":
+            return json.dumps(run)
+        query = parse_qs(urlsplit(path).query)
+        assert path.startswith("repos/o/r/actions/workflows/test.yml/runs?")
+        assert query["event"] == ["merge_group"]
+        assert query["created"] == [">=2026-10-14T23:06:11Z"]
+        page = int(query.get("page", ["1"])[0])
+        rows = inventory[page - 1] if page <= len(inventory) else []
+        return json.dumps({"total_count": 100 * (len(inventory) - 1) + len(inventory[-1]), "workflow_runs": rows})
+
+    def state(repo: str, number: int) -> dict[str, Any]:
+        calls.append(f"pull:{number}")
+        return states[min(calls.count(f"pull:{number}"), len(states)) - 1]
+
+    def failed(repo: str, run_id: int) -> list[dict[str, Any]]:
+        calls.append(f"failed:{run_id}")
+        return [job("unit (3.12, 2)", failure)]
+
+    def sleep(seconds: float) -> None:
+        pytest.fail("queue retry must return without sleeping")
+
+    monkeypatch.setattr(ci_queue_retry, "_api", api)
+    monkeypatch.setattr(ci_queue_retry, "pull_state", state)
+    monkeypatch.setattr(ci_queue_retry, "failed_jobs", failed)
+    monkeypatch.setattr(time, "sleep", sleep)
+    monkeypatch.chdir(ROOT)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "retry-output"))
+    return calls
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+def test_main_returns_waiting_after_one_queued_pull_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = retry_entry(monkeypatch, tmp_path, [{**pull([REMOVED]), "isInMergeQueue": True}, pull([REMOVED])])
+    assert ci_queue_retry.main(["--repo", "o/r", "--run-id", "9"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["waiting"] is True
+    assert result["requeue"] is False
+    assert calls.count("pull:3259") == 1
+    assert (tmp_path / "retry-output").read_text() == "requeue=false\nwaiting=true\npull=3259\nnode=\nhead=\n"
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+def test_main_requeues_an_exited_pull_with_one_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = retry_entry(monkeypatch, tmp_path, [pull([REMOVED])])
+    assert ci_queue_retry.main(["--repo", "o/r", "--run-id", "9"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["requeue"] is True
+    assert result["waiting"] is False
+    assert calls.count("pull:3259") == 1
+    assert f"node=PR_kwDO3259\nhead={HEAD}\n" in (tmp_path / "retry-output").read_text()
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+def test_resume_selects_the_newest_run_for_the_pull(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    candidate = {**RUN, "id": 12, "head_branch": QUEUE_BRANCH, "created_at": REMOVED["createdAt"]}
+    rows = [
+        {**candidate, "id": 15, "head_branch": QUEUE_BRANCH.replace("pr-3259-", "pr-32590-")},
+        {**candidate, "id": 14, "head_branch": "dev", "event": "push"},
+        candidate,
+        {**candidate, "id": 9},
+    ]
+    calls = retry_entry(monkeypatch, tmp_path, [pull([REMOVED])], [rows])
+    assert ci_queue_retry.main(["--repo", "o/r", "--pull", "3259"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert (result["run"], result["pull"], result["requeue"]) == (12, 3259, True)
+    assert calls.count("pull:3259") == 1
+    assert [call for call in calls if call.startswith("failed:")] == ["failed:12"]
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+@pytest.mark.parametrize(
+    ("conclusion", "attempt", "failure"),
+    [("success", 1, SHUTDOWN), ("failure", 2, SHUTDOWN), ("failure", 1, RED), (None, 1, SHUTDOWN)],
+    ids=["success", "rerun", "test-failure", "unfinished"],
+)
+def test_resume_never_falls_back_to_an_older_runner_loss(
+    conclusion: str | None,
+    attempt: int,
+    failure: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    old = {**RUN, "id": 9, "head_branch": QUEUE_BRANCH, "created_at": REMOVED["createdAt"]}
+    newest = {**old, "id": 12, "conclusion": conclusion, "run_attempt": attempt}
+    calls = retry_entry(monkeypatch, tmp_path, [pull([REMOVED])], [[newest, old]], failure)
+    assert ci_queue_retry.main(["--repo", "o/r", "--pull", "3259"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["requeue"] is False
+    assert result["waiting"] is False
+    assert result["run"] == 12
+    assert [call for call in calls if call.startswith("failed:")] == ["failed:12"]
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+def test_resume_pages_until_the_newest_matching_pull_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = {**RUN, "id": 9, "head_branch": QUEUE_BRANCH, "created_at": REMOVED["createdAt"]}
+    unrelated = {**run, "id": 10, "head_branch": QUEUE_BRANCH.replace("pr-3259-", "pr-4-")}
+    calls = retry_entry(monkeypatch, tmp_path, [pull([REMOVED])], [[unrelated] * 100, [run]])
+    assert ci_queue_retry.main(["--repo", "o/r", "--pull", "3259"]) == 0
+    assert json.loads(capsys.readouterr().out)["requeue"] is True
+    assert len([call for call in calls if "workflows/test.yml/runs?" in call]) == 2
+    assert [call for call in calls if call.startswith("failed:")] == ["failed:9"]
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+def test_resume_without_a_matching_run_never_classifies(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = retry_entry(monkeypatch, tmp_path, [pull([REMOVED])], [[]])
+    assert ci_queue_retry.main(["--repo", "o/r", "--pull", "3259"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["requeue"] is False
+    assert result["waiting"] is False
+    assert not any(call.startswith("failed:") for call in calls)
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+@pytest.mark.parametrize(
+    "state",
+    [
+        {**pull([REMOVED]), "state": "MERGED"},
+        {**pull([REMOVED]), "state": "CLOSED"},
+        {**pull([REMOVED]), "isInMergeQueue": True},
+        pull([REMOVED, {**REMOVED, "createdAt": "2026-10-15T05:41:00Z"}]),
+        pull([{**REMOVED, "reason": "manual"}]),
+    ],
+    ids=["merged", "closed", "queued", "second-removal", "manual"],
+)
+def test_resume_keeps_the_existing_pull_guards(
+    state: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = retry_entry(monkeypatch, tmp_path, [state])
+    assert ci_queue_retry.main(["--repo", "o/r", "--pull", "3259"]) == 0
+    assert json.loads(capsys.readouterr().out)["requeue"] is False
+    assert calls.count("pull:3259") == 1
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+@pytest.mark.parametrize("dequeued_first", [False, True], ids=["completed-first", "dequeued-first"])
+def test_either_event_order_resumes_once_the_run_and_pull_are_ready(
+    dequeued_first: bool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = {**RUN, "id": 9, "head_branch": QUEUE_BRANCH, "created_at": REMOVED["createdAt"]}
+    if dequeued_first:
+        calls = retry_entry(monkeypatch, tmp_path, [pull([REMOVED])], [[{**run, "conclusion": None}]])
+        first = ["--pull", "3259"]
+        second = ["--run-id", "9"]
+    else:
+        calls = retry_entry(monkeypatch, tmp_path, [{**pull([REMOVED]), "isInMergeQueue": True}])
+        first = ["--run-id", "9"]
+        second = ["--pull", "3259"]
+    assert ci_queue_retry.main(["--repo", "o/r", *first]) == 0
+    assert json.loads(capsys.readouterr().out)["requeue"] is False
+    calls.clear()
+    monkeypatch.setattr(ci_queue_retry, "pull_state", lambda repo, number: pull([REMOVED]))
+    assert ci_queue_retry.main(["--repo", "o/r", *second]) == 0
+    assert json.loads(capsys.readouterr().out)["requeue"] is True
+    calls.clear()
+    monkeypatch.setattr(ci_queue_retry, "pull_state", lambda repo, number: {**pull([REMOVED]), "isInMergeQueue": True})
+    assert ci_queue_retry.main(["--repo", "o/r", "--pull", "3259"]) == 0
+    assert json.loads(capsys.readouterr().out)["requeue"] is False
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+def test_retry_workflow_releases_the_runner_and_resumes_from_trusted_code() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/queue-retry.yml").read_text())
+    assert workflow[True]["pull_request_target"] == {"types": ["dequeued"]}
+    retry = workflow["jobs"]["retry"]
+    assert retry["timeout-minutes"] <= 5
+    assert "github.event_name == 'pull_request_target'" in retry["if"]
+    checkout = next(step for step in retry["steps"] if step.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
+    classify = next(step for step in retry["steps"] if step.get("id") == "classify")
+    assert classify["env"]["PULL"] == "${{ github.event.pull_request.number }}"
+    assert '--pull "$PULL"' in classify["run"]
+    assert '--run-id "$RUN_ID"' in classify["run"]
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+def test_retry_workflow_timeout_is_at_most_five_minutes() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/queue-retry.yml").read_text())
+    assert workflow["jobs"]["retry"]["timeout-minutes"] <= 5

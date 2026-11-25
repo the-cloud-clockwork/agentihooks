@@ -1,0 +1,19 @@
+{
+  "id": "queue-retry-releases-runner",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-queue-retry-release-runner",
+  "behaviour": "Queue retry releases its runner while the pull remains queued and resumes once through the same failure and head guards after dequeue.",
+  "seam": "scripts.ci_queue_retry.main and Queue retry workflow events",
+  "tests": [
+    "tests/test_ci_queue_retry.py::test_main_returns_waiting_after_one_queued_pull_read",
+    "tests/test_ci_queue_retry.py::test_main_requeues_an_exited_pull_with_one_read",
+    "tests/test_ci_queue_retry.py::test_resume_selects_the_newest_run_for_the_pull",
+    "tests/test_ci_queue_retry.py::test_resume_never_falls_back_to_an_older_runner_loss",
+    "tests/test_ci_queue_retry.py::test_resume_pages_until_the_newest_matching_pull_run",
+    "tests/test_ci_queue_retry.py::test_resume_without_a_matching_run_never_classifies",
+    "tests/test_ci_queue_retry.py::test_resume_keeps_the_existing_pull_guards",
+    "tests/test_ci_queue_retry.py::test_either_event_order_resumes_once_the_run_and_pull_are_ready",
+    "tests/test_ci_queue_retry.py::test_retry_workflow_releases_the_runner_and_resumes_from_trusted_code",
+    "tests/test_ci_queue_retry.py::test_retry_workflow_timeout_is_at_most_five_minutes"
+  ]
+}
