@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.swarm import claim_hold, enhance_review, plan_review, slice_check
+from scripts.swarm import claim_hold, enhance_review, plan_review, prompt, slice_check
 from scripts.swarm import cli as swarm_cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger as ledger_cli
@@ -275,8 +275,8 @@ def test_the_planner_of_a_thin_task_with_no_phase_publishes_into_its_own_phase_a
     seats: Seats, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A thin task added with no phase gets from the thin task pass a manual phase of its own holding it and its
-    enhancement task; the claimed planner publishes its plan into that phase with publish-plan, points the task at its
-    section and closes its plan task with done, which marks the task planned and releases its hold."""
+    enhancement task; the claimed planner publishes its plan into the phase its prompt names with publish-plan, points
+    the task at its section and closes its plan task with done, which marks the task planned and releases its hold."""
     store, ledger = seats
     autonomy(store, "full")
     ledger.add_task(SLUG, {"task": TARGET, "title": "Task t1", "lane": "eng", "description": "Thin."}, "swarm")
@@ -289,7 +289,11 @@ def test_the_planner_of_a_thin_task_with_no_phase_publishes_into_its_own_phase_a
     plan.write_text(
         f"# Plan for task t1\n<!-- slice: {ANCHOR} -->\n## Enhance task t1\n{section()}\n", encoding="utf-8"
     )
-    publish_plan(monkeypatch, plan, ENHANCE)
+    told = re.search(
+        r"publish-plan <plan file> --phase (\S+)\.", prompt.build(SLUG, "/repo", "plan", PLANNER, task(ENHANCE))
+    )
+    assert told is not None and told.group(1) == ENHANCE
+    publish_plan(monkeypatch, plan, told.group(1))
     url = json.loads(capsys.readouterr().out)["plan_url"]
     fields = {"plan_url": url, "plan_slice": ANCHOR, "description": DONE_WHEN, "territory": ["scripts/swarm"]}
     ledger.update_task(SLUG, TARGET, fields, by=PLANNER)
