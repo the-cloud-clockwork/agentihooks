@@ -46,24 +46,35 @@ chmod 555 "$root/trees/head/sealed" "$root/trees/head"
 chmod 000 "$root/locked"
 agentihooks ci-lab-worker 2> "$log" &
 worker=$!
-trap 'kill "$worker" 2>/dev/null || true' EXIT
-for _ in $(seq 240); do
+trap 'kill -KILL "$worker" 2>/dev/null || true' EXIT
+polls="${SMOKE_POLLS:-240}"
+leased=""
+for _ in $(seq "$polls"); do
   if ! kill -0 "$worker" 2>/dev/null; then
     cat "$log" >&2
     echo "the worker exited before its first lease call on a work root that belongs to another user" >&2
     exit 1
   fi
   if grep -q "lease call failed" "$log"; then
+    leased=yes
     break
   fi
   sleep 0.5
 done
 left="$(ls -A "$root" | tr '\n' ' ')"
-if [[ "$left" != "runs venvs " ]]; then
+if [[ -z "$leased" || "$left" != "runs venvs " ]]; then
   cat "$log" >&2
   echo "the worker made no lease call or left its work root holding: $left" >&2
   exit 1
 fi
 kill -TERM "$worker"
-wait "$worker"
+for _ in $(seq "$polls"); do
+  if ! kill -0 "$worker" 2>/dev/null; then
+    wait "$worker"
+    exit 0
+  fi
+  sleep 0.5
+done
+echo "the worker did not exit after SIGTERM" >&2
+exit 1
 START

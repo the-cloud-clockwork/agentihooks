@@ -47,9 +47,9 @@ Both services run from the installed wheel, which ships `hooks`, `scripts` and `
 `docker/ci-lab/smoke.sh` also imports the worker's executors, test runner and pricing inside the
 built CI lab image. It then starts the worker as the lab chart runs it, as user and group 1001 with
 a read only root filesystem, every capability dropped and no network, on a work root owned by root
-that holds a sealed tree, a locked folder and a file. The smoke fails when the worker exits before
-its first lease call, leaves a planted entry in the root or does not exit 0 on SIGTERM, so a release
-whose worker cannot start in the lab pod never moves the release tag.
+that holds a sealed tree, a locked folder and a file. The smoke fails when the worker does not reach
+its first lease call, leaves a planted entry in the root or does not exit 0 on SIGTERM, each within
+two minutes, so a release whose worker cannot start in the lab pod never moves the release tag.
 
 ## Run the scheduler service
 

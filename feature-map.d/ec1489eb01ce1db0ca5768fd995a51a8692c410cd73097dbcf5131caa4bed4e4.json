@@ -2,7 +2,7 @@
   "id": "lab-worker-empties-a-root-it-does-not-own",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
-  "behaviour": "A lab worker starts on a work root that belongs to another user and is open to it, as the emptyDir of the lab chart is. Emptying a folder changes its mode only when the folder lacks one of its three owner bits, so a folder that already grants them is emptied as it is, sealed trees and locked folders inside it included. The image smoke starts the worker as the lab chart runs it, as user and group 1001 with a read only root filesystem, every capability dropped and a full work root owned by root, and refuses an image whose worker exits before its first lease call, leaves a planted entry in its root or does not exit zero on SIGTERM.",
+  "behaviour": "A lab worker starts on a work root that belongs to another user and is open to it, as the emptyDir of the lab chart is. Emptying a folder changes its mode only when the folder lacks one of its three owner bits, so a folder that already grants them is emptied as it is, sealed trees and locked folders inside it included. The image smoke starts the worker as the lab chart runs it, as user and group 1001 with a read only root filesystem, every capability dropped and a full work root owned by root, and refuses an image whose worker does not reach its first lease call, leaves a planted entry in its root or does not exit zero on SIGTERM.",
   "seam": "scripts.ci_lab.worktrees.empty, and docker/ci-lab/smoke.sh run against a fake docker with its start script run against a fake worker",
   "tests": [
     "tests/ci_lab/test_worktrees.py::test_empty_removes_every_entry_of_an_open_folder_whose_mode_change_the_system_refuses",
@@ -11,7 +11,9 @@
     "tests/test_ci_lab_image.py::test_the_start_passes_a_worker_that_empties_its_root_calls_for_a_lease_and_stops_on_sigterm",
     "tests/test_ci_lab_image.py::test_the_start_refuses_a_worker_that_exits_before_its_first_lease_call",
     "tests/test_ci_lab_image.py::test_the_start_refuses_a_worker_that_leaves_a_planted_entry_in_its_root",
-    "tests/test_ci_lab_image.py::test_the_start_refuses_a_worker_that_does_not_exit_zero_on_sigterm"
+    "tests/test_ci_lab_image.py::test_the_start_refuses_a_worker_that_does_not_exit_zero_on_sigterm",
+    "tests/test_ci_lab_image.py::test_the_start_refuses_a_worker_that_empties_its_root_but_never_calls_for_a_lease",
+    "tests/test_ci_lab_image.py::test_the_start_refuses_a_worker_that_does_not_exit_after_sigterm"
   ],
   "rules": [
     "lab-empty-chmods-folder-unconditionally"

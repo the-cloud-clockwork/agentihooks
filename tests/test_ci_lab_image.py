@@ -36,7 +36,8 @@ EMPTIES = (
     'rm -rf "${CI_LAB_WORK_ROOT:?}"/*\n'
     'mkdir "$CI_LAB_WORK_ROOT/runs" "$CI_LAB_WORK_ROOT/venvs"\n'
 )
-SERVES = "trap 'exit 0' TERM\nwhile true; do sleep 0.1; done\n"
+STOPS = "trap 'exit 0' TERM\n"
+LOOPS = "while true; do sleep 0.1; done\n"
 
 
 def _instructions() -> list[tuple[str, str]]:
@@ -164,7 +165,7 @@ def test_the_smoke_needs_an_image_and_the_lock_digest(tmp_path: Path, args: tupl
     assert not (tmp_path / "docker.log").exists()
 
 
-def _start(tmp_path: Path, worker: str) -> tuple[subprocess.CompletedProcess[str], Path]:
+def _start(tmp_path: Path, worker: str, polls: int = 60) -> tuple[subprocess.CompletedProcess[str], Path]:
     assert _smoke(tmp_path, "worker:candidate", "ab12").returncode == 0
     script = "set -euo pipefail\n" + (tmp_path / "docker.stdin").read_text().split("set -euo pipefail\n")[2]
     fake = tmp_path / "bin/agentihooks"
@@ -177,6 +178,7 @@ def _start(tmp_path: Path, worker: str) -> tuple[subprocess.CompletedProcess[str
         "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
         "CI_LAB_WORK_ROOT": str(root),
         "TMPDIR": str(tmp_path),
+        "SMOKE_POLLS": str(polls),
     }
     result = subprocess.run(
         ["bash", "-s"], input=script, env=env, capture_output=True, text=True, check=False, timeout=180
@@ -202,7 +204,7 @@ def test_the_smoke_starts_the_worker_as_the_lab_chart_runs_it_on_a_full_root_of_
 def test_the_start_passes_a_worker_that_empties_its_root_calls_for_a_lease_and_stops_on_sigterm(
     tmp_path: Path,
 ) -> None:
-    result, root = _start(tmp_path, EMPTIES + LEASE_LINE + SERVES)
+    result, root = _start(tmp_path, STOPS + EMPTIES + LEASE_LINE + LOOPS)
     assert (result.returncode, result.stderr) == (0, "")
     assert sorted(path.name for path in root.iterdir()) == ["runs", "venvs"]
 
@@ -219,7 +221,7 @@ def test_the_start_refuses_a_worker_that_exits_before_its_first_lease_call(tmp_p
 
 @pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
 def test_the_start_refuses_a_worker_that_leaves_a_planted_entry_in_its_root(tmp_path: Path) -> None:
-    result, _ = _start(tmp_path, LEASE_LINE + SERVES)
+    result, _ = _start(tmp_path, LEASE_LINE + LOOPS)
     assert result.returncode == 1
     assert result.stderr == (
         "ci-lab worker: lease call failed, retrying in 1s: URLError()\n"
@@ -231,6 +233,31 @@ def test_the_start_refuses_a_worker_that_leaves_a_planted_entry_in_its_root(tmp_
 def test_the_start_refuses_a_worker_that_does_not_exit_zero_on_sigterm(tmp_path: Path) -> None:
     result, _ = _start(tmp_path, EMPTIES + LEASE_LINE + "exec sleep 60\n")
     assert result.returncode == 143
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_the_start_refuses_a_worker_that_empties_its_root_but_never_calls_for_a_lease(tmp_path: Path) -> None:
+    result, _ = _start(tmp_path, EMPTIES + LOOPS, polls=4)
+    assert result.returncode == 1
+    assert result.stderr == "the worker made no lease call or left its work root holding: runs venvs \n"
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_the_start_refuses_a_worker_that_does_not_exit_after_sigterm(tmp_path: Path) -> None:
+    result, _ = _start(tmp_path, "trap '' TERM\n" + EMPTIES + LEASE_LINE + LOOPS, polls=4)
+    assert result.returncode == 1
+    assert result.stderr == "the worker did not exit after SIGTERM\n"
+
+
+def test_the_start_waits_two_minutes_for_the_lease_call_and_for_the_exit_unless_told_otherwise(
+    tmp_path: Path,
+) -> None:
+    assert _smoke(tmp_path, "worker:candidate", "ab12").returncode == 0
+    start = (tmp_path / "docker.stdin").read_text().split("set -euo pipefail\n")[2]
+    assert 'polls="${SMOKE_POLLS:-240}"\n' in start
+    assert start.count('for _ in $(seq "$polls"); do\n') == 2
+    assert start.count("  sleep 0.5\n") == 2
+    assert "SMOKE_POLLS" not in START_RUN
 
 
 def test_the_workflow_builds_on_dev_pushes_to_its_inputs_a_daily_refresh_and_dispatch() -> None:
