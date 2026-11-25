@@ -360,6 +360,13 @@ def _fetch_elevenlabs(text: str, path: str) -> str:
     return str(status)
 
 
+def _fetch_audio(text: str, voice_service_url: str, api_key: str, path: str) -> str:
+    """Fetch the clip from the voice service when one is set, otherwise from ElevenLabs."""
+    if voice_service_url:
+        return _fetch_voice_service(text, voice_service_url, api_key, path)
+    return _fetch_elevenlabs(text, path)
+
+
 def _speak_and_play(text: str, voice_service_url: str) -> bool:
     """Returns True if audio was played successfully."""
     try:
@@ -368,10 +375,7 @@ def _speak_and_play(text: str, voice_service_url: str) -> bool:
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
             tmp_path = tmp.name
 
-        if voice_service_url:
-            http_code = _fetch_voice_service(text, voice_service_url, VOICE_API_KEY, tmp_path)
-        else:
-            http_code = _fetch_elevenlabs(text, tmp_path)
+        http_code = _fetch_audio(text, voice_service_url, VOICE_API_KEY, tmp_path)
 
         if http_code != "200":
             try:

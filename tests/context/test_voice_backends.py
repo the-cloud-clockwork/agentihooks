@@ -1,5 +1,6 @@
 """Voice output speaks through the voice service when one is set, otherwise through ElevenLabs with the tell-me skill's variables."""
 
+import email.message
 import io
 import json
 import subprocess
@@ -70,7 +71,9 @@ def test_elevenlabs_request_honours_the_overrides(
 
 def test_elevenlabs_error_keeps_its_body_for_the_quota_check(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A refused request returns its status and leaves the error body where the caller reads it."""
-    refusal = urllib.error.HTTPError("https://tts", 401, "Unauthorized", {}, io.BytesIO(b'{"detail":"quota_exceeded"}'))
+    refusal = urllib.error.HTTPError(
+        "https://tts", 401, "Unauthorized", email.message.Message(), io.BytesIO(b'{"detail":"quota_exceeded"}')
+    )
     monkeypatch.setattr(voice_output.urllib.request, "urlopen", Mock(side_effect=refusal))
     clip = tmp_path / "clip.ogg"
 
@@ -122,6 +125,20 @@ def test_speak_picks_the_service_when_set_else_elevenlabs(
 
     assert voice_output._speak_and_play("Hi", url) is False
     assert (via_service.call_count, via_elevenlabs.call_count) == (service, elevenlabs)
+
+
+@pytest.mark.parametrize(("url", "expected"), [("http://voice", "service"), ("", "elevenlabs")])
+def test_fetch_audio_hands_its_arguments_to_the_chosen_backend(
+    monkeypatch: pytest.MonkeyPatch, url: str, expected: str
+) -> None:
+    """The chosen backend gets the text, the service details and the clip path, and its status comes back."""
+    monkeypatch.setattr(voice_output, "_fetch_voice_service", lambda *args: ("service", args))
+    monkeypatch.setattr(voice_output, "_fetch_elevenlabs", lambda *args: ("elevenlabs", args))
+
+    backend, args = voice_output._fetch_audio("Hi", url, "key-v", "/tmp/c.ogg")
+
+    assert backend == expected
+    assert args == (("Hi", url, "key-v", "/tmp/c.ogg") if url else ("Hi", "/tmp/c.ogg"))
 
 
 @pytest.mark.parametrize(("url", "key", "spoken"), [("", "key-x", 1), ("http://voice", "", 1), ("", "", 0)])
