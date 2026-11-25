@@ -31,7 +31,7 @@ def resume_argv(environ: Mapping[str, str], session_id: str, target: str) -> lis
         return None
     if target not in HOMES or not routed(environ, target):
         return None
-    home = environ.get(HOMES[target], "")
+    home = environ.get(HOMES[target])
     prefix = ["env", f"{HOMES[target]}={home}"] if home else []
     if target == "codex":
         argv = [*prefix, "agentihooks", "codex", "resume", session_id]
@@ -62,7 +62,8 @@ def report(
 
 def report_command(payload: Mapping[str, object], environ: Mapping[str, str]) -> list[str] | None:
     target = environ.get("AGENTIHOOKS_TARGET", "").strip().lower() or "claude"
-    argv = resume_argv(environ, str(payload.get("session_id") or ""), target)
+    session_id = payload.get("session_id")
+    argv = resume_argv(environ, session_id, target) if isinstance(session_id, str) else None
     if argv is None:
         return None
     seq = str(time.time_ns())

@@ -91,10 +91,10 @@ def resume_off(environ: Mapping[str, str] | None = None) -> bool:
         from scripts import mcp_daemon
 
         scan: Callable[[str], str | None] = getattr(mcp_daemon, "_scan_env_file")
-        value = os.environ.get(RESUME_ENV) or scan(RESUME_ENV) or ""
+        value = os.environ.get(RESUME_ENV) or scan(RESUME_ENV)
     else:
-        value = environ.get(RESUME_ENV, "")
-    return value.strip().lower() in ("off", "false", "0", "no")
+        value = environ.get(RESUME_ENV)
+    return value is not None and value.strip().lower() in ("off", "false", "0", "no")
 
 
 def _herdr_state() -> dict[str, object]:
@@ -140,7 +140,7 @@ def apply_config(path: Path) -> list[str]:
     _resume(doc, changed)
     if changed:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes((tomlkit.dumps(doc).rstrip("\n") + "\n").encode())
+        path.write_bytes(tomlkit.dumps(doc).encode())
     return changed
 
 

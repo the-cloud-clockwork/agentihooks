@@ -87,6 +87,20 @@ def test_an_empty_session_id_reports_nothing():
 
 
 @pytest.mark.feature("herdr-native-resume")
+@pytest.mark.parametrize("payload", [{}, {"session_id": ""}, {"session_id": None}, {"session_id": 7}])
+def test_a_start_without_a_session_id_never_calls_herdr(payload):
+    run = Recorder()
+    assert herdr_resume.report(payload, ROUTED, run) is False
+    assert run.calls == []
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_an_empty_profile_home_is_left_out():
+    environ = {**ROUTED, "CLAUDE_CONFIG_DIR": ""}
+    assert (herdr_resume.resume_argv(environ, SESSION, "claude") or [""])[0] == "agentihooks"
+
+
+@pytest.mark.feature("herdr-native-resume")
 def test_the_report_hands_herdr_the_routed_command_for_this_pane():
     run = Recorder()
     assert herdr_resume.report({"session_id": SESSION}, ROUTED, run) is True

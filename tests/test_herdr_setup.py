@@ -217,15 +217,15 @@ def test_configure_keeps_agent_resume_the_operator_turned_on(monkeypatch, runner
 
 @pytest.mark.feature("herdr-native-resume")
 def test_configure_releases_the_resume_off_it_wrote_before_once(monkeypatch, runner, tmp_path, capsys):
-    existing = "[ui]\ncopy_on_select = true\n" + RESUME_OFF
-    assert _configured(monkeypatch, runner, tmp_path, existing) == "[ui]\ncopy_on_select = true\n"
+    existing = "[ui]\ncopy_on_select = true\n" + RESUME_OFF + "\n[keys]\ngoto = 1\n"
+    assert _configured(monkeypatch, runner, tmp_path, existing) == "[ui]\ncopy_on_select = true\n\n[keys]\ngoto = 1\n"
     assert ["/bin/herdr", "server", "reload-config"] in runner.calls
     assert (
         capsys.readouterr()
         .out.splitlines()[-1]
         .startswith("[herdr] config: resume_agents_on_restore restored to the herdr default in ")
     )
-    assert install._load_state()["herdr"]["resume_released"]
+    assert install._load_state()["herdr"]["resume_released"].endswith("+00:00")
 
 
 @pytest.mark.feature("herdr-native-resume")
@@ -269,6 +269,14 @@ def test_the_resume_switch_leaves_a_resume_off_config_alone(monkeypatch, runner,
 @pytest.mark.parametrize("value", ["", "on", "true", "1"])
 def test_resume_stays_on_unless_switched_off(value):
     assert herdr_setup.resume_off({herdr_setup.RESUME_ENV: value}) is False
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_resume_stays_on_when_nothing_sets_the_switch(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    assert herdr_setup.resume_off({}) is False
+    assert herdr_setup.resume_off({"OTHER": "off"}) is False
+    assert herdr_setup.resume_off() is False
 
 
 @pytest.mark.feature("herdr-native-resume")
