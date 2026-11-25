@@ -6693,6 +6693,27 @@
       ]
     },
     {
+      "id": "forge-gitlab-merge-request-state",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gl-mr-state",
+      "behaviour": "A GitLab merge request link reads over REST into the fields the hub pull tracker builds from GitHub: opened, closed and merged map to open, closed and merged, the head commit, queued false, and a finished head pipeline as one completed suite in GitHub conclusion words keyed by the pipeline id with the pipeline commit as checks head; a running pipeline or none gives no suite. A missing token, a 404, a link that is no GitLab merge request or another state raises FetchError instead of reading as a closed merge request.",
+      "seam": "scripts.forge.gitlab.merge_request_state(url, token, send) returns a MergeRequestState or raises FetchError through an injected transport; scripts.forge.gitlab.GitLabForge.state reads one merge request by number",
+      "tests": [
+        "tests/forge/test_gitlab.py::test_an_opened_merge_request_reads_open_with_its_failed_pipeline_as_one_suite",
+        "tests/forge/test_gitlab.py::test_merge_request_states_and_finished_pipelines_read_in_the_tracker_words",
+        "tests/forge/test_gitlab.py::test_an_unfinished_pipeline_gives_no_suite_on_its_own_commit",
+        "tests/forge/test_gitlab.py::test_a_merge_request_without_a_pipeline_reads_its_head_with_no_suites",
+        "tests/forge/test_gitlab.py::test_a_finished_pipeline_on_an_older_commit_keeps_that_commit_as_its_checks_head",
+        "tests/forge/test_gitlab.py::test_a_merge_request_in_another_state_raises_a_fetch_error",
+        "tests/forge/test_gitlab.py::test_a_missing_merge_request_raises_a_fetch_error_never_a_closed_state",
+        "tests/forge/test_gitlab.py::test_another_http_error_reaches_the_caller_as_it_came",
+        "tests/forge/test_gitlab.py::test_a_missing_token_raises_a_fetch_error_before_any_request",
+        "tests/forge/test_gitlab.py::test_a_github_pull_link_raises_a_fetch_error_before_any_request",
+        "tests/forge/test_gitlab.py::test_a_link_of_no_forge_raises_a_fetch_error_before_any_request",
+        "tests/forge/test_gitlab.py::test_the_state_read_sends_through_urlopen_by_default"
+      ]
+    },
+    {
       "id": "ledger-event-relay",
       "origin": "inventory",
       "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order with only its catalogued fields, a crash between publish and mark never duplicates an event, and a row the bus refuses as too large never holds back the rows after it.",
