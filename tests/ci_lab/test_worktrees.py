@@ -1,4 +1,5 @@
 import base64
+import errno
 import os
 import stat
 import subprocess
@@ -415,6 +416,72 @@ def test_empty_removes_sealed_trees_locked_folders_files_and_symlinks_but_keeps_
 @pytest.mark.feature("lab-worker-seat-keeping-restart")
 def test_empty_of_a_missing_folder_is_not_an_error(tmp_path: Path) -> None:
     worktrees.empty(tmp_path / "absent")
+
+
+def _recorded_chmod(monkeypatch: pytest.MonkeyPatch, refused: Path | None = None) -> list[tuple[Path, int]]:
+    changed: list[tuple[Path, int]] = []
+    chmod = Path.chmod
+
+    def record(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        if path == refused:
+            raise PermissionError(errno.EPERM, "Operation not permitted", str(path))
+        changed.append((path, stat.S_IMODE(mode)))
+        chmod(path, mode, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "chmod", record)
+    return changed
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_empty_removes_every_entry_of_an_open_folder_whose_mode_change_the_system_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "root"
+    sealed = folder / "trees" / "head"
+    sealed.mkdir(parents=True)
+    (sealed / "file").write_text("x")
+    sealed.chmod(0o555)
+    locked = folder / "locked"
+    locked.mkdir()
+    (locked / "inner").write_text("y")
+    locked.chmod(0)
+    (folder / "plain.txt").write_text("z")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("kept")
+    (folder / "link").symlink_to(outside)
+    folder.chmod(0o777)
+    _recorded_chmod(monkeypatch, refused=folder)
+
+    worktrees.empty(folder)
+
+    assert list(folder.iterdir()) == []
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o777
+    assert outside.read_text() == "kept"
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_empty_changes_the_mode_only_of_a_folder_that_lacks_an_owner_bit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "root"
+    open_folder = folder / "open"
+    open_folder.mkdir(parents=True)
+    modes = {"no-read": 0o355, "no-write": 0o555, "no-search": 0o655, "none": 0}
+    for name, mode in modes.items():
+        (folder / name).mkdir()
+        (folder / name).chmod(mode)
+    folder.chmod(0o700)
+    changed = _recorded_chmod(monkeypatch)
+
+    worktrees.empty(folder)
+
+    assert list(folder.iterdir()) == []
+    assert sorted(changed) == [
+        (folder / "no-read", 0o755),
+        (folder / "no-search", 0o755),
+        (folder / "no-write", 0o755),
+        (folder / "none", 0o700),
+    ]
 
 
 @pytest.mark.feature("lab-mutation-units-work-on-the-change")

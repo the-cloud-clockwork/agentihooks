@@ -22,6 +22,21 @@ printf '%s\\n' "$*" >> "$DOCKER_LOG"
 case " $* " in *" -i "*) cat >> "$DOCKER_STDIN" ;; esac
 exit "${DOCKER_EXIT:-0}"
 """
+START_RUN = (
+    "run --rm -i --network none --user 1001:1001 --read-only --cap-drop ALL --security-opt no-new-privileges "
+    "--tmpfs /work:mode=0777 --tmpfs /tmp:mode=1777 "
+    "-e CI_LAB_SCHEDULER_URL=http://127.0.0.1:9 -e CI_LAB_SLOTS=1 -e CI_LAB_GIT_MIRROR=/cache/git/agentihooks.git "
+    "-e UV_CACHE_DIR=/cache/uv -e CI_LAB_WORK_ROOT=/work -e CI_LAB_MANIFEST=/work/manifest.json "
+    "-e CI_LAB_FLAKES=/work/flakes.jsonl -e CI_LAB_MUTATION_CACHE=/work/mutation-cache -e CI_LAB_KILLERS=/work/killers "
+    "-e CI_LAB_MUTATION_BUDGET=1800 -e CI_LAB_MUTATION_CAP=1 --entrypoint bash worker:candidate -s"
+)
+LEASE_LINE = 'echo "ci-lab worker: lease call failed, retrying in 1s: URLError()" >&2\n'
+EMPTIES = (
+    'chmod -R u+rwx "$CI_LAB_WORK_ROOT"\n'
+    'rm -rf "${CI_LAB_WORK_ROOT:?}"/*\n'
+    'mkdir "$CI_LAB_WORK_ROOT/runs" "$CI_LAB_WORK_ROOT/venvs"\n'
+)
+SERVES = "trap 'exit 0' TERM\nwhile true; do sleep 0.1; done\n"
 
 
 def _instructions() -> list[tuple[str, str]]:
@@ -109,6 +124,7 @@ def test_the_smoke_runs_the_self_test_and_the_image_checks_with_no_network(tmp_p
     assert (tmp_path / "docker.log").read_text().splitlines() == [
         "run --rm --network none worker:candidate --self-test",
         "run --rm -i --network none -e LOCK_DIGEST=ab12 --entrypoint bash worker:candidate -s",
+        START_RUN,
     ]
     checks = (tmp_path / "docker.stdin").read_text()
     assert "bwrap --version\n" in checks
@@ -146,6 +162,75 @@ def test_the_smoke_needs_an_image_and_the_lock_digest(tmp_path: Path, args: tupl
     assert result.returncode != 0
     assert " usage: smoke.sh IMAGE LOCK_DIGEST\n" in result.stderr
     assert not (tmp_path / "docker.log").exists()
+
+
+def _start(tmp_path: Path, worker: str) -> tuple[subprocess.CompletedProcess[str], Path]:
+    assert _smoke(tmp_path, "worker:candidate", "ab12").returncode == 0
+    script = "set -euo pipefail\n" + (tmp_path / "docker.stdin").read_text().split("set -euo pipefail\n")[2]
+    fake = tmp_path / "bin/agentihooks"
+    fake.write_text(f"#!/usr/bin/env bash\n{worker}")
+    fake.chmod(0o755)
+    root = tmp_path / "work"
+    root.mkdir()
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+        "CI_LAB_WORK_ROOT": str(root),
+        "TMPDIR": str(tmp_path),
+    }
+    result = subprocess.run(
+        ["bash", "-s"], input=script, env=env, capture_output=True, text=True, check=False, timeout=180
+    )
+    for left in (root / "locked", root / "trees/head", root / "trees/head/sealed"):
+        if left.exists():
+            left.chmod(0o755)
+    return result, root
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_the_smoke_starts_the_worker_as_the_lab_chart_runs_it_on_a_full_root_of_another_user(tmp_path: Path) -> None:
+    assert _smoke(tmp_path, "worker:candidate", "ab12").returncode == 0
+    assert (tmp_path / "docker.log").read_text().splitlines()[-1] == START_RUN
+    start = (tmp_path / "docker.stdin").read_text().split("set -euo pipefail\n")[2]
+    assert 'mkdir -p "$root/trees/head/sealed" "$root/locked"\n' in start
+    assert 'chmod 555 "$root/trees/head/sealed" "$root/trees/head"\n' in start
+    assert 'chmod 000 "$root/locked"\n' in start
+    assert 'agentihooks ci-lab-worker 2> "$log" &\n' in start
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_the_start_passes_a_worker_that_empties_its_root_calls_for_a_lease_and_stops_on_sigterm(
+    tmp_path: Path,
+) -> None:
+    result, root = _start(tmp_path, EMPTIES + LEASE_LINE + SERVES)
+    assert (result.returncode, result.stderr) == (0, "")
+    assert sorted(path.name for path in root.iterdir()) == ["runs", "venvs"]
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_the_start_refuses_a_worker_that_exits_before_its_first_lease_call(tmp_path: Path) -> None:
+    result, _ = _start(tmp_path, 'echo "PermissionError: [Errno 1] Operation not permitted" >&2\nexit 1\n')
+    assert result.returncode == 1
+    assert result.stderr == (
+        "PermissionError: [Errno 1] Operation not permitted\n"
+        "the worker exited before its first lease call on a work root that belongs to another user\n"
+    )
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_the_start_refuses_a_worker_that_leaves_a_planted_entry_in_its_root(tmp_path: Path) -> None:
+    result, _ = _start(tmp_path, LEASE_LINE + SERVES)
+    assert result.returncode == 1
+    assert result.stderr == (
+        "ci-lab worker: lease call failed, retrying in 1s: URLError()\n"
+        "the worker made no lease call or left its work root holding: locked manifest.json trees \n"
+    )
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_the_start_refuses_a_worker_that_does_not_exit_zero_on_sigterm(tmp_path: Path) -> None:
+    result, _ = _start(tmp_path, EMPTIES + LEASE_LINE + "exec sleep 60\n")
+    assert result.returncode == 143
 
 
 def test_the_workflow_builds_on_dev_pushes_to_its_inputs_a_daily_refresh_and_dispatch() -> None:
