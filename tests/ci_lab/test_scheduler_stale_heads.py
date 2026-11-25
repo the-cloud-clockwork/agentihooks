@@ -200,8 +200,9 @@ def test_a_pull_request_delivery_names_its_head_branch_as_its_lane(action: str) 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
 def test_a_pull_request_from_a_fork_names_its_owner_and_branch_as_its_lane() -> None:
-    events = webhooks.head_events("pull_request", _pull("opened", HEAD_A, owner="stranger"))
-    assert [event.lane for event in events] == ["stranger:feature"]
+    assert webhooks.head_events("pull_request", _pull("opened", HEAD_A, owner="stranger")) == [
+        HeadEvent("pull_request", REPO, HEAD_A, BASE, ACTOR, "opened", "stranger:feature")
+    ]
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
