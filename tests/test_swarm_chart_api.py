@@ -30,7 +30,7 @@ def test_the_kind_proof_renders_the_api_service_before_any_cluster_starts() -> N
     script = SMOKE.read_text()
 
     assert 'python3 tests/chart_api.py "$chart"' in script
-    assert script.index("python3 tests/chart_api.py") < script.index("kind create cluster")
+    assert script.index("python3 tests/chart_api.py") < script.index('wait "$cluster_setup"\nkubectl apply')
 
 
 def test_api_deployment_mirrors_the_ledgers_env_and_settings() -> None:
