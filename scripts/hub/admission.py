@@ -527,7 +527,11 @@ class Admission:
         admitted = json.loads(held) if held else None
         if not admitted or admitted["hive"] != request["hive"]:
             return False
+        from scripts.hive.launch import ACCOUNT_FULL
+
         task_id, harness, reason = request["task"], request["harness"], request["reason"]
+        if "No account slot available" in reason or reason.startswith(ACCOUNT_FULL):
+            harness = ""
         self.store.note_launch_failure(slug, task_id, reason, harness)
         if harness:
             admitted["task"]["avoid_harness"] = harness

@@ -145,6 +145,10 @@ class Pod:
         return Build(self.ports, self.whitelist, self.timeout)
 
 
+class ManifestRefused(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class Suite:
     """The test adapter's inputs beyond the lease: the dependency manifest file and the flake ledger."""
@@ -241,9 +245,15 @@ def tests(pod: Pod, suite: Suite, lease: Lease) -> Finished:
     """Run the lease's test batch on its head with the venv of the head's lockfile digest, the manifest and the flake
     ledger, on as many workers as its slots; the report counts the git and uv cache lookups it made and carries the
     flake ledger rows of a batch its retry passed, with the unit key as run and the attempt count as run_attempt."""
+    if not lease.unit.manifest_digest:
+        raise ManifestRefused(f"{lease.unit.key}: missing manifest digest")
+    if not lease.unit.manifest:
+        raise ManifestRefused(f"{lease.unit.key}: missing manifest")
+    if hashlib.sha256(lease.unit.manifest.encode()).hexdigest() != lease.unit.manifest_digest:
+        raise ManifestRefused(f"{lease.unit.key}: manifest digest mismatch")
+    manifest = json.loads(lease.unit.manifest)
     with pod.trees.shared(lease.head) as ((tree,), fetched):
         venv, built = venvs.venv_for(lockfile_digest(tree), tree, pod.venvs, pod.build)
-        manifest = json.loads(lease.unit.manifest)
         lab = run_tests.Lab(pod.runs, pod.ports, pod.whitelist, manifest, suite.flakes, pod.timeout, False)
         started = pod.clock()
         verdict = run_tests.run(lease.unit.members, tree, venv, lease.slots, lab)

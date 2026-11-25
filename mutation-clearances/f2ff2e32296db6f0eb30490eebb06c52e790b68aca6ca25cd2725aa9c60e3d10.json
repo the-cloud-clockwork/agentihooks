@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/webhooks.py:scripts.ci_lab.webhooks.x_pull_lane:a59d452134fcd1bfdf5283cecbac198833eed0f1406ab749d9cadc7cf2384864": {
+    "reader": "standards_reader",
+    "reason": "Git forbids a colon in ref names and GitHub logins cannot contain one, so a head label owner:branch has exactly one colon and partition and rpartition return the same owner."
+  }
+}

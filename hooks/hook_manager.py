@@ -553,9 +553,7 @@ def on_session_end(payload: dict) -> None:
         },
     )
     _request_trace_flush(payload, "end")
-    from hooks.context import documentation_session
-
-    documentation_session.end(payload)
+    _end_documentation_session(payload)
 
     if session_id and transcript_path:
         from hooks.observability.transcript import log_new_entries
@@ -1077,6 +1075,15 @@ def _start_documentation_session(payload: dict) -> None:
     from hooks.context import documentation_session
 
     documentation_session.start(payload)
+
+
+def _end_documentation_session(payload: dict[str, Any]) -> None:
+    """End the documentation session; on Windows it is skipped, because it reaches the swarm ledger."""
+    if sys.platform == "win32":
+        return
+    from hooks.context import documentation_session
+
+    documentation_session.end(payload)
 
 
 def _recycle_directive(session_id: str) -> str | None:
