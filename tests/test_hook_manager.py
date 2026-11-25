@@ -346,6 +346,31 @@ def test_windows_session_start_registers_no_broadcast_session(
     deliver.assert_not_called()
 
 
+@pytest.mark.parametrize(("platform", "calls"), [("win32", 0), ("linux", 1)])
+def test_session_end_closes_the_broadcast_session_only_off_windows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, platform: str, calls: int
+) -> None:
+    """Windows registers no broadcast session, so its session end closes none and never reaches the session registry."""
+    from unittest.mock import Mock
+
+    from hooks import config
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    close, heartbeat = Mock(), Mock()
+    monkeypatch.setattr(config, "BROADCAST_ENABLED", True)
+    monkeypatch.setattr("hooks.context.account_sessions.agent_pid", Mock(return_value=7))
+    monkeypatch.setattr("hooks.context.broadcast.mark_session_closed", close)
+    monkeypatch.setattr("hooks.context.broadcast.heartbeat_sessions", heartbeat)
+    monkeypatch.setattr("hooks.context.documentation_session.end", Mock())
+    monkeypatch.setattr(sys, "platform", platform)
+
+    EVENT_HANDLERS["SessionEnd"]({"session_id": "s-end", "cwd": str(tmp_path)})
+
+    assert (close.call_count, heartbeat.call_count) == (calls, calls)
+    if calls:
+        close.assert_called_once_with("s-end", 7)
+
+
 def test_pretool_blocks_handed_off_session(monkeypatch, tmp_path):
     from unittest.mock import Mock
 
