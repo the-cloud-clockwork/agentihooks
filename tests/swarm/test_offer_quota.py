@@ -31,7 +31,7 @@ def _event_runtime(
     monkeypatch.setattr(capacity, "accounts", reader)
     monkeypatch.setattr(runtime.plugins, "claude_only", lambda _profile: False)
     monkeypatch.setattr(runtime.time, "time", lambda: 1_234_567_890.0)
-    monkeypatch.setattr(runtime.prompt, "build", Mock(return_value="Plan the task"))
+    monkeypatch.setattr(runtime.prompt, "build", lambda *_args, **_kwargs: "Plan the task")
     monkeypatch.setattr(
         local,
         "_profile_decision",
