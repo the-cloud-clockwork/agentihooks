@@ -494,6 +494,30 @@ def test_held_accepts_a_precomputed_admitted_queue_and_skips_recomputing_it(monk
     assert with_queue == without_queue is True
 
 
+@pytest.mark.feature("ledger-page-marks-admission-once")
+@pytest.mark.parametrize("open_tasks", [2, 40])
+def test_marks_derives_the_admitted_queue_once_whatever_the_open_task_count(
+    open_tasks: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        task(f"t{index}", phase=f"p{index % 2 + 1}", lane="eng" if index % 3 else "ci") for index in range(open_tasks)
+    ]
+    found = doc(record("lane:ci", "focus"), tasks=rows)
+    graph = hierarchy.project(found)[0]
+    expected = freeze.marks(found, graph, "", False)
+    calls: list[int] = []
+    original = freeze.admitted
+
+    def counting(ledger: dict[str, Any], nodes: dict[str, Any]) -> frozenset[str] | None:
+        calls.append(1)
+        return original(ledger, nodes)
+
+    monkeypatch.setattr(freeze, "admitted", counting)
+    assert freeze.marks(found, graph, "", False) == expected
+    assert expected["held"]
+    assert calls == [1]
+
+
 @pytest.mark.feature("ready-ordered-offer-first")
 def test_waits_names_what_each_task_of_the_ledger_waits_on() -> None:
     phases: list[dict[str, Any]] = [{"id": "p1"}, {"id": "p2", "depends_on": ["p1"]}]
