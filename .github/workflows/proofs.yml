@@ -364,7 +364,7 @@ jobs:
           log="$RUNNER_TEMP/focused-proof.log"
           status=0
           workers=$(python -m scripts.ci_cpu_quota)
-          if [[ "$MANIFEST_REPLAY" == true ]]; then
+          if [[ "${MANIFEST_REPLAY:-false}" == true ]]; then
             workers=0
           fi
           python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short 2>&1 | tee "$log" || status=$?
