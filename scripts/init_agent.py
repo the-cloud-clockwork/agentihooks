@@ -1155,11 +1155,10 @@ def main(
         active_env.update({"AGENTIHOOKS_CLAIM_FENCE": args.claim_fence} if args.claim_fence else {})
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
-        requested = args.agent or ("claude" if _flag_value(claude_args, ("--route",)) == "claude-ai" else "")
         agent, reason = (
-            (_handoff_agent(requested, active_env, claude_args), "handoff")
+            (_handoff_agent(args.agent, active_env, claude_args), "handoff")
             if args.handoff
-            else ((requested or "claude", "interactive") if args.auth else agent_choice.choose(requested, active_env))
+            else ((args.agent or "claude", "interactive") if args.auth else agent_choice.choose(args.agent, active_env))
         )
         agent = agent or "claude"
         if args.handoff:

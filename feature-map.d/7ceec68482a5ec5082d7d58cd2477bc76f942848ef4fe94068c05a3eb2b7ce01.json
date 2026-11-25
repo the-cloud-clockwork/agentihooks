@@ -1,0 +1,10 @@
+{
+  "id": "live-session-route-forces-claude",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-live-session-route",
+  "behaviour": "init-agent resolves an absent --agent to claude whenever the launched CLI's own args carry --route claude-ai, so session-count rotation is never asked to pick between Claude and Codex for a login only Claude holds.",
+  "seam": "scripts.init_agent.main agent selection for --route claude-ai",
+  "tests": [
+    "tests/test_init_agent.py::test_the_claude_ai_route_is_never_handed_to_codex_rotation"
+  ]
+}
