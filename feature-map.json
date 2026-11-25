@@ -3039,6 +3039,18 @@
       ]
     },
     {
+      "id": "hive-failed-master-launch-pane",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mql-pane-retire",
+      "behaviour": "A failed master launch whose runtime returns an owned shell pane retires it before acknowledging the original failure with the pane identity. Cleanup refusal preserves the delivery and identity across a consumer restart and order expiry without another spawn, and a reused pane stays open. A refusal without a pane keeps its existing acknowledgement.",
+      "seam": "scripts.hive.orders.Consumer.poll through LocalHerdrRuntime.spawn and ownership qualified termination",
+      "tests": [
+        "tests/hive/test_orders.py::test_a_failed_master_launch_closes_its_shell_before_acknowledging",
+        "tests/hive/test_orders.py::test_a_failed_master_without_a_pane_keeps_its_failure",
+        "tests/hive/test_orders.py::test_failed_master_cleanup_retries_after_restart_and_expiry_without_spawning"
+      ]
+    },
+    {
       "id": "master-token-slot-route-report",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",
