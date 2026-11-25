@@ -657,6 +657,22 @@ def test_a_routed_quick_seat_starts(
     assert "route_status=routed" in out and "routed_only=failed" not in out
 
 
+@pytest.mark.feature("quick-launcher-survival")
+def test_a_quick_launch_keeps_its_started_marker_after_acceptance(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def popen(command: Sequence[str], **kwargs: object) -> None:
+        assert command[0] == "/usr/bin/terminal"
+        launcher = Path(command[-1])
+        launcher.with_suffix(".started").write_text("77\n")
+        launcher.with_suffix(".route").write_text("status=routed\naccount=beta\nplacement=open\n")
+
+    assert _quick_seat(monkeypatch, tmp_path, popen, extra=["--routed-only"]) == 0
+    markers = list((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.started"))
+    assert len(markers) == 1
+    assert markers[0].read_text() == "77\n"
+
+
 def test_only_a_launch_that_had_to_be_routed_and_was_not_is_refused_with_its_own_line() -> None:
     handoff = argparse.Namespace(handoff=True, routed_only=False)
     routed_only = argparse.Namespace(handoff=False, routed_only=True)
@@ -773,6 +789,71 @@ def _launcher_text(tmp_path, environ, agent="claude", name="swarm-buildout-eng-4
     env = {"XDG_RUNTIME_DIR": str(tmp_path), **environ}
     launcher, _ = init_agent._write_launcher(tmp_path, name, "", [], env, init_agent.AgentSpec(agent=agent))
     return launcher.read_text()
+
+
+def _retained_launcher(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    name: str,
+    stamp: str,
+    quick: bool = True,
+) -> tuple[Path, Path | None]:
+    from scripts.quick.member import QUICK_ENV
+
+    environ = {"XDG_RUNTIME_DIR": str(tmp_path), "SHELL": "/bin/true"}
+    if quick:
+        environ[QUICK_ENV] = "quick-abc"
+    with monkeypatch.context() as patch:
+        patch.setattr(init_agent, "LAUNCH_GRACE_S", 0)
+        patch.setattr(init_agent, "_agent_command", lambda *args: (["/bin/true"], ""))
+        patch.setattr(init_agent.operator_env, "source_line", lambda env: "")
+        patch.setattr(init_agent.sys, "executable", "/bin/true")
+        patch.setattr(init_agent.time, "strftime", lambda pattern: stamp)
+        return init_agent._write_launcher(tmp_path, name, "seed", [], environ)
+
+
+@pytest.mark.feature("quick-launcher-survival")
+def test_a_quick_launcher_survives_exit_until_a_successor_replaces_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launcher, prompt = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010101")
+    process = subprocess.Popen(["bash", str(launcher)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    output, error = process.communicate(timeout=5)
+    assert process.returncode == 0, (output, error)
+    assert launcher.is_file()
+    assert prompt is not None and prompt.is_file()
+    marker = launcher.with_suffix(".started")
+    assert marker.read_text() == f"{process.pid}\n"
+
+    successor, successor_prompt = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010102")
+    assert not launcher.exists()
+    assert not marker.exists()
+    assert not prompt.exists()
+    assert successor.is_file()
+    assert successor_prompt is not None and successor_prompt.is_file()
+
+
+@pytest.mark.feature("quick-launcher-survival")
+def test_successor_cleanup_keeps_live_launchers_and_other_agent_names(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    live, live_prompt = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010101")
+    live.with_suffix(".started").write_text(f"{os.getpid()}\n")
+    other, other_prompt = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master-extra", "261125-010101")
+    other.with_suffix(".started").write_text("999999999\n")
+    successor, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010102")
+    assert live.is_file() and other.is_file() and successor.is_file()
+    assert live_prompt is not None and live_prompt.is_file()
+    assert other_prompt is not None and other_prompt.is_file()
+
+
+@pytest.mark.feature("quick-launcher-survival")
+def test_an_ordinary_launcher_still_removes_itself_after_exit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    launcher, prompt = _retained_launcher(monkeypatch, tmp_path, "ordinary", "261125-010101", quick=False)
+    result = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, timeout=5, check=False)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert not launcher.exists()
+    assert prompt is not None and not prompt.exists()
 
 
 def test_hive_launch_refreshes_github_credentials_by_reference(tmp_path):

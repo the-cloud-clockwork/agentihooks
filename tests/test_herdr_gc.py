@@ -3,6 +3,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -777,6 +778,44 @@ def test_launch_files_older_than_a_day_are_removed(tmp_path):
     assert herdr_gc.clean_run_dir(tmp_path, now, True, alive) == [f"removed {p.name}" for p in sorted(old)]
     assert not any(p.exists() for p in old)
     assert fresh.exists() and held.exists() and all(p.exists() for p in kept)
+
+
+@pytest.mark.feature("live-launcher-gc")
+def test_old_launchers_with_live_started_pids_survive_cleanup(tmp_path: Path) -> None:
+    folder = tmp_path / "run"
+    folder.mkdir()
+    day = herdr_gc.RUN_FILE_AGE_S
+    kept: list[Path] = []
+    removed: list[Path] = []
+    for name, marker_text in (
+        ("live", "77\n"),
+        ("dead", "99\n"),
+        ("malformed", "wrong"),
+        ("zero", "0"),
+        ("negative", "-1"),
+        ("missing", None),
+    ):
+        launcher = aged(folder / f"{name}-261125-010101-123.sh", day + 60)
+        files = [launcher]
+        if marker_text is not None:
+            marker = launcher.with_suffix(".started")
+            marker.write_text(marker_text)
+            stamp = launcher.stat().st_mtime
+            os.utime(marker, (stamp, stamp))
+            files.append(marker)
+        (kept if name == "live" else removed).extend(files)
+    unreadable = aged(folder / "unreadable-261125-010101-123.sh", day + 60)
+    unreadable.with_suffix(".started").mkdir()
+    removed.append(unreadable)
+    now = kept[0].stat().st_mtime + day + 60
+    alive = {77}.__contains__
+    assert herdr_gc.clean_run_dir(folder, now, False, alive) == [
+        f"would remove {path.name}" for path in sorted(removed)
+    ]
+    assert all(path.is_file() for path in [*kept, *removed])
+    assert herdr_gc.clean_run_dir(folder, now, True, alive) == [f"removed {path.name}" for path in sorted(removed)]
+    assert all(path.is_file() for path in kept)
+    assert not any(path.exists() for path in removed)
 
 
 def test_a_launch_file_exactly_a_day_old_stays(tmp_path):
