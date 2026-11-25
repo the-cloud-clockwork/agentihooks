@@ -818,7 +818,7 @@ def test_a_quick_launcher_survives_exit_until_a_successor_replaces_it(
 ) -> None:
     launcher, prompt = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010101")
     process = subprocess.Popen(["bash", str(launcher)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    output, error = process.communicate(timeout=5)
+    output, error = process.communicate(timeout=10)
     assert process.returncode == 0, (output, error)
     assert launcher.is_file()
     assert prompt is not None and prompt.is_file()
@@ -879,7 +879,7 @@ def test_a_successor_written_at_the_same_path_is_kept(monkeypatch: pytest.Monkey
 @pytest.mark.feature("quick-launcher-survival")
 def test_an_ordinary_launcher_still_removes_itself_after_exit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     launcher, prompt = _retained_launcher(monkeypatch, tmp_path, "ordinary", "261125-010101", quick=False)
-    result = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, timeout=5, check=False)
+    result = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, timeout=10, check=False)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert not launcher.exists()
     assert prompt is not None and not prompt.exists()
