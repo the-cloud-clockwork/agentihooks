@@ -52,6 +52,7 @@ def test_scan_keeps_the_reusable_workflow_steps() -> None:
         "Own rules hold on their fixtures and the code",
         "Outage rules for tests hold on every test file",
         "New test waits keep a bound of ten seconds or more",
+        "Test modules import no new private names from other test modules",
         "Rule exceptions only shrink",
         "Resolve the merge base of the head and the base",
         "Fail on findings new against the base",

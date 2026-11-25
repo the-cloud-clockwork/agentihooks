@@ -264,6 +264,7 @@ def test_a_chart_check_refuses_a_grader_copy_that_ignores_the_root_instead_of_gr
                 "Own rules hold on their fixtures and the code",
                 "Outage rules for tests hold on every test file",
                 "New test waits keep a bound of ten seconds or more",
+                "Test modules import no new private names from other test modules",
                 "Fail on findings new against the base",
             ],
         ),

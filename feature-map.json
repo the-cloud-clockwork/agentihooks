@@ -4382,6 +4382,8 @@
         "tests/test_private_test_imports.py::test_check_skips_the_listed_scan_when_the_change_touches_no_listed_file",
         "tests/test_private_test_imports.py::test_write_records_every_offender_sorted_and_indented_by_one_space",
         "tests/test_private_test_imports.py::test_main_routes_check_and_write_from_the_working_directory",
+        "tests/test_private_test_imports.py::test_main_requires_a_subcommand",
+        "tests/test_private_test_imports.py::test_main_help_names_the_command",
         "tests/test_private_test_imports.py::test_the_list_names_each_offender_once_in_order_with_an_existing_test_file",
         "tests/test_private_test_imports.py::test_the_rule_reads_only_test_modules_and_its_fixture",
         "tests/test_ci_semgrep.py::test_private_test_imports_gate_runs_the_grader_copy_against_the_merge_base"

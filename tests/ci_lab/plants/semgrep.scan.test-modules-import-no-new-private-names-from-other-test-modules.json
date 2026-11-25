@@ -1,0 +1,11 @@
+{
+  "gate": "semgrep/scan/test-modules-import-no-new-private-names-from-other-test-modules",
+  "reason": "tests/test_private_test_imports.py imports the private name _jobs from another test module",
+  "edits": [
+    {
+      "path": "tests/test_private_test_imports.py",
+      "before": "def test_the_rule_reads_only_test_modules_and_its_fixture() -> None:\n    (rule,)",
+      "after": "def test_the_rule_reads_only_test_modules_and_its_fixture() -> None:\n    from tests.test_ci_semgrep import _jobs\n\n    assert callable(_jobs)\n    (rule,)"
+    }
+  ]
+}

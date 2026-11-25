@@ -251,6 +251,23 @@ def test_main_routes_check_and_write_from_the_working_directory(monkeypatch: pyt
 
 
 @pytest.mark.feature("test-private-imports-ratchet")
+def test_main_requires_a_subcommand(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(gate, "write", lambda root: pytest.fail("missing command reached write"))
+    with pytest.raises(SystemExit) as error:
+        gate.main([])
+    assert error.value.code == 2
+    assert capsys.readouterr().err.endswith("error: the following arguments are required: command\n")
+
+
+@pytest.mark.feature("test-private-imports-ratchet")
+def test_main_help_names_the_command(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        gate.main(["--help"])
+    assert error.value.code == 0
+    assert capsys.readouterr().out.startswith("usage: python -m scripts.private_test_imports [-h] {check,write} ...\n")
+
+
+@pytest.mark.feature("test-private-imports-ratchet")
 def test_the_list_names_each_offender_once_in_order_with_an_existing_test_file() -> None:
     entries = json.loads((_ROOT / gate.ALLOWLIST).read_text())
     assert entries
