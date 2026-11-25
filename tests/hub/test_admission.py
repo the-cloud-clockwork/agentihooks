@@ -1389,7 +1389,7 @@ def test_an_account_refusal_records_its_reason_without_steering(
     assert admission.ADMITTED_MS - 5_000 < rig.store.redis.pttl(held) <= admission.ADMITTED_MS
     assert capsys.readouterr() == ("", "")
     assert rig.admitter.reopen(SLUG, ask()) is True
-    later = rig.admitter.admit(SLUG, ask())
+    later = rig.admitter.admit(SLUG, ask(generation=rig.rows["t1"]["claim_generation"]))
     assert later is not None
     assert "avoid_harness" not in later["task"]
 
@@ -1415,7 +1415,7 @@ def test_a_broken_harness_failure_keeps_steering(
     assert admission.ADMITTED_MS - 5_000 < rig.store.redis.pttl(held) <= admission.ADMITTED_MS
     assert capsys.readouterr() == ("", f"hub: events steering swarm={SLUG} task=t1 avoid={harness}: {reason}\n")
     assert rig.admitter.reopen(SLUG, ask()) is True
-    later = rig.admitter.admit(SLUG, ask())
+    later = rig.admitter.admit(SLUG, ask(generation=rig.rows["t1"]["claim_generation"]))
     assert later is not None
     assert later["task"]["avoid_harness"] == harness
 
