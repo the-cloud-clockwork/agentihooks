@@ -478,6 +478,29 @@ def test_a_closed_pull_request_keeps_the_waiting_head_of_a_branch_another_pull_r
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_closed_pull_request_keeps_the_waiting_head_of_its_own_base_while_its_lane_grades_two_bases(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})}, quiet_ms=500)
+    _deliver(run, _pull("opened", HEAD_A))
+    run.tick(1000)
+    run.tick(1600)
+    _deliver(run, _pull("opened", HEAD_A, base=OTHER_BASE))
+    run.tick(1700)
+    run.tick(2300)
+    one, two = (next(grade for grade in run.grades() if grade.base == base) for base in (BASE, OTHER_BASE))
+    _deliver(run, _pull("synchronize", HEAD_B))
+    _deliver(run, _pull("synchronize", HEAD_B, base=OTHER_BASE))
+    assert run.tick(2400) == [f"received {HEAD_B} on feature", f"holding {HEAD_B}"]
+    _deliver(run, _pull("closed", HEAD_B))
+    assert run.tick(2500) == [f"closed feature of {REPO}: retired {one.run}, {two.run} still grades {HEAD_A}"]
+    assert list(run.lab.client.hgetall(scheduler.WAITING)) == [PULL_LANE]
+    run.tick(3000)
+    assert run.grade(HEAD_B).base == BASE
+    assert run.grade(HEAD_A).superseded
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
 def test_a_closed_pull_request_ends_every_grade_of_its_head_and_base_in_its_lane(lab: Callable[..., Run]) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1),)})})
     _deliver(run, _pull("opened", HEAD_A))
@@ -491,6 +514,27 @@ def test_a_closed_pull_request_ends_every_grade_of_its_head_and_base_in_its_lane
     assert f"closed feature of {REPO}: retired {earlier}, {again}, dropped 1 pending units" in run.tick(1100)
     assert run.grades() == []
     assert run.engine.queue.pending() == []
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
+def test_a_closed_pull_request_names_every_grade_it_ends_beside_the_grade_that_stays(lab: Callable[..., Run]) -> None:
+    first = unit(1)
+    run = lab({HEAD_A: plan({"lint": (first,)})})
+    _deliver(run, _pull("opened", HEAD_A))
+    run.tick(1000)
+    earlier = run.grade(HEAD_A).run
+    run.push(HEAD_A, event="pull_request", action=intake.RERUN)
+    run.tick(1010)
+    again = run.lab.client.get(scheduler.LANES + PULL_LANE)
+    _deliver(run, _pull("opened", HEAD_A, base=OTHER_BASE))
+    run.tick(1020)
+    stays = next(grade for grade in run.grades() if grade.base == OTHER_BASE)
+    _deliver(run, _pull("closed", HEAD_A))
+    gone = ", ".join(sorted([earlier, again]))
+    assert f"closed feature of {REPO}: retired {gone}, {stays.run} still grades {HEAD_A}" in run.tick(1100)
+    assert [grade.run for grade in run.grades()] == [stays.run]
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_A, first)]
+    assert run.lab.client.get(scheduler.LANES + PULL_LANE) == stays.run
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
