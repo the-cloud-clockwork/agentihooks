@@ -854,11 +854,12 @@ def test_successor_cleanup_keeps_live_launchers_and_other_agent_names(
 
 @pytest.mark.feature("quick-launcher-survival")
 @pytest.mark.parametrize("quick", [False, True])
+@pytest.mark.parametrize("dead_pid", ["999999999", str(10**100)], ids=["dead", "out-of-range"])
 def test_only_a_quick_successor_removes_dead_launchers_with_a_recorded_pid(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, quick: bool
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, quick: bool, dead_pid: str
 ) -> None:
     dead, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010101")
-    dead.with_suffix(".started").write_text("999999999\n")
+    dead.with_suffix(".started").write_text(dead_pid)
     unknown, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010102", quick=False)
     unknown.with_suffix(".started").write_text("unknown")
     successor, _ = _retained_launcher(monkeypatch, tmp_path, "quick-abc-master", "261125-010103", quick=quick)

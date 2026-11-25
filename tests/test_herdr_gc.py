@@ -823,6 +823,18 @@ def test_old_launchers_with_live_started_pids_survive_cleanup(tmp_path: Path) ->
     assert not any(path.exists() for path in removed)
 
 
+@pytest.mark.feature("live-launcher-gc")
+def test_an_out_of_range_started_pid_uses_the_age_rule(tmp_path: Path) -> None:
+    launcher = aged(tmp_path / "oversized-261125-010101-123.sh", herdr_gc.RUN_FILE_AGE_S + 60)
+    marker = launcher.with_suffix(".started")
+    marker.write_text(str(10**100))
+    stamp = launcher.stat().st_mtime
+    os.utime(marker, (stamp, stamp))
+    now = stamp + herdr_gc.RUN_FILE_AGE_S + 60
+    assert herdr_gc.clean_run_dir(tmp_path, now, True) == [f"removed {launcher.name}", f"removed {marker.name}"]
+    assert not launcher.exists() and not marker.exists()
+
+
 def test_a_launch_file_exactly_a_day_old_stays(tmp_path):
     path = aged(tmp_path / "eng-1-a.sh", 0)
     assert herdr_gc.stale_launch_files(tmp_path, path.stat().st_mtime + herdr_gc.RUN_FILE_AGE_S) == []

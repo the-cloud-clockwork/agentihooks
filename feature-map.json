@@ -12747,7 +12747,8 @@
       "behaviour": "Run folder cleanup preserves old launch files whose started marker holds a live positive PID. Dead, missing, malformed and unreadable markers keep the existing age rule.",
       "seam": "scripts.herdr_gc.clean_run_dir",
       "tests": [
-        "tests/test_herdr_gc.py::test_old_launchers_with_live_started_pids_survive_cleanup"
+        "tests/test_herdr_gc.py::test_old_launchers_with_live_started_pids_survive_cleanup",
+        "tests/test_herdr_gc.py::test_an_out_of_range_started_pid_uses_the_age_rule"
       ]
     },
     {

@@ -313,7 +313,7 @@ def lines(findings: list, act: bool) -> list[str]:
 def _alive(pid: int, kill: Callable[[int, int], None] = os.kill) -> bool:
     try:
         kill(pid, 0)
-    except ProcessLookupError:
+    except (ProcessLookupError, OverflowError):
         return False
     except PermissionError:
         pass
