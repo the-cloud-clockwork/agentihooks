@@ -160,6 +160,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         ".github/actions/browser-cache/verify.sh",
         ".github/actions/retry-upload/find.sh",
         ".github/actions/retry-upload/watchdog.sh",
+        ".github/coverage/arrivals.py",
         ".github/coverage/combine.sh",
         ".github/coverage/flatten.py",
         ".github/coverage/parallel_xml.py",

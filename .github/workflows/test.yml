@@ -2799,6 +2799,26 @@ jobs:
       - name: Install coverage
         run: python -m pip install --constraint .github/test-requirements.lock coverage==7.17.0 PyYAML==6.0.3
 
+      - name: Mint the token that reads this run's job states
+        id: jobs-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Watch whether this run's shard jobs have started
+        id: queue-watch
+        env:
+          GH_APP_TOKEN: ${{ steps.jobs-token.outputs.token }}
+          PREFIX: 'unit ('
+          COVERAGE_RAW: 'true'
+          SHARDS: '20'
+        run: |
+          python .github/coverage/queue_watch.py "$PREFIX" > queue-watch.log 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
+
       - name: Take raw shard coverage as it lands
         id: raw-shard-coverage
         continue-on-error: true
@@ -2813,6 +2833,15 @@ jobs:
           github-token: none
           script: |
             require('child_process').execFileSync('python', [process.env.ARRIVALS], {stdio: 'inherit'})
+
+      - name: Require completed unit producers
+        run: python .github/coverage/arrivals.py --producers-complete
+
+      - name: Stop the queue watch
+        if: always() && steps.queue-watch.outputs.pid != ''
+        env:
+          PID: ${{ steps.queue-watch.outputs.pid }}
+        run: kill "$PID" 2> /dev/null || true
 
       - name: Download shard coverage
         id: download-shard-coverage

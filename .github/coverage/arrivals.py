@@ -82,6 +82,8 @@ class Jobs(Protocol):
         """Say whether a shard job of this scope is running or done, or None when that could not be read."""
         ...
 
+    def completed(self) -> bool: ...
+
 
 class Wall(Timer):
     """The monotonic clock and a real sleep."""
@@ -179,6 +181,19 @@ class FileJobs:
             return None
         return True if content == "started" else False if content == "queued" else None
 
+    def completed(self) -> bool:
+        path = self.path.with_name(self.path.name + ".complete")
+        try:
+            fresh = time.time() - path.stat().st_mtime <= STALE
+            state = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return False
+        return fresh and state == {
+            "run": os.environ.get("GITHUB_RUN_ID", ""),
+            "attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+            "complete": True,
+        }
+
 
 def shard_of(name: str, scope: str, shards: int) -> int | None:
     """Return the shard a coverage artifact of this scope belongs to, or None for any other artifact."""
@@ -271,27 +286,33 @@ def arrive(
     budget_start = timer.now()
     checked = budget_start - JOB_POLL
     running = True
-    taken: set[str] = set()
+    taken: dict[str, str] = {}
     first: dict[str, str] | None = None
     left = list(range(1, run.shards + 1))
     queue = [] if raw else [path for path in sorted(out.glob(CARRIED)) if path.stat().st_size]
     flattening: Flattening | None = None
     while True:
+        complete = not raw or jobs is not None and jobs.completed()
         listed = service.listed()
         if listed is not None:
             first = listed if first is None else first
             for name in sorted(listed):
                 if (
                     name in taken
+                    and (not raw or taken[name] == listed[name])
                     or shard_of(name, run.scope, run.shards) is None
                     or not service.fetch(name, out / name)
                 ):
                     continue
-                taken.add(name)
+                taken[name] = listed[name]
                 if not raw:
                     queue.extend(databases(out / name))
                 print(f"{name} landed {timer.now() - budget_start:.0f} s into the wait", flush=True)
-            left = pending(listed, first, taken, run.scope, run.shards, run.attempt)
+            if raw:
+                covered = {shard_of(name, run.scope, run.shards) for name in taken if taken[name] == listed.get(name)}
+                left = [shard for shard in range(1, run.shards + 1) if shard not in covered or not complete]
+            else:
+                left = pending(listed, first, set(taken), run.scope, run.shards, run.attempt)
         if not left or timer.now() - budget_start >= seconds:
             break
         if not raw:
@@ -311,6 +332,8 @@ def arrive(
 
 def main() -> int:
     """Wait for the SHARDS shards of SCOPE in this run attempt and say how the wait ended."""
+    if sys.argv[1:] == ["--producers-complete"]:
+        return int(not FileJobs(QUEUE_STATE).completed())
     token = os.environ.get("ACTIONS_RUNTIME_TOKEN", "")
     base = os.environ.get("ACTIONS_RESULTS_URL", "")
     if not token or not base:
@@ -321,9 +344,7 @@ def main() -> int:
     attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
     raw = os.environ.get("COVERAGE_RAW") == "true"
     service = Results(base, token)
-    left = arrive(
-        service, Scope(shards, scope, attempt), OUT, WAIT, Wall(), None if raw else FileJobs(QUEUE_STATE), raw
-    )
+    left = arrive(service, Scope(shards, scope, attempt), OUT, WAIT, Wall(), FileJobs(QUEUE_STATE), raw)
     if raw:
         covered = {shard_of(path.name, scope, shards) for path in OUT.iterdir() if (path / ".coverage").is_file()}
         left = sorted(set(left) | {shard for shard in range(1, shards + 1) if shard not in covered})

@@ -154,6 +154,9 @@ def test_raw_arrival_collection_matches_bulk_inputs_without_flattening(
     monkeypatch.setattr(arrivals, "OUT", out)
     monkeypatch.setattr(arrivals, "advance", flatten)
     monkeypatch.setattr(clock, "pause", pause)
+    _producer_state(tmp_path, True, attempt=1)
+    monkeypatch.setenv("GITHUB_RUN_ID", "9")
+    monkeypatch.setattr(arrivals, "QUEUE_STATE", tmp_path / "queue")
     assert arrivals.main() == 0
     assert pauses == [arrivals.INTERVAL]
     assert _outputs(out, root) == _outputs(baseline, root)
@@ -209,10 +212,10 @@ def test_manifest_preparation_starts_beside_units_and_collects_before_validation
     assert manifest["timeout-minutes"] > collect["timeout-minutes"]
 
 
-def _producer_state(folder: Path, complete: bool, queued: bool = False) -> None:
+def _producer_state(folder: Path, complete: bool, queued: bool = False, attempt: int = 2) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "queue").write_text("queued" if queued else "started")
-    (folder / "queue.complete").write_text(json.dumps({"run": "9", "attempt": 2, "complete": complete}))
+    (folder / "queue.complete").write_text(json.dumps({"run": "9", "attempt": attempt, "complete": complete}))
 
 
 def _raw_cli(service: Any, clock: Clock, folder: Path, monkeypatch: pytest.MonkeyPatch) -> int:

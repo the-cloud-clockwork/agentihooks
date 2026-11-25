@@ -342,10 +342,21 @@ jobs:
           [[ "$package" == "$isolated_package" ]] || { echo '::error::Isolated proof HOME imports a different Playwright package.'; exit 1; }
           HOME="$proof_home" timeout --kill-after=5s 30s bash .github/actions/browser-cache/verify.sh
 
+      - name: Mint the token for the manifest corpus proof
+        id: manifest-token
+        if: inputs.tests == 'tests/dep_manifest_replay.py'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
       - name: Run selected tests
         env:
           PYTHONUNBUFFERED: '1'
           PROOF_REPORT_DIR: ${{ runner.temp }}/proof-reports
+          GH_TOKEN: ${{ steps.manifest-token.outputs.token }}
         run: |
           set -o pipefail
           read -r -a paths <<< "$TEST_PATHS"
