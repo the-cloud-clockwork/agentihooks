@@ -474,6 +474,8 @@
       "behaviour": "The ledger page's first reads answer from narrow database reads: the summary read gives every part of the page but its paged sections, with counts per state of each paged section, phase status, freeze marks and closed row counts equal to what the page view derives, and an open rows read pages the open rows of one section in page order without comment bodies. Neither builds the whole ledger page view.",
       "seam": "GET /api/v1/ledgers/<slug>/summary, GET /api/v1/ledgers/<slug>/<section>?state=open and scripts.swarm_ledger.api.summary.build",
       "tests": [
+        "tests/swarm_ledger/test_api_v1.py::test_sdk_collections_and_tick_readers_cross_page_boundaries",
+        "tests/swarm_ledger/test_api_v1.py::test_cli_collection_consumers_read_all_pages",
         "tests/swarm_ledger/test_summary_read.py::test_the_summary_answers_without_building_the_whole_page_view",
         "tests/swarm_ledger/test_summary_read.py::test_an_open_first_page_answers_without_building_the_whole_page_view",
         "tests/swarm_ledger/test_summary_read.py::test_a_summary_read_and_an_open_tasks_read_at_once_build_the_summary_once",
