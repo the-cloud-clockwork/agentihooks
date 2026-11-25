@@ -19,7 +19,7 @@ STEPS = [
     ("_operator_mode", ({}, False), "hooks.context.operator_mode"),
     ("_operator_reminder", ({},), "hooks.context.operator_mode"),
     ("_refocus_blocks", ("session", "PreToolUse"), "hooks.context.swarm_refocus"),
-    ("_prompt_quota_policy", ({}, "session"), "hooks.context.quota_policy"),
+    ("_prompt_quota_policy", ({}, "session", False), "hooks.context.quota_policy"),
     ("_request_trace_flush", ({}, "stop"), "hooks.observability.trace_flush"),
     ("_close_handed_off", ({},), "hooks.lifecycle.handoff_close"),
 ]
