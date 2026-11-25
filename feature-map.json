@@ -8152,6 +8152,19 @@
       ]
     },
     {
+      "id": "lab-test-manifest-identity",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2752",
+      "behaviour": "Each test batch records the digest of its exact manifest bytes when keyed. The expected digest survives grade persistence, queue admission and lease transport. A worker refuses missing identity, missing payload and substituted batch records by name before acquiring execution resources, while later valid work still runs.",
+      "seam": "test expansion through persisted scheduler slots, queue, HTTP lease and test executor",
+      "tests": [
+        "tests/ci_lab/test_manifest_identity.py::test_expansion_records_the_identity_of_its_exact_batch_bytes",
+        "tests/ci_lab/test_manifest_identity.py::test_a_swapped_stored_manifest_is_refused_and_the_next_unit_still_runs",
+        "tests/ci_lab/test_manifest_identity.py::test_manifest_refusal_precedes_all_test_execution_resources",
+        "tests/ci_lab/test_manifest_identity.py::test_old_records_without_identity_are_parsed_then_refused_after_claiming"
+      ]
+    },
+    {
       "id": "swarm-enhance-close",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-close",
@@ -11293,7 +11306,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
@@ -13041,7 +13054,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-intake-drain",
       "behaviour": "One scheduler intake drains successive head consumer batches until a short or empty fetch or a ten second monotonic budget ends, including batches containing only completed checks, while preserving delivery order and keeping collected heads unacknowledged if a later fetch or observer fails. Remaining heads are read on the next call so release and admission can continue each pass.",
       "seam": "scripts.ci_lab.scheduler.BusInbox.heads over a paginated bus consumer and a controlled monotonic clock",
-      "rules": ["lab-intake-single-batch"],
+      "rules": [
+        "lab-intake-single-batch"
+      ],
       "tests": [
         "tests/ci_lab/test_scheduler_intake.py::test_one_intake_drains_a_backlog_larger_than_the_default_batch",
         "tests/ci_lab/test_scheduler_intake.py::test_a_short_or_empty_batch_ends_intake_without_another_fetch",
