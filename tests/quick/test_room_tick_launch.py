@@ -519,7 +519,7 @@ def test_force_ends_the_master_and_starts_a_bound_successor(tmp_path: Path) -> N
     assert ended == [("quick-abc-master", registry.LAUNCHING)]
     assert len(started) == 1
     assert seat is not None
-    assert (seat.pane, seat.session_id, seat.state) == ("w1:p1", "new-master-session", registry.READY)
+    assert (seat.pane_id, seat.session_id, seat.state) == ("w1:p1", "new-master-session", registry.READY)
 
 
 def test_force_never_ends_a_seat_whose_state_changed_since_it_was_read(
