@@ -28,6 +28,15 @@ class CheckedHub(HubAdmission):
         return self._claim()
 
 
+class CheckedHubHold(HubAdmission):
+    def admit(self: Any, offer_quota: Any) -> Any:
+        with self._turn():
+            if full := self._full() or self._account_hold():
+                return {"held": full}
+            # ok: event-claim-before-account-eligibility
+            return self._claim()
+
+
 class MissingSpokeCheck:
     def _poll(self: Any) -> Any:
         # ruleid: event-claim-before-account-eligibility

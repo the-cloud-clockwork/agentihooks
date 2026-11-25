@@ -149,22 +149,26 @@ class Admission:
             timer.mark("turn")
             if not busy and (kept := self._kept(slug, request, offer)):
                 return kept
-            if full := busy or self._full(request["hive"], reserved):
+            if (
+                full := busy
+                or self._full(request["hive"], reserved)
+                or self._account_hold(slug, lane, view.rows[task_id])
+            ):
                 refused(slug, request, full)
                 held: dict[str, str] = {hive_admission.HELD: full}
                 return held
             timer.mark("full")
-            environ = dict(os.environ)
-            accounts = capacity.hive_accounts(self.store)(environ, time.time(), refresh=False)
-            if not offer_quota.available(self.store.config(slug), lane, view.rows[task_id], accounts, environ):
-                refused(slug, request, ACCOUNT_HOLD)
-                return {hive_admission.HELD: ACCOUNT_HOLD}
             with self._claiming(offer, request["hive"]):
                 admitted = self._claim(slug, request, view.rows, view.doc, timer)
         if admitted is None:
             refused(slug, request, "another holder took the claim")
             return None
         return self._answered(slug, request, started, admitted, timer)
+
+    def _account_hold(self, slug: str, lane: str, task: dict[str, Any]) -> str:
+        environ = dict(os.environ)
+        accounts = capacity.hive_accounts(self.store)(environ, time.time(), refresh=False)
+        return ACCOUNT_HOLD if not offer_quota.available(self.store.config(slug), lane, task, accounts, environ) else ""
 
     def _held(self, offer: str) -> dict[str, Any] | None:
         """The admission kept for the offer, whichever hive asked for it; None when none is kept."""
