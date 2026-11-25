@@ -189,3 +189,76 @@ def test_an_unread_poll_leaves_the_state_file_as_it_was(tmp_path: Path, monkeypa
     monkeypatch.setattr("sys.argv", ["queue_watch.py", "unit ("])
     assert queue_watch.main() == 0
     assert not (tmp_path / queue_watch.STATE).exists()
+
+
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+@pytest.mark.parametrize(
+    ("history", "complete"),
+    [
+        ([], False),
+        ([("unit (3.12, 1)", 1, "queued"), ("unit (3.12, 2)", 1, "queued")], False),
+        ([("unit (3.12, 1)", 1, "success"), ("unit (3.12, 2)", 1, "success")], True),
+        ([("unit (3.12, 1)", 1, "success"), ("unit (3.12, 2)", 1, "failure"), ("unit (3.12, 2)", 2, "success")], True),
+        (
+            [("unit (3.12, 1)", 1, "success"), ("unit (3.12, 2)", 1, "success"), ("dep-manifest", 2, "in_progress")],
+            True,
+        ),
+        ([("unit (3.12, 1)", 1, "success"), ("unit (3.12, 2)", 1, "success"), ("select", 2, "success")], False),
+        (
+            [
+                ("unit (3.12, 1)", 1, "success"),
+                ("unit (3.12, 2)", 1, "success"),
+                ("select", 2, "success"),
+                ("unit (3.12, 1)", 2, "success"),
+                ("unit (3.12, 2)", 2, "success"),
+            ],
+            True,
+        ),
+        ([("unit (3.12, 1)", 2, "success"), ("unit (3.12, 2)", 2, "failure")], False),
+        ([("unit (3.12, 1)", 2, "success")], False),
+    ],
+    ids=[
+        "empty",
+        "queued",
+        "success",
+        "partial-rerun",
+        "manifest-only",
+        "matrix-not-created",
+        "matrix-created",
+        "failed-producer",
+        "missing-shard",
+    ],
+)
+def test_raw_watch_requires_a_complete_successful_final_matrix(
+    history: list[tuple[str, int, str]],
+    complete: bool,
+    jobs_api: tuple[str, list[dict[str, object]], list[tuple[str, str]]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api, jobs, calls = jobs_api
+    for ident, (name, attempt, result) in enumerate(history, 1):
+        jobs.append(
+            {
+                "id": ident,
+                "name": name,
+                "run_attempt": attempt,
+                "status": result if result in {"queued", "in_progress"} else "completed",
+                "conclusion": result if result in {"success", "failure"} else None,
+            }
+        )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GH_APP_TOKEN", "token-x")
+    monkeypatch.setenv("GITHUB_API_URL", api)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GITHUB_RUN_ID", "9")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    monkeypatch.setenv("COVERAGE_RAW", "true")
+    monkeypatch.setenv("SHARDS", "2")
+    monkeypatch.setattr(queue_watch, "INTERVAL", 0)
+    monkeypatch.setattr(queue_watch, "BOUND", 0.03)
+    monkeypatch.setattr("sys.argv", ["queue_watch.py", "unit ("])
+    assert queue_watch.main() == 0
+    state = json.loads((tmp_path / f"{queue_watch.STATE}.complete").read_text())
+    assert state == {"run": "9", "attempt": 2, "complete": complete}
+    assert any("filter=all" in path for path, _ in calls)

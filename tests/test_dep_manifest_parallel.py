@@ -207,3 +207,117 @@ def test_manifest_preparation_starts_beside_units_and_collects_before_validation
     assert str(collect["env"]["SHARDS"]) == "20"
     assert collect["with"]["github-token"] == "none"
     assert manifest["timeout-minutes"] > collect["timeout-minutes"]
+
+
+def _producer_state(folder: Path, complete: bool, queued: bool = False) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "queue").write_text("queued" if queued else "started")
+    (folder / "queue.complete").write_text(json.dumps({"run": "9", "attempt": 2, "complete": complete}))
+
+
+def _raw_cli(service: Any, clock: Clock, folder: Path, monkeypatch: pytest.MonkeyPatch) -> int:
+    monkeypatch.setenv("ACTIONS_RUNTIME_TOKEN", "runtime")
+    monkeypatch.setenv("ACTIONS_RESULTS_URL", "https://example.invalid/")
+    monkeypatch.setenv("SHARDS", "2")
+    monkeypatch.setenv("SCOPE", "full")
+    monkeypatch.setenv("GITHUB_RUN_ID", "9")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    monkeypatch.setenv("COVERAGE_RAW", "true")
+    monkeypatch.setattr(arrivals, "Results", lambda *args: service)
+    monkeypatch.setattr(arrivals, "Wall", lambda: clock)
+    monkeypatch.setattr(arrivals, "OUT", folder / "shards")
+    monkeypatch.setattr(arrivals, "QUEUE_STATE", folder / "queue")
+    return arrivals.main()
+
+
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+def test_raw_rerun_reselects_replaced_archives_after_producers_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, archives = _corpus(tmp_path)
+    final = dict(archives)
+    final["coverage-3.12-1"] = archives["coverage-3.12-2"]
+    baseline = tmp_path / "bulk"
+    for name, body in final.items():
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            archive.extractall(baseline / name)
+    clock = Clock()
+    service = _transport(archives, monkeypatch, clock)
+    folder = tmp_path / "raw"
+    _producer_state(folder, False)
+    monkeypatch.setattr(
+        service, "listed", lambda: {"coverage-3.12-1": "3" if clock.now() else "1", "coverage-3.12-2": "2"}
+    )
+    replacement_calls = []
+
+    def opened(url: str, timeout: float) -> io.BytesIO:
+        name = url.rsplit("/", 1)[1]
+        if clock.now() and name == "coverage-3.12-1":
+            replacement_calls.append(name)
+            if len(replacement_calls) == 1:
+                raise OSError("replacement temporarily unavailable")
+        return io.BytesIO((final if clock.now() else archives)[name])
+
+    def pause(seconds: float) -> None:
+        clock.pauses.append(seconds)
+        clock.moment += seconds
+        _producer_state(folder, True)
+
+    monkeypatch.setattr(arrivals.urllib.request, "urlopen", opened)
+    monkeypatch.setattr(clock, "pause", pause)
+    assert _raw_cli(service, clock, folder, monkeypatch) == 0
+    assert clock.pauses == [arrivals.INTERVAL] * 2
+    assert len(replacement_calls) == 2
+    assert _outputs(folder / "shards", root) == _outputs(baseline, root)
+
+
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+def test_raw_cli_does_not_spend_its_budget_while_shards_are_queued(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, archives = _corpus(tmp_path)
+    clock = Clock()
+    service = _transport(archives, monkeypatch, clock)
+    folder = tmp_path / "raw"
+    _producer_state(folder, False, queued=True)
+    monkeypatch.setattr(arrivals, "WAIT", arrivals.INTERVAL)
+    monkeypatch.setattr(arrivals, "JOB_POLL", arrivals.INTERVAL)
+    monkeypatch.setattr(
+        service,
+        "listed",
+        lambda: {} if clock.now() < arrivals.INTERVAL * 4 else {"coverage-3.12-1": "1", "coverage-3.12-2": "2"},
+    )
+
+    def pause(seconds: float) -> None:
+        clock.pauses.append(seconds)
+        clock.moment += seconds
+        ready = clock.now() >= arrivals.INTERVAL * 4
+        _producer_state(folder, ready, queued=not ready)
+
+    monkeypatch.setattr(clock, "pause", pause)
+    assert _raw_cli(service, clock, folder, monkeypatch) == 0
+    assert clock.pauses == [arrivals.INTERVAL] * 4
+    assert (folder / "shards/coverage-3.12-1/.coverage").is_file()
+    assert _outputs(folder / "shards", root)["contexts"]
+
+
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+def test_manifest_tracks_queued_and_completed_producers_before_fallback() -> None:
+    manifest = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["dep-manifest"]
+    steps = manifest["steps"]
+    named = {step.get("name"): step for step in steps}
+    mint = named["Mint the token that reads this run's job states"]
+    assert mint["with"]["permission-actions"] == "read"
+    assert manifest["permissions"] == {"contents": "read"}
+    watch = named["Watch whether this run's shard jobs have started"]
+    assert watch["env"]["COVERAGE_RAW"] == "true"
+    assert watch["env"]["PREFIX"] == "unit ("
+    assert watch["env"]["GH_APP_TOKEN"] == "${{ steps.jobs-token.outputs.token }}"
+    assert "queue_watch.py" in watch["run"]
+    stop = named["Stop the queue watch"]
+    assert "always()" in stop["if"]
+    names = [step.get("name") for step in steps]
+    boundary = names.index("Require completed unit producers")
+    assert names.index("Take raw shard coverage as it lands") < boundary
+    assert boundary < names.index("Download shard coverage")
+    assert boundary < names.index("Check the shard coverage downloads")
