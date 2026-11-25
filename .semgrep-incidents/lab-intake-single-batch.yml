@@ -1,0 +1,19 @@
+rules:
+  - id: lab-intake-single-batch
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A single head consumer fetch per scheduler pass leaves pushed heads behind the event stream.
+      Drain further batches until a short fetch or the intake deadline, then reach release and admission.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-intake-single-batch.py
+    patterns:
+      - pattern-inside: |
+          def heads(...):
+              ...
+      - pattern: $CONSUMER.fetch(...)
+      - pattern-not-inside: |
+          while $CONDITION:
+              ...
