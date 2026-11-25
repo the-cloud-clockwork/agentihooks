@@ -40,7 +40,7 @@ from scripts.dep_manifest import changes as recorded_changes
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
 WORKERS = 4
-BATCH_RUNNERS = 12
+BATCH_RUNNERS = 6
 RUNNER_WAVES = 2
 SHARD_CEILING = BATCH_RUNNERS * RUNNER_WAVES
 SHARD_SETUP_SECONDS = 180.0

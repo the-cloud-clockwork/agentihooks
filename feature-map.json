@@ -5149,7 +5149,7 @@
       "id": "tick-thin-task-pass",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-tick-step",
-      "behaviour": "Every 120 seconds the thin task pass checks each open engineer or ci task whose enhancement field is empty; a thin one gets one enhancement plan task in its phase, its enhancement set to needed in the same ledger write, and one master notice, and a second pass queues nothing more; a task the swarm freeze check reads as frozen, held by a freeze on itself, its phase or its plan, gets no write and no place in the notice.",
+      "behaviour": "Every 120 seconds the thin task pass checks each open engineer or ci task whose enhancement field is empty; a thin one gets one enhancement plan task in its phase, its enhancement set to needed in the same ledger write, and one master notice, and a thin one with no phase first gets in that write a manual planning phase of its own, named like its enhancement task, and a move into it, and a second pass queues nothing more; a task the swarm freeze check reads as frozen, held by a freeze on itself, its phase or its plan, gets no write and no place in the notice.",
       "seam": "scripts.tick.steps.thin._thin_task_pass registered as tick step thin task pass in group wrapper phases",
       "tests": [
         "tests/tick/steps/test_thin_task_pass.py::test_thin_task_pass",
@@ -5162,7 +5162,7 @@
         "tests/tick/steps/test_thin_task_pass.py::test_a_title_the_ledger_would_refuse_falls_back_to_a_plain_title",
         "tests/tick/steps/test_thin_task_pass.py::test_a_task_with_no_title_gets_the_plain_title",
         "tests/tick/steps/test_thin_task_pass.py::test_two_thin_tasks_are_both_queued_and_named_in_one_master_notice",
-        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_with_no_phase_or_description_gets_an_enhancement_task_with_neither",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_with_no_phase_gets_a_manual_phase_of_its_own_holding_it_and_its_enhancement",
         "tests/tick/steps/test_thin_task_pass.py::test_a_spent_deadline_takes_no_task",
         "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_held_by_a_freeze_gets_no_enhancement_write",
         "tests/tick/steps/test_thin_task_pass.py::test_an_unfrozen_thin_task_beside_a_frozen_phase_still_gets_its_enhancement",
@@ -16629,7 +16629,7 @@
       "id": "ledger-writer-hosts",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-hosts",
-      "behaviour": "Workstation hive installation and shared systemd units keep the warm ledger writer running after clean or failed termination. Worker startup restarts the writer beside hive run with inherited database settings and stops it when the hive ends.",
+      "behaviour": "Workstation hive installation and shared systemd units keep the warm ledger writer running after clean or failed termination. Every writer launch sets MALLOC_ARENA_MAX to two. Worker startup restarts the writer beside hive run with inherited database settings and stops it when the hive ends.",
       "seam": "timer.units, hive.daemon.install and deploy worker startup",
       "tests": [
         "tests/hive/test_daemon.py::test_writer_unit_uses_the_installed_binary_and_restarts_after_every_exit",
