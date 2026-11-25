@@ -4414,9 +4414,9 @@ Work it end to end, then stop:
 ```
 
 The commands carry the planner's own prefixes: `agentihooks api --slug <slug> --as <planner>` for ledger reads and
-writes, and `agentihooks swarm <slug>` for `done`. The phase in step 4 is the enhancement task's own phase, which is always its target's phase: a
-target with no phase gets a manual planning phase of its own, named like its enhancement task, in the same ledger write
-that queues the enhancement.
+writes, and `agentihooks swarm <slug>` for `done`. The phase in step 4 is the enhancement task's own phase, which is
+always its target's phase: a target with no phase gets a manual planning phase of its own, named like its enhancement
+task, in the same ledger write that queues the enhancement.
 
 Each step leaves this behind:
 
