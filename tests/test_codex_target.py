@@ -459,6 +459,40 @@ class TestSharedSkillsDir:
         assert (shared / "SKILL.md").read_text() == "REAL SKILL"
 
 
+class TestOwnCodexHomeSkills:
+    """A CODEX_HOME of its own keeps its skills, so another Codex on the machine never sees them."""
+
+    def test_layer_skills_go_into_the_codex_home(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from scripts.targets._common import agents_skills_home
+
+        home = tmp_path / "own-codex"
+        monkeypatch.setenv("CODEX_HOME", str(home))
+        layer = tmp_path / "layer"
+        (layer / "helper").mkdir(parents=True)
+        (layer / "helper" / "SKILL.md").write_text("---\nname: helper\ndescription: Helps.\n---\n")
+        CodexAdapter().install_features("skills", [("skill", layer)], lambda p: (p / "SKILL.md").is_file())
+        assert (home / "skills" / "helper" / "SKILL.md").is_file()
+        assert not (agents_skills_home() / "helper").exists()
+
+    def test_hand_placed_skills_and_commands_go_into_the_codex_home(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from scripts.targets._common import agents_skills_home
+
+        home = tmp_path / "own-codex"
+        monkeypatch.setenv("CODEX_HOME", str(home))
+        skill = install.CLAUDE_HOME / "skills" / "proxy-analyst"
+        _hand_placed(skill / "SKILL.md", "---\nname: proxy-analyst\ndescription: Reads the proxy.\n---\n")
+        text = "---\ndescription: Deploys the agent.\n---\n\nRun the deploy.\n"
+        _hand_placed(install.CLAUDE_HOME / "commands" / "deploy-agent.md", text)
+        CodexAdapter().install_features("skills", [("skill", tmp_path / "none")], lambda p: (p / "SKILL.md").is_file())
+        CodexAdapter().install_features("commands", [("command", tmp_path / "none")], _is_md)
+        assert (home / "skills" / "proxy-analyst").resolve() == skill.resolve()
+        assert (home / "skills" / "deploy-agent" / "SKILL.md").read_text() == text
+        assert not (agents_skills_home() / "proxy-analyst").exists()
+        assert not (agents_skills_home() / "deploy-agent").exists()
+
+
 def _is_md(path: Path) -> bool:
     return path.suffix == ".md"
 
