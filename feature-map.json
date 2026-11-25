@@ -58,7 +58,7 @@
       "id": "sonar-failed-gate-names-new-bugs",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-sonar-new-bug-13212",
-      "behaviour": "A failed Sonar quality gate prints the unresolved new bugs and vulnerabilities of the branch or pull request the scanner's dashboard address names, read once: the first 100 with component, line, rule and message, then a count of the rest. A refused read leaves the error line and the red exit as they are, a read the server does not answer stops once its retry waits reach 30 seconds and shows neither the retry script's outage notice nor its summary line, and a passed or superseded gate reads no issues.",
+      "behaviour": "A failed Sonar quality gate prints every page of unresolved new bugs and vulnerabilities of the branch or pull request the scanner's dashboard address names with component, line, rule and message. Refused or empty later pages retain prior findings and report the remaining count when known. Both finding collections share one thirty second timeout, diagnostic errors leave the original failed verdict and summary unchanged, and passed or superseded gates read no issues.",
       "seam": "the run text of the step SonarQube Quality Gate of the sonar job, run in a shell against a fake curl that answers the issue search",
       "tests": [
         "tests/test_ci_sonar_speed.py::test_a_failed_gate_names_its_new_bugs",
