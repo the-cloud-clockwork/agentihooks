@@ -45,8 +45,9 @@ launcher script into the runtime directory and runs it in the seat's herdr
 pane. The launcher exports the seat's identity, then its quick variables —
 `AGENTIHOOKS_QUICK_SWARM`, `AGENTIHOOKS_QUICK_SEAT`, `AGENTIHOOKS_QUICK_DIR`
 (`scripts/quick/member.py`'s `QUICK_ENV` / `SEAT_ENV` / `DIR_ENV`) — plus
-`AGENTIHOOKS_AGENT_NAME` and `AGENTIHOOKS_TERMINAL_LAUNCH=1`; herdr itself sets
-`HERDR_AGENT` for the pane it starts. A seat's agent registers itself into
+`AGENTIHOOKS_AGENT_NAME` and `AGENTIHOOKS_TERMINAL_LAUNCH=1`; `init-agent`
+itself sets `HERDR_AGENT` for the pane it starts
+(`scripts/init_agent.py::env`). A seat's agent registers itself into
 `seats.json` (`registry.bind`) only when it reads those quick variables and
 the seat was `launching`.
 
@@ -108,7 +109,11 @@ the quick tick never forces the master either. Start a master successor by
 hand instead: open a new session in the master's pane with its quick
 variables set (`AGENTIHOOKS_QUICK_SWARM`, `AGENTIHOOKS_QUICK_SEAT=master`,
 `AGENTIHOOKS_QUICK_DIR`), then from that pane run `agentihooks quick relaunch
-master --folder <folder> --adopt`. An open operator order is changing this.
+master --folder <folder> --adopt`. `launch.adopt` (`cli._adopt`) only binds
+that live session into the registry; unlike `start_seat` it writes no opening
+prompt, so the successor's first message, typed into the pane before the
+adopt command, must be told by hand to load the `quick-swarm-master` skill
+before anything else. An open operator order is changing this.
 
 ## Enforcing the merge request discipline
 

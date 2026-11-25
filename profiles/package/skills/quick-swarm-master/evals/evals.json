@@ -14,5 +14,9 @@
   {
     "query": "force a handoff of the quick swarm master's own seat",
     "expected_behavior": "States that a forced relaunch of the master seat returns master and starts nothing on current dev, then starts a successor by hand in the master's pane with its quick variables set and runs agentihooks quick relaunch master --folder <folder> --adopt from that pane."
+  },
+  {
+    "query": "a hand-started session is about to adopt the quick swarm master seat with --adopt",
+    "expected_behavior": "Points out that --adopt only binds the live session into the registry and writes no opening prompt, so before running the adopt command the successor's first message in that pane must tell it to load the quick-swarm-master skill before anything else."
   }
 ]
