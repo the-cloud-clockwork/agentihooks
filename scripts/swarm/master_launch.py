@@ -224,7 +224,8 @@ def _new(store: RedisStore, slug: str, runtime: Any, at: int, forced: bool) -> L
     occupant = store.execution_occupants(slug).get(record.seat)
     record = placed_record(occupant if occupant and occupant.name == name else record, placed)
     reported = runtime.reported(record)
-    spawn_counts.placed(store, slug, replace(record, state="working" if reported else "starting"), runtime)
+    spawn_counts.completed(store, slug, record, runtime)
+    store.put_agent(slug, replace(record, state="working" if reported else "starting"))
     launch_check.begin(store, slug, record, at)
     if reported:
         store.redis.delete(store.key(slug, "master-start"))

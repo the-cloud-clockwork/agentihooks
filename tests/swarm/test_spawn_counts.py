@@ -149,15 +149,20 @@ def test_a_start_already_counted_as_a_claim_still_repairs_its_missing_spawn(
 
 
 @pytest.mark.feature("swarm-status-hourly-spawns")
-def test_a_same_name_master_resume_adds_a_new_launch(store: RedisStore) -> None:
+@pytest.mark.parametrize("with_launch_time", [True, False])
+def test_a_same_name_master_resume_adds_a_new_launch(store: RedisStore, with_launch_time: bool) -> None:
     from scripts.swarm import master_launch
 
     now = now_ms()
     original = local_spawn(store, "claude", now - 1000)
     agent = replace(original, harness="claude", profile="engineer", launched_at=now - 1000)
-    runtime = SimpleNamespace(resume=lambda *args: Placed("resumed:pane", "claude", launched_at=now))
-    master_launch._resume(store, SLUG, runtime, now - HOUR - 1, master_launch.Previous(agent, now - 1000))
+    runtime = SimpleNamespace(
+        resume=lambda *args: Placed("resumed:pane", "claude", launched_at=now if with_launch_time else 0)
+    )
+    requested = now - HOUR - 1 if with_launch_time else now
+    master_launch._resume(store, SLUG, runtime, requested, master_launch.Previous(agent, now - 1000))
     assert store.spawns(SLUG) == {"claude": 2}
+    assert next(row for row in store.agents(SLUG) if row.name == agent.name).launched_at == now
 
 
 @pytest.mark.feature("swarm-status-hourly-spawns")
@@ -187,7 +192,7 @@ def test_a_resumed_process_stays_counted_when_its_metadata_write_fails(
 
     now = now_ms()
     agent = AgentRecord("eng-a", "eng", "t1", harness="claude", pane_id="old")
-    runtime = SimpleNamespace(resume=lambda *args: Placed("new", "claude", launched_at=now))
+    runtime = SimpleNamespace(resume=lambda *args: Placed("new", "claude", launched_at=now), retire=lambda agent: None)
     context = SimpleNamespace(runtime=runtime, at=now)
     monkeypatch.setattr(snapshot, "worktrees", lambda *args: {})
     monkeypatch.setattr(resume, "blocker", lambda *args: "")
@@ -220,3 +225,52 @@ def test_a_local_launch_is_retired_when_its_spawn_cannot_be_recorded(
     retired = runtime.retire.call_args.args[0]
     assert (retired.pane_id, retired.harness) == ("local:pane", "claude")
     runtime.retire.assert_called_once()
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+@pytest.mark.parametrize("name", ["", None])
+def test_an_anonymous_spawn_is_not_recorded(
+    store: RedisStore, name: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(spawn_counts.time, "time", lambda: 0.001)
+    before = store.export(SLUG)
+    spawn_counts.record(store, SLUG, "claude", name, 1)
+    assert store.export(SLUG) == before
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+def test_a_launch_at_the_first_positive_millisecond_is_counted(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(spawn_counts.time, "time", lambda: 0.001)
+    spawn_counts.record(store, SLUG, "claude", "one", 1)
+    assert store.spawns(SLUG) == {"claude": 1}
+
+
+@pytest.mark.feature("swarm-status-hourly-spawns")
+def test_a_handoff_restart_records_its_returned_launch_and_conversation(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import resume, tick
+
+    now = now_ms()
+    agent = AgentRecord("eng-restart", "eng", "t1", harness="claude", pane_id="old", idle_ticks=4)
+    runtime = SimpleNamespace(
+        spawn=lambda *args: Placed("restart:pane", "claude", launched_at=now, conversation_id="restart-conversation"),
+        retire=lambda agent: None,
+    )
+    context = SimpleNamespace(runtime=runtime, at=now - HOUR - 1)
+    monkeypatch.setattr(resume, "_recovery_current", lambda *args: True)
+    monkeypatch.setattr(resume, "recovery_text", lambda *args: "saved handoff")
+    monkeypatch.setattr(resume.transfers, "record", lambda *args: None)
+    monkeypatch.setattr(resume.transfers, "attach", lambda *args: {})
+    monkeypatch.setattr(tick, "primed", lambda store, slug, seat, task: task)
+    assert resume._restart_from_handoff(store, SLUG, agent, {}, context) == ""
+    stored = next(row for row in store.agents(SLUG) if row.name == agent.name)
+    assert (stored.pane_id, stored.conversation_id, stored.launched_at, stored.idle_ticks) == (
+        "restart:pane",
+        "restart-conversation",
+        now,
+        0,
+    )
+    assert store.spawns(SLUG) == {"claude": 1}
