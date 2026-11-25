@@ -58,6 +58,19 @@ def test_resource_literals_remain_visible(mode: str) -> None:
 
 @pytest.mark.feature("guardrails.secret-reference-literals")
 @pytest.mark.parametrize("mode", ["standard", "strict"])
+@pytest.mark.parametrize("key", ["secret", "password", "api_key"])
+def test_reference_shaped_keys_do_not_hide_credentials(key: str, mode: str) -> None:
+    value = "7fJk29sLq0pXv8Rt"
+    text = json.dumps({f"example/service/{key}": value})
+    assert scan(text, mode=mode) == ["generic_secret"]
+    result = redact(text, mode=mode)
+    assert "[REDACTED:generic_secret]" in result
+    assert value not in result
+    assert contains_generic_secret(text)
+
+
+@pytest.mark.feature("guardrails.secret-reference-literals")
+@pytest.mark.parametrize("mode", ["standard", "strict"])
 @pytest.mark.parametrize("style", ["quoted", "bare", "json"])
 @pytest.mark.parametrize(
     "value",

@@ -7,6 +7,7 @@
   "tests": [
     "tests/test_secret_references.py::test_secret_references_remain_visible",
     "tests/test_secret_references.py::test_resource_literals_remain_visible",
+    "tests/test_secret_references.py::test_reference_shaped_keys_do_not_hide_credentials",
     "tests/test_secret_references.py::test_credentials_and_malformed_references_stay_blocked",
     "tests/test_secret_references.py::test_reference_does_not_hide_a_credential_or_provider_token",
     "tests/test_secret_references.py::test_unterminated_reference_is_still_a_literal"
