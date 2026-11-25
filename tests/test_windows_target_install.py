@@ -81,7 +81,7 @@ def test_codex_hooks_run_a_batch_wrapper_on_windows(monkeypatch):
         for group in groups
         for hook in group["hooks"]
     }
-    assert commands == {f'"{wrapper}"'}
+    assert commands == {f'cmd.exe /d /c "{wrapper}"'}
     text = wrapper.read_text()
     assert text.startswith("@echo off\n")
     assert codex_target._wrapper_python(text) == text.splitlines()[-1].split('"')[1]
@@ -102,6 +102,37 @@ def test_windows_reinstall_replaces_bash_wrapper_hooks(monkeypatch):
     commands = [hook["command"] for groups in doc["hooks"].values() for group in groups for hook in group["hooks"]]
     assert not any(command.endswith("agentihooks-hook.sh") for command in commands)
     assert "PostCompact" not in doc["hooks"]
+
+
+def test_windows_reinstall_replaces_quoted_wrapper_hooks(monkeypatch):
+    """Codex on Windows never runs a quoted hook command; reinstall writes the cmd.exe form once per event."""
+    from scripts.targets import codex_target
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setattr(codex_target, "WINDOWS", True)
+    home = codex_target.codex_home()
+    home.mkdir(parents=True, exist_ok=True)
+    wrapper = home / "agentihooks-hook.cmd"
+    quoted = {"hooks": [{"type": "command", "command": f'"{wrapper}"'}]}
+    (home / "hooks.json").write_text(json.dumps({"hooks": {"PreToolUse": [quoted]}}))
+    codex_target.CodexAdapter().write_settings({})
+    groups = json.loads((home / "hooks.json").read_text())["hooks"]["PreToolUse"]
+    assert [hook["command"] for group in groups for hook in group["hooks"]] == [f'cmd.exe /d /c "{wrapper}"']
+
+
+def test_windows_reinstall_keeps_one_cmd_hook_per_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second install recognises its own cmd.exe hooks and does not add them again."""
+    from scripts.targets import codex_target
+
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setattr(codex_target, "WINDOWS", True)
+    home = codex_target.codex_home()
+    home.mkdir(parents=True, exist_ok=True)
+    codex_target.CodexAdapter().write_settings({})
+    codex_target.CodexAdapter().write_settings({})
+    doc = json.loads((home / "hooks.json").read_text())
+    counts = {event: sum(len(group["hooks"]) for group in groups) for event, groups in doc["hooks"].items()}
+    assert counts and set(counts.values()) == {1}
 
 
 @pytest.mark.parametrize("takes_package", [True, False])
