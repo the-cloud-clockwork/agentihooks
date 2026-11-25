@@ -425,7 +425,7 @@ def _downstream(task_id, waiters):
 HOLDING_STATES = ("claimed", "pr")
 
 
-def _focus_order(doc, caps=None, weight=50):
+def _focus_order(doc: dict[str, Any], caps: dict[str, int] | None = None, weight: int = 50) -> dict[str, int]:
     """Focused tasks sort first, except in a lane already at its focus-weight share of claimed/pr tasks."""
     targets = [row.get("target") for row in doc.get("freezes", []) if row.get("verb") == "focus"]
     nodes, _ = hierarchy.project(doc)
@@ -437,7 +437,9 @@ def _focus_order(doc, caps=None, weight=50):
 
     matched = {t["id"]: match(t) for t in tasks}
     holding = Counter(t.get("lane") for t in tasks if t.get("state") in HOLDING_STATES and matched[t["id"]] is not None)
-    cap = {lane: (count * weight) // 100 for lane, count in (caps or {}).items()}
+    cap = {
+        lane: max(1, (count * weight) // 100) if count > 0 and weight > 0 else 0 for lane, count in (caps or {}).items()
+    }
     order = {}
     for t in tasks:
         index, lane = matched[t["id"]], t.get("lane")
