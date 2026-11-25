@@ -1,0 +1,16 @@
+{
+  "id": "thin-enhancement-phase-backfill",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-phaseless-enhance-backfill",
+  "behaviour": "Previously queued open enhancement plans without phases and their targets get a shared manual phase, preserving existing scope and metadata, and repeated passes perform no writes.",
+  "seam": "scripts.swarm.thin_task.backfill and its explicit module command",
+  "tests": [
+    "tests/swarm/test_thin_task_backfill.py::test_an_existing_enhancement_target_is_already_skipped_by_the_thin_pass",
+    "tests/swarm/test_thin_task_backfill.py::test_legacy_pairs_get_separate_manual_phases_and_a_second_pass_writes_nothing",
+    "tests/swarm/test_thin_task_backfill.py::test_an_existing_own_phase_is_reused",
+    "tests/swarm/test_thin_task_backfill.py::test_a_scoped_target_keeps_its_phase_and_only_its_orphan_plan_moves",
+    "tests/swarm/test_thin_task_backfill.py::test_unrelated_finished_and_scoped_plan_tasks_are_unchanged",
+    "tests/swarm/test_thin_task_backfill.py::test_target_state_and_completion_metadata_are_preserved",
+    "tests/swarm/test_thin_task_backfill.py::test_a_missing_target_refuses_the_pass_before_any_writes"
+  ]
+}
