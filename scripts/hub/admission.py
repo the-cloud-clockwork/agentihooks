@@ -2,6 +2,7 @@
 or occupy a seat, and a remote hive makes no service ledger reads."""
 
 import json
+import os
 import sys
 import time
 import uuid
@@ -18,7 +19,7 @@ from scripts.handoff import envelope, transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
 from scripts.hub import branch_heads, lease
-from scripts.swarm import admission_view, readiness, run_window, successor_fill
+from scripts.swarm import admission_view, capacity, offer_quota, readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
@@ -30,6 +31,7 @@ ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
 TURN_MS, TURN_TRIES, TURN_WAIT_S = 30_000, 40, 0.05  # pragma: no mutate
 BUSY = "another admission for the hive is in progress"
+ACCOUNT_HOLD = "no permitted harness has a free account seat"
 
 
 def release_key(text: str) -> Version | None:
@@ -152,6 +154,11 @@ class Admission:
                 held: dict[str, str] = {hive_admission.HELD: full}
                 return held
             timer.mark("full")
+            environ = dict(os.environ)
+            accounts = capacity.hive_accounts(self.store)(environ, time.time(), refresh=False)
+            if not offer_quota.available(self.store.config(slug), lane, view.rows[task_id], accounts, environ):
+                refused(slug, request, ACCOUNT_HOLD)
+                return {hive_admission.HELD: ACCOUNT_HOLD}
             with self._claiming(offer, request["hive"]):
                 admitted = self._claim(slug, request, view.rows, view.doc, timer)
         if admitted is None:

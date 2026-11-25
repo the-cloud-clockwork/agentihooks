@@ -1,13 +1,17 @@
-from typing import Any
+from typing import Any, Protocol
 
 
-class MissingHubCheck:
-    def admit(self: Any) -> Any:
+class HubAdmission(Protocol):
+    def admit(self, offer_quota: Any) -> Any: ...
+
+
+class MissingHubCheck(HubAdmission):
+    def admit(self: Any, offer_quota: Any) -> Any:
         # ruleid: event-claim-before-account-eligibility
         return self._claim()
 
 
-class LateHubCheck:
+class LateHubCheck(HubAdmission):
     def admit(self: Any, offer_quota: Any) -> Any:
         # ruleid: event-claim-before-account-eligibility
         claimed = self._claim()
@@ -16,7 +20,7 @@ class LateHubCheck:
         return claimed
 
 
-class CheckedHub:
+class CheckedHub(HubAdmission):
     def admit(self: Any, offer_quota: Any) -> Any:
         if not offer_quota.available():
             return {"held": "no account seat"}

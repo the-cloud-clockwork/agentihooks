@@ -123,7 +123,7 @@ def test_each_lane_has_its_own_work_queue():
     assert readiness.queue_name("other", "ci") == "swarm.other.ready.ci"
 
 
-def test_an_offer_carries_the_task_lane_and_generation():
+def test_an_offer_carries_the_task_lane_and_generation() -> None:
     view = snapshot(doc([task("a", lane="ci", claim_generation=2)]))
     event = readiness.offer(view.rows["a"], view, NOW)
     assert event.to_dict() == {
@@ -135,7 +135,7 @@ def test_an_offer_carries_the_task_lane_and_generation():
         "version": 2,
         "time": NOW,
         "author": "readiness",
-        "data": {"lane": "ci", "generation": 2},
+        "data": {"lane": "ci", "generation": 2, "quota": {}},
         "cause": None,
         "schema_version": 1,
     }
