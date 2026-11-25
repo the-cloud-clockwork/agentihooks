@@ -1,0 +1,13 @@
+{
+  "id": "guardrails.secret-reference-literals",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-secret-scan-name-not-value",
+  "behaviour": "The generic credential scan preserves quoted hierarchical secret names and AWS Secrets Manager or SSM parameter references while continuing to block credential values and malformed references.",
+  "seam": "scan, redact and contains_generic_secret through assignment and JSON content",
+  "tests": [
+    "tests/test_secret_references.py::test_secret_references_remain_visible",
+    "tests/test_secret_references.py::test_credentials_and_malformed_references_stay_blocked",
+    "tests/test_secret_references.py::test_reference_does_not_hide_a_credential_or_provider_token",
+    "tests/test_secret_references.py::test_unterminated_reference_is_still_a_literal"
+  ]
+}
