@@ -15829,7 +15829,8 @@
         "tests/test_sonar_arrivals.py::test_a_fresh_started_state_reads_as_started",
         "tests/test_sonar_arrivals.py::test_a_fresh_queued_state_reads_as_not_started",
         "tests/test_sonar_arrivals.py::test_a_stale_queue_state_file_reads_as_unknown",
-        "tests/test_sonar_arrivals.py::test_an_unrecognised_queue_state_reads_as_unknown"
+        "tests/test_sonar_arrivals.py::test_an_unrecognised_queue_state_reads_as_unknown",
+        "tests/test_queue_watch.py::test_a_queued_shard_among_running_ones_reports_not_started"
       ]
     },
     {
