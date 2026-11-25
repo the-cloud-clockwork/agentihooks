@@ -102,8 +102,71 @@ def process(proc: Path = Path("/proc"), start: int | None = None) -> tuple[int, 
     raise ValueError("profile canary has no supported live harness ancestor")
 
 
+def bind_sandbox(environ: dict[str, str], pid: int, start: int, thread: str) -> None:
+    if environ.get("AGENTIHOOKS_PROFILE") != "planner" or not environ.get(REPORT):
+        return
+    outer, target, live, account = process(start=pid)
+    report = Path(environ[REPORT])
+    if (
+        target != "codex"
+        or live.get("AGENTIHOOKS_PROFILE") != "planner"
+        or live.get(REPORT) != str(report)
+        or live.get("CODEX_HOME") != environ.get("CODEX_HOME")
+    ):
+        raise ValueError("Codex planner launch does not match its live process")
+    requested = json.loads(report.read_text())
+    requested["sandbox_launch"] = {
+        "pid": outer,
+        "start": start,
+        "thread": thread,
+        "profile": "planner",
+        "harness": target,
+        "home": live["CODEX_HOME"],
+        "report": str(report),
+        "account": account,
+        "model": live.get("AGENTIHOOKS_RUN_MODEL", ""),
+        "effort": live.get("AGENTIHOOKS_RUN_EFFORT", ""),
+    }
+    _report(report, requested)
+
+
+def _sandbox_process() -> tuple[int, str, dict[str, str], str]:
+    report = os.environ.get(REPORT)
+    thread = os.environ.get("CODEX_THREAD_ID")
+    if os.environ.get("AGENTIHOOKS_PROFILE") != "planner" or not report or not thread:
+        raise ValueError("profile canary has no supported live harness ancestor")
+    launch = json.loads(Path(report).read_text()).get("sandbox_launch", {})
+    if (
+        not launch.get("pid")
+        or not launch.get("start")
+        or launch.get("thread") != thread
+        or launch.get("profile") != "planner"
+        or launch.get("harness") != "codex"
+        or launch.get("home") != os.environ.get("CODEX_HOME")
+        or launch.get("report") != report
+    ):
+        raise ValueError("sandbox planner launch binding mismatch")
+    env = {
+        REPORT: report,
+        "AGENTIHOOKS_PROFILE": "planner",
+        "CODEX_HOME": launch["home"],
+        "AGENTIHOOKS_RUN_MODEL": launch["model"],
+        "AGENTIHOOKS_RUN_EFFORT": launch["effort"],
+    }
+    return launch["pid"], "codex", env, launch["account"]
+
+
+def _canary_process() -> tuple[int, str, dict[str, str], str]:
+    try:
+        return process()
+    except ValueError as exc:
+        if str(exc) != "profile canary has no supported live harness ancestor":
+            raise
+    return _sandbox_process()
+
+
 def validate(canary: str) -> dict[str, Any]:
-    pid, target, env, account = process()
+    pid, target, env, account = _canary_process()
     if not env.get(REPORT):
         raise ValueError("profile canary has no launch validation request")
     report = Path(env[REPORT])
