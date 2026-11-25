@@ -1363,6 +1363,76 @@ def test_a_failed_launch_naming_no_harness_records_the_failure_and_steers_nothin
     assert capsys.readouterr() == ("", "")
 
 
+@pytest.mark.feature("hub-launch-failure-capacity-no-steering")
+@pytest.mark.parametrize("harness", ["codex", "claude"])
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "No account slot available",
+        "codex session launch refused: app server could not start: No account slot available",
+        "account reservation is full",
+        "account reservation is full: account=example sessions=6 cap=6 five_left=100 week_left=100",
+    ],
+)
+def test_an_account_refusal_records_its_reason_without_steering(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str], harness: str, reason: str
+) -> None:
+    first = rig.admitter.admit(SLUG, ask())
+    held = rig.store.key(SLUG, "spoke-admission", "t1", "0")
+    capsys.readouterr()
+
+    assert rig.admitter.failed(SLUG, ask(harness=harness, reason=reason)) is True
+
+    assert rig.store.launch_failure(SLUG, "t1") == reason
+    assert rig.store.failed_harness(SLUG, "t1") == ""
+    assert rig.admitter.admit(SLUG, ask()) == first
+    assert admission.ADMITTED_MS - 5_000 < rig.store.redis.pttl(held) <= admission.ADMITTED_MS
+    assert capsys.readouterr() == ("", "")
+    assert rig.admitter.reopen(SLUG, ask()) is True
+    later = rig.admitter.admit(SLUG, ask())
+    assert later is not None
+    assert "avoid_harness" not in later["task"]
+
+
+@pytest.mark.feature("hub-launch-failure-capacity-no-steering")
+@pytest.mark.parametrize("harness", ["codex", "claude"])
+@pytest.mark.parametrize(
+    "reason",
+    ["profile canary timed out", "agent exited before its canary", "launch failed: account reservation is full"],
+)
+def test_a_broken_harness_failure_keeps_steering(
+    rig: SimpleNamespace, capsys: pytest.CaptureFixture[str], harness: str, reason: str
+) -> None:
+    first = rig.admitter.admit(SLUG, ask())
+    held = rig.store.key(SLUG, "spoke-admission", "t1", "0")
+    capsys.readouterr()
+
+    assert rig.admitter.failed(SLUG, ask(harness=harness, reason=reason)) is True
+
+    assert rig.store.launch_failure(SLUG, "t1") == reason
+    assert rig.store.failed_harness(SLUG, "t1") == harness
+    assert rig.admitter.admit(SLUG, ask()) == {**first, "task": {**first["task"], "avoid_harness": harness}}
+    assert admission.ADMITTED_MS - 5_000 < rig.store.redis.pttl(held) <= admission.ADMITTED_MS
+    assert capsys.readouterr() == ("", f"hub: events steering swarm={SLUG} task=t1 avoid={harness}: {reason}\n")
+    assert rig.admitter.reopen(SLUG, ask()) is True
+    later = rig.admitter.admit(SLUG, ask())
+    assert later is not None
+    assert later["task"]["avoid_harness"] == harness
+
+
+@pytest.mark.feature("hub-launch-failure-capacity-no-steering")
+def test_an_account_refusal_preserves_earlier_broken_harness_steering(rig: SimpleNamespace) -> None:
+    rig.admitter.admit(SLUG, ask())
+    assert rig.admitter.failed(SLUG, ask(harness="claude", reason="profile canary timed out")) is True
+    steered = rig.admitter.admit(SLUG, ask())
+
+    assert rig.admitter.failed(SLUG, ask(harness="codex", reason="No account slot available")) is True
+
+    assert rig.store.launch_failure(SLUG, "t1") == "No account slot available"
+    assert rig.store.failed_harness(SLUG, "t1") == "claude"
+    assert rig.admitter.admit(SLUG, ask()) == steered
+
+
 @pytest.mark.parametrize("fields", [{"hive": "hive-b"}, {"generation": 1}])
 def test_a_failure_report_without_its_admission_records_nothing(rig, fields):
     first = rig.admitter.admit(SLUG, ask())
