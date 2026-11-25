@@ -401,7 +401,7 @@ def test_the_command_flushes_each_outcome_to_stderr_before_the_next_write(
 def test_the_command_reports_frozen_skips_without_constructing_a_writer_in_a_dry_run(
     dry_run: bool, swarm: list[float], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    tasks = [_task("b", phase="p2")]
+    tasks = [_task("a"), _task("b", phase="p2"), _task("c")] if dry_run else [_task("b", phase="p2")]
     _serve(monkeypatch, {"tasks": tasks, **_frozen("phases/p2")})
     built: list[str] = []
     ledger = FakeLedger(dict(ANSWERS))
@@ -418,7 +418,10 @@ def test_the_command_reports_frozen_skips_without_constructing_a_writer_in_a_dry
     assert captured.err == line + "\n"
     assert json.loads(captured.out) == {
         "dry_run": dry_run,
-        "lanes": {"eng": {"count": 0, "ids": []}, "ci": {"count": 0, "ids": []}},
+        "lanes": {
+            "eng": {"count": 2, "ids": ["a", "c"]} if dry_run else {"count": 0, "ids": []},
+            "ci": {"count": 0, "ids": []},
+        },
         "actions": [line],
         "counts": {"queued": 0, "failed": 0, "skipped": 1},
     }
