@@ -5,6 +5,7 @@ import time
 import types
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -116,12 +117,12 @@ def live(monkeypatch):
     assert server.HUB.watched() == []
 
 
-def test_stream_reads_the_snapshot_with_the_header_credential(live):
+def test_stream_reads_the_open_event_with_the_header_credential(live):
     frames = watch_ledger.stream(SLUG)
     name, data, cursor = next(frames)
     frames.close()
-    assert name == "snapshot" and cursor
-    assert data["ledger"]["_meta"]["rev"] == repository.get_document(SLUG)["_meta"]["rev"]
+    assert name == "open" and cursor
+    assert data == {"rev": None, "swarm": None}
 
 
 def test_stream_raises_expired_for_a_lost_cursor(live):
@@ -162,19 +163,27 @@ def run_watch(monkeypatch, capsys, take, *flags):
     return calls, capsys.readouterr().out
 
 
-def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop(live, monkeypatch, capsys):
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop(
+    live: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     start = repository.get_document(SLUG)["_meta"]["rev"]
     original = watch_ledger.Watch.take
     seen_names = []
+    written = []
 
-    def take(self, name, data):
+    def take(self: watch_ledger.Watch, name: str, data: dict[str, Any]) -> None:
         original(self, name, data)
-        if name not in {"snapshot", "ledger"}:
-            return
+        if name == "ledger":
+            assert self.since >= data["rev"]
         seen_names.append(name)
-        if seen_names == ["snapshot"]:
+        if name not in {"open", "ledger"}:
+            return
+        if not written:
+            written.append(1)
             server.repository.apply_ops(SLUG, ops=[note(1)])
-        elif seen_names == ["snapshot", "ledger"]:
+        elif written == [1] and self.since == start + 1:
+            written.append(2)
             server.repository.apply_ops(SLUG, ops=[note(2)])
             raise OSError("dropped")
         elif self.since >= start + 2:
@@ -182,31 +191,33 @@ def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop
 
     calls, out = run_watch(monkeypatch, capsys, take, "--since-rev", str(start))
     assert calls[0] is None and calls[1] and len(calls) == 2
-    assert seen_names.count("snapshot") == 1
+    assert seen_names[0] == "open" and "snapshot" not in seen_names
     assert [line for line in out.splitlines() if line.startswith("OPERATOR")] == [
         f'OPERATOR rev={start + 1} note added [n-1]: "note 1"',
         f'OPERATOR rev={start + 2} note added [n-2]: "note 2"',
     ]
 
 
-def test_an_expired_cursor_reconnects_without_one_and_prints_nothing_twice(live, monkeypatch, capsys):
+def test_an_expired_cursor_reconnects_without_one_and_prints_nothing_twice(
+    live: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     start = repository.get_document(SLUG)["_meta"]["rev"]
     server.repository.apply_ops(SLUG, ops=[note(3)])
     original = watch_ledger.Watch.take
     seen_names = []
 
-    def take(self, name, data):
+    def take(self: watch_ledger.Watch, name: str, data: dict[str, Any]) -> None:
         original(self, name, data)
         seen_names.append(name)
-        if seen_names == ["snapshot", "heartbeat"]:
+        if seen_names == ["open", "heartbeat"]:
             server.HUB.channels[SLUG].epoch = "restarted"
             raise OSError("server restarted")
-        if seen_names.count("snapshot") == 2:
+        if seen_names.count("open") == 2:
             raise SystemExit
 
     calls, out = run_watch(monkeypatch, capsys, take, "--since-rev", str(start))
     assert calls[0] is None and calls[1] and calls[2] is None
-    assert seen_names == ["snapshot", "heartbeat", "snapshot"]
+    assert seen_names == ["open", "heartbeat", "open"]
     assert out.count("[n-3]") == 1
     assert out.count("WATCHING") == 1
 
@@ -395,3 +406,12 @@ def test_a_comment_on_a_hidden_done_task_still_reaches_its_claimant(capsys):
     assert [line for line in capsys.readouterr().out.splitlines() if line.startswith("OPERATOR")] == [
         'OPERATOR rev=2 comment added on tasks/t1 [c1]: "look"'
     ]
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_take_never_applies_a_ledger_patch_whose_frame_carries_a_from_field_while_caught_up() -> None:
+    watch = watch_ledger.Watch(args(since_rev=0), "path.json", None)
+    state = ledger(5)
+    watch.take("snapshot", {"ledger": state})
+    watch.take("ledger", {"patch": {"o": {"tasks": {"drop": 0, "add": [{"id": "t1"}], "u": []}}}, "from": 5, "rev": 5})
+    assert watch.state == state

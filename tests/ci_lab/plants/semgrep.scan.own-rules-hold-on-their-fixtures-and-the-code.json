@@ -1,0 +1,11 @@
+{
+  "gate": "semgrep/scan/own-rules-hold-on-their-fixtures-and-the-code",
+  "reason": "claim-filter-bypasses-claim-hold: a rule fixture line its rule matches is marked ok",
+  "edits": [
+    {
+      "path": ".semgrep/claim-holds.py",
+      "before": "        # ruleid: claim-filter-bypasses-claim-hold\n        and phase_state.admits(task, doc)\n",
+      "after": "        # ok: claim-filter-bypasses-claim-hold\n        and phase_state.admits(task, doc)\n"
+    }
+  ]
+}

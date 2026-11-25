@@ -2,10 +2,18 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const promote = require('../../../.github/scripts/promote.cjs');
 
+const pageSize = per_page => Math.min(per_page ?? 30, 100);
+
+const servedPage = (items, { page = 1, per_page }) => {
+  const size = pageSize(per_page);
+  return items.slice((page - 1) * size, page * size);
+};
+
 function fixture(options = {}) {
   const writes = [];
   const refs = [];
   const outputs = {};
+  const infos = [];
   const context = {
     repo: { owner: 'owner', repo: 'repo' }, eventName: 'push', ref: 'refs/heads/dev',
     sha: 'graded', payload: { repository: { full_name: 'owner/repo' } },
@@ -34,10 +42,10 @@ function fixture(options = {}) {
   const github = { rest: {
     actions: {
       getWorkflowRun: async () => ({ data: { workflow_id: 10, run_number: context.runId, created_at: '2026-10-28T01:00:00Z' } }),
-      listWorkflowRuns: async () => ({ data: { workflow_runs: [] } }),
-      listJobsForWorkflowRun: async () => ({ data: { jobs: jobs.slice(0, 100) } }),
+      listWorkflowRuns: async args => ({ data: { workflow_runs: servedPage([], args) } }),
+      listJobsForWorkflowRun: async args => ({ data: { jobs: servedPage(jobs, args) } }),
     },
-    checks: { listForRef: async () => ({ data: { check_runs: checks.slice(0, 100) } }) },
+    checks: { listForRef: async args => ({ data: { check_runs: servedPage(checks, args) } }) },
     git: {
       getRef: async ({ ref }) => {
         if (ref === 'heads/dev') return { data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } };
@@ -59,7 +67,7 @@ function fixture(options = {}) {
       getCommit: async ({ ref }) => ({ data: ref === context.sha ? commit(context.sha, 'tree') :
         ref === 'main' && options.mainMoves && ++mainReads > 1 ? commit('moved', 'old', `Promote green dev to main (#8)\n\nGraded dev revision: ${options.mainMoves}\n`) :
         ref === 'main' ? commit('main', options.already ? 'tree' : 'old', options.promoted ? `Promote green dev to main (#6)\n\nGraded dev revision: ${options.promoted}\n` : '') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
-      listCommitStatusesForRef: async () => ({ data: statuses.slice(0, 100) }),
+      listCommitStatusesForRef: async args => ({ data: servedPage(args.ref === 'snapshot' ? [...grades].reverse() : statuses, args) }),
       compareCommits: async args => { refs.push(['compare', args]); return { data: { status: options.orders?.[args.base] || options.order || 'ahead' } }; },
     },
     pulls: {
@@ -75,20 +83,27 @@ function fixture(options = {}) {
       },
     },
   } };
-  github.paginate = async (method, args) => {
+  github.paginate = async (method, args, map) => {
     pages.push(args);
-    if (method === github.rest.actions.listWorkflowRuns) return [];
-    if (method === github.rest.actions.listJobsForWorkflowRun) return jobs;
-    if (method === github.rest.checks.listForRef) return checks;
-    if (method === github.rest.repos.listCommitStatusesForRef) return args.ref === 'snapshot' ? [...grades].reverse() : statuses;
-    throw new Error('Unexpected paginated endpoint');
+    const lists = [github.rest.actions.listWorkflowRuns, github.rest.actions.listJobsForWorkflowRun, github.rest.checks.listForRef,
+      github.rest.repos.listCommitStatusesForRef];
+    if (!lists.includes(method)) throw new Error('Unexpected paginated endpoint');
+    let items = [];
+    let done = false;
+    for (let page = 1; !done; page++) {
+      const response = await method({ ...args, page });
+      const data = Array.isArray(response.data) ? response.data : Object.values(response.data).find(Array.isArray);
+      items = items.concat(map ? map({ ...response, data }, () => { done = true; }) : data);
+      done ||= data.length < pageSize(args.per_page);
+    }
+    return items;
   };
   const summary = { addHeading() { return this; }, addTable() { return this; }, async write() {} };
-  const core = { setOutput: (key, value) => { outputs[key] = value; }, summary, info() {} };
+  const core = { setOutput: (key, value) => { outputs[key] = value; }, summary, info: message => { infos.push(message); } };
   github.graphql = async () => ({ repository: { object: { statusCheckRollup: { contexts: {
     nodes: [], pageInfo: { hasNextPage: false, endCursor: null },
   } } } } });
-  return { github, context, core, writes, refs, outputs, jobs, checks, statuses, pages, grades,
+  return { github, context, core, writes, refs, outputs, jobs, checks, statuses, pages, grades, infos,
     now: () => elapsed, sleep: async ms => { elapsed += ms; } };
 }
 
@@ -101,6 +116,93 @@ test('reports the snapshot grade with the promotion app before merging', async (
   await promote(f);
   assert.ok(f.grades.every(grade => grade.sha === 'snapshot' && grade.context === 'Gate — Required' &&
     grade.target_url === 'https://github.com/owner/repo/actions/runs/42'));
+});
+
+for (const status of ['queued', 'waiting', 'pending', 'in_progress']) {
+  test(`a noncompleted triggering promote job merges on its first poll: ${status}`, async () => {
+    const f = fixture();
+    f.jobs[0].status = status;
+    await promote(f);
+    assert.equal(f.now(), 0);
+    assert.equal(f.outputs.main, 'rebased');
+    assert.equal(f.grades.at(-1).state, 'success');
+    assert.equal(f.writes.find(([kind]) => kind === 'merge')[1].sha, 'snapshot');
+  });
+}
+
+test('logs every changed grade poll once with all unsettled job statuses', async () => {
+  const f = fixture();
+  const current = f.jobs[0];
+  const gate = f.jobs[1];
+  gate.status = 'queued';
+  const lint = { id: 75, run_id: 42, name: 'lint', status: 'queued', conclusion: null };
+  f.jobs.push(lint);
+  const sleep = f.sleep;
+  f.sleep = async ms => {
+    await sleep(ms);
+    f.jobs.reverse();
+    if (f.now() === 10000) {
+      lint.status = 'in_progress';
+      current.status = 'queued';
+    }
+    if (f.now() === 20000) {
+      gate.status = lint.status = 'completed';
+      lint.conclusion = 'success';
+    }
+  };
+  await promote(f);
+  assert.equal(f.now(), 20000);
+  assert.deepEqual(f.infos.filter(message => message.startsWith('Promotion grade poll:')), [
+    'Promotion grade poll: current promote jobs=1; unsettled jobs=Gate — Required queued, lint queued, promote / promote in_progress',
+    'Promotion grade poll: current promote jobs=1; unsettled jobs=Gate — Required queued, lint in_progress, promote / promote queued',
+    'Promotion grade poll: current promote jobs=1; unsettled jobs=promote / promote queued',
+  ]);
+});
+
+for (const count of [0, 2]) {
+  test(`logs a changing current promotion job count from ${count} to one`, async () => {
+    const f = fixture();
+    const current = f.jobs.shift();
+    if (count === 2) f.jobs.push(current, { ...current, id: 73 });
+    const sleep = f.sleep;
+    f.sleep = async ms => {
+      await sleep(ms);
+      if (f.now() === 10000) {
+        f.jobs.splice(0, f.jobs.length, f.jobs.find(job => job.name === 'Gate — Required'), { ...current, status: 'queued' });
+      }
+    };
+    await promote(f);
+    assert.equal(f.now(), 10000);
+    assert.deepEqual(f.infos.filter(message => message.startsWith('Promotion grade poll:')), [
+      `Promotion grade poll: current promote jobs=${count}; unsettled jobs=${count ? 'promote / promote in_progress, promote / promote in_progress' : 'none'}`,
+      'Promotion grade poll: current promote jobs=1; unsettled jobs=promote / promote queued',
+    ]);
+  });
+}
+
+test('logs every unsettled job beyond one hundred without another jobs request', async () => {
+  const f = fixture();
+  f.jobs[1].status = 'queued';
+  f.jobs.push(...Array.from({ length: 110 }, (_, id) => ({
+    id: 100 + id, run_id: 42, name: `extra-${id}`, status: 'queued', conclusion: null,
+  })));
+  const sleep = f.sleep;
+  f.sleep = async ms => {
+    await sleep(ms);
+    for (const job of f.jobs.filter(job => job.name !== 'promote / promote')) {
+      job.status = 'completed';
+      job.conclusion = 'success';
+    }
+  };
+  await promote(f);
+  const polls = f.infos.filter(message => message.startsWith('Promotion grade poll:'));
+  assert.equal(polls.length, 2);
+  assert.match(polls[0], /current promote jobs=1;/);
+  assert.ok(polls[0].includes('Gate — Required queued'));
+  assert.ok(polls[0].includes('promote / promote in_progress'));
+  for (let id = 0; id < 110; id++) assert.ok(polls[0].includes(`extra-${id} queued`));
+  assert.equal(polls[1], 'Promotion grade poll: current promote jobs=1; unsettled jobs=promote / promote in_progress');
+  assert.equal(f.pages.filter(args => args.run_id === 42).length, 3);
 });
 
 test('keeps the snapshot grade pending until the original grade completes', async () => {
@@ -139,6 +241,17 @@ for (const conclusion of ['failure', 'cancelled', 'timed_out', 'neutral', 'actio
   });
 }
 
+test('fails at once on a red job of its graded run past the first page of jobs', async () => {
+  const f = fixture();
+  f.jobs.push(...Array.from({ length: 100 - f.jobs.length }, (_, id) => ({ id: 100 + id, run_id: 42, name: `green-${id}`,
+    status: 'completed', conclusion: 'success' })), { id: 75, run_id: 42, name: 'lint', status: 'completed', conclusion: 'failure' });
+  await assert.rejects(promote(f), /Graded run jobs did not pass: lint failure$/);
+  assert.equal(f.now(), 0);
+  assert.equal(f.outputs.main, undefined);
+  assert.ok(f.grades.every(grade => grade.state !== 'success'));
+  assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
+});
+
 test('waits for the reported snapshot grade to appear before merging', async () => {
   const f = fixture();
   const paginate = f.github.paginate;
@@ -146,6 +259,18 @@ test('waits for the reported snapshot grade to appear before merging', async () 
   await promote(f);
   assert.equal(f.now(), 15000);
   assert.equal(f.grades.at(-1).state, 'success');
+});
+
+test('finds the reported snapshot grade behind a full first page of newer statuses', async () => {
+  const f = fixture();
+  const createCommitStatus = f.github.rest.repos.createCommitStatus;
+  f.github.rest.repos.createCommitStatus = async args => {
+    await createCommitStatus(args);
+    if (args.state === 'success') f.grades.push(...Array.from({ length: 100 }, (_, id) => ({ ...args, context: `newer-${id}` })));
+  };
+  await promote(f);
+  assert.equal(f.now(), 0);
+  assert.equal(f.outputs.main, 'rebased');
 });
 
 test('waits past four minutes for the snapshot required checks to turn green', async () => {

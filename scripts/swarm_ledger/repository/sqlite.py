@@ -9,17 +9,20 @@ import weakref
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, heap, hierarchy, live_rows, media_files, outbox, refresh, writer_copy
+from . import artifact_files, heap, hierarchy, host_entries, live_rows, media_files, outbox, refresh, writer_copy
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
 from .rows import TABLES, assemble, diff, encode, flatten, load, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
 from .writer_copy import written
+
+if TYPE_CHECKING:
+    from .task_write import Written
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS registry (slug TEXT, path TEXT, value TEXT, PRIMARY KEY(slug,path));
@@ -117,9 +120,9 @@ def scope(parts: list) -> tuple[list, str]:
     return [encode(parts[:depth]) for depth in range(len(parts) + 1)], encode(parts)[:-1] + ","
 
 
-def read_partial(connection, slug: str, keys: tuple) -> dict:
-    """Rows under each key path only, assembled; `_meta.events` is filled from the events table."""
-    rows = {}
+def partial_rows(connection: Any, slug: str, keys: tuple[list[Any], ...]) -> dict[str, tuple[Any, ...]]:
+    """The stored rows under each key path and of every ancestor of it, by path."""
+    rows: dict[str, tuple[Any, ...]] = {}
     for parts in keys:
         exact, prefix = scope(parts)
         marks = ",".join("?" * len(exact))
@@ -130,6 +133,12 @@ def read_partial(connection, slug: str, keys: tuple) -> dict:
                 (slug, *exact, prefix, prefix + PATH_END),
             ):
                 rows[path] = (table, parent, key, position, kind, value)
+    return rows
+
+
+def read_partial(connection: Any, slug: str, keys: tuple) -> dict:
+    """Rows under each key path only, assembled; `_meta.events` is filled from the events table."""
+    rows = partial_rows(connection, slug, keys)
     if "[]" not in rows:
         raise Missing(slug)
     state = assemble(rows)
@@ -208,6 +217,48 @@ def read_ids(directory, slug: str, collection: str) -> tuple:
             return ()
     found = (json.loads(path)[1] for _, path in sorted(rows))
     return tuple(part[1] for part in found if part[0] == "id")
+
+
+def read_flags(
+    directory: object, slug: str, collections: tuple[str, ...], names: tuple[str, ...]
+) -> dict[str, list[dict[str, object]]]:
+    """Each item of the named collections with only its `names` fields, read from those rows alone.
+
+    Every named collection maps to its items in stored order; {} when the ledger is not stored or unreadable.
+    """
+    with read_only(directory) as connection:
+        if connection is None:
+            return {}
+        try:
+            with connection:
+                connection.execute(BEGIN)
+                if connection.execute(STORED, (slug,)).fetchone() is None:
+                    return {}
+                return {collection: item_fields(connection, slug, collection, names) for collection in collections}
+        except sqlite3.OperationalError:
+            return {}
+
+
+def item_fields(connection: Any, slug: str, collection: str, names: tuple[str, ...]) -> list[dict[str, object]]:
+    """The `names` leaf values of each item of one stored collection, from the item rows and those leaf rows."""
+    parent = encode([collection])
+    prefix = scope([collection])[1]
+    keys = tuple(encode(name) for name in names)
+    marks = ",".join("?" * len(keys))
+    positions: dict[str, int] = {}
+    fields: dict[str, dict[str, object]] = {}
+    for table in TABLES:
+        for path, position in connection.execute(
+            f"SELECT path, position FROM {table} WHERE slug=? AND parent=?", (slug, parent)
+        ):
+            positions[path] = position
+        for owner, key, value in connection.execute(
+            f"SELECT parent, key, value FROM {table} "
+            f"WHERE slug=? AND path > ? AND path < ? AND kind='value' AND key IN ({marks})",
+            (slug, prefix, prefix + PATH_END, *keys),
+        ):
+            fields.setdefault(owner, {})[json.loads(key)] = json.loads(value)
+    return [fields.get(path, {}) for path in sorted(positions, key=positions.__getitem__)]
 
 
 def read_slugs(directory) -> list:
@@ -440,6 +491,7 @@ class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
     adopts = True
+    copies: host_entries.Copies | None = None
 
     def __init__(self, path: Path | None = None, domain=None):
         self._path = None if path is None else Path(path)
@@ -525,7 +577,7 @@ class SQLiteLedgerRepository:
     def _key(self, slug):
         return str(self.path), slug
 
-    def _entry(self, connection, slug: str) -> Entry:
+    def _entry(self, connection: sqlite3.Connection, slug: str) -> Entry:
         """The stored ledger; a reader whose snapshot predates a cached write gets that newer committed copy."""
         row = connection.execute(GENERATION, (slug,)).fetchone()
         if row is None:
@@ -539,18 +591,33 @@ class SQLiteLedgerRepository:
             cached = self._cache.get(self._key(slug))
             if cached is not None and cached.generation >= row[0]:
                 return cached
-            state, writer = self._refreshed(connection, slug, cached, row[0])
+            if cached is None and self.copies is not None:
+                with request_metrics.step("copy_adopt"):
+                    cached = self.copies.adopt(slug, row[0])
+            with request_metrics.step("copy_refresh"):
+                state, writer = self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
-                state = load(connection, slug)
-            if "events" in state["_meta"]:
-                state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
-            fragments = document(state, None if whole else cached.fragments)
-            entry = Entry(row[0], None, fragments.value, fragments, writer)
-            self._remember(slug, entry)
+                with request_metrics.step("copy_load"):
+                    state = load(connection, slug)
+            with request_metrics.step("copy_document"):
+                if "events" in state["_meta"]:
+                    state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
+                fragments = document(state, None if whole else cached.fragments)
+                entry = Entry(row[0], None, fragments.value, fragments, writer)
+                self._remember(slug, entry)
+                self._keep(connection, slug, entry, whole)
         if whole:
             heap.release()
         return entry
+
+    def _keep(self, connection: sqlite3.Connection, slug: str, entry: Entry, whole: bool) -> None:
+        if self.copies is not None:
+            self.copies.keep(slug, entry, whole)
+
+    def _drop(self, connection: sqlite3.Connection, slug: str) -> None:
+        if self.copies is not None:
+            self.copies.drop(slug)
 
     def _refreshed(self, connection, slug: str, cached: Entry | None, generation: int) -> tuple:
         if cached is None:
@@ -713,7 +780,13 @@ class SQLiteLedgerRepository:
             return row[0], meta, read_partial(connection, slug, (["tasks"],)).get("tasks") or []
 
     def apply_ops(
-        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
+        self,
+        slug: str,
+        changes: list | None = None,
+        ops: list | None = None,
+        gate: Any = None,
+        *,
+        copy_state: bool = True,
     ) -> tuple[dict, list]:
         from . import mutation
 
@@ -721,10 +794,11 @@ class SQLiteLedgerRepository:
         with request_metrics.locked(self.domain.LOCK.ledger(slug)), self.connect() as connection:
             with connection:
                 request_metrics.begin_ledger(connection, slug, BEGIN_IMMEDIATE)
-                entry = self._entry(connection, slug)
-                state = entry.for_write()
-                rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
-                written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
+                with request_metrics.step("apply_locked"):
+                    entry = self._entry(connection, slug)
+                    state = entry.for_write()
+                    rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
+                    written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
             artifact_files.drop(slug, ctx.unstored)
             media_files.drop(slug, ctx.unstored)
             self._remember(slug, written)
@@ -758,6 +832,23 @@ class SQLiteLedgerRepository:
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),
         )
         return Entry(generation, None, state, fragments, writer)
+
+    def admit(self, connection: sqlite3.Connection, state: dict[str, Any]) -> None:
+        """Refuse or annotate a write before its rows are stored; a SQLite store admits every writer."""
+
+    def apply_task_update(self, slug: str, op: dict[str, Any], gate: Any = None) -> "Written | None":
+        """Apply one guarded claim shaped task update on the task's own stored rows and return the touched row and the
+        new revision; None, with nothing written, when the update needs the whole ledger write."""
+        from . import task_write
+
+        self._adopt(slug)
+        lock: Any = self.domain.LOCK.ledger(slug)  # pyright: ignore[reportUnknownMemberType]
+        with request_metrics.locked(lock), self.connect() as connection:
+            held: Any = connection
+            with held:
+                request_metrics.begin_ledger(held, slug, BEGIN_IMMEDIATE)
+                with request_metrics.step("apply_locked"):
+                    return task_write.update(self, held, slug, op, gate)
 
     def _insert(self, connection, slug: str, state: dict, token: str, seeds: dict | None = None) -> None:
         previous = connection.execute(GENERATION, (slug,)).fetchone()
@@ -855,13 +946,14 @@ class SQLiteLedgerRepository:
     def list_summaries(self) -> list:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
 
-    def purge(self, slug: str, connection) -> None:
+    def purge(self, slug: str, connection: sqlite3.Connection) -> None:
         if connection.execute(STORED, (slug,)).fetchone():
             before = self._entry(connection, slug).state
             outbox.write(connection, slug, before["_meta"]["rev"], before, {})
         for table in (*PER_LEDGER, artifact_files.TABLE, media_files.TABLE):
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
+        self._drop(connection, slug)
 
     def registry(self, name: str, connection) -> dict:
         return {key: json.loads(value) for key, value in connection.execute(REGISTRY, (name,))}

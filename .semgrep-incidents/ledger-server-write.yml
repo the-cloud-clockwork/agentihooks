@@ -4,8 +4,10 @@ rules:
     severity: ERROR
     message: >-
       Incident 16 November: a switch chose between the in process ledger path and the ledger server, so writes
-      outside a tick pass still reached the ledger server. The in process ledger API path is the only one; judge a
-      call with database_ledger.acting and never bring back database_ledger.serving or database_ledger.scoped.
+      outside a tick pass still reached the ledger server. The ledger API route code is the only write path: run in
+      process, or on this host's warm writer socket through writer_client.routed, which runs the same route code;
+      judge a call with database_ledger.acting and never bring back database_ledger.serving or
+      database_ledger.scoped.
     paths:
       include:
         - /scripts/

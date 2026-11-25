@@ -1,6 +1,15 @@
 {
  "scenarios": {
+  "autoscaler alert": [
+   "running"
+  ],
+  "codex hook order": [
+   "running"
+  ],
   "doc items map": [
+   "running"
+  ],
+  "expert seats": [
    "running"
   ],
   "focus unclaimed": [
@@ -15,14 +24,29 @@
   "lab capacity": [
    "running"
   ],
+  "master scale": [
+   "running"
+  ],
+  "order waiting": [
+   "running"
+  ],
   "orphans": [
    "orphan"
   ],
   "progress heads": [
    "running"
   ],
+  "rank pass": [
+   "running"
+  ],
   "reap": [
    "hive-roll"
+  ],
+  "review pass": [
+   "running"
+  ],
+  "seat alarm": [
+   "running"
   ],
   "status publish": [
    "running"
@@ -30,7 +54,14 @@
   "step starvation": [
    "running"
   ],
+  "thin task pass": [
+   "running",
+   "thin-accepted"
+  ],
   "tick master": [
+   "running"
+  ],
+  "view wait": [
    "running"
   ],
   "workflow runner": [
@@ -42,7 +73,6 @@
   "bottleneck remedy",
   "bottleneck status",
   "close space",
-  "codex hook order",
   "command runner",
   "config load",
   "conversations",
@@ -79,7 +109,6 @@
   "master alarm",
   "master down",
   "master move fail over",
-  "master scale",
   "master stall",
   "master start watch",
   "master wake",
@@ -102,7 +131,6 @@
   "prompt stall",
   "quiet pass",
   "quota notice",
-  "rank pass",
   "reboot pass",
   "recover master",
   "recover outages",
@@ -110,7 +138,6 @@
   "release alert",
   "retire idle master",
   "run window",
-  "seat alarm",
   "session models",
   "settle",
   "size pass",

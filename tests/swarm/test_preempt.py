@@ -87,16 +87,43 @@ def test_an_ask_passes_on_only_after_the_answer_window(store):
     }
 
 
-def test_an_ask_is_forgotten_once_its_holder_left(store):
+@pytest.mark.feature("hub-preemption-suppresses-relaunch")
+def test_a_departed_holder_is_forgotten_while_its_waiting_task_asks_nobody_else_in_the_window(
+    store: RedisStore,
+) -> None:
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 0)
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
-    preempt.step(SLUG, store, ROWS, doc(), full("t3", holders=[HOLDERS[0]]), 2)
-    assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e1": '["t3", 2]'}
+    assert preempt.step(SLUG, store, ROWS, doc(), full("t3", holders=[HOLDERS[0]]), 2) == []
+    assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {}
+    assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3", holders=[HOLDERS[0]]), 1 + preempt.ANSWER_MS)) == 1
+    assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e1": f'["t3", {1 + preempt.ANSWER_MS}]'}
+
+
+@pytest.mark.feature("hub-preemption-suppresses-relaunch")
+def test_an_admitted_attempt_keeps_the_episode_open_one_window_past_it(store: RedisStore) -> None:
+    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 0)
+    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
+    preempt.attempted(store, SLUG, "t3", 5)
+    assert preempt.step(SLUG, store, ROWS, doc(), full("t3", holders=[HOLDERS[0]]), 4 + preempt.ANSWER_MS) == []
+    assert len(preempt.step(SLUG, store, ROWS, doc(), full("t3", holders=[HOLDERS[0]]), 5 + preempt.ANSWER_MS)) == 1
+
+
+@pytest.mark.feature("hub-preemption-suppresses-relaunch")
+def test_an_attempt_opens_no_episode_and_each_write_expires_within_the_window(store: RedisStore) -> None:
+    key = store.key(SLUG, preempt.EPISODE, "t3")
+    preempt.attempted(store, SLUG, "t3", 1)
+    assert store.redis.exists(key) == 0
+    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
+    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2)
+    assert store.redis.get(key) == "2" and preempt.ANSWER_MS - 1_000 < store.redis.pttl(key) <= preempt.ANSWER_MS
+    preempt.attempted(store, SLUG, "t3", 3)
+    assert store.redis.get(key) == "3" and preempt.ANSWER_MS - 1_000 < store.redis.pttl(key) <= preempt.ANSWER_MS
 
 
 @pytest.mark.feature("repeated-subject-notices-pass-the-seen-claim")
-def test_each_ask_for_one_waiting_task_passes_the_seen_claim(store):
-    """A holder asked again for the same waiting task after its lane freed and filled again reads the new ask."""
+def test_each_ask_for_one_waiting_task_passes_the_seen_claim(store: RedisStore) -> None:
+    """A holder asked again for the same waiting task after its lane freed and filled again and its answer window
+    passed reads the new ask."""
     from scripts.inbox import seen
 
     inbox = InboxStore(store.redis)
@@ -105,8 +132,8 @@ def test_each_ask_for_one_waiting_task_passes_the_seen_claim(store):
     (first,) = seen.claim(inbox, "e2")
     preempt.step(SLUG, store, ROWS, doc(), {}, 3)
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 4)
-    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 5)
-    assert [item.ref for item in seen.claim(inbox, "e2")] == ["preempt:t3:5"]
+    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2 + preempt.ANSWER_MS)
+    assert [item.ref for item in seen.claim(inbox, "e2")] == [f"preempt:t3:{2 + preempt.ANSWER_MS}"]
     assert first.ref == "preempt:t3:2"
 
 

@@ -9,16 +9,19 @@ from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, account_key
-from scripts.swarm import autoscale, freeze, host_budget, master_pin
+from scripts.swarm import autoscale, freeze, host_budget, master_pin, plan_cap_floor
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.ledger_client import pass_state
-from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
+from scripts.swarm.store import AUTO_SCALING, AgentRecord, RedisStore, SwarmConfig
 
 if TYPE_CHECKING:
     from scripts.routing.reservation import Reservation
 
-LANES = ("eng", "ci", "plan")
+LANES = ("eng", "ci", "plan", "review")
+SCALED_LANES = ("eng", "ci", "plan")
 LABELS = {"claude": "Claude", "codex": "Codex"}
+CODEX_SHARE = 0.3
+SHARED_LANES = ("eng", "ci")
 
 
 @dataclass(frozen=True)
@@ -398,12 +401,38 @@ def _reserved(limits: dict, effective: dict, options: dict, cursors: dict) -> di
     return result
 
 
+def _shared(agents: Iterable[AgentRecord]) -> dict[str, int]:
+    """The live eng and ci agents of each harness, the base the Codex share counts from."""
+    return {
+        harness: sum(a.lane in SHARED_LANES and a.state != "finished" and a.harness == harness for a in agents)
+        for harness in ("claude", "codex")
+    }
+
+
+def _share(lane: str, free: list[str], eligible: list[str], shared: dict[str, int]) -> list[str]:
+    """Codex alone for an eng or ci slot while Codex holds under its share and has an unreserved seat, else the free
+    harnesses, or every eligible one when pinned work reserves them all."""
+    short = shared["codex"] < CODEX_SHARE * (shared["claude"] + shared["codex"] + 1)
+    return ["codex"] if lane in SHARED_LANES and "codex" in free and short else free or eligible
+
+
 def _allocate(
-    config, effective: dict, limits: dict, open_seats: list, requirements: dict | None, accounts: dict | None = None
+    config: SwarmConfig | None,
+    effective: dict,
+    limits: dict,
+    open_seats: list,
+    requirements: dict | None,
+    accounts: dict | None = None,
+    *,
+    shared: dict[str, int],
 ) -> tuple:
     allocation = {lane: {"claude": 0, "codex": 0} for lane in LANES}
     placements = {lane: [] for lane in LANES}
-    options = requirements or {lane: [_harnesses(config, lane)] * limits[lane] for lane in LANES}
+    options = (
+        {lane: requirements.get(lane, []) for lane in LANES}
+        if requirements
+        else {lane: [_harnesses(config, lane)] * limits[lane] for lane in LANES}
+    )
     cursors = dict.fromkeys(LANES, 0)
     held = {(seat.harness, seat.account): seat for seat in open_seats}
 
@@ -424,17 +453,24 @@ def _allocate(
         cursors[lane] = index
         reserved = _reserved(limits, effective, options, cursors)
         eligible = [h for h in options[lane][index] if room(lane, index, h)]
-        spare = [h for h in eligible if remaining[h] > reserved[h]] or eligible
+        spare = _share(lane, [h for h in eligible if remaining[h] > reserved[h]], eligible, shared)
         seat = pick(held.values(), lambda s: s.harness in spare and usable(lane, index, s))
         held[(seat.harness, seat.account)] = replace(seat, sessions=seat.sessions + 1)
         allocation[lane][seat.harness] += 1
         placements[lane].append({"index": index, "harness": seat.harness, "account": seat.account})
+        if lane in SHARED_LANES:
+            shared[seat.harness] += 1
         cursors[lane] += 1
         effective[lane] += 1
 
 
-def _configured(config) -> dict:
-    return dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan), strict=True))
+def _configured(config: SwarmConfig) -> dict[str, int]:
+    return dict(zip(LANES, (config.max_eng, config.max_ci, config.max_plan, config.max_review), strict=True))
+
+
+def _scaled(counts: dict[str, int]) -> dict[str, int]:
+    """The counts of the eng, ci and plan lanes, the ceilings autoscale starts from before its first decision."""
+    return {lane: counts.get(lane, 0) for lane in SCALED_LANES}
 
 
 def _busy(agents: list) -> dict:
@@ -511,21 +547,29 @@ def warned_accounts(observations: list[Account], environ: dict[str, str]) -> dic
 def autoscaled(
     config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None
 ) -> tuple[SwarmConfig, dict[str, Any] | None]:
+    demand: dict[str, int] = inputs.demand or dict.fromkeys(LANES, 0)
     if config.scaling != AUTO_SCALING:
-        return config, None
+        return plan_cap_floor.manual(config, demand), None
     host = host or granted(host_room(config, inputs), inputs.previous, inputs.now_ms)
     stored = inputs.previous.get("autoscale") or {}
     previous = {
-        "ceilings": stored.get("ceilings") or _configured(config),
+        "ceilings": stored.get("ceilings") or _scaled(_configured(config)),
         "pending_raise": stored.get("pending_raise") or {"target": None, "ticks": 0},
     }
-    demand = inputs.demand or dict.fromkeys(LANES, 0)
+    demand = {lane: demand.get(lane, 0) for lane in LANES}
     free = _placeable(_open(inputs.observations, inputs.warned))
     decision = autoscale.calculate(
-        _busy(inputs.agents), free, unspent(host, inputs.spent), demand, previous, now_ms=inputs.now_ms
+        _busy(inputs.agents),
+        free,
+        unspent(host, inputs.spent),
+        demand,
+        previous,
+        now_ms=inputs.now_ms,
+        review=autoscale.Review(config.review_share, _harnesses(config, autoscale.REVIEW)),
     )
-    caps = decision["ceilings"]
-    scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"])
+    caps = decision["ceilings"] = plan_cap_floor.ceilings(decision["ceilings"], demand)
+    reviewers = caps.get(autoscale.REVIEW, config.max_review)
+    scaled = replace(config, max_eng=caps["eng"], max_ci=caps["ci"], max_plan=caps["plan"], max_review=reviewers)
     return scaled, {**decision, "host": host}
 
 
@@ -631,7 +675,7 @@ def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list
 
 
 def calculate(
-    config,
+    config: SwarmConfig,
     observations: list[Account],
     agents: list,
     demand: dict | None = None,
@@ -643,14 +687,20 @@ def calculate(
     busy = _busy(agents)
     effective = {lane: min(configured[lane], busy[lane]) for lane in LANES}
     limits = {
-        lane: min(configured[lane], busy[lane] + demand[lane]) if demand is not None else configured[lane]
+        lane: min(configured[lane], busy[lane] + demand.get(lane, 0)) if demand is not None else configured[lane]
         for lane in LANES
     }
     warned = warned or {}
     open_rows = _open(observations, warned)
     placeable = _placeable(open_rows)
     allocation, placements = _allocate(
-        config, effective, limits, _worker_seats(config, observations, agents, warned), requirements, accounts
+        config,
+        effective,
+        limits,
+        _worker_seats(config, observations, agents, warned),
+        requirements,
+        accounts,
+        shared=_shared(agents),
     )
     restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN" and row.kind != API})
     idle = [lane for lane in LANES if effective[lane] == limits[lane] < configured[lane]]
@@ -670,13 +720,13 @@ def calculate(
     }
 
 
-def read(store, slug: str) -> dict:
+def read(store: Any, slug: str) -> dict[str, Any]:
     value = store.redis.get(store.key(slug, "quota-capacity"))
     return json.loads(value) if value else {}
 
 
 def caps(decision: dict, config: SwarmConfig) -> dict[str, int]:
-    return decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
+    return decision.get("effective", _configured(config))
 
 
 def status_line(decision: dict) -> str:
@@ -717,7 +767,36 @@ def placement_ready(
     return eligible, actions
 
 
-def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
+def pins(
+    config: SwarmConfig,
+    decision: Mapping[str, Any],
+    ready: Mapping[str, list[dict[str, Any]]],
+    previous: Mapping[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    """Each lane offered only one harness, under the decision's ``pins`` key: the pin, when a capacity pass first saw
+    it, the other harness's free quota seats and the ready lane tasks this pass placed nowhere while the lane sat below
+    its ceiling. No key when no lane is pinned, so a pin that clears or changes starts its age again."""
+    seen = previous.get("pins", {})
+    found = {}
+    for lane in LANES:
+        offered = _harnesses(config, lane)
+        if len(offered) != 1:
+            continue
+        pin, other = offered[0], next(harness for harness in LABELS if harness not in offered)
+        before = seen.get(lane, {})
+        room = decision["effective"][lane] < decision["configured"][lane]
+        found[lane] = {
+            "agent": pin,
+            "since": before["since"] if before.get("agent") == pin else now_ms,
+            "other": other,
+            "free": decision["placeable"][other],
+            "waiting": [task["id"] for task in ready.get(lane, []) if room and task["id"] not in decision["tasks"]],
+        }
+    return {"pins": found} if found else {}
+
+
+def apply(slug: str, config: Any, store: Any, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     reader = getattr(runtime, "quota_capacity", None)
     if reader is None:
         return []
@@ -742,6 +821,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
         for lane, slots in decision["placements"].items()
         for slot in slots
     }
+    decision |= pins(config, decision, ready, previous, now_ms)
     changed = any(previous.get(key) != decision[key] for key in ("configured", "effective", "reason"))
     decision["at"] = now_ms if changed else previous["at"]
     decision["observed_at"] = now_ms

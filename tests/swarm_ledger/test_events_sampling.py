@@ -103,10 +103,14 @@ def test_idle_sampling_reads_no_ledger_document_and_sends_nothing(folders, monke
     assert server.HUB.channels["s"].seq == 0
 
 
-def test_sampling_skips_a_watched_ledger_without_a_loaded_copy(folders, monkeypatch):
-    monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: pytest.fail("sampled"))
-    server.HUB.open("s", lambda: {"swarm": None})
+def test_sampling_publishes_the_swarm_status_of_a_watched_ledger_without_a_loaded_copy(
+    folders: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: {"config": {"state": "paused"}})
+    server.HUB.open("s", lambda: {"swarm": {"config": {"state": "running"}}})
     server.sample_streams()
+    assert server.HUB.resource("s", "swarm") == {"config": {"state": "paused"}}
+    assert [entry[2] for entry in server.HUB.channels["s"].log] == ["swarm"]
 
 
 def test_the_served_page_version_is_computed_once_per_process(monkeypatch):
@@ -150,23 +154,15 @@ def test_the_code_stamp_of_a_folder_without_code_is_zero(tmp_path):
     assert server.code_stamp([tmp_path]) == 0
 
 
-def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch):
+def test_stream_resources_carries_only_the_swarm_status_without_loading_the_ledger(monkeypatch):
     calls = []
-    state = {"tasks": [], "_meta": {"rev": 7}}
-
-    def get_document(slug):
-        calls.append(("document", slug))
-        return state
-
-    monkeypatch.setattr(server.repository, "get_document", get_document)
-    monkeypatch.setattr(server, "ledger_view", lambda given, *_: {**given, "view": True})
+    monkeypatch.setattr(server.repository, "get_document", lambda slug: calls.append(("document", slug)))
+    monkeypatch.setattr(server, "ledger_view", lambda *a: calls.append(("view", *a)))
     monkeypatch.setattr(
-        server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or {"q": 1, "transfers": {}}
+        server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or {"q": 1, "history": [9]}
     )
-    monkeypatch.setattr(server, "workspace_tails", lambda *a: calls.append(("tails", *a)))
-    view = {**state, "view": True}
-    assert server.stream_resources("s") == {"ledger": view, "swarm": {"q": 1}}
-    assert calls == [("document", "s"), ("swarm", "s", view)]
+    assert server.stream_resources("s") == {"swarm": {"q": 1}}
+    assert calls == [("swarm", "s", None)]
 
 
 def test_the_page_stream_leaves_out_the_swarm_records_the_page_never_reads(monkeypatch):

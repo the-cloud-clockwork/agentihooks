@@ -1,0 +1,13 @@
+rules:
+  - id: codex-attach-before-classification
+    languages: [python]
+    severity: ERROR
+    message: An admitted execution reads starting with no harness or transport until its Codex supervisor publishes them, so refusing native terminal attach before that check sends a launching hive pane to a shell; return pending for a starting record with no harness first.
+    patterns:
+      - pattern: |
+          if not capabilities.of_agent($AGENT).native_terminal_attach:
+              raise $ERROR(...)
+      - pattern-not-inside: |
+          if $AGENT.state == $STARTING and not $AGENT.harness:
+              return None
+          ...

@@ -1,0 +1,10 @@
+rules:
+  - id: enhancement-frozen-hold
+    languages: [python]
+    severity: ERROR
+    message: Claim gates must also hold plan enhancements whose target is frozen.
+    paths:
+      include:
+        - /scripts/swarm/freeze.py
+        - enhancement-frozen-hold.py
+    pattern: return frozen(...) or unfocused(...) or outside_watched(...)

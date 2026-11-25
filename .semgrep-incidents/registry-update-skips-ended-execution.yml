@@ -1,0 +1,26 @@
+rules:
+  - id: registry-update-skips-ended-execution
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A write onto a seat's current execution guards the "finished" terminal state but never refuses one onto
+      "ended", so a write a drop or exit already ended still applies and the agents projection relists the dropped
+      agent. Return the current record unchanged once its state is "ended", after the identity check, in
+      ExecutionRegistry._update. Every ordinary write stays skipped this way; only ExecutionRegistry.revive lands a
+      write onto an ended execution, and it shares the "finished" guard with _update through the _land write both
+      call, so a revival still cannot resurrect a finished head.
+    paths:
+      include:
+        - /scripts/swarm/execution.py
+        - registry-update-skips-ended-execution.py
+    patterns:
+      - pattern: $CURRENT.state == "finished"
+      - pattern-not-inside: |
+          def $F(...):
+              ...
+              if $CURRENT.state == "ended":
+                  ...
+              ...
+      - pattern-not-inside: |
+          def _land(...):
+              ...

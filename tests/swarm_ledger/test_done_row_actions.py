@@ -101,11 +101,11 @@ def test_a_live_update_to_done_drops_the_verdicts_and_a_reopen_restores_them(led
     page, served = ledger
     phases = [DOC["phases"][0], {**DOC["phases"][1], "done": True}]
     tasks = [DOC["tasks"][0], {**DOC["tasks"][1], "state": "done", "done": True}]
-    serve(page, served, 1, phases, tasks)
+    serve(page, served, 2, phases, tasks)
     page.wait_for_function("() => document.querySelector('#item-tasks-t2').classList.contains('done')", timeout=6000)
     assert verdicts(page, "#item-phases-p2") == []
     assert verdicts(page, "#item-tasks-t2") == []
-    serve(page, served, 2, DOC["phases"], DOC["tasks"])
+    serve(page, served, 3, DOC["phases"], DOC["tasks"])
     page.wait_for_function("() => !document.querySelector('#item-tasks-t2').classList.contains('done')", timeout=6000)
     assert verdicts(page, "#item-phases-p2") == ["Approve", "Deny"]
     assert verdicts(page, "#item-tasks-t2") == ["Approve", "Deny"]
@@ -146,11 +146,11 @@ def test_a_done_follow_up_offers_no_verdicts_and_no_scope_toggle(ledger):
 def test_a_live_update_out_of_scope_drops_the_verdicts_and_back_in_scope_restores_them(ledger):
     page, served = ledger
     out = [{**DOC["followups"][0], "out_of_scope": True}, *DOC["followups"][1:]]
-    serve(page, served, 1, DOC["phases"], DOC["tasks"], out)
+    serve(page, served, 2, DOC["phases"], DOC["tasks"], out)
     page.wait_for_function("() => document.querySelector('#item-followups-f1').classList.contains('out')", timeout=6000)
     assert verdicts(page, "#item-followups-f1") == []
     back = [DOC["followups"][0], {**DOC["followups"][1], "out_of_scope": False}, DOC["followups"][2]]
-    serve(page, served, 2, DOC["phases"], DOC["tasks"], back)
+    serve(page, served, 3, DOC["phases"], DOC["tasks"], back)
     page.wait_for_function(
         "() => !document.querySelector('#item-followups-f2').classList.contains('out')", timeout=6000
     )

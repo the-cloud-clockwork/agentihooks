@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x_apply:0c647c706ff0a7ad532009fa677df59e0312cd9f9c0878d133966d2625353b59": {
+    "reader": "standards_reader",
+    "reason": "apply_claim is called only when claim(payload) is not None, i.e. the sole op is task_update. worktree is consumed only inside stamped()/_stamp(), which returns the op unchanged whenever op[\"op\"] is not in WRITES (add, edit, add_item, retext). task_update is never in WRITES, so worktree is never read on this path; passing None changes nothing."
+  }
+}

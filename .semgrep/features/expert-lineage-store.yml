@@ -1,0 +1,24 @@
+rules:
+  - id: feature-expert-lineage-store
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-22, an expert lineage works one saved mission and only code moves its state: the lineage
+      records, the set of the running ones, the saved missions and the mission proofs are read and written
+      through scripts/swarm/expert_lineage.py alone, so no other module names their store keys.
+    pattern-either:
+      - pattern: '"expert-lineages"'
+      - pattern: '"expert-missions"'
+      - pattern: '"expert-running"'
+      - pattern: '"expert-proofs"'
+      - pattern: expert_lineage.LINEAGES
+      - pattern: expert_lineage.MISSIONS
+      - pattern: expert_lineage.ACTIVE
+      - pattern: expert_lineage.PROOFS
+    paths:
+      include:
+        - /scripts/
+        - /hooks/
+        - '*.test.py'
+      exclude:
+        - /scripts/swarm/expert_lineage.py

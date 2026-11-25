@@ -50,6 +50,7 @@ def _github(
     failed: Collection[tuple[int, str]] = (),
     uncovered: Collection[int] = (),
     fillers: Mapping[int, int] | None = None,
+    copied: Mapping[int, str] | None = None,
 ) -> None:
     listing = f"{ACTIONS}/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=10"
 
@@ -78,6 +79,8 @@ def _github(
     def jobs(endpoint, size=None):
         assert endpoint.startswith(f"{ACTIONS}/runs/") and endpoint.endswith("/attempts/1/jobs")
         run_id = int(endpoint.split("/runs/")[1].split("/")[0])
+        if conclusion := (copied or {}).get(run_id):
+            return [{"name": ci_test_plan.COPY_JOB, "conclusion": conclusion}]
         return [
             {"name": name, "conclusion": "failure" if (run_id, name) in failed else "success"}
             for name in sorted(ci_test_plan.UNIT_JOBS)
@@ -192,6 +195,18 @@ def test_the_newest_dev_run_whose_unit_shards_passed_and_kept_a_manifest_is_the_
     run, manifest = ci_test_plan.find_record(REPOSITORY, LATER)
     assert run["id"] == 1
     assert manifest["commit"] == f"{1:040d}"
+
+
+@pytest.mark.feature("dev-push-copies-reused-unit-results-in-one-job")
+@pytest.mark.parametrize(("conclusion", "record"), [("success", 2), ("failure", 1)])
+def test_a_dev_run_that_copied_its_queue_units_in_one_job_is_a_record_only_when_the_copy_passed(
+    monkeypatch, conclusion, record
+):
+    runs = [_run(2), _run(1)]
+    _github(monkeypatch, runs, manifests={2: _manifest(2), 1: _manifest(1)}, copied={2: conclusion})
+    found = ci_test_plan.find_record(REPOSITORY, LATER)
+    assert found is not None
+    assert found[0]["id"] == record
 
 
 def test_a_record_reads_all_jobs_of_its_run_in_one_request(monkeypatch):

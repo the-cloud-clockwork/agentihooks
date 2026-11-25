@@ -1,0 +1,14 @@
+rules:
+  - id: lab-static-step-path-without-image-tools
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A lab static step's PATH is built from the venv bin folder and the system default path alone. On 23 November a
+      live lab worker found neither semgrep nor helm under that PATH, since the worker image installs both in
+      /usr/local/bin, so every Semgrep gate and the chart timer gate failed on unchanged dev inside the sandbox. Name
+      the image tool folder between the venv bin folder and os.defpath.
+    paths:
+      include:
+        - /scripts/ci_lab/run_static.py
+        - lab-static-step-path-without-image-tools.py
+    pattern: os.pathsep.join(($VENV, os.defpath))

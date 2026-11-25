@@ -15,19 +15,42 @@ def ledger(rev, **fields):
     return {"tasks": [], **fields, "_meta": {"rev": rev}}
 
 
+def unloaded() -> dict[str, object]:
+    raise AssertionError("a cursor replay never loads the channel")
+
+
 def opened(hub, slug=SLUG, cursor=None, rev=1):
     return hub.open(slug, lambda: {"ledger": ledger(rev), "swarm": None, "workspaces": {}}, cursor)
 
 
-def test_a_first_connection_gets_one_snapshot_at_the_current_cursor():
+def test_a_first_connection_gets_one_open_event_at_the_current_cursor():
     hub = Hub()
     seq, first = opened(hub)
     channel = hub.channels[SLUG]
     assert seq == 0
     assert first == [
-        (0, f"{channel.epoch}.0", "snapshot", {"ledger": ledger(1), "swarm": None, "workspaces": {}}),
+        (0, f"{channel.epoch}.0", "open", {"rev": 1, "swarm": None, "workspaces": {}}),
     ]
     assert hub.watched() == [SLUG]
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_a_connect_without_a_cursor_opens_without_a_ledger_snapshot():
+    hub = Hub()
+    seq, first = hub.open(SLUG, lambda: {"swarm": {"agents": []}})
+    channel = hub.channels[SLUG]
+    assert seq == 0
+    assert first == [(0, f"{channel.epoch}.0", "open", {"rev": None, "swarm": {"agents": []}})]
+    assert hub.publish(SLUG, "ledger", ledger(2, tasks=[{"id": "t0"}, {"id": "t1"}]))
+    assert hub.publish(SLUG, "ledger", ledger(3, tasks=[{"id": "t1", "state": "pr"}, {"id": "t2"}]))
+    events = hub.wait(SLUG, seq, 0.01)
+    assert [(name, data.get("from"), data["rev"]) for _, _, name, data in events] == [
+        ("open", None, 2),
+        ("ledger", 2, 3),
+    ]
+    assert events[1][3]["rows"] == {"tasks": {"u": ["t1", "t2"], "gone": ["t0"]}}
+    _, again = hub.open(SLUG, lambda: {"swarm": None})
+    assert [(name, data) for _, _, name, data in again] == [("open", {"rev": 3, "swarm": {"agents": []}})]
 
 
 def test_every_channel_life_has_its_own_epoch():
@@ -44,7 +67,7 @@ def test_a_second_connection_reuses_the_loaded_resources():
     calls = []
     seq, first = hub.open(SLUG, lambda: calls.append(1) or {"ledger": ledger(1)})
     assert calls == [] and seq == 1
-    assert first[0][3]["ledger"] == ledger(2)
+    assert first[0][3] == {"rev": 2, "swarm": None, "workspaces": {}}
 
 
 def test_a_publish_appends_a_patch_that_rebuilds_the_new_value():
@@ -223,19 +246,19 @@ def test_a_reconnect_replays_exactly_the_events_after_its_cursor():
     for rev in (2, 3, 4):
         hub.publish(SLUG, "ledger", ledger(rev))
     cursor = hub.channels[SLUG].log[0][1]
-    seq, replay = hub.open(SLUG, None, cursor)
+    seq, replay = hub.open(SLUG, unloaded, cursor)
     assert seq == 1
     assert [data["rev"] for _, _, _, data in replay] == [3, 4]
     latest = hub.channels[SLUG].log[-1][1]
-    assert hub.open(SLUG, None, latest) == (3, [])
+    assert hub.open(SLUG, unloaded, latest) == (3, [])
 
 
 def test_a_cursor_from_the_snapshot_replays_everything_since():
     hub = Hub()
     _, first = opened(hub)
-    assert hub.open(SLUG, None, first[0][1]) == (0, [])
+    assert hub.open(SLUG, unloaded, first[0][1]) == (0, [])
     hub.publish(SLUG, "ledger", ledger(2))
-    _, replay = hub.open(SLUG, None, first[0][1])
+    _, replay = hub.open(SLUG, unloaded, first[0][1])
     assert [data["rev"] for _, _, _, data in replay] == [2]
 
 
@@ -245,9 +268,9 @@ def test_an_unreadable_cursor_is_expired(seq):
     opened(hub)
     hub.publish(SLUG, "ledger", ledger(2))
     with pytest.raises(Expired):
-        hub.open(SLUG, None, f"{hub.channels[SLUG].epoch}.{seq}")
+        hub.open(SLUG, unloaded, f"{hub.channels[SLUG].epoch}.{seq}")
     with pytest.raises(Expired):
-        hub.open(SLUG, None, f"{hub.channels[SLUG].epoch}{seq}")
+        hub.open(SLUG, unloaded, f"{hub.channels[SLUG].epoch}{seq}")
 
 
 def test_a_cursor_from_another_server_ledger_or_channel_life_is_expired():
@@ -257,26 +280,26 @@ def test_a_cursor_from_another_server_ledger_or_channel_life_is_expired():
     other = Hub()
     opened(other)
     with pytest.raises(Expired):
-        hub.open(SLUG, None, Hub.cursor(other.channels[SLUG], 0))
+        hub.open(SLUG, unloaded, Hub.cursor(other.channels[SLUG], 0))
     with pytest.raises(Expired):
-        hub.open(SLUG, None, Hub.cursor(hub.channels["other-2026-01-01"], 0))
+        hub.open(SLUG, unloaded, Hub.cursor(hub.channels["other-2026-01-01"], 0))
     with pytest.raises(Expired):
-        hub.open("never-2026-01-01", None, Hub.cursor(hub.channels[SLUG], 0))
+        hub.open("never-2026-01-01", unloaded, Hub.cursor(hub.channels[SLUG], 0))
     old = Hub.cursor(hub.channels[SLUG], 0)
     hub.close(SLUG)
     hub.evict(now=time.monotonic() + events_hub.IDLE_EVICT_S)
     with pytest.raises(Expired):
-        hub.open(SLUG, None, old)
+        hub.open(SLUG, unloaded, old)
     opened(hub)
     with pytest.raises(Expired):
-        hub.open(SLUG, None, old)
+        hub.open(SLUG, unloaded, old)
 
 
 def test_a_cursor_ahead_of_the_channel_is_expired():
     hub = Hub()
     opened(hub)
     with pytest.raises(Expired):
-        hub.open(SLUG, None, Hub.cursor(hub.channels[SLUG], 1))
+        hub.open(SLUG, unloaded, Hub.cursor(hub.channels[SLUG], 1))
 
 
 def test_a_cursor_older_than_retention_is_expired_and_the_oldest_kept_one_replays():
@@ -288,10 +311,10 @@ def test_a_cursor_older_than_retention_is_expired_and_the_oldest_kept_one_replay
     assert [at for at, *_ in channel.log] == [10, 11, 12]
     for old in (8, 1):
         with pytest.raises(Expired):
-            hub.open(SLUG, None, Hub.cursor(channel, old))
-    seq, replay = hub.open(SLUG, None, Hub.cursor(channel, 9))
+            hub.open(SLUG, unloaded, Hub.cursor(channel, old))
+    seq, replay = hub.open(SLUG, unloaded, Hub.cursor(channel, 9))
     assert seq == 9 and [at for at, *_ in replay] == [10, 11, 12]
-    assert hub.open(SLUG, None, Hub.cursor(channel, 11)) == (11, [channel.log[-1]])
+    assert hub.open(SLUG, unloaded, Hub.cursor(channel, 11)) == (11, [channel.log[-1]])
 
 
 @pytest.mark.wall_clock
@@ -423,7 +446,7 @@ def test_a_publish_during_the_first_load_wins_over_the_loaded_copy():
         return {"ledger": ledger(4), "swarm": None}
 
     _, first = hub.open(SLUG, load)
-    assert first[0][3] == {"ledger": ledger(5), "swarm": None}
+    assert first[0][3] == {"rev": 5, "swarm": None}
 
 
 def test_the_default_retention_is_bounded():
@@ -472,3 +495,70 @@ def test_a_drained_hub_answers_closed_at_once():
 
 def test_closed_is_not_expired():
     assert not issubclass(events_hub.Closed, Expired)
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_treats_a_change_without_an_o_key_as_no_rows_changed() -> None:
+    assert events_hub.changed_rows({"tasks": []}, {"tasks": []}, {}) == {}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_skips_a_key_whose_after_value_is_not_a_list() -> None:
+    old = {"tasks": [{"id": "a"}, {"id": "b"}]}
+    new = {"tasks": ({"id": "a"}, {"id": "c"})}
+    change = {"o": {"tasks": {"u": [{"id": "c"}], "add": []}}}
+    assert events_hub.changed_rows(old, new, change) == {}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_skips_a_key_whose_after_ids_cannot_be_resolved() -> None:
+    old = {"tasks": [{"id": "a"}]}
+    new = {"tasks": [1, 2, 3]}
+    change = {"o": {"tasks": {"u": [], "add": []}}}
+    assert events_hub.changed_rows(old, new, change) == {}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_keeps_reading_later_keys_after_one_key_has_no_ids() -> None:
+    old = {"weird": [1, 2], "tasks": [{"id": "a"}]}
+    new = {"weird": [3, 4], "tasks": [{"id": "a"}, {"id": "b"}]}
+    change = {"o": {"weird": {"u": [], "add": []}, "tasks": {"u": [{"id": "b"}], "add": []}}}
+    assert events_hub.changed_rows(old, new, change) == {"tasks": {"u": ["b"], "gone": []}}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_upserts_the_updated_and_added_rows_when_the_list_was_patched_incrementally() -> None:
+    old = {"tasks": [{"id": "a"}]}
+    new = {"tasks": [{"id": "a"}, {"id": "x"}]}
+    change = {"o": {"tasks": {"add": [{"id": "x"}]}}}
+    assert events_hub.changed_rows(old, new, change) == {"tasks": {"u": ["x"], "gone": []}}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_upserts_the_whole_after_list_when_the_part_carries_a_full_value() -> None:
+    old = {"tasks": [{"id": "a"}]}
+    new = {"tasks": [{"id": "z"}]}
+    change = {"o": {"tasks": {"v": [{"id": "z"}], "u": [{"id": "other"}], "add": [{"id": "other2"}]}}}
+    assert events_hub.changed_rows(old, new, change) == {"tasks": {"u": ["z"], "gone": ["a"]}}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_changed_rows_keeps_later_rows_after_a_non_list_field() -> None:
+    old = {"meta": {"rev": 1}, "tasks": [{"id": "a"}]}
+    new = {"meta": {"rev": 2}, "tasks": [{"id": "b"}]}
+    change = {"o": {"meta": {"o": {"rev": {"v": 2}}}, "tasks": {"v": [{"id": "b"}]}}}
+    assert events_hub.changed_rows(old, new, change) == {"tasks": {"u": ["b"], "gone": ["a"]}}
+
+
+@pytest.mark.feature("ledger-stream-no-snapshot-connect")
+def test_a_first_ledger_publication_advances_an_existing_resource_cursor() -> None:
+    hub = Hub()
+    hub.open(SLUG, lambda: {"swarm": {"state": "running"}})
+    assert hub.publish(SLUG, "swarm", {"state": "paused"})
+    prior = hub.channels[SLUG].log[-1][1]
+    assert hub.publish(SLUG, "ledger", ledger(9))
+    assert [event[0] for event in hub.channels[SLUG].log] == [1, 2]
+    seq, replay = hub.open(SLUG, unloaded, prior)
+    assert seq == 1
+    assert [(at, name, data) for at, _, name, data in replay] == [(2, "open", {"rev": 9})]
+    assert hub.open(SLUG, unloaded, replay[0][1]) == (2, [])

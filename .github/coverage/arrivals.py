@@ -2,13 +2,17 @@
 
 The sonar job starts beside the shards. This runs inside an actions/github-script step, which
 hands it the job's runtime token, and asks the results service download-artifact uses for this
-run's artifacts every few seconds. It holds no GitHub token, so it spends no REST quota. Each
-shard's coverage is downloaded into .coverage-shards when it is listed. A shard ends when its
-coverage is taken, or when its flake report, uploaded after its coverage, is listed with no
-coverage of it; a rerun counts only a flake report that changed since its first listing. While
-shards still run it flattens the databases it holds as flat-<name> beside them, which combine.sh
-takes as they are. It returns once every shard ended or the wait ran out, and leaves naming a
-shard without coverage to combine.sh.
+run's artifacts every few seconds. It holds no GitHub token for that listing, so it spends no
+REST quota there. Each shard's coverage is downloaded into .coverage-shards when it is listed. A
+shard ends when its coverage is taken, or when its flake report, uploaded after its coverage, is
+listed with no coverage of it; a rerun counts only a flake report that changed since its first
+listing. While shards still run it flattens the databases it holds as flat-<name> beside them,
+which combine.sh takes as they are. A shard job still queued for a runner does not spend the
+wait: this module takes no GitHub token and makes no API call of its own, so a sibling script,
+queue_watch.py, polls the run's job states separately with the App token the sonar job already
+mints, and leaves its answer in QUEUE_STATE on disk; only time with a fresh "started" answer
+counts against the wait, and a missing or stale answer counts it as before. It returns once
+every shard ended or the wait ran out, and leaves naming a shard without coverage to combine.sh.
 """
 
 import base64
@@ -23,6 +27,7 @@ import time
 import urllib.parse
 import urllib.request
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -30,6 +35,9 @@ SERVICE = "twirp/github.actions.results.api.v1.ArtifactService/"
 INTERVAL = 3
 TIMEOUT = 30
 WAIT = 44 * 60
+JOB_POLL = 10 * INTERVAL
+QUEUE_STATE = Path(".sonar-shard-queue-state")
+STALE = 3 * JOB_POLL
 OUT = Path(".coverage-shards")
 FLATTEN = Path(__file__).with_name("flatten.py")
 FLAT = "flat-"
@@ -64,6 +72,14 @@ class Timer(Protocol):
 
     def pause(self, seconds: float) -> None:
         """Wait the given seconds."""
+        ...
+
+
+class Jobs(Protocol):
+    """Whether this run's remaining shard jobs have started, read apart from the artifact listing."""
+
+    def started(self) -> bool | None:
+        """Say whether a shard job of this scope is running or done, or None when that could not be read."""
         ...
 
 
@@ -145,6 +161,25 @@ class Results:
         return True
 
 
+class FileJobs:
+    """A shard queue state a sibling watcher writes to disk, since this module takes no GitHub token."""
+
+    def __init__(self, path: Path) -> None:
+        """Keep the path the watcher keeps current."""
+        self.path = path
+
+    def started(self) -> bool | None:
+        """Say whether the watcher's last fresh answer was started, or None when it is missing or stale."""
+        try:
+            stat = self.path.stat()
+            content = self.path.read_text().strip()
+        except OSError:
+            return None
+        if time.time() - stat.st_mtime > STALE:
+            return None
+        return True if content == "started" else False if content == "queued" else None
+
+
 def shard_of(name: str, scope: str, shards: int) -> int | None:
     """Return the shard a coverage artifact of this scope belongs to, or None for any other artifact."""
     patterns = (PLAIN, BRANCH) if scope == SELECTED else (PLAIN,)
@@ -213,15 +248,31 @@ def advance(flattening: Flattening | None, queue: list[Path]) -> Flattening | No
     return Flattening(queue.pop(0)) if queue else None
 
 
+@dataclass(frozen=True)
+class Scope:
+    """Which shards of this run attempt are being awaited."""
+
+    shards: int
+    scope: str
+    attempt: int
+
+
 def arrive(
-    service: Service, shards: int, scope: str, attempt: int, out: Path, seconds: float, timer: Timer
+    service: Service,
+    run: Scope,
+    out: Path,
+    seconds: float,
+    timer: Timer,
+    jobs: Jobs | None = None,
 ) -> list[int]:
-    """Take each shard's coverage as it lands; return the shards still running when the wait ran out."""
+    """Take each shard's coverage as it lands, spending the wait only while a shard job runs; return what is left."""
     out.mkdir(parents=True, exist_ok=True)
-    start = timer.now()
+    budget_start = timer.now()
+    checked = budget_start - JOB_POLL
+    running = True
     taken: set[str] = set()
     first: dict[str, str] | None = None
-    left = list(range(1, shards + 1))
+    left = list(range(1, run.shards + 1))
     queue = [path for path in sorted(out.glob(CARRIED)) if path.stat().st_size]
     flattening: Flattening | None = None
     while True:
@@ -229,16 +280,27 @@ def arrive(
         if listed is not None:
             first = listed if first is None else first
             for name in sorted(listed):
-                if name in taken or shard_of(name, scope, shards) is None or not service.fetch(name, out / name):
+                if (
+                    name in taken
+                    or shard_of(name, run.scope, run.shards) is None
+                    or not service.fetch(name, out / name)
+                ):
                     continue
                 taken.add(name)
                 queue.extend(databases(out / name))
-                print(f"{name} landed {timer.now() - start:.0f} s into the wait", flush=True)
-            left = pending(listed, first, taken, scope, shards, attempt)
-        if not left or timer.now() - start >= seconds:
+                print(f"{name} landed {timer.now() - budget_start:.0f} s into the wait", flush=True)
+            left = pending(listed, first, taken, run.scope, run.shards, run.attempt)
+        if not left or timer.now() - budget_start >= seconds:
             break
         flattening = advance(flattening, queue)
         timer.pause(INTERVAL)
+        moment = timer.now()
+        if jobs is not None and moment - checked >= JOB_POLL:
+            checked = moment
+            started = jobs.started()
+            running = True if started is None else started
+        if jobs is not None and not running:
+            budget_start += INTERVAL
     if flattening is not None:
         flattening.stop()
     return left
@@ -252,8 +314,10 @@ def main() -> int:
         print("::error::No artifact service token reached the coverage wait; the merge finds no shard coverage.")
         return 1
     shards = int(os.environ["SHARDS"])
+    scope = os.environ["SCOPE"]
+    attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
     service = Results(base, token)
-    left = arrive(service, shards, os.environ["SCOPE"], int(os.environ["GITHUB_RUN_ATTEMPT"]), OUT, WAIT, Wall())
+    left = arrive(service, Scope(shards, scope, attempt), OUT, WAIT, Wall(), FileJobs(QUEUE_STATE))
     if left:
         named = ", ".join(map(str, left))
         print(f"::warning::Shards {named} had not ended after {WAIT // 60} minutes; the merge names their coverage.")

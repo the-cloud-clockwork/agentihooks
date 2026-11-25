@@ -232,7 +232,7 @@ def test_the_folder_ledger_server_publishes_a_write_another_process_stored_witho
     def publish(slug: str, state: dict[str, Any]) -> None:
         published.append((slug, [message["id"] for message in state.get("chat", [])]))
 
-    def stop(interval: float) -> None:
+    def stop(interval: float, timeout: float | None = None) -> None:
         raise Stopped
 
     writer = store(tmp_path)
