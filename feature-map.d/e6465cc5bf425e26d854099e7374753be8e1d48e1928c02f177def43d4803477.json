@@ -11,6 +11,7 @@
     "tests/test_herdr_setup.py::test_the_resume_switch_turns_agent_resume_off",
     "tests/test_herdr_setup.py::test_the_resume_switch_leaves_a_resume_off_config_alone",
     "tests/test_herdr_setup.py::test_resume_stays_on_unless_switched_off",
+    "tests/test_herdr_setup.py::test_a_given_environment_switches_resume_off",
     "tests/test_herdr_setup.py::test_resume_stays_on_when_nothing_sets_the_switch",
     "tests/test_herdr_setup.py::test_the_resume_switch_is_read_from_the_agentihooks_env_file",
     "tests/test_herdr_resume.py::test_a_routed_claude_pane_resumes_through_the_router",

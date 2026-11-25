@@ -272,6 +272,12 @@ def test_resume_stays_on_unless_switched_off(value):
 
 
 @pytest.mark.feature("herdr-native-resume")
+@pytest.mark.parametrize("value", ["off", "false", "0", "no", " Off "])
+def test_a_given_environment_switches_resume_off(value):
+    assert herdr_setup.resume_off({herdr_setup.RESUME_ENV: value}) is True
+
+
+@pytest.mark.feature("herdr-native-resume")
 def test_resume_stays_on_when_nothing_sets_the_switch(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     assert herdr_setup.resume_off({}) is False
