@@ -3320,6 +3320,21 @@
       ]
     },
     {
+      "id": "hub-launch-failure-capacity-no-steering",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-capacity-refusal-no-steer",
+      "behaviour": "An account slot or account full refusal records its launch failure reason without creating harness avoidance on a repeated or new admission. Canary timeouts and early exits still steer away from the broken harness, and a later account refusal preserves that earlier genuine avoidance.",
+      "seam": "Admission.failed, repeated Admission.admit and admission after reopen",
+      "rules": [
+        "hub-capacity-refusal-steers-harness"
+      ],
+      "tests": [
+        "tests/hub/test_admission.py::test_an_account_refusal_records_its_reason_without_steering",
+        "tests/hub/test_admission.py::test_a_broken_harness_failure_keeps_steering",
+        "tests/hub/test_admission.py::test_an_account_refusal_preserves_earlier_broken_harness_steering"
+      ]
+    },
+    {
       "id": "events-failed-launch-releases-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-lost-claims",
