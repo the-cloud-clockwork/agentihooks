@@ -1,0 +1,11 @@
+{
+  "id": "swarm-enhancement-done-target",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-target-done",
+  "behaviour": "The claim filters hold an open enhancement plan task whose target task is done, naming the target in the reason, so no planner claim, hub offer or admission takes a plan task with nothing left to plan; an enhancement whose target is open, claimed or missing stays claimable by planners.",
+  "seam": "scripts.swarm.claim_hold.hold, holds and urgent through readiness.claimable in the plan lane",
+  "tests": [
+    "tests/swarm/test_thin_hold.py::test_a_plan_task_enhancing_a_done_target_is_held_from_every_planner_claim",
+    "tests/swarm/test_thin_hold.py::test_a_plan_task_enhancing_unfinished_or_missing_work_stays_claimable_by_planners"
+  ]
+}
