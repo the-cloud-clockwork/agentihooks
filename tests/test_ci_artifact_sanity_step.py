@@ -79,9 +79,10 @@ def _module_file(name: str) -> Path | None:
 
 def _import_time(node: ast.AST) -> Iterator[ast.AST]:
     for child in ast.iter_child_nodes(node):
-        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) or (
-            isinstance(child, ast.If) and "TYPE_CHECKING" in ast.unparse(child.test)
-        ):
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if isinstance(child, ast.If) and ast.unparse(child.test) in ("TYPE_CHECKING", "typing.TYPE_CHECKING"):
+            yield from (item for branch in child.orelse for item in (branch, *_import_time(branch)))
             continue
         yield child
         yield from _import_time(child)
@@ -126,7 +127,7 @@ def _checker_packages() -> set[str]:
 def _interpreter_installs(run: str) -> set[str]:
     names: set[str] = set()
     for line in run.replace("\\\n", " ").splitlines():
-        if not line.lstrip().startswith("python -m pip install "):
+        if not line.lstrip().startswith("python -m pip install ") or any(mark in line for mark in "&;|"):
             continue
         words = iter(shlex.split(line)[4:])
         for word in words:
@@ -165,7 +166,12 @@ def test_the_step_detects_the_option_the_checker_really_declares() -> None:
 def test_the_lint_interpreter_installs_every_package_the_artifact_checker_imports() -> None:
     steps = _lint_steps()
     before = steps[: steps.index(_named(steps, "Artifact sanity checks"))]
-    installed = {name for step in before for name in _interpreter_installs(step.get("run", ""))}
+    runs = [step.get("run", "") for step in before if not step.get("continue-on-error")]
+    installed = {name for run in runs for name in _interpreter_installs(run)}
     known = packages_distributions()
-    wanted = {canonicalize_name(dist) for module in _checker_packages() for dist in known.get(module, [module])}
-    assert sorted(wanted - installed) == []
+    missing = [
+        module
+        for module in sorted(_checker_packages())
+        if not {canonicalize_name(dist) for dist in known.get(module, [module])} & installed
+    ]
+    assert missing == []
