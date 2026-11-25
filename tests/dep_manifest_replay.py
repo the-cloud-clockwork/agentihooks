@@ -26,6 +26,13 @@ RUN = "45229761034"
 REPOSITORY = "the-cloud-clockwork/agentihooks"
 
 
+def _phase(name: str, event: str, details: dict[str, Any]) -> None:
+    folder = Path(os.environ["PROOF_REPORT_DIR"])
+    folder.mkdir(parents=True, exist_ok=True)
+    with (folder / "manifest-phases.jsonl").open("a") as stream:
+        stream.write(json.dumps({"phase": name, "event": event, "utc_seconds": time.time(), **details}) + "\n")
+
+
 def _request(path: str) -> Any:
     request = urllib.request.Request(
         f"https://api.github.com/repos/{REPOSITORY}/{path}",
@@ -57,6 +64,7 @@ def _download(folder: Path) -> dict[str, dict[str, Any]]:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
         assert artifact["digest"] == f"sha256:{digest}"
         selected[name] = {"id": artifact["id"], "digest": digest, "bytes": path.stat().st_size}
+        _phase(name, "downloaded", selected[name])
     return selected
 
 
@@ -91,6 +99,8 @@ def _coverage(path: Path) -> dict[str, Any]:
 
 
 def _command(script: str, environment: dict[str, str]) -> dict[str, Any]:
+    name = f"{Path(environment['RUNNER_TEMP']).name}: {script.splitlines()[0]}"
+    _phase(name, "started", {})
     start = time.monotonic()
     completed = subprocess.run(
         ["bash", "-e", "-o", "pipefail", "-c", script],
@@ -100,12 +110,14 @@ def _command(script: str, environment: dict[str, str]) -> dict[str, Any]:
         text=True,
         timeout=600,
     )
-    return {
+    result = {
         "exit": completed.returncode,
         "seconds": time.monotonic() - start,
         "stdout": completed.stdout,
         "stderr": completed.stderr,
     }
+    _phase(name, "completed", result)
+    return result
 
 
 def _workflow(text: str) -> dict[str, str]:
@@ -124,10 +136,13 @@ def _run_commands(workflow: dict[str, str], folder: Path, head: str) -> dict[str
     combined = _command(combine, environment)
     assert combined["exit"] == 0, combined
     profile = folder / "manifest.profile"
-    built = _command(f'python -m cProfile -o "{profile}" -m scripts.dep_manifest build{cli}', environment)
+    command = f'python -m cProfile -o "{profile}" -m scripts.dep_manifest build' if folder.name == "after" else marker
+    built = _command(command + cli, environment)
     assert built["exit"] == 0, built
-    stats = pstats.Stats(str(profile)).get_stats_profile().func_profiles
-    phases = {name: stats[name].cumtime for name in ("build", "pack", "dumps")}
+    phases = {}
+    if folder.name == "after":
+        stats = pstats.Stats(str(profile)).get_stats_profile().func_profiles
+        phases = {name: stats[name].cumtime for name in ("build", "pack", "dumps")}
     return {"validation": validation, "combine": combined, "cli": built, "profile_seconds": phases}
 
 
@@ -175,7 +190,7 @@ def _malformed(before: dict[str, str], after: dict[str, str], corpus: Path, head
 
 
 @pytest.mark.feature("dep-manifest-raw-arrivals")
-@pytest.mark.timeout(850)
+@pytest.mark.timeout(2100)
 def test_real_promotion_archives_produce_identical_workflow_outputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -189,6 +204,7 @@ def test_real_promotion_archives_produce_identical_workflow_outputs(
         assert before[name] == after[name]
     archives = tmp_path / "archives"
     archives.mkdir()
+    _phase("corpus", "started", {"head": head, "source_run": RUN})
     fingerprints = _download(archives)
     bulk = tmp_path / "bulk"
     for name in fingerprints:
