@@ -198,6 +198,7 @@ def reopen(
                     profile_decision={**agent.profile_decision, **placed.profile_decision},
                     launch_timings=placed.launch_timings,
                 ),
+                runtime,
             )
             store.names.note(agent.name, session_id=agent.conversation_id)
             ledger.notify(slug, f"Resumed {agent.name} in its own conversation and seat after its pane ended.")

@@ -75,9 +75,9 @@ def place_seat(
 
         admitted = codex.admit_legacy(store, slug, tick.placed_record(record, placed), runtime)
         placed = replace(placed, execution=admitted) if admitted.execution_id else placed
+        spawn_counts.completed(store, slug, admitted, runtime)
     except Exception as exc:
         tick._release_hive_launch(slug, store, record)
         raise SeatFailed(record, exc) from exc
-    spawn_counts.record(store, slug, admitted.harness, admitted.name, admitted.launched_at)
     tick._spend_local(store, admitted, now_ms)
     return record, placed

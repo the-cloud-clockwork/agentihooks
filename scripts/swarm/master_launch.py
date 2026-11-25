@@ -154,11 +154,11 @@ def _resume(store: RedisStore, slug: str, runtime: Any, at: int, previous: Previ
             profile=placed.profile or agent.profile,
             model=placed.model or agent.model,
             effort=placed.effort or agent.effort,
-            launched_at=at,
+            launched_at=placed.launched_at or at,
             idle_ticks=0,
         )
-        store.revive_agent(slug, record)
         spawn_counts.record(store, slug, record.harness, record.name, record.launched_at)
+        store.revive_agent(slug, record)
     except Exception:
         runtime.retire(replace(agent, pane_id=placed.pane_id))
         store.seats.record_exit(agent.name, seat, "its resumed record was refused")
@@ -224,7 +224,7 @@ def _new(store: RedisStore, slug: str, runtime: Any, at: int, forced: bool) -> L
     occupant = store.execution_occupants(slug).get(record.seat)
     record = placed_record(occupant if occupant and occupant.name == name else record, placed)
     reported = runtime.reported(record)
-    spawn_counts.placed(store, slug, replace(record, state="working" if reported else "starting"))
+    spawn_counts.placed(store, slug, replace(record, state="working" if reported else "starting"), runtime)
     launch_check.begin(store, slug, record, at)
     if reported:
         store.redis.delete(store.key(slug, "master-start"))

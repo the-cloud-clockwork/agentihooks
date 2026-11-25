@@ -155,7 +155,7 @@ def _attempt(
                 effort=placed.effort or agent.effort,
                 model_source=placed.model_source,
                 model_confidence=placed.model_confidence,
-                launched_at=context.at,
+                launched_at=placed.launched_at or context.at,
                 idle_ticks=0,
                 state="working",
             )
@@ -163,7 +163,7 @@ def _attempt(
         agent = replace(agent, state=AWAITING)
         store.put_agent(slug, agent)
     else:
-        spawn_counts.placed(store, slug, agent)
+        spawn_counts.placed(store, slug, agent, context.runtime)
     live = context.runtime.live_names() if context.runtime else set()
     transfers.observe(store, slug, live)
     return Outcome(
@@ -468,7 +468,7 @@ def _recover_process(store: Any, slug: str, agent: Any, task: Any, context: Any,
                     replace(
                         agent,
                         pane_id=placed.pane_id,
-                        launched_at=context.at,
+                        launched_at=placed.launched_at or context.at,
                         idle_ticks=0,
                         account=placed.account or agent.account,
                         model=placed.model or agent.model,
@@ -476,6 +476,7 @@ def _recover_process(store: Any, slug: str, agent: Any, task: Any, context: Any,
                         model_source=placed.model_source or agent.model_source,
                         profile_decision={**agent.profile_decision, **placed.profile_decision},
                     ),
+                    context.runtime,
                 )
                 return ""
         return _restart_from_handoff(store, slug, agent, task, context)
@@ -505,8 +506,12 @@ def _restart_from_handoff(store: Any, slug: str, agent: Any, task: Any, context:
         store,
         slug,
         replace(
-            placed_record(agent, placed), conversation_id=placed.conversation_id, launched_at=context.at, idle_ticks=0
+            placed_record(agent, placed),
+            conversation_id=placed.conversation_id,
+            launched_at=placed.launched_at or context.at,
+            idle_ticks=0,
         ),
+        context.runtime,
     )
     return ""
 

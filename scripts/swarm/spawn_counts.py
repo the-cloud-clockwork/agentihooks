@@ -24,6 +24,14 @@ def read(store: Any, slug: str) -> dict[str, int]:
     return dict(Counter(harnesses))
 
 
-def placed(store: Any, slug: str, agent: Any) -> None:
+def completed(store: Any, slug: str, agent: Any, runtime: Any) -> None:
+    try:
+        record(store, slug, agent.harness, agent.name, agent.launched_at)
+    except Exception:
+        runtime.retire(agent)
+        raise
+
+
+def placed(store: Any, slug: str, agent: Any, runtime: Any) -> None:
+    completed(store, slug, agent, runtime)
     store.put_agent(slug, agent)
-    record(store, slug, agent.harness, agent.name, agent.launched_at)
