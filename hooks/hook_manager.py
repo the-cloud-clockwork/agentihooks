@@ -2305,6 +2305,15 @@ def _link_codex_rollout(transcript_path: str) -> None:
         log("codex rollout link failed", {"error": str(e)})
 
 
+def _close_handed_off(payload: dict) -> bool:
+    """Close a session its successor took over; Windows runs no handoffs."""
+    if sys.platform == "win32":
+        return False
+    from hooks.lifecycle.handoff_close import on_stop
+
+    return on_stop(payload)
+
+
 def on_stop(payload: dict) -> None:
     """Handle Stop event.
 
@@ -2480,9 +2489,7 @@ def on_stop(payload: dict) -> None:
         log("session refresh failed", {"error": str(e)})
 
     try:
-        from hooks.lifecycle.handoff_close import on_stop as handoff_close_on_stop
-
-        if sys.platform != "win32" and handoff_close_on_stop(payload):
+        if _close_handed_off(payload):
             log("handed-off session close scheduled", {"session_id": session_id})
     except Exception as e:
         log("handed-off session close failed", {"error": str(e)})
