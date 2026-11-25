@@ -154,10 +154,10 @@ With `agent` set to `codex`:
 | Stuck harness | The bottleneck remedy moves only a pinned `eng` or `ci` lane. When Codex is the stuck stage, the review pin stays on Codex, and with no `eng` or `ci` lane pinned to Codex the remedy records `no lane is pinned to codex`. |
 
 `claude` pins the lane to Claude the same way, and `auto`, the default, offers
-both harnesses. [Harness pin findings](../pillars/swarm.md#harness-pin-findings)
-check only `eng`, `ci` and `plan`, so a review pin raises no pin finding. While
-review tasks wait, the [reserved review share](#reserved-review-share) counts
-only the free seats of the pinned harness.
+both harnesses. See [Harness pin findings](../pillars/swarm.md#harness-pin-findings)
+for pin diagnostics. While review tasks wait, the
+[reserved review share](#reserved-review-share) counts only the free seats of
+the pinned harness.
 
 ## Reserved review share
 
