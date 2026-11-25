@@ -48,6 +48,16 @@ def test_secret_references_remain_visible(reference: str, style: str, mode: str)
 
 @pytest.mark.feature("guardrails.secret-reference-literals")
 @pytest.mark.parametrize("mode", ["standard", "strict"])
+def test_resource_literals_remain_visible(mode: str) -> None:
+    reference = _arn(("secret", "example/service-AbCdEf"))
+    text = f'RESOURCE = "{reference}"'
+    assert scan(text, mode=mode) == []
+    assert redact(text, mode=mode) == text
+    assert not contains_generic_secret(text)
+
+
+@pytest.mark.feature("guardrails.secret-reference-literals")
+@pytest.mark.parametrize("mode", ["standard", "strict"])
 @pytest.mark.parametrize("style", ["quoted", "bare", "json"])
 @pytest.mark.parametrize(
     "value",
@@ -96,8 +106,9 @@ def test_reference_does_not_hide_a_credential_or_provider_token() -> None:
 
 
 @pytest.mark.feature("guardrails.secret-reference-literals")
-def test_unterminated_reference_is_still_a_literal() -> None:
-    text = "SEC" + 'RET = "example/service/credential'
+@pytest.mark.parametrize("ending", ["", "'", ' extra"', '\nextra"'])
+def test_unterminated_reference_is_still_a_literal(ending: str) -> None:
+    text = "SEC" + f'RET = "example/service/credential{ending}'
     assert scan(text, mode="standard") == ["generic_secret"]
-    assert redact(text, mode="standard") == "[REDACTED:generic_secret]"
+    assert "[REDACTED:generic_secret]" in redact(text, mode="standard")
     assert contains_generic_secret(text)
