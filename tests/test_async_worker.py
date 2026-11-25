@@ -73,6 +73,7 @@ def test_job_file_is_read_and_closed_before_it_is_deleted(jobs: Path, monkeypatc
 
     from hooks import _async
 
+    (jobs / "logs").mkdir()
     job = _async._write_job(print, ("job ran",), {})
     handles: list[Any] = []
     real_open, real_unlink = builtins.open, os.unlink
