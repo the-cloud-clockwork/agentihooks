@@ -8179,6 +8179,19 @@
       ]
     },
     {
+      "id": "lab-test-manifest-identity",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2752",
+      "behaviour": "Each test batch records the digest of its exact manifest bytes when keyed. The expected digest survives grade persistence, queue admission and lease transport. A worker refuses missing identity, missing payload and substituted batch records by name before acquiring execution resources, while later valid work still runs.",
+      "seam": "test expansion through persisted scheduler slots, queue, HTTP lease and test executor",
+      "tests": [
+        "tests/ci_lab/test_manifest_identity.py::test_expansion_records_the_identity_of_its_exact_batch_bytes",
+        "tests/ci_lab/test_manifest_identity.py::test_a_swapped_stored_manifest_is_refused_and_the_next_unit_still_runs",
+        "tests/ci_lab/test_manifest_identity.py::test_manifest_refusal_precedes_all_test_execution_resources",
+        "tests/ci_lab/test_manifest_identity.py::test_old_records_without_identity_are_parsed_then_refused_after_claiming"
+      ]
+    },
+    {
       "id": "swarm-enhance-close",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-close",
