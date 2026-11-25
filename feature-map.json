@@ -16477,6 +16477,16 @@
         "tests/ci_lab/test_budget_docs.py::test_the_published_lab_budget_docs_match_the_shed_thresholds_in_code",
         "tests/ci_lab/test_budget_docs.py::test_a_docs_copy_with_the_thresholds_swapped_fails_the_check"
       ]
+    },
+    {
+      "id": "lane-grader-admits-dedicated-tests-dispatch-lanes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tests-dispatch-own-lane",
+      "behaviour": "The trusted branch lane grader admits the exact dedicated Tests dispatch lane expression while preserving the old Tests groups and refusing changed groups, queue settings, cancellation, extra keys, workflow names, events, untrusted baselines and new jobs.",
+      "seam": "ci_branch_lanes.problems",
+      "tests": [
+        "tests/test_ci_branch_lanes.py::test_only_the_trusted_tests_workflow_may_use_dedicated_dispatch_lanes"
+      ]
     }
   ],
   "unmapped_rules": [
