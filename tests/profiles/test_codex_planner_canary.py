@@ -88,7 +88,7 @@ def test_a_sandboxed_canary_requires_the_complete_launch_record(
     else:
         requested["sandbox_launch"].pop(field)
     report.write_text(json.dumps(requested))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^sandbox planner launch binding mismatch$"):
         binding.validate(binding.inspect(home, "planner", "codex")["canary"])
 
 
@@ -116,7 +116,7 @@ def test_a_sandboxed_canary_requires_native_thread_identity(
     requested["sandbox_launch"].pop("thread")
     report.write_text(json.dumps(requested))
     monkeypatch.delenv("CODEX_THREAD_ID")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^profile canary has no supported live harness ancestor$"):
         binding.validate(binding.inspect(home, "planner", "codex")["canary"])
 
 
@@ -148,7 +148,7 @@ def test_recording_refuses_a_different_live_planner(
     target = "claude" if mismatch == "harness" else "codex"
     monkeypatch.setattr(binding, "process", Mock(return_value=(2345, target, live, "account-one")))
     before = report.read_bytes()
-    with pytest.raises(ValueError, match="does not match"):
+    with pytest.raises(ValueError, match="^Codex planner launch does not match its live process$"):
         binding.bind_sandbox(env, 2345, 98765, "thread-planner")
     assert report.read_bytes() == before
 

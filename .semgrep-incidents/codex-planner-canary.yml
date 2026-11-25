@@ -5,8 +5,11 @@ rules:
     message: Resolve a planner canary through its recorded launch when the Codex sandbox hides the harness ancestor.
     patterns:
       - pattern-inside: |
-          def validate(...):
+          def $VALIDATE(...):
               ...
+      - metavariable-regex:
+          metavariable: $VALIDATE
+          regex: ^validate(?:_|$)
       - pattern: process()
   - id: codex-planner-canary-recorded-late
     languages: [python]

@@ -2,18 +2,16 @@ from scripts.profiles import binding
 from scripts.profiles.binding import _canary_process, process
 
 
-class AncestorOnly:
-    def validate(self, canary: str) -> int:
-        # ruleid: codex-planner-canary-ancestor-only
-        pid, _, _, _ = process()
-        return pid
+def validate_ancestor(canary: str) -> int:
+    # ruleid: codex-planner-canary-ancestor-only
+    pid, _, _, _ = process()
+    return pid
 
 
-class SandboxLaunch:
-    def validate(self, canary: str) -> int:
-        # ok: codex-planner-canary-ancestor-only
-        pid, _, _, _ = _canary_process()
-        return pid
+def validate_sandbox(canary: str) -> int:
+    # ok: codex-planner-canary-ancestor-only
+    pid, _, _, _ = _canary_process()
+    return pid
 
 
 def open_turn() -> None:
