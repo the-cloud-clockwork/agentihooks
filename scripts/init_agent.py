@@ -689,13 +689,16 @@ def _recorded_home(agent: str, environ: dict[str, str]) -> str | None:
     return environ.get(binding.HOMES[agent])
 
 
-def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
+def _binding_request(args: Any, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
     from scripts.profiles import binding
 
     if not args.profile:
         return prompt
     home = Path(environ[binding.HOMES[agent]])
-    report = _runtime_dir(environ) / f"profile-{os.getpid()}-{time.time_ns()}.json"
+    root = _runtime_dir(environ)
+    if agent == "codex" and args.profile == "planner":
+        root = Path(environ.get("HOME") or Path.home()) / ".agentihooks" / "swarm" / "profile-reports"
+    report = root / f"profile-{os.getpid()}-{time.time_ns()}.json"
     binding.request(report, args.profile, agent, home)
     environ[binding.REPORT] = str(report)
     if not args.defer_canary:

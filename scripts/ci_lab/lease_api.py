@@ -118,6 +118,7 @@ def _grant(grant: Grant) -> dict[str, Any]:
         "slots": grant.slots,
         "expires_ms": grant.expires_ms,
         **({"manifest": grant.unit.manifest} if grant.unit.manifest else {}),
+        **({"manifest_digest": grant.unit.manifest_digest} if grant.unit.manifest_digest else {}),
     }
 
 

@@ -40,6 +40,8 @@ def _master(found: Member) -> str:
     lines = [
         f"You are the master of quick swarm {found.swarm.quick_id}, in herdr pane 1. You are the operator's "
         "front door: the operator talks only to you.",
+        "Load the quick-swarm-master skill before any other action: it covers how this quick swarm is built, "
+        "how a seat launches and registers, how messages travel, and how to troubleshoot or force a handoff.",
         "Take work from whatever source the operator names, tickets, issues or pull requests, with the tools you have.",
         "Your engineers, the only agents you contact:",
         *(_engineer_line(found, seat) for seat in engineers),
@@ -50,6 +52,14 @@ def _master(found: Member) -> str:
         "learned.md its lessons. Tell the operator what each engineer is doing and where its notes are.",
         "Reach a Claude engineer with SendMessage to its session; reach any other seat with "
         '`agentihooks quick send <seat> "<text>"` and read what seats sent you with `agentihooks quick room`.',
+        "Never trust that a pane message reached its seat: after typing into a pane, read it back and confirm "
+        "the seat started on it or queued it; if the text still sits unsent, press Enter again and recheck, and "
+        "if it still cannot be confirmed, report NOT SENT and send it through the room instead with "
+        '`agentihooks quick send <seat> "<text>"`.',
+        "Pack each delivery into as few merge or pull requests as possible, one per repository, at most 20 "
+        "changed files each; split only above 20 files. Follow-ups go into the change already open in that "
+        "repository. Approve an engineer's new merge or pull request only when no change is open in that "
+        "repository, or the open one would pass 20 files.",
         HANDOFF.format(handoff=paths.handoff(found.folder, MASTER), learned=paths.learned(found.folder, MASTER)),
     ]
     return "\n".join(lines)
@@ -69,6 +79,9 @@ def _engineer(found: Member) -> str:
         f"Report progress, blockers and the finished plan to the master: {_reach(seat, master)}. Read what other "
         "seats sent you with `agentihooks quick room`.",
         "When the plan is complete, report it to the master and wait for the next instruction.",
+        "Pack each delivery into as few merge or pull requests as possible, one per repository, at most 20 "
+        "changed files each; split only above 20 files. Follow-ups go into the change already open in that "
+        'repository. Ask the master through `agentihooks quick send master "<text>"` before opening any new one.',
         HANDOFF.format(handoff=paths.handoff(found.folder, seat.seat), learned=paths.learned(found.folder, seat.seat)),
     ]
     return "\n".join(lines)
@@ -88,6 +101,17 @@ def block(found: Member) -> str:
     head = (
         f"QUICK SWARM — you are {seat.seat} of quick swarm {found.swarm.quick_id}, herdr pane {seat.position} "
         f"({role}). Seat folder {paths.seat_dir(found.folder, seat.seat)}. Plan: {progress}."
+    )
+    if seat.seat == MASTER:
+        head += " Load the quick-swarm-master skill before any other action."
+    head += (
+        " Pack each delivery into as few merge or pull requests as possible, one per repository, at most 20 "
+        "changed files each, split only above 20; follow-ups go into the change already open in that repository."
+    )
+    head += (
+        " Approve a new one only when no change is open in that repository, or the open one would pass 20 files."
+        if seat.seat == MASTER
+        else ' Ask the master through `agentihooks quick send master "<text>"` before opening any new one.'
     )
     waiting = room.waiting(found.folder, seat.seat)
     head += f" Room: {waiting} message(s) for you; read them with `agentihooks quick room`." if waiting else ""

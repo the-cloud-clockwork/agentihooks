@@ -1071,6 +1071,7 @@ def test_writer_unit_uses_the_installed_binary_and_restarts_after_every_exit() -
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         "EnvironmentFile=-%h/.agentihooks/hive.env\n"
+        "Environment=MALLOC_ARENA_MAX=2\n"
         'ExecStart="/installed/bin/agentihooks" ledger writer serve\n'
         "Restart=always\nRestartSec=5\n\n"
         "[Install]\nWantedBy=default.target\n"
