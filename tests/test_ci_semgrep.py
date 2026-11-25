@@ -694,7 +694,7 @@ def test_feature_tests_and_charts_have_runner_classes():
     }
 
 
-def test_exactly_one_step_per_ratchet_grades_against_the_base():
+def test_exactly_one_step_per_ratchet_grades_against_the_base() -> None:
     ratchets = [
         (job, step)
         for job, body in _jobs().items()

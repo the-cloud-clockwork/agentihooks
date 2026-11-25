@@ -1,0 +1,6 @@
+{
+  "scripts/private_test_imports.py:scripts.private_test_imports.x_check:88fa1121fe14349c16c78f150bcfd3612005329c045eb563c193fa744676ff8c": {
+    "reader": "standards-reader",
+    "reason": "check mutant 29 is equivalent: right splitting preserves the touched-entry path because each supported baseline key contains exactly one separator."
+  }
+}

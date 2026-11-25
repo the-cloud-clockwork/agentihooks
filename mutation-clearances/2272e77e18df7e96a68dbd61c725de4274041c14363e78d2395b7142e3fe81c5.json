@@ -1,0 +1,6 @@
+{
+  "scripts/private_test_imports.py:scripts.private_test_imports.x_check:72ee652d06569723f95dd92089dd387baab5f64984b979d4d64bde3c71f7d581": {
+    "reader": "standards-reader",
+    "reason": "check mutant 31 is equivalent: maxsplit 2 and maxsplit 1 extract the same touched-entry path from keys containing one separator."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/private_test_imports.py:scripts.private_test_imports.x_check:dec6c43b7f5ffd567f6f93a0fc1334c80c187dc4ec208af9fef0dcffd25c211e": {
+    "reader": "standards-reader",
+    "reason": "check mutant 43 is equivalent: increasing maxsplit to 2 preserves the rescan path because supported baseline keys contain one separator."
+  }
+}

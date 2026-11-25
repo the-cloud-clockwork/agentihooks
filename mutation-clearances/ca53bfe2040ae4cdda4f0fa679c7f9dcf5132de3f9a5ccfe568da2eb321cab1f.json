@@ -1,0 +1,6 @@
+{
+  "scripts/private_test_imports.py:scripts.private_test_imports.x_changed:b6617e2aab38bab1a5fd49bc784b0b1c61e457da6d0faa1835258b09a8c8fe9c": {
+    "reader": "standards-reader",
+    "reason": "changed mutant 5 is equivalent: subprocess.run raises on nonzero status only when check is truthy; None and False both leave return-code handling to changed."
+  }
+}

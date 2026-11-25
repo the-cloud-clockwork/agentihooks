@@ -1,0 +1,6 @@
+{
+  "scripts/private_test_imports.py:scripts.private_test_imports.x_grade:7dba12cd029952e7672ecfda1edfbcc43fa7dbdead1f90990aac83e9cf8b0b3b": {
+    "reader": "standards-reader",
+    "reason": "grade mutant 8 is equivalent: unrestricted split still returns exactly the path and imported identifier for every supported offender key."
+  }
+}
