@@ -70,7 +70,7 @@
       "id": "sonar-failed-gate-names-new-bugs",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-sonar-new-bug-13212",
-      "behaviour": "A failed Sonar quality gate prints the unresolved new bugs and vulnerabilities of the branch or pull request the scanner's dashboard address names, read once: the first 100 with component, line, rule and message, then a count of the rest. A refused read leaves the error line and the red exit as they are, a read the server does not answer stops once its retry waits reach 30 seconds and shows neither the retry script's outage notice nor its summary line, and a passed or superseded gate reads no issues.",
+      "behaviour": "A failed Sonar quality gate prints every page of unresolved new bugs and vulnerabilities of the branch or pull request the scanner's dashboard address names with component, line, rule and message. Refused or empty later pages retain prior findings and report the remaining count when known. Both finding collections share one thirty second timeout, diagnostic errors leave the original failed verdict and summary unchanged, and passed or superseded gates read no issues.",
       "seam": "the run text of the step SonarQube Quality Gate of the sonar job, run in a shell against a fake curl that answers the issue search",
       "tests": [
         "tests/test_ci_sonar_speed.py::test_a_failed_gate_names_its_new_bugs",
@@ -78,6 +78,33 @@
         "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_red_when_the_bug_read_is_refused",
         "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_a_code_verdict_when_the_bug_read_meets_an_outage",
         "tests/test_ci_sonar_speed.py::test_a_passed_gate_reads_no_issues"
+      ]
+    },
+    {
+      "id": "sonar-failed-gate-names-new-hotspots",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2619",
+      "behaviour": "A failed Sonar quality gate prints new security hotspots still to review for its graded branch or pull request with component, line or zero, rule and message. Refused, unavailable or incomplete reads retain prior findings and the failed code verdict. Passed and superseded gates read no hotspots.",
+      "seam": "the run text of the step SonarQube Quality Gate of the sonar job, run in a shell against a fake curl that answers the hotspot search",
+      "tests": [
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_names_its_unreviewed_hotspots",
+        "tests/test_ci_sonar_speed.py::test_finding_searches_use_the_read_token_and_polling_keeps_the_scan_token",
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_says_how_many_hotspots_it_left_out",
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_red_when_the_hotspot_read_is_refused",
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_a_code_verdict_when_the_hotspot_read_meets_an_outage",
+        "tests/test_ci_sonar_speed.py::test_a_passed_or_superseded_gate_reads_no_hotspots"
+      ]
+    },
+    {
+      "id": "sonar-failed-gate-lists-every-page",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2619",
+      "behaviour": "A failed Sonar gate prints every page of new gated issues and unreviewed hotspots for the graded branch or pull request. A refused or empty later page retains printed findings and counts the remainder. Both lists share one thirty second diagnostic timeout without changing the failed code verdict.",
+      "seam": "The quality gate step run text executed against page specific API responses",
+      "tests": [
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_lists_every_finding_page",
+        "tests/test_ci_sonar_speed.py::test_a_later_finding_page_cannot_lose_printed_findings",
+        "tests/test_ci_sonar_speed.py::test_all_finding_pages_share_one_diagnostic_timeout"
       ]
     },
     {
