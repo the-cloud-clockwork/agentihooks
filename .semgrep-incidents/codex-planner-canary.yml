@@ -12,7 +12,12 @@ rules:
     languages: [python]
     severity: ERROR
     message: Record the Codex planner launch before opening the turn that runs its canary.
-    pattern: |
-      open_turn(...)
-      ...
-      binding.bind_sandbox(...)
+    pattern-either:
+      - pattern: |
+          open_turn(...)
+          ...
+          binding.bind_sandbox(...)
+      - pattern: |
+          $RECORD = $REPLACE(..., active_turn_id=open_turn(...), ...)
+          ...
+          binding.bind_sandbox(...)

@@ -124,8 +124,8 @@ def bind_sandbox(environ: dict[str, str], pid: int, start: int, thread: str) -> 
         "home": live["CODEX_HOME"],
         "report": str(report),
         "account": account,
-        "model": live.get("AGENTIHOOKS_RUN_MODEL", ""),
-        "effort": live.get("AGENTIHOOKS_RUN_EFFORT", ""),
+        "model": live["AGENTIHOOKS_RUN_MODEL"],
+        "effort": live["AGENTIHOOKS_RUN_EFFORT"],
     }
     _report(report, requested)
 

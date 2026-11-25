@@ -7,8 +7,6 @@ import pytest
 from scripts.profiles import binding
 from scripts.swarm import runtime
 
-pytestmark = pytest.mark.feature("codex-planner-sandbox-canary")
-
 
 @pytest.fixture
 def mounted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, dict[str, Any]]:
@@ -42,6 +40,7 @@ def mounted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path
     return home, report, launched
 
 
+@pytest.mark.feature("codex-planner-sandbox-canary")
 def test_a_sandboxed_planner_validates_its_recorded_outer_launch(
     mounted: tuple[Path, Path, dict[str, Any]],
 ) -> None:
@@ -67,6 +66,7 @@ def test_a_sandboxed_planner_validates_its_recorded_outer_launch(
         ("CODEX_THREAD_ID", "thread-other"),
     ],
 )
+@pytest.mark.feature("codex-planner-sandbox-canary")
 def test_a_sandboxed_canary_refuses_another_execution(
     mounted: tuple[Path, Path, dict[str, Any]], monkeypatch: pytest.MonkeyPatch, name: str, value: str
 ) -> None:
@@ -77,6 +77,7 @@ def test_a_sandboxed_canary_refuses_another_execution(
 
 
 @pytest.mark.parametrize("field", ["sandbox_launch", "pid", "start", "thread", "profile", "harness", "home", "report"])
+@pytest.mark.feature("codex-planner-sandbox-canary")
 def test_a_sandboxed_canary_requires_the_complete_launch_record(
     mounted: tuple[Path, Path, dict[str, Any]], field: str
 ) -> None:
@@ -94,6 +95,7 @@ def test_a_sandboxed_canary_requires_the_complete_launch_record(
 @pytest.mark.parametrize(
     ("field", "value"), [("harness", "claude"), ("profile", "engineer"), ("report", "/other/report")]
 )
+@pytest.mark.feature("codex-planner-sandbox-canary")
 def test_a_sandboxed_canary_refuses_a_foreign_launch_record(
     mounted: tuple[Path, Path, dict[str, Any]], field: str, value: str
 ) -> None:
@@ -105,6 +107,67 @@ def test_a_sandboxed_canary_refuses_a_foreign_launch_record(
         binding.validate(binding.inspect(home, "planner", "codex")["canary"])
 
 
+@pytest.mark.feature("codex-planner-sandbox-canary")
+def test_a_sandboxed_canary_requires_native_thread_identity(
+    mounted: tuple[Path, Path, dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, report, _ = mounted
+    requested = json.loads(report.read_text())
+    requested["sandbox_launch"].pop("thread")
+    report.write_text(json.dumps(requested))
+    monkeypatch.delenv("CODEX_THREAD_ID")
+    with pytest.raises(ValueError):
+        binding.validate(binding.inspect(home, "planner", "codex")["canary"])
+
+
+@pytest.mark.feature("codex-planner-sandbox-canary")
+def test_unavailable_process_evidence_cannot_use_the_sandbox_record(
+    mounted: tuple[Path, Path, dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import Mock
+
+    home, _, _ = mounted
+    monkeypatch.setattr(binding, "process", Mock(side_effect=ValueError("process filesystem unavailable")))
+    with pytest.raises(ValueError, match="process filesystem unavailable"):
+        binding.validate(binding.inspect(home, "planner", "codex")["canary"])
+
+
+@pytest.mark.feature("codex-planner-sandbox-canary")
+@pytest.mark.parametrize("mismatch", ["harness", "profile", "report", "home"])
+def test_recording_refuses_a_different_live_planner(
+    mounted: tuple[Path, Path, dict[str, Any]], monkeypatch: pytest.MonkeyPatch, mismatch: str
+) -> None:
+    from unittest.mock import Mock
+
+    home, report, _ = mounted
+    env = {binding.REPORT: str(report), "AGENTIHOOKS_PROFILE": "planner", "CODEX_HOME": str(home)}
+    live = {**env, "AGENTIHOOKS_RUN_MODEL": "model", "AGENTIHOOKS_RUN_EFFORT": "high"}
+    keys = {"profile": "AGENTIHOOKS_PROFILE", "report": binding.REPORT, "home": "CODEX_HOME"}
+    if mismatch in keys:
+        live[keys[mismatch]] = "other"
+    target = "claude" if mismatch == "harness" else "codex"
+    monkeypatch.setattr(binding, "process", Mock(return_value=(2345, target, live, "account-one")))
+    before = report.read_bytes()
+    with pytest.raises(ValueError, match="does not match"):
+        binding.bind_sandbox(env, 2345, 98765, "thread-planner")
+    assert report.read_bytes() == before
+
+
+@pytest.mark.feature("codex-planner-sandbox-canary")
+@pytest.mark.parametrize("case", ["other-profile", "no-report"])
+def test_recording_leaves_other_launches_unchanged(monkeypatch: pytest.MonkeyPatch, case: str) -> None:
+    from unittest.mock import Mock
+
+    env = {"AGENTIHOOKS_PROFILE": "engineer", binding.REPORT: "report"}
+    if case == "no-report":
+        env = {"AGENTIHOOKS_PROFILE": "planner"}
+    process = Mock(side_effect=AssertionError("must not inspect another launch"))
+    monkeypatch.setattr(binding, "process", process)
+    binding.bind_sandbox(env, 2345, 98765, "thread-planner")
+    process.assert_not_called()
+
+
+@pytest.mark.feature("codex-planner-sandbox-canary")
 def test_a_sandboxed_planner_keeps_canary_and_revalidation_checks(
     mounted: tuple[Path, Path, dict[str, Any]],
 ) -> None:
@@ -122,6 +185,7 @@ def test_a_sandboxed_planner_keeps_canary_and_revalidation_checks(
         binding.validate(canary)
 
 
+@pytest.mark.feature("codex-planner-sandbox-canary")
 def test_the_supervisor_records_the_launch_before_the_canary_turn(
     mounted: tuple[Path, Path, dict[str, Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -176,6 +240,7 @@ def test_the_supervisor_records_the_launch_before_the_canary_turn(
     assert len(opened) == 1
 
 
+@pytest.mark.feature("codex-planner-sandbox-canary")
 def test_planner_permissions_keep_the_repository_read_only(tmp_path: Path) -> None:
     args = runtime.codex_plan_mode({"HOME": str(tmp_path)})
     assert args == [
@@ -189,6 +254,7 @@ def test_planner_permissions_keep_the_repository_read_only(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(("target", "profile"), [("codex", "planner"), ("codex", "engineer"), ("claude", "planner")])
+@pytest.mark.feature("codex-planner-sandbox-canary")
 def test_only_codex_planner_reports_move_into_the_existing_write_grant(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], target: str, profile: str
 ) -> None:

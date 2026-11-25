@@ -662,9 +662,7 @@ def _recorded_home(agent: str, environ: dict[str, str]) -> str | None:
     return environ.get(binding.HOMES[agent])
 
 
-def _binding_request(
-    args: argparse.Namespace, agent: str, prompt: str, environ: dict[str, str], flags: list[str]
-) -> str:
+def _binding_request(args: Any, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
     from scripts.profiles import binding
 
     if not args.profile:
