@@ -1,4 +1,5 @@
 {
+  "fragments": true,
   "features": [
     {
       "id": "lab-scheduler-access-log-query-redaction",
@@ -9553,6 +9554,16 @@
       ]
     },
     {
+      "id": "swarm-release-retag-runs-on-the-light-pool",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-release-retag-light-pool",
+      "behaviour": "The Swarm image release job, a registry only retag by docker/swarm-node/release.sh after the publish job, runs on the anton-oss-light pool for trusted actors and on a hosted runner for any other actor or triggering actor, so a full anton-oss pool never holds the release tags the hub and controller roll to.",
+      "seam": "Swarm image workflow release job runs-on expression",
+      "tests": [
+        "tests/test_ci_swarm_image_workflow.py::test_swarm_release_retags_on_the_light_runner_only_for_trusted_actors"
+      ]
+    },
+    {
       "id": "hive-retire-absence",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",
@@ -16476,6 +16487,16 @@
       "tests": [
         "tests/ci_lab/test_budget_docs.py::test_the_published_lab_budget_docs_match_the_shed_thresholds_in_code",
         "tests/ci_lab/test_budget_docs.py::test_a_docs_copy_with_the_thresholds_swapped_fails_the_check"
+      ]
+    },
+    {
+      "id": "lane-grader-admits-dedicated-tests-dispatch-lanes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tests-dispatch-own-lane",
+      "behaviour": "The trusted branch lane grader admits the exact dedicated Tests dispatch lane expression while preserving the old Tests groups and refusing changed groups, queue settings, cancellation, extra keys, workflow names, events, untrusted baselines and new jobs.",
+      "seam": "ci_branch_lanes.problems",
+      "tests": [
+        "tests/test_ci_branch_lanes.py::test_only_the_trusted_tests_workflow_may_use_dedicated_dispatch_lanes"
       ]
     }
   ],
