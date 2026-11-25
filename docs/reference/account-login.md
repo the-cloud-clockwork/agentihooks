@@ -155,8 +155,8 @@ agentihooks claude --route claude-ai
 agentihooks init-agent --dir ~/dev/project -- --route claude-ai
 ```
 
-Route `claude-ai` launches a live session — also called a live login, live
-agent or interactive agent — a normal standalone session, outside any swarm
+Route `claude-ai` launches a live session, also called a live login, live
+agent or interactive agent: a normal standalone session, outside any swarm
 seat, on one of the stored master claude ai logins instead of a quota token.
 `init-agent -- --route claude-ai` with no `--agent` resolves to Claude, never
 Codex rotation. It works whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is
