@@ -21,8 +21,8 @@ def _without_heredocs(command: str) -> str:
     """Cut each terminated heredoc the bash parse finds: its opener, and its body through the terminator line.
 
     The rest of the delimiter line stays. An unquoted delimiter's body leaves the command substitutions bash runs in
-    it, each on a line of its own with its heredocs cut the same way; the parse yields a heredoc after the ones nested in
-    it, so the enclosing cut wins. An arithmetic shift never parses as a heredoc. A heredoc counts as terminated
+    it, each on a line of its own with its heredocs cut the same way; the parse yields a heredoc after the ones nested
+    in it, so the enclosing cut wins. An arithmetic shift never parses as a heredoc. A heredoc counts as terminated
     only when its terminator holds the delimiter word, because the parse can end an unterminated body holding an
     expansion with a terminator made of the rest of the text. A double quoted delimiter never matches its terminator,
     so the guards still read its body. A parse with an error keeps every heredoc, as prod
