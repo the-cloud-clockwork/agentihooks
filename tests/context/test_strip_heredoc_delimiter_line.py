@@ -121,7 +121,7 @@ def test_branch_guard_refuses_a_push_after_any_arithmetic_shift(command: str) ->
         ),
         (
             "cat <<OUTER > notes.md\n$(cat <<INNER\ninner\nINNER\n)\nOUTER\ngit status",
-            "cat  > notes.md\ngit status",
+            "cat  > notes.md\ncat \n\ngit status",
         ),
         ("cat <<EOF > notes.md\n\ud800\nEOF\ngit status", "cat  > notes.md\ngit status"),
         ("cat <<EOF > out.txt\n${HOME}/notes\nEOF\ngit status", "cat  > out.txt\ngit status"),
@@ -173,11 +173,16 @@ UNQUOTED_BODY_PUSHES = [
             "cat <<OUTER > notes.md\n$(cat <<INNER\n$(git push origin main)\nINNER\n)\nOUTER\ngit status",
             "cat  > notes.md\ncat \ngit push origin main\n\ngit status",
         ),
-        ("cat <<EOF > notes.md\n$(echo \ud800)\nEOF\ngit status", "cat  > notes.md\necho \ud800\ngit status"),
     ],
 )
 def test_stripping_keeps_the_substitutions_of_an_unquoted_body(command: str, stripped: str) -> None:
     assert strip_non_command_content(command) == stripped
+
+
+@pytest.mark.feature("guard-stripping-keeps-unquoted-heredoc-substitutions")
+def test_stripping_keeps_a_lone_surrogate_inside_an_unquoted_body_substitution() -> None:
+    stripped = strip_non_command_content("cat <<EOF > notes.md\n$(echo \ud800)\nEOF\ngit status")
+    assert stripped.encode("utf-8", "surrogatepass") == b"cat  > notes.md\necho \xed\xa0\x80\ngit status"
 
 
 @pytest.mark.feature("guard-stripping-keeps-unquoted-heredoc-substitutions")

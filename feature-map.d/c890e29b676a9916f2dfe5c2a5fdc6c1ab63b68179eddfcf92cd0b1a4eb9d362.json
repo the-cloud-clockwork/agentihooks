@@ -6,6 +6,7 @@
   "seam": "hooks.context._strip.strip_non_command_content, observed through hooks.context.branch_guard.check_branch_guard on Bash payloads",
   "tests": [
     "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_the_substitutions_of_an_unquoted_body",
+    "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_a_lone_surrogate_inside_an_unquoted_body_substitution",
     "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_drops_a_quoted_body_and_body_text_bash_never_runs",
     "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_to_main_in_an_unquoted_body_substitution",
     "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_lets_a_push_substitution_in_a_quoted_body_pass"
