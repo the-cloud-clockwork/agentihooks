@@ -116,6 +116,13 @@ def test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota(
     ]
 
 
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+def test_only_the_real_corpus_test_job_has_the_extended_bound() -> None:
+    jobs = _workflow()["jobs"]
+    assert jobs["tests"]["timeout-minutes"] == "${{ inputs.tests == 'tests/dep_manifest_replay.py' && 45 || 15 }}"
+    assert jobs["operations-receipts"]["timeout-minutes"] == 15
+
+
 @pytest.mark.parametrize(
     ("log", "exit_code", "code"),
     [

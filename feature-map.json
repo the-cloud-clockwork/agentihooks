@@ -22,7 +22,8 @@
         "tests/test_queue_watch.py::test_a_renewed_observer_sees_completion_after_the_first_observer_ends",
         "tests/test_sonar_arrivals.py::test_a_replaced_archive_does_not_keep_files_from_an_interrupted_extraction",
         "tests/test_queue_watch.py::test_raw_watch_uses_the_latest_producer_shape",
-        "tests/test_ci_proofs.py::test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota"
+        "tests/test_ci_proofs.py::test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota",
+        "tests/test_ci_proofs.py::test_only_the_real_corpus_test_job_has_the_extended_bound"
       ]
     },
     {
