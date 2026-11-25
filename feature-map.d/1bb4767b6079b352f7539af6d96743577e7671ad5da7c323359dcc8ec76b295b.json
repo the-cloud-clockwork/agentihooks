@@ -4,6 +4,9 @@
   "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
   "behaviour": "A lab grade diffs against the merge base of its head and its base: its static units are keyed on the files at that merge base and each job it enqueues carries it as the base a worker checks out, while the grader, the run key and the base the grade names stay the delivered base. A head that shares no history with its base fails expansion.",
   "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a real git repository, and Scheduler.tick over its fakes through the base each leased job carries",
+  "rules": [
+    "lab-static-base-read-at-delivered-base"
+  ],
   "tests": [
     "tests/ci_lab/test_scheduler_merge_base.py::test_a_head_whose_base_moved_past_its_fork_point_is_keyed_on_the_files_of_the_merge_base",
     "tests/ci_lab/test_scheduler_merge_base.py::test_a_head_whose_base_is_its_ancestor_keeps_its_keys_and_names_no_merge_base",
