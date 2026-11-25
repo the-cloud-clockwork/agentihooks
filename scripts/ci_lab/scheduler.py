@@ -152,6 +152,7 @@ SUBJECT = f"{HEAD_SUBJECT}.>"
 CHECKS = f"{HEAD_SUBJECT}.{CHECK_COMPLETED}"
 BATCH = 50
 FETCH_MS = 100
+INTAKE_SECONDS = 10
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
 UNANSWERED_FETCHES = 10
@@ -1362,29 +1363,33 @@ class BusInbox:
         self.observe = observe
 
     def heads(self) -> list[Head]:
-        """Return the heads of the next batch of envelopes; a head's lane is its branch, else the head itself, and its
-        ref the grade ref a lab remote notice names. An envelope missing a head field is terminated with a logged
-        warning, never redelivered to the dead letter cap. A completed check goes to the observer in delivery order,
-        and the heads are acknowledged once the whole batch is read, so an observer that fails leaves them to be
-        redelivered.
+        """Return heads from successive batches until a short fetch or the intake deadline. A head's lane is its
+        branch, else the head itself, and its ref the grade ref a lab remote notice names. An envelope missing a head
+        field is terminated with a logged warning. Completed checks reach the observer in delivery order; heads are
+        acknowledged after the whole intake succeeds, so a later fetch or observer failure leaves them replayable.
         """
         heads: list[Head] = []
         read: list[Delivery] = []
-        for delivery in self.consumer.fetch(self.batch, self.timeout_ms):
-            data = cast(Mapping[str, Any], delivery.event.data)  # pragma: no mutate
-            if delivery.event.type == CHECKS:
-                self._observe(delivery, data)
-                continue
-            missing = [name for name in HEAD_FIELDS if name not in data]
-            if missing:
-                logging.getLogger(__name__).warning(
-                    "terminated lab head %s missing %s", delivery.event.id, ", ".join(missing)
-                )
-                delivery.term()
-                continue
-            event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
-            heads.append(Head(event, str(data.get("branch") or event.head), str(data.get("ref") or "")))
-            read.append(delivery)
+        deadline = time.monotonic() + INTAKE_SECONDS
+        while time.monotonic() < deadline:
+            deliveries = self.consumer.fetch(self.batch, self.timeout_ms)
+            for delivery in deliveries:
+                data = cast(Mapping[str, Any], delivery.event.data)  # pragma: no mutate
+                if delivery.event.type == CHECKS:
+                    self._observe(delivery, data)
+                    continue
+                missing = [name for name in HEAD_FIELDS if name not in data]
+                if missing:
+                    logging.getLogger(__name__).warning(
+                        "terminated lab head %s missing %s", delivery.event.id, ", ".join(missing)
+                    )
+                    delivery.term()
+                    continue
+                event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
+                heads.append(Head(event, str(data.get("branch") or event.head), str(data.get("ref") or "")))
+                read.append(delivery)
+            if len(deliveries) < self.batch:
+                break
         for delivery in read:
             delivery.ack()
         return heads

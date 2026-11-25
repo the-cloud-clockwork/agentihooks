@@ -25,7 +25,7 @@ from scripts import gates
 from scripts.swarm_ledger import api_service, ledger_server, run, storage, warm_writer
 from scripts.swarm_ledger.api import resources
 from scripts.swarm_ledger.repository import postgres
-from scripts.tick.adapters import database_ledger
+from scripts.tick.adapters import database_ledger, writer_client
 
 CONTENT = {"title": "Warm", "overview": "o", "phases": [{"title": "One", "description": "d"}]}
 TASK = {
@@ -130,7 +130,7 @@ def writer(memory_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
 
 def over_socket(where: Path, slug: str, path: str, payload: dict[str, Any] | None = None) -> tuple[int, bytes]:
     """The status and body the writer on ``where`` answers one request with."""
-    return warm_writer.ask(warm_writer.connected(10.0, where), slug, path, payload)
+    return writer_client.ask(writer_client.connected(10.0, where), slug, path, payload)
 
 
 def in_process(slug: str, path: str, payload: dict[str, Any] | None = None) -> tuple[int, bytes]:
@@ -285,7 +285,7 @@ def test_ask_sends_the_caller_name_and_the_in_process_headers(
     ):
         thread, heard = recording(where, b'201\n{"ok": 1}')
         with database_ledger.acting("eng@ab-1"):
-            answered = warm_writer.ask(warm_writer.connected(10.0, where), "sw", path, payload)
+            answered = writer_client.ask(writer_client.connected(10.0, where), "sw", path, payload)
         thread.join(10.0)
         where.unlink()
         assert answered == (201, b'{"ok": 1}')
@@ -304,7 +304,7 @@ def test_ask_raises_when_the_writer_closes_without_an_answer(memory_path: Path, 
     where = memory_path / "r.sock"
     thread, _ = recording(where, reply)
     with pytest.raises(EOFError) as closed:
-        warm_writer.ask(warm_writer.connected(10.0, where), "sw", "tasks", None)
+        writer_client.ask(writer_client.connected(10.0, where), "sw", "tasks", None)
     thread.join(10.0)
     assert closed.value.args == ("the ledger writer closed with no answer",)
 
@@ -341,7 +341,7 @@ def test_a_raised_reply_names_the_error_class_and_its_arguments() -> None:
 
 @pytest.mark.feature("ledger-warm-writer")
 def test_an_error_class_nested_in_another_is_rebuilt_by_its_qualified_name() -> None:
-    error = warm_writer.reraised(warm_writer.raised(Outer.Inner("deep", 3)).split(b"\n", 1)[1])
+    error = writer_client.reraised(warm_writer.raised(Outer.Inner("deep", 3)).split(b"\n", 1)[1])
     assert type(error).__qualname__ == "Outer.Inner"
     assert error.args == ("deep", 3)
 
@@ -362,7 +362,7 @@ def test_an_error_class_nested_in_another_is_rebuilt_by_its_qualified_name() -> 
 def test_an_error_the_caller_cannot_rebuild_is_raised_as_a_runtime_error_naming_it(
     module: str, name: str, args: list[str], cause: type[Exception] | None
 ) -> None:
-    error = warm_writer.reraised(json.dumps({"module": module, "name": name, "args": args}).encode())
+    error = writer_client.reraised(json.dumps({"module": module, "name": name, "args": args}).encode())
     assert type(error) is RuntimeError
     assert error.args == (f"the ledger writer raised {module}.{name}: {args}",)
     assert type(error.__cause__) is (type(None) if cause is None else cause)
@@ -379,7 +379,7 @@ def called(text: str) -> str:
 
 @pytest.mark.feature("ledger-warm-writer")
 def test_a_reply_naming_a_callable_that_is_not_an_error_class_never_calls_it() -> None:
-    error = warm_writer.reraised(json.dumps({"module": __name__, "name": "called", "args": ["x"]}).encode())
+    error = writer_client.reraised(json.dumps({"module": __name__, "name": "called", "args": ["x"]}).encode())
     assert CALLED == []
     assert type(error) is RuntimeError
     assert error.__cause__ is None
@@ -410,7 +410,7 @@ def test_the_writer_socket_is_owner_only_in_the_agentihooks_home(
     served = serving(warm_writer.socket_path(), stopped)
     try:
         with database_ledger.acting(""):
-            answered = warm_writer.ask(warm_writer.connected(10.0), "warm-missing", "tasks", None)
+            answered = writer_client.ask(writer_client.connected(10.0), "warm-missing", "tasks", None)
             assert answered == in_process("warm-missing", "tasks")
         assert answered[0] == 404
         assert os.umask(0o022) == 0o022

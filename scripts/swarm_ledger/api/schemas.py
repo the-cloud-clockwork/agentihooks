@@ -70,7 +70,7 @@ PAGINATION = {
     "properties": {
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
         "cursor": {"type": "string", "pattern": "^[a-f0-9]{64}:[0-9]{1,12}$"},
-        "state": {"enum": ["done"]},
+        "state": {"enum": ["done", "open"]},
         "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "q": {"type": "string", "maxLength": 200},
         "targets": {"type": "string", "minLength": 1, "maxLength": 500},

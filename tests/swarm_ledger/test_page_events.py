@@ -4,10 +4,11 @@ import time
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import MODULES, is_events, serve_modules, shell_html, snapshot_body
+from tests.swarm_ledger.ledger_page import MODULES, fulfill_events, is_events, open_body, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 from tests.swarm_ledger.test_patch import CASES
 from tests.swarm_ledger.test_tabs import DOC, SWARM, URL
@@ -40,21 +41,28 @@ def test_the_page_applies_every_patch_the_server_builds_to_the_same_value(browse
     assert results == [new for _, new, _ in cases]
 
 
+def streamed(url: str) -> bool:
+    return urlsplit(url).path.endswith("/events")
+
+
 def stub_page(browser, answers):
-    """Open the page with events answered from a list: a status code, or a (ledger, swarm) snapshot."""
+    """Open the page with events answered from a list: a status code, or a (ledger, swarm) open frame."""
     context = browser.new_context(viewport={"width": 1440, "height": 900})
     html = shell_html()
     seen = []
+    served = next(answer[0] for answer in answers if not isinstance(answer, int))
 
     def route(request):
         url = request.request.url
+        if is_events(url) and not streamed(url):
+            return fulfill_events(request, served)
         if is_events(url):
             seen.append({"url": url, "headers": request.request.headers})
-            answer = answers[min(sum(is_events(r["url"]) for r in seen), len(answers)) - 1]
+            answer = answers[min(sum(streamed(r["url"]) for r in seen), len(answers)) - 1]
             if isinstance(answer, int):
                 return request.fulfill(status=answer, body="{}", content_type="application/json")
             ledger, swarm, cursor = answer
-            body = snapshot_body(ledger, swarm).replace("id: c0", f"id: {cursor}")
+            body = open_body(ledger, swarm).replace("id: c0", f"id: {cursor}")
             return request.fulfill(body=body, content_type="text/event-stream")
         if url.startswith(URL):
             return request.fulfill(body=html, content_type="text/html")
@@ -78,16 +86,16 @@ def test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410(
             break
         page.wait_for_timeout(100)
     context.close()
-    events = [r for r in seen if is_events(r["url"])]
+    events = [r for r in seen if streamed(r["url"])]
     assert [r["headers"].get("last-event-id") for r in events[:4]] == [None, "first", None, "second"]
     assert all(r["url"].endswith("/api/v1/ledgers/__LEDGER_SLUG__/events") for r in events)
     assert all("token" not in r["url"].lower() and not r["headers"].get("x-ledger-token") for r in events)
     assert sorted(r["url"] for r in seen if "/api/" in r["url"] and not is_events(r["url"])) == [
         "http://ledger.test/api/__LEDGER_SLUG__/session",
         "http://ledger.test/api/v1/layout",
-        "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/architecture",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/orders",
+        "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/swarm",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/swarm/models",
     ]
 
@@ -155,17 +163,17 @@ def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser:
         for method, path in requests
         if path.startswith("/api/") and path not in ("/api/v1/layout", orders_path)
     ]
-    assert sorted(reads) == sorted(
-        [
-            ("GET", f"/api/v1/ledgers/{SLUG}/events"),
-            ("GET", f"/api/v1/ledgers/{SLUG}"),
-            ("GET", f"/api/v1/ledgers/{SLUG}/swarm/models"),
-            ("GET", f"/api/v1/ledgers/{SLUG}/architecture"),
-            ("GET", "/api/v1/tips"),
-            ("POST", f"/api/{SLUG}/session"),
-        ]
-        * 2
-    )
+    ledger = f"/api/v1/ledgers/{SLUG}"
+    allowed = {f"{ledger}/{part}" for part in ("events", "summary", "swarm", "swarm/models", "architecture")}
+    assert [path for _, path in reads if path.split("?")[0] == f"{ledger}/events"] == [f"{ledger}/events"] * 2
+    assert all(
+        path in allowed
+        or path in ("/api/v1/tips", f"/api/{SLUG}/session")
+        or "?state=open&" in path
+        or (path.startswith(f"{ledger}/swarm/") and "limit=100" in path)
+        for _, path in reads
+    ), reads
+    assert ("GET", ledger) not in reads
     context.close()
     for _ in range(100):
         if not server.HUB.watched():

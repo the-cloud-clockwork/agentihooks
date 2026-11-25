@@ -1,4 +1,5 @@
 {
+  "fragments": true,
   "features": [
     {
       "id": "lab-scheduler-access-log-query-redaction",
@@ -69,7 +70,7 @@
       "id": "sonar-failed-gate-names-new-bugs",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-promo-sonar-new-bug-13212",
-      "behaviour": "A failed Sonar quality gate prints the unresolved new bugs and vulnerabilities of the branch or pull request the scanner's dashboard address names, read once: the first 100 with component, line, rule and message, then a count of the rest. A refused read leaves the error line and the red exit as they are, a read the server does not answer stops once its retry waits reach 30 seconds and shows neither the retry script's outage notice nor its summary line, and a passed or superseded gate reads no issues.",
+      "behaviour": "A failed Sonar quality gate prints every page of unresolved new bugs and vulnerabilities of the branch or pull request the scanner's dashboard address names with component, line, rule and message. Refused or empty later pages retain prior findings and report the remaining count when known. Both finding collections share one thirty second timeout, diagnostic errors leave the original failed verdict and summary unchanged, and passed or superseded gates read no issues.",
       "seam": "the run text of the step SonarQube Quality Gate of the sonar job, run in a shell against a fake curl that answers the issue search",
       "tests": [
         "tests/test_ci_sonar_speed.py::test_a_failed_gate_names_its_new_bugs",
@@ -77,6 +78,33 @@
         "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_red_when_the_bug_read_is_refused",
         "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_a_code_verdict_when_the_bug_read_meets_an_outage",
         "tests/test_ci_sonar_speed.py::test_a_passed_gate_reads_no_issues"
+      ]
+    },
+    {
+      "id": "sonar-failed-gate-names-new-hotspots",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2619",
+      "behaviour": "A failed Sonar quality gate prints new security hotspots still to review for its graded branch or pull request with component, line or zero, rule and message. Refused, unavailable or incomplete reads retain prior findings and the failed code verdict. Passed and superseded gates read no hotspots.",
+      "seam": "the run text of the step SonarQube Quality Gate of the sonar job, run in a shell against a fake curl that answers the hotspot search",
+      "tests": [
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_names_its_unreviewed_hotspots",
+        "tests/test_ci_sonar_speed.py::test_finding_searches_use_the_read_token_and_polling_keeps_the_scan_token",
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_says_how_many_hotspots_it_left_out",
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_red_when_the_hotspot_read_is_refused",
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_stays_a_code_verdict_when_the_hotspot_read_meets_an_outage",
+        "tests/test_ci_sonar_speed.py::test_a_passed_or_superseded_gate_reads_no_hotspots"
+      ]
+    },
+    {
+      "id": "sonar-failed-gate-lists-every-page",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2619",
+      "behaviour": "A failed Sonar gate prints every page of new gated issues and unreviewed hotspots for the graded branch or pull request. A refused or empty later page retains printed findings and counts the remainder. Both lists share one thirty second diagnostic timeout without changing the failed code verdict.",
+      "seam": "The quality gate step run text executed against page specific API responses",
+      "tests": [
+        "tests/test_ci_sonar_speed.py::test_a_failed_gate_lists_every_finding_page",
+        "tests/test_ci_sonar_speed.py::test_a_later_finding_page_cannot_lose_printed_findings",
+        "tests/test_ci_sonar_speed.py::test_all_finding_pages_share_one_diagnostic_timeout"
       ]
     },
     {
@@ -465,6 +493,84 @@
         "tests/swarm_ledger/test_ledger_hook.py::test_dispatch_does_not_run_the_handler_for_a_ledger_with_no_member_record",
         "tests/swarm_ledger/test_sqlite_reads.py::test_read_flags_reads_only_the_named_flags_of_each_item_in_stored_order",
         "tests/swarm_ledger/test_ledger_gate.py::test_task_targets_name_only_unhandled_operator_task_targets_once_each"
+      ]
+    },
+    {
+      "id": "ledger-summary-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-load-api",
+      "behaviour": "The ledger page's first reads answer from narrow database reads: the summary read gives every part of the page but its paged sections, with counts per state of each paged section, phase status, freeze marks and closed row counts equal to what the page view derives, and an open rows read pages the open rows of one section in page order without comment bodies. Neither builds the whole ledger page view.",
+      "seam": "GET /api/v1/ledgers/<slug>/summary, GET /api/v1/ledgers/<slug>/<section>?state=open and scripts.swarm_ledger.api.summary.build",
+      "tests": [
+        "tests/swarm_ledger/test_api_v1.py::test_sdk_collections_and_tick_readers_cross_page_boundaries",
+        "tests/swarm_ledger/test_api_v1.py::test_cli_collection_consumers_read_all_pages",
+        "tests/swarm_ledger/test_summary_read.py::test_the_summary_answers_without_building_the_whole_page_view",
+        "tests/swarm_ledger/test_summary_read.py::test_an_open_first_page_answers_without_building_the_whole_page_view",
+        "tests/swarm_ledger/test_summary_read.py::test_a_summary_read_and_an_open_tasks_read_at_once_build_the_summary_once",
+        "tests/swarm_ledger/test_summary_read.py::test_the_summary_derives_what_the_page_view_derives",
+        "tests/swarm_ledger/test_summary_read.py::test_the_summary_of_a_production_sized_ledger_fits_one_reply",
+        "tests/swarm_ledger/test_summary_read.py::test_the_summary_crew_holds_only_members_seen_in_the_active_window",
+        "tests/swarm_ledger/test_summary_read.py::test_build_keeps_the_trimmed_view_of_a_collection_outside_paged_sections",
+        "tests/swarm_ledger/test_summary_read.py::test_referenced_names_task_dependencies_parked_tasks_and_priority_targets",
+        "tests/swarm_ledger/test_summary_read.py::test_page_order_sorts_unheld_open_rows_by_their_actual_rank",
+        "tests/swarm_ledger/test_summary_read.py::test_page_order_defaults_a_missing_state_to_open_and_an_unknown_state_last",
+        "tests/swarm_ledger/test_summary_read.py::test_page_order_holds_only_the_rows_whose_task_id_is_frozen",
+        "tests/swarm_ledger/test_summary_read.py::test_view_rows_drops_closed_rows_beyond_the_kept_window",
+        "tests/swarm_ledger/test_summary_read.py::test_rows_holds_its_cached_tasks_object_under_the_ledger_slug",
+        "tests/swarm_ledger/test_summary_read.py::test_done_reads_select_only_the_requested_repository_rows",
+        "tests/swarm_ledger/test_summary_read.py::test_a_cursor_read_uses_only_the_requested_repository_record",
+        "tests/swarm_ledger/test_summary_read.py::test_summary_sections_apply_collection_specific_closure",
+        "tests/swarm_ledger/test_summary_read.py::test_summary_sections_count_repeated_states_and_exclude_deleted_rows",
+        "tests/swarm_ledger/test_summary_read.py::test_the_open_route_guard_refuses_query_and_cursor_keys_directly",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_page_without_an_explicit_offset_or_limit_uses_the_defaults",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_page_includes_a_single_row_whose_reply_lands_exactly_at_the_reply_limit",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_page_stops_before_an_oversized_second_row_and_returns_the_rows_already_selected",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_page_refuses_an_oversized_first_row_with_resource_too_large",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_read_tasks_path_reads_task_rows_and_folds_in_the_frozen_marks",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_open_read_non_tasks_path_skips_marks_and_uses_an_empty_frozen_set",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_active_crew_keeps_members_with_future_last_seen_and_drops_those_missing_it_at_the_window_boundary",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_active_crew_keeps_a_member_seen_exactly_at_the_window_start",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_ledger_summary_reuses_the_cached_build_for_unchanged_stored_rows",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_ledger_summary_keeps_a_separate_build_lock_for_each_slug",
+        "tests/swarm_ledger/test_open_read_bounds.py::test_ledger_summary_builds_meta_page_version_crew_and_limits_from_doctor_holds",
+        "tests/swarm_ledger/test_artifact_sanity.py::test_feed_answers_404_for_a_path_it_does_not_recognize",
+        "tests/swarm_ledger/test_artifact_sanity.py::test_feed_routes_a_path_naming_swarm_in_the_middle_to_the_swarm_route",
+        "tests/swarm_ledger/test_artifact_sanity.py::test_swarm_route_answers_the_empty_data_and_collections_body",
+        "tests/swarm_ledger/test_artifact_sanity.py::test_open_page_names_the_section_from_the_last_path_segment_and_numbers_its_rows",
+        "tests/swarm_ledger/test_artifact_sanity.py::test_summary_reads_each_paged_section_by_its_own_name_and_answers_revision_r"
+      ]
+    },
+    {
+      "id": "ledger-stream-no-snapshot-connect",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-load-api",
+      "behaviour": "A ledger event stream connect without a cursor answers an open frame naming the cursor, the ledger revision the channel holds and its small resources, never a whole ledger snapshot, and never builds the ledger page view on the request path. Ledger change frames carry the revision they apply from and the upserted and removed row ids of each list they change.",
+      "seam": "scripts.swarm_ledger.events.hub.Hub.open, scripts.swarm_ledger.events.stream.serve and GET /api/v1/ledgers/<slug>/events",
+      "tests": [
+        "tests/swarm_ledger/test_hub.py::test_a_connect_without_a_cursor_opens_without_a_ledger_snapshot",
+        "tests/swarm_ledger/test_events_stream.py::test_serve_opens_a_cursorless_connect_without_a_snapshot",
+        "tests/swarm_ledger/test_stream.py::test_a_cursorless_connect_opens_without_building_the_page_view",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_treats_a_change_without_an_o_key_as_no_rows_changed",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_skips_a_key_whose_after_value_is_not_a_list",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_skips_a_key_whose_after_ids_cannot_be_resolved",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_keeps_reading_later_keys_after_one_key_has_no_ids",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_upserts_the_updated_and_added_rows_when_the_list_was_patched_incrementally",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_upserts_the_whole_after_list_when_the_part_carries_a_full_value",
+        "tests/swarm_ledger/test_hub.py::test_changed_rows_keeps_later_rows_after_a_non_list_field",
+        "tests/swarm_ledger/test_hub.py::test_a_first_ledger_publication_advances_an_existing_resource_cursor",
+        "tests/swarm_ledger/test_watch_events.py::test_a_newer_ledger_frame_with_a_from_revision_resyncs_directly",
+        "tests/swarm_ledger/test_watch_ledger.py::test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop",
+        "tests/swarm_ledger/test_watch_ledger.py::test_take_never_applies_a_ledger_patch_whose_frame_carries_a_from_field_while_caught_up"
+      ]
+    },
+    {
+      "id": "ledger-cold-load",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-cold-load-api",
+      "behaviour": "A browser with empty storage opening a ledger whose document holds about thirty megabytes shows its first task rows within one second of navigation, with under one megabyte transferred before them, at 1920 by 1080. The mapped test holds the one megabyte bound in every unit run. No automatic check holds the one second bound: only a manual Proofs tests dispatch of tests/swarm_ledger/cold_load_probe.py runs it, until a promotion lane for browser timing probes lands (proposed as a ledger follow up).",
+      "seam": "GET /<slug> in Chromium against the live ledger server, timed from navigation start to the first task row",
+      "tests": [
+        "tests/swarm_ledger/test_cold_load.py::test_a_cold_browser_shows_the_first_task_rows_within_a_megabyte"
       ]
     },
     {
@@ -4600,7 +4706,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-slow-lane-reaper-reset",
       "behaviour": "A tick pass's process scan ends only in the context that opened it: a close from another context, such as the slow lane thread opening the wrapper relay hook, leaves that context as it is and raises nothing, so the slow lane keeps running its steps and hands their records back, and the pass that opened the scan puts back the value it replaced when it closes.",
       "seam": "scripts.tick.sites.TickSites start hook and close, called directly from a slow lane thread and through scripts.tick.engine.run_graph with a SiteGate whose relay hook the slow lane opens",
-      "rules": ["contextvar-token-kept-on-object"],
+      "rules": [
+        "contextvar-token-kept-on-object"
+      ],
       "tests": [
         "tests/tick/test_scan_close_context.py::test_a_scan_closed_from_the_slow_lane_context_stays_open_until_the_pass_that_opened_it_closes",
         "tests/tick/test_scan_close_context.py::test_the_slow_lane_survives_opening_the_relay_hook_that_closes_the_pass_scan"
@@ -5732,7 +5840,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-frozen-hold",
       "behaviour": "The claim gate holds open plan lane enhancements while their target is frozen by its ancestry, a selector or its explicit flag, releases them after thaw, and leaves unfrozen or missing targets claimable. Repeated claims reuse the task index while task list identity and length stay fixed.",
       "seam": "scripts.swarm.freeze.claim_gate",
-      "rules": ["enhancement-frozen-hold"],
+      "rules": [
+        "enhancement-frozen-hold"
+      ],
       "tests": [
         "tests/swarm/test_freeze.py::test_claim_gate_holds_a_plan_enhancing_frozen_work",
         "tests/swarm/test_freeze.py::test_claim_gate_releases_an_enhancement_when_its_target_is_unfrozen",
@@ -5983,7 +6093,23 @@
         "tests/swarm/test_enhance_sweep.py::test_the_sweep_queues_each_thin_task_through_the_swarm_ledger_with_paced_writes",
         "tests/swarm/test_enhance_sweep.py::test_an_unfrozen_thin_task_beside_a_frozen_phase_is_still_listed",
         "tests/swarm/test_enhance_sweep.py::test_the_sweep_lists_and_queues_no_thin_task_a_freeze_holds",
-        "tests/swarm/test_ledger_client_task.py::test_a_work_tree_read_asks_the_ledger_for_its_plans_phases_and_slices_alone"
+        "tests/swarm/test_ledger_client_task.py::test_a_work_tree_read_asks_the_ledger_for_its_plans_phases_and_slices_alone",
+        "tests/swarm/test_enhance_sweep.py::test_a_refused_enhancement_write_leaves_the_sweep_writing_the_next_thin_task",
+        "tests/swarm/test_enhance_sweep.py::test_a_sweep_where_every_write_lands_reports_one_queued_line_per_thin_task_in_ledger_order"
+      ]
+    },
+    {
+      "id": "swarm-enhance-sweep-continues-past-timeout",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-sweep-timeout-continue",
+      "behaviour": "The enhance sweep reports ordered task outcomes and counts, continues after timeout, transport, unreachable or refused writes with fresh deadlines and pacing, skips frozen thin tasks without writing, and flushes each line to stderr while retaining one stdout JSON document with actions and counts.",
+      "seam": "scripts.swarm.enhance_sweep.sweep and command through scripts.swarm.cli.main",
+      "tests": [
+        "tests/swarm/test_enhance_sweep.py::test_a_failed_second_write_is_counted_and_the_sweep_continues",
+        "tests/swarm/test_enhance_sweep.py::test_the_sweep_leaves_programming_errors_visible",
+        "tests/swarm/test_enhance_sweep.py::test_a_frozen_thin_task_is_reported_in_order_without_a_write_or_extra_pause",
+        "tests/swarm/test_enhance_sweep.py::test_the_command_flushes_each_outcome_to_stderr_before_the_next_write",
+        "tests/swarm/test_enhance_sweep.py::test_the_command_reports_frozen_skips_without_constructing_a_writer_in_a_dry_run"
       ]
     },
     {
@@ -6177,6 +6303,26 @@
         "tests/swarm/test_waits.py::test_a_reply_wait_on_a_master_seat_holds_while_pending_there_and_ends_on_the_masters_reply",
         "tests/swarm/test_waits.py::test_a_reply_wait_ends_when_its_item_is_gone_from_the_inbox",
         "tests/swarm/test_waits.py::test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see"
+      ]
+    },
+    {
+      "id": "rerun-budget-counts-admitted-reruns",
+      "origin": "regression",
+      "ordered_at": "2026-11-18",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-rerun-budget-counts-admitted",
+      "behaviour": "The CI rerun budget of a pull request head counts only reruns every PreToolUse guard admitted: a rerun that a later guard such as panic mode refuses, or a command the reruns gate itself refuses at the cap, gives back every rerun it counted, never below zero, and the denied call keeps its block even when ending it fails. A hook payload without a tool use id lists nothing, so its spend stays counted as before.",
+      "seam": "The reruns gate counting: Budget spend and refund by call, the reruns gate release, and the denied PreToolUse call path in the hook manager and tool_end.closing_denied",
+      "tests": [
+        "tests/gates/test_budget.py::test_a_refund_gives_back_once_each_spend_listed_under_its_call",
+        "tests/gates/test_budget.py::test_a_refund_never_counts_below_zero_and_leaves_spends_without_a_call",
+        "tests/gates/test_budget.py::test_a_refund_gives_back_a_spend_whose_subject_holds_a_tab",
+        "tests/gates/test_reruns.py::test_released_gives_back_the_rerun_its_call_counted",
+        "tests/gates/test_reruns.py::test_a_command_the_gate_refuses_at_the_cap_gives_back_its_earlier_rerun",
+        "tests/gates/test_reruns.py::test_released_gives_back_only_the_reruns_of_its_own_call",
+        "tests/gates/test_reruns.py::test_a_rerun_panic_refuses_leaves_both_reruns_of_the_head_unspent",
+        "tests/gates/test_reruns.py::test_a_gate_call_carries_the_tool_use_id_of_its_hook_payload",
+        "tests/gates/test_reruns.py::test_a_rerun_the_pre_tool_use_handler_admits_keeps_its_count",
+        "tests/context/test_tool_end.py::test_a_failing_end_keeps_the_block_and_chains_its_error"
       ]
     },
     {
@@ -6690,6 +6836,27 @@
         "tests/forge/test_remote.py::test_hostile_variants_of_every_accepted_link_are_refused_by_pattern_and_parser",
         "tests/forge/test_remote.py::test_the_shared_pattern_finds_change_links_in_text_as_plain_strings",
         "tests/forge/test_remote.py::test_the_parser_and_shared_pattern_are_public_names_of_the_remote_module"
+      ]
+    },
+    {
+      "id": "forge-gitlab-merge-request-state",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gl-mr-state",
+      "behaviour": "A GitLab merge request link reads over REST into the fields the hub pull tracker builds from GitHub: opened, closed and merged map to open, closed and merged, the head commit, queued false, and a finished head pipeline as one completed suite in GitHub conclusion words keyed by the pipeline id with the pipeline commit as checks head; a running pipeline or none gives no suite. A missing token, a 404, a link that is no GitLab merge request or another state raises FetchError instead of reading as a closed merge request.",
+      "seam": "scripts.forge.gitlab.merge_request_state(url, token, send) returns a MergeRequestState or raises FetchError through an injected transport; scripts.forge.gitlab.GitLabForge.state reads one merge request by number",
+      "tests": [
+        "tests/forge/test_gitlab.py::test_an_opened_merge_request_reads_open_with_its_failed_pipeline_as_one_suite",
+        "tests/forge/test_gitlab.py::test_merge_request_states_and_finished_pipelines_read_in_the_tracker_words",
+        "tests/forge/test_gitlab.py::test_an_unfinished_pipeline_gives_no_suite_on_its_own_commit",
+        "tests/forge/test_gitlab.py::test_a_merge_request_without_a_pipeline_reads_its_head_with_no_suites",
+        "tests/forge/test_gitlab.py::test_a_finished_pipeline_on_an_older_commit_keeps_that_commit_as_its_checks_head",
+        "tests/forge/test_gitlab.py::test_a_merge_request_in_another_state_raises_a_fetch_error",
+        "tests/forge/test_gitlab.py::test_a_missing_merge_request_raises_a_fetch_error_never_a_closed_state",
+        "tests/forge/test_gitlab.py::test_another_http_error_reaches_the_caller_as_it_came",
+        "tests/forge/test_gitlab.py::test_a_missing_token_raises_a_fetch_error_before_any_request",
+        "tests/forge/test_gitlab.py::test_a_github_pull_link_raises_a_fetch_error_before_any_request",
+        "tests/forge/test_gitlab.py::test_a_link_of_no_forge_raises_a_fetch_error_before_any_request",
+        "tests/forge/test_gitlab.py::test_the_state_read_sends_through_urlopen_by_default"
       ]
     },
     {
@@ -9076,7 +9243,7 @@
       "ordered_at": "2026-11-07",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-db-ledger",
       "behaviour": "A tick pass serves its ledger export, resource reads and operations in process through the ledger API route code over the shared ledger store, judged as the swarm's own service, every write keeping the controller epoch stamp and every refusal surfacing as the same HTTP error, so passes complete with the ledger server down; no setting or fallback sends a tick read or write to the ledger server.",
-      "seam": "scripts.tick.adapters.database_ledger.client, the only client scripts.swarm_ledger.ledger.client returns, used by the tick ledger port adapter and the pass LedgerClient inside scripts.swarm_ledger.ledger_route.tick",
+      "seam": "scripts.tick.adapters.writer_client.client, imported back as scripts.tick.adapters.database_ledger.client, the only client scripts.swarm_ledger.ledger.client returns, used by the tick ledger port adapter and the pass LedgerClient inside scripts.swarm_ledger.ledger_route.tick",
       "semgrep_rule": "feature-tick-database-ledger",
       "live_check": [
         "python",
@@ -9150,6 +9317,21 @@
         "tests/swarm_ledger/test_warm_writer_parity.py::test_each_refusal_answers_alike_over_the_socket_and_in_process",
         "tests/swarm_ledger/test_warm_writer_parity.py::test_a_conflicting_write_retries_once_and_lands_alike_over_the_socket_and_in_process",
         "tests/swarm_ledger/test_warm_writer_parity.py::test_each_audit_effect_is_left_alike_over_the_socket_and_in_process"
+      ]
+    },
+    {
+      "id": "ledger-slim-write-client",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-write-slim-client",
+      "behaviour": "A command line ledger write through the ledger command client goes to this host's warm writer socket as the caller, with the worktree header, and is never run in process when the writer answers; with no writer listening, or inside a tick pass, it runs in process through the database ledger request with its slug, path and payload; a writer that holds the reply past the client timeout raises a timeout; the client addresses the ledger server its own slug selects; a fresh interpreter that sends such a write loads neither the ledger API service, the ledger server nor the database ledger adapter.",
+      "seam": "scripts.swarm_ledger.ledger.client, the client every command line ledger write builds, over the host writer socket, and the modules a fresh interpreter holds after one write",
+      "tests": [
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_goes_to_the_host_writer_socket",
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_runs_in_process_when_no_writer_listens",
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_inside_a_tick_pass_runs_in_process_while_a_writer_listens",
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_write_the_writer_holds_past_the_client_timeout_raises_a_timeout",
+        "tests/swarm_ledger/test_writer_client.py::test_a_command_line_client_addresses_the_ledger_server_its_slug_selects",
+        "tests/swarm_ledger/test_writer_client.py::test_a_fresh_interpreter_write_through_a_live_writer_leaves_the_api_service_and_ledger_server_unloaded"
       ]
     },
     {
@@ -9237,7 +9419,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2764",
       "behaviour": "Worker startup recovers configured existing primary checkouts with a stale garbage collection log by pruning unreachable objects older than two weeks, removing the log only after successful pruning, then running full garbage collection with cruft packs that preserve younger unreachable objects. Checkouts without a log and unconfigured repositories remain untouched.",
       "seam": "configured repository startup loop through scripts.hive.repo_maintenance.recover",
-      "rules": ["hive-prune-needs-expiry"],
+      "rules": [
+        "hive-prune-needs-expiry"
+      ],
       "tests": [
         "tests/hive/test_repo_maintenance.py::test_startup_recovers_only_configured_existing_checkouts_with_a_gc_log",
         "tests/hive/test_repo_maintenance.py::test_failed_pruning_keeps_the_gc_log_and_does_not_start_gc",
@@ -9514,6 +9698,16 @@
         "tests/contracts/promotion/test_release_images.py::test_the_swarm_release_build_pushes_only_its_commit_image",
         "tests/contracts/promotion/test_release_images.py::test_the_swarm_release_tag_stays_on_the_newer_of_two_overlapping_releases_whichever_finishes_last",
         "tests/contracts/promotion/test_release_images.py::test_the_release_job_moves_the_swarm_release_tag_and_the_publish_job_moves_none"
+      ]
+    },
+    {
+      "id": "swarm-release-retag-runs-on-the-light-pool",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-release-retag-light-pool",
+      "behaviour": "The Swarm image release job, a registry only retag by docker/swarm-node/release.sh after the publish job, runs on the anton-oss-light pool for trusted actors and on a hosted runner for any other actor or triggering actor, so a full anton-oss pool never holds the release tags the hub and controller roll to.",
+      "seam": "Swarm image workflow release job runs-on expression",
+      "tests": [
+        "tests/test_ci_swarm_image_workflow.py::test_swarm_release_retags_on_the_light_runner_only_for_trusted_actors"
       ]
     },
     {
@@ -11060,7 +11254,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-queue-gate",
       "behaviour": "Every first queue entry checks an independent review of the exact observed head that the task claimant has read. The gate logs by default and refuses only with the swarm review enforce mode. Master and automatic callers keep the claimant as author.",
       "seam": "scripts.review.gate through swarm cmd_merge, ready first admission and recovery, and status gate modes",
-      "rules": ["merge-queue-admit-skips-review"],
+      "rules": [
+        "merge-queue-admit-skips-review"
+      ],
       "tests": [
         "tests/review/test_queue_gate.py::test_review_defaults_to_log_only_and_enforces_only_from_swarm_configuration",
         "tests/review/test_queue_gate.py::test_refusal_requires_independence_and_the_actual_authors_read",
@@ -11097,7 +11293,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
@@ -12678,23 +12874,23 @@
         "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_the_narrow_write_cannot_prove_falls_back_with_nothing_written",
         "tests/swarm_ledger/test_task_update_narrow_write.py::test_only_a_single_guarded_hub_claim_takes_the_narrow_path",
         "tests/swarm_ledger/test_task_update_narrow_write.py::test_publishing_refreshes_only_a_published_ledger_after_a_narrow_write",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_reads_its_dependencies_and_keeps_stored_size_warnings",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_its_gate_refuses_is_rejected_and_trims_events_as_the_whole_write_does",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_on_a_ledger_without_a_task_revision_stores_the_previous_revision",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_on_a_settled_task_or_one_that_changes_a_priority_line_falls_back",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_ledger_missing_a_part_the_whole_write_creates_falls_back",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_on_a_missing_ledger_names_it",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_adopts_only_its_own_legacy_ledger",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_locks_and_begins_its_own_ledger_and_times_its_write_steps",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_row_written_outside_the_read_keeps_its_stored_key_and_position",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_reads_the_rows_operator_events_and_open_alerts_name_since_the_oldest_held_revision",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_leaves_the_written_state_alone_when_nothing_it_names_is_missing",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_adds_a_named_phase_to_a_written_state_without_phases",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_the_narrow_fold_names_a_refused_claim_and_keeps_only_the_stored_size_warnings",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_stored_warnings_reads_only_the_stored_warning_list",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_refused_hub_claim_answers_with_the_stored_warnings_and_the_refusal",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_with_a_stale_guard_is_refused_by_its_write_gate",
-      "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_hands_its_hooks_the_task_an_operator_wrote_since_a_held_revision",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_reads_its_dependencies_and_keeps_stored_size_warnings",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_its_gate_refuses_is_rejected_and_trims_events_as_the_whole_write_does",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_on_a_ledger_without_a_task_revision_stores_the_previous_revision",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_claim_on_a_settled_task_or_one_that_changes_a_priority_line_falls_back",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_ledger_missing_a_part_the_whole_write_creates_falls_back",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_on_a_missing_ledger_names_it",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_adopts_only_its_own_legacy_ledger",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_narrow_claim_locks_and_begins_its_own_ledger_and_times_its_write_steps",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_row_written_outside_the_read_keeps_its_stored_key_and_position",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_reads_the_rows_operator_events_and_open_alerts_name_since_the_oldest_held_revision",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_leaves_the_written_state_alone_when_nothing_it_names_is_missing",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_hook_state_adds_a_named_phase_to_a_written_state_without_phases",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_the_narrow_fold_names_a_refused_claim_and_keeps_only_the_stored_size_warnings",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_stored_warnings_reads_only_the_stored_warning_list",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_refused_hub_claim_answers_with_the_stored_warnings_and_the_refusal",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_with_a_stale_guard_is_refused_by_its_write_gate",
+        "tests/swarm_ledger/test_task_update_narrow_write.py::test_a_hub_claim_hands_its_hooks_the_task_an_operator_wrote_since_a_held_revision",
         "tests/swarm/test_ledger_client_task_guard.py::test_a_narrow_claim_reply_holding_only_the_claimed_row_returns_that_row"
       ]
     },
@@ -12840,6 +13036,21 @@
         "tests/ci_lab/test_scheduler.py::test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red",
         "tests/ci_lab/test_scheduler.py::test_a_unit_that_cannot_run_makes_the_grade_red_and_stores_no_verdict",
         "tests/ci_lab/test_scheduler.py::test_the_fold_reproduces_gate_required_on_recorded_fixtures"
+      ]
+    },
+    {
+      "id": "lab-intake-drain",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-intake-drain",
+      "behaviour": "One scheduler intake drains successive head consumer batches until a short or empty fetch or a ten second monotonic budget ends, including batches containing only completed checks, while preserving delivery order and keeping collected heads unacknowledged if a later fetch or observer fails. Remaining heads are read on the next call so release and admission can continue each pass.",
+      "seam": "scripts.ci_lab.scheduler.BusInbox.heads over a paginated bus consumer and a controlled monotonic clock",
+      "rules": ["lab-intake-single-batch"],
+      "tests": [
+        "tests/ci_lab/test_scheduler_intake.py::test_one_intake_drains_a_backlog_larger_than_the_default_batch",
+        "tests/ci_lab/test_scheduler_intake.py::test_a_short_or_empty_batch_ends_intake_without_another_fetch",
+        "tests/ci_lab/test_scheduler_intake.py::test_a_full_completed_check_batch_does_not_hide_the_head_in_the_next_batch",
+        "tests/ci_lab/test_scheduler_intake.py::test_intake_stops_at_its_deadline_and_the_next_call_reads_the_remaining_heads",
+        "tests/ci_lab/test_scheduler_intake.py::test_a_later_batch_failure_leaves_all_collected_heads_unacknowledged"
       ]
     },
     {
@@ -15609,6 +15820,16 @@
       ]
     },
     {
+      "id": "gate-required-status-runs-in-its-own-head-group",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-required-status-lane",
+      "behaviour": "The Gate Required status workflow runs in a concurrency group of its own, keyed by the head of the Tests run it reports, with queue max and cancel-in-progress written as the literal false, so a status run never waits on a shared hosted lane behind other workflows and the runs of one head keep their order.",
+      "seam": "Gate Required status workflow concurrency group",
+      "tests": [
+        "tests/test_ci_hosted_lanes.py::test_the_gate_required_status_runs_in_one_own_group_per_reported_head_and_never_on_a_lane"
+      ]
+    },
+    {
       "id": "swarm-harness-pin-guard",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-harness-pin-guard",
@@ -15722,7 +15943,8 @@
         "tests/test_sonar_arrivals.py::test_a_fresh_started_state_reads_as_started",
         "tests/test_sonar_arrivals.py::test_a_fresh_queued_state_reads_as_not_started",
         "tests/test_sonar_arrivals.py::test_a_stale_queue_state_file_reads_as_unknown",
-        "tests/test_sonar_arrivals.py::test_an_unrecognised_queue_state_reads_as_unknown"
+        "tests/test_sonar_arrivals.py::test_an_unrecognised_queue_state_reads_as_unknown",
+        "tests/test_queue_watch.py::test_a_queued_shard_among_running_ones_reports_not_started"
       ]
     },
     {
@@ -16443,6 +16665,16 @@
       "tests": [
         "tests/ci_lab/test_budget_docs.py::test_the_published_lab_budget_docs_match_the_shed_thresholds_in_code",
         "tests/ci_lab/test_budget_docs.py::test_a_docs_copy_with_the_thresholds_swapped_fails_the_check"
+      ]
+    },
+    {
+      "id": "lane-grader-admits-dedicated-tests-dispatch-lanes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tests-dispatch-own-lane",
+      "behaviour": "The trusted branch lane grader admits the exact dedicated Tests dispatch lane expression while preserving the old Tests groups and refusing changed groups, queue settings, cancellation, extra keys, workflow names, events, untrusted baselines and new jobs.",
+      "seam": "ci_branch_lanes.problems",
+      "tests": [
+        "tests/test_ci_branch_lanes.py::test_only_the_trusted_tests_workflow_may_use_dedicated_dispatch_lanes"
       ]
     }
   ],

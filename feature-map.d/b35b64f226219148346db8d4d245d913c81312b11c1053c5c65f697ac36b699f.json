@@ -1,0 +1,10 @@
+{
+  "id": "mutation-workspace-semgrep-incidents",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-copy-semgrep-incidents",
+  "behaviour": "Mutation workspace preparation copies the complete Semgrep incident rules directory beside the Semgrep rules directory and includes it in the generated mutmut copy configuration.",
+  "seam": "scripts.ci_mutation.runner.prepare_workspace through copied rule assets and tool.mutmut.also_copy",
+  "tests": [
+    "tests/test_ci_mutation_runner.py::test_workspace_scopes_mutmut_and_preserves_the_pytest_config"
+  ]
+}

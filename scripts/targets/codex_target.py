@@ -235,7 +235,8 @@ def _is_ours(group: object, wrapper: Path) -> bool:
 
 
 def _runs_wrapper(command: str, wrapper: Path) -> bool:
-    """True for a hook command that runs our wrapper, quoted or not, or the bash wrapper an earlier install wrote."""
+    """True for a hook command that runs our wrapper, quoted, bare or through cmd.exe, or the bash wrapper an earlier install wrote."""
+    command = command.removeprefix(WINDOWS_RUNNER)
     bare = command.strip('"')
     return _command_is_wrapper(bare, wrapper) or _command_is_wrapper(bare, wrapper.with_name(LEGACY_WRAPPER))
 
@@ -245,9 +246,12 @@ def wrapper_name() -> str:
     return "agentihooks-hook.cmd" if WINDOWS else LEGACY_WRAPPER
 
 
+WINDOWS_RUNNER = "cmd.exe /d /c "
+
+
 def hook_command(wrapper: Path) -> str:
-    """The hooks.json command for the wrapper; quoted on Windows so cmd.exe keeps a path with spaces whole."""
-    return f'"{wrapper}"' if WINDOWS else str(wrapper)
+    """The hooks.json command for the wrapper; on Windows a cmd.exe call, because Codex runs a quoted command not at all."""
+    return f'{WINDOWS_RUNNER}"{wrapper}"' if WINDOWS else str(wrapper)
 
 
 def restore_hook_order(home: Path) -> list[str]:

@@ -1,5 +1,6 @@
 import json
 import uuid
+from pathlib import Path
 from typing import Any
 
 from scripts.swarm_ledger import api_service
@@ -1996,7 +1997,8 @@ def test_layout_body_must_be_an_object(live, payload):
     assert send(live, "GET", "/api/v1/layout")[1] == before
 
 
-def test_sdk_collections_and_tick_readers_cross_page_boundaries(live):
+@pytest.mark.feature("ledger-summary-read")
+def test_sdk_collections_and_tick_readers_cross_page_boundaries(live: dict[str, Any]) -> None:
     from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm_ledger.api.client import ResourceClient
     from tests.swarm_ledger.test_ledger_authority import core, ledger
@@ -2006,6 +2008,7 @@ def test_sdk_collections_and_tick_readers_cross_page_boundaries(live):
         ops=[{"op": "add", "id": f"page-{index}", "thread": "chat", "text": f"Page {index}"} for index in range(105)],
     )
     client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    assert len(client.request(SLUG, "chat?limit=100")["data"]) == 100
     rows = client.collection(SLUG, "chat")
     assert len(rows) == 107
     assert [row["text"] for row in rows][-105:] == [f"Page {index}" for index in range(105)]
@@ -2454,7 +2457,10 @@ def test_stored_checkbox_receipt_keeps_the_canonical_digest(live):
     assert request(live, "GET", "phases/p1")[1] == before
 
 
-def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeypatch):
+@pytest.mark.feature("ledger-summary-read")
+def test_cli_collection_consumers_read_all_pages(
+    live: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from types import SimpleNamespace
     from unittest.mock import Mock
 
@@ -2493,6 +2499,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
             {"op": "add", "id": f"cli-chat-{index}", "thread": "chat", "text": f"Entry {index}"} for index in range(105)
         ],
     )
+    assert len(request(live, "GET", "tasks?limit=100")[1]["data"]) == 100
     ledger.cmd_artifact_purge(SimpleNamespace(slug=SLUG, name="api-reader"))
     assert json.loads(capsys.readouterr().out) == {"purged": 0, "artifacts": 0}
     send_operation = Mock(return_value={})

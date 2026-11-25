@@ -4,6 +4,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -62,6 +63,43 @@ def _wait_for(predicate, seconds):
             return True
         time.sleep(0.05)
     return False
+
+
+def test_job_file_is_read_and_closed_before_it_is_deleted(jobs: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows refuses to delete an open file, so the worker loads the job before it removes it."""
+    import builtins
+    import os
+    import signal
+
+    from hooks import _async
+
+    (jobs / "logs").mkdir()
+    job = _async._write_job(print, ("job ran",), {})
+    handles: list[Any] = []
+    real_open, real_unlink = builtins.open, os.unlink
+
+    def tracking_open(*args: Any, **kwargs: Any) -> Any:
+        handle = real_open(*args, **kwargs)
+        handles.append(handle)
+        return handle
+
+    def unlink_only_closed(path: str) -> None:
+        assert all(handle.closed for handle in handles if handle.name == path)
+        real_unlink(path)
+
+    def exit_code(code: int) -> None:
+        raise SystemExit(code)
+
+    monkeypatch.setattr(builtins, "open", tracking_open)
+    monkeypatch.setattr(os, "unlink", unlink_only_closed)
+    monkeypatch.setattr(os, "_exit", exit_code)
+    try:
+        with pytest.raises(SystemExit) as exited:
+            _async.run_job(job, "30", "closed-before-delete")
+    finally:
+        signal.alarm(0)
+    assert exited.value.code == 0
+    assert not Path(job).exists()
 
 
 def test_job_completes_while_another_thread_holds_an_import_lock(jobs, monkeypatch):
