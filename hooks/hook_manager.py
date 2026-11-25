@@ -1182,6 +1182,14 @@ def _swarm_tool_end(payload: dict) -> None:
     finish(call_id=payload.get("tool_use_id") or "")
 
 
+def _denied_tool_end(payload: dict[str, Any]) -> None:
+    """A denied call never runs: end it for the stall clock, then give back the CI reruns the reruns gate counted."""
+    _swarm_tool_end(payload)
+    from scripts.gates.reruns import released
+
+    released(payload)
+
+
 def on_post_tool_use_failure(payload: dict[str, Any]) -> None:
     """Handle PostToolUseFailure: close the stall clock and count the failure in the retry breaker."""
     _swarm_tool_end(payload)
@@ -2787,7 +2795,7 @@ EVENT_HANDLERS = {
     "SessionStart": on_session_start,
     "SessionEnd": on_session_end,
     "UserPromptSubmit": on_user_prompt_submit,
-    "PreToolUse": lambda payload: tool_end.closing_denied(on_pre_tool_use, payload, BlockAction, _swarm_tool_end),
+    "PreToolUse": lambda payload: tool_end.closing_denied(on_pre_tool_use, payload, BlockAction, _denied_tool_end),
     "PostToolUse": on_post_tool_use,
     "Stop": on_stop,
     "SubagentStart": on_subagent_start,
