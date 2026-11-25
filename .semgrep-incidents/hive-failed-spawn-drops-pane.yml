@@ -1,0 +1,13 @@
+rules:
+  - id: hive-failed-spawn-drops-pane
+    languages: [python]
+    severity: ERROR
+    message: Retire and retain a failed spawn's owned pane before acknowledging failure.
+    paths:
+      include:
+        - /scripts/hive/orders.py
+        - hive-failed-spawn-drops-pane.py
+    pattern: |
+      $OUTCOME = $RUNTIME.spawn(...)
+      if not $OUTCOME.ok:
+          return Ack("failed", {}, ...)
