@@ -2305,7 +2305,7 @@ def _link_codex_rollout(transcript_path: str) -> None:
         log("codex rollout link failed", {"error": str(e)})
 
 
-def _close_handed_off(payload: dict) -> bool:
+def _close_handed_off(payload: dict[str, Any]) -> bool:
     """Close a session its successor took over; Windows runs no handoffs."""
     if sys.platform == "win32":
         return False
