@@ -435,6 +435,7 @@ class Slot:
     outcome: str = ""
     started: bool = False
     held: bool = False
+    manifest_digest: str = ""
 
 
 @dataclass
@@ -1125,7 +1126,7 @@ class Scheduler:
         ref = f"{unit.kind}:{unit.key}"
         if ref in state.units:
             return ref
-        slot = Slot(unit.kind, unit.key, list(unit.members))
+        slot = Slot(unit.kind, unit.key, list(unit.members), manifest_digest=unit.manifest_digest)
         verdict = self.store.get(unit.kind, unit.key, bypass_negative=bypass)
         lookup = contract.CACHE_MISSES_TOTAL if verdict is None else contract.CACHE_HITS_TOTAL
         self.registry.inc(lookup, 1.0, {"cache": caches.VERDICT})
@@ -1175,7 +1176,9 @@ class Scheduler:
             for slot in state.units.values():
                 if slot.held and budget.admits(CLASSES[state.tier], DEFAULT.slots, load.slots_free, waiting, self.shed):
                     slot.held = False
-                    admitted.append(Unit(slot.kind, slot.key, tuple(slot.members)))
+                    admitted.append(
+                        Unit(slot.kind, slot.key, tuple(slot.members), manifest_digest=slot.manifest_digest)
+                    )
                     waiting += DEFAULT.slots
             if admitted:
                 self.queue.enqueue(admitted, state.head, {}, state.base, state.grader, state.tier)

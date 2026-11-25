@@ -103,7 +103,11 @@ class Lost(RuntimeError):
 def _lease(grant: Mapping[str, Any]) -> Lease:
     """Read one grant of the lease API's POST /lease reply."""
     unit = Unit(
-        kind=grant["kind"], key=grant["key"], members=tuple(grant["members"]), manifest=grant.get("manifest", "")
+        kind=grant["kind"],
+        key=grant["key"],
+        members=tuple(grant["members"]),
+        manifest=grant.get("manifest", ""),
+        manifest_digest=grant.get("manifest_digest", ""),
     )
     return Lease(
         grant["job"],

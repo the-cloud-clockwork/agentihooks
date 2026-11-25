@@ -250,13 +250,14 @@ def marks(doc: dict, graph: dict, fix: str, watched: bool) -> dict:
     focus = [r["target"] for r in records if r["verb"] == "focus"]
     tasks = {f"tasks/{t.get('id')}": t for t in doc.get("tasks") or [] if isinstance(t, dict)}
     chains = {node: _chain(node, graph, tasks) for node in graph}
-    found, focused = {"frozen": [], "held": []}, admitted(doc, graph) is not None
+    queue = admitted(doc, graph)
+    found, focused = {"frozen": [], "held": []}, queue is not None
     for node, chain in chains.items():
         task = tasks.get(node)
         if task is not None:
             cold = frozen(task, records, chain)
             hold = task.get("state") == "open" and (
-                unfocused(task, doc, graph, fix) or watched and not exempt(task, fix)
+                unfocused(task, doc, graph, fix, queue) or watched and not exempt(task, fix)
             )
         else:
             cold = any(r["verb"] == "freeze" and r["target"] in chain for r in records)

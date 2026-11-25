@@ -4277,6 +4277,19 @@
       ]
     },
     {
+      "id": "tick-lost-agent-keeps-record-until-retired",
+      "rules": ["lost-reap-drops-after-refused-retire"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lost-master-recovery-pane",
+      "behaviour": "A lost agent stays recorded while pane retirement refuses, records the refusal and retries next tick; successful retirement closes the pane and drops the record. Deliberate termination also preserves its record on retirement refusal.",
+      "seam": "scripts.tick.steps.agents._lost through _reap",
+      "tests": [
+        "tests/tick/steps/test_lost_retire.py::test_a_lost_master_whose_resume_is_refused_keeps_its_record_while_retire_refuses",
+        "tests/tick/steps/test_lost_retire.py::test_a_lost_master_is_dropped_on_the_pass_its_retire_succeeds",
+        "tests/tick/steps/test_lost_retire.py::test_a_deliberate_terminate_keeps_its_record_while_retire_refuses"
+      ]
+    },
+    {
       "id": "swarm-tick-agents-reap",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h10",
@@ -5886,6 +5899,16 @@
         "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_calls_admitted_once_regardless_of_pending_count",
         "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_propagates_held_status_through_a_dependency_chain",
         "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_leaves_a_chain_with_no_frozen_ancestor_free"
+      ]
+    },
+    {
+      "id": "ledger-page-marks-admission-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-local-ledger-follow-cpu",
+      "behaviour": "The page view's freeze marks derive the admitted-focus queue once per view and hand it to every open task, so publishing each new generation of a watched ledger costs work linear in its tasks instead of open tasks times all tasks.",
+      "seam": "scripts.swarm.freeze.marks through unfocused and admitted",
+      "tests": [
+        "tests/swarm/test_freeze.py::test_marks_derives_the_admitted_queue_once_whatever_the_open_task_count"
       ]
     },
     {
@@ -8176,6 +8199,19 @@
         "tests/swarm/test_enhance_close.py::test_a_matching_enhancement_expectation_passes_the_api_and_writes",
         "tests/swarm/test_enhance_close.py::test_an_omitted_enhancement_expectation_keeps_legacy_writes",
         "tests/swarm/test_enhance_close.py::test_the_enhancement_expectation_rejects_invalid_values"
+      ]
+    },
+    {
+      "id": "lab-test-manifest-identity",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2752",
+      "behaviour": "Each test batch records the digest of its exact manifest bytes when keyed. The expected digest survives grade persistence, queue admission and lease transport. A worker refuses missing identity, missing payload and substituted batch records by name before acquiring execution resources, while later valid work still runs.",
+      "seam": "test expansion through persisted scheduler slots, queue, HTTP lease and test executor",
+      "tests": [
+        "tests/ci_lab/test_manifest_identity.py::test_expansion_records_the_identity_of_its_exact_batch_bytes",
+        "tests/ci_lab/test_manifest_identity.py::test_a_swapped_stored_manifest_is_refused_and_the_next_unit_still_runs",
+        "tests/ci_lab/test_manifest_identity.py::test_manifest_refusal_precedes_all_test_execution_resources",
+        "tests/ci_lab/test_manifest_identity.py::test_old_records_without_identity_are_parsed_then_refused_after_claiming"
       ]
     },
     {
@@ -12715,6 +12751,9 @@
         "tests/quick/test_room_tick_launch.py::test_the_launch_lands_in_the_seat_pane_with_the_quick_variables",
         "tests/quick/test_room_tick_launch.py::test_relaunch_starts_the_successor_once_and_marks_the_seat_ready",
         "tests/quick/test_seeds.py::test_the_master_seed_makes_it_the_front_door_over_its_own_panes",
+        "tests/quick/test_seeds.py::test_the_master_seed_never_trusts_a_pane_message_delivered",
+        "tests/quick/test_seeds.py::test_the_master_seed_and_block_load_the_quick_swarm_master_skill_first",
+        "tests/quick/test_seeds.py::test_every_seat_packs_deliveries_into_few_merge_requests",
         "tests/quick/test_seeds.py::test_an_engineer_seed_plans_first_and_reports_to_the_master_before_starting",
         "tests/quick/test_seeds.py::test_the_injected_block_names_the_seat_its_folder_and_its_next_stage",
         "tests/quick/test_seeds.py::test_the_block_tells_a_seat_of_room_lines_waiting_for_it",
