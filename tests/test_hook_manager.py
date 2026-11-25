@@ -192,6 +192,7 @@ def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatc
     monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", Mock())
     codex_refresh_kick = Mock()
     monkeypatch.setattr("hooks.lifecycle.codex_refresh_kick.kick", codex_refresh_kick)
+    monkeypatch.setattr("hooks.lifecycle.herdr_resume.kick", Mock())
     monkeypatch.setattr("hooks.context.injection_trace.record_session_start", Mock())
     monkeypatch.setattr("hooks.context.enforcement.get_session_start_enforcements", Mock(return_value=""))
     monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
@@ -242,6 +243,7 @@ def quiet_session_start(monkeypatch):
     monkeypatch.setattr("hooks.lifecycle.guard.session_event", Mock())
     monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", Mock())
     monkeypatch.setattr("hooks.lifecycle.codex_refresh_kick.kick", Mock())
+    monkeypatch.setattr("hooks.lifecycle.herdr_resume.kick", Mock())
     monkeypatch.setattr("hooks.context.injection_trace.record_session_start", Mock())
     monkeypatch.setattr("hooks.context.enforcement.get_session_start_enforcements", Mock(return_value=""))
     monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
@@ -286,6 +288,30 @@ def test_codex_session_start_envelope_carries_start_condition_context(start_cond
     output = json.loads(out)["hookSpecificOutput"]
     assert output["hookEventName"] == "SessionStart"
     assert "[condition start-greet.sh]\nhello from a start condition" in output["additionalContext"]
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_session_start_reports_the_herdr_resume_command(quiet_session_start, monkeypatch):
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    seen = []
+    monkeypatch.setattr("hooks.lifecycle.herdr_resume.kick", seen.append)
+    EVENT_HANDLERS["SessionStart"]({"session_id": "herdr-session"})
+    assert seen == [{"session_id": "herdr-session"}]
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_a_failing_herdr_resume_report_never_breaks_session_start(quiet_session_start, monkeypatch):
+    from hooks import hook_manager
+
+    def refuse(payload):
+        raise RuntimeError("herdr socket gone")
+
+    logged = []
+    monkeypatch.setattr("hooks.lifecycle.herdr_resume.kick", refuse)
+    monkeypatch.setattr(hook_manager, "log", lambda message, data=None: logged.append((message, data)))
+    hook_manager.EVENT_HANDLERS["SessionStart"]({"session_id": "herdr-session"})
+    assert ("herdr resume report failed", {"error": "RuntimeError"}) in logged
 
 
 def test_start_condition_failure_fails_open(quiet_session_start, monkeypatch, tmp_path):

@@ -3,13 +3,18 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 import tomlkit
+from tomlkit import TOMLDocument
+from tomlkit.items import Table
 
 INSTALL_COMMAND = "curl -fsSL https://herdr.dev/install.sh | sh"
 INTEGRATIONS = ("claude", "codex")
+RESUME_ENV = "AGENTIHOOKS_HERDR_RESUME"
 
 
 def _install_module():
@@ -75,27 +80,68 @@ def config_path() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "herdr" / "config.toml"
 
 
-def _table(doc, name: str):
+def _table(doc: TOMLDocument, name: str) -> Table:
     table = doc.get(name)
     if table is None:
         table = doc[name] = tomlkit.table()
-    return table
+    return cast("Table", table)
+
+
+def resume_off(environ: Mapping[str, str] | None = None) -> bool:
+    if environ is None:
+        from scripts import mcp_daemon
+
+        scan: Callable[[str], str | None] = getattr(mcp_daemon, "_scan_env_file")
+        value = os.environ.get(RESUME_ENV) or scan(RESUME_ENV) or ""
+    else:
+        value = environ.get(RESUME_ENV, "")
+    return value.strip().lower() in ("off", "false", "0", "no")
+
+
+def _herdr_state() -> dict[str, object]:
+    state: dict[str, object] = getattr(_install_module(), "_load_state")()
+    herdr = state.get("herdr")
+    return cast("dict[str, object]", herdr) if isinstance(herdr, dict) else {}
+
+
+def _released() -> bool:
+    return bool(_herdr_state().get("resume_released"))
+
+
+def _mark_released() -> None:
+    install = _install_module()
+    state: dict[str, object] = getattr(install, "_load_state")()
+    released = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    state["herdr"] = {**_herdr_state(), "resume_released": released}
+    getattr(install, "_save_state")(state)
+
+
+def _resume(doc: TOMLDocument, changed: list[str]) -> None:
+    session = doc.get("session")
+    if resume_off():
+        if not isinstance(session, Table) or session.get("resume_agents_on_restore") is not False:
+            _table(doc, "session")["resume_agents_on_restore"] = False
+            changed.append("resume_agents_on_restore = false")
+        return
+    if _released():
+        return
+    _mark_released()
+    if isinstance(session, Table) and session.unwrap() == {"resume_agents_on_restore": False}:
+        del doc["session"]
+        changed.append("resume_agents_on_restore restored to the herdr default")
 
 
 def apply_config(path: Path) -> list[str]:
     doc = tomlkit.parse(path.read_bytes().decode()) if path.exists() else tomlkit.document()
-    changed = []
+    changed: list[str] = []
     ui = _table(doc, "ui")
     if "copy_on_select" not in ui:
         ui["copy_on_select"] = False
         changed.append("copy_on_select = false")
-    session = _table(doc, "session")
-    if session.get("resume_agents_on_restore") is not False:
-        session["resume_agents_on_restore"] = False
-        changed.append("resume_agents_on_restore = false")
+    _resume(doc, changed)
     if changed:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(tomlkit.dumps(doc).encode())
+        path.write_bytes((tomlkit.dumps(doc).rstrip("\n") + "\n").encode())
     return changed
 
 
