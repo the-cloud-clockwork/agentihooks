@@ -584,7 +584,7 @@ class Consumer:
         pane = (outcome.value or {}).get("pane_id")
         if not pane:
             return Ack("failed", {}, _failure(outcome))
-        failed = replace(agent, pane_id=pane, runtime_target={"host_id": self.hive})
+        failed = replace(agent, pane_id=pane)
         cleanup = {"agent": asdict(failed), "failure": _failure(outcome)}
         self.store.redis.hset(self.orders.receipt(order), "cleanup", json.dumps(cleanup))
         return self._cleanup_failed_launch(cleanup)
