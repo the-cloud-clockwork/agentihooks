@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/enhance_sweep.py:scripts.swarm.enhance_sweep.x_sweep:e5c68bb1666744234b064ca121d8d6b21c24cbb4b25aec30af6dc8a07b9458e1": {
+    "reader": "/root/standards_reader",
+    "reason": "Equivalent: writes is observed only by its truthiness before pacing. Assigning one after every write preserves false before the first write and true before every later write. Its magnitude is never returned or otherwise used."
+  }
+}
