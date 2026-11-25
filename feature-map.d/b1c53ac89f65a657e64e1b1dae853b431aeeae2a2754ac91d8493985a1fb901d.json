@@ -1,0 +1,13 @@
+{
+  "id": "quota-push-operator-only",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-push-operator-only",
+  "behaviour": "Only typed operator prompts authorize quota push; automated deliveries preserve quota stop guidance.",
+  "seam": "UserPromptSubmit hook through quota persistence, evaluation and prompt alert injection",
+  "tests": [
+    "tests/context/test_prompt_quota_policy.py::test_automated_prompt_cannot_authorize_quota_push",
+    "tests/context/test_prompt_quota_policy.py::test_typed_operator_prompt_still_authorizes_quota_push",
+    "tests/context/test_prompt_quota_policy.py::test_negated_operator_prompt_does_not_authorize_quota_push",
+    "tests/context/test_prompt_quota_policy.py::test_subagent_prompt_does_not_authorize_quota_push"
+  ]
+}
