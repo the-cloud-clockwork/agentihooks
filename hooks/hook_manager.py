@@ -664,7 +664,7 @@ def on_session_end(payload: dict) -> None:
 
     from hooks.config import BROADCAST_ENABLED
 
-    if BROADCAST_ENABLED:
+    if BROADCAST_ENABLED and sys.platform != "win32":
         try:
             from hooks.context.account_sessions import agent_pid
             from hooks.context.broadcast import heartbeat_sessions, mark_session_closed
