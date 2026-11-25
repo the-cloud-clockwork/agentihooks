@@ -51,10 +51,13 @@ def lab(environ: Mapping[str, str]) -> Lab | None:
 
 def empty(folder: Path) -> None:
     """Remove every entry of the folder, sealed trees and folders without owner access included, leaving the folder
-    itself in place; a symlink's target stays untouched, and a missing folder is not an error."""
+    itself in place; a symlink's target stays untouched, and a missing folder is not an error. A folder's mode is
+    changed only when it lacks an owner bit, so an open folder of another user is emptied as it is."""
     if not folder.is_dir():
         return
-    folder.chmod(folder.stat().st_mode | OWNED)
+    mode = folder.stat().st_mode
+    if mode & OWNED != OWNED:
+        folder.chmod(mode | OWNED)
     for entry in folder.iterdir():
         if entry.is_symlink():
             entry.unlink()
