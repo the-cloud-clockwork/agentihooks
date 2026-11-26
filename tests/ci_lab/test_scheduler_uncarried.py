@@ -95,6 +95,20 @@ def test_a_pull_request_head_no_mirror_ref_reaches_leases_no_unit_and_posts_one_
     assert run.grades() == []
 
 
+@pytest.mark.feature("lab-refusal-posted-once-in-a-pass")
+def test_two_pull_request_requests_of_one_head_no_ref_carries_post_one_failure_in_a_pass(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: pull_plan({"lint": (unit(1),)})})
+    reaching(run, monkeypatch, HEAD_A)
+    run.push(HEAD_A, lane="first", event="pull_request", action="synchronize")
+    run.push(HEAD_A, lane="second", event="pull_request", action="synchronize")
+    retiring = f"retiring {HEAD_A}: {REASON}"
+    assert run.tick(1000)[-2:] == [retiring, retiring]
+    assert run.lab.poster.posts == [retired(REPO, HEAD_A)]
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+
+
 @pytest.mark.feature("lab-scheduler-uncarried-head")
 @pytest.mark.parametrize("refusal", REFUSALS)
 def test_a_refused_failure_post_of_a_retired_pull_request_head_is_recorded_and_the_pass_goes_on(

@@ -2,11 +2,14 @@ import ast
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+from unittest.mock import Mock
 
 import pytest
+import requests
 import yaml
 
-from scripts.ci_lab import scheduler
+from scripts.ci_lab import checks, scheduler
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.manifests import FetchPending, FetchUnanswered
@@ -24,6 +27,7 @@ from tests.ci_lab.test_scheduler import (
     SLUG,
     SUITE_MANIFEST,
     Expander,
+    FixtureToken,
     Inbox,
     Lab,
     Port,
@@ -32,12 +36,28 @@ from tests.ci_lab.test_scheduler import (
     _suite,
     fake_redis,
     plan,
+    restarted,
     unit,
 )
 from tests.ci_lab.test_scheduler import lab as _lab
 from tests.ci_lab.test_scheduler import staticless as staticless
+from tests.ci_lab.test_scheduler_posts import REFUSALS, refusing
 
 lab = _lab
+
+
+def malformed(request: GradeRequest) -> scheduler.Plan:
+    raise yaml.YAMLError(f"malformed workflow at {request.base}")
+
+
+def creating(created: list[tuple[str, str, str]]) -> Callable[..., Mock]:
+    def request(method: str, url: str, **sent: Any) -> Mock:
+        body = sent["json"]
+        created.append((method, str(body.get("head_sha", "")), str(body.get("name", ""))))
+        status = 201 if method == "POST" else 200
+        return Mock(status_code=status, json=Mock(return_value={"id": len(created)}), text="")
+
+    return request
 
 
 @pytest.mark.feature("lab-scheduler-unexpanded-head")
@@ -160,3 +180,86 @@ def test_a_held_heads_unanswered_fetches_count_in_a_row_until_a_new_head_or_a_st
     run.tick(1004)
     assert counts() == {}
     assert [grade.head for grade in run.grades()] == [HEAD_B]
+
+
+@pytest.mark.feature("lab-refusal-posted-once-in-a-pass")
+def test_a_head_refused_twice_in_one_pass_gets_one_failed_required_check_and_the_pass_goes_on(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(requests, "request", creating(created))
+    run = restarted(lab({HEAD_B: plan({"lint": (unit(2),)})}), checks.Checks(SLUG, FixtureToken()))
+    run.push(HEAD_A)
+    run.push(HEAD_A, lane="fix", event="pull_request", action="synchronize")
+    run.push(HEAD_B, lane="second")
+    actions = run.tick(1000)
+    assert len([action for action in actions if action.startswith(f"cannot expand {HEAD_A}: ")]) == 2
+    assert [made for made in created if made[1] == HEAD_A] == [("POST", HEAD_A, checks.name(scheduler.REQUIRED, True))]
+    assert [grade.head for grade in run.grades()] == [HEAD_B]
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+
+
+@pytest.mark.feature("lab-refusal-posted-once-in-a-pass")
+def test_the_second_refusal_of_a_head_in_a_pass_posts_nothing_and_keeps_its_action_line(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({})
+    monkeypatch.setattr(run.lab.expander, "expand", malformed)
+    run.push(HEAD_A)
+    run.push(HEAD_A, lane="fix", event="pull_request", action="synchronize")
+    refused = f"cannot expand {HEAD_A}: malformed workflow at {BASE}"
+    assert run.tick(1000)[-2:] == [refused, refused]
+    reason = f"cannot expand {HEAD_A} against {BASE}: malformed workflow at {BASE}"
+    output = Output(
+        "pull_request grade cannot expand", reason, (), "unexpanded-1000", "unknown", f"{REPO}/commit/{HEAD_A}"
+    )
+    assert run.lab.poster.posts == [(HEAD_A, scheduler.REQUIRED, "completed", "failure", output, True)]
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+
+
+@pytest.mark.feature("lab-refusal-posted-once-in-a-pass")
+@pytest.mark.parametrize("refusal", REFUSALS)
+def test_a_refused_post_of_a_refusal_is_not_tried_again_for_the_second_request_of_the_pass(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, refusal: Exception
+) -> None:
+    run = lab({})
+    monkeypatch.setattr(run.lab.expander, "expand", malformed)
+    poster = refusing(run, refusal, heads=frozenset({HEAD_A}))
+    run.push(HEAD_A)
+    run.push(HEAD_A, lane="fix", event="pull_request", action="synchronize")
+    actions = run.tick(1000)
+    unposted = f"cannot post the failed {scheduler.REQUIRED} check on {HEAD_A}: {refusal}"
+    assert [action for action in actions if action == unposted] == [unposted]
+    assert poster.attempts == 1
+    assert poster.moves(HEAD_A, scheduler.REQUIRED) == []
+
+
+@pytest.mark.feature("lab-refusal-posted-once-in-a-pass")
+def test_a_head_refused_in_two_passes_gets_a_failed_required_check_in_each(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({})
+    monkeypatch.setattr(run.lab.expander, "expand", malformed)
+    run.push(HEAD_A)
+    run.tick(1000)
+    run.push(HEAD_A)
+    run.tick(2000)
+    assert [(post[0], post[4].run) for post in run.lab.poster.posts] == [
+        (HEAD_A, "unexpanded-1000"),
+        (HEAD_A, "unexpanded-2000"),
+    ]
+
+
+@pytest.mark.feature("lab-refusal-posted-once-in-a-pass")
+def test_two_heads_refused_in_one_pass_each_get_their_failed_required_check(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({})
+    monkeypatch.setattr(run.lab.expander, "expand", malformed)
+    run.push(HEAD_A)
+    run.push(HEAD_B, lane="second")
+    run.tick(1000)
+    assert [(post[0], post[4].run) for post in run.lab.poster.posts] == [
+        (HEAD_A, "unexpanded-1000"),
+        (HEAD_B, "unexpanded-1000"),
+    ]

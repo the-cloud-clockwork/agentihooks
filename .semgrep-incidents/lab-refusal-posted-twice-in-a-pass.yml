@@ -1,0 +1,21 @@
+rules:
+  - id: lab-refusal-posted-twice-in-a-pass
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The failed required check of a refusal is posted with no memory of what the pass already said. Two waiting
+      requests of one head refused in one pass carry the same run id, the check poster raises on the second completed
+      post and the lab scheduler exits. Post a refusal only through _fail, after its check that the pass has not said
+      it yet.
+    paths:
+      include:
+        - /scripts/ci_lab/scheduler.py
+        - lab-refusal-posted-twice-in-a-pass.py
+    patterns:
+      - pattern: $POSTER.post($HEAD, REQUIRED, "completed", "failure", ...)
+      - pattern-not-inside: |
+          def _fail(...):
+              ...
+              if $SAID in self.$PASS:
+                  return []
+              ...
