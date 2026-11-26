@@ -736,14 +736,12 @@ class Scheduler:
         self.held: defaultdict[str, int] = defaultdict(int)
         self._demand_cache: dict[str, tuple[str, _Demand]] = {}
         self._quiets: dict[str, _Quiet] = {}
-        self._said: set[tuple[str, str, str]] = set()
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: on the first pass retire the pull request grades whose head nothing wants, then retire the
         merge group grades whose merge group is gone, intake, release quiet lanes, reap expired leases, refresh the
         live grade summaries, enqueue the held units the budget admits, then advance every live grade, counting each
-        finished job in the most urgent tier of the live grades holding it. A pass begins with no refusal said."""
-        self._said.clear()
+        finished job in the most urgent tier of the live grades holding it."""
         swept = self._sweep()
         actions = [*self._retire_groups(), *self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms)]
         self._survey()
@@ -1034,6 +1032,7 @@ class Scheduler:
         pauses = control.paused(self.client)
         started = 0
         looked_at = 0
+        said: set[tuple[str, str, str]] = set()
         for name, raw in sorted(self.client.hgetall(WAITING).items(), key=_urgency):
             held = json.loads(raw)
             request = _request(held["request"])
@@ -1046,7 +1045,7 @@ class Scheduler:
             self.client.hdel(WAITING, name)
             ref = held.get("ref", "")
             try:
-                actions.append(self._start(request, held["lane"], ref, now_ms))
+                actions.append(self._start(request, held["lane"], ref, now_ms, said))
                 started += 1
             except FetchPending as error:
                 self.client.hset(WAITING, name, raw)
@@ -1062,7 +1061,7 @@ class Scheduler:
                         f"{fetches} manifest fetches in a row got no answer or a server error, the last: {error}"
                     )
                     actions.append(f"cannot expand {request.head}: {refusal}")
-                    actions.extend(self._refuse(request, ref, refusal, now_ms))
+                    actions.extend(self._refuse(request, ref, refusal, now_ms, said))
             except (
                 subprocess.CalledProcessError,
                 ValueError,
@@ -1073,30 +1072,35 @@ class Scheduler:
             ) as error:
                 started += 1
                 actions.append(f"cannot expand {request.head}: {error}")
-                actions.extend(self._refuse(request, ref, error, now_ms))
+                actions.extend(self._refuse(request, ref, error, now_ms, said))
             if started == STARTS_PER_PASS or looked_at == LOOKED_AT_PER_PASS:
                 break
         return actions
 
-    def _refuse(self, request: GradeRequest, ref: str, error: Exception, now_ms: int) -> list[str]:
+    def _refuse(
+        self, request: GradeRequest, ref: str, error: Exception, now_ms: int, said: set[tuple[str, str, str]]
+    ) -> list[str]:
         """Post a completed required check run with conclusion failure on a head that cannot expand, naming the error,
         so the head shows a lab status; a head pushed to a grade ref posts nothing, since GitHub does not hold it."""
         if ref.startswith(GRADE_REFS):
             return []
         reason = f"cannot expand {request.head} against {request.base}: {error}"
-        return self._fail(request, f"{CLASSES[request.tier]} grade cannot expand", reason, f"unexpanded-{now_ms}")
+        external = f"unexpanded-{now_ms}"
+        return self._fail(request, f"{CLASSES[request.tier]} grade cannot expand", reason, external, said)
 
-    def _fail(self, request: GradeRequest, title: str, reason: str, external: str) -> list[str]:
+    def _fail(
+        self, request: GradeRequest, title: str, reason: str, external: str, said: set[tuple[str, str, str]]
+    ) -> list[str]:
         """Post a completed required check run with conclusion failure and the reason as its summary on a head with no
         plan; such a head has no authoritative gates, so the check posts as lab-shadow/required. The post is tried
         once, outside the post holds, and a post the App token, GitHub or the network refuses is recorded and not
-        retried, since the head keeps no grade. A pass says one run of one head once: a second waiting request of
-        the head, failed in the same pass under the same run id, posts nothing, since the poster refuses a second
-        completed post of a check run."""
-        said = (request.repo, request.head, external)
-        if said in self._said:
+        retried, since the head keeps no grade. A pass says one run of one head once: `said` holds the runs the
+        pass already failed, and a second waiting request of the head, failed in the same pass under the same run
+        id, posts nothing, since the poster refuses a second completed post of a check run."""
+        run = (request.repo, request.head, external)
+        if run in said:
             return []
-        self._said.add(said)
+        said.add(run)
         output = Output(title, reason, (), external, "unknown", f"{request.repo}/commit/{request.head}")
         try:
             self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
@@ -1104,14 +1108,15 @@ class Scheduler:
             return [f"cannot post the failed {REQUIRED} check on {request.head}: {refusal}"]
         return []
 
-    def _retire(self, request: GradeRequest, now_ms: int) -> str:
+    def _retire(self, request: GradeRequest, now_ms: int, said: set[tuple[str, str, str]]) -> str:
         """Retire a head no ref every node mirror fetches reaches, placing none of its units since no worker could
         fetch it; a pull request head also gets the failed required check run naming that reason, and a refused post
         of it is recorded in the same action."""
         reason = f"no branch or pull request head ref of {request.repo} carries {request.head}"
         refusals: list[str] = []
         if request.tier == Priority.PULL_REQUEST:
-            refusals = self._fail(request, f"{CLASSES[request.tier]} grade retired", reason, f"uncarried-{now_ms}")
+            title = f"{CLASSES[request.tier]} grade retired"
+            refusals = self._fail(request, title, reason, f"uncarried-{now_ms}", said)
         return "; ".join([f"retiring {request.head}: {reason}", *refusals])
 
     def _origins(self) -> dict[str, dict[str, Any]]:
@@ -1239,13 +1244,13 @@ class Scheduler:
             self._forget(run)
         return [stale_heads.unbranched(len(waiting), len(gone), dropped)] if waiting or gone else []
 
-    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int) -> str:
+    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int, said: set[tuple[str, str, str]]) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
         and hold the store's misses for the budget; a request that bypasses negative verdicts grades again under a run
         of its own. A head no ref every node mirror fetches reaches is retired before expansion, unless it was pushed
         to a grade ref, which the lab remote serves."""
         if not ref.startswith(GRADE_REFS) and not self.ports.expander.reachable(request.repo, request.head):
-            return self._retire(request, now_ms)
+            return self._retire(request, now_ms, said)
         plan = self.ports.expander.expand(request)
         inputs = GradeInputs(request.repo, request.head, request.base, CLASSES[request.tier], plan.grader)
         run = grade_key(inputs)
