@@ -791,8 +791,8 @@ def review_steps(me: str, led: str, name: str, phase: str) -> list[str]:
         "its body, the whole diff, the feature map entries it touches and the code it reaches.",
         "2. Write strict findings whatever the checks say, at least one, each naming the file and line, what breaks, "
         "its evidence and the smallest fix.",
-        f"3. Post them on the change request: agentihooks review post <change request url> --slug {slug} "
-        '--finding "<finding>", one --finding per finding.',
+        f"3. Post them on the change request with agentihooks review post <change request url> --slug {slug} "
+        '--finding "<finding>", one --finding per finding; a forge post records nothing for done.',
         f"4. Leave the crew with {led} leave, then close the task: {me} done --finding <change request url>. The ledger "
         f"refuses done until review post has recorded a finding. {CLOSES}",
     ]

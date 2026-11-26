@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from scripts.swarm import cli, prompt, templates
@@ -68,8 +70,8 @@ def test_a_review_task_gets_the_reviewer_launch_steps() -> None:
         "its body, the whole diff, the feature map entries it touches and the code it reaches.",
         "2. Write strict findings whatever the checks say, at least one, each naming the file and line, what breaks, "
         "its evidence and the smallest fix.",
-        "3. Post them on the change request: agentihooks review post <change request url> --slug sw "
-        '--finding "<finding>", one --finding per finding.',
+        "3. Post them on the change request with agentihooks review post <change request url> --slug sw "
+        '--finding "<finding>", one --finding per finding; a forge post records nothing for done.',
         "4. Leave the crew with agentihooks api --slug sw --as reviewer@a1b2c3-0001 leave, then close the task: "
         "agentihooks swarm sw done --finding <change request url>. The ledger refuses done until review post has "
         "recorded a finding. The swarm then closes this session; stop working.",
@@ -86,8 +88,11 @@ def test_a_reviewer_that_cannot_finish_blocks_without_a_branch() -> None:
 
 
 @pytest.mark.feature("review-launch-prompt-steps")
-def test_every_lane_template_kind_has_launch_steps() -> None:
-    assert set(templates.DEFAULT_KINDS.values()) <= set(prompt.STEPS)
+def test_every_lane_template_kind_has_launch_steps(tmp_path: Path) -> None:
+    built_in = templates.available({"AGENTIHOOKS_HOME": str(tmp_path)})
+    kinds = {lane.kind for template, _ in built_in for lane in template.lanes.values()}
+    assert {"review", "troubleshoot"} <= kinds
+    assert (kinds | set(templates.DEFAULT_KINDS.values())) - {templates.AUTO} <= set(prompt.STEPS)
 
 
 def _start(env, kind):  # noqa: F811
