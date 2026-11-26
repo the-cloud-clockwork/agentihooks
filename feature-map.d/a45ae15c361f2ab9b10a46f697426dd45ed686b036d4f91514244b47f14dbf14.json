@@ -1,0 +1,12 @@
+{
+  "id": "review-release-promotion-post",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-rv-release-post-seam",
+  "behaviour": "A release review posts its findings with the release tag link: the review record resolves the promotion pull request whose squash merge commit the tag points at, reads its head, posts every finding on that pull request, keeps the record under the pull request link and counts each finding for the review task, so swarm done closes the task. The author marks those findings through the same release link.",
+  "seam": "scripts.review.record post and mark on a release tag link through Forge.release_pull, and the agentihooks review post command through scripts.review.cli main",
+  "tests": [
+    "tests/review/test_record_release.py::test_a_release_review_posts_every_finding_on_the_promotion_pull_request",
+    "tests/review/test_record_release.py::test_the_author_marks_release_findings_on_the_promotion_pull_request",
+    "tests/review/test_record_release.py::test_review_post_on_a_release_link_prints_the_promotion_pull_request_record"
+  ]
+}
