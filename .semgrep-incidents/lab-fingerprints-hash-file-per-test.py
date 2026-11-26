@@ -66,3 +66,12 @@ def per_test_with_a_fresh_table_each_read(manifest: dict, tree: Mapping[str, byt
         # ruleid: lab-fingerprints-hash-file-per-test
         keys[test] = str(_cached_blob(tree, record["own"], {}))
     return keys
+
+
+def per_test_with_a_table_built_by_a_call_in_the_loop(manifest: dict, tree: Mapping[str, bytes]) -> dict[str, str]:
+    keys: dict[str, str] = {}
+    for test, record in manifest["tests"].items():
+        cache = dict[str, str | None]()
+        # ruleid: lab-fingerprints-hash-file-per-test
+        keys[test] = str(_cached_blob(tree, record["own"], cache))
+    return keys

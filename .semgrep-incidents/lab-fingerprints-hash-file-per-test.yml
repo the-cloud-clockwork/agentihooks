@@ -26,16 +26,17 @@ rules:
           - pattern: _blob(...)
           - pattern: hashlib.sha256(...)
           - pattern: _cached_blob($TREE, $PATH, {})
+          - pattern: _cached_blob($TREE, $PATH, $MAKE(...))
           - patterns:
               - pattern: _cached_blob($TREE, $PATH, $CACHE)
               - pattern-either:
                   - pattern-inside: |
                       for $TEST, $RECORD in $MANIFEST["tests"].items():
                           ...
-                          $CACHE = {}
+                          $CACHE = ...
                           ...
                   - pattern-inside: |
                       for $TEST, $RECORD in $MANIFEST["tests"].items():
                           ...
-                          $CACHE: $TYPE = {}
+                          $CACHE: $TYPE = ...
                           ...
