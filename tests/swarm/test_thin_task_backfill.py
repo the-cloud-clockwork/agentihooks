@@ -65,6 +65,7 @@ def test_legacy_pairs_get_separate_manual_phases_and_a_second_pass_writes_nothin
         assert moved_target["item"] == f"tasks/{target['id']}"
         assert moved_plan["item"] == f"tasks/{plan['id']}"
         assert moved_target["fields"] == moved_plan["fields"] == {"phase": plan["id"]}
+        assert {phase["by"], moved_target["by"], moved_plan["by"]} == {"swarm"}
     rows, phases = _apply(tasks, batches)
     assert rows == [{**task, "phase": f"enhance-{task.get('enhances', task['id'])}"} for task in original]
     assert phases == {"enhance-legacy", "enhance-second"}
