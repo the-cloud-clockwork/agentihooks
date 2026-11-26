@@ -17,6 +17,7 @@
     "tests/ci_lab/test_scheduler_push_lane.py::test_a_hotfix_push_and_a_grade_ref_push_whose_lane_is_their_head_are_still_held",
     "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_retires_the_live_promotion_grades_stored_under_their_own_head",
     "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_drops_the_waiting_promotion_heads_stored_under_their_own_head",
+    "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_drops_a_waiting_promotion_head_stored_under_its_own_head_with_no_ref_recorded",
     "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_keeps_a_waiting_promotion_head_that_holds_a_grade_ref",
     "tests/ci_lab/test_scheduler_push_lane.py::test_a_retired_promotion_grade_keeps_the_units_of_a_head_another_live_grade_grades",
     "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_keeps_a_pull_request_grade_and_a_grade_ref_grade_whose_lane_is_their_head",
