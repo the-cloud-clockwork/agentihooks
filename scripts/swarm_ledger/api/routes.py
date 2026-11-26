@@ -107,7 +107,7 @@ def ledger_read(services: Services, slug: str, path: str, query: dict[str, Any])
         return orders_read(services, slug)
     if path == "summary":
         data = services.ledger.summary(slug)
-        return resources.bounded({"data": data, "revision": resources.revision(data)})
+        return {"data": data, "revision": resources.revision(data)}
     state: object = query.get("state")
     if state == "open":
         return open_read(services, slug, path, query)
