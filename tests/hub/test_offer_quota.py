@@ -33,6 +33,7 @@ def test_a_claude_offer_is_held_before_claim_until_its_account_has_a_seat(
         capacity.Account("codex", "codex-a", "OPEN", codex_sessions, None, 90, 6),
     ]
     reader = _accounts(monkeypatch, rows)
+    monkeypatch.setenv("HUB_ACCOUNT_READING", "present")
     rig.rows["t1"].update(profile="planner", requires_harness="claude")
     if requirement == "profile":
         rig.rows["t1"].update(profile="claude-only", requires_harness="")
@@ -64,6 +65,8 @@ def test_a_claude_offer_is_held_before_claim_until_its_account_has_a_seat(
     assert rig.store.claim_generation(SLUG, "t1") == generation + 1
     assert rig.store.claims(SLUG, "t1") == lives
     assert reader.call_args.kwargs["redis"] is rig.store.redis
+    assert reader.call_args.args[0]["HUB_ACCOUNT_READING"] == "present"
+    assert isinstance(reader.call_args.args[1], float)
     assert reader.call_args.kwargs["refresh"] is False
 
 

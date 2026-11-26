@@ -2145,6 +2145,8 @@
         "tests/swarm/test_offer_quota.py::test_available_excludes_quota_predecessor",
         "tests/swarm/test_offer_quota.py::test_fit_passes_master_offers_without_reading_accounts",
         "tests/swarm/test_offer_quota.py::test_fit_preserves_placement_before_quota",
+        "tests/swarm/test_offer_quota.py::test_fit_judges_the_lane_harness_of_its_own_swarm",
+        "tests/swarm/test_offer_quota.py::test_permitted_reads_no_lanes_from_a_swarm_without_them",
         "tests/swarm/test_offer_quota.py::test_fit_holds_legacy_offers_without_reading_accounts",
         "tests/swarm/test_offer_quota.py::test_fit_reads_once_and_preserves_hold_until_poll_ends",
         "tests/swarm/test_offer_quota.py::test_fit_empty_read_is_cached_until_next_poll",

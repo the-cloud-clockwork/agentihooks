@@ -42,9 +42,9 @@ def accounts(environ: dict[str, str], now: float, refresh: bool = False, redis: 
 def permitted(config: SwarmConfig, lane: str, task: Mapping[str, Any]) -> tuple[str, ...]:
     lanes = dict[str, Any](getattr(config, "lanes", {}))
     chosen = dict[str, Any](lanes.get(lane, {}))
-    requested = chosen.get("agent")
-    requested = "" if requested in (None, "", "auto") else requested
-    required = task.get("requires_harness", "")
+    requested = chosen.get("agent") or ""
+    requested = "" if requested == "auto" else requested
+    required = task.get("requires_harness")
     if requested and required and requested != required:
         return ()
     wanted = required or requested

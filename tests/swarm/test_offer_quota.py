@@ -1,5 +1,6 @@
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -210,6 +211,7 @@ def test_permitted_automatic_lanes(config: SwarmConfig, agent: str | None) -> No
         ("claude", {"requires_harness": "codex"}, ()),
         ("codex", {"profile": "claude-profile"}, ()),
         ("auto", {"profile": "claude-profile"}, ("claude",)),
+        ("auto", {"profile": "claude-profile", "requires_harness": "claude"}, ("claude",)),
         ("auto", {"requires_harness": "other"}, ()),
         ("other", {}, ()),
         ("auto", {"launch_assignment": {"profile": "claude-profile"}, "profile": "planner"}, ("claude",)),
@@ -290,9 +292,24 @@ def test_fit_preserves_placement_before_quota(config: SwarmConfig) -> None:
     fits = offer_quota.Fit(config, "plan", placement, read)
     offered = event({})
     assert not fits(offered)
-    assert not fits.held
+    assert fits.held is False
     placement.assert_called_once_with(offered)
     read.assert_not_called()
+
+
+@pytest.mark.feature("event-offer-account-seats")
+def test_fit_judges_the_lane_harness_of_its_own_swarm(config: SwarmConfig) -> None:
+    pinned = replace(config, lanes={"plan": {"agent": "codex", "profile": "planner"}})
+    read = Mock(return_value=[account("claude"), account("codex", sessions=2)])
+    fits = offer_quota.Fit(pinned, "plan", lambda offered: True, read)
+    assert not fits(event({}))
+    assert fits.held
+
+
+@pytest.mark.feature("event-offer-account-seats")
+def test_permitted_reads_no_lanes_from_a_swarm_without_them(config: SwarmConfig) -> None:
+    bare: Any = SimpleNamespace(slug="example")
+    assert offer_quota.permitted(bare, "plan", {}) == ("claude", "codex")
 
 
 @pytest.mark.feature("event-offer-account-seats")
