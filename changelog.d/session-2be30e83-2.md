@@ -7,6 +7,9 @@
 
 ### Fixed
 
+- A herdr pane whose launcher exported `AGENTIHOOKS_RESUME_LAUNCHER` resumes
+  through that launcher. A `smith claude` gateway pane that herdr reopened with
+  plain `claude --resume` came back not logged in.
 - A swarm agent in a herdr pane reports a placeholder resume command, so after a
   restart herdr no longer reopens it with plain `claude --resume` on the default
   login while the swarm's reboot recovery reopens the same conversation again.

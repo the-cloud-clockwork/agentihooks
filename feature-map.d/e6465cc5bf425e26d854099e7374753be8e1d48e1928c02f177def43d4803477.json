@@ -1,7 +1,7 @@
 {
   "id": "herdr-native-resume",
   "origin": "inventory",
-  "behaviour": "herdr native agent resume stays on: herdr configure never forces it off unless AGENTIHOOKS_HERDR_RESUME is off, releases the forced false of earlier releases once and keeps that release when a choice is recorded, a routed non-swarm session in a herdr pane reports a resume command that reopens it through the agentihooks router, unrouted sessions keep herdr's own resume, and a swarm session reports a placeholder naming the agent so herdr never resumes it and the swarm alone reopens it.",
+  "behaviour": "herdr native agent resume stays on: herdr configure never forces it off unless AGENTIHOOKS_HERDR_RESUME is off, releases the forced false of earlier releases once and keeps that release when a choice is recorded, a session whose launcher exported AGENTIHOOKS_RESUME_LAUNCHER reports that launcher with the resume arguments, a routed non-swarm session in a herdr pane reports a resume command that reopens it through the agentihooks router, unrouted sessions keep herdr's own resume, and a swarm session reports a placeholder naming the agent so herdr never resumes it and the swarm alone reopens it.",
   "seam": "scripts.herdr_setup apply_config and resume_off through configure; hooks.lifecycle.herdr_resume resume_argv, report and kick through the SessionStart handler",
   "tests": [
     "tests/test_herdr_setup.py::test_configure_keeps_agent_resume_the_operator_turned_on",
@@ -24,6 +24,9 @@
     "tests/test_herdr_resume.py::test_a_swarm_name_herdr_cannot_type_reports_nothing",
     "tests/test_herdr_resume.py::test_an_empty_swarm_value_resumes_through_the_router",
     "tests/test_herdr_resume.py::test_a_swarm_codex_pane_reports_its_placeholder_as_codex",
+    "tests/test_herdr_resume.py::test_a_pane_its_launcher_named_resumes_through_that_launcher",
+    "tests/test_herdr_resume.py::test_a_launcher_comes_before_the_router_and_after_the_swarm",
+    "tests/test_herdr_resume.py::test_a_launcher_herdr_cannot_type_reports_nothing",
     "tests/test_herdr_resume.py::test_a_session_the_router_sent_to_the_api_or_a_login_resumes_through_it",
     "tests/test_herdr_resume.py::test_an_empty_session_id_reports_nothing",
     "tests/test_herdr_resume.py::test_a_start_without_a_session_id_never_calls_herdr",

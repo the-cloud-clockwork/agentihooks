@@ -844,8 +844,14 @@ reopens its conversation in the same pane.
   `agentihooks codex resume <id>`, keeping the pane's `CLAUDE_CONFIG_DIR` or
   `CODEX_HOME`. The router picks an account with quota left; when none can be
   picked, Claude starts bare, as herdr's own resume would.
-- A pane on an API key, a gateway, Bedrock or a single default login reports
-  nothing, and herdr runs its own `claude --resume <id>` or `codex resume <id>`.
+- A pane whose launcher exported `AGENTIHOOKS_RESUME_LAUNCHER` (for example
+  `smith claude ultra`, which sets up the gateway in the shell) reports that
+  launcher with the resume arguments: `smith claude ultra --resume <id>` or
+  `<launcher> resume <id>` for Codex. herdr types it into the restored shell, so
+  the conversation comes back with the same login and model.
+- A pane on an API key, Bedrock or a single default login with no launcher
+  reports nothing, and herdr runs its own `claude --resume <id>` or
+  `codex resume <id>`.
 - A swarm agent (`AGENTIHOOKS_SWARM`) reports a placeholder,
   `echo agentihooks swarm <slug> reopens <agent>`, so herdr brings its pane back
   as a shell and never resumes it on the default login. The swarm's reboot

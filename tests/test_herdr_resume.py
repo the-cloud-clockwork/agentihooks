@@ -67,6 +67,9 @@ def test_a_routed_codex_pane_resumes_through_the_router():
         (PANE, "codex"),
         ({**ROUTED, "AGENTIHOOKS_HERDR_RESUME": "off"}, "claude"),
         ({**SWARM, "AGENTIHOOKS_HERDR_RESUME": "off"}, "claude"),
+        ({**PANE, herdr_resume.LAUNCHER: "smith claude", "AGENTIHOOKS_HERDR_RESUME": "off"}, "claude"),
+        ({**PANE, herdr_resume.LAUNCHER: "  "}, "claude"),
+        ({**PANE, herdr_resume.LAUNCHER: "smith claude"}, "copilot"),
         (SWARM, "copilot"),
         ({**SWARM, "HERDR_ENV": ""}, "claude"),
         ({**ROUTED, "HERDR_ENV": ""}, "claude"),
@@ -99,6 +102,32 @@ def test_a_swarm_pane_without_an_agent_name_names_its_session(name):
 @pytest.mark.parametrize("key", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"])
 def test_a_swarm_name_herdr_cannot_type_reports_nothing(key):
     assert herdr_resume.resume_argv({**SWARM, key: "o'neil"}, SESSION, "claude") is None
+
+
+@pytest.mark.feature("herdr-native-resume")
+@pytest.mark.parametrize(
+    ("target", "resume"),
+    [
+        ("claude", ["smith", "claude", "ultra", "--resume", SESSION]),
+        ("codex", ["smith", "claude", "ultra", "resume", SESSION]),
+    ],
+)
+def test_a_pane_its_launcher_named_resumes_through_that_launcher(target, resume):
+    environ = {**PANE, herdr_resume.LAUNCHER: " smith  claude ultra "}
+    assert herdr_resume.resume_argv(environ, SESSION, target) == resume
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_a_launcher_comes_before_the_router_and_after_the_swarm():
+    assert (herdr_resume.resume_argv({**ROUTED, herdr_resume.LAUNCHER: "smith claude"}, SESSION, "claude") or [""])[
+        0
+    ] == "smith"
+    assert herdr_resume.resume_argv({**SWARM, herdr_resume.LAUNCHER: "smith claude"}, SESSION, "claude") == PLACEHOLDER
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_a_launcher_herdr_cannot_type_reports_nothing():
+    assert herdr_resume.resume_argv({**PANE, herdr_resume.LAUNCHER: "o'neil claude"}, SESSION, "claude") is None
 
 
 @pytest.mark.feature("herdr-native-resume")
