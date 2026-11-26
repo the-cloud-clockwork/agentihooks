@@ -1060,3 +1060,28 @@ def test_a_units_lease_root_holding_a_read_only_folder_is_fully_removed(
             if (root / "rules").exists():
                 (root / "rules" / "tests").chmod(0o700)
                 (root / "rules").chmod(0o700)
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_unit_whose_lease_root_cannot_be_cut_heartbeats_nothing_and_its_lease_reaps(
+    scheduler: str, lab: Counted, jobs: queue.Queue, clock: Clock, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    ran: list[Path] = []
+
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
+        ran.append(root)
+        return worker.Finished(outcome="passed", report=root / "report.json", log=root / "log.txt")
+
+    missing = tmp_path / "runs"
+    rootless = worker.Worker(worker.Client(scheduler), {"test": held}, "pod-1", 1, missing, wait_ms=0, heartbeat_s=0.01)
+
+    rootless.run_once()
+
+    assert rootless.drain() == []
+    time.sleep(0.5)
+    assert ran == []
+    assert lab.beats == []
+    assert sink.bodies == {}
+    clock.now += lab.ttl_ms + 1
+    assert lab.reap(clock.now) == [("h1:test:a", "pending")]
