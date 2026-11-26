@@ -305,6 +305,17 @@ def _private_master(hive: dict[str, Any], harness: str, front: bool) -> bool:
     )
 
 
+def _open_master_login(hive: dict[str, Any], harness: str, login: str, closed: frozenset[str]) -> str | None:
+    return next(
+        (
+            account
+            for account in master_accounts(hive, harness) or [""]
+            if login in ("", account) and account_key(account) not in closed
+        ),
+        None,
+    )
+
+
 def place_master(
     harness: str,
     login: str,
@@ -326,11 +337,10 @@ def place_master(
         headless = hive["ui"] != YES
         forced = _private_master(hive, harness, front)
         if forced:
-            for account in master_accounts(hive, harness) or [""]:
-                if login in ("", account) and account_key(account) not in closed:
-                    placed = MasterPlacement(hive["id"], account, MASTER_LOGIN, False)
-                    candidates.append((headless, not bool(account), _order(MASTER)(hive), account, placed))
-                    break
+            account = _open_master_login(hive, harness, login, closed)
+            if account is not None:
+                placed = MasterPlacement(hive["id"], account, MASTER_LOGIN, False)
+                candidates.append((headless, not bool(account), _order(MASTER)(hive), account, placed))
             continue
         native = hive["interactive"].get(harness)
         if front and native and login in ("", native) and account_key(native) not in closed:
