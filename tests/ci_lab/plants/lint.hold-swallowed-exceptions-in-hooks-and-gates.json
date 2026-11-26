@@ -5,7 +5,7 @@
     {
       "path": "hooks/context/_strip.py",
       "before": "    check = command\n",
-      "after": "    try:\n        check = command\n    except OSError:\n        pass\n"
+      "after": "    check = command\n    try:\n        pass\n    except OSError:\n        pass\n"
     }
   ]
 }
