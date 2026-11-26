@@ -104,6 +104,7 @@ def test_aggregate_fetch_rotates_sources_with_sustained_backlog():
     assert calls == [0, 1, 2, 0, 1, 2]
 
 
+@pytest.mark.feature("swarm-review-trigger")
 def test_a_merged_consumer_reports_no_created_time_even_when_every_child_knows_one() -> None:
     children = [SimpleNamespace(fetch=lambda *_: [], created=at) for at in (300, 100)]
     logs = cast(list[EventLog], [SimpleNamespace(consumer=lambda *_, child=child: child) for child in children])
