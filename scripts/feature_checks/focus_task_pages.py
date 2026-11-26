@@ -69,38 +69,40 @@ def _bare(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _target(slug: str, target: str, read: Read, attempts: int = ATTEMPTS) -> str:
-    """The line of one target, judged once and read again with one attempt less while the two reads differ; the
-    failing line is written when no attempt is left. A target one reply cannot hold has only its pages, held to
-    the list the ledger hashes; any other refusal is raised."""
+    """The line of one target, judged once and read again with one attempt less while it does not hold; the failing
+    line is written when no attempt is left. The pages are read first and the one reply right after them, so the
+    ledger has the time of one read to move between the two. A target one reply cannot hold has only its pages,
+    held to the list the ledger hashes; any other refusal is raised."""
+    rows = read(slug, f"focus/{target}/tasks", True)
     try:
         whole = _rows(read(slug, f"focus/{target}", False)["tasks"])
     except urllib.error.HTTPError as refused:
         if refused.code != TOO_LARGE:
             raise
-        return _paged(slug, target, read, attempts)
-    paged = _rows(read(slug, f"focus/{target}/tasks", True))
-    if whole == paged:
-        return SAME.format(slug=slug, target=target, count=len(paged))
+        if _hashed(slug, target, read, rows):
+            return PAGED.format(slug=slug, target=target, count=len(rows))
+        failing = BROKEN.format(slug=slug, target=target, paged=len(rows))
+    else:
+        if whole == _rows(rows):
+            return SAME.format(slug=slug, target=target, count=len(rows))
+        failing = DIFFERENT.format(slug=slug, target=target, paged=len(rows), whole=len(whole))
     if attempts > 1:
         return _target(slug, target, read, attempts - 1)
-    return FAIL + DIFFERENT.format(slug=slug, target=target, paged=len(paged), whole=len(whole))
+    return FAIL + failing
 
 
-def _paged(slug: str, target: str, read: Read, attempts: int = ATTEMPTS) -> str:
-    """The line of a target one reply cannot hold: its pages are held to the list the ledger hashes, by asking for
-    one row at the cursor made from the hash of its bare rows, read again with one attempt less on a conflict; the
-    failing line is written when no attempt is left. Any other refusal is raised."""
-    rows = read(slug, f"focus/{target}/tasks", True)
+def _hashed(slug: str, target: str, read: Read, rows: list[dict[str, Any]]) -> bool:
+    """Whether the pages of a target are the list the ledger hashes: one row asked at the cursor made from the hash
+    of their bare rows is answered, and refused as a conflict when the ledger holds another list. Any other refusal
+    is raised."""
     cursor = f"{resources.revision(_bare(rows))}:0"
     try:
         read(slug, f"focus/{target}/tasks?" + urlencode({"limit": 1, "cursor": cursor}), False)
     except urllib.error.HTTPError as refused:
         if refused.code != CONFLICT:
             raise
-        if attempts > 1:
-            return _paged(slug, target, read, attempts - 1)
-        return FAIL + BROKEN.format(slug=slug, target=target, paged=len(rows))
-    return PAGED.format(slug=slug, target=target, count=len(rows))
+        return False
+    return True
 
 
 def _running(store: Swarms) -> list[str]:
