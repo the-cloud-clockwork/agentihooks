@@ -77,13 +77,15 @@ def stored_master_login(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.feature("operator-master-up-resume-master-login")
+@pytest.mark.parametrize(("profile", "fallback"), [("master", "master"), ("", "master"), ("master", "custom-master")])
 def test_a_quota_stopped_master_resumes_on_the_placed_master_login_account(
-    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch
+    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch, profile: str, fallback: str
 ) -> None:
     from scripts import agent_choice, master_claude_login, master_logins
 
     store, _, rt = up
-    name = gone_master(store, account="slot-1")
+    run("sw", "set", f"master-profile={fallback}")
+    name = gone_master(store, account="slot-1", profile=profile)
     monkeypatch.setattr(agent_choice, "account_has_quota", lambda *args: False)
     monkeypatch.setattr(master_claude_login, "free", lambda held: ["slot-1", "slot-4"])
     monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, 100.0 if account == "slot-1" else 5.0, now))
@@ -95,6 +97,25 @@ def test_a_quota_stopped_master_resumes_on_the_placed_master_login_account(
     [record] = masters(store)
     assert (record.account, record.conversation_id, record.seat) == ("slot-4", "conv-1", "master@sw")
     assert rt.resumed[0][:4] == (name, "claude", "conv-1", "master")
+
+
+@pytest.mark.feature("operator-master-up-resume-master-login")
+def test_a_master_with_a_custom_fallback_keeps_its_recorded_account_refusal(
+    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import agent_choice, master_claude_login
+
+    store, _, rt = up
+    run("sw", "set", "master-profile=custom-master")
+    gone_master(store, account="slot-1", profile="")
+    monkeypatch.setattr(agent_choice, "account_has_quota", lambda *args: False)
+    monkeypatch.setattr(master_claude_login, "free", lambda _: pytest.fail("custom fallback does not use master login"))
+    with pytest.raises(SwarmError) as refused:
+        direct(store, rt, master_launch.LAST)
+    assert str(refused.value) == (
+        "the last master cannot be resumed: account slot-1 out of quota; run master up --new for a new master"
+    )
+    assert rt.resumed == []
 
 
 def answers(monkeypatch, *replies):

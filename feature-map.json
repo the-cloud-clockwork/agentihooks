@@ -3645,6 +3645,7 @@
       "seam": "agentihooks swarm master up --last; swarm.resume.blocker; master_claude_login.prepare",
       "tests": [
         "tests/swarm/test_master_launch.py::test_a_quota_stopped_master_resumes_on_the_placed_master_login_account",
+        "tests/swarm/test_master_launch.py::test_a_master_with_a_custom_fallback_keeps_its_recorded_account_refusal",
         "tests/swarm/test_resume.py::test_a_front_door_master_checks_free_master_logins_instead_of_its_old_account",
         "tests/swarm/test_resume.py::test_a_front_door_master_names_the_login_slots_when_none_has_room",
         "tests/swarm/test_resume.py::test_other_resume_routes_keep_the_recorded_account_quota_check",
