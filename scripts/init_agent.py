@@ -928,7 +928,7 @@ def _parser() -> argparse.ArgumentParser:
         default="",
         help=AGENT_HELP,
     )
-    parser.add_argument("--auth", choices=("interactive",), default="", help="Use the declared interactive login")
+    parser.add_argument("--auth", default="", help="interactive, default or named:reference authentication")
     parser.add_argument("--profile", default="", help="Role profile for this run")
     parser.add_argument("--claim-fence", default="", help="Pinned event bus claim identity for this execution")
     parser.add_argument(
@@ -1118,11 +1118,18 @@ def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:
 
     if args.auth and native("sign-ins", "init-agent-auth", environ):
         raise ValueError("explicit authentication refused by the sign ins gate")
+    if args.auth and args.routed_only:
+        raise ValueError("explicit authentication cannot combine with --routed-only")
+    if args.auth and args.auth != "interactive":
+        from scripts.quick.authentication import selections
+
+        if args.auth == "routed":
+            raise ValueError("routed authentication uses --routed-only")
+        selections(args.auth, [args.agent or "claude"], environ)
 
 
 def _routed_only(args: argparse.Namespace) -> bool:
-    """A handoff must land on another account and a --routed-only launch on a routed one; neither starts bare."""
-    return bool(args.handoff or args.routed_only)
+    return bool(args.handoff or args.routed_only or (args.auth and args.auth != "interactive"))
 
 
 def _unrouted(args: argparse.Namespace, route: dict[str, str]) -> tuple[str, str] | None:
@@ -1160,9 +1167,7 @@ def main(
             (_handoff_agent(args.agent, active_env, claude_args), "handoff")
             if args.handoff
             else (
-                (args.agent or "claude", "interactive")
-                if args.auth
-                else agent_choice.choose(rotation_default, active_env)
+                (args.agent or "claude", args.auth) if args.auth else agent_choice.choose(rotation_default, active_env)
             )
         )
         agent = agent or "claude"

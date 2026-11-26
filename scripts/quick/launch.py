@@ -21,10 +21,12 @@ Start = Callable[[list[str], dict[str, str]], int]
 
 
 def argv(swarm: registry.Swarm, seat: registry.Seat, prompt_file: Path) -> list[str]:
-    """The init-agent arguments that open the seat's agent in its own herdr pane, only on a routed account."""
+    selection = seat.auth if seat.auth == "default" else f"named:{seat.account}"
+    policy = ["--routed-only"] if seat.auth == "routed" else ["--auth", selection]
     return [
         *("--host", "herdr", "--pane", seat.pane_id, "--name", seat.name, "--agent", seat.harness),
-        *("--dir", swarm.directory, "--prompt-file", str(prompt_file), "--routed-only"),
+        *("--dir", swarm.directory, "--prompt-file", str(prompt_file)),
+        *policy,
     ]
 
 

@@ -16836,7 +16836,9 @@
         "tests/quick/test_authentication.py::test_common_and_per_engineer_native_authentication_resolve_safe_references",
         "tests/quick/test_authentication.py::test_invalid_native_authentication_reports_the_exact_refusal",
         "tests/quick/test_native_authentication.py::test_saved_native_authentication_reaches_the_launcher",
-        "tests/quick/test_native_authentication.py::test_native_init_keeps_explicit_authentication_without_automatic_selection"
+        "tests/quick/test_native_authentication.py::test_native_init_keeps_explicit_authentication_without_automatic_selection",
+        "tests/test_native_default.py::test_native_default_isolates_local_login_from_master_and_routed_credentials",
+        "tests/test_native_default.py::test_codex_native_default_bypasses_automatic_account_enumeration"
       ]
     }
   ],
