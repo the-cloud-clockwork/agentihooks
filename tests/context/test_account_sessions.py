@@ -361,7 +361,14 @@ def test_the_local_process_scan_survives_a_codex_process_that_exits_mid_read(
 ) -> None:
     root = tmp_path / "proc"
     _proc(root, 902, "codex", 1, ["codex", "--no-daemon"], {"AH_CX_TOKEN_alpha": "a"})
-    _proc(root, 903, "codex", 1, ["codex", "exec", "ok"], {"AH_CX_TOKEN_beta": "b"})
+    _proc(
+        root,
+        903,
+        "codex",
+        1,
+        ["/opt/codex/bin/codex-x86_64-unknown-linux-musl", "exec", "ok"],
+        {"AH_CX_TOKEN_beta": "b"},
+    )
     monkeypatch.setattr(acc, "handed_off_pids", set)
     _exits_after_first_read(monkeypatch, 902)
     assert acc.local_processes(root) == {"claude": {}, "codex": {902: "alpha", 903: "beta"}}
