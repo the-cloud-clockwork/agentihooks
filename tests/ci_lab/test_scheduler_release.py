@@ -162,11 +162,14 @@ def test_a_head_put_back_for_its_manifest_fetch_keeps_its_waiting_record(
     monkeypatch.setattr(run.lab.expander, "expand", expand)
     run.push(head, lane="lane-0", event="merge_group")
     run.tick(1000)
+    before = run.lab.client.hgetall(scheduler.WAITING)
     run.tick(1600)
     raw = next(iter(run.lab.client.hgetall(scheduler.WAITING).values()))
     record = json.loads(raw)
     assert run.lab.client.hlen(scheduler.WAITING) == 1
+    assert "starts" not in record
     if held is manifests.FetchPending:
+        assert run.lab.client.hgetall(scheduler.WAITING) == before
         assert record["since"] == 1000
         assert "unanswered" not in record
     else:
@@ -301,3 +304,25 @@ def test_an_expander_error_the_release_loop_does_not_name_still_removes_the_wait
     with pytest.raises(OSError):
         run.tick(1600)
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
+
+
+@pytest.mark.feature("lab-scheduler-release-keeps-a-cut-short-head")
+def test_a_cut_short_refusal_counts_toward_the_pass_s_starts_cap_so_a_later_head_waits(
+    lab: Callable[..., Run],
+) -> None:
+    run, heads = backlog(lab, 9)
+    cut_short, rest = heads[0], heads[1:]
+    run.push(cut_short, lane="0cut", event="merge_group")
+    for number, head in enumerate(rest):
+        run.push(head, lane=f"lane-{number:02}", event="merge_group")
+    run.tick(1000)
+    name, raw = next(
+        (name, raw)
+        for name, raw in run.lab.client.hgetall(scheduler.WAITING).items()
+        if json.loads(raw)["request"]["head"] == cut_short
+    )
+    record = json.loads(raw)
+    run.lab.client.hset(scheduler.WAITING, name, json.dumps({**record, "starts": scheduler.CUT_SHORT_STARTS}))
+    run.tick(1600)
+    assert len(run.lab.expander.seen) == 7
+    assert run.lab.client.hlen(scheduler.WAITING) == 1

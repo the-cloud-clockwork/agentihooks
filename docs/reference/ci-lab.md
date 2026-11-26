@@ -2496,7 +2496,13 @@ key; the builders are pure and read no file, clock or network.
    held by a pause takes no place among those looked at; a head put back for its manifest fetch,
    pending or unanswered, takes one of the twenty four but none of the eight, so the pass moves on to
    the next waiting head instead of stalling on it. The other heads wait for a later pass, so every
-   pass reaches steps 5 to 8 however many heads wait.
+   pass reaches steps 5 to 8 however many heads wait. A head's waiting entry stays in the hash while
+   the head is checked and expanded, with the count of starts begun and not finished kept in it: a
+   scheduler stopped or killed while it checks or expands the head finds it still waiting on the next
+   pass, in the same process or a new one, and starts it again. A head cut short this way five times
+   in a row (`CUT_SHORT_STARTS`) is refused on the sixth pass instead of started again, with a failed
+   `lab-shadow/required` check run naming the count, so a head whose expansion keeps killing the
+   process cannot hold the scheduler in a crash loop.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
    unit per gate step, described in [Static units](#static-units). A merge group, promotion or
