@@ -165,17 +165,17 @@ def _mark(found: Record, by: str, ids: Sequence[str], answer: str) -> Record:
 
 
 def mark(store: RedisStore, slug: str, forge: Forge, url: str, by: str, ids: Sequence[str], answer: str) -> Record:
-    target = _change_url(forge, url)
-    head = _head(forge, target)
-    return _write(store, slug, target, head, lambda found: _mark(found, by, ids, answer), "")
+    url = _change_url(forge, url)
+    head = _head(forge, url)
+    return _write(store, slug, url, head, lambda found: _mark(found, by, ids, answer), "")
 
 
 def post(store: RedisStore, slug: str, forge: Forge, url: str, by: str, task: str, bodies: Sequence[str]) -> Record:
     cleaned = tuple(text for body in bodies if (text := body.strip()))
     if not cleaned:
         raise SwarmError("a review posts at least one finding")
-    target = _change_url(forge, url)
-    found = Record(target, _head(forge, target))
+    url = _change_url(forge, url)
+    found = Record(url, _head(forge, url))
     who = Who(name=by, swarm=slug, task=task)
     for body in cleaned:
         found = _post_one(store, forge, found, who, body)

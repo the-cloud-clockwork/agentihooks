@@ -7,6 +7,7 @@
   "tests": [
     "tests/review/test_record_release.py::test_a_release_review_posts_every_finding_on_the_promotion_pull_request",
     "tests/review/test_record_release.py::test_the_author_marks_release_findings_on_the_promotion_pull_request",
-    "tests/review/test_record_release.py::test_review_post_on_a_release_link_prints_the_promotion_pull_request_record"
+    "tests/review/test_record_release.py::test_review_post_on_a_release_link_prints_the_promotion_pull_request_record",
+    "tests/review/test_record_release.py::test_the_first_release_marker_splits_the_repository_from_a_tag_without_trailing_slashes"
   ]
 }

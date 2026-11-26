@@ -54,6 +54,19 @@ def test_review_post_on_a_release_link_prints_the_promotion_pull_request_record(
     assert record.done_refusal(found, SLUG, "review", "review", TASK) is None
 
 
+@pytest.mark.feature("review-release-promotion-post")
+@pytest.mark.parametrize(
+    ("link", "tag"),
+    [(f"{RELEASE}/", "v1.2.3"), ("https://github.com/o/r/releases/tag/rc/releases/tag/2", "rc/releases/tag/2")],
+)
+def test_the_first_release_marker_splits_the_repository_from_a_tag_without_trailing_slashes(
+    link: str, tag: str
+) -> None:
+    found, forge = store(), FakeForge(url=PULL)
+    posted = record.post(found, SLUG, forge, link, REVIEWER, TASK, ["First"])
+    assert (forge.tags, posted.url, forge.posts) == ([tag], PULL, [(41, "First")])
+
+
 @pytest.mark.feature("review-record-post")
 def test_a_merge_queue_commit_link_is_refused_and_posts_nothing() -> None:
     found, forge = store(), FakeForge()
