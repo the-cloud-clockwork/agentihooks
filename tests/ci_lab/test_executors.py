@@ -1263,13 +1263,14 @@ def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
 
     assert executors.main([], environ) == 0
 
-    [(given, adapters, name, count, quota)] = built
-    assert (given, sorted(cast("dict[str, object]", adapters)), name, count, quota) == (
+    [(given, adapters, name, count, quota, runs)] = built
+    assert (given, sorted(cast("dict[str, object]", adapters)), name, count, quota, runs) == (
         environ,
         ["mutant", "static", "stats", "test"],
         "pod-1",
         slots,
         2.0,
+        tmp_path / "work" / "runs",
     )
     found = {kind: parts(adapter) for kind, adapter in cast("dict[str, object]", adapters).items()}
     static_pod = cast("executors.Pod", found["static"][1][0])
