@@ -40,7 +40,11 @@ def _event_runtime(
         "_profile_decision",
         Mock(return_value=profile_choice.ProfileDecision("planner", "task", "required profile")),
     )
-    monkeypatch.setattr(local, "_launch", launcher)
+
+    def launch(*args: Any, **kwargs: Any) -> runtime.Placed:
+        return launcher(*args, **kwargs)
+
+    monkeypatch.setattr(local, "_launch", launch)
     config = SwarmConfig("rig", str(tmp_path), 1, 0, code="a1b2c3", scaling="manual")
     return local, config, reader, launcher
 
