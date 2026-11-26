@@ -29,6 +29,7 @@ class Seat:
     state: str = READY
     auth: str = "routed"
     account: str = ""
+    command: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

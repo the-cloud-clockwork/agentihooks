@@ -2,6 +2,41 @@
   "fragments": true,
   "features": [
     {
+      "id": "quick-local-command",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2901",
+      "behaviour": "Quick engineers can run a saved literal argument list instead of the built in launch: a common command and per engineer overrides are checked before any pane is split, saved on the seat and run in the seat pane through the herdr boundary on every launch, retry, relaunch and force. Claude and Codex wrappers keep native session binding and receive the prompt file; a plain program is ready on its live process, never receives a prompt and is never typed into by the tick. Status shows only a safe identity and lifecycle capabilities.",
+      "seam": "agentihooks quick up command options, scripts.quick.recipe, saved Seat command, launch.start_seat, start_all and relaunch readiness, tick._busy and quick status",
+      "tests": [
+        "tests/quick/test_recipe.py::test_a_json_argument_list_parses_to_its_literal_arguments",
+        "tests/quick/test_recipe.py::test_anything_but_a_list_of_plain_arguments_is_refused",
+        "tests/quick/test_recipe.py::test_a_common_command_applies_to_every_engineer_and_an_override_replaces_one",
+        "tests/quick/test_recipe.py::test_no_command_keeps_every_engineer_on_its_built_in_launch",
+        "tests/quick/test_recipe.py::test_an_override_for_an_engineer_that_does_not_exist_is_refused",
+        "tests/quick/test_recipe.py::test_a_program_engineer_without_a_command_is_refused",
+        "tests/quick/test_recipe.py::test_a_missing_executable_is_refused_naming_only_its_file_name",
+        "tests/quick/test_recipe.py::test_an_executable_is_found_on_the_callers_path_or_refused",
+        "tests/quick/test_recipe.py::test_an_argument_that_looks_like_a_credential_is_refused",
+        "tests/quick/test_recipe.py::test_a_seat_kind_follows_its_harness_and_command",
+        "tests/quick/test_recipe.py::test_the_launcher_keeps_every_argument_literal_and_records_its_process",
+        "tests/quick/test_recipe.py::test_a_command_seat_runs_its_launcher_in_its_own_pane_without_init_agent",
+        "tests/quick/test_recipe.py::test_a_plain_program_never_receives_the_prompt_file",
+        "tests/quick/test_recipe.py::test_a_pane_herdr_refuses_fails_the_command_seat_start",
+        "tests/quick/test_recipe.py::test_start_all_starts_command_and_native_engineers_each_their_own_way",
+        "tests/quick/test_recipe.py::test_a_relaunched_plain_program_is_ready_on_its_live_process_without_a_session",
+        "tests/quick/test_recipe.py::test_a_plain_program_whose_process_is_gone_leaves_the_seat_pending",
+        "tests/quick/test_recipe.py::test_a_relaunched_wrapper_still_waits_for_its_native_session",
+        "tests/quick/test_recipe.py::test_force_and_relaunch_reuse_the_saved_command",
+        "tests/quick/test_recipe.py::test_the_tick_never_types_into_a_plain_program_seat",
+        "tests/quick/test_recipe.py::test_a_saved_command_round_trips_through_the_registry_as_literal_arguments",
+        "tests/quick/test_cli.py::test_an_invalid_command_never_creates_panes",
+        "tests/quick/test_cli.py::test_up_saves_each_engineers_command_and_status_shows_only_its_safe_identity"
+      ],
+      "rules": [
+        "quick-program-busy-refusal"
+      ]
+    },
+    {
       "id": "lab-scheduler-access-log-query-redaction",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2855",
@@ -12845,7 +12880,9 @@
         "tests/quick/test_cli_mutants.py::test_relaunch_force_ends_the_live_agent_and_starts_its_successor",
         "tests/test_init_agent.py::test_a_successor_without_account_tokens_refuses_and_its_seat_never_reads_ready",
         "tests/quick/test_room_tick_launch.py::test_a_notice_above_the_input_box_a_busy_agent_or_an_unreadable_pane_is_never_forced",
-        "tests/quick/test_cli.py::test_an_invalid_harness_count_never_creates_panes"
+        "tests/quick/test_cli.py::test_an_invalid_harness_count_never_creates_panes",
+        "tests/quick/test_cli.py::test_status_rows_carry_every_seat_field",
+        "tests/quick/test_recipe.py::test_a_registry_saved_before_newer_seat_fields_loads_with_their_defaults"
       ],
       "semgrep_rule": "feature-quick-swarm-pane-typing"
     },

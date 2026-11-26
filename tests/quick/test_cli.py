@@ -280,6 +280,56 @@ def test_status_lists_every_seat(quick_env, tmp_path, capsys):
     assert [row["seat"] for row in rows] == ["master", "eng-1", "eng-2", "eng-3"]
 
 
+@pytest.mark.feature("quick-swarm")
+def test_status_rows_carry_every_seat_field(quick_env, tmp_path, capsys):
+    assert cli.main(["up", "--agents", "2", "--dir", str(tmp_path)], quick_env) == 0
+    capsys.readouterr()
+    assert cli.main(["status"], quick_env) == 0
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    expected = {"position", "seat", "pane_id", "harness", "name", "session_id", "state", "auth", "account"}
+    assert all(expected <= set(row) for row in rows)
+
+
+@pytest.mark.feature("quick-local-command")
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--harness", "program"],
+        ["--command", "not json"],
+        ["--command", '["/nowhere/tool"]'],
+        ["--engineer-command", '4=["/usr/bin/env"]'],
+    ],
+)
+def test_an_invalid_command_never_creates_panes(
+    quick_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, options: list[str]
+) -> None:
+    def refuse_layout(*args: object, **kwargs: object) -> None:
+        pytest.fail("invalid command created a layout")
+
+    monkeypatch.setattr(cli.layout, "build", refuse_layout)
+    assert cli.main(["up", "--agents", "3", *options, "--dir", str(tmp_path)], quick_env) == 2
+    assert not (tmp_path / "scratchpad" / "repo" / "quick-d039e169" / registry.FILE).exists()
+
+
+@pytest.mark.feature("quick-local-command")
+def test_up_saves_each_engineers_command_and_status_shows_only_its_safe_identity(
+    quick_env: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    options = ["--harness", "claude,program", "--engineer-command", '2=["/usr/bin/env", "--private-flag"]']
+    assert cli.main(["up", "--agents", "3", *options, "--dir", str(tmp_path)], quick_env) == 0
+    swarm = registry.load(tmp_path / "scratchpad" / "repo" / "quick-d039e169")
+    assert swarm is not None
+    assert [seat.command for seat in swarm.seats] == [(), (), ("/usr/bin/env", "--private-flag")]
+    capsys.readouterr()
+    assert cli.main(["status"], quick_env) == 0
+    out = capsys.readouterr().out
+    rows = [json.loads(line) for line in out.splitlines()]
+    assert "--private-flag" not in out and all("command" not in row for row in rows)
+    assert rows[2]["identity"] == {"kind": "program", "program": "env", "arguments": 1}
+    assert rows[2]["capabilities"] == {"agent_hooks": False, "automatic_handoff": False, "prompt_typing": False}
+    assert rows[1]["identity"] == {"kind": "native", "program": "claude", "arguments": 0}
+
+
 def test_herdr_columns_read_the_tab_layout(monkeypatch):
     layout = {"layout": {"panes": [{"pane_id": "w1:p1", "rect": {"x": 0, "width": 80}}]}}
     monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: layout)
