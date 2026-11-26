@@ -4,8 +4,8 @@ import os
 from collections.abc import Mapping
 
 REMINDER = (
-    "SEAT NOTES: run `agentihooks seat brief` before any tool call: it prints the handoff, culture, latest recap "
-    "and learned notes your seat holds."
+    "SEAT NOTES: run `agentihooks seat brief` before your first command: it prints the handoff, culture, latest "
+    "recap and learned notes your seat holds."
 )
 
 

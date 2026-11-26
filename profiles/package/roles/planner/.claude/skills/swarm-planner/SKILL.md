@@ -34,7 +34,7 @@ first: the project intent, the phase intent and any send back note.
 
 ## Join
 
-- `agentihooks seat brief` before any other command: it prints your seat's
+- `agentihooks seat brief` before your first command: it prints your seat's
   handoff, culture, latest recap and learned notes, in that order, from the
   store that keeps them. Done when you have read all four.
 - `agentihooks api --slug <slug> --as <name> join`, once.

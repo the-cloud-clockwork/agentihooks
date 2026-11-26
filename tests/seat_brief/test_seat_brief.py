@@ -5,6 +5,7 @@ from pathlib import Path
 
 import fakeredis
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 import scripts.seat_brief as seat_brief
 from hooks.context import injection_trace
@@ -204,6 +205,38 @@ def test_a_store_failure_prints_the_error_and_exits_one(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "seat brief: Redis is unreachable (refused); the swarm refuses to run without it\n"
+
+
+@pytest.mark.feature("seat-brief")
+def test_a_redis_error_while_reading_prints_the_error_and_exits_one(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def refused() -> RedisStore:
+        raise RedisConnectionError("Connection refused")
+
+    monkeypatch.setattr(sources, "connect", refused)
+
+    assert seat_brief.main(["brief"], SEATED) == 1
+
+    assert capsys.readouterr().err == "seat brief: Connection refused\n"
+
+
+@pytest.mark.feature("seat-brief")
+def test_a_quick_seat_is_read_before_a_swarm_seat_the_session_also_names(
+    store: RedisStore, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert seat_brief.main(["brief"], {**SEATED, **_quick(tmp_path)}) == 0
+
+    assert capsys.readouterr().out.startswith("Seat eng-1 of quick swarm quick-abc.\n")
+
+
+@pytest.mark.feature("seat-brief")
+def test_a_swarm_name_outside_every_lane_holds_no_seat(store: RedisStore, capsys: pytest.CaptureFixture[str]) -> None:
+    store.put_agent("sw", AgentRecord("someone", "eng", "t2", seat="eng-2@sw"))
+
+    assert seat_brief.main(["brief"], {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "someone"}) == 0
+
+    assert capsys.readouterr().out == f"{seat_brief.NO_SEAT}\n"
 
 
 @pytest.mark.feature("seat-brief")
