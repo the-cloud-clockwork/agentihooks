@@ -7030,6 +7030,21 @@
       ]
     },
     {
+      "id": "ledger-sources-op",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/phases/p139",
+      "behaviour": "A source_add op takes an id, an author name matching the author pattern and a block of source text of at most 1000 characters, and is refused for a missing or extra key, a malformed or over length author, or a blank, non text or over length source. Applying it appends the source to the ledger's sources list with a stamp and a record event naming the author and the source, unless that source is already present, in which case the ledger is left unchanged.",
+      "seam": "scripts.swarm_ledger.ledger_sources.check and apply, registered as the source_add op in scripts.swarm_ledger.ledger_core.EXTENSION_OPS",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_sources.py::test_check_accepts_a_well_formed_op",
+        "tests/swarm_ledger/test_ledger_sources.py::test_check_refuses_an_extra_key",
+        "tests/swarm_ledger/test_ledger_sources.py::test_check_refuses_an_author_one_character_over_the_length_limit",
+        "tests/swarm_ledger/test_ledger_sources.py::test_check_refuses_a_source_one_character_over_the_limit",
+        "tests/swarm_ledger/test_ledger_sources.py::test_apply_appends_a_new_source_with_its_stamp_and_its_record_event",
+        "tests/swarm_ledger/test_ledger_sources.py::test_apply_leaves_a_source_already_present_alone"
+      ]
+    },
+    {
       "id": "ledger-followup-duplicates",
       "origin": "inventory",
       "behaviour": "A follow up repeating an open follow up or task is refused naming it, unless a plain words not duplicate reason is given and stored.",
