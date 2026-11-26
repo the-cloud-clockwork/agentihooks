@@ -57,7 +57,11 @@ def test_review_post_on_a_release_link_prints_the_promotion_pull_request_record(
 @pytest.mark.feature("review-release-promotion-post")
 @pytest.mark.parametrize(
     ("link", "tag"),
-    [(f"{RELEASE}/", "v1.2.3"), ("https://github.com/o/r/releases/tag/rc/releases/tag/2", "rc/releases/tag/2")],
+    [
+        (f"{RELEASE}/", "v1.2.3"),
+        ("https://github.com/o/r/releases/tag/rc/releases/tag/2", "rc/releases/tag/2"),
+        ("https://github.com/o/r/releases/tag/v1.2.3-X/", "v1.2.3-X"),
+    ],
 )
 def test_the_first_release_marker_splits_the_repository_from_a_tag_without_trailing_slashes(
     link: str, tag: str
