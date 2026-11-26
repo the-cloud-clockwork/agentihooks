@@ -26,7 +26,9 @@ def test_legacy_event_filter_and_dead_attempt_cap_remain_usable():
                 created=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
             )
         ),
-        add_consumer=AsyncMock(),
+        add_consumer=AsyncMock(
+            return_value=SimpleNamespace(created=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC))
+        ),
         pull_subscribe_bind=AsyncMock(),
     )
     asyncio.run(nats._pull(js, "AGENTIHOOKS_EVENTS", "reader", "swarm.>", policy, False))
