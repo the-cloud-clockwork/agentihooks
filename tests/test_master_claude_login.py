@@ -1206,10 +1206,13 @@ def test_a_drained_login_cannot_outrank_a_failed_login_with_room(
     _spare_slot(rendered, monkeypatch)
     login.mark_failed(2)
     monkeypatch.setattr(
-        master_logins, "usage", lambda account, now: (0.0, used if account == MASTER_ACCOUNT else 5.0, now)
+        master_logins, "usage", lambda account, now: (0.0, used if account == "masteratexample_com" else 5.0, now)
+    )
+    monkeypatch.setattr(
+        master_logins, "week_left", lambda account, now: 100.0 - (used if account == "masteratexample_com" else 5.0)
     )
     target, found = login.prepare(_environ(rendered), tmp_path)
-    assert (target, found) == (login.home(number), MASTER_ACCOUNT if number == 1 else "spareatexample_com")
+    assert (target, found) == (login.home(number), "masteratexample_com" if number == 1 else "spareatexample_com")
     assert login.holders(login.root(number)) == {"master@a-1": os.getpid()}
     assert login.holders(login.root(3 - number)) == {}
 
@@ -1227,7 +1230,7 @@ def test_a_single_drained_login_is_not_claimed(
     monkeypatch.setattr(reservation, "primary_reserved", lambda *_: False)
     with pytest.raises(login.LoginRefused) as refused:
         login.prepare(_environ(rendered), tmp_path)
-    assert str(refused.value) == login.ALL_HELD.format(held=f"{MASTER_ACCOUNT} drained")
+    assert str(refused.value) == login.ALL_HELD.format(held="masteratexample_com drained")
     assert login.holders(login.root()) == {}
 
 
