@@ -7773,6 +7773,20 @@
       ]
     },
     {
+      "id": "codex-planner-export-grant",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-planner-export-grant",
+      "behaviour": "Codex planners retain their ledger, swarm and scratchpad write roots and read-only base while gaining the ledger client export directory, resolved from AGENTIHOOKS_HOME or the process home exactly as export_file does, including empty, quoted, relative and tilde overrides.",
+      "seam": "scripts.swarm.runtime.codex_plan_mode output and scripts.swarm_ledger.api.client.export_file directory",
+      "rules": [
+        "codex-planner-export-grant-missing"
+      ],
+      "tests": [
+        "tests/swarm/test_codex_planner_exports.py::test_planner_keeps_existing_write_grants",
+        "tests/swarm/test_codex_planner_exports.py::test_planner_grants_the_client_export_directory"
+      ]
+    },
+    {
       "id": "launch-model-suits-harness",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2562",

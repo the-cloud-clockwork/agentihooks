@@ -489,23 +489,28 @@ def test_only_a_claude_planner_starts_in_plan_mode(tmp_path, lane, agent):
     assert "--permission-mode" not in _passed(_spawn_seen(tmp_path, {lane: {"agent": agent}}, lane=lane)["argv"])
 
 
-def test_a_codex_planner_starts_with_a_read_only_repo_and_network(tmp_path, monkeypatch):
+def test_a_codex_planner_starts_with_a_read_only_repo_and_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("HOME", "/h")
     monkeypatch.setenv("LEDGER_DIR", "/l")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", "/state")
     passed = _passed(_spawn_seen(tmp_path, {"plan": {"agent": "codex"}}, lane="plan")["argv"])
     assert passed[-4:] == [
         "-c",
         'permissions.planner={extends=":read-only", network={enabled=true}, '
-        'filesystem={"/l"="write", "/h/.agentihooks/swarm"="write", "/h/scratchpad"="write"}}',
+        'filesystem={"/l"="write", "/h/.agentihooks/swarm"="write", "/h/scratchpad"="write", '
+        '"/state/ledger-exports"="write"}}',
         "-c",
         'default_permissions="planner"',
     ]
 
 
-def _grants(ledger, home):
+def _grants(ledger: str, home: str, exports: str) -> str:
     return (
         'permissions.planner={extends=":read-only", network={enabled=true}, '
-        f'filesystem={{"{ledger}"="write", "{home}/.agentihooks/swarm"="write", "{home}/scratchpad"="write"}}}}'
+        f'filesystem={{"{ledger}"="write", "{home}/.agentihooks/swarm"="write", "{home}/scratchpad"="write", '
+        f'"{exports}"="write"}}}}'
     )
 
 
@@ -518,14 +523,24 @@ def _grants(ledger, home):
         ({"HOME": ""}, "/p/development-ledger", "/p"),
     ],
 )
-def test_a_codex_planner_writes_its_ledger_home_and_scratchpad(monkeypatch, environ, ledger, home):
+def test_a_codex_planner_writes_its_ledger_home_and_scratchpad(
+    monkeypatch: pytest.MonkeyPatch, environ: dict[str, str], ledger: str, home: str
+) -> None:
     monkeypatch.setenv("HOME", "/h")
     monkeypatch.setattr(Path, "home", lambda: Path("/p"))
-    assert codex_plan_mode(environ) == ["-c", _grants(ledger, home), "-c", 'default_permissions="planner"']
+    assert codex_plan_mode(environ) == [
+        "-c",
+        _grants(ledger, home, "/p/.agentihooks/ledger-exports"),
+        "-c",
+        'default_permissions="planner"',
+    ]
 
 
-def test_a_codex_planner_quotes_each_granted_path():
-    assert codex_plan_mode({"HOME": '/q"x'})[1] == _grants('/q\\"x/development-ledger', '/q\\"x')
+def test_a_codex_planner_quotes_each_granted_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", lambda: Path("/p"))
+    assert codex_plan_mode({"HOME": '/q"x'})[1] == _grants(
+        r"/q\"x/development-ledger", r"/q\"x", "/p/.agentihooks/ledger-exports"
+    )
 
 
 @pytest.mark.parametrize(("lane", "agent"), [("eng", "codex"), ("ci", "codex"), ("plan", "claude")])
