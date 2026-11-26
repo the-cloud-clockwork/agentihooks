@@ -15866,6 +15866,8 @@
         "tests/swarm_ledger/test_focus_task_pages.py::test_get_refuses_a_focus_item_that_names_no_target",
         "tests/swarm_ledger/test_focus_task_pages.py::test_get_reads_a_focus_target_in_one_reply_and_its_task_list_to_the_end",
         "tests/swarm_ledger/test_focus_task_pages.py::test_a_focus_read_past_the_reply_limit_names_the_command_line_read_that_fits",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_the_live_check_holds_a_target_one_reply_cannot_hold_to_the_list_the_route_hashes",
+        "tests/swarm_ledger/test_focus_task_pages.py::test_the_live_check_fails_a_target_whose_pages_miss_a_row_of_the_list_the_route_hashes",
         "tests/swarm_ledger/test_hierarchy_pages.py::test_a_collection_whose_name_only_begins_with_a_restart_name_takes_the_export_path",
         "tests/swarm/test_focus_check.py::test_task_rows_passes_the_fix_phase_through_a_focus_elsewhere",
         "tests/swarm/test_focus_check.py::test_task_rows_is_none_under_no_target_or_with_no_tasks_suffix_and_lists_a_node_named_tasks_one_down",

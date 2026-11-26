@@ -5,13 +5,15 @@ read past the reply limit names."""
 import json
 import sys
 import urllib.error
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+from scripts.feature_checks import focus_task_pages
 from scripts.swarm_ledger import ledger
 from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import resources, routes
@@ -281,3 +283,52 @@ def test_a_focus_read_past_the_reply_limit_names_the_command_line_read_that_fits
     reader = Served(repo)
     assert [row["id"] for row in reader.collection(SLUG, LIST)] == [row["id"] for row in tasks]
     assert len(reader.paths) > 1
+
+
+def through(reader: Served) -> Callable[[str, str, bool], Any]:
+    """The read of the live check answered by the route code: a list through its pages, any other path in one
+    reply."""
+
+    def read(slug: str, path: str, listed: bool) -> Any:
+        return reader.collection(slug, path) if listed else reader.request(slug, path)["data"]
+
+    return read
+
+
+@pytest.fixture
+def crowded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Served, list[dict[str, Any]]]:
+    """A ledger served by the route code whose focused phase holds more task rows than one reply, and those rows."""
+    repo = kept(tmp_path, [task(f"t{number}") for number in range(250)], record("phases/p1", "focus"))
+    whole = routes.ledger_read(served(repo), SLUG, "focus/phases/p1", {})["data"]
+    monkeypatch.setattr(resources, "MAX_REPLY", resources.reply_size({"data": whole}) - 1)
+    return Served(repo), whole["tasks"]
+
+
+@pytest.mark.feature("ledger-focus-task-pages")
+def test_the_live_check_holds_a_target_one_reply_cannot_hold_to_the_list_the_route_hashes(
+    crowded: tuple[Served, list[dict[str, Any]]],
+) -> None:
+    reader, rows = crowded
+    assert focus_task_pages.lines(SLUG, through(reader)) == [
+        focus_task_pages.PAGED.format(slug=SLUG, target="phases/p1", count=250)
+    ]
+    assert [urlsplit(path).path for path in reader.paths] == ["focus", "freezes", "focus/phases/p1", *[LIST] * 4]
+    assert parse_qs(urlsplit(reader.paths[-1]).query) == {"limit": ["1"], "cursor": [f"{resources.revision(rows)}:0"]}
+
+
+@pytest.mark.feature("ledger-focus-task-pages")
+def test_the_live_check_fails_a_target_whose_pages_miss_a_row_of_the_list_the_route_hashes(
+    crowded: tuple[Served, list[dict[str, Any]]],
+) -> None:
+    reader, _ = crowded
+    read = through(reader)
+
+    def short(slug: str, path: str, listed: bool) -> Any:
+        found = read(slug, path, listed)
+        return found[:-1] if listed and path == LIST else found
+
+    assert focus_task_pages.lines(SLUG, short) == [
+        focus_task_pages.FAIL + focus_task_pages.BROKEN.format(slug=SLUG, target="phases/p1", paged=249)
+    ]
+    asked = [path for path in reader.paths if urlsplit(path).query.startswith("limit=1&")]
+    assert len(asked) == focus_task_pages.ATTEMPTS
