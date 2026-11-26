@@ -2563,6 +2563,21 @@ The test that an old offender outside the diff passes failed before the fix
 and passed after it
 ([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39045831977)).
 
+## First read before seated work
+
+The `first-read` gate applies to swarm members and quick seats on Claude Code
+and Codex. It defaults to `observe`, recording a would-be denial until the
+session runs `agentihooks seat brief`. The successful command sets a local
+session marker; compaction clears it. Standalone sessions are outside the gate.
+Seat brief, the profile canary, the opening prompt Read, ToolSearch and condition
+tools stay available before the marker exists.
+
+The gate catalogue exposes `first-read-gate` through the normal swarm gate
+controls. `observe` permits calls and records denials, `enforce` blocks them
+with a reason naming seat brief, and `off` disables the check. The package
+conditions and marker lifecycle are described in
+[First read for seated sessions](../hooks/conditions.md#first-read-for-seated-sessions).
+
 ## One push per pull request
 
 In this repository the Tests workflow sets `cancel-in-progress` for
