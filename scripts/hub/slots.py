@@ -5,7 +5,7 @@ import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from scripts.events.bus import Bus
+from scripts.events.bus import Bus, PayloadTooLarge
 from scripts.events.subjects import SLOTS
 from scripts.hive import account_slots, presence
 
@@ -55,6 +55,11 @@ def handle(
     except Exception as exc:
         answer = {"ok": False, "error": str(exc) or type(exc).__name__}
     return json.dumps(answer).encode()
+
+
+def refusal(subject: str, data: bytes, error: PayloadTooLarge, admitter: "Admission") -> bytes:
+    """The answer to a slot request whose own answer cannot cross the bus."""
+    raise error
 
 
 def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms, admitter: "Admission | None" = None) -> None:

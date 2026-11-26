@@ -65,6 +65,7 @@ RECON_FIRST = (
 )
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
+RECAPS_TOTAL = "recaps_total"
 ORDERS_OPEN = "Operator orders open at the handoff. Build each before other work; only the operator's words clear one:"
 ORDERS_NONE = "Operator orders: none were open at the handoff."
 ORDERS_UNKNOWN = (
@@ -466,6 +467,11 @@ def priming_lines(task):
     if len(older) > OLDER_RECAPS:
         lines.append(f"{len(older) - OLDER_RECAPS} older recaps are kept on the seat and not shown.")
     return lines
+
+
+def carried(task: dict[str, Any]) -> dict[str, Any]:
+    """The task an admission carries to the hive that renders its prompt."""
+    return task
 
 
 def handoff_lines(task: dict[str, Any]) -> list[str]:
