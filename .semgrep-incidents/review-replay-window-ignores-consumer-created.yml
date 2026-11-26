@@ -1,0 +1,18 @@
+rules:
+  - id: review-replay-window-ignores-consumer-created
+    languages: [python]
+    severity: ERROR
+    message: >-
+      An event's age is cut at the replay window alone. A durable consumer holds every event published after it was
+      created, so a backlog built while the tick sat idle overnight is older than the window yet new to the consumer,
+      and the cut acks it unreviewed. Compare the event time to the earlier of the window start and the consumer's
+      created time, and keep the window alone only when the created time is unknown.
+    paths:
+      include:
+        - /scripts/tick/steps/
+        - review-replay-window-ignores-consumer-created.py
+    pattern-either:
+      - pattern: $EVENT.time >= $NOW - REPLAY_MS
+      - pattern: $EVENT.time < $NOW - REPLAY_MS
+      - pattern: $NOW - $EVENT.time <= REPLAY_MS
+      - pattern: $NOW - $EVENT.time > REPLAY_MS

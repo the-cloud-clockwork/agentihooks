@@ -16594,8 +16594,11 @@
     {
       "id": "swarm-review-trigger",
       "origin": "inventory",
-      "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
-      "seam": "scripts.tick.steps.review.review_pass, scripts.hub.github_webhooks.repository_events and scripts.hub.pulls.Pulls.announce",
+      "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; an event older than the six hour replay window still queues when it was published at or after its review consumer was created, and with no known creation time the window alone decides; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
+      "seam": "scripts.tick.steps.review.review_pass over scripts.events.bus.Consumer.created, scripts.hub.github_webhooks.repository_events and scripts.hub.pulls.Pulls.announce",
+      "rules": [
+        "review-replay-window-ignores-consumer-created"
+      ],
       "tests": [
         "tests/tick/steps/test_review_pass.py::test_review_pass",
         "tests/tick/steps/test_review_queue.py::test_one_pull_opened_event_queues_exactly_one_review_task_and_a_repeat_queues_none",
@@ -16624,7 +16627,10 @@
         "tests/tick/steps/test_review_queue.py::test_the_durable_consumer_is_named_by_kind_and_swarm",
         "tests/tick/steps/test_review_queue.py::test_an_event_at_the_edge_of_the_replay_window_still_queues",
         "tests/tick/steps/test_review_queue.py::test_the_step_opens_the_configured_shared_bus",
-        "tests/tick/steps/test_review_queue.py::test_a_scoped_bus_review_pass_queues_only_its_own_swarm_events"
+        "tests/tick/steps/test_review_queue.py::test_a_scoped_bus_review_pass_queues_only_its_own_swarm_events",
+        "tests/tick/steps/test_review_queue.py::test_a_backlog_older_than_the_replay_window_queues_when_the_consumer_is_older_still",
+        "tests/tick/steps/test_review_queue.py::test_an_event_older_than_the_window_and_the_consumer_queues_nothing",
+        "tests/tick/steps/test_review_queue.py::test_a_consumer_with_no_created_time_keeps_the_replay_window_rule"
       ]
     },
     {
