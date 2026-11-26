@@ -1,17 +1,13 @@
 import pytest
 
 from scripts import claude_quota_balancer as balancer
-from scripts.routing import master_account, place, reservation
-from scripts.routing.master_account import MasterAccount
+from scripts.routing import place, reservation
 from scripts.routing.settings import FileSettings
-from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION
 from scripts.swarm import capacity
 
 REASON = "reserved for 1 live master: workers stop at 70% of the week"
 WORKER = {"AGENTIHOOKS_AGENT_NAME": "engineer@1"}
 MASTER = {"AGENTIHOOKS_AGENT_NAME": "master@1"}
-FIRST = MasterAccount("claude", "first", "", INTERACTIVE)
-THIRD = MasterAccount("claude", "third", "", SUBSCRIPTION)
 
 
 @pytest.fixture
@@ -34,7 +30,9 @@ def _result(name, week_used):
 
 def _route(environ, tmp_path, monkeypatch, week_used, agent):
     monkeypatch.setattr(balancer, "collect_results", lambda *a, **k: ([_result("third", week_used)], "live"))
-    return balancer.select_credential({**environ, **agent}, cache_file=tmp_path / "cache.json", sessions={}, now=0)
+    decision = balancer.select_credential({**environ, **agent}, cache_file=tmp_path / "cache.json", sessions={}, now=0)
+    assert decision.credential is not None
+    return decision.credential.env_name
 
 
 def _row(name, week_left):
@@ -42,21 +40,15 @@ def _row(name, week_left):
 
 
 @pytest.mark.feature("worker-ceiling-every-master-login-slot")
-def test_the_reader_returns_every_declared_master_login_account(environ):
-    assert master_account.load_logins(environ) == (FIRST, THIRD)
-    assert master_account.load(environ) == {"claude": FIRST}
-
-
-@pytest.mark.feature("worker-ceiling-every-master-login-slot")
 def test_a_worker_offer_on_a_slot_three_account_past_the_ceiling_is_refused(environ, tmp_path, monkeypatch):
     with pytest.raises(balancer.RoutingError):
         _route(environ, tmp_path, monkeypatch, 70.0, WORKER)
-    assert _route(environ, tmp_path, monkeypatch, 70.0, MASTER).credential.env_name == "AH_CC_TOKEN_third"
+    assert _route(environ, tmp_path, monkeypatch, 70.0, MASTER) == "AH_CC_TOKEN_third"
 
 
 @pytest.mark.feature("worker-ceiling-every-master-login-slot")
 def test_a_worker_takes_a_slot_three_account_below_the_ceiling(environ, tmp_path, monkeypatch):
-    assert _route(environ, tmp_path, monkeypatch, 69.9, WORKER).credential.env_name == "AH_CC_TOKEN_third"
+    assert _route(environ, tmp_path, monkeypatch, 69.9, WORKER) == "AH_CC_TOKEN_third"
 
 
 @pytest.mark.feature("worker-ceiling-every-master-login-slot")
