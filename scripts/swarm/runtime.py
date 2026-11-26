@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -69,11 +69,13 @@ TICK_ONLY = ("SWARM_SECRET", "AGENTIHOOKS_LEDGER_AGENT_TOKEN")
 REPO_VARIABLE = "AGENTIHOOKS_SWARM_REPO"
 
 
-def codex_plan_mode(environ):
+def codex_plan_mode(environ: Mapping[str, str]) -> list[str]:
     home = Path(environ.get("HOME") or Path.home())
     ledger = Path(environ.get("LEDGER_DIR") or home / "development-ledger").expanduser()
+    exports = Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "ledger-exports"
     grants = ", ".join(
-        f'{json.dumps(str(root))}="write"' for root in (ledger, home / ".agentihooks" / "swarm", home / "scratchpad")
+        f'{json.dumps(str(root))}="write"'
+        for root in (ledger, home / ".agentihooks" / "swarm", home / "scratchpad", exports)
     )
     return [
         "-c",
@@ -526,7 +528,7 @@ class HerdrRuntime:
             requirements[lane] = options
         return requirements
 
-    def _quota_successor_accounts(self, requirements):
+    def _quota_successor_accounts(self, requirements: Any) -> Any:
         from scripts.swarm import quota_handoff
 
         thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
@@ -545,7 +547,9 @@ class HerdrRuntime:
             accounts.setdefault(lane, {})[index] = {(row.harness, row.name) for row in eligible if row.harness == first}
             if first is None:
                 task = self._quota_ready_ids[lane][index]
-                self._quota_held[task] = quota_handoff.refusal(predecessor, harnesses, rows, reason)
+                self._quota_held[task] = quota_handoff.refusal(
+                    predecessor, harnesses, rows, reason, master=lane == MASTER
+                )
         return accounts
 
     def _quota_preferring(self, requirements):
@@ -643,7 +647,9 @@ class HerdrRuntime:
             or quota_handoff.successor(candidates, order, thresholds)
         )
         if account is None:
-            raise SpawnError(quota_handoff.refusal(predecessor, harnesses, rows, blocked), "unavailable")
+            raise SpawnError(
+                quota_handoff.refusal(predecessor, harnesses, rows, blocked, master=lane == MASTER), "unavailable"
+            )
         return {
             **saved,
             "harness": account.harness,

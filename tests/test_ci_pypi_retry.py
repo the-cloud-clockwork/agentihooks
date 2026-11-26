@@ -429,7 +429,7 @@ def test_a_head_that_predates_the_helper_still_runs_it_from_the_workflow_revisio
 
 
 def test_the_test_planner_installs_its_pinned_pyyaml_with_uv_through_the_retry():
-    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["test-count"]["steps"]
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["collect"]["steps"]
     (plan,) = [step for step in steps if step.get("name") == "Plan the tests whose inputs did not change"]
     assert [line.strip() for line in plan["run"].splitlines() if "pip install" in line] == [
         'bash .github/scripts/pypi-retry.sh "Install the test planner dependencies" -- '
