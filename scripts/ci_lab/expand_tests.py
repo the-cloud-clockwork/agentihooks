@@ -45,6 +45,13 @@ def _blob(tree: Mapping[str, bytes], path: str) -> str | None:
     return hashlib.sha256(content).hexdigest() if content is not None else None
 
 
+def _cached_blob(tree: Mapping[str, bytes], path: str, cache: dict[str, str | None]) -> str | None:
+    """Return _blob(tree, path), hashing a given path at most once per cache."""
+    if path not in cache:
+        cache[path] = _blob(tree, path)
+    return cache[path]
+
+
 def _text(content: bytes) -> str:
     """Return a source file's text the way the manifest's change reader decodes it."""
     return content.decode(errors="replace")
@@ -100,17 +107,20 @@ def fingerprints(
 ) -> dict[str, str]:
     """Return a content key per manifest test over the repository tree it runs against.
 
-    The tree maps every tracked path to its blob content. The invocation is the interpreter and pytest arguments the
-    executor runs, without its slot count. Inputs the manifest does not record, such as the clock, the network and
-    environment variables, are not keyed.
+    The tree maps every tracked path to its blob content, hashed at most once per call. The invocation is the
+    interpreter and pytest arguments the executor runs, without its slot count. Inputs the manifest does not record,
+    such as the clock, the network and environment variables, are not keyed.
     """
+    cache: dict[str, str | None] = {}
     shared = _digest(
         {
             "invocation": list(invocation),
-            "files": {path: _blob(tree, path) for path in dep_manifest.GLOBAL_FILES.union(filter(_shared, tree))},
+            "files": {
+                path: _cached_blob(tree, path, cache) for path in dep_manifest.GLOBAL_FILES.union(filter(_shared, tree))
+            },
         }
     )
-    measured = _digest({path: _blob(tree, path) for path in tree if path.startswith(BROAD_TREES)})
+    measured = _digest({path: _cached_blob(tree, path, cache) for path in tree if path.startswith(BROAD_TREES)})
     names: list[str] = manifest["units"]
     units = _unit_keys(names, tree)
     owns = {dep_manifest.node(test).partition("::")[0] for test in manifest["tests"]}
@@ -122,7 +132,7 @@ def fingerprints(
         found: dict[str, object] = {
             "test": test,
             "shared": shared,
-            "files": {path: _blob(tree, path) for path in {*opened, own, *reached[own]}},
+            "files": {path: _cached_blob(tree, path, cache) for path in {*opened, own, *reached[own]}},
         }
         if broad(record):
             found["tree"] = measured

@@ -1,0 +1,18 @@
+rules:
+  - id: lab-fingerprints-hash-file-per-test
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tree file is hashed again for every manifest test that opens it. Hash the path once through
+      the call's digest table and read the cached value back instead.
+    paths:
+      include:
+        - /scripts/ci_lab/expand_tests.py
+        - lab-fingerprints-hash-file-per-test.py
+    patterns:
+      - pattern-inside: |
+          for $TEST, $RECORD in $MANIFEST["tests"].items():
+              ...
+      - pattern-either:
+          - pattern: _blob(...)
+          - pattern: hashlib.sha256(...)

@@ -2983,7 +2983,8 @@ one per `expand_tests.batches` batch, with batches cut at `BATCH_SECONDS` (60) f
 `.test_durations`. Each unit's key is `digests.test_key` over its tests' fingerprints on the head
 tree, the blob ids of the files its tests opened outside the manifest (their records' `outside`
 list), the pytest invocation and the toolchain. The expander reads every head file in one
-`git cat-file --batch` for the fingerprints.
+`git cat-file --batch` for the fingerprints, and `fingerprints` hashes each tree file at most once
+per call, however many tests open, own or reach it.
 
 A batch starts as one test file. A file is split only when its tests' summed durations pass 60
 seconds and none of its tests carries an xdist group. `expand_tests._parts` then deals its tests,
