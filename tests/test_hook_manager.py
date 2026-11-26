@@ -219,6 +219,7 @@ _START_PAYLOADS = {
         "permission_mode": "bypassPermissions",
         "source": "startup",
     },
+    "copilot": {"hookEventName": "sessionStart", "sessionId": "copilot-start"},
 }
 
 
@@ -288,6 +289,46 @@ def test_codex_session_start_envelope_carries_start_condition_context(start_cond
     output = json.loads(out)["hookSpecificOutput"]
     assert output["hookEventName"] == "SessionStart"
     assert "[condition start-greet.sh]\nhello from a start condition" in output["additionalContext"]
+
+
+@pytest.fixture(params=["standalone", "swarm seat"])
+def start_seat(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from tests.swarm_ledger import legacy_page
+
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    if request.param == "swarm seat":
+        folder = tmp_path / "ledgers"
+        folder.mkdir()
+        task = {"id": "t1", "phase": "p1", "title": "Ship it", "description": "Ship the change."}
+        phase = {"id": "p1", "title": "Delivery", "description": "Deliver complete changes."}
+        legacy_page.store(folder, "rig", {"title": "Rig", "overview": "Ship.", "phases": [phase], "tasks": [task]})
+        monkeypatch.setenv("LEDGER_DIR", str(folder))
+        monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+        monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t1")
+    return tmp_path
+
+
+def _start_context(target: str, out: str) -> str:
+    if target == "claude":
+        return out
+    envelope = json.loads(out)
+    return envelope["additionalContext"] if target == "copilot" else envelope["hookSpecificOutput"]["additionalContext"]
+
+
+@pytest.mark.feature("delivery-requirements-summary")
+@pytest.mark.parametrize("target", ["claude", "codex", "copilot"])
+def test_every_session_start_carries_the_delivery_requirements_summary(
+    target: str,
+    start_seat: Path,
+    quiet_session_start: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _start_context(target, _session_start_stdout(target, start_seat, monkeypatch, capsys))
+    assert "Delivery requirements: deliver each change as one complete pull request." in context
+    assert "Split it in two only when it changes more than 20 files" in context
+    assert "Always deliver or offer the source root fix, never a workaround the user did not ask for." in context
 
 
 @pytest.mark.feature("herdr-native-resume")
