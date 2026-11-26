@@ -6,7 +6,8 @@ rules:
       The lab scheduler release loop starts waiting heads with no bound on the pass. On 19 November 3225 waiting heads
       expanded one after another on the pass thread, so admission never ran, all 74230 units of 244 live grades stayed
       held and workers leased nothing. Count each start and break out of the loop once the count reaches the pass's
-      bound, so admission runs every pass.
+      bound, so admission runs every pass. A loop that also bounds the heads it looks at with LOOKED_AT_PER_PASS
+      must still break on STARTS_PER_PASS, or a pass starts three times its eight heads.
     paths:
       include:
         - /scripts/ci_lab/scheduler.py
@@ -15,20 +16,36 @@ rules:
       - pattern-inside: |
           for $ENTRY in $WAITING:
               ...
-      - pattern: $SCHEDULER._start(...)
-      - pattern-not-inside: |
-          for $ENTRY in $WAITING:
-              ...
-              $STARTED += 1
-              ...
-              if <... $STARTED ...>:
-                  break
-              ...
-      - pattern-not-inside: |
-          for $ENTRY in $WAITING:
-              ...
-              if <... $STARTED ...>:
-                  break
-              ...
-              $STARTED += 1
-              ...
+      - pattern-either:
+          - patterns:
+              - pattern: $SCHEDULER._start(...)
+              - pattern-not-inside: |
+                  for $ENTRY in $WAITING:
+                      ...
+                      $STARTED += 1
+                      ...
+                      if <... $STARTED ...>:
+                          break
+                      ...
+              - pattern-not-inside: |
+                  for $ENTRY in $WAITING:
+                      ...
+                      if <... $STARTED ...>:
+                          break
+                      ...
+                      $STARTED += 1
+                      ...
+          - patterns:
+              - pattern: $SCHEDULER._start(...)
+              - pattern-inside: |
+                  for $ENTRY in $WAITING:
+                      ...
+                      if <... LOOKED_AT_PER_PASS ...>:
+                          break
+                      ...
+              - pattern-not-inside: |
+                  for $ENTRY in $WAITING:
+                      ...
+                      if <... STARTS_PER_PASS ...>:
+                          break
+                      ...

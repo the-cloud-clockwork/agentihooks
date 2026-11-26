@@ -1002,11 +1002,13 @@ class Scheduler:
         """Look at up to `LOOKED_AT_PER_PASS` held heads whose quiet window ended, except one a pause of its class
         holds: the most urgent class first and the longest waiting first within a class. A head still quiet or paused
         takes no place among those looked at, and the rest wait for a later pass, so every pass reaches admission.
-        A head whose manifest fetch still runs off the pass, or whose fetch GitHub never answered or answered with a
-        server error and has not yet reached the `UNANSWERED_FETCHES`th such fetch in a row, keeps its place and
-        window for the next pass without using one of the `STARTS_PER_PASS` places, so the pass moves on to the next
-        waiting head instead of stalling on it. Starting a head, retiring it or dropping it after its last expansion
-        failure each take one of those `STARTS_PER_PASS` places, since each is the pass's last word on that head."""
+        A head whose manifest fetch still runs off the pass keeps its place and its window for the next pass; one
+        whose fetch GitHub never answered or answered with a server error waits out the window again, its count of
+        such fetches in a row kept in its waiting entry, until the `UNANSWERED_FETCHES`th one. Neither takes one of
+        the `STARTS_PER_PASS` places, only one of the `LOOKED_AT_PER_PASS` looked at, so the pass moves on to the
+        next waiting head instead of stalling on it. Starting a head, retiring it or dropping it after its last
+        expansion failure each take one of those `STARTS_PER_PASS` places, since each is the pass's last word on
+        that head."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         started = 0

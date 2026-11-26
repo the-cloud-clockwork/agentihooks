@@ -171,3 +171,58 @@ def test_a_head_put_back_for_its_manifest_fetch_keeps_its_waiting_record(
     else:
         assert record["since"] == 1600
         assert record["unanswered"] == 1
+
+
+@pytest.mark.feature("lab-scheduler-release-bound")
+def test_eight_heads_that_cannot_expand_are_dropped_and_take_eight_of_the_starts_places(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run, heads = backlog(lab, 16)
+    failing, waiting = heads[:8], heads[8:]
+    planned = run.lab.expander.expand
+
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        found = planned(request)
+        if request.head in failing:
+            raise ValueError(f"no dependency manifest at or before {request.base}")
+        return found
+
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
+    for number, head in enumerate(heads):
+        run.push(head, lane=f"lane-{number:02}", event="merge_group")
+        run.tick(1000 + number)
+    run.tick(1700)
+    assert [request.head for request in run.lab.expander.seen] == failing
+    assert run.grades() == []
+    assert run.lab.client.hlen(scheduler.WAITING) == len(waiting)
+
+
+@pytest.mark.feature("lab-scheduler-release-bound")
+def test_eight_heads_whose_tenth_unanswered_fetch_arrives_in_the_same_pass_take_the_eight_places(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run, heads = backlog(lab, 16)
+    planned = run.lab.expander.expand
+
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        planned(request)
+        raise manifests.FetchUnanswered(f"GET actions/workflows/test.yml/runs answered 502 for {request.base}")
+
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
+    for number, head in enumerate(heads):
+        run.push(head, lane=f"lane-{number:02}", event="merge_group")
+        run.tick(1000 + number)
+    at = 1700
+    for _ in range(9):
+        run.tick(at)
+        at += 600
+    records = [json.loads(raw) for raw in run.lab.client.hvals(scheduler.WAITING)]
+    assert {record["unanswered"] for record in records} == {9}
+    assert run.lab.client.hlen(scheduler.WAITING) == 16
+    seen_before = len(run.lab.expander.seen)
+    run.tick(at)
+    assert len(run.lab.expander.seen) - seen_before == 8
+    assert run.lab.client.hlen(scheduler.WAITING) == 8
+    records = [json.loads(raw) for raw in run.lab.client.hvals(scheduler.WAITING)]
+    assert {record["unanswered"] for record in records} == {9}
+    assert run.grades() == []
