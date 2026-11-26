@@ -1112,7 +1112,8 @@
     {
       "id": "lab-scheduler-release-bound",
       "rules": [
-        "lab-release-starts-every-waiting-head"
+        "lab-release-starts-every-waiting-head",
+        "lab-release-looked-at-cap-without-starts-cap"
       ],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2761",
