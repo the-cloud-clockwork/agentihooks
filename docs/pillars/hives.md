@@ -2951,6 +2951,97 @@ step 2, so it stays seated with its execution stopped when the store refuses its
 An agent with no recorded start, a legacy launch, gets no stop: no started event on the bus matches it, so the
 stop answers `unknown`. On the memory bus the stop answers `unknown` without opening a bus.
 
+#### Guarding the tick free paths
+
+The free helpers `_free_revoked`, `_free_refused` and `_free_stuck` share this retirement boundary. Each calls
+`retire_watch.retire_unless_gone` before dropping the agent with `refund=True`, then passes the actual drop result
+to `_stop_hive(slug, store, agent, reason, dropped)`. The helper returns that result unchanged and sends a stop
+only when the store accepted the drop. The stop needs a matching recorded `execution.started` for the agent's
+current execution; it cannot target a legacy launch by name alone.
+
+The regression `test_a_freed_legacy_agent_sends_no_stop_and_is_still_retired`, mapped as
+`events-legacy-free-sends-no-stop`, runs once for each of `revoked`, `refused` and `stuck`. It verifies that the
+runtime retired the legacy agent, the store removed its record and no execution stop was published. Legacy agents
+still pass through `_stop_hive`; its execution lookup makes the no stop decision. There is no new runtime setting
+or legacy mode flag to configure.
+
+The Python incident rule `tick-free-skips-execution-stop`, added by
+[pull request #11211](https://github.com/the-cloud-clockwork/agentihooks/pull/11211), reports an `ERROR` when a
+function guarded by `if not T.retire_watch.retire_unless_gone(...)` calls `T._drop(..., refund=True)` without
+passing the result through `T._stop_hive`. It also checks a drop invoked through `T.timing.timed`.
+
+This rejected example retires and refunds, then loses the connection to the hive execution:
+
+```python
+from typing import Any
+
+from scripts.swarm import tick as T
+
+
+def free_without_stop(
+    slug: str, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: int
+) -> list[str]:
+    if not T.retire_watch.retire_unless_gone(store, runtime, agent, (), now_ms):
+        return ["retrying"]
+    dropped = T._drop(slug, store, ledger, rows, agent, refund=True)
+    return ["freed" + dropped]
+```
+
+Using the same imports and arguments, the accepted form passes that drop result to the stop helper:
+
+```python
+def free_through_stop(
+    slug: str, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: int
+) -> list[str]:
+    if not T.retire_watch.retire_unless_gone(store, runtime, agent, (), now_ms):
+        return ["retrying"]
+    dropped = T._drop(slug, store, ledger, rows, agent, refund=True)
+    return ["freed" + T._stop_hive(slug, store, agent, "refused", dropped)]
+```
+
+A nested `_stop_hive(..., T._drop(..., refund=True))` also passes. With a timed drop, pass its saved result to
+either a direct or timed stop; inside the same retirement guard this is accepted:
+
+```python
+dropped = T.timing.timed(T._drop, slug, store, ledger, rows, agent, refund=True)
+T.timing.timed(T._stop_hive, slug, store, agent, "stuck", dropped)
+```
+
+Calling `_stop_hive` with an unrelated value, such as `""`, does not satisfy the rule. The paired incident fixture
+also includes red raw and timed drops, accepted nested and saved result forms, and a refunded drop with no
+retirement guard, which is outside this rule's scope. Its historical examples omit `store` from `_stop_hive`
+because they test syntax; use the current signature above in runtime code. This is a syntax check of the declared
+call forms, not a proof of every branch, alias or execution identity. The regression tests check behavior.
+
+From the repository root, scan just this rule against the tick code:
+
+```bash
+semgrep scan --error --strict --metrics off \
+  --config .semgrep-incidents/tick-free-skips-execution-stop.yml scripts/tick/
+```
+
+The rule's `paths.include` covers `scripts/tick/` and its named fixture. CI includes `.semgrep-incidents` in the
+Semgrep scan and tests its red and clean fixtures in an isolated copy with an empty `.semgrepignore`. A scan of
+the tick code should have no findings; the red fixtures are deliberately excluded from an ordinary repository
+scan. Keep fixture tests and regression runs in CI. After pushing a branch, dispatch the supported proofs:
+
+```bash
+gh workflow run proofs.yml --ref <branch> -f proof=semgrep -f base=origin/dev
+gh workflow run proofs.yml --ref <branch> -f proof=tests \
+  -f tests=tests/swarm/test_events_claim_refunds.py
+```
+
+Read the Semgrep fixture test result and the three legacy regression cases in the resulting Actions runs. A
+successful dispatch only means GitHub accepted the request. These guards require no additional environment
+variables; their configuration is the checked in rule and the proof workflow inputs.
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `tick-free-skips-execution-stop` on a free helper | The flagged raw or timed drop and the value passed to `_stop_hive` | Pass the actual drop result through the helper, using `store` in its current signature. Keep the retirement guard and accepted drop boundary. |
+| A scan skips the incident fixture | `.semgrepignore` and the CI fixture test job | Use the Semgrep proof, which tests fixtures in an isolated copy; an ordinary scan deliberately skips them. |
+| A freed legacy agent publishes no stop | The legacy regression cases and the agent's recorded start | Expected when no start matches. Verify retirement and removal still happen; do not publish a stop using only its name. |
+| An admitted agent gets `unknown` after a free | The current execution's started event and the stop lookup | Check execution identity as in [Troubleshooting retirements](#troubleshooting-retirements); a passing syntax scan does not prove a matching start exists. |
+
 #### The claim life refund
 
 Every one of these drops refunds. The drop gives the task back one claim life when all of these hold:

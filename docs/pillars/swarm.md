@@ -153,7 +153,10 @@ sends the execution stop to the hive of an agent whose work ended, and the hive 
 ended and whose pane is live goes through the same idle and revoked seat watch as any other agent. A retirement
 from that watch, or from the `verify` step's binding mismatch check, refunds the agent's claim life and sends its
 hive the execution stop with the retirement reason (see
-[Retiring a hub admitted agent](hives.md#retiring-a-hub-admitted-agent)). The tick still
+[Retiring a hub admitted agent](hives.md#retiring-a-hub-admitted-agent)).
+[Guarding the tick free paths](hives.md#guarding-the-tick-free-paths) covers legacy retirements without a published
+stop and the Semgrep rule that requires a refunded free to pass its drop result through the hive stop helper.
+The tick still
 runs master failover and recovery, the orphan pass that reopens a claimed task whose claimant has no agent record
 and no claim, pane evidence, exits, verification, the dispatcher, master
 scaling and the promotion and release watches. Master agents are reaped by the tick.
