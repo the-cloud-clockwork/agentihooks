@@ -77,7 +77,7 @@ def test_init_verbose_controls_all_details(verbose, monkeypatch, capsys):
     assert ("herdr detail" in output) is verbose
     assert sum(line.startswith(("Claude ", "Codex ")) for line in output.splitlines()) == 2
     if not verbose:
-        assert len(output.splitlines()) == 5
+        assert len(output.splitlines()) == 6
         assert output.splitlines()[0] == "AgentiHooks installed"
         assert output.splitlines()[1] == "Bundle none"
         assert "=" not in output

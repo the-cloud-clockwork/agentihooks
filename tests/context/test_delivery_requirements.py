@@ -1,13 +1,13 @@
 """The delivery requirements summary: the code review file limit setting and the rules it names."""
 
-import importlib
 import os
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
+
+from hooks.context import delivery_requirements
 
 ROOT = Path(__file__).resolve().parents[2]
 PROBE = (
@@ -16,10 +16,6 @@ PROBE = (
     "print(config.CODEREVIEW_FILELIMIT)\n"
     "print(delivery_requirements.summary())\n"
 )
-
-
-def _delivery_requirements() -> ModuleType:
-    return importlib.import_module("hooks.context.delivery_requirements")
 
 
 def _fresh_process(tmp_path: Path, limit: str | None) -> list[str]:
@@ -51,7 +47,7 @@ def test_an_env_file_limit_changes_the_number_the_summary_names(tmp_path: Path) 
 @pytest.mark.feature("delivery-requirements-summary")
 @pytest.mark.parametrize("limit", [1, 20, 9999])
 def test_the_summary_stays_within_fifty_words_and_names_both_rules(limit: int) -> None:
-    text = _delivery_requirements().render(limit)
+    text = delivery_requirements.render(limit)
     assert len(text.split()) <= 50
     assert text.startswith("Delivery requirements: deliver each change as one complete pull request.")
     assert f"Split it in two only when it changes more than {limit} files" in text
@@ -61,6 +57,5 @@ def test_the_summary_stays_within_fifty_words_and_names_both_rules(limit: int) -
 
 @pytest.mark.feature("delivery-requirements-summary")
 def test_the_summary_reads_the_current_file_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = _delivery_requirements()
     monkeypatch.setattr("hooks.config.CODEREVIEW_FILELIMIT", 7)
-    assert module.summary() == module.render(7)
+    assert delivery_requirements.summary() == delivery_requirements.render(7)
