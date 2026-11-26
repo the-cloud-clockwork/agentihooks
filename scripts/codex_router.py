@@ -765,7 +765,7 @@ def main(
 
             declared = interactive.account("codex", active, run)
             account, placement, live, cap = CodexAccount(declared.slug), "forced", 0, "?"
-        elif route == "default":
+        elif route == "native-default":
             from scripts.routing import native_default
 
             try:

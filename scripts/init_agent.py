@@ -392,6 +392,10 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
     return [command[0], "select-profile", spec.profile, *worn, "--agent", spec.agent, "--", *command[2:]]
 
 
+def _auth_route(auth: str) -> str:
+    return "native-default" if auth == "default" else auth
+
+
 def _app_server_command(
     spec: AgentSpec, report: Path, agent_args: list[str], environ: dict[str, str], directory: Path, opening: Path | None
 ) -> list[str]:
@@ -418,7 +422,7 @@ def _app_server_command(
         *(["--resume", spec.resume] if spec.resume else []),
         *(["--prompt-file", str(opening)] if opening else []),
         "--",
-        *(["--route", spec.auth] if spec.auth else []),
+        *(["--route", _auth_route(spec.auth)] if spec.auth else []),
         *_codex_otel_args(environ),
         *_codex_trust_args(directory, environ),
         *_model_args("codex", agent_args, environ),
@@ -475,7 +479,7 @@ def _agent_command(
         command = [
             agentihooks_bin,
             "codex",
-            *(["--route", spec.auth] if spec.auth else []),
+            *(["--route", _auth_route(spec.auth)] if spec.auth else []),
             *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
             "--agentihooks-report",
             str(report),
@@ -493,7 +497,7 @@ def _agent_command(
     command = [
         agentihooks_bin,
         "claude",
-        *(["--route", spec.auth] if spec.auth else []),
+        *(["--route", _auth_route(spec.auth)] if spec.auth else []),
         *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
         *(["--agentihooks-fallback-bare"] if spec.fallback_bare else []),
         "--agentihooks-report",
@@ -865,7 +869,7 @@ def _transport(args: argparse.Namespace, agent: str) -> str:
 
 
 def _auth_value(value: str) -> str:
-    if value in ("interactive", "default") or (value.startswith("named:") and value.removeprefix("named:")):
+    if value in ("", "interactive", "default") or (value.startswith("named:") and value.removeprefix("named:")):
         return value
     raise argparse.ArgumentTypeError("authentication must be interactive, default or named:reference")
 

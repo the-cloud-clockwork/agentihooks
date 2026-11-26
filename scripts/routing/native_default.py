@@ -13,7 +13,10 @@ def _configuration(source: Path, home: Path) -> None:
             continue
         target = home / entry.name
         if entry.is_dir():
-            target.symlink_to(entry.resolve(), target_is_directory=True)
+            if entry.name == "plans":
+                shutil.copytree(entry, target, symlinks=True)
+            else:
+                target.symlink_to(entry.resolve(), target_is_directory=True)
         else:
             shutil.copy2(entry, target)
 
@@ -49,6 +52,7 @@ def prepare(agent: str, environ: Mapping[str, str]) -> dict[str, str]:
     (home / credential).chmod(0o600)
     _binding(agent, source, home, environ)
     child = envs.codex_subscription_child(envs.claude_interactive_child(environ, agent))
+    child.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
     child[variable] = str(home)
     homes.collect(base, key)
     return child

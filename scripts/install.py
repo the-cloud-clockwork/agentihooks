@@ -91,7 +91,7 @@ def _resolve_claude_home() -> Path:
 CLAUDE_HOME = _resolve_claude_home()
 ROUTE_LAUNCHERS = {
     "interactive": "scripts.routing.interactive",
-    "default": "scripts.routing.native_default",
+    "native-default": "scripts.routing.native_default",
     "master-login": "scripts.master_claude_login",
     "claude-ai": "scripts.routing.claude_ai",
 }

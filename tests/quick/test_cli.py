@@ -280,6 +280,40 @@ def test_status_lists_every_seat(quick_env, tmp_path, capsys):
     assert [row["seat"] for row in rows] == ["master", "eng-1", "eng-2", "eng-3"]
 
 
+@pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize(
+    ("selection", "mode", "account", "automatic"),
+    [
+        ("routed", "routed", "", True),
+        ("default", "default", "", False),
+        ("named:alpha", "named", "alpha", False),
+    ],
+)
+def test_status_exposes_saved_authentication_and_tier_metadata(
+    selection: str,
+    mode: str,
+    account: str,
+    automatic: bool,
+    quick_env: dict[str, str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    environ = {**quick_env, "AH_CC_TOKEN_alpha": "unused"}
+    assert cli.main(["up", "--agents", "2", "--auth", selection, "--dir", str(tmp_path)], environ) == 0
+    capsys.readouterr()
+    assert cli.main(["status"], environ) == 0
+    output = capsys.readouterr().out
+    rows = [json.loads(line) for line in output.splitlines()]
+    assert (rows[1]["harness"], rows[1]["auth"], rows[1]["account"], rows[1]["automatic_tiers"]) == (
+        "claude",
+        mode,
+        account,
+        automatic,
+    )
+    assert "automatic_tiers" not in rows[0]
+    assert "unused" not in output
+
+
 def test_herdr_columns_read_the_tab_layout(monkeypatch):
     layout = {"layout": {"panes": [{"pane_id": "w1:p1", "rect": {"x": 0, "width": 80}}]}}
     monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: layout)

@@ -46,7 +46,7 @@ def quick_auth_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[s
 @pytest.mark.feature("quick-native-authentication")
 @pytest.mark.parametrize("harness", ["claude", "codex"])
 @pytest.mark.parametrize(("mode", "account"), [("default", ""), ("named", "alpha")])
-@pytest.mark.parametrize("state", [registry.READY, registry.LAUNCHING])
+@pytest.mark.parametrize("state", [registry.READY, registry.LAUNCHING, registry.PENDING])
 def test_bound_explicit_quick_engineers_bypass_automatic_quota_switching(
     harness: str,
     mode: str,
@@ -73,7 +73,8 @@ def test_bound_explicit_quick_engineers_bypass_automatic_quota_switching(
 
 @pytest.mark.feature("quick-native-authentication")
 @pytest.mark.parametrize(
-    "mismatch", ["routed", "session", "pane", "harness", "pending", "unbound", "empty-name", "master", "missing"]
+    "mismatch",
+    ["routed", "session", "pane", "harness", "unsupported-mode", "unbound", "empty-name", "master", "missing"],
 )
 def test_routed_or_unverified_quick_members_retain_quota_policy(
     mismatch: str, quick_auth_member: dict[str, str], monkeypatch: pytest.MonkeyPatch
@@ -91,8 +92,8 @@ def test_routed_or_unverified_quick_members_retain_quota_policy(
         monkeypatch.setenv("HERDR_PANE_ID", "w1:p9")
     elif mismatch == "harness":
         seat = dataclasses.replace(seat, harness="claude")
-    elif mismatch == "pending":
-        seat = dataclasses.replace(seat, state=registry.PENDING)
+    elif mismatch == "unsupported-mode":
+        seat = dataclasses.replace(seat, auth="unsupported")
     elif mismatch == "unbound":
         seat = dataclasses.replace(seat, session_id="")
     elif mismatch == "empty-name":

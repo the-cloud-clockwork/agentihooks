@@ -16843,7 +16843,9 @@
         "tests/test_native_default.py::test_native_default_missing_local_login_never_uses_the_master",
         "tests/test_native_default.py::test_claude_native_default_checks_and_launches_the_isolated_login",
         "tests/quick/test_authentication_quota.py::test_bound_explicit_quick_engineers_bypass_automatic_quota_switching",
-        "tests/quick/test_authentication_quota.py::test_routed_or_unverified_quick_members_retain_quota_policy"
+        "tests/quick/test_authentication_quota.py::test_routed_or_unverified_quick_members_retain_quota_policy",
+        "tests/quick/test_cli.py::test_status_exposes_saved_authentication_and_tier_metadata",
+        "tests/quick/test_authentication_metadata.py::test_master_context_exposes_each_safe_authentication_selection"
       ]
     }
   ],

@@ -33,7 +33,8 @@ def test_native_default_isolates_local_login_from_master_and_routed_credentials(
         "CLAUDE_CODE_OAUTH_TOKEN": "unused",
         "OPENAI_API_KEY": "unused",
         "ANTHROPIC_API_KEY": "unused",
-        "AH_INTERACTIVE_master": "1",
+        "AH_ROUTE_INTERACTIVE_master": "1",
+        "AGENTIHOOKS_ROUTE_ACCOUNT": "master",
     }
     child = native_default.prepare(agent, environ)
     home = Path(child[variable])
@@ -45,7 +46,8 @@ def test_native_default_isolates_local_login_from_master_and_routed_credentials(
     assert (home / "settings.json").read_text() == "{}"
     assert (operator / filename).read_bytes() == b"local-login-fixture"
     assert (master / filename).read_bytes() == b"master-login-fixture"
-    assert not any(name.startswith(("AH_CC_TOKEN_", "AH_CX_TOKEN_", "AH_INTERACTIVE_")) for name in child)
+    assert not any(name.startswith(("AH_CC_TOKEN_", "AH_CX_TOKEN_", "AH_ROUTE_INTERACTIVE_")) for name in child)
+    assert "AGENTIHOOKS_ROUTE_ACCOUNT" not in child
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in child
     assert "OPENAI_API_KEY" not in child and "ANTHROPIC_API_KEY" not in child
 
@@ -72,7 +74,7 @@ def test_codex_native_default_bypasses_automatic_account_enumeration(
 
     assert (
         codex_router.main(
-            ["--route", "default"],
+            ["--route", "native-default"],
             {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / "state")},
             execvpe=execute,
         )
@@ -104,6 +106,8 @@ def test_native_default_preserves_and_repins_rendered_profile_binding(
     (source.parent / f"{agent}.sources.json").write_text("[]")
     (source / "state").mkdir()
     (source / "state" / "retained").write_text("shared state")
+    (source / "plans").mkdir()
+    (source / "plans" / "retained.md").write_text("saved plan")
     binding.write(source, "engineer", agent)
     original = binding.inspect(source, "engineer", agent)
     report = tmp_path / "request.json"
@@ -126,6 +130,8 @@ def test_native_default_preserves_and_repins_rendered_profile_binding(
         "state": "pending",
         "rendered": {**original, "home": str(home.resolve())},
     }
+    assert not (home / "plans").is_symlink()
+    assert (home / "plans" / "retained.md").read_text() == "saved plan"
     assert (home / "state").is_symlink()
     assert (home / "state" / "retained").read_text() == "shared state"
     assert binding.inspect(source, "engineer", agent) == original
@@ -174,4 +180,4 @@ def test_claude_native_default_checks_and_launches_the_isolated_login(
         "account": "default",
         "placement": "forced",
     }
-    assert capsys.readouterr().out == "[agenti] account=default route=default\\n"
+    assert capsys.readouterr().out == "[agenti] account=default route=default\n"

@@ -43,7 +43,7 @@ def test_saved_native_authentication_reaches_the_launcher(
 
 @pytest.mark.feature("quick-native-authentication")
 @pytest.mark.parametrize("harness", ["claude", "codex"])
-@pytest.mark.parametrize(("selection", "route"), [("default", "default"), ("named:alpha", "named:alpha")])
+@pytest.mark.parametrize(("selection", "route"), [("default", "native-default"), ("named:alpha", "named:alpha")])
 def test_native_init_keeps_explicit_authentication_without_automatic_selection(
     harness: str,
     selection: str,
