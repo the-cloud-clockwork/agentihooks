@@ -11106,6 +11106,19 @@
       ]
     },
     {
+      "id": "master-quota-login-guidance",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mql-texts",
+      "behaviour": "Master quota stop and wait guidance, master handoff refusals, the master login alert and the rendered master persona name agentihooks claude login --master to replenish a login slot; worker advice stays unchanged.",
+      "seam": "quota_policy.render, HerdrRuntime quota refusal callers, master_prompt_stall.LOGIN_ALERT and rendered package master persona",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_quota_exhaustion_text_uses_the_master_login_only_for_masters",
+        "tests/swarm/test_quota_handoff.py::test_quota_handoff_refusal_adds_login_guidance_only_for_a_master",
+        "tests/swarm/test_master_prompt_stall.py::test_master_login_alert_names_the_master_login_command",
+        "tests/test_package_role_skills.py::test_rendered_masters_ask_through_the_inbox_for_a_master_login_slot"
+      ]
+    },
+    {
       "id": "quota-wait-no-session-cron",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-wait-scheduler-timer",
