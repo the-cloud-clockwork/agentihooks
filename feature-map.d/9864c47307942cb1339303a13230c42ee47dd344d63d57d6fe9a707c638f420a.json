@@ -14,6 +14,9 @@
     "tests/test_ci_queue_retry.py::test_resume_keeps_the_existing_pull_guards",
     "tests/test_ci_queue_retry.py::test_either_event_order_resumes_once_the_run_and_pull_are_ready",
     "tests/test_ci_queue_retry.py::test_retry_workflow_releases_the_runner_and_resumes_from_trusted_code",
-    "tests/test_ci_queue_retry.py::test_retry_workflow_timeout_is_at_most_five_minutes"
+    "tests/test_ci_queue_retry.py::test_retry_workflow_timeout_is_at_most_five_minutes",
+    "tests/test_ci_queue_retry.py::test_resume_stops_at_inventory_boundaries",
+    "tests/test_ci_hosted_lanes.py::test_only_explicit_dequeued_recovery_is_outside_required_lane_contexts",
+    "tests/test_ci_hosted_lanes.py::test_a_reusable_recovery_keeps_its_ordinary_callers_required_contexts"
   ]
 }

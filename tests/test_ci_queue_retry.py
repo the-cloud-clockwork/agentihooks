@@ -525,12 +525,14 @@ def retry_entry(
         query = parse_qs(urlsplit(path).query)
         assert path.startswith("repos/o/r/actions/workflows/test.yml/runs?")
         assert query["event"] == ["merge_group"]
+        assert query["per_page"] == ["100"]
         assert query["created"] == [">=2026-10-14T23:06:11Z"]
         page = int(query.get("page", ["1"])[0])
         rows = inventory[page - 1] if page <= len(inventory) else []
         return json.dumps({"total_count": 100 * (len(inventory) - 1) + len(inventory[-1]), "workflow_runs": rows})
 
     def state(repo: str, number: int) -> dict[str, Any]:
+        assert repo == "o/r"
         calls.append(f"pull:{number}")
         return states[min(calls.count(f"pull:{number}"), len(states)) - 1]
 
@@ -642,6 +644,28 @@ def test_resume_without_a_matching_run_never_classifies(
     result = json.loads(capsys.readouterr().out)
     assert result["requeue"] is False
     assert result["waiting"] is False
+    assert result["reason"] == "no merge group run for this pull request head"
+    assert not any(call.startswith("failed:") for call in calls)
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+@pytest.mark.parametrize("boundary", ["last-page", "empty-page", "page-limit"])
+def test_resume_stops_at_inventory_boundaries(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], boundary: str
+) -> None:
+    unrelated = {**RUN, "id": 10, "head_branch": QUEUE_BRANCH.replace("pr-3259-", "pr-4-")}
+    inventories = {
+        "last-page": [[unrelated] * 100],
+        "empty-page": [[], [unrelated]],
+        "page-limit": [[unrelated] * 100] * (ci_queue_retry.RUN_PAGES + 1),
+    }
+    expected = {"last-page": 1, "empty-page": 1, "page-limit": ci_queue_retry.RUN_PAGES}
+    calls = retry_entry(monkeypatch, tmp_path, [pull([REMOVED])], inventories[boundary])
+    assert ci_queue_retry.main(["--repo", "o/r", "--pull", "3259"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["requeue"] is False
+    assert result["reason"] == "no merge group run for this pull request head"
+    assert len([call for call in calls if "workflows/test.yml/runs?" in call]) == expected[boundary]
     assert not any(call.startswith("failed:") for call in calls)
 
 
