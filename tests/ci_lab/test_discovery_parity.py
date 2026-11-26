@@ -31,15 +31,45 @@ for name, missing in json.loads((root / "gates.json").read_text()).items():
     if name not in IGNORED:
         print(json.dumps({{"name": name, "missing": missing}}))
 """
+FAILURE = "the discovery of this code is broken"
+READS = "return dict(json.loads(raw))"
+BLIND = "return {}"
+CORRUPT = 'raise ValueError("the catalog reader of this code is broken")'
+CATALOG = """import json
+
+PATH = {path!r}
 
 
-def _code(folder: Path, ignored: Iterable[str] = (), fails: bool = False) -> Path:
+def read(raw):
+    {body}
+"""
+MESSAGES = {
+    "DIFFERS": "the released lab reads this head to other static gates than the head's own code does, and to other "
+    "gates than it reads from the base",
+    "BROKEN": "the released lab cannot read the static gates of this head, and it reads those of the base",
+    "UNREADABLE": "the head's own code cannot read the static gates of the head",
+    "LAGS": "the released lab reads this head to other static gates than the head's own code does, as it reads the "
+    "base",
+    "STUCK": "the released lab cannot read the static gates of this head, as it cannot read those of the base",
+    "REMEDY": "land the change to how gates are read first, and the tree that needs it once a release holds that "
+    "change",
+}
+
+
+def _code(
+    folder: Path,
+    ignored: Iterable[str] = (),
+    fails: bool = False,
+    catalog: str = READS,
+    path: str = static_exclusions.PATH,
+) -> Path:
     package = folder / "scripts" / "ci_lab"
     package.mkdir(parents=True)
     (folder / "scripts" / "__init__.py").write_text("")
     (package / "__init__.py").write_text("")
-    body = "raise SystemExit(3)\n" if fails else COMMAND.format(ignored=sorted(ignored))
+    body = f"raise SystemExit({FAILURE!r})\n" if fails else COMMAND.format(ignored=sorted(ignored))
     (package / "static_gates.py").write_text(body)
+    (package / "static_exclusions.py").write_text(CATALOG.format(path=path, body=catalog))
     return folder
 
 
@@ -134,9 +164,55 @@ def test_a_reading_leaves_out_the_gates_the_exclusion_catalog_of_its_tree_names(
 
 
 @pytest.mark.feature("lab-discovery-parity-with-release")
-def test_a_command_that_fails_gives_a_failed_reading(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("catalog", "path"),
+    [(BLIND, static_exclusions.PATH), (READS, "tests/ci_lab/another_catalog.json")],
+    ids=["its reader finds no name", "its catalog lives elsewhere"],
+)
+def test_a_reading_leaves_out_only_the_gates_the_catalog_reader_of_its_code_finds_in_the_tree(
+    tmp_path: Path, catalog: str, path: str
+) -> None:
+    tree = _tree(tmp_path / "tree", _gates(REAL, INSTALLS), excluded=INSTALLS)
+    assert discovery_parity.graded(_code(tmp_path / "reads"), tree) == REAL
+    assert discovery_parity.graded(_code(tmp_path / "other", catalog=catalog, path=path), tree) == REAL | INSTALLS
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
+def test_a_catalog_reader_that_fails_gives_a_failed_reading_and_its_error_on_standard_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tree = _tree(tmp_path / "tree", _gates(REAL, INSTALLS), excluded=INSTALLS)
+    assert discovery_parity.graded(_code(tmp_path / "code", catalog=CORRUPT), tree) is None
+    assert "the catalog reader of this code is broken" in capsys.readouterr().err
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
+def test_a_command_that_fails_gives_a_failed_reading_and_its_error_on_standard_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     tree = _tree(tmp_path / "tree", _gates(REAL))
     assert discovery_parity.graded(_code(tmp_path / "code", fails=True), tree) is None
+    assert FAILURE in capsys.readouterr().err
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
+def test_a_reading_runs_the_command_from_the_folder_of_the_code_it_is_given(tmp_path: Path) -> None:
+    code = _code(tmp_path / "code")
+    (code / "scripts" / "ci_lab" / "static_gates.py").write_text(
+        'import json\nfrom pathlib import Path\n\nprint(json.dumps({"name": Path.cwd().name, "missing": []}))\n'
+    )
+    assert discovery_parity.graded(code, _tree(tmp_path / "tree", {})) == {"code"}
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
+def test_a_reading_takes_a_code_folder_and_a_tree_named_from_the_working_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTHONSAFEPATH", "1")
+    _code(tmp_path / "new", ignored=["lint/b"])
+    _tree(tmp_path / "tree", {"lint/a": [], "lint/b": [], "lint/c": []}, excluded=["lint/c"])
+    monkeypatch.chdir(tmp_path)
+    assert discovery_parity.graded(Path("new"), Path("tree")) == {"lint/a"}
 
 
 @pytest.mark.feature("lab-discovery-parity-with-release")
@@ -144,9 +220,44 @@ def test_the_command_of_this_checkout_reads_this_checkout_to_the_gates_its_disco
     workflow = (ROOT / static_gates.WORKFLOW).read_text()
     registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
     found = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+    catalog = ROOT / static_exclusions.PATH
+    excluded = static_exclusions.read(catalog.read_text()) if catalog.is_file() else {}
     read = discovery_parity.graded(ROOT, ROOT)
     assert read
-    assert read == {gate.name for gate in found if not gate.missing}
+    assert read == {gate.name for gate in found if not gate.missing and gate.name not in excluded}
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
+def test_the_refusals_and_the_notices_say_what_the_released_lab_reads_and_what_to_land_first() -> None:
+    assert {name: getattr(discovery_parity, name) for name in MESSAGES} == MESSAGES
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
+@pytest.mark.parametrize("left_out", ["--released", "--base", "--head"])
+def test_the_command_needs_the_released_code_the_base_and_the_head(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], left_out: str
+) -> None:
+    given = {name: str(tmp_path) for name in ("--released", "--base", "--head") if name != left_out}
+    with pytest.raises(SystemExit) as stopped:
+        discovery_parity.main([word for pair in given.items() for word in pair])
+    assert stopped.value.code == 2
+    assert left_out in capsys.readouterr().err
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
+def test_the_command_refuses_a_head_whose_catalog_the_released_code_does_not_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    released = _code(tmp_path / "released", catalog=BLIND)
+    base = _tree(tmp_path / "base", _gates(REAL))
+    head = _code(_tree(tmp_path / "head", _gates(REAL, INSTALLS), excluded=INSTALLS))
+    assert _run(released, base, head) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        f"::error::{discovery_parity.DIFFERS}",
+        f"::error::{ONLY_RELEASED}",
+        "::error::only the head's code grades: none",
+        f"::error::{discovery_parity.REMEDY}",
+    ]
 
 
 @pytest.mark.feature("lab-discovery-parity-with-release")
@@ -233,7 +344,8 @@ def test_the_lint_actions_job_reads_the_head_with_the_scripts_of_main_after_the_
     assert step["run"].splitlines() == [
         "git fetch --no-tags origin main",
         'mkdir "$RUNNER_TEMP/released"',
-        'git archive FETCH_HEAD scripts | tar -x -C "$RUNNER_TEMP/released"',
+        'git archive --output "$RUNNER_TEMP/released.tar" FETCH_HEAD scripts',
+        'tar -x -f "$RUNNER_TEMP/released.tar" -C "$RUNNER_TEMP/released"',
         'if [[ -f "$RUNNER_TEMP/grader/scripts/ci_lab/discovery_parity.py" ]]; then',
         '  cd "$RUNNER_TEMP/grader"',
         "fi",
