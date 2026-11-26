@@ -900,6 +900,73 @@ def test_feature_fragment_filename_must_match_its_id(mapped_repo: tuple[Path, Pa
         feature_map.load(path)
 
 
+@pytest.mark.feature("feature-map-records")
+def test_two_branches_adding_one_record_each_merge_clean_and_both_load(
+    mapped_repo: tuple[Path, Path, dict],
+) -> None:
+    root, path, entry = mapped_repo
+    path.write_text(json.dumps({"features": [entry], "fragments": True}, indent=2) + "\n")
+
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, check=False)
+
+    git("init", "-b", "base")
+    git("config", "user.name", "Feature record proof")
+    git("config", "user.email", "feature-record-proof@example.invalid")
+    git("add", ".")
+    git("commit", "-m", "base")
+    for feature in ("left", "right"):
+        git("checkout", "-b", feature, "base")
+        (root / f"tests/test_{feature}.py").write_text(
+            f'import pytest\n@pytest.mark.feature("{feature}")\ndef test_{feature}():\n    assert True\n'
+        )
+        record = feature_map.entry_path(path, feature)
+        record.parent.mkdir(exist_ok=True)
+        record.write_text(
+            json.dumps(
+                {
+                    "id": feature,
+                    "origin": "inventory",
+                    "behaviour": f"The {feature} branch behaviour.",
+                    "seam": f"The {feature} seam",
+                    "tests": [f"tests/test_{feature}.py::test_{feature}"],
+                }
+            )
+        )
+        git("add", ".")
+        assert git("commit", "-m", feature).returncode == 0
+    git("checkout", "left")
+    merged = git("merge", "--no-edit", "right")
+    assert merged.returncode == 0, merged.stdout + merged.stderr
+    assert "CONFLICT" not in merged.stdout
+    assert [item["id"] for item in feature_map.load(path)["features"]] == ["login", "right", "left"]
+    assert json.loads(path.read_text())["features"] == [entry]
+    assert feature_map.validate(root, path) == 3
+
+
+@pytest.mark.feature("feature-map-records")
+def test_the_repository_feature_map_keeps_new_entries_as_records() -> None:
+    path = Path(__file__).resolve().parents[1] / "feature-map.json"
+    root_entries = json.loads(path.read_text())
+    assert root_entries["fragments"] is True
+    assert "feature-map-records" not in {item["id"] for item in root_entries["features"]}
+    assert feature_map.entry_path(path, "feature-map-records").is_file()
+    loaded = [item["id"] for item in feature_map.load(path)["features"]]
+    assert loaded.count("feature-map-records") == 1
+    assert loaded[: len(root_entries["features"])] == [item["id"] for item in root_entries["features"]]
+
+
+@pytest.mark.feature("feature-map-records")
+def test_record_option_prints_the_record_path_for_a_feature_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["feature_map", "--root", str(tmp_path), "--record", "feature-map-records"])
+    feature_map.main()
+    assert capsys.readouterr().out == (
+        "feature-map.d/fb5a20f7b10513784a7505dda396071a0852753a6f252e6483d1f4c0a02dc59d.json\n"
+    )
+
+
 def _canonical(features: list[dict[str, object]], ending: str) -> str:
     """A feature map with metadata around ``features`` in the layout of an indent two dump, lines ended by ``ending``."""
     root = {"head": [1], "features": features, "after": {"id": "x"}}

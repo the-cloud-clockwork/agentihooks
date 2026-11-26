@@ -855,6 +855,72 @@
       ]
     },
     {
+      "id": "lab-retire-stale-pull-request-heads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
+      "behaviour": "The CI lab ends the work of pull request heads nobody wants graded any more: a pull request head travels with a lane naming its head branch, owner and branch for a fork, so a newer head of the pull request drops the pending and held units of the older one, and a head already graded still takes its lane; a closed pull request ends what carries its base in its lane of the pull request class, dropping its waiting head and the pending units of its live head unless another live grade grades that head, and posts nothing; and the first pass of a scheduler retires every live pull request grade with no grade ref whose head is neither an open pull request head nor a plant branch head, from the paged listings of its open pull requests and its plant branches, read until two readings in a row name the same heads and never one head at a time, retiring nothing of a repository whose listing fails or never settles. A close ends only its own work, told by the base GitHub repeats at the close: a waiting head or a live grade of another base stays, and while the lane holds live grades of one head against two bases, the grades of the closed base end and the lane keeps its waiting head. Hotfix, queue, promotion and backfill grades and grades pushed to a grade ref are left alone.",
+      "seam": "scripts.ci_lab.webhooks.head_events and envelope over pull request deliveries, scripts.ci_lab.scheduler.BusInbox.heads and Scheduler.tick over fakeredis with a listing fake, and scripts.ci_lab.stale_heads.OpenHeads over a fake GitHub",
+      "rules": [
+        "lab-pull-request-head-without-lane"
+      ],
+      "tests": [
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_pull_request_delivery_names_its_head_branch_as_its_lane",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_pull_request_from_a_fork_names_its_owner_and_branch_as_its_lane",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_envelope_of_a_pull_request_head_carries_its_lane_beside_the_six_head_fields",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_envelope_of_a_head_that_names_no_lane_holds_the_six_head_fields_only",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_bus_inbox_reads_the_lane_key_then_the_branch_then_the_head",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_newer_head_of_a_pull_request_drops_the_pending_units_of_its_older_head",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_drops_its_pending_units_and_forgets_its_run",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_drops_its_waiting_head_and_starts_no_grade",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_ends_its_waiting_head_and_its_live_grade_together",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_with_nothing_held_names_that_and_the_batch_goes_on",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_keeps_the_pending_units_another_live_grade_grades",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_leaves_a_grade_pushed_to_a_grade_ref",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_ends_the_live_grade_of_its_base_when_the_lane_names_a_grade_that_finished",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_ends_the_live_grade_of_its_base_beside_a_grade_pushed_to_a_grade_ref_that_keeps_the_lane",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_leaves_a_waiting_head_pushed_to_a_grade_ref",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_leaves_the_same_lane_of_the_hotfix_class",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_head_already_graded_takes_its_lane_and_supersedes_the_lanes_older_head",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_first_pass_retires_the_pull_request_grades_whose_head_nothing_wants",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_stale_grades_of_one_pass_are_retired_in_run_order_and_counted",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_stale_head_retire_runs_on_the_first_pass_of_a_scheduler_only",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_listing_that_fails_retires_nothing_and_is_named_once",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_each_repository_is_listed_once_and_a_failed_one_keeps_its_grades",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_first_pass_asks_nothing_for_grades_of_other_classes_or_pushed_to_a_grade_ref",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_first_pass_keeps_the_pending_units_another_live_grade_grades",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_scheduler_without_a_listing_retires_nothing",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_listing_reads_every_page_of_open_pull_requests_and_of_plant_branches_twice",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_listings_are_read_again_until_two_readings_in_a_row_name_the_same_heads",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_reading_that_repeats_an_earlier_one_but_not_the_last_settles_nothing",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_listings_settle_on_the_last_reading_they_are_allowed",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_listings_that_never_repeat_raise_instead_of_naming_heads",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_next_link_outside_the_api_raises_and_sends_the_token_nowhere_else",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_ends_its_own_grade_and_leaves_the_other_pull_request_of_its_branch",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_whose_grade_its_lane_names_hands_the_lane_to_the_other_pull_request",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_three_pull_requests_of_one_branch_end_one_grade_at_each_close",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_keeps_the_waiting_head_of_a_branch_another_pull_request_holds",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_keeps_the_waiting_head_of_its_own_base_while_its_lane_grades_two_bases",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_ends_every_grade_of_its_head_and_base_in_its_lane",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_names_every_grade_it_ends_beside_the_grade_that_stays",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_whose_base_no_grade_of_a_shared_lane_carries_ends_nothing",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_with_no_grade_of_its_own_ends_nothing_of_its_branch",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_leaves_the_waiting_head_of_another_base",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_that_names_the_waiting_head_alone_leaves_the_live_grade_of_another_base",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_grade_of_the_same_head_in_another_lane_is_no_other_pull_request_of_the_branch",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_whose_lane_names_a_grade_that_finished_leaves_the_grade_of_its_head_in_another_lane",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_closed_pull_request_whose_live_grade_lost_its_document_is_still_forgotten",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_close_whose_lane_names_a_grade_that_finished_passes_over_a_grade_that_lost_its_document",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_listing_of_a_repository_url_asks_its_owner_and_name",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_listing_github_refuses_raises_instead_of_naming_fewer_heads",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_listing_longer_than_its_page_cap_raises_instead_of_naming_fewer_heads",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_listing_with_a_row_that_names_no_head_raises_an_os_error",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_listing_whose_token_is_refused_raises_an_os_error",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_a_listing_without_the_lab_app_settings_raises_an_os_error",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_listing_asks_the_lab_app_for_read_access_to_pull_requests_and_refs",
+        "tests/ci_lab/test_scheduler_stale_heads.py::test_the_service_scheduler_lists_wanted_heads_through_the_lab_app"
+      ]
+    },
+    {
       "id": "lab-lease-class-order",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
@@ -3054,6 +3120,18 @@
       ]
     },
     {
+      "id": "hive-failed-master-launch-pane",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mql-pane-retire",
+      "behaviour": "A failed master launch whose runtime returns an owned shell pane retires it before acknowledging the original failure with the pane identity. Cleanup refusal preserves the delivery and identity across a consumer restart and order expiry without another spawn, and a reused pane stays open. A refusal without a pane keeps its existing acknowledgement.",
+      "seam": "scripts.hive.orders.Consumer.poll through LocalHerdrRuntime.spawn and ownership qualified termination",
+      "tests": [
+        "tests/hive/test_orders.py::test_a_failed_master_launch_closes_its_shell_before_acknowledging",
+        "tests/hive/test_orders.py::test_a_failed_master_without_a_pane_keeps_its_failure",
+        "tests/hive/test_orders.py::test_failed_master_cleanup_retries_after_restart_and_expiry_without_spawning"
+      ]
+    },
+    {
       "id": "master-token-slot-route-report",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",
@@ -3320,6 +3398,21 @@
       "seam": "Admission.admit on the hub",
       "tests": [
         "tests/hub/test_admission.py::test_a_late_admission_line_names_the_elapsed_milliseconds_of_each_step"
+      ]
+    },
+    {
+      "id": "hub-launch-failure-capacity-no-steering",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-capacity-refusal-no-steer",
+      "behaviour": "An account slot or account full refusal records its launch failure reason without creating harness avoidance on a repeated or new admission. Canary timeouts and early exits still steer away from the broken harness, and a later account refusal preserves that earlier genuine avoidance.",
+      "seam": "Admission.failed, repeated Admission.admit and admission after reopen",
+      "rules": [
+        "hub-capacity-refusal-steers-harness"
+      ],
+      "tests": [
+        "tests/hub/test_admission.py::test_an_account_refusal_records_its_reason_without_steering",
+        "tests/hub/test_admission.py::test_a_broken_harness_failure_keeps_steering",
+        "tests/hub/test_admission.py::test_an_account_refusal_preserves_earlier_broken_harness_steering"
       ]
     },
     {
@@ -4265,6 +4358,19 @@
       ]
     },
     {
+      "id": "tick-lost-agent-keeps-record-until-retired",
+      "rules": ["lost-reap-drops-after-refused-retire"],
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-lost-master-recovery-pane",
+      "behaviour": "A lost agent stays recorded while pane retirement refuses, records the refusal and retries next tick; successful retirement closes the pane and drops the record. Deliberate termination also preserves its record on retirement refusal.",
+      "seam": "scripts.tick.steps.agents._lost through _reap",
+      "tests": [
+        "tests/tick/steps/test_lost_retire.py::test_a_lost_master_whose_resume_is_refused_keeps_its_record_while_retire_refuses",
+        "tests/tick/steps/test_lost_retire.py::test_a_lost_master_is_dropped_on_the_pass_its_retire_succeeds",
+        "tests/tick/steps/test_lost_retire.py::test_a_deliberate_terminate_keeps_its_record_while_retire_refuses"
+      ]
+    },
+    {
       "id": "swarm-tick-agents-reap",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h10",
@@ -5058,7 +5164,7 @@
       "id": "tick-thin-task-pass",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-thin-tick-step",
-      "behaviour": "Every 120 seconds the thin task pass checks each open engineer or ci task whose enhancement field is empty; a thin one gets one enhancement plan task in its phase, its enhancement set to needed in the same ledger write, and one master notice, and a second pass queues nothing more; a task the swarm freeze check reads as frozen, held by a freeze on itself, its phase or its plan, gets no write and no place in the notice.",
+      "behaviour": "Every 120 seconds the thin task pass checks each open engineer or ci task whose enhancement field is empty; a thin one gets one enhancement plan task in its phase, its enhancement set to needed in the same ledger write, and one master notice, and a thin one with no phase first gets in that write a manual planning phase of its own, named like its enhancement task, and a move into it, and a second pass queues nothing more; a task the swarm freeze check reads as frozen, held by a freeze on itself, its phase or its plan, gets no write and no place in the notice.",
       "seam": "scripts.tick.steps.thin._thin_task_pass registered as tick step thin task pass in group wrapper phases",
       "tests": [
         "tests/tick/steps/test_thin_task_pass.py::test_thin_task_pass",
@@ -5071,7 +5177,7 @@
         "tests/tick/steps/test_thin_task_pass.py::test_a_title_the_ledger_would_refuse_falls_back_to_a_plain_title",
         "tests/tick/steps/test_thin_task_pass.py::test_a_task_with_no_title_gets_the_plain_title",
         "tests/tick/steps/test_thin_task_pass.py::test_two_thin_tasks_are_both_queued_and_named_in_one_master_notice",
-        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_with_no_phase_or_description_gets_an_enhancement_task_with_neither",
+        "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_with_no_phase_gets_a_manual_phase_of_its_own_holding_it_and_its_enhancement",
         "tests/tick/steps/test_thin_task_pass.py::test_a_spent_deadline_takes_no_task",
         "tests/tick/steps/test_thin_task_pass.py::test_a_thin_task_held_by_a_freeze_gets_no_enhancement_write",
         "tests/tick/steps/test_thin_task_pass.py::test_an_unfrozen_thin_task_beside_a_frozen_phase_still_gets_its_enhancement",
@@ -5874,6 +5980,16 @@
         "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_calls_admitted_once_regardless_of_pending_count",
         "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_propagates_held_status_through_a_dependency_chain",
         "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_leaves_a_chain_with_no_frozen_ancestor_free"
+      ]
+    },
+    {
+      "id": "ledger-page-marks-admission-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-local-ledger-follow-cpu",
+      "behaviour": "The page view's freeze marks derive the admitted-focus queue once per view and hand it to every open task, so publishing each new generation of a watched ledger costs work linear in its tasks instead of open tasks times all tasks.",
+      "seam": "scripts.swarm.freeze.marks through unfocused and admitted",
+      "tests": [
+        "tests/swarm/test_freeze.py::test_marks_derives_the_admitted_queue_once_whatever_the_open_task_count"
       ]
     },
     {
@@ -8164,6 +8280,19 @@
         "tests/swarm/test_enhance_close.py::test_a_matching_enhancement_expectation_passes_the_api_and_writes",
         "tests/swarm/test_enhance_close.py::test_an_omitted_enhancement_expectation_keeps_legacy_writes",
         "tests/swarm/test_enhance_close.py::test_the_enhancement_expectation_rejects_invalid_values"
+      ]
+    },
+    {
+      "id": "lab-test-manifest-identity",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2752",
+      "behaviour": "Each test batch records the digest of its exact manifest bytes when keyed. The expected digest survives grade persistence, queue admission and lease transport. A worker refuses missing identity, missing payload and substituted batch records by name before acquiring execution resources, while later valid work still runs.",
+      "seam": "test expansion through persisted scheduler slots, queue, HTTP lease and test executor",
+      "tests": [
+        "tests/ci_lab/test_manifest_identity.py::test_expansion_records_the_identity_of_its_exact_batch_bytes",
+        "tests/ci_lab/test_manifest_identity.py::test_a_swapped_stored_manifest_is_refused_and_the_next_unit_still_runs",
+        "tests/ci_lab/test_manifest_identity.py::test_manifest_refusal_precedes_all_test_execution_resources",
+        "tests/ci_lab/test_manifest_identity.py::test_old_records_without_identity_are_parsed_then_refused_after_claiming"
       ]
     },
     {
@@ -12703,6 +12832,9 @@
         "tests/quick/test_room_tick_launch.py::test_the_launch_lands_in_the_seat_pane_with_the_quick_variables",
         "tests/quick/test_room_tick_launch.py::test_relaunch_starts_the_successor_once_and_marks_the_seat_ready",
         "tests/quick/test_seeds.py::test_the_master_seed_makes_it_the_front_door_over_its_own_panes",
+        "tests/quick/test_seeds.py::test_the_master_seed_never_trusts_a_pane_message_delivered",
+        "tests/quick/test_seeds.py::test_the_master_seed_and_block_load_the_quick_swarm_master_skill_first",
+        "tests/quick/test_seeds.py::test_every_seat_packs_deliveries_into_few_merge_requests",
         "tests/quick/test_seeds.py::test_an_engineer_seed_plans_first_and_reports_to_the_master_before_starting",
         "tests/quick/test_seeds.py::test_the_injected_block_names_the_seat_its_folder_and_its_next_stage",
         "tests/quick/test_seeds.py::test_the_block_tells_a_seat_of_room_lines_waiting_for_it",
@@ -16376,6 +16508,17 @@
       ]
     },
     {
+      "id": "swarm-set-ascii-whole-numbers",
+      "origin": "regression",
+      "ordered_at": "2026-11-24",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-set-unicode-digit",
+      "behaviour": "Swarm set takes a whole number cap, memory per agent, swap floor or placement node limit only in ASCII digits: a value written with a superscript or fullwidth digit gets the same usage refusal as a letter, exit 1, and the stored swarm config stays unchanged instead of the command crashing or storing it.",
+      "seam": "scripts.swarm.cli.main through cmd_set, config_value and scaling_value",
+      "tests": [
+        "tests/swarm/test_set_ascii_digits.py::test_set_refuses_a_non_ascii_digit_like_any_other_non_number"
+      ]
+    },
+    {
       "id": "swarm-review-trigger",
       "origin": "inventory",
       "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
@@ -16502,7 +16645,7 @@
       "id": "ledger-writer-hosts",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-warm-writer-hosts",
-      "behaviour": "Workstation hive installation and shared systemd units keep the warm ledger writer running after clean or failed termination. Worker startup restarts the writer beside hive run with inherited database settings and stops it when the hive ends.",
+      "behaviour": "Workstation hive installation and shared systemd units keep the warm ledger writer running after clean or failed termination. Every writer launch sets MALLOC_ARENA_MAX to two. Worker startup restarts the writer beside hive run with inherited database settings and stops it when the hive ends.",
       "seam": "timer.units, hive.daemon.install and deploy worker startup",
       "tests": [
         "tests/hive/test_daemon.py::test_writer_unit_uses_the_installed_binary_and_restarts_after_every_exit",

@@ -572,7 +572,22 @@ def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_l
     finished = executors.tests(
         pod,
         suite,
-        Lease("job", "tok", "h1", Unit("test", "k", ("tests/a.py::t",), json.dumps(manifest)), 3, 1500, "b1", "g1"),
+        Lease(
+            "job",
+            "tok",
+            "h1",
+            Unit(
+                "test",
+                "k",
+                ("tests/a.py::t",),
+                json.dumps(manifest),
+                hashlib.sha256(json.dumps(manifest).encode()).hexdigest(),
+            ),
+            3,
+            1500,
+            "b1",
+            "g1",
+        ),
     )
 
     assert venv.calls == [
@@ -600,7 +615,7 @@ def report_of_tests(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, verdict: ru
     )
     monkeypatch.setattr(executors.run_tests, "run", Recorder(verdict))
     pod = pod_of(tmp_path, FakeWorktrees({"h1": tree}))
-    unit = Unit("test", "unit-key", ("tests/a.py::t", "tests/a.py::u"), "{}")
+    unit = Unit("test", "unit-key", ("tests/a.py::t", "tests/a.py::u"), "{}", hashlib.sha256(b"{}").hexdigest())
     return report(executors.tests(pod, suite, Lease("job", "tok", "h1", unit, 1, 1500, "b1", "g1")), pod)
 
 

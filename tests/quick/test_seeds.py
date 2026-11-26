@@ -34,6 +34,39 @@ def test_the_master_seed_makes_it_the_front_door_over_its_own_panes(tmp_path):
 
 
 @pytest.mark.feature("quick-swarm")
+def test_the_master_seed_never_trusts_a_pane_message_delivered(tmp_path):
+    text = seeds.opening(_member(tmp_path, "master"))
+    assert "Never trust that a pane message reached its seat" in text
+    assert "report NOT SENT" in text
+    assert text.count('agentihooks quick send <seat> "<text>"') == 2
+
+
+@pytest.mark.feature("quick-swarm")
+def test_the_master_seed_and_block_load_the_quick_swarm_master_skill_first(tmp_path):
+    found = _member(tmp_path, "master")
+    assert "Load the quick-swarm-master skill before any other action" in seeds.opening(found)
+    assert "Load the quick-swarm-master skill before any other action" in seeds.block(found)
+    assert "quick-swarm-master" not in seeds.opening(_member(tmp_path, "eng-1"))
+
+
+@pytest.mark.feature("quick-swarm")
+def test_every_seat_packs_deliveries_into_few_merge_requests(tmp_path):
+    master_found, engineer_found = _member(tmp_path, "master"), _member(tmp_path, "eng-1")
+    master_opening, engineer_opening = seeds.opening(master_found), seeds.opening(engineer_found)
+    master_block, engineer_block = seeds.block(master_found), seeds.block(engineer_found)
+    for text in (master_opening, engineer_opening, master_block, engineer_block):
+        assert "Pack each delivery into as few merge or pull requests as possible, one per repository" in text
+        assert "at most 20" in text and "split only above 20" in text
+        assert "Follow-ups go into the change already open in that repository" in text or (
+            "follow-ups go into the change already open in that repository" in text
+        )
+    for text in (master_opening, master_block):
+        assert "Approve" in text and "no change is open in that repository" in text
+    for text in (engineer_opening, engineer_block):
+        assert 'agentihooks quick send master "<text>"` before opening any new one' in text
+
+
+@pytest.mark.feature("quick-swarm")
 def test_an_engineer_seed_plans_first_and_reports_to_the_master_before_starting(tmp_path):
     text = seeds.opening(_member(tmp_path, "eng-1"))
     assert "eng-1 of quick swarm quick-abc, in herdr pane 2" in text

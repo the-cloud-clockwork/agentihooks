@@ -307,7 +307,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--base", type=Path)
+    parser.add_argument("--record")
     args = parser.parse_args()
+    if args.record:
+        print(entry_path(Path("feature-map.json"), args.record).as_posix())
+        return
     base = args.base / "feature-map.json" if args.base else None
     count = validate(args.root, args.root / "feature-map.json", base)
     print(f"Feature map: {count} features, all rule, test and live check links exist")

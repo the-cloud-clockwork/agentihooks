@@ -33,7 +33,7 @@ def test_a_leased_batch_carries_its_manifest_to_an_empty_worker_volume(
     for head, name in ((HEAD_A, "a"), (HEAD_B, "b")):
         path = f"tests/test_{name}.py"
         test = f"{path}::test_{name}"
-        record = {"units": [], "files": [f"scripts/{name}.py"], "outside": [f"docs/{name}.md"], "escapes": False}
+        record = {"units": [], "files": [f"scripts/{name}.py"], "escapes": False, "outside": [f"docs/{name}.md"]}
         manifest = {"commit": head, "units": [], "tests": {} if unlisted else {test: record}}
         manifests[head] = manifest
         tree = {path: f"def test_{name}():\n    assert True\n".encode(), f"scripts/{name}.py": b"value = 1\n"}

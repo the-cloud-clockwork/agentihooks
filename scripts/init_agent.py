@@ -662,13 +662,16 @@ def _recorded_home(agent: str, environ: dict[str, str]) -> str | None:
     return environ.get(binding.HOMES[agent])
 
 
-def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
+def _binding_request(args: Any, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
     from scripts.profiles import binding
 
     if not args.profile:
         return prompt
     home = Path(environ[binding.HOMES[agent]])
-    report = _runtime_dir(environ) / f"profile-{os.getpid()}-{time.time_ns()}.json"
+    root = _runtime_dir(environ)
+    if agent == "codex" and args.profile == "planner":
+        root = Path(environ.get("HOME") or Path.home()) / ".agentihooks" / "swarm" / "profile-reports"
+    report = root / f"profile-{os.getpid()}-{time.time_ns()}.json"
     binding.request(report, args.profile, agent, home)
     environ[binding.REPORT] = str(report)
     if not args.defer_canary:
@@ -1152,10 +1155,15 @@ def main(
         active_env.update({"AGENTIHOOKS_CLAIM_FENCE": args.claim_fence} if args.claim_fence else {})
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
+        rotation_default = args.agent or ("claude" if _flag_value(claude_args, ("--route",)) == "claude-ai" else "")
         agent, reason = (
             (_handoff_agent(args.agent, active_env, claude_args), "handoff")
             if args.handoff
-            else ((args.agent or "claude", "interactive") if args.auth else agent_choice.choose(args.agent, active_env))
+            else (
+                (args.agent or "claude", "interactive")
+                if args.auth
+                else agent_choice.choose(rotation_default, active_env)
+            )
         )
         agent = agent or "claude"
         if args.handoff:

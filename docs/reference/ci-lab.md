@@ -45,7 +45,11 @@ Both services run from the installed wheel, which ships `hooks`, `scripts` and `
 | Import the lab scheduler's modules inside the swarm image | Swarm container smoke | The built swarm image cannot import a module of `scripts.ci_lab`, the executors and mutation expansion the scheduler loads at call time included, or the CI test planner |
 
 `docker/ci-lab/smoke.sh` also imports the worker's executors, test runner and pricing inside the
-built CI lab image.
+built CI lab image. It then starts the worker as the lab chart runs it, as user and group 1001 with
+a read only root filesystem, every capability dropped and no network, on a work root owned by root
+that holds a sealed tree, a locked folder and a file. The smoke fails when the worker does not reach
+its first lease call, leaves a planted entry in the root or does not exit 0 on SIGTERM, each within
+two minutes, so a release whose worker cannot start in the lab pod never moves the release tag.
 
 ## Run the scheduler service
 
@@ -1753,10 +1757,17 @@ both of these hold:
 |---|---|---|---|---|
 | `push` delivery on `/github` | A branch under `refs/heads/` outside the plant prefix moved; a deleted branch, a new branch whose `before` is all zeros, or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
 | `push` delivery on `/github` to a plant branch | A branch under `refs/heads/diffcheck/lab-plant-` (`scripts.ci_lab.webhooks.PLANT_PREFIX`) moved; a deleted branch records nothing | `ci.lab.head.plant` | `after`, and an empty base whatever `before` says | The delivery's sender |
-| `pull_request` delivery on `/github` | The action is `opened`, `synchronize` or `reopened` | `ci.lab.head.pull_request` | The pull request's head and base SHA | The pull request's author |
+| `pull_request` delivery on `/github` | The action is `opened`, `synchronize`, `reopened` or `closed` | `ci.lab.head.pull_request` | The pull request's head and base SHA | The pull request's author |
 | `merge_group` delivery on `/github` | The action is `checks_requested` | `ci.lab.head.merge_group` | The group's `head_sha` and `base_sha` | The delivery's sender |
 | `check_run` delivery on `/github` | The action is `rerequested` and the check's name starts with `lab` | `ci.lab.head.check_run` | The run's `head_sha`, and the base of its first pull request, empty when it has none | The delivery's sender |
 | Signed notice on `/lab/head` | Every valid notice | `ci.lab.head.notice` | As the notice names them | As the notice names it |
+
+A pull request head also carries `lane` in its envelope data: the pull request's head branch, or
+`owner:branch` for a pull request from a fork (`scripts.ci_lab.webhooks.pull_lane`). The scheduler
+keys the head's lane on it, so a newer head of the pull request supersedes the older one. No other
+head carries the key, and the scheduler reads an envelope without it as before. A `closed` head
+asks for no grade: it names the lane whose work the scheduler ends, described in
+[Scheduler loop](#scheduler-loop).
 
 The receiver records each head the table names whoever its actor is, and every other GitHub
 event records no head. `scripts.ci_lab.intake.admit` keeps only heads whose actor is on the
@@ -1876,7 +1887,8 @@ the url before it pushes origin; see [Publishing through the lab](../pillars/swa
 remote comes from.
 
 The url is the scheduler's [`/grades/<sha>`](#grades-of-a-commit) route. The envelope carries the
-pushed `ref` and the `branch` push option, which becomes the head's scheduler lane. Its id covers
+pushed `ref` and the `branch` push option, which becomes the head's scheduler lane when the
+envelope names no `lane`. Its id covers
 both, so the same head pushed again with another branch or to another grade ref is a new head
 event. The base is the `-o base=<sha>` push option, else the head's first parent. The hook runs
 after git writes the refs, so it cannot turn a push away. The remote's pre receive hook refuses refs
@@ -2474,6 +2486,8 @@ key; the builders are pure and read no file, clock or network.
    in the pull request class with that commit as base and grader, so both twins of a plant cut
    from one dev commit share it. When git cannot resolve one, the pass prints
    `cannot resolve the dev merge base of plant head <head>: <error>` and never holds the head.
+   A head whose action is `closed` is not admitted or held: intake ends the work of its lane, as
+   described below.
 2. Each head waits in its lane (repository, branch and class) for the quiet window, 30 seconds by
    default; a newer head of the lane restarts it and a hotfix waits for none. A pass starts at most
    eight heads whose window ended (`STARTS_PER_PASS`): the most urgent class first (hotfix, pull
@@ -2617,8 +2631,56 @@ every other repository. A live grade with no
 origin, one that started before this step existed, gets one from its document on the next pass,
 and the origin of a run that is no longer live is removed.
 
-Known limits: a lab head event carries no branch yet, so a head's lane is its own sha and a newer
-head supersedes nothing until intake records the branch; expansion keys static gates, test units
+The lab also ends the work of pull request heads nobody wants graded any more, in three ways.
+
+- A head's lane is the `lane` its envelope names, else its `branch`, else the head itself. A pull
+  request head names its head branch, so the newer head of a pull request supersedes the older
+  one. A head whose grade already exists still takes its lane: the lane's older head is
+  superseded and the lane names the existing run, so a head first graded outside its pull request
+  lane holds that lane afterwards.
+- A `closed` pull request head starts no grade. `Scheduler._close` ends what the closed pull
+  request holds in its lane of the pull request class, told by its base: GitHub sets a pull
+  request's base commit at its last head and repeats it when the pull request closes. It drops
+  the waiting head of that base and forgets the lane's live grade when the close names that
+  grade's base, with every other grade of the same head, base and lane and with the pending jobs
+  of that head unless another live grade grades the head. Nothing is posted. A waiting head or a grade pushed to a grade ref stays, and so does
+  the same lane of the hotfix class. The pass prints `closed <lane> of <repo>:` and what it
+  ended, or `nothing held`. A waiting head or a live grade of another base is the work of another
+  pull request of the same head branch and stays. While the lane holds live grades of one head
+  against two bases, a close ends the grades of its own base only: the waiting head and the
+  pending jobs stay, the lane names a grade that stays, and the pass prints `retired <run>,
+  <run> still grades <head>`. When the lane names a grade that already finished, or one pushed
+  to a grade ref, the close starts from the live grades of the closed head that name the lane,
+  and the lane keeps naming the grade it names.
+- On its first pass a scheduler retires the stale grades a restart finds live. For each repository
+  with a live pull request grade that has no grade ref, `scripts.ci_lab.stale_heads.OpenHeads`
+  reads the open pull request heads and the heads of the plant branches through the lab App: two
+  paged listings, 100 open pull requests a page, each followed through its `next` links and
+  never asked one head at a time. It reads both listings again until two readings in a row name
+  the same heads, at least twice and at most five times, because a pull request closed between
+  two pages moves a later one out of a single reading. `Scheduler._retire_heads` then forgets
+  every such grade whose head the settled reading does not name, the way a gone merge group grade
+  is forgotten. Each one prints `retired <run>: <head> is
+  no open pull request head or plant head of <repo>, dropped <n> pending units`, and each listed
+  repository one line counting the heads listed, its live pull request grades, the grades retired
+  and the pending units dropped. When GitHub refuses a page, a listing is longer than 50 pages,
+  a `next` link leaves the GitHub API, five readings never agree, the App token is refused or a
+  row cannot be read, the listing raises an `OSError`: the pass
+  retires nothing of that repository and prints `cannot list the wanted heads of <repo>`; later
+  passes do not list again. A head pushed with a signed notice before its pull request exists is
+  in neither listing, so a restart retires its grade and the pull request's `opened` delivery
+  grades it again.
+
+Known limits: a rerequested check run and a signed notice name no lane, so such a head's lane is
+its own sha until its pull request delivers it; two open pull requests from two branches whose
+heads are one commit graded against one base share a single grade, so closing one of them, or
+pushing a newer head to it, ends the pending units of that commit for both until the other is
+pushed or reopened; of two pull requests from one head branch whose heads arrive in one quiet
+window only the first is graded, so closing that one ends the grade the other reads; a pull
+request whose base was edited after its last head closes with a base no grade carries, and a
+pull request closed while a newer head waits names the base of that waiting head, so the live
+grade of its older head, started against an earlier base, stays until it finishes or the
+scheduler restarts; expansion keys static gates, test units
 and mutation units only, so the other jobs the lab does not run yet pass by their frame; a
 rerequested grade reuses the finished jobs of its own head.
 
@@ -3526,7 +3588,10 @@ its process exits 0, so the kubelet restarts the container in the same pod and p
 tag; its running units finish or are left to reap exactly as on a SIGTERM drain. The entry point
 empties `CI_LAB_WORK_ROOT` first, sealed trees and folders without owner access included, so a
 restarted or freshly scheduled pod always starts from an empty root: the venvs, mutation cache and
-killers a worker built under it are built again after any container restart, a crash included. A
+killers a worker built under it are built again after any container restart, a crash included.
+Emptying changes a folder's mode only when the folder lacks one of its three owner bits, as a sealed
+tree does: the work root itself is an `emptyDir` owned by root with mode 777, which the worker's
+user may not change, and it is emptied as it is. A
 worker answered `426` again after its restart, because the node has not pulled the wanted digest
 yet, exits again at once; the kubelet's restart backoff is the only pause between those attempts.
 

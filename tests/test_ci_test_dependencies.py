@@ -1138,7 +1138,11 @@ PINNED_TOOL_STEPS = {
         "lint-actions",
         "Hold the hive member NATS grants equal to the antoncore hive user",
     ): ("cryptography",),
-    (".github/workflows/test.yml", "lint-actions", "Install Playwright for artifact checks"): ("orjson", "playwright"),
+    (".github/workflows/test.yml", "lint-actions", "Install Playwright for artifact checks"): (
+        "jsonschema",
+        "orjson",
+        "playwright",
+    ),
     (".github/workflows/test.yml", "lint", "Install PyYAML"): ("pyyaml",),
     (".github/workflows/test.yml", "lint-actions", "Install PyYAML"): ("pyyaml",),
     (".github/workflows/test.yml", "lint", "Install ruff"): ("ruff",),
