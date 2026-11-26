@@ -24,7 +24,9 @@ UNREAD = "a delivery file its reader accepts: {error}"
 
 def _terms(condition: object) -> list[str]:
     """The terms a job condition joins with and, read without its expression braces: none when it joins any
-    with or outside every pair of brackets, since such a condition can hold without them."""
+    with or outside every pair of brackets, since such a condition can hold without them. A bracket inside
+    quoted text counts as a bracket here; the protected grader, which holds a gate job to its base condition
+    plus the exact lab clause, is the gate that refuses such a condition."""
     text = str(condition).removeprefix("${{").removesuffix("}}")
     depth = 0
     for index, mark in enumerate(text):
