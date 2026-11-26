@@ -307,6 +307,16 @@ def test_fit_judges_the_lane_harness_of_its_own_swarm(config: SwarmConfig) -> No
 
 
 @pytest.mark.feature("event-offer-account-seats")
+def test_fit_passes_an_offer_no_harness_may_take_on_to_the_hub_refusal(config: SwarmConfig) -> None:
+    pinned = replace(config, lanes={"plan": {"agent": "codex", "profile": "planner"}})
+    read = Mock(return_value=[account("claude"), account("codex")])
+    fits = offer_quota.Fit(pinned, "plan", lambda offered: True, read)
+    assert fits(event({"requires_harness": "claude"}))
+    assert not fits.held
+    read.assert_not_called()
+
+
+@pytest.mark.feature("event-offer-account-seats")
 def test_permitted_reads_no_lanes_from_a_swarm_without_them(config: SwarmConfig) -> None:
     bare: Any = SimpleNamespace(slug="example")
     assert offer_quota.permitted(bare, "plan", {}) == ("claude", "codex")

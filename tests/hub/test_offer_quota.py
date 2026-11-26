@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from scripts.hub import admission
 from scripts.swarm import capacity, offer_quota, runtime
 from scripts.swarm.offer_quota import accounts as real_accounts
 from tests.hub.test_admission import SLUG, ask
@@ -97,3 +98,36 @@ def test_a_mixed_offer_waits_for_either_harness_without_spending_a_claim_life(
     assert admitted["task"]["requires_harness"] == ""
     assert rig.store.claimant(SLUG, "t1") == admitted["name"]
     assert rig.store.claims(SLUG, "t1") == 0
+
+
+@pytest.mark.feature("event-offer-account-seats")
+@pytest.mark.parametrize("requirement", ["harness", "profile"])
+def test_an_offer_no_harness_may_take_is_refused_before_any_account_read_or_claim(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], requirement: str
+) -> None:
+    reader = _accounts(
+        monkeypatch,
+        [
+            capacity.Account("claude", "claude-a", "OPEN", 0, None, 90, 3),
+            capacity.Account("codex", "codex-a", "OPEN", 0, None, 90, 6),
+        ],
+    )
+    rig.store.update(SLUG, lanes={"eng": {"agent": "codex"}})
+    rig.rows["t1"].update(profile="planner", requires_harness="claude")
+    if requirement == "profile":
+        rig.rows["t1"].update(profile="claude-only", requires_harness="")
+    before = deepcopy(rig.rows["t1"])
+    generation = rig.store.claim_generation(SLUG, "t1")
+    lives = rig.store.claims(SLUG, "t1")
+
+    answer = rig.admitter.admit(SLUG, ask())
+
+    assert answer is None
+    assert f"refused: {admission.NO_HARNESS}" in capsys.readouterr().err
+    reader.assert_not_called()
+    assert rig.rows["t1"] == before
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.claim_generation(SLUG, "t1") == generation
+    assert rig.store.claims(SLUG, "t1") == lives
+    assert rig.store.agents(SLUG) == []
+    assert rig.ledger.writes == []
