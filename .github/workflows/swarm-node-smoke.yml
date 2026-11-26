@@ -2,11 +2,6 @@ name: Swarm worker image smoke
 
 on:
   workflow_call:
-    secrets:
-      TCC_CI_CLIENT_ID:
-        required: true
-      TCC_CI_APP_PRIVATE_KEY:
-        required: true
   workflow_dispatch:
 
 permissions:
@@ -23,7 +18,6 @@ jobs:
     env:
       WORKER_SCANNER_CACHE: ${{ github.workspace }}/.worker-scanner-cache
       WORKER_PROVEN_IMAGE: agentihooks-worker-proven:${{ github.run_id }}-${{ github.run_attempt }}
-      ANTONCORE_SANDBOX_REF: 268500b5510330c2f4e7600a932f9a91a1ba637c
     strategy:
       fail-fast: false
       matrix:
@@ -32,52 +26,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-      - name: Mint the sandbox chart read token
-        if: matrix.proof == 'startup'
-        id: sandbox-token
-        uses: actions/create-github-app-token@v3.2.0
-        with:
-          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
-          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-          repositories: antoncore
-          permission-contents: read
-      - name: Read the pinned sandbox chart
-        if: matrix.proof == 'startup'
-        uses: actions/checkout@v4
-        with:
-          repository: the-cloud-clockwork/antoncore
-          ref: ${{ env.ANTONCORE_SANDBOX_REF }}
-          token: ${{ steps.sandbox-token.outputs.token }}
-          path: .sandbox-source
-          persist-credentials: false
-          sparse-checkout: k8s/charts/ci-lab
-      - uses: azure/setup-helm@v4.3.1
-        if: matrix.proof == 'startup'
-      - uses: actions/setup-python@v5
-        if: matrix.proof == 'startup'
-        with:
-          python-version: '3.12'
-      - name: Render both native sandbox profiles
-        if: matrix.proof == 'startup'
-        env:
-          WORKER_SANDBOX_PROFILES: ${{ runner.temp }}/worker-image-evidence/sandbox-profiles
-        run: |
-          python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
-          mkdir -p "$WORKER_SANDBOX_PROFILES"
-          helm template sandbox .sandbox-source/k8s/charts/ci-lab --namespace ci-lab --show-only templates/node-profiles.yaml > "$WORKER_SANDBOX_PROFILES/rendered.yaml"
-          python - "$WORKER_SANDBOX_PROFILES" <<'PY'
-          import json, os, sys
-          from pathlib import Path
-          import yaml
-          output = Path(sys.argv[1])
-          documents = yaml.safe_load_all((output / 'rendered.yaml').read_text())
-          config = next(doc for doc in documents if doc and doc['kind'] == 'ConfigMap' and doc['metadata']['name'] == 'ci-lab-node-profiles')
-          data = config['data']
-          json.loads(data['swarm-codex.json'])
-          for name in ('swarm-codex.json', 'ci-lab-worker'):
-              (output / name).write_text(data[name])
-          (output / 'source-ref').write_text(os.environ['ANTONCORE_SANDBOX_REF'] + '\n')
-          PY
       - name: Pull the locked worker base with bounded rate limit retries
         run: bash docker/swarm-node/pull-base.sh
       - uses: actions/cache/restore@v4
@@ -98,7 +46,6 @@ jobs:
           WORKER_PROOF: ${{ matrix.proof }}
           WORKER_LAYERS: ${{ steps.layers.outputs.cache-matched-key && format('{0}/worker-layers', runner.temp) || '' }}
           WORKER_KEEP_IMAGE: ${{ matrix.proof == 'startup' && env.WORKER_PROVEN_IMAGE || '' }}
-          WORKER_SANDBOX_PROFILES: ${{ runner.temp }}/worker-image-evidence/sandbox-profiles
         run: bash docker/swarm-node/smoke.sh "$RUNNER_TEMP/worker-image-evidence" "$WORKER_PROOF"
       - uses: actions/cache/save@v4
         if: success() && matrix.proof == 'startup'

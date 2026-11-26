@@ -173,9 +173,6 @@ jobs:
     if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
     needs: [reuse, admission]
     uses: ./.github/workflows/swarm-node-smoke.yml
-    secrets:
-      TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
-      TCC_CI_APP_PRIVATE_KEY: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
   swarm-image:
     if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
     needs: [reuse, admission]

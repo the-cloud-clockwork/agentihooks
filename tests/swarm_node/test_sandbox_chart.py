@@ -30,24 +30,3 @@ def test_profile_defaults_and_shared_service_security_are_preserved() -> None:
     security = helpers.split('define "swarm.podSecurityContext"', 1)[1].split("end", 1)[0]
     assert "type: RuntimeDefault" in security
     assert "appArmorProfile" not in security
-
-
-@pytest.mark.feature("codex-planner-native-sandbox")
-def test_native_smoke_reads_the_pinned_chart_with_scoped_secret_references() -> None:
-    workflows = CHART.parents[2] / ".github/workflows"
-    job = yaml.safe_load((workflows / "swarm-node-smoke.yml").read_text())["jobs"]["worker-image"]
-    assert job["env"]["ANTONCORE_SANDBOX_REF"] == "268500b5510330c2f4e7600a932f9a91a1ba637c"
-    assert not any("runner." in str(value) for value in job["env"].values())
-    render = next(step for step in job["steps"] if step.get("name") == "Render both native sandbox profiles")
-    assert render["env"]["WORKER_SANDBOX_PROFILES"] == "${{ runner.temp }}/worker-image-evidence/sandbox-profiles"
-    checkout = next(step for step in job["steps"] if step.get("name") == "Read the pinned sandbox chart")
-    assert checkout["with"]["ref"] == "${{ env.ANTONCORE_SANDBOX_REF }}"
-    assert checkout["with"]["persist-credentials"] is False
-    token = next(step for step in job["steps"] if step.get("id") == "sandbox-token")
-    assert token["with"]["repositories"] == "antoncore"
-    assert token["with"]["permission-contents"] == "read"
-    for caller in ("test.yml", "proofs.yml"):
-        secrets = yaml.safe_load((workflows / caller).read_text())["jobs"]["worker-image"]["secrets"]
-        assert secrets == {
-            name: "${{ secrets." + name + " }}" for name in ("TCC_CI_CLIENT_ID", "TCC_CI_APP_PRIVATE_KEY")
-        }

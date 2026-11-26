@@ -237,9 +237,6 @@ jobs:
   worker-image:
     if: inputs.proof == 'worker-image'
     uses: ./.github/workflows/swarm-node-smoke.yml
-    secrets:
-      TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
-      TCC_CI_APP_PRIVATE_KEY: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
   swarm-image:
     if: inputs.proof == 'swarm-image'

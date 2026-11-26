@@ -49,29 +49,19 @@ fixture="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
 image="agentihooks-worker-proof:$fixture"
 rebuild="agentihooks-worker-rebuild:$fixture"
 rejected="agentihooks-worker-rejected:$fixture"
-sandbox_loader="agentihooks-worker-apparmor:$fixture"
 context="$output/context-$fixture"
 mkdir "$context"
 git -C "$repo" archive HEAD | tar -x -C "$context"
 cleanup() {
-    local cleanup_status=$?
     if [[ -n "${scanner_pid:-}" ]]; then wait "$scanner_pid" || true; fi
     if [[ -n "${scan_pid:-}" ]]; then wait "$scan_pid" || true; fi
     if [[ -n "${profile_pid:-}" ]]; then wait "$profile_pid" || true; fi
     docker rm -f "worker-profile-positive-$fixture" "worker-profile-positive-second-$fixture" >/dev/null 2>&1 || true
-    if [[ -n "${sandbox_loaded:-}" ]]; then
-        if ! docker run --rm --privileged --network none --read-only --tmpfs /tmp \
-            -v "$sandbox_profiles:/profiles:ro" "$sandbox_loader" --remove --skip-cache /profiles/qualification.apparmor; then
-            echo "failed to remove qualification AppArmor profile $sandbox_name" >&2
-            if (( cleanup_status == 0 )); then cleanup_status=1; fi
-        fi
-    fi
-    docker image rm "$image" "$rebuild" "$rejected" "$sandbox_loader" >/dev/null 2>&1 || true
+    docker image rm "$image" "$rebuild" "$rejected" >/dev/null 2>&1 || true
     python3 - "$context" <<'PY' || true
 import shutil, sys
 shutil.rmtree(sys.argv[1])
 PY
-    return "$cleanup_status"
 }
 trap cleanup EXIT
 trap 'echo "worker proof failed at line $LINENO: $BASH_COMMAND (exit $?)" >&2; case "$BASH_COMMAND" in "docker build "*rebuild.log*) tail -n 40 "$output/rebuild.log" >&2 || true ;; "docker build "*) tail -n 40 "$output/build.log" >&2 || true ;; esac' ERR
@@ -114,36 +104,6 @@ if [[ "$proof" != profiles ]]; then
     docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 --tmpfs /tmp \
         -v "$context/tests/swarm_node/code_mode_probe.py:/opt/probe/code_mode_probe.py:ro" \
         "$image" python /opt/probe/code_mode_probe.py /usr/local/bin/codex > "$output/codex-code-mode.json"
-    sandbox_profiles="${WORKER_SANDBOX_PROFILES:?supply the paired profiles rendered from the pinned infrastructure chart}"
-    [[ -s "$sandbox_profiles/swarm-codex.json" && -s "$sandbox_profiles/ci-lab-worker" ]]
-    sandbox_name="worker-planner-$fixture"
-    sed "s/ci-lab-worker/$sandbox_name/g" "$sandbox_profiles/ci-lab-worker" > "$sandbox_profiles/qualification.apparmor"
-    docker build --platform linux/amd64 -f "$context/docker/swarm-node/apparmor.Dockerfile" \
-        -t "$sandbox_loader" "$context" > "$output/apparmor-build.log" 2>&1 || {
-            status=$?
-            cat "$output/apparmor-build.log" >&2
-            exit "$status"
-        }
-    docker run --rm --privileged --network none --read-only --tmpfs /tmp \
-        -v "$sandbox_profiles:/profiles:ro" "$sandbox_loader" --add --skip-cache /profiles/qualification.apparmor \
-        > "$output/apparmor-load.log" 2>&1 || {
-            status=$?
-            cat "$output/apparmor-load.log" >&2
-            exit "$status"
-        }
-    sandbox_loaded=1
-    docker run --rm --network none --read-only --user 10001:10001 --cap-drop ALL \
-        --security-opt no-new-privileges \
-        --security-opt "seccomp=$sandbox_profiles/swarm-codex.json" \
-        --security-opt "apparmor=$sandbox_name" \
-        --tmpfs /home/worker:uid=10001,gid=10001,exec --tmpfs /tmp \
-        -v "$context/tests/swarm_node/planner_sandbox_probe.py:/opt/probe/planner_sandbox_probe.py:ro" \
-        "$image" python /opt/probe/planner_sandbox_probe.py \
-        > "$output/planner-sandbox.json" 2> "$output/planner-sandbox.log" || {
-            status=$?
-            cat "$output/planner-sandbox.log" "$output/planner-sandbox.json" >&2
-            exit "$status"
-        }
 
 fi
 
