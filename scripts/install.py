@@ -5358,7 +5358,7 @@ def cmd_claude(extra_args: list[str]) -> None:
                 route_lock.close()
             return import_module(ROUTE_LAUNCHERS[route]).launch_claude(claude_bin, extra_args, os.environ, report)
         decision = (
-            forced(os.environ, route.removeprefix("named:"))
+            forced(os.environ, route)
             if route
             else select_launch_credential(
                 os.environ,

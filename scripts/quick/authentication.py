@@ -4,6 +4,9 @@ from scripts.quick.guard import QuickError
 
 
 def _named(reference: str, harness: str, environ: Mapping[str, str]) -> str:
+    prefix = "AH_CC_TOKEN_" if harness == "claude" else "AH_CX_TOKEN_"
+    name = f"{prefix}{reference.removeprefix(prefix)}"
+    environ = {name: environ.get(name, "")}
     if harness == "claude":
         from scripts.claude_quota_balancer import RoutingError, credential_for_slug, discover_credentials
 

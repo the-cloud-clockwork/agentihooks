@@ -707,6 +707,12 @@ def _report(path: str, **fields: str) -> None:
 
 def _route(environ: Mapping[str, str], route: str, run: Callable, exclude: str) -> tuple[CodexAccount, str, int, str]:
     sessions = codex_sessions_by_account()
+    if route.startswith("named:"):
+        reference = route.removeprefix("named:").removeprefix(CODEX_TOKEN_PREFIX)
+        name = f"{CODEX_TOKEN_PREFIX}{reference}"
+        pool = token_accounts({name: environ.get(name, "")})
+        account, placement, _ = select(pool, {}, sessions, time.time(), reference, environ)
+        return account, placement, sessions.get(account.name, 0), "?"
     if route == API_ACCOUNT:
         return api_account(environ), "forced", sessions.get(API_ACCOUNT, 0), "?"
     source = CodexAccountSource(run, refresh=not route)
@@ -776,7 +782,7 @@ def main(
                 raise RoutingError("native default login is unavailable")
             account, placement, live, cap = CodexAccount(CODEX_DEFAULT), "forced", 0, "?"
         else:
-            account, placement, live, cap = _route(active, route.removeprefix("named:"), run, exclude)
+            account, placement, live, cap = _route(active, route, run, exclude)
             account = credential(account, active)
     except RoutingError as exc:
         print(f"agentihooks codex: {exc}", file=sys.stderr)

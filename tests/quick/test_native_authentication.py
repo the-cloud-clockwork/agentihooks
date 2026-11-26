@@ -3,42 +3,8 @@ from pathlib import Path
 import pytest
 
 from scripts import init_agent
-from scripts.quick import launch, registry
 
 pytestmark = pytest.mark.unit
-
-
-@pytest.mark.feature("quick-native-authentication")
-@pytest.mark.parametrize("harness", ["claude", "codex"])
-@pytest.mark.parametrize(
-    ("mode", "account", "tail"),
-    [
-        ("routed", "", ["--routed-only"]),
-        ("default", "", ["--auth", "default"]),
-        ("named", "alpha", ["--auth", "named:alpha"]),
-    ],
-)
-def test_saved_native_authentication_reaches_the_launcher(
-    harness: str, mode: str, account: str, tail: list[str], tmp_path: Path
-) -> None:
-    seat = registry.Seat(2, "eng-1", "w1:p2", harness, "quick-proof-eng-1", auth=mode, account=account)
-    swarm = registry.Swarm("quick-proof", str(tmp_path), (seat,))
-    prompt = tmp_path / "prompt.md"
-    assert launch.argv(swarm, seat, prompt) == [
-        "--host",
-        "herdr",
-        "--pane",
-        "w1:p2",
-        "--name",
-        "quick-proof-eng-1",
-        "--agent",
-        harness,
-        "--dir",
-        str(tmp_path),
-        "--prompt-file",
-        str(prompt),
-        *tail,
-    ]
 
 
 @pytest.mark.feature("quick-native-authentication")

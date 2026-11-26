@@ -10,3 +10,15 @@ rules:
     pattern-either:
       - pattern: ($HOME / "auth.json").symlink_to(...)
       - pattern: ($HOME / ".credentials.json").symlink_to(...)
+  - id: native-named-route-stripped
+    message: Retain the named authentication namespace until the native selector resolves the exact reference.
+    languages: [python]
+    severity: ERROR
+    paths:
+      include:
+        - scripts/install.py
+        - scripts/codex_router.py
+        - native-default-shared-login.py
+    pattern-either:
+      - pattern: forced($ENV, $ROUTE.removeprefix("named:"))
+      - pattern: _route($ENV, $ROUTE.removeprefix("named:"), ...)

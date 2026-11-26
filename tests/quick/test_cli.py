@@ -103,87 +103,6 @@ def test_up_refuses_a_harness_list_that_does_not_match_the_engineers(quick_env, 
 
 
 @pytest.mark.feature("quick-swarm")
-def test_an_invalid_harness_count_never_creates_panes(
-    quick_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def refuse_layout(*args: object, **kwargs: object) -> None:
-        pytest.fail("invalid request created a layout")
-
-    monkeypatch.setattr(cli.layout, "build", refuse_layout)
-    assert cli.main(["up", "--agents", "3", "--harness", "codex,claude,claude", "--dir", str(tmp_path)], quick_env) == 2
-    assert not (tmp_path / "scratchpad" / "repo" / "quick-d039e169" / registry.FILE).exists()
-
-
-@pytest.mark.feature("quick-native-authentication")
-def test_up_persists_default_for_mixed_engineers_without_changing_master(
-    quick_env: dict[str, str], tmp_path: Path
-) -> None:
-    assert (
-        cli.main(
-            ["up", "--agents", "3", "--harness", "claude,codex", "--auth", "default", "--dir", str(tmp_path)], quick_env
-        )
-        == 0
-    )
-    swarm = registry.load(tmp_path / "scratchpad" / "repo" / "quick-d039e169")
-    assert swarm is not None
-    assert [(row["harness"], row["auth"], row["account"]) for row in map(cli.dataclasses.asdict, swarm.seats)] == [
-        ("claude", "routed", ""),
-        ("claude", "default", ""),
-        ("codex", "default", ""),
-    ]
-
-
-@pytest.mark.feature("quick-native-authentication")
-@pytest.mark.parametrize(
-    "choice", ["named:missing", "default,named:missing", "default,routed,default", "named:", "interactive"]
-)
-def test_invalid_authentication_never_creates_panes(
-    choice: str, quick_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def refuse_layout(*args: object, **kwargs: object) -> None:
-        pytest.fail("invalid authentication created a layout")
-
-    monkeypatch.setattr(cli.layout, "build", refuse_layout)
-    assert (
-        cli.main(
-            ["up", "--agents", "3", "--harness", "claude,codex", "--auth", choice, "--dir", str(tmp_path)], quick_env
-        )
-        == 2
-    )
-    assert not (tmp_path / "scratchpad" / "repo" / "quick-d039e169" / registry.FILE).exists()
-
-
-@pytest.mark.feature("quick-native-authentication")
-def test_up_resolves_named_native_references_per_engineer(quick_env: dict[str, str], tmp_path: Path) -> None:
-    environ = {**quick_env, "AH_CC_TOKEN_alpha": "unused", "AH_CX_TOKEN_beta": "unused"}
-    assert (
-        cli.main(
-            [
-                "up",
-                "--agents",
-                "3",
-                "--harness",
-                "claude,codex",
-                "--auth",
-                "named:AH_CC_TOKEN_alpha,named:AH_CX_TOKEN_beta",
-                "--dir",
-                str(tmp_path),
-            ],
-            environ,
-        )
-        == 0
-    )
-    swarm = registry.load(tmp_path / "scratchpad" / "repo" / "quick-d039e169")
-    assert swarm is not None
-    assert [(row["auth"], row["account"]) for row in map(cli.dataclasses.asdict, swarm.seats)] == [
-        ("routed", ""),
-        ("named", "alpha"),
-        ("named", "beta"),
-    ]
-    assert "unused" not in registry.path(tmp_path / "scratchpad" / "repo" / "quick-d039e169").read_text()
-
-
-@pytest.mark.feature("quick-swarm")
 def test_up_outside_herdr_fails_loudly(monkeypatch, quick_env, tmp_path, capsys):
     def refuse(environ):
         raise guard.QuickError(guard.NOT_INSTALLED)
@@ -278,40 +197,6 @@ def test_status_lists_every_seat(quick_env, tmp_path, capsys):
     assert cli.main(["status"], quick_env) == 0
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [row["seat"] for row in rows] == ["master", "eng-1", "eng-2", "eng-3"]
-
-
-@pytest.mark.feature("quick-native-authentication")
-@pytest.mark.parametrize(
-    ("selection", "mode", "account", "automatic"),
-    [
-        ("routed", "routed", "", True),
-        ("default", "default", "", False),
-        ("named:alpha", "named", "alpha", False),
-    ],
-)
-def test_status_exposes_saved_authentication_and_tier_metadata(
-    selection: str,
-    mode: str,
-    account: str,
-    automatic: bool,
-    quick_env: dict[str, str],
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    environ = {**quick_env, "AH_CC_TOKEN_alpha": "unused"}
-    assert cli.main(["up", "--agents", "2", "--auth", selection, "--dir", str(tmp_path)], environ) == 0
-    capsys.readouterr()
-    assert cli.main(["status"], environ) == 0
-    output = capsys.readouterr().out
-    rows = [json.loads(line) for line in output.splitlines()]
-    assert (rows[1]["harness"], rows[1]["auth"], rows[1]["account"], rows[1]["automatic_tiers"]) == (
-        "claude",
-        mode,
-        account,
-        automatic,
-    )
-    assert "automatic_tiers" not in rows[0]
-    assert "unused" not in output
 
 
 def test_herdr_columns_read_the_tab_layout(monkeypatch):

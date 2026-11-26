@@ -32,12 +32,7 @@ def _reach(sender: Seat, receiver: Seat) -> str:
 
 def _engineer_line(found: Member, seat: Seat) -> str:
     folder = paths.seat_dir(found.folder, seat.seat)
-    authentication = f"named:{seat.account}" if seat.auth == "named" else seat.auth
-    tiers = "automatic tiers" if seat.auth == "routed" else "outside automatic tiers"
-    return (
-        f"- {seat.seat} in pane {seat.position} ({seat.harness}, session {seat.name}); seat folder {folder}"
-        f"; authentication {authentication}, {tiers}"
-    )
+    return f"- {seat.seat} in pane {seat.position} ({seat.harness}, session {seat.name}); seat folder {folder}"
 
 
 def _master(found: Member) -> str:

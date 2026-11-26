@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 from collections.abc import Mapping
@@ -25,9 +26,9 @@ def _binding(agent: str, source: Path, home: Path, environ: Mapping[str, str]) -
     profile = environ.get("AGENTIHOOKS_PROFILE")
     if not profile or not (source / binding.FILE).is_file():
         return
-    binding.inspect(source, profile, agent)
+    rendered = binding.inspect(source, profile, agent)
     shutil.copy2(source.parent / f"{agent}.sources.json", home.parent / f"{agent}.sources.json")
-    binding.write(home, profile, agent)
+    (home / binding.FILE).write_text(json.dumps({**rendered, "home": str(home.resolve())}) + "\n")
     report = environ.get(binding.REPORT)
     if report:
         binding.request(Path(report), profile, agent, home)
