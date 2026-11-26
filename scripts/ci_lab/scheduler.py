@@ -1174,8 +1174,10 @@ class Scheduler:
         """Drop every waiting promotion head and close every live promotion grade a push that named no branch asked
         for, which holds its own head as its lane and no grade ref: the run is forgotten and the pending jobs of its
         head are dropped unless another live grade grades that head. Nothing is posted. Each grade document is read
-        alone and only its head is kept. One line counts the waiting heads dropped, the grades retired and the
-        pending units dropped; a pass that finds none adds no line."""
+        alone, once: of a grade it retires only the head is kept, and of a grade it keeps the summary at the revision
+        stored before the read, so the survey of the same pass reads that grade no second time. One line counts the
+        waiting heads dropped, the grades retired and the pending units dropped; a pass that finds none adds no
+        line."""
         held = {name: json.loads(raw) for name, raw in self.client.hgetall(WAITING).items()}
         waiting = sorted(
             name
@@ -1187,11 +1189,14 @@ class Scheduler:
         if waiting:
             self.client.hdel(WAITING, *waiting)
         origins = self._origins()
+        revisions = self.client.hgetall(REVISIONS)
         gone: dict[str, str] = {}
-        for run, origin in origins.items():
-            grade = self.grade(run) if origin["tier"] == Priority.PROMOTION else None
+        for run in sorted(origins):
+            grade = self.grade(run) if origins[run]["tier"] == Priority.PROMOTION else None
             if grade is not None and stale_heads.branchless(grade.tier, grade.lane, grade.head, grade.ref):
                 gone[run] = grade.head
+            elif grade is not None:
+                self._quiets[run] = _quiet(grade, int(revisions.get(run, 0)))
         kept = {origin["head"] for run, origin in origins.items() if run not in gone}
         dropped = 0
         for run, head in sorted(gone.items()):
