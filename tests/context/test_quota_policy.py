@@ -374,7 +374,8 @@ def test_quota_exhaustion_text_uses_the_master_login_only_for_masters(
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "quota-swarm")
     monkeypatch.setattr(qp.time, "time", lambda: 1_800_000_000.0)
-    monkeypatch.setattr(qp, "reset_when", lambda _: "later")
+    expected_reset = 1_800_003_600.0 if action == "wait" else 1_800_086_400.0
+    monkeypatch.setattr(qp, "reset_when", lambda reset: "later" if reset == expected_reset else "wrong reset")
     decision = qp.Decision(action, "week", "alpha", 99.2, 98.5, 1_800_003_600.0, 1_800_086_400.0, None, ())
     head = "7-day quota 98.5% used (limit 98%) on alpha."
     others = "no other account is configured; handoffs need at least 2 accounts"
