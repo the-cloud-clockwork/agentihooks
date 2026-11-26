@@ -337,6 +337,9 @@ repository's own conditions folder (trusted repositories only).
 
 Every `AH_CC_TOKEN_<slug>` is one Claude subscription.
 
+- **Live sessions:** "claude-ai", "live session", "live login", "live agent"
+  and "interactive agent" are synonyms for a standalone session on a claude.ai
+  subscription login — `--agent claude -- --route claude-ai`.
 - **Launch:** `agenti` (and `agentihooks init-agent`) picks among accounts
   below their live session cap: 6 live sessions at 60% or more of the five-hour
   window left, 4 at 40-60%, 3 at 10-40%, 2 at 5-10%, none below 5% until that

@@ -44,6 +44,7 @@ reports `herdr_error`.
 | "in Windows Terminal", "not in herdr" | `--host native` |
 | "open codex", "a codex agent" | `--agent codex` — agent flags after `--` go to `codex` |
 | "open claude", "a claude agent" | `--agent claude` |
+| "claude-ai", "live session", "live login", "live agent", "interactive agent" (synonyms), "launch it in claude-ai" | `--agent claude -- --route claude-ai` |
 
 Rules:
 
