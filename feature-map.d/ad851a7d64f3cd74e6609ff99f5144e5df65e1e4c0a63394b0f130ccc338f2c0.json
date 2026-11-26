@@ -1,0 +1,14 @@
+{
+  "id": "ledger-alert-warning-without-context",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t13134",
+  "behaviour": "A ledger warning raised through raise_warning or built through new_alert needs only the revision and the time of the sync that raises it, not the whole op context: an open alert of the same text, or of the same sync writer and item, is left alone or has its last refusal time moved; a closed alert whose text is already known before the first alert of its sync is not raised again; every other case appends one new alert row carrying that revision and time and marks the context dirty.",
+  "seam": "scripts.swarm_ledger.ledger_alerts.raise_warning and scripts.swarm_ledger.ledger_alerts.new_alert",
+  "tests": [
+    "tests/swarm_ledger/test_ledger_alerts.py::test_raise_warning_covers_every_branch",
+    "tests/swarm_ledger/test_ledger_alerts.py::test_new_alert_appends_a_row_and_marks_the_context_dirty",
+    "tests/swarm_ledger/test_postgres_floor.py::test_each_refused_writer_becomes_one_open_master_alert_on_the_next_allowed_write",
+    "tests/swarm_ledger/test_postgres_floor.py::test_a_refusal_alert_starts_the_alert_list_on_a_ledger_without_one",
+    "tests/swarm_ledger/test_postgres_floor.py::test_a_closed_refusal_alert_is_not_raised_again_while_its_writer_stays_connected"
+  ]
+}
