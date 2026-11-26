@@ -8,6 +8,35 @@ import pytest
 
 from scripts import herdr_host, herdr_panes, init_agent
 
+INSTALLED = herdr_host.binary
+
+
+def _herdr_at(folder: Path, mode: int) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    exe = folder / "herdr"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(mode)
+    return exe
+
+
+@pytest.mark.feature("herdr-enabled-when-installed")
+def test_herdr_is_found_in_the_local_bin_its_installer_uses(monkeypatch, tmp_path):
+    exe = _herdr_at(tmp_path / ".local" / "bin", 0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", str(tmp_path / "elsewhere"))
+    assert INSTALLED() == str(exe)
+    exe.chmod(0o644)
+    assert INSTALLED() is None
+
+
+@pytest.mark.feature("herdr-enabled-when-installed")
+def test_herdr_on_path_comes_before_the_local_bin(monkeypatch, tmp_path):
+    _herdr_at(tmp_path / ".local" / "bin", 0o755)
+    on_path = _herdr_at(tmp_path / "path", 0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", str(tmp_path / "path"))
+    assert INSTALLED() == str(on_path)
+
 
 class FakeHerdr:
     def __init__(self, workspaces=()):
@@ -122,13 +151,15 @@ def test_the_spawn_rename_uses_the_name_the_swarm_looks_agents_up_by(herdr):
     assert herdr.made("agent rename")[2:] == ["w1:p5", herdr_target(name)]
 
 
+@pytest.mark.feature("herdr-enabled-when-installed")
 @pytest.mark.parametrize(
     ("flag", "env", "binary", "state", "expected"),
     [
         ("native", {}, "/bin/herdr", None, ("native", True)),
         ("", {"AGENTIHOOKS_TERMINAL_HOST": "native"}, "/bin/herdr", None, ("native", True)),
         ("", {}, "/bin/herdr", None, ("herdr", False)),
-        ("", {}, "/bin/herdr", {"herdr": {"enabled": False}}, ("native", False)),
+        ("", {}, "/bin/herdr", {"herdr": {"enabled": False}}, ("herdr", False)),
+        ("", {}, None, {"herdr": {"enabled": True}}, ("native", False)),
         ("", {}, None, None, ("native", False)),
     ],
 )

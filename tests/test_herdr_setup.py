@@ -49,36 +49,95 @@ def _no_input(prompt=""):
     raise AssertionError("asked again")
 
 
+SETUP_BINARY = herdr_setup.binary
+
+
+def _missing(monkeypatch):
+    installs = []
+    monkeypatch.setattr(herdr_setup, "binary", lambda: None)
+    monkeypatch.setattr(herdr_setup, "install", lambda: installs.append("install") or 1)
+    return installs
+
+
 def test_the_first_init_asks_once_and_remembers(monkeypatch, runner):
+    installs = _missing(monkeypatch)
     monkeypatch.setattr("builtins.input", lambda prompt="": "")
     herdr_setup.init_step("", interactive=True)
     assert herdr_setup.choice() is True
+    assert installs == ["install"]
     monkeypatch.setattr("builtins.input", _no_input)
     herdr_setup.init_step("", interactive=True)
     assert herdr_setup.choice() is True
 
 
 def test_declining_installs_nothing_and_is_remembered(monkeypatch, runner):
+    installs = _missing(monkeypatch)
     monkeypatch.setattr("builtins.input", lambda prompt="": "n")
     herdr_setup.init_step("", interactive=True)
     assert herdr_setup.choice() is False
-    assert runner.calls == []
+    assert installs == [] and runner.calls == []
     monkeypatch.setattr("builtins.input", _no_input)
     herdr_setup.init_step("", interactive=True)
 
 
 def test_without_a_terminal_or_flag_nothing_is_decided(monkeypatch, runner):
+    installs = _missing(monkeypatch)
     monkeypatch.setattr("builtins.input", _no_input)
     herdr_setup.init_step("", interactive=False)
     assert herdr_setup.choice() is None
-    assert runner.calls == []
+    assert installs == [] and runner.calls == []
 
 
-def test_the_flag_decides_for_an_agent(runner):
+def test_the_flag_decides_for_an_agent(monkeypatch, runner):
+    installs = _missing(monkeypatch)
     herdr_setup.init_step("no", interactive=False)
-    assert herdr_setup.choice() is False
+    assert herdr_setup.choice() is False and installs == []
     herdr_setup.init_step("yes", interactive=False)
-    assert herdr_setup.choice() is True
+    assert herdr_setup.choice() is True and installs == ["install"]
+
+
+@pytest.mark.feature("herdr-enabled-when-installed")
+@pytest.mark.parametrize(("flag", "recorded"), [("", False), ("no", None), ("", None), ("no", True)])
+def test_an_installed_herdr_is_configured_whatever_was_answered(monkeypatch, runner, flag, recorded):
+    if recorded is not None:
+        herdr_setup.record(recorded)
+    monkeypatch.setattr("builtins.input", _no_input)
+    herdr_setup.init_step(flag, interactive=True)
+    assert ["/bin/herdr", "integration", "install", "claude"] in runner.calls
+
+
+@pytest.mark.feature("herdr-enabled-when-installed")
+@pytest.mark.parametrize(("exe", "line", "code"), [("/bin/herdr", "enabled=true", 0), (None, "enabled=false", 1)])
+def test_status_reports_herdr_enabled_while_it_is_installed(monkeypatch, runner, capsys, exe, line, code):
+    herdr_setup.record(exe is None)
+    monkeypatch.setattr(herdr_setup, "binary", lambda: exe)
+    assert herdr_setup.status() == code
+    assert line in capsys.readouterr().out.splitlines()
+
+
+@pytest.mark.feature("herdr-enabled-when-installed")
+def test_an_installed_herdr_cannot_be_disabled(runner):
+    with pytest.raises(SystemExit) as refused:
+        herdr_setup.main(["disable"])
+    assert refused.value.code == 2
+    assert herdr_setup.choice() is None
+
+
+@pytest.mark.feature("herdr-enabled-when-installed")
+def test_setup_finds_herdr_where_the_terminal_host_does(monkeypatch):
+    monkeypatch.setattr("scripts.herdr_host.binary", lambda: "/home/u/.local/bin/herdr")
+    assert SETUP_BINARY() == "/home/u/.local/bin/herdr"
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_recording_a_choice_keeps_the_resume_release(runner):
+    state = install._load_state()
+    state["herdr"] = {"enabled": True, "decided_at": "2026-10-26T18:54:57+00:00", "resume_released": "kept"}
+    install._save_state(state)
+    herdr_setup.record(False)
+    herdr = install._load_state()["herdr"]
+    assert (herdr["enabled"], herdr["resume_released"]) == (False, "kept")
+    assert herdr["decided_at"] != "2026-10-26T18:54:57+00:00" and herdr["decided_at"].endswith("+00:00")
 
 
 def test_enabled_init_installs_the_claude_and_codex_integrations(runner):

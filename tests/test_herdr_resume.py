@@ -7,6 +7,9 @@ from hooks.lifecycle import herdr_resume
 SESSION = "97f04df2-8214-4ef0-943b-ff8bd10254ca"
 PANE = {"HERDR_ENV": "1", "HERDR_PANE_ID": "w6:p5", "HERDR_BIN_PATH": "/opt/herdr"}
 ROUTED = {**PANE, "AH_CC_TOKEN_work": "token-value"}
+NAME = "engineer@a1b2c3-0001"
+SWARM = {**PANE, "AGENTIHOOKS_SWARM": "rig", "AGENTIHOOKS_AGENT_NAME": NAME}
+PLACEHOLDER = ["echo", "agentihooks", "swarm", "rig", "reopens", NAME]
 
 
 class Recorder:
@@ -62,8 +65,10 @@ def test_a_routed_codex_pane_resumes_through_the_router():
         (PANE, "claude"),
         ({**PANE, "AH_CC_TOKEN_a": "x", "AH_CC_TOKEN_b": "y"}, "claude"),
         (PANE, "codex"),
-        ({**ROUTED, "AGENTIHOOKS_SWARM": "rig"}, "claude"),
         ({**ROUTED, "AGENTIHOOKS_HERDR_RESUME": "off"}, "claude"),
+        ({**SWARM, "AGENTIHOOKS_HERDR_RESUME": "off"}, "claude"),
+        (SWARM, "copilot"),
+        ({**SWARM, "HERDR_ENV": ""}, "claude"),
         ({**ROUTED, "HERDR_ENV": ""}, "claude"),
         ({key: value for key, value in ROUTED.items() if key != "HERDR_PANE_ID"}, "claude"),
         ({key: value for key, value in ROUTED.items() if key != "HERDR_BIN_PATH"}, "claude"),
@@ -73,6 +78,42 @@ def test_a_routed_codex_pane_resumes_through_the_router():
 )
 def test_herdr_keeps_its_own_resume_when_agentihooks_has_nothing_to_add(environ, target):
     assert herdr_resume.resume_argv(environ, SESSION, target) is None
+
+
+@pytest.mark.feature("herdr-native-resume")
+@pytest.mark.parametrize("environ", [SWARM, {**SWARM, "AH_CC_TOKEN_work": "token-value"}])
+def test_a_swarm_pane_leaves_its_reopen_to_the_swarm(environ):
+    assert herdr_resume.resume_argv(environ, SESSION, "claude") == PLACEHOLDER
+
+
+@pytest.mark.feature("herdr-native-resume")
+@pytest.mark.parametrize("name", [None, ""])
+def test_a_swarm_pane_without_an_agent_name_names_its_session(name):
+    environ = {key: value for key, value in SWARM.items() if key != "AGENTIHOOKS_AGENT_NAME"}
+    if name is not None:
+        environ["AGENTIHOOKS_AGENT_NAME"] = name
+    assert herdr_resume.resume_argv(environ, SESSION, "claude") == [*PLACEHOLDER[:-1], SESSION]
+
+
+@pytest.mark.feature("herdr-native-resume")
+@pytest.mark.parametrize("key", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"])
+def test_a_swarm_name_herdr_cannot_type_reports_nothing(key):
+    assert herdr_resume.resume_argv({**SWARM, key: "o'neil"}, SESSION, "claude") is None
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_an_empty_swarm_value_resumes_through_the_router():
+    assert (herdr_resume.resume_argv({**ROUTED, "AGENTIHOOKS_SWARM": ""}, SESSION, "claude") or [""])[
+        0
+    ] == "agentihooks"
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_a_swarm_codex_pane_reports_its_placeholder_as_codex():
+    run = Recorder()
+    assert herdr_resume.report({"session_id": SESSION}, {**SWARM, "AGENTIHOOKS_TARGET": "codex"}, run) is True
+    assert run.calls[0][0][7] == "codex"
+    assert run.calls[0][0][-7:] == ["--", *PLACEHOLDER]
 
 
 @pytest.mark.feature("herdr-native-resume")

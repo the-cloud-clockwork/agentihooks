@@ -27,17 +27,24 @@ def routed(environ: Mapping[str, str], target: str) -> bool:
 def resume_argv(environ: Mapping[str, str], session_id: str, target: str) -> list[str] | None:
     if not session_id or environ.get("HERDR_ENV") != "1" or not environ.get("HERDR_PANE_ID"):
         return None
-    if not environ.get("HERDR_BIN_PATH") or environ.get("AGENTIHOOKS_SWARM") or resume_off(environ):
+    if not environ.get("HERDR_BIN_PATH") or resume_off(environ) or target not in HOMES:
         return None
-    if target not in HOMES or not routed(environ, target):
+    swarm = environ.get("AGENTIHOOKS_SWARM")
+    if swarm:
+        argv = ["echo", "agentihooks", "swarm", swarm, "reopens", environ.get("AGENTIHOOKS_AGENT_NAME") or session_id]
+    elif routed(environ, target):
+        argv = routed_argv(environ, session_id, target)
+    else:
         return None
+    return None if any("'" in arg for arg in argv) else argv
+
+
+def routed_argv(environ: Mapping[str, str], session_id: str, target: str) -> list[str]:
     home = environ.get(HOMES[target])
     prefix = ["env", f"{HOMES[target]}={home}"] if home else []
     if target == "codex":
-        argv = [*prefix, "agentihooks", "codex", "resume", session_id]
-    else:
-        argv = [*prefix, "agentihooks", "claude", "--agentihooks-fallback-bare", "--resume", session_id]
-    return None if any("'" in arg for arg in argv) else argv
+        return [*prefix, "agentihooks", "codex", "resume", session_id]
+    return [*prefix, "agentihooks", "claude", "--agentihooks-fallback-bare", "--resume", session_id]
 
 
 def report(
