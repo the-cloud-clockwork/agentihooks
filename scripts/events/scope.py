@@ -79,7 +79,8 @@ class MergedConsumer:
     @property
     def created(self) -> int | None:
         times = [consumer.created for consumer in self._consumers.values()]
-        return min((at for at in times if at is not None), default=None)
+        known = [at for at in times if at is not None]
+        return min(known) if known and len(known) == len(times) else None
 
     def fetch(self, batch: int, timeout_ms: int) -> list[Delivery]:
         logs = self._logs()
