@@ -49,6 +49,67 @@ def test_beat_advertises_every_stored_login_and_the_best_legacy_account(
     assert record["master_login_enabled"] == "yes"
 
 
+@pytest.mark.feature("hive-all-master-logins")
+@pytest.mark.parametrize(
+    ("readings", "failed", "preferred", "marker", "expected"),
+    [
+        ({"login": (0, 50), "spare": (0, 5)}, set(), {}, 1, "spare"),
+        ({"login": (0, 50), "spare": (0, 5)}, {4}, {}, 1, "login"),
+        ({"login": (0, 98), "spare": (0, 97)}, set(), {"login": 0}, 1, "spare"),
+        ({"login": (0, 50), "spare": (0, 5)}, set(), {"login": 0}, 1, "login"),
+        ({"login": (99, 0), "spare": (0, 20)}, set(), {}, 1, "spare"),
+        ({"login": (0, 5), "spare": (0, 5)}, set(), {"other": 0}, 4, "spare"),
+        ({"login": (0, 5), "spare": (0, 5)}, set(), {}, 3, "login"),
+    ],
+)
+def test_best_legacy_login_follows_the_launch_ranking(
+    redis: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    readings: dict[str, tuple[float, float]],
+    failed: set[int],
+    preferred: dict[str, int],
+    marker: int,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(daemon.master_claude_login, "signed_in", lambda: "login")
+    monkeypatch.setattr(daemon.master_claude_login, "unusable", lambda: "")
+    monkeypatch.setattr(daemon.master_claude_login, "logins", lambda: {4: "spare", 1: "login"})
+    monkeypatch.setattr(daemon.master_claude_login, "failed", lambda number: number in failed)
+    monkeypatch.setattr(daemon.master_claude_login, "preferred", lambda: preferred)
+    monkeypatch.setattr(daemon.master_claude_login, "slot", lambda: marker)
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (*readings[account], now))
+    daemon.beat(redis, "machine")
+    record = registry.show(redis, "machine")
+    assert record is not None
+    assert record["master_login"] == {"claude": expected}
+
+
+@pytest.mark.feature("hive-all-master-logins")
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_advertised_private_login_passes_hive_checks_without_a_worker_slot(harness: str) -> None:
+    record = hive(
+        "private",
+        slots=[],
+        master_login={},
+        master_logins=[
+            {"harness": "other", "account": "foreign", "slot": 1, "week_left": 100},
+            {"harness": harness, "account": "spare", "slot": 4, "week_left": 95},
+        ],
+    )
+    assert placement.place_master(harness, "", REPO, [record], NOW, front=True) == placement.MasterPlacement(
+        "private", "spare", "master-login", False
+    )
+    assert placement.choose("master", harness, "spare", "master-login", REPO, [record], NOW) == placement.Choice(
+        "private"
+    )
+    assert placement.choose("master", harness, "foreign", "master-login", REPO, [record], NOW) == placement.Wait(
+        f"no hive for master holds the {harness} master login for foreign"
+    )
+
+
 @pytest.mark.parametrize("login", ["", "spare"])
 @pytest.mark.feature("hive-all-master-logins")
 def test_front_door_tries_slot_four_when_marker_slot_one_is_closed(login: str) -> None:

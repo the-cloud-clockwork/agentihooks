@@ -170,7 +170,7 @@ def hosting(hives: list[dict[str, Any]], profile: str, advertised: dict[str, fro
     return [hive for hive in hives if profile in advertised.get(hive["id"], frozenset())]
 
 
-def _master_logins(hives: list[dict], front: bool) -> list[dict]:
+def _master_logins(hives: list[dict[str, Any]], front: bool) -> list[dict[str, Any]]:
     if not front:
         return hives
     rejected = {
@@ -178,7 +178,24 @@ def _master_logins(hives: list[dict], front: bool) -> list[dict]:
         for _, result in balancer.cached_observations()
         if result.provider_status in ("revoked", "rejected")
     }
-    return [hive for hive in hives if placement.account_key(hive["master_login"].get("claude", "")) not in rejected]
+    kept = []
+    for hive in hives:
+        accounts = placement.master_accounts(hive, "claude")
+        allowed = [account for account in accounts if placement.account_key(account) not in rejected]
+        if accounts and not allowed:
+            continue
+        if hive.get("master_logins"):
+            hive = {
+                **hive,
+                "master_logins": [
+                    item
+                    for item in hive["master_logins"]
+                    if item["harness"] != "claude" or placement.account_key(item["account"]) not in rejected
+                ],
+                "master_login": {**hive["master_login"], "claude": allowed[0] if allowed else ""},
+            }
+        kept.append(hive)
+    return kept
 
 
 def _master_closed(row: capacity.Account) -> bool:
@@ -203,9 +220,7 @@ def _floored(waited: placement.Wait, rows: list[capacity.Account], hives: list[d
     slot for the master."""
     if waited.reason != NO_MASTER_SLOT:
         return waited
-    logins = {
-        placement.account_key(hive["master_login"]["claude"]) for hive in hives if "claude" in hive["master_login"]
-    }
+    logins = {placement.account_key(account) for hive in hives for account in placement.master_accounts(hive, "claude")}
     floored = [
         MASTER_FLOOR.format(account=row.name, window=floor[0], left=floor[1])
         for row in rows

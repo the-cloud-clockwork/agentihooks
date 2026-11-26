@@ -10429,7 +10429,12 @@
         "tests/hive/test_master_login_advertisement.py::test_legacy_record_and_secondary_master_keep_their_routes",
         "tests/hive/test_master_login_advertisement.py::test_front_door_keeps_advertised_ranking_instead_of_account_alphabetical_order",
         "tests/hive/test_master_login_advertisement.py::test_launch_uses_an_open_sibling_of_the_closed_or_rejected_marker",
-        "tests/hive/test_master_login_advertisement.py::test_all_advertised_logins_closed_keep_each_master_floor_reason"
+        "tests/hive/test_master_login_advertisement.py::test_all_advertised_logins_closed_keep_each_master_floor_reason",
+        "tests/hive/test_master_login_advertisement.py::test_best_legacy_login_follows_the_launch_ranking",
+        "tests/hive/test_master_login_advertisement.py::test_advertised_private_login_passes_hive_checks_without_a_worker_slot"
+      ],
+      "rules": [
+        "hive-marker-only-master-login"
       ]
     },
     {
