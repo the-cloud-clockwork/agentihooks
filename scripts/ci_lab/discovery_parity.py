@@ -45,7 +45,7 @@ def _printed(folder: Path, arguments: Sequence[str]) -> str | None:
     that folder first on the module path, or nothing when it fails, its error going to standard error."""
     environ = {**os.environ, "PYTHONPATH": str(folder)}
     command = [sys.executable, *arguments]
-    done = subprocess.run(command, cwd=folder, env=environ, capture_output=True, text=True, check=False)
+    done = subprocess.run(command, cwd=folder, env=environ, capture_output=True, text=True)
     if done.returncode:
         sys.stderr.write(done.stderr)
         return None
