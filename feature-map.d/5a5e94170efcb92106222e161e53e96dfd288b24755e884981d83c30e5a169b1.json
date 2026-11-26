@@ -1,0 +1,12 @@
+{
+  "id": "lab-fingerprints-hash-once-per-call",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-fingerprints-hash-once",
+  "behaviour": "expand_tests.fingerprints hashes each tree file at most once per call: the shared digest, the measured tree digest and every manifest test's opened, own and reached files read a path's digest through one table kept for the length of the call, and a path the tree lacks keeps giving a stable None key.",
+  "seam": "scripts.ci_lab.expand_tests.fingerprints and its call-scoped digest table",
+  "tests": [
+    "tests/ci_lab/test_expand_tests.py::test_fingerprints_are_golden",
+    "tests/ci_lab/test_expand_tests.py::test_fingerprints_hashes_a_shared_opened_file_the_same_number_of_times_for_few_or_many_tests",
+    "tests/ci_lab/test_expand_tests.py::test_fingerprints_keys_a_missing_opened_file_the_same_as_a_tree_that_never_held_it"
+  ]
+}
