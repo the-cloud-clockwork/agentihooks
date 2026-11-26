@@ -170,8 +170,7 @@ def test_existing_mode_and_standalone_contracts_are_preserved(monkeypatch: pytes
 @pytest.mark.feature("first-read-gate")
 def test_marker_home_default_and_empty_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("AGENTIHOOKS_HOME")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    assert first_read.marker_path("session") == tmp_path / ".agentihooks" / "first-read" / "session"
+    assert first_read.marker_path("session") == Path.home() / ".agentihooks" / "first-read" / "session"
     assert not first_read.FirstRead().matches(Call(tool="Write"))
     assert first_read.FirstRead().decide(Call(tool="Write"), ME, None).allowed
 

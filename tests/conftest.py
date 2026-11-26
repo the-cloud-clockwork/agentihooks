@@ -775,6 +775,11 @@ def sample_tool_use_event():
 
 
 @pytest.fixture(autouse=True)
+def _first_read_gate_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_GATE_FIRST_READ", "off")
+
+
+@pytest.fixture(autouse=True)
 def _package_conditions_offline(tmp_path, monkeypatch):
     from hooks.context import conditions
 

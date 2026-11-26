@@ -246,12 +246,13 @@ class TestEntry:
             monkeypatch.setenv(key, value)
         assert entry.main() == 0
 
-    def test_registry_names_each_gate(self):
+    def test_registry_names_each_gate(self) -> None:
         assert sorted(entry.GATES) == [
             "brain",
             "build",
             "claim-stop",
             "expert-stop",
+            "first-read",
             "identity",
             "intent",
             "one-push",

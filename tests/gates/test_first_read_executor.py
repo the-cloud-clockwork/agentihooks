@@ -68,7 +68,10 @@ def run_hook(tmp_path: Path, target: str, step: str, payload: dict[str, Any], mo
 )
 def test_enforce_blocks_native_shell_calls(tmp_path: Path, target: str, tool: str, args: dict[str, Any]) -> None:
     effect = run_hook(tmp_path, target, "pre", {"tool_name": tool, "tool_input": args})
-    assert effect["block"] == "Run agentihooks seat brief before using other tools in this seated session."
+    assert (
+        effect["block"]
+        == "[condition pre-any-first_read.sh] Run agentihooks seat brief before using other tools in this seated session."
+    )
 
 
 @pytest.mark.feature("first-read-gate")

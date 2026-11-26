@@ -6,6 +6,8 @@
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-first-read-gate",
   "behaviour": "Seated Claude Code and Codex sessions observe a requirement to run seat brief before ordinary tools; successful brief sets a session marker and compaction clears it. Standalone sessions and bootstrap calls stay exempt.",
   "seam": "scripts.gates.first_read.FirstRead and package pre, post and start conditions",
+  "semgrep_rule": "first-read-pre-any-fast-exit",
+  "live_check": ["python", "-m", "scripts.gates", "first-read"],
   "rules": ["first-read-pre-any-fast-exit"],
   "tests": [
     "tests/gates/test_first_read.py::test_unread_seat_requires_brief",
