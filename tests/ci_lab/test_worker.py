@@ -1021,3 +1021,42 @@ def test_a_units_lease_root_is_removed_though_a_lost_lease_delivers_nothing(
     assert not root.exists()
     assert list(runs.iterdir()) == []
     assert sink.bodies == {}
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_units_lease_root_holding_a_read_only_folder_is_fully_removed(
+    scheduler: str, jobs: queue.Queue, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    seen: list[Path] = []
+
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
+        seen.append(root)
+        report = root / "report.json"
+        report.write_text('{"key": "a"}')
+        log = root / "log.txt"
+        log.write_text("log of h1")
+        rules = root / "rules"
+        tests = rules / "tests"
+        tests.mkdir(parents=True)
+        (rules / "features.json").write_text("{}")
+        (tests / "test_alpha.py").write_text("x")
+        tests.chmod(0o555)
+        rules.chmod(0o555)
+        return worker.Finished(outcome="passed", report=report, log=log)
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    one = worker.Worker(worker.Client(scheduler), {"test": held}, "pod-1", 1, runs, wait_ms=0)
+
+    try:
+        one.run_once()
+        assert one.drain() == []
+        [root] = seen
+        assert not root.exists()
+        assert sink.bodies == {"/h1:test:a/report": b'{"key": "a"}', "/h1:test:a/log": b"log of h1"}
+    finally:
+        for root in seen:
+            if (root / "rules").exists():
+                (root / "rules" / "tests").chmod(0o700)
+                (root / "rules").chmod(0o700)

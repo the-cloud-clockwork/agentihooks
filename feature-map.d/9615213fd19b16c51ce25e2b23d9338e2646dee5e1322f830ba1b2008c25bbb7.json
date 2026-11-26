@@ -8,6 +8,7 @@
     "tests/ci_lab/test_worker.py::test_a_delivered_units_lease_root_is_removed_and_its_report_and_log_upload_whole",
     "tests/ci_lab/test_worker.py::test_a_units_lease_root_is_removed_even_though_its_executor_raises_and_its_lease_reaps",
     "tests/ci_lab/test_worker.py::test_a_units_lease_root_is_removed_though_a_lost_lease_delivers_nothing",
+    "tests/ci_lab/test_worker.py::test_a_units_lease_root_holding_a_read_only_folder_is_fully_removed",
     "tests/ci_lab/test_executors.py::test_static_cuts_its_run_and_report_folders_inside_the_root_the_worker_hands_it_not_the_shared_runs_folder",
     "tests/ci_lab/test_executors.py::test_tests_cuts_its_attempt_and_report_folders_inside_the_root_the_worker_hands_it_not_the_shared_runs_folder",
     "tests/ci_lab/test_executors.py::test_mutation_cuts_its_request_and_report_folders_inside_the_root_the_worker_hands_it_not_the_shared_runs_folder"
