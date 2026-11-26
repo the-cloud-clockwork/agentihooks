@@ -7,9 +7,9 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
-from scripts.ci_lab.model import Toolchain
 
 from scripts.ci_lab import contract, git_auth, relay, scheduler
+from scripts.ci_lab.digests import Toolchain
 from scripts.ci_lab.intake import HeadEvent
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.worktrees import Mirror
