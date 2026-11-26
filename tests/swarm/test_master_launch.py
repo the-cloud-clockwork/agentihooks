@@ -87,7 +87,7 @@ def test_a_quota_stopped_master_resumes_on_the_placed_master_login_account(
     monkeypatch.setattr(agent_choice, "account_has_quota", lambda *args: False)
     monkeypatch.setattr(master_claude_login, "free", lambda held: ["slot-1", "slot-4"])
     monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, 100.0 if account == "slot-1" else 5.0, now))
-    rt.placed = Placed("w2:m4", "claude", "slot-4", "opus", "xhigh", profile="master")
+    monkeypatch.setattr(rt, "placed", Placed("w2:m4", "claude", "slot-4", "opus", "xhigh", profile="master"))
 
     result, _ = direct(store, rt, master_launch.LAST)
 
