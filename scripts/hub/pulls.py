@@ -147,9 +147,15 @@ def _rows(snapshot: dict, found: list[tuple[str, dict]], now: int) -> list[dict]
 
 
 class Pulls:
-    def __init__(self, bus: Bus, fetch: Callable[[str], Observation] = fetch, clock: lease.Clock = lease.wall_ms):
+    def __init__(
+        self,
+        bus: Bus,
+        fetch: Callable[[str], Observation] = fetch,
+        clock: lease.Clock = lease.wall_ms,
+        index: Bus | None = None,
+    ) -> None:
         self._events = bus.events
-        self._state = bus.state(BUCKET)
+        self._state = (bus if index is None else index).state(BUCKET)
         self._fetch = fetch
         self._clock = clock
 
