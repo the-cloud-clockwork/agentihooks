@@ -23,8 +23,14 @@ UNREAD = "a delivery file its reader accepts: {error}"
 
 
 def _terms(condition: object) -> list[str]:
-    """The terms a job condition joins with and, read without its expression braces."""
+    """The terms a job condition joins with and, read without its expression braces: none when it joins any
+    with or outside every pair of brackets, since such a condition can hold without them."""
     text = str(condition).removeprefix("${{").removesuffix("}}")
+    depth = 0
+    for index, mark in enumerate(text):
+        depth += (mark == "(") - (mark == ")")
+        if depth == 0 and text.startswith("||", index):
+            return []
     return [term.strip() for term in text.split("&&")]
 
 
