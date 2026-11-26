@@ -11,31 +11,38 @@ from scripts import herdr_host, herdr_panes, init_agent
 INSTALLED = herdr_host.binary
 
 
-def _herdr_at(folder: Path, mode: int) -> Path:
-    folder.mkdir(parents=True, exist_ok=True)
-    exe = folder / "herdr"
-    exe.write_text("#!/bin/sh\n")
-    exe.chmod(mode)
-    return exe
+def _which(monkeypatch, tmp_path, found):
+    asked = []
+
+    def which(command, path=None):
+        asked.append((command, path))
+        return found.get(path)
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(herdr_host.shutil, "which", which)
+    return asked
 
 
 @pytest.mark.feature("herdr-enabled-when-installed")
 def test_herdr_is_found_in_the_local_bin_its_installer_uses(monkeypatch, tmp_path):
-    exe = _herdr_at(tmp_path / ".local" / "bin", 0o755)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", str(tmp_path / "elsewhere"))
-    assert INSTALLED() == str(exe)
-    exe.chmod(0o644)
-    assert INSTALLED() is None
+    local = str(tmp_path / ".local" / "bin")
+    asked = _which(monkeypatch, tmp_path, {local: f"{local}/herdr"})
+    assert INSTALLED() == f"{local}/herdr"
+    assert asked == [("herdr", None), ("herdr", local)]
 
 
 @pytest.mark.feature("herdr-enabled-when-installed")
 def test_herdr_on_path_comes_before_the_local_bin(monkeypatch, tmp_path):
-    _herdr_at(tmp_path / ".local" / "bin", 0o755)
-    on_path = _herdr_at(tmp_path / "path", 0o755)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", str(tmp_path / "path"))
-    assert INSTALLED() == str(on_path)
+    local = str(tmp_path / ".local" / "bin")
+    asked = _which(monkeypatch, tmp_path, {None: "/usr/bin/herdr", local: f"{local}/herdr"})
+    assert INSTALLED() == "/usr/bin/herdr"
+    assert asked == [("herdr", None)]
+
+
+@pytest.mark.feature("herdr-enabled-when-installed")
+def test_no_herdr_anywhere_is_none(monkeypatch, tmp_path):
+    _which(monkeypatch, tmp_path, {})
+    assert INSTALLED() is None
 
 
 class FakeHerdr:

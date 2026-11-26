@@ -10,6 +10,7 @@
     "tests/test_herdr_setup.py::test_setup_finds_herdr_where_the_terminal_host_does",
     "tests/test_herdr_host.py::test_herdr_is_found_in_the_local_bin_its_installer_uses",
     "tests/test_herdr_host.py::test_herdr_on_path_comes_before_the_local_bin",
+    "tests/test_herdr_host.py::test_no_herdr_anywhere_is_none",
     "tests/test_herdr_host.py::test_host_selection"
   ]
 }
