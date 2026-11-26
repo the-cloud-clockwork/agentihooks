@@ -73,6 +73,22 @@ def scope_problems(chart: str) -> list[str]:
     return found
 
 
+def receiver_scope_problems(chart: str) -> list[str]:
+    found = []
+    for setting, expected in ((None, "1"), ("false", None), ("true", "1")):
+        options = [] if setting is None else ["--set", f"hub.bus.scoped={setting}"]
+        result = render(chart, *ENABLED, *RECEIVER, *RELEASE, *options)
+        if result.returncode:
+            found.append(f"receiver scope {setting} fails to render: {result.stderr.strip()}")
+            continue
+        deployment = next(d for d in receivers(result.stdout) if d["kind"] == "Deployment")
+        container = deployment["spec"]["template"]["spec"]["containers"][0]
+        env = {row["name"]: row.get("value") for row in container.get("env", [])}
+        if env.get("AGENTIHOOKS_BUS_SCOPED") != expected:
+            found.append(f"receiver scope {setting} renders {env.get('AGENTIHOOKS_BUS_SCOPED')}, expected {expected}")
+    return found
+
+
 def receivers(text: str) -> list[dict]:
     documents = [d for d in yaml.safe_load_all(text) if d]
     return [d for d in documents if d["metadata"]["name"].endswith("-github-webhook")]
@@ -147,7 +163,13 @@ def problems(chart: str) -> list[str]:
         found.append("a hub.env entry for AGENTIHOOKS_HUB_SERVING_FILE moves the hub off the file its probe reads")
     if receivers(default.stdout):
         found.append("the default release renders the GitHub webhook receiver")
-    return found + scope_problems(chart) + secret_env_problems(chart) + receiver_release_problems(chart)
+    return (
+        found
+        + scope_problems(chart)
+        + receiver_scope_problems(chart)
+        + secret_env_problems(chart)
+        + receiver_release_problems(chart)
+    )
 
 
 def secret_env_problems(chart: str) -> list[str]:

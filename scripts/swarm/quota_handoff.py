@@ -126,13 +126,20 @@ def exclusion(account: capacity.Account, thresholds: Thresholds, predecessor: tu
 
 
 def refusal(
-    predecessor: tuple, harnesses: tuple, accounts: list[capacity.Account], reason: Callable[[capacity.Account], str]
+    predecessor: tuple,
+    harnesses: tuple,
+    accounts: list[capacity.Account],
+    reason: Callable[[capacity.Account], str],
+    master: bool = False,
 ) -> str:
     reasons = "; ".join(f"{row.harness} {row.name} {reason(row)}" for row in accounts)
-    return (
+    message = (
         f"no {' or '.join(harnesses)} account can take the quota handoff from {predecessor[0]} account "
         f"{predecessor[1]}: {reasons or 'no accounts were observed'}"
     )
+    if master:
+        message += "; ask through the inbox for a master login slot added with agentihooks claude login --master"
+    return message
 
 
 def successor(
