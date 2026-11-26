@@ -528,7 +528,7 @@ class HerdrRuntime:
             requirements[lane] = options
         return requirements
 
-    def _quota_successor_accounts(self, requirements):
+    def _quota_successor_accounts(self, requirements: Any) -> Any:
         from scripts.swarm import quota_handoff
 
         thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
@@ -547,7 +547,9 @@ class HerdrRuntime:
             accounts.setdefault(lane, {})[index] = {(row.harness, row.name) for row in eligible if row.harness == first}
             if first is None:
                 task = self._quota_ready_ids[lane][index]
-                self._quota_held[task] = quota_handoff.refusal(predecessor, harnesses, rows, reason)
+                self._quota_held[task] = quota_handoff.refusal(
+                    predecessor, harnesses, rows, reason, master=lane == MASTER
+                )
         return accounts
 
     def _quota_preferring(self, requirements):
@@ -645,7 +647,9 @@ class HerdrRuntime:
             or quota_handoff.successor(candidates, order, thresholds)
         )
         if account is None:
-            raise SpawnError(quota_handoff.refusal(predecessor, harnesses, rows, blocked), "unavailable")
+            raise SpawnError(
+                quota_handoff.refusal(predecessor, harnesses, rows, blocked, master=lane == MASTER), "unavailable"
+            )
         return {
             **saved,
             "harness": account.harness,

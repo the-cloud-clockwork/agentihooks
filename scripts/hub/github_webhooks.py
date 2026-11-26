@@ -76,15 +76,16 @@ def repository_events(name: str | None, payload: dict[str, Any]) -> list[Reposit
 
 
 class LazyPulls:
-    def __init__(self, bus: Bus):
+    def __init__(self, bus: Bus, index: Bus | None = None) -> None:
         self._bus = bus
+        self._index = index
         self._pulls: Pulls | None = None
         self._lock = threading.Lock()
 
     def _hub(self) -> Pulls:
         with self._lock:
             if self._pulls is None:
-                self._pulls = Pulls(self._bus)
+                self._pulls = Pulls(self._bus, index=self._index)
             return self._pulls
 
     def observe(self, seen: Observation) -> None:
@@ -192,14 +193,18 @@ def main(argv: list[str]) -> int:
     if not secret:
         print(f"agentihooks github-webhook: {NO_SECRET}", file=sys.stderr)
         return 2
-    bus = open_bus(replace(BusConfig.from_environ(os.environ), provision=False))
+    config = replace(BusConfig.from_environ(os.environ), provision=False)
+    bus = open_bus(config)
+    index = open_bus(replace(config, scoped=False)) if config.scoped else None
     lab_secret = os.environ.get(NOTICE_SECRET_ENV, "").encode()
     lab = LabIntake(bus.lab_heads, lab_secret) if lab_secret else None
-    server = ThreadingHTTPServer((args.host, args.port), handler(Ingress(LazyPulls(bus), secret, lab)))
+    server = ThreadingHTTPServer((args.host, args.port), handler(Ingress(LazyPulls(bus, index), secret, lab)))
     previous = signal.signal(signal.SIGINT, _interrupted)
     try:
         server.serve_forever()
     finally:
         server.server_close()
         bus.close()
+        if index is not None:
+            index.close()
         signal.signal(signal.SIGINT, previous)

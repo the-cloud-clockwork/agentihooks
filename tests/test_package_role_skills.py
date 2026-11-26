@@ -338,6 +338,20 @@ def test_rendered_claude_and_codex_masters_carry_the_scaling_rule(world):
     assert [phrase for phrase in MASTER_SCALING if phrase not in skill] == []
 
 
+@pytest.mark.feature("master-quota-login-guidance")
+def test_rendered_masters_ask_through_the_inbox_for_a_master_login_slot(world: object) -> None:
+    from scripts.profiles import render
+
+    out = render.render_codex("package:master")
+    assert out is not None
+    advice = (
+        "When every master login slot is spent, ask through the inbox for a slot added with "
+        "`agentihooks claude login --master`."
+    )
+    for persona in (out.parent / "claude" / "CLAUDE.md", out / "AGENTS.md"):
+        assert advice in persona.read_text()
+
+
 def test_swarm_docs_describe_the_master_pool_for_claude_and_codex():
     docs = ROLES.parents[2] / "docs" / "pillars" / "swarm.md"
     text = " ".join(_section(docs.read_text(), "### Master pool", "\n### ").split())

@@ -1127,16 +1127,22 @@
     {
       "id": "lab-scheduler-release-bound",
       "rules": [
-        "lab-release-starts-every-waiting-head"
+        "lab-release-starts-every-waiting-head",
+        "lab-release-looked-at-cap-without-starts-cap"
       ],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2761",
-      "behaviour": "One CI lab scheduler pass starts at most eight waiting heads: the most urgent class first (hotfix, pull request, queue, promotion, backfill) and the longest waiting first within a class. A head still in its quiet window or held by a pause takes no place among the eight; a head put back for its manifest fetch takes one, since its expansion ran on the pass. The other heads keep waiting for a later pass, so the same pass still admits the started heads' held units to the queue however many heads wait.",
+      "behaviour": "One CI lab scheduler pass looks at up to twenty four waiting heads whose quiet window ended, the most urgent class first (hotfix, pull request, queue, promotion, backfill) and the longest waiting first within a class, and starts, retires or drops at most eight of them. A head still in its quiet window or held by a pause takes no place among those looked at; a head put back for its manifest fetch, pending or unanswered, takes one of the twenty four but none of the eight, so the pass moves on to the next waiting head instead of stalling on it. The other heads keep waiting for a later pass, so the same pass still admits the started heads' held units to the queue however many heads wait.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with a fake expander, holding more waiting heads than one pass starts",
       "tests": [
         "tests/ci_lab/test_scheduler_release.py::test_each_pass_starts_eight_waiting_heads_in_class_order_and_admits_their_units_in_the_same_pass",
         "tests/ci_lab/test_scheduler_release.py::test_the_eight_heads_a_pass_starts_are_the_longest_waiting_and_quiet_or_paused_heads_take_no_place",
-        "tests/ci_lab/test_scheduler_release.py::test_a_head_put_back_for_its_manifest_fetch_still_takes_one_of_the_eight_places"
+        "tests/ci_lab/test_scheduler_release.py::test_a_head_put_back_for_its_manifest_fetch_takes_no_place_and_the_pass_moves_on_to_later_heads",
+        "tests/ci_lab/test_scheduler_release.py::test_eight_heads_put_back_for_their_manifest_fetch_do_not_use_up_the_eight_starts_the_eight_heads_behind_them_take",
+        "tests/ci_lab/test_scheduler_release.py::test_more_than_twenty_four_heads_all_put_back_for_their_manifest_fetch_one_pass_looks_at_exactly_twenty_four",
+        "tests/ci_lab/test_scheduler_release.py::test_a_head_put_back_for_its_manifest_fetch_keeps_its_waiting_record",
+        "tests/ci_lab/test_scheduler_release.py::test_eight_heads_that_cannot_expand_are_dropped_and_take_eight_of_the_starts_places",
+        "tests/ci_lab/test_scheduler_release.py::test_eight_heads_whose_tenth_unanswered_fetch_arrives_in_the_same_pass_take_the_eight_places"
       ]
     },
     {
@@ -11097,6 +11103,19 @@
       "tests": [
         "tests/codex_session/test_attach.py::test_an_admitted_execution_waits_for_its_harness_and_then_attaches",
         "tests/codex_session/test_attach.py::test_a_classified_or_running_execution_without_an_app_server_still_refuses"
+      ]
+    },
+    {
+      "id": "master-quota-login-guidance",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mql-texts",
+      "behaviour": "Master quota stop and wait guidance, master handoff refusals, the master login alert and the rendered master persona name agentihooks claude login --master to replenish a login slot; worker advice stays unchanged.",
+      "seam": "quota_policy.render, HerdrRuntime quota refusal callers, master_prompt_stall.LOGIN_ALERT and rendered package master persona",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_quota_exhaustion_text_uses_the_master_login_only_for_masters",
+        "tests/swarm/test_quota_handoff.py::test_quota_handoff_refusal_adds_login_guidance_only_for_a_master",
+        "tests/swarm/test_master_prompt_stall.py::test_master_login_alert_names_the_master_login_command",
+        "tests/test_package_role_skills.py::test_rendered_masters_ask_through_the_inbox_for_a_master_login_slot"
       ]
     },
     {
