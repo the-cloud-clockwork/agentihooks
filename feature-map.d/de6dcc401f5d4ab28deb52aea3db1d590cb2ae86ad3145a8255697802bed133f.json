@@ -1,0 +1,12 @@
+{
+  "id": "codex-planner-native-sandbox",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-canary-timeout",
+  "behaviour": "Worker images include the official Codex bubblewrap companion and verify its native identity without weakening other companion checks, so a planner can execute its binding canary in the restricted sandbox.",
+  "seam": "Worker artifact lock and scripts.swarm_v2.worker_image installation and inventory",
+  "tests": [
+    "tests/swarm_node/test_planner_sandbox.py::test_worker_image_locks_the_planner_sandbox_runtime",
+    "tests/swarm_node/test_planner_sandbox.py::test_companion_identity_accepts_its_native_usage",
+    "tests/swarm_node/test_planner_sandbox.py::test_companion_identity_refuses_another_executable"
+  ]
+}
