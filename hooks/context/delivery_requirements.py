@@ -24,5 +24,5 @@ def summary() -> str:
 
 
 def inject_on_session_start() -> None:
-    """Hand the summary to the session start context of every agent."""
-    inject_context(summary())
+    """Hand the summary to the session start context of every agent, ranked with the enforcements."""
+    inject_context(summary(), kind="enforcement")
