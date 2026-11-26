@@ -102,6 +102,6 @@ class Fit:
             return False
         if self.rows is None:
             self.rows = self.read(self.environ, time.time(), refresh=False)
-        admitted = bool(available(self.config, self.lane, data["quota"], self.rows, self.environ))
+        admitted = bool(available(self.config, self.lane, descriptor, self.rows, self.environ))
         self.held = self.held or not admitted
         return admitted
