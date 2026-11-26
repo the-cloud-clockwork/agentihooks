@@ -419,11 +419,13 @@ class Ports:
 
 @dataclass(frozen=True)
 class Settings:
-    """The trusted actors, the quiet window of a lane and the retries of a lost unit."""
+    """The trusted actors, the quiet window of a lane, the retries of a lost unit and the served repositories by
+    slug; with no set of served repositories every repository is served."""
 
     trusted: frozenset[str]
     quiet_ms: int = QUIET_MS
     retries: Policy = Policy()
+    served: frozenset[str] | None = None
 
 
 @dataclass
