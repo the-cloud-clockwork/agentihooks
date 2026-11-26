@@ -173,7 +173,7 @@ def _rotate(rig: Any, holders: list[AgentRecord]) -> list[str]:
 @pytest.mark.feature("hub-preemption-victim-rotation")
 def test_recent_victim_task_rotates_to_other_holder(episode: Any) -> None:
     successor = _successor(episode, 600_000)
-    episode.rows["higher"]["rank"] = "low"
+    episode.rows["higher"]["rank"] = episode.rows["lower"].get("rank", "normal")
     other = next(agent for agent in episode.store.agents(SLUG) if agent.task == "higher")
     actions = _rotate(episode, [other, successor])
     assert len(actions) == 1
