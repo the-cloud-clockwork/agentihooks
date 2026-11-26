@@ -14,7 +14,8 @@
     "tests/test_lab_authority_check.py::test_a_delisted_gate_whose_job_is_gone_fails_by_name_on_the_list_its_authority_and_its_skip_clause",
     "tests/test_lab_authority_check.py::test_a_listed_gate_whose_job_is_gone_fails_on_the_delivery_file_and_never_raises",
     "tests/test_lab_authority_check.py::test_a_job_whose_whole_condition_is_the_skip_clause_holds_it",
-    "tests/test_lab_authority_check.py::test_a_checkout_with_no_wiring_file_raises_and_is_never_reported_as_a_delivery_fault"
+    "tests/test_lab_authority_check.py::test_a_checkout_with_no_wiring_file_raises_and_is_never_reported_as_a_delivery_fault",
+    "tests/test_lab_authority_check.py::test_a_checkout_with_a_malformed_wiring_file_raises_and_is_never_reported_as_a_delivery_fault"
   ],
   "live_check": [
     "python",

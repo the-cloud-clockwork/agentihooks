@@ -141,6 +141,13 @@ def test_a_checkout_with_no_wiring_file_raises_and_is_never_reported_as_a_delive
 
 
 @pytest.mark.feature("lab-authoritative-static-gates")
+def test_a_checkout_with_a_malformed_wiring_file_raises_and_is_never_reported_as_a_delivery_fault(copy: Path) -> None:
+    (copy / check.WIRING).write_text("{")
+    with pytest.raises(json.JSONDecodeError):
+        check.main(copy)
+
+
+@pytest.mark.feature("lab-authoritative-static-gates")
 def test_a_job_whose_whole_condition_is_the_skip_clause_holds_it(
     copy: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
