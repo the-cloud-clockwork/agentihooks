@@ -17,11 +17,12 @@ DURATION_JOB = (
     if "durations" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     else "select"
 )
-UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count"}
+UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "collect"}
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = UNIT | {
     "select",
     "lint",
+    "lint-actions",
     "semgrep",
     "sonar",
     "mutation-plan",
@@ -41,8 +42,9 @@ TIERS = [
 
 def _gate_steps(*, docs: bool = False, typing: bool = False) -> list[dict]:
     options = {"consolidated": True} if DURATION_JOB == "select" else {}
-    steps = ci_reuse.postgres_required(ci_reuse.gate_steps(queue_tier=True, docs=docs, **options))
-    return ci_reuse.typing_required(steps) if typing else steps
+    steps = ci_reuse.postgres_required(ci_reuse.gate_steps(queue_tier=True, promotion=True, docs=docs, **options))
+    steps = ci_reuse.typing_required(steps) if typing else steps
+    return ci_reuse.split_required(steps)
 
 
 def gate(event, needs, mutation="true", scope="full"):

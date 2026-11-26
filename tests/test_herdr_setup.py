@@ -175,7 +175,7 @@ def test_init_runs_the_herdr_step_once_for_all_targets(options, expected, monkey
 def _configured(monkeypatch, runner, tmp_path, existing: str | None) -> str:
     path = tmp_path / "xdg" / "herdr" / "config.toml"
     if existing is not None:
-        path.parent.mkdir(parents=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(existing, encoding="utf-8")
     monkeypatch.setenv("HERDR_CONFIG_PATH", str(path))
     assert herdr_setup.configure() == 0
@@ -183,6 +183,7 @@ def _configured(monkeypatch, runner, tmp_path, existing: str | None) -> str:
 
 
 RESUME_OFF = "\n[session]\nresume_agents_on_restore = false\n"
+RESUME_ON = "\n[session]\nresume_agents_on_restore = true\n"
 
 
 def _no_rewrite(doc):
@@ -191,39 +192,72 @@ def _no_rewrite(doc):
 
 def test_configure_adds_a_ui_section_that_turns_copy_on_select_off(monkeypatch, runner, tmp_path, capsys):
     text = _configured(monkeypatch, runner, tmp_path, 'onboarding = false\n\n[theme]\nname = "one-dark"\n')
-    assert text == 'onboarding = false\n\n[theme]\nname = "one-dark"\n\n[ui]\ncopy_on_select = false\n' + RESUME_OFF
+    assert text == 'onboarding = false\n\n[theme]\nname = "one-dark"\n\n[ui]\ncopy_on_select = false\n'
     assert runner.options[("/bin/herdr", "server", "reload-config")] == {"capture_output": True}
     printed = capsys.readouterr().out.splitlines()[-1]
     path = tmp_path / "xdg" / "herdr" / "config.toml"
-    assert printed == f"[herdr] config: copy_on_select = false, resume_agents_on_restore = false in {path}"
+    assert printed == f"[herdr] config: copy_on_select = false in {path}"
 
 
 def test_configure_merges_copy_on_select_into_an_existing_ui_section(monkeypatch, runner, tmp_path):
     existing = "# mine\n[ui]\nconfirm_close = true\n\n[ui.sound]\nenabled = false\n"
     text = _configured(monkeypatch, runner, tmp_path, existing)
-    assert (
-        text
-        == "# mine\n[ui]\nconfirm_close = true\ncopy_on_select = false\n\n[ui.sound]\nenabled = false\n" + RESUME_OFF
-    )
+    assert text == "# mine\n[ui]\nconfirm_close = true\ncopy_on_select = false\n\n[ui.sound]\nenabled = false\n"
     assert ["/bin/herdr", "server", "reload-config"] in runner.calls
 
 
-def test_configure_keeps_copy_on_select_the_operator_turned_on(monkeypatch, runner, tmp_path, capsys):
-    existing = "[ui]\ncopy_on_select = true\n"
-    assert _configured(monkeypatch, runner, tmp_path, existing) == existing + RESUME_OFF
-    printed = capsys.readouterr().out.splitlines()[-1]
-    assert printed.startswith("[herdr] config: resume_agents_on_restore = false in ")
+@pytest.mark.feature("herdr-native-resume")
+def test_configure_keeps_agent_resume_the_operator_turned_on(monkeypatch, runner, tmp_path, capsys):
+    existing = "[ui]\ncopy_on_select = true\n" + RESUME_ON
+    monkeypatch.setattr(herdr_setup, "tomlkit", types.SimpleNamespace(parse=tomlkit.parse, dumps=_no_rewrite))
+    assert _configured(monkeypatch, runner, tmp_path, existing) == existing
+    assert ["/bin/herdr", "server", "reload-config"] not in runner.calls
+    assert "[herdr] config:" not in capsys.readouterr().out
 
 
-def test_configure_turns_off_agent_resume_the_operator_turned_on(monkeypatch, runner, tmp_path):
-    existing = "[ui]\ncopy_on_select = true\n\n[session]\nresume_agents_on_restore = true\n"
-    text = _configured(monkeypatch, runner, tmp_path, existing)
-    assert tomllib.loads(text)["session"] == {"resume_agents_on_restore": False}
+@pytest.mark.feature("herdr-native-resume")
+def test_configure_releases_the_resume_off_it_wrote_before_once(monkeypatch, runner, tmp_path, capsys):
+    existing = "[ui]\ncopy_on_select = true\n" + RESUME_OFF + "\n[keys]\ngoto = 1\n"
+    assert _configured(monkeypatch, runner, tmp_path, existing) == "[ui]\ncopy_on_select = true\n\n[keys]\ngoto = 1\n"
+    assert ["/bin/herdr", "server", "reload-config"] in runner.calls
+    assert (
+        capsys.readouterr()
+        .out.splitlines()[-1]
+        .startswith("[herdr] config: resume_agents_on_restore restored to the herdr default in ")
+    )
+    assert install._load_state()["herdr"]["resume_released"].endswith("+00:00")
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_configure_keeps_a_resume_off_set_after_the_release(monkeypatch, runner, tmp_path):
+    _configured(monkeypatch, runner, tmp_path, "[ui]\ncopy_on_select = true\n")
+    existing = "[ui]\ncopy_on_select = true\n" + RESUME_OFF
+    monkeypatch.setattr(herdr_setup, "tomlkit", types.SimpleNamespace(parse=tomlkit.parse, dumps=_no_rewrite))
+    assert _configured(monkeypatch, runner, tmp_path, existing) == existing
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_configure_keeps_a_resume_off_sharing_its_section(monkeypatch, runner, tmp_path):
+    existing = (
+        "[ui]\ncopy_on_select = true\n\n[session]\nresume_agents_on_restore = false\nstartup_per_agent_delay_ms = 200\n"
+    )
+    monkeypatch.setattr(herdr_setup, "tomlkit", types.SimpleNamespace(parse=tomlkit.parse, dumps=_no_rewrite))
+    assert _configured(monkeypatch, runner, tmp_path, existing) == existing
+    assert install._load_state()["herdr"]["resume_released"]
+
+
+@pytest.mark.feature("herdr-native-resume")
+@pytest.mark.parametrize("value", ["off", "false", "0", "no", " OFF "])
+def test_the_resume_switch_turns_agent_resume_off(monkeypatch, runner, tmp_path, value):
+    monkeypatch.setenv(herdr_setup.RESUME_ENV, value)
+    text = _configured(monkeypatch, runner, tmp_path, "[ui]\ncopy_on_select = true\n" + RESUME_ON)
     assert text == "[ui]\ncopy_on_select = true\n" + RESUME_OFF
     assert ["/bin/herdr", "server", "reload-config"] in runner.calls
 
 
-def test_configure_leaves_a_compliant_config_alone(monkeypatch, runner, tmp_path, capsys):
+@pytest.mark.feature("herdr-native-resume")
+def test_the_resume_switch_leaves_a_resume_off_config_alone(monkeypatch, runner, tmp_path, capsys):
+    monkeypatch.setenv(herdr_setup.RESUME_ENV, "off")
     existing = "[ui]\ncopy_on_select = true\n" + RESUME_OFF
     monkeypatch.setattr(herdr_setup, "tomlkit", types.SimpleNamespace(parse=tomlkit.parse, dumps=_no_rewrite))
     assert _configured(monkeypatch, runner, tmp_path, existing) == existing
@@ -231,8 +265,50 @@ def test_configure_leaves_a_compliant_config_alone(monkeypatch, runner, tmp_path
     assert "[herdr] config:" not in capsys.readouterr().out
 
 
+@pytest.mark.feature("herdr-native-resume")
+@pytest.mark.parametrize("value", ["", "on", "true", "1"])
+def test_resume_stays_on_unless_switched_off(value):
+    assert herdr_setup.resume_off({herdr_setup.RESUME_ENV: value}) is False
+
+
+@pytest.mark.feature("herdr-native-resume")
+@pytest.mark.parametrize("value", ["off", "false", "0", "no", " Off "])
+def test_a_given_environment_switches_resume_off(value):
+    assert herdr_setup.resume_off({herdr_setup.RESUME_ENV: value}) is True
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_resume_stays_on_when_nothing_sets_the_switch(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    assert herdr_setup.resume_off({}) is False
+    assert herdr_setup.resume_off({"OTHER": "off"}) is False
+    assert herdr_setup.resume_off() is False
+
+
+@pytest.mark.feature("herdr-native-resume")
+def test_the_resume_switch_is_read_from_the_agentihooks_env_file(monkeypatch, tmp_path):
+    env_file = tmp_path / ".agentihooks" / ".env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text(f"{herdr_setup.RESUME_ENV}=off\n", encoding="utf-8")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(env_file.parent))
+    assert herdr_setup.resume_off() is True
+    monkeypatch.setenv(herdr_setup.RESUME_ENV, "on")
+    assert herdr_setup.resume_off() is False
+
+
+def test_configure_leaves_a_compliant_config_alone(monkeypatch, runner, tmp_path, capsys):
+    existing = "[ui]\ncopy_on_select = true\n"
+    _configured(monkeypatch, runner, tmp_path, existing)
+    capsys.readouterr()
+    runner.calls.clear()
+    monkeypatch.setattr(herdr_setup, "tomlkit", types.SimpleNamespace(parse=tomlkit.parse, dumps=_no_rewrite))
+    assert _configured(monkeypatch, runner, tmp_path, existing) == existing
+    assert ["/bin/herdr", "server", "reload-config"] not in runner.calls
+    assert "[herdr] config:" not in capsys.readouterr().out
+
+
 def test_configure_creates_a_missing_config(monkeypatch, runner, tmp_path):
-    assert _configured(monkeypatch, runner, tmp_path, None) == "[ui]\ncopy_on_select = false\n" + RESUME_OFF
+    assert _configured(monkeypatch, runner, tmp_path, None) == "[ui]\ncopy_on_select = false\n"
 
 
 def test_the_config_path_follows_herdr(monkeypatch, tmp_path):

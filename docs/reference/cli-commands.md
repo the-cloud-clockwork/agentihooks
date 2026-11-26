@@ -399,7 +399,7 @@ agenti --route claude-ai        # a stored claude ai login; only a front door ma
 `--route claude-ai` picks a stored claude ai login by
 `AGENTIHOOKS_MASTER_LOGIN_ORDER` and prints
 `[agenti] account=<name> route=claude-ai slot=<n>`; see
-[Standalone sessions on a claude ai login](account-login.md#standalone-sessions-on-a-claude-ai-login).
+[Live sessions on a claude ai login](account-login.md#live-sessions-on-a-claude-ai-login).
 
 The launch line reports `account`, `routing_left` and `sessions=n/cap`, or
 `account=api kind=api` for the api side. The api weight decides which side a
@@ -833,16 +833,34 @@ records the answer in `state.json` (`herdr.enabled`); agents pass
 `agentihooks init --herdr yes|no`. Later inits with herdr enabled install the
 binary when missing and (re)install the herdr integrations for Claude and Codex.
 
-Configure also writes `[session] resume_agents_on_restore = false` into the
-herdr config, overwriting `true`. A herdr server restart then brings agent panes
-back as plain shells; agents return only through the agentihooks boot recovery
-and launcher, which give each one its routed account. herdr's own resume runs
-`codex resume <id>` or `claude --resume <id>` without that account.
+herdr's own agent resume stays on. After a herdr server restart every agent pane
+reopens its conversation in the same pane.
+
+- A pane started through the agentihooks router (`agentihooks claude`,
+  `agentihooks codex`, `init-agent`) tells herdr at SessionStart to resume through
+  the router: `agentihooks claude --agentihooks-fallback-bare --resume <id>` or
+  `agentihooks codex resume <id>`, keeping the pane's `CLAUDE_CONFIG_DIR` or
+  `CODEX_HOME`. The router picks an account with quota left; when none can be
+  picked, Claude starts bare, as herdr's own resume would.
+- A pane on an API key, a gateway, Bedrock or a single default login reports
+  nothing, and herdr runs its own `claude --resume <id>` or `codex resume <id>`.
+- A swarm agent (`AGENTIHOOKS_SWARM`) reports nothing; the swarm's reboot recovery
+  reopens it in its seat.
+
+`AGENTIHOOKS_HERDR_RESUME=off` turns herdr's agent resume off entirely: configure
+then writes `[session] resume_agents_on_restore = false`, and no pane reports a
+resume command. Agents come back only through the swarm's reboot recovery. Use it
+on a machine that runs swarms and would rather not have herdr reopen swarm panes.
+
+Releases before this one forced `resume_agents_on_restore = false`. The first
+configure after upgrading removes that key when it is the only one in
+`[session]`, and records `herdr.resume_released` in `state.json` so it never
+touches the key again. A `false` written by hand after that stays.
 
 ```bash
 agentihooks herdr              # status; offers to install when herdr is missing
 agentihooks herdr install      # official installer, then configure
-agentihooks herdr configure    # herdr integration install claude|codex; agent resume off
+agentihooks herdr configure    # herdr integration install claude|codex; agent resume kept on
 agentihooks herdr disable      # init-agent stops choosing herdr
 ```
 

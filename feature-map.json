@@ -679,6 +679,21 @@
       ]
     },
     {
+      "id": "lab-static-jobs-hold-lab-steps",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
+      "behaviour": "The Tests workflow jobs lint, type-gate and test-count hold only steps the CI lab grades: the lint steps only Actions can run sit in the lint-actions job and the test plan, the early collection and the queue count record in the collect job, both needs of Gate Required. An inline python -c probe makes no lab gate, so no step of the three jobs is in the static exclusion catalog and delivery authority keeps all three when a tree lists them.",
+      "seam": "scripts.ci_lab.static_gates.discover over the Tests workflow, scripts.ci_lab.delivery.authoritative with the repository exclusion catalog, and the collect and lint-actions jobs of the Tests workflow read through the workflow tests",
+      "tests": [
+        "tests/ci_lab/test_delivery.py::test_the_exclusion_catalog_keeps_lab_authority_for_the_split_static_gates",
+        "tests/ci_lab/test_static_gates.py::test_a_python_dash_c_probe_adds_no_gate_while_module_script_and_stdin_forms_do",
+        "tests/ci_lab/test_static_gates.py::test_the_real_lint_type_gate_and_test_count_jobs_hold_no_excluded_step",
+        "tests/ci_lab/test_static_gates.py::test_the_real_static_jobs_leave_only_their_setup_and_record_fetch_steps_without_a_gate",
+        "tests/ci_lab/test_static_gates.py::test_the_real_count_floor_gate_reads_no_pull_request_head_and_no_reviews_file",
+        "tests/test_ci_workflow_collect.py::test_the_collection_step_propagates_its_exit_code"
+      ]
+    },
+    {
       "id": "lab-pull-request-reusable-job-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2722",
@@ -5045,6 +5060,16 @@
       ]
     },
     {
+      "id": "semgrep-engine-posix-backend",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-runner-oom",
+      "behaviour": "Every job of the Semgrep workflow runs semgrep-core on the Eio posix backend, so the engine opens no io_uring ring.",
+      "seam": "the top level env of the Semgrep workflow, inherited by its scan, feature-tests and charts jobs, with no job or step env or run text setting EIO_BACKEND",
+      "tests": [
+        "tests/test_ci_semgrep.py::test_every_semgrep_job_inherits_the_posix_backend_without_override"
+      ]
+    },
+    {
       "id": "feature-suite-harness",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/fsuite1",
@@ -5943,6 +5968,18 @@
         "tests/doctor/test_empty_seats.py::test_a_review_seat_above_the_review_lane_cap_has_no_seat_wait",
         "tests/doctor/test_empty_seats.py::test_a_review_seat_on_a_config_stored_without_a_review_cap_has_no_seat_wait"
       ]
+    },
+    {
+      "id": "swarm-focus-cap-small-lane",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-cap-small-lane",
+      "behaviour": "A lane with positive seats and positive focus weight retains at least one focus seat; zero seats, disabled focus and exhausted focus shares yield focus priority.",
+      "seam": "scripts.swarm.dispatcher._focus_order",
+      "tests": [
+        "tests/swarm/test_dispatcher.py::test_small_lanes_keep_a_positive_focus_share",
+        "tests/swarm/test_dispatcher.py::test_small_lanes_yield_focus_when_disabled_or_full"
+      ],
+      "rules": ["focus-share-floor-division"]
     },
     {
       "id": "swarm-review-dispatcher-lane-cap",
@@ -7458,11 +7495,11 @@
       "id": "split-starts-on-the-early-collection-upload",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-queue-first-shard-lead",
-      "behaviour": "The Tests split job passes its early collection guard at the first jobs API poll that shows the test-count job still running with its Upload the early collection step concluded success, so the unit shards no longer wait for the count job's tail steps. A test-count job the guard sees completed keeps the old verdict: it passes only on success, and any other completion fails the guard before any artifact is read, even after its upload step succeeded.",
-      "seam": "the split job's Require successful early collection step and the COLLECTION_STEP it names in test-count",
+      "behaviour": "The Tests split job passes its early collection guard at the first jobs API poll that shows the collect job still running with its Upload the early collection step concluded success, so the unit shards no longer wait for the collect job's tail steps. A collect job the guard sees completed keeps the old verdict: it passes only on success, and any other completion fails the guard before any artifact is read, even after its upload step succeeded.",
+      "seam": "the split job's Require successful early collection step and the COLLECTION_STEP it names in collect",
       "tests": [
-        "tests/test_ci_workflow.py::test_split_starts_once_the_early_collection_upload_succeeds_while_the_count_job_runs",
-        "tests/test_ci_workflow.py::test_split_waits_on_the_count_step_that_uploads_the_collection_it_downloads"
+        "tests/test_ci_workflow.py::test_split_starts_once_the_early_collection_upload_succeeds_while_the_collect_job_runs",
+        "tests/test_ci_workflow.py::test_split_waits_on_the_collect_step_that_uploads_the_collection_it_downloads"
       ]
     },
     {
@@ -7783,6 +7820,20 @@
       "tests": [
         "tests/swarm/test_queue_priority.py::test_priority_moves_waiting_entries_at_once_while_the_head_group_tests",
         "tests/swarm/test_merge_queue_priority.py::test_master_priority_moves_waiting_entries_without_cancelling_running_head"
+      ]
+    },
+    {
+      "id": "codex-planner-export-grant",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-planner-export-grant",
+      "behaviour": "Codex planners retain their ledger, swarm and scratchpad write roots and read-only base while gaining the ledger client export directory, resolved from AGENTIHOOKS_HOME or the process home exactly as export_file does, including empty, quoted, relative and tilde overrides.",
+      "seam": "scripts.swarm.runtime.codex_plan_mode output and scripts.swarm_ledger.api.client.export_file directory",
+      "rules": [
+        "codex-planner-export-grant-missing"
+      ],
+      "tests": [
+        "tests/swarm/test_codex_planner_exports.py::test_planner_keeps_existing_write_grants",
+        "tests/swarm/test_codex_planner_exports.py::test_planner_grants_the_client_export_directory"
       ]
     },
     {
@@ -8225,7 +8276,7 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-pr-planner-artifact-page",
       "behaviour": "The test planner lists every artifact page of each candidate dev push run, up to two pages of 100, and counts every page against its request budget, so a passed dev push run whose coverage shards are listed past the first 100 artifacts is still the record, because two passed dev push runs each held 106 artifacts with coverage shards on page two and pull request runs reused tests from a dev run four commits behind.",
-      "seam": "scripts.ci_test_plan.find_record and its per run artifact listing, run by the Plan the tests whose inputs did not change step of the Tests workflow test-count job",
+      "seam": "scripts.ci_test_plan.find_record and its per run artifact listing, run by the Plan the tests whose inputs did not change step of the Tests workflow collect job",
       "rules": [
         "run-artifacts-read-one-page-python"
       ],
@@ -10118,7 +10169,7 @@
       "id": "lint-gates-grade-from-grader",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-gates-from-grader-tree",
-      "behaviour": "The lint job's ruff, wiring, marker vector and for loop word list steps and the Semgrep code scans and chart checks grade the head with the protected grader's module and config, the head only as data, so a head that edits a gate's module or config to pass its own copy stays red.",
+      "behaviour": "The lint job's ruff, wiring and for loop word list steps, the lint-actions job's marker vector step and the Semgrep code scans and chart checks grade the head with the protected grader's module and config, the head only as data, so a head that edits a gate's module or config to pass its own copy stays red.",
       "seam": "The lint and Semgrep workflow step run text, executed over a planted head with the repository as grader",
       "tests": [
         "tests/test_ci_grader_gates.py::test_a_head_config_that_drops_a_rule_stays_red_under_the_grader_config",
@@ -12820,7 +12871,7 @@
     {
       "id": "quick-swarm",
       "origin": "inventory",
-      "behaviour": "A quick swarm runs in one herdr tab with no Redis or ledger server: the session that runs quick up becomes the master in pane 1 and up to four engineers open in the panes to its right, every seat injected with its role, seat folder and plan state; a seat that hands off at its compaction limit is ended with its pane kept and its successor starts in that same pane from the seat's handoff, a room message tells an idle receiving seat at once, and the quick tick, run by the hourly safety nudge round, nudges idle engineers, tells seats of room messages, relaunches a pending seat and starts again an engineer whose agent exited, and never types into a pane at a bare shell; every agent gets an equal column, quick up fails an engineer whose agent exits at launch, and outside herdr quick up refuses loudly; a seat's agent lands only on a routed account: a quick seat launch never falls back to bare Claude, the router reads the operator's token block when the pane's shell never loaded it, and a launch whose agent was not routed fails and leaves the seat pending; the tick ends an engineer whose idle agent shows Claude's signed-out notice below its input box, whether its seat is ready or pending, with its pane kept and its seat held launching, and starts it again, and quick relaunch --force does the same for a named seat, never the master.",
+      "behaviour": "A quick swarm runs in one herdr tab with no Redis or ledger server: the session that runs quick up becomes the master in pane 1 and up to four engineers open in the panes to its right, every seat injected with its role, seat folder and plan state; a seat that hands off at its compaction limit is ended with its pane kept and its successor starts in that same pane from the seat's handoff, a room message tells an idle receiving seat at once, and the quick tick, run by the hourly safety nudge round, nudges idle engineers, tells seats of room messages, relaunches a pending seat and starts again an engineer whose agent exited, and never types into a pane at a bare shell; every agent gets an equal column, quick up fails an engineer whose agent exits at launch, and outside herdr quick up refuses loudly; a seat's agent lands only on a routed account: a quick seat launch never falls back to bare Claude, the router reads the operator's token block when the pane's shell never loaded it, and a launch whose agent was not routed fails and leaves the seat pending; the tick ends an engineer whose idle agent shows Claude's signed-out notice below its input box, whether its seat is ready or pending, with its pane kept and its seat held launching, and starts it again, and quick relaunch --force does the same for a named seat, including the master, whose successor binds in the preserved pane.",
       "seam": "scripts.quick (guard, layout, registry, member, seeds, handoff, room, launch, tick, cli), hooks.context.quick_swarm, the quick branches of hooks.context.context_recycle and hooks.lifecycle.handoff_close, init-agent --pane and its quick seat route check, and the token block read of scripts.claude_quota_balancer.select_launch_credential",
       "tests": [
         "tests/quick/test_cli.py::test_up_seats_the_caller_as_master_and_launches_the_engineers",
@@ -12874,12 +12925,49 @@
         "tests/test_claude_quota_balancer.py::test_a_launch_routes_over_the_operator_token_block_its_shell_never_loaded",
         "tests/quick/test_room_tick_launch.py::test_an_engineer_whose_agent_is_signed_out_is_started_again_and_the_master_never_is",
         "tests/quick/test_room_tick_launch.py::test_force_ends_the_seat_agent_with_its_pane_kept_and_starts_its_successor",
-        "tests/quick/test_room_tick_launch.py::test_force_never_ends_the_master_nor_a_seat_being_launched",
+        "tests/quick/test_room_tick_launch.py::test_force_never_ends_a_seat_being_launched_or_a_missing_seat",
         "tests/quick/test_cli_mutants.py::test_relaunch_force_ends_the_live_agent_and_starts_its_successor",
         "tests/test_init_agent.py::test_a_successor_without_account_tokens_refuses_and_its_seat_never_reads_ready",
         "tests/quick/test_room_tick_launch.py::test_a_notice_above_the_input_box_a_busy_agent_or_an_unreadable_pane_is_never_forced"
       ],
       "semgrep_rule": "feature-quick-swarm-pane-typing"
+    },
+    {
+      "id": "quick-master-force-relaunch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quick-master-relaunch",
+      "behaviour": "Forcing the quick master seat ends its current agent while keeping the pane, starts one successor and records its new session binding before the seat reads ready.",
+      "seam": "scripts.quick.launch.force and registry.bind",
+      "tests": [
+        "tests/quick/test_room_tick_launch.py::test_force_ends_the_master_and_starts_a_bound_successor"
+      ]
+    },
+    {
+      "id": "quick-launcher-survival",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quick-master-relaunch",
+      "behaviour": "A quick launcher and its PID marker survive agent exit and launch acceptance. A same-name successor removes dead predecessor launchers and inputs, preserving live launchers and other names. Ordinary launches retain exit cleanup.",
+      "seam": "scripts.init_agent._write_launcher and main",
+      "tests": [
+        "tests/test_init_agent.py::test_a_quick_launcher_survives_exit_until_a_successor_replaces_it",
+        "tests/test_init_agent.py::test_successor_cleanup_keeps_live_launchers_and_other_agent_names",
+        "tests/test_init_agent.py::test_successor_cleanup_reaches_dead_launchers_after_every_skipped_entry",
+        "tests/test_init_agent.py::test_only_a_quick_successor_removes_dead_launchers_with_a_recorded_pid",
+        "tests/test_init_agent.py::test_a_successor_written_at_the_same_path_is_kept",
+        "tests/test_init_agent.py::test_an_ordinary_launcher_still_removes_itself_after_exit",
+        "tests/test_init_agent.py::test_a_quick_launch_keeps_its_started_marker_after_acceptance"
+      ]
+    },
+    {
+      "id": "live-launcher-gc",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quick-master-relaunch",
+      "behaviour": "Run folder cleanup preserves old launch files whose started marker holds a live positive PID. Dead, missing, malformed and unreadable markers keep the existing age rule.",
+      "seam": "scripts.herdr_gc.clean_run_dir",
+      "tests": [
+        "tests/test_herdr_gc.py::test_old_launchers_with_live_started_pids_survive_cleanup",
+        "tests/test_herdr_gc.py::test_an_out_of_range_started_pid_uses_the_age_rule"
+      ]
     },
     {
       "id": "tick-progress-heads",
@@ -13124,8 +13212,8 @@
       "id": "sonar-reads-the-reused-plan-after-test-count-uploads-it",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-sonar-reused-artifacts-race",
-      "behaviour": "The sonar job of the Tests workflow waits for every job that uploads the reused test plan artifacts it downloads by the pattern {reused-branch,reused}-3.12, so its download lists both reused-branch-3.12 and reused-3.12 and each lands in its own folder where the branch coverage carrier reads it. Before, Sonar could list the run's artifacts between the two uploads, take the lone match into the bare folder, carry no reused coverage and fail the quality gate on new coverage. Sonar still runs when test-count is skipped or fails, because its condition starts with !cancelled() and reads no test-count result.",
-      "seam": "The needs and the condition of the sonar job and the upload steps of the test-count job in the Tests workflow",
+      "behaviour": "The sonar job of the Tests workflow waits for every job that uploads the reused test plan artifacts it downloads by the pattern {reused-branch,reused}-3.12, so its download lists both reused-branch-3.12 and reused-3.12 and each lands in its own folder where the branch coverage carrier reads it. Before, Sonar could list the run's artifacts between the two uploads, take the lone match into the bare folder, carry no reused coverage and fail the quality gate on new coverage. Sonar still runs when collect or test-count is skipped or fails, because its condition starts with !cancelled() and reads neither result.",
+      "seam": "The needs and the condition of the sonar job and the upload steps of the collect job in the Tests workflow",
       "tests": [
         "tests/test_ci_lone_artifact_download.py::test_sonar_lists_the_reused_test_plan_only_after_every_job_that_uploads_it_finished",
         "tests/test_ci_sonar_workflow.py::test_sonar_runs_when_test_count_is_skipped_or_failed"
@@ -14714,13 +14802,14 @@
       "origin": "regression",
       "ordered_at": "2026-11-19",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2527",
-      "behaviour": "On a pull request the test count floor admits a new signed retirement only when a code owner that the base revision's CODEOWNERS names for the retirement file approved the pull request head the run grades. Each reviewer's last approval, request for changes or dismissal decides, and a comment leaves it standing; an approval of an earlier head, an approval from anyone the base does not name, a base CODEOWNERS rule outside the anchored grammar the floor matches, and reviews that cannot be read keep the lost test counted and the job red. The test count job reads the pull request's reviews on its App token and hands the floor the reviews file and the head from the event payload; without a reviewed head, in merge groups and dispatched runs, signed retirements are graded as before. The approvals mode of the floor grades the same approval on its own, without collecting either tree: it fails when the head holds a new signed retirement that no such code owner approved on the reviewed head, passes when every one is approved, when the head holds none and when no head is named, and is refused beside the record and retire modes.",
-      "seam": "tests.count_floor.retirements with approvers and code_owners, fed by the test-count job's Read the pull request reviews step, and the approvals mode of tests.count_floor.main (hold_approvals), which grades the same approval without collecting",
+      "behaviour": "On a pull request the test count floor admits a new signed retirement only when a code owner that the base revision's CODEOWNERS names for the retirement file approved the pull request head the run grades. Each reviewer's last approval, request for changes or dismissal decides, and a comment leaves it standing; an approval of an earlier head, an approval from anyone the base does not name, a base CODEOWNERS rule outside the anchored grammar the floor matches, and reviews that cannot be read keep the lost test counted and the job red. The collect job reads the pull request's reviews on its App token, and its approval hold step runs the base copy of the floor in approvals mode with the reviews file and the head from the event payload, failing closed when the base copy lacks the mode; the floor step of the test count job reads neither, and without a reviewed head, in merge groups and dispatched runs, signed retirements are graded as before. The approvals mode of the floor grades the same approval on its own, without collecting either tree: it fails when the head holds a new signed retirement that no such code owner approved on the reviewed head, passes when every one is approved, when the head holds none and when no head is named, and is refused beside the record and retire modes.",
+      "seam": "tests.count_floor.retirements with approvers and code_owners, and the approvals mode of tests.count_floor.main (hold_approvals), which grades the same approval without collecting, run by the collect job's Hold each new retirement to a code owner's approval step on the file its Read the pull request reviews step writes",
       "tests": [
         "tests/test_count_floor.py::test_a_signed_retirement_is_admitted_only_with_a_code_owner_approval_of_the_head",
         "tests/test_count_floor.py::test_a_code_owner_rule_the_floor_cannot_match_admits_no_retirement",
         "tests/test_count_floor.py::test_reviews_without_a_reviewed_head_leave_a_signed_retirement_graded_as_before",
-        "tests/test_ci_gate_workflow.py::test_a_pull_request_count_floor_reads_its_reviews_on_the_app_token",
+        "tests/test_ci_gate_workflow.py::test_the_collect_job_reads_the_pull_request_reviews_on_the_app_token_for_the_approval_hold",
+        "tests/test_ci_workflow_collect.py::test_the_approval_hold_runs_the_base_floor_and_ends_with_its_exit_code",
         "tests/test_count_floor_approvals.py::test_the_approvals_mode_fails_a_new_signed_retirement_no_code_owner_approved_on_the_head",
         "tests/test_count_floor_approvals.py::test_the_approvals_mode_fails_a_new_signed_retirement_whose_reviews_cannot_be_read",
         "tests/test_count_floor_approvals.py::test_the_approvals_mode_fails_a_retirement_whose_file_has_no_code_owner_on_the_base",
@@ -14788,8 +14877,8 @@
       "id": "tracked-test-lock-cache-keys",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-cache-keys-tracked-lock",
-      "behaviour": "The tracked .github/test-requirements.lock, never the untracked uv.lock, is the dependency lock every cache key and trigger reads: the mutation stats cache hashes it among its configuration sources, so a lock change recollects a test file's stats and gives every lab stats unit a new key; the test dependency manifest counts it as a global file, so a lock change or removal rekeys every lab test fingerprint and keeps whole files in planned mutation test selection; and the lint job's self plant runs the mutation gate's plant when it changes.",
-      "seam": "scripts.ci_mutation.stats_cache CONFIGURATION with collect_cached_stats, scripts.ci_lab.expand_mutation stats_units, scripts.dep_manifest GLOBAL_FILES with scripts.ci_lab.expand_tests fingerprints and scripts.ci_mutation.plan record_drift, the self-plant step of the lint job in .github/workflows/test.yml",
+      "behaviour": "The tracked .github/test-requirements.lock, never the untracked uv.lock, is the dependency lock every cache key and trigger reads: the mutation stats cache hashes it among its configuration sources, so a lock change recollects a test file's stats and gives every lab stats unit a new key; the test dependency manifest counts it as a global file, so a lock change or removal rekeys every lab test fingerprint and keeps whole files in planned mutation test selection; and the lint-actions job's self plant runs the mutation gate's plant when it changes.",
+      "seam": "scripts.ci_mutation.stats_cache CONFIGURATION with collect_cached_stats, scripts.ci_lab.expand_mutation stats_units, scripts.dep_manifest GLOBAL_FILES with scripts.ci_lab.expand_tests fingerprints and scripts.ci_mutation.plan record_drift, the self-plant step of the lint-actions job in .github/workflows/test.yml",
       "tests": [
         "tests/test_ci_mutation_stats_cache.py::test_a_test_requirements_lock_change_recollects_stats",
         "tests/ci_lab/test_expand_mutation.py::test_a_test_requirements_lock_change_rekeys_every_stats_unit",
@@ -14931,7 +15020,7 @@
       "id": "lab-static-test-count-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-units-missing",
-      "behaviour": "The CI lab grades the Tests workflow's test-count job with static units: the static executor supplies runner.temp as the unit's run folder, github.event_name as pull_request and each matrix value the gate's job holds at one value, so the four test-count gate steps discover with nothing missing; static gate discovery names the docs and writer-lock jobs CI only with the reason the lab sandbox cannot run them, names CI only each job of a static job's reusable workflow that calls another reusable workflow instead of raising on it, and the discovery command prints those jobs with their reasons under --ci-only.",
+      "behaviour": "The CI lab grades the Tests workflow's test-count job with static units: the static executor supplies runner.temp as the unit's run folder, github.event_name as pull_request and each matrix value the gate's job holds at one value, so the test-count floor step discovers with nothing missing; static gate discovery names the docs and writer-lock jobs CI only with the reason the lab sandbox cannot run them, names CI only each job of a static job's reusable workflow that calls another reusable workflow instead of raising on it, and the discovery command prints those jobs with their reasons under --ci-only.",
       "seam": "scripts.ci_lab.static_gates discover, ci_only and main with the StaticGate matrix and missing, scripts.ci_lab.run_static run with its run folder and the gate's matrix in the context, and scripts.ci_lab.executors static with the event name in the lease context",
       "tests": [
         "tests/ci_lab/test_static_gates.py::test_a_gate_misses_no_run_folder_event_name_or_matrix_value_its_job_holds_at_one_value",
@@ -15525,7 +15614,7 @@
       "id": "deselect-scripts-manifest",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2654",
-      "behaviour": "The test count job's Deselect the reused tests step runs the grader checkout's scripts.dep_manifest alone. A grader checkout whose interpreter cannot import the tests package deselects exactly the tests scripts.dep_manifest.deselect picks, and a grader checkout that keeps the manifest only under the tests package never runs that manifest.",
+      "behaviour": "The collect job's Deselect the reused tests step runs the grader checkout's scripts.dep_manifest alone. A grader checkout whose interpreter cannot import the tests package deselects exactly the tests scripts.dep_manifest.deselect picks, and a grader checkout that keeps the manifest only under the tests package never runs that manifest.",
       "seam": "the Deselect the reused tests step run text executed in a fake grader checkout",
       "tests": [
         "tests/test_dep_manifest.py::test_the_split_deselects_with_the_scripts_manifest_alone_and_never_the_tests_package"
@@ -16173,8 +16262,8 @@
       "id": "ci-dependency-audit-platformdirs-pin",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2801",
-      "behaviour": "The dependency audit runs pip-audit through uvx with --constraints on the checked in audit lock, .github/ci-tools/audit.lock, read from the script's own tree, and the lock pins the audited pip-audit version and its whole closure, so a new upstream release such as platformdirs 4.14.8 cannot reach the audit; the lint job's grading step sets no constraint of its own and calls the base's copy of the script.",
-      "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint job's dependency audit step",
+      "behaviour": "The dependency audit runs pip-audit through uvx with --constraints on the checked in audit lock, .github/ci-tools/audit.lock, read from the script's own tree, and the lock pins the audited pip-audit version and its whole closure, so a new upstream release such as platformdirs 4.14.8 cannot reach the audit; the lint-actions job's grading step sets no constraint of its own and calls the base's copy of the script.",
+      "seam": "scripts.ci_dependency_audit.audit's pip-audit command and the lint-actions job's dependency audit step",
       "tests": [
         "tests/test_ci_dependency_audit.py::test_audit_runs_pip_audit_under_the_checked_in_audit_constraint",
         "tests/test_ci_dependency_audit.py::test_dependency_audit_is_a_lint_step_graded_by_the_base"

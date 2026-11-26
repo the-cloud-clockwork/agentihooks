@@ -101,6 +101,7 @@ def test_user_prompt_shows_ledger_events_on_every_harness(harness, dispatched, i
 def test_session_start_reaches_the_ledger_hook_on_every_harness(harness, dispatched, injected, monkeypatch):
     monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", lambda: None)
     monkeypatch.setattr("hooks.lifecycle.codex_refresh_kick.kick", lambda: None)
+    monkeypatch.setattr("hooks.lifecycle.herdr_resume.kick", lambda payload: None)
     hm.on_session_start({"hook_event_name": "SessionStart", "session_id": "s1", "cwd": "/p"})
     assert [p["hook_event_name"] for p in dispatched] == ["SessionStart"]
 

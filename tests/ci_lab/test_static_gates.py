@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from scripts import ci_wiring
-from scripts.ci_lab import grader, static_gates
+from scripts.ci_lab import grader, static_exclusions, static_gates
 from scripts.ci_lab.static_gates import WHOLE_TREE, StaticGate
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -366,6 +366,27 @@ def test_two_steps_with_one_gate_name_are_refused() -> None:
     assert str(refused.value) == "lint/lint-check names two gate steps"
 
 
+@pytest.mark.feature("lab-static-jobs-hold-lab-steps")
+def test_a_python_dash_c_probe_adds_no_gate_while_module_script_and_stdin_forms_do() -> None:
+    probed = [
+        {"name": "Only a -c probe", "run": "python -c 'import sys; sys.exit(0)'"},
+        {"name": "A module", "run": "python -m scripts.read_the_run"},
+        {"name": "A script file", "run": "python scripts/read_the_run.py"},
+        {"name": "A heredoc script", "run": "python - <<'EOF'\nprint(1)\nEOF"},
+        {"name": "A module beside a probe", "run": "python -m scripts.read_the_run && python -c 'print(1)'"},
+        {"name": "A probe importing repository code", "run": "python -c 'from tests.count_floor import main; main()'"},
+        {"name": "A probe with combined flags", "run": "python -Ic 'print(1)'"},
+    ]
+    gates = {gate.step: gate for gate in static_gates.discover(_edited(WORKFLOW, "lint", probed), REGISTRY, REUSABLE)}
+    assert "Only a -c probe" not in gates
+    assert "A probe importing repository code" not in gates
+    assert "A probe with combined flags" not in gates
+    assert gates["A module"].modules == ("scripts.read_the_run",)
+    assert gates["A script file"].modules == ("scripts.read_the_run",)
+    assert gates["A heredoc script"].modules == ()
+    assert gates["A module beside a probe"].modules == ("scripts.read_the_run",)
+
+
 def test_discovery_over_the_real_workflow_lists_every_gate_the_lint_job_runs() -> None:
     workflows = ROOT / ".github" / "workflows"
     registry = json.loads((ROOT / ".github" / "input-keys.json").read_text())
@@ -380,6 +401,65 @@ def test_discovery_over_the_real_workflow_lists_every_gate_the_lint_job_runs() -
     semgrep = [gate for gate in gates if gate.job.startswith("semgrep/")]
     assert ("scripts.ci_semgrep_floors",) in [gate.modules for gate in semgrep]
     assert any("semgrep" in gate.tools for gate in semgrep)
+
+
+@pytest.mark.feature("lab-static-jobs-hold-lab-steps")
+def test_the_real_lint_type_gate_and_test_count_jobs_hold_no_excluded_step() -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+    names = {gate.name for gate in gates if gate.job in ("lint", "type-gate", "test-count")}
+    excluded = static_exclusions.read((ROOT / static_exclusions.PATH).read_text())
+    assert not names & excluded.keys()
+    assert not any(key.startswith(("lint/", "type-gate/", "test-count/")) for key in excluded)
+
+
+@pytest.mark.feature("lab-static-jobs-hold-lab-steps")
+def test_the_real_static_jobs_leave_only_their_setup_and_record_fetch_steps_without_a_gate() -> None:
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    gated = {(gate.job, gate.step) for gate in static_gates.discover(workflow, registry, ci_wiring.load(ROOT))}
+    jobs = yaml.safe_load(workflow)["jobs"]
+    ungated = {
+        job: [step["name"] for step in jobs[job]["steps"] if "run" in step and (job, step["name"]) not in gated]
+        for job in ("lint", "type-gate", "test-count")
+    }
+    assert ungated == {
+        "lint": [
+            "Install ruff",
+            "Install PyYAML",
+            "Install vulture",
+            "Install the comment gate grammars",
+            "Check out the base revision",
+            "Check out the protected grader",
+        ],
+        "type-gate": [
+            "Install dependencies",
+            "Use the test environment",
+            "Check out the base revision",
+            "Check out the protected grader",
+        ],
+        "test-count": [
+            "Install dependencies",
+            "Use the test environment",
+            "Check out the base revision",
+            "Fetch the base suite count recorded on dev",
+        ],
+    }
+
+
+@pytest.mark.feature("lab-static-jobs-hold-lab-steps")
+def test_the_real_count_floor_gate_reads_no_pull_request_head_and_no_reviews_file() -> None:
+    registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
+    workflow = (ROOT / static_gates.WORKFLOW).read_text()
+    gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
+    floor = next(gate for gate in gates if gate.name == "test-count/hold-the-base-revision-s-test-count")
+    assert floor.reads == ("runner.temp", "steps.day.outputs.key")
+    assert dict(floor.env) == {
+        "TEST_COUNT_COLLECTION_CACHE": "${{ runner.temp }}/count-collections",
+        "TEST_COUNT_ENVIRONMENT": "${{ steps.day.outputs.key }}",
+        "TEST_COUNT_BASE_RECORD": "${{ runner.temp }}/base-record.json",
+    }
 
 
 def test_the_command_prints_one_json_line_per_gate(
@@ -596,17 +676,7 @@ def test_the_real_workflow_marks_each_gate_reading_an_event_field_the_lease_lack
     registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
     workflow = (ROOT / static_gates.WORKFLOW).read_text()
     gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
-    assert {gate.name: gate.missing for gate in gates if gate.missing} == {
-        "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": (
-            "github.head_ref",
-            "github.ref_name",
-        ),
-        "lint/artifact-sanity-checks": (
-            "github.base_ref",
-            "github.event.before",
-            "github.event.merge_group.base_sha",
-        ),
-    }
+    assert {gate.name: gate.missing for gate in gates if gate.missing} == {}
 
 
 @pytest.mark.feature("lab-static-step-env")
@@ -754,10 +824,7 @@ def test_the_real_test_count_job_yields_runnable_gates_while_docs_and_writer_loc
     workflow = (ROOT / static_gates.WORKFLOW).read_text()
     gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
     assert {gate.name: gate.missing for gate in gates if gate.job == "test-count"} == {
-        "test-count/install-dependencies": (),
-        "test-count/fetch-the-base-suite-count-recorded-on-dev": (),
         "test-count/hold-the-base-revision-s-test-count": (),
-        "test-count/record-the-head-count-for-the-next-queue-group": (),
     }
     assert static_gates.main(["--root", str(ROOT), "--ci-only"]) == 0
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
@@ -770,11 +837,7 @@ def test_every_lab_gradable_gate_that_reads_the_event_name_is_one_whose_verdict_
     registry = json.loads((ROOT / static_gates.REGISTRY).read_text())
     workflow = (ROOT / static_gates.WORKFLOW).read_text()
     gates = static_gates.discover(workflow, registry, ci_wiring.load(ROOT))
-    assert sorted(gate.name for gate in gates if not gate.missing and "github.event_name" in gate.reads) == [
-        "lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one",
-        "test-count/fetch-the-base-suite-count-recorded-on-dev",
-        "test-count/record-the-head-count-for-the-next-queue-group",
-    ]
+    assert sorted(gate.name for gate in gates if not gate.missing and "github.event_name" in gate.reads) == []
 
 
 def test_the_command_adds_each_gate_closure_digest_at_the_grader_tree(
