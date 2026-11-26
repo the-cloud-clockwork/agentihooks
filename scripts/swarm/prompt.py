@@ -406,7 +406,7 @@ def build(
         "successor continues the task from it and the seat recap is derived from the same document.",
         (
             f'If you cannot finish: {me} block "<plain words naming the blocker>" and stop.'
-            if ledger_kinds.kind(task) == "plan"
+            if ledger_kinds.kind(task) in ("plan", "review")
             else "If you cannot finish (missing secret, a decision only the operator can make, another task first): push your "
             f'branch, open a draft pull request, then {me} block "<plain words naming the blocker>" and stop.'
         ),
@@ -781,6 +781,23 @@ def research_steps(me, led, name, phase):
     ]
 
 
+def review_steps(me: str, led: str, name: str, phase: str) -> list[str]:
+    """A reviewer's launch steps: read the change request, post strict findings through review post, which records
+    the finding done requires, then leave and close with the change request link; a reviewer edits nothing."""
+    slug = me.rsplit(" ", 1)[1]
+    return [
+        "Work it end to end with the swarm-reviewer skill, then stop. You edit, commit and push nothing:",
+        "1. Read the change request your task names with agentihooks forge read <number> --remote <repository url>: "
+        "its body, the whole diff, the feature map entries it touches and the code it reaches.",
+        "2. Write strict findings whatever the checks say, at least one, each naming the file and line, what breaks, "
+        "its evidence and the smallest fix.",
+        f"3. Post them on the change request: agentihooks review post <change request url> --slug {slug} "
+        '--finding "<finding>", one --finding per finding.',
+        f"4. Leave the crew with {led} leave, then close the task: {me} done --finding <change request url>. The ledger "
+        f"refuses done until review post has recorded a finding. {CLOSES}",
+    ]
+
+
 def plan_steps(me: str, led: str, name: str, phase: str) -> list[str]:
     return [
         "Work it end to end, then stop:",
@@ -832,6 +849,7 @@ STEPS = {
     "tune": tune_steps,
     "troubleshoot": troubleshoot_steps,
     "research": research_steps,
+    "review": review_steps,
 }
 
 
