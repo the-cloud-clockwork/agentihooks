@@ -185,6 +185,16 @@ def test_restrictions_preserve_only_admission_fields() -> None:
     assert offer_quota.restrictions({"handoff_envelope": {"body": "text"}}) == {"handoff_envelope": {"launch": {}}}
 
 
+@pytest.mark.feature("event-offer-account-seats")
+def test_accounts_reads_capacity_rows_without_a_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [account("claude")]
+    read = Mock(return_value=rows)
+    monkeypatch.setattr(offer_quota.capacity, "accounts", read)
+    redis = object()
+    assert offer_quota.accounts({"READING": "kept"}, 12.5, redis=redis) == rows
+    read.assert_called_once_with({"READING": "kept"}, 12.5, refresh=False, redis=redis)
+
+
 @pytest.mark.parametrize("agent", [None, "", "auto"])
 @pytest.mark.feature("event-offer-account-seats")
 def test_permitted_automatic_lanes(config: SwarmConfig, agent: str | None) -> None:

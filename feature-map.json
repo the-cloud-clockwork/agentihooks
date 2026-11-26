@@ -2136,6 +2136,7 @@
         "tests/swarm/test_offer_quota.py::test_an_admitted_spawn_keeps_quota_rows_owned_by_the_tick_pass",
         "tests/swarm/test_offer_quota.py::test_an_admitted_relaunch_with_its_saved_launch_reads_no_quota_rows",
         "tests/swarm/test_offer_quota.py::test_restrictions_preserve_only_admission_fields",
+        "tests/swarm/test_offer_quota.py::test_accounts_reads_capacity_rows_without_a_probe",
         "tests/swarm/test_offer_quota.py::test_permitted_automatic_lanes",
         "tests/swarm/test_offer_quota.py::test_permitted_preserves_constraints",
         "tests/swarm/test_offer_quota.py::test_permitted_uses_lane_profile",
