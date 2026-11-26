@@ -109,6 +109,26 @@ def test_two_pull_request_requests_of_one_head_no_ref_carries_post_one_failure_i
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
 
 
+@pytest.mark.feature("lab-refusal-posted-once-in-a-pass")
+def test_a_head_retired_for_one_request_and_refused_for_another_in_a_pass_gets_both_checks(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({})
+    answers = iter([False, True])
+
+    def reach(repo: str, head: str) -> bool:
+        return next(answers)
+
+    monkeypatch.setattr(run.lab.expander, "reachable", reach)
+    run.push(HEAD_A, lane="first", event="pull_request", action="synchronize")
+    run.push(HEAD_A, lane="second")
+    run.tick(1000)
+    assert [(post[0], post[4].run) for post in run.lab.poster.posts] == [
+        (HEAD_A, "uncarried-1000"),
+        (HEAD_A, "unexpanded-1000"),
+    ]
+
+
 @pytest.mark.feature("lab-scheduler-uncarried-head")
 @pytest.mark.parametrize("refusal", REFUSALS)
 def test_a_refused_failure_post_of_a_retired_pull_request_head_is_recorded_and_the_pass_goes_on(

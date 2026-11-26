@@ -17,6 +17,18 @@ class NoMemory:
         return []
 
 
+class MemoryNeverFilled:
+    def __init__(self, poster: Poster) -> None:
+        self.poster = poster
+
+    def _fail(self, head: str, run: str, said: set[tuple[str, str]]) -> list[str]:
+        if (head, run) in said:
+            return []
+        # ruleid: lab-refusal-posted-twice-in-a-pass
+        self.poster.post(head, REQUIRED, "completed", "failure", run, True)
+        return []
+
+
 class PostedElsewhere:
     def __init__(self, poster: Poster) -> None:
         self.poster = poster

@@ -54,8 +54,9 @@ def creating(created: list[tuple[str, str, str]]) -> Callable[..., Mock]:
     def request(method: str, url: str, **sent: Any) -> Mock:
         body = sent["json"]
         created.append((method, str(body.get("head_sha", "")), str(body.get("name", ""))))
-        status = 201 if method == "POST" else 200
-        return Mock(status_code=status, json=Mock(return_value={"id": len(created)}), text="")
+        made = method == "POST"
+        run = sum(1 for verb, _, _ in created if verb == "POST") if made else int(url.rsplit("/", 1)[1])
+        return Mock(status_code=201 if made else 200, json=Mock(return_value={"id": run}), text="")
 
     return request
 
@@ -189,12 +190,16 @@ def test_a_head_refused_twice_in_one_pass_gets_one_failed_required_check_and_the
     created: list[tuple[str, str, str]] = []
     monkeypatch.setattr(requests, "request", creating(created))
     run = restarted(lab({HEAD_B: plan({"lint": (unit(2),)})}), checks.Checks(SLUG, FixtureToken()))
+    run.push(HEAD_B, lane="second")
+    run.tick(1000)
+    run.lease()
     run.push(HEAD_A)
     run.push(HEAD_A, lane="fix", event="pull_request", action="synchronize")
-    run.push(HEAD_B, lane="second")
-    actions = run.tick(1000)
+    actions = run.tick(2000)
     assert len([action for action in actions if action.startswith(f"cannot expand {HEAD_A}: ")]) == 2
+    assert actions[-2:] == [f"posted lint in_progress on {HEAD_B}", f"posted required in_progress on {HEAD_B}"]
     assert [made for made in created if made[1] == HEAD_A] == [("POST", HEAD_A, checks.name(scheduler.REQUIRED, True))]
+    assert [made[0] for made in created[-2:]] == ["PATCH", "PATCH"]
     assert [grade.head for grade in run.grades()] == [HEAD_B]
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
 
@@ -259,7 +264,26 @@ def test_two_heads_refused_in_one_pass_each_get_their_failed_required_check(
     run.push(HEAD_A)
     run.push(HEAD_B, lane="second")
     run.tick(1000)
-    assert [(post[0], post[4].run) for post in run.lab.poster.posts] == [
+    assert sorted((post[0], post[4].run) for post in run.lab.poster.posts) == [
         (HEAD_A, "unexpanded-1000"),
         (HEAD_B, "unexpanded-1000"),
     ]
+
+
+@pytest.mark.feature("lab-refusal-posted-once-in-a-pass")
+def test_one_head_refused_in_two_repositories_in_a_pass_gets_its_check_in_each(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({})
+    monkeypatch.setattr(run.lab.expander, "expand", malformed)
+    bundle = f"{REPO}-bundle"
+    run.push(HEAD_A)
+    run.lab.inbox.pending.append(
+        scheduler.Head(HeadEvent("push", bundle, HEAD_A, BASE, ACTOR, "pushed"), "feature", "")
+    )
+    run.tick(1000)
+    assert sorted(post[4].details for post in run.lab.poster.posts) == [
+        f"{REPO}-bundle/commit/{HEAD_A}",
+        f"{REPO}/commit/{HEAD_A}",
+    ]
+    assert sorted(run.lab.repos) == [SLUG, f"{SLUG}-bundle"]

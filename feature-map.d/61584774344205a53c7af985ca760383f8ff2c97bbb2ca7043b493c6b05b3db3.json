@@ -2,7 +2,7 @@
   "id": "lab-refusal-posted-once-in-a-pass",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
-  "behaviour": "The lab scheduler posts the failed required check of a refusal once for each repository, head and run id in a pass. A second waiting request of the same head that cannot expand, or that no ref carries, posts nothing in that pass, keeps its own action line and leaves the waiting hash, so the pass ends and the grades of other heads are posted. A head refused again in a later pass gets a new check, two heads refused in one pass each get theirs, and a post GitHub, the token or the network refused is not tried again for the second request.",
+  "behaviour": "The lab scheduler posts the failed required check of a refusal once for each repository, head and run id in a pass. A second waiting request of the same head that cannot expand, or that no ref carries, posts nothing in that pass, keeps its own action line and leaves the waiting hash, so the pass ends and the grades of other heads are posted. A head refused again in a later pass gets a new check, two heads refused in one pass each get theirs, one head refused in two repositories gets its check in each, a head retired for one request and refused for another gets both checks, and a post GitHub, the token or the network refused is not tried again for the second request.",
   "seam": "Scheduler.tick over its fakes, with the real check poster over a faked GitHub and with the recording poster, through its actions, the waiting hash, the grades and the checks posted",
   "rules": [
     "lab-refusal-posted-twice-in-a-pass"
@@ -13,6 +13,8 @@
     "tests/ci_lab/test_scheduler_unexpanded.py::test_a_refused_post_of_a_refusal_is_not_tried_again_for_the_second_request_of_the_pass",
     "tests/ci_lab/test_scheduler_unexpanded.py::test_a_head_refused_in_two_passes_gets_a_failed_required_check_in_each",
     "tests/ci_lab/test_scheduler_unexpanded.py::test_two_heads_refused_in_one_pass_each_get_their_failed_required_check",
-    "tests/ci_lab/test_scheduler_uncarried.py::test_two_pull_request_requests_of_one_head_no_ref_carries_post_one_failure_in_a_pass"
+    "tests/ci_lab/test_scheduler_uncarried.py::test_two_pull_request_requests_of_one_head_no_ref_carries_post_one_failure_in_a_pass",
+    "tests/ci_lab/test_scheduler_unexpanded.py::test_one_head_refused_in_two_repositories_in_a_pass_gets_its_check_in_each",
+    "tests/ci_lab/test_scheduler_uncarried.py::test_a_head_retired_for_one_request_and_refused_for_another_in_a_pass_gets_both_checks"
   ]
 }
