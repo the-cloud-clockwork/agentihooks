@@ -7761,7 +7761,8 @@
       ],
       "tests": [
         "tests/swarm/test_codex_planner_exports.py::test_planner_keeps_existing_write_grants",
-        "tests/swarm/test_codex_planner_exports.py::test_planner_grants_the_client_export_directory"
+        "tests/swarm/test_codex_planner_exports.py::test_planner_grants_the_client_export_directory",
+        "tests/profiles/test_codex_planner_canary.py::test_planner_permissions_keep_the_repository_read_only"
       ]
     },
     {
