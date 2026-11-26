@@ -312,7 +312,7 @@ def test_the_live_check_holds_a_target_one_reply_cannot_hold_to_the_list_the_rou
     assert focus_task_pages.lines(SLUG, through(reader)) == [
         focus_task_pages.PAGED.format(slug=SLUG, target="phases/p1", count=250)
     ]
-    assert [urlsplit(path).path for path in reader.paths] == ["focus", "freezes", "focus/phases/p1", *[LIST] * 4]
+    assert [urlsplit(path).path for path in reader.paths] == ["focus", "freezes", *[LIST] * 3, "focus/phases/p1", LIST]
     assert parse_qs(urlsplit(reader.paths[-1]).query) == {"limit": ["1"], "cursor": [f"{resources.revision(rows)}:0"]}
 
 

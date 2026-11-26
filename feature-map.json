@@ -15873,6 +15873,7 @@
         "tests/swarm/test_focus_check.py::test_task_rows_is_none_under_no_target_or_with_no_tasks_suffix_and_lists_a_node_named_tasks_one_down",
         "tests/swarm/test_focus_check.py::test_the_focus_tasks_route_hands_the_fix_phase_of_the_slug_to_task_rows",
         "tests/test_focus_task_pages_check.py::test_a_target_whose_pages_hold_the_rows_of_its_one_reply_read_passes",
+        "tests/test_focus_task_pages_check.py::test_a_ledger_that_moves_while_the_pages_are_read_passes_on_the_first_reading",
         "tests/test_focus_task_pages_check.py::test_pages_that_keep_differing_from_the_one_reply_read_fail_after_three_reads",
         "tests/test_focus_task_pages_check.py::test_a_ledger_that_moved_between_the_two_reads_is_read_again_and_passes",
         "tests/test_focus_task_pages_check.py::test_the_three_focus_records_with_the_most_tasks_are_checked_largest_first",

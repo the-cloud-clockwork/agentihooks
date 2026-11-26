@@ -98,9 +98,28 @@ def test_a_target_whose_pages_hold_the_rows_of_its_one_reply_read_passes() -> No
     assert check.lines("rig", ledgers) == ["rig focus phases/p1: 2 task rows in pages, as the read of the target holds"]
     assert ledgers.reads == [
         ("rig", "focus", True),
-        ("rig", "focus/phases/p1", False),
         ("rig", "focus/phases/p1/tasks", True),
+        ("rig", "focus/phases/p1", False),
     ]
+
+
+@pytest.mark.feature("ledger-focus-task-pages")
+def test_a_ledger_that_moves_while_the_pages_are_read_passes_on_the_first_reading() -> None:
+    moved = [row("t1", "it is in a pull request"), row("t2")]
+    held: dict[str, list[dict[str, Any]]] = {"lane:eng": [row("t1"), row("t2")]}
+    reads: list[str] = []
+
+    def read(slug: str, path: str, listed: bool) -> Any:
+        reads.append(path)
+        if path == "focus":
+            return [{"target": "lane:eng", "tasks": held["lane:eng"]}]
+        if listed:
+            held["lane:eng"] = moved
+            return revised(moved)
+        return {"target": "lane:eng", "tasks": held["lane:eng"]}
+
+    assert check.lines("rig", read) == ["rig focus lane:eng: 2 task rows in pages, as the read of the target holds"]
+    assert reads == ["focus", "focus/lane:eng/tasks", "focus/lane:eng"]
 
 
 @pytest.mark.feature("ledger-focus-task-pages")
@@ -123,7 +142,7 @@ def test_pages_that_keep_differing_from_the_one_reply_read_fail_after_three_read
     ]
     assert ledgers.reads == [
         ("rig", "focus", True),
-        *[("rig", "focus/tasks/t1", False), ("rig", "focus/tasks/t1/tasks", True)] * 3,
+        *[("rig", "focus/tasks/t1/tasks", True), ("rig", "focus/tasks/t1", False)] * 3,
     ]
 
 
@@ -159,8 +178,8 @@ def test_a_target_one_reply_cannot_hold_passes_on_its_pages() -> None:
     probe = "focus/phases/p1/tasks?" + urlencode({"limit": 1, "cursor": f"{resources.revision(rows)}:0"})
     assert ledgers.reads == [
         ("rig", "focus", True),
-        ("rig", "focus/phases/p1", False),
         ("rig", "focus/phases/p1/tasks", True),
+        ("rig", "focus/phases/p1", False),
         ("rig", probe, False),
     ]
 
@@ -175,7 +194,7 @@ def test_a_target_one_reply_cannot_hold_whose_pages_miss_a_row_fails_after_three
     assert check.lines("rig", ledgers) == [
         "FAIL: rig focus phases/p1: the pages hold 1 task rows that are not the list the ledger holds"
     ]
-    assert len(ledgers.reads) == 2 + 3 * 2
+    assert len(ledgers.reads) == 1 + 3 * 3
 
 
 @pytest.mark.feature("ledger-focus-task-pages")
@@ -198,7 +217,7 @@ def test_a_target_one_reply_cannot_hold_whose_ledger_moved_once_then_holds_passe
         moved={"phases/p1": [[row("t1"), row("t2")], [row("t1", "it waits on task t9"), row("t2")]]},
     )
     assert check.lines("rig", ledgers) == ["rig focus phases/p1: 2 task rows in pages, more than one reply holds"]
-    assert len(ledgers.reads) == 2 + 2 * 2
+    assert len(ledgers.reads) == 1 + 2 * 3
 
 
 @pytest.mark.feature("ledger-focus-task-pages")
