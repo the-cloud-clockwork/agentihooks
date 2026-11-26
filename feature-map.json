@@ -3638,6 +3638,19 @@
       ]
     },
     {
+      "id": "operator-master-up-resume-master-login",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mql-resume-slot",
+      "behaviour": "A front door Claude master resumes its conversation through a free stored master login above the drain line and outside the primary reserve, records the account actually placed and refuses with the login slot reason when no stored login is eligible. Other resume routes retain the recorded account quota check.",
+      "seam": "agentihooks swarm master up --last; swarm.resume.blocker",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_quota_stopped_master_resumes_on_the_placed_master_login_account",
+        "tests/swarm/test_resume.py::test_a_front_door_master_checks_free_master_logins_instead_of_its_old_account",
+        "tests/swarm/test_resume.py::test_a_front_door_master_names_the_login_slots_when_none_has_room",
+        "tests/swarm/test_resume.py::test_other_resume_routes_keep_the_recorded_account_quota_check"
+      ]
+    },
+    {
       "id": "operator-master-up-resume-retired-master",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-up-resume-paths",

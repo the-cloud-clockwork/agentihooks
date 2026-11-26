@@ -68,6 +68,35 @@ def up(env, monkeypatch, tmp_path):  # noqa: F811
     return store, ledger, rt
 
 
+@pytest.fixture(autouse=True)
+def stored_master_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import master_claude_login, master_logins
+
+    monkeypatch.setattr(master_claude_login, "free", lambda name: ["slot-4"])
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, 0.0, 0.0))
+
+
+@pytest.mark.feature("operator-master-up-resume-master-login")
+def test_a_quota_stopped_master_resumes_on_the_placed_master_login_account(
+    up: tuple[RedisStore, object, ResumingRuntime], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import agent_choice, master_claude_login, master_logins
+
+    store, _, rt = up
+    name = gone_master(store, account="slot-1")
+    monkeypatch.setattr(agent_choice, "account_has_quota", lambda *args: False)
+    monkeypatch.setattr(master_claude_login, "free", lambda held: ["slot-1", "slot-4"])
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, 100.0 if account == "slot-1" else 5.0, now))
+    rt.placed = Placed("w2:m4", "claude", "slot-4", "opus", "xhigh", profile="master")
+
+    result, _ = direct(store, rt, master_launch.LAST)
+
+    assert (result.master, result.pane, result.seat, result.choice) == (name, "w2:m4", "master@sw", "last")
+    [record] = masters(store)
+    assert (record.account, record.conversation_id, record.seat) == ("slot-4", "conv-1", "master@sw")
+    assert rt.resumed[0][:4] == (name, "claude", "conv-1", "master")
+
+
 def answers(monkeypatch, *replies):
     asked, queue = [], list(replies)
 

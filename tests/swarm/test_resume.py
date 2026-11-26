@@ -49,6 +49,57 @@ def test_the_quota_check_asks_about_the_agents_own_harness_and_account():
     assert asked == [("codex", "cx1")]
 
 
+@pytest.mark.feature("operator-master-up-resume-master-login")
+@pytest.mark.parametrize("accounts", [["slot-1", "slot-4"], ["slot-4"]])
+def test_a_front_door_master_checks_free_master_logins_instead_of_its_old_account(
+    monkeypatch: pytest.MonkeyPatch, accounts: list[str]
+) -> None:
+    from scripts import master_claude_login, master_logins
+
+    record = agent(lane=MASTER, task=MASTER, profile="master", seat="master@sw", account="slot-1")
+    monkeypatch.setattr(master_claude_login, "free", lambda name: accounts if name == record.name else [])
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, 100.0 if account == "slot-1" else 5.0, now))
+    assert resume.blocker(record, "/wt", always, lambda *_: pytest.fail("the previous account is not the route")) == ""
+
+
+@pytest.mark.feature("operator-master-up-resume-master-login")
+@pytest.mark.parametrize("accounts", [[], ["drained"], ["primary"], ["drained", "primary"]])
+def test_a_front_door_master_names_the_login_slots_when_none_has_room(
+    monkeypatch: pytest.MonkeyPatch, accounts: list[str]
+) -> None:
+    from scripts import master_claude_login, master_logins
+    from scripts.routing import reservation
+
+    monkeypatch.setattr(master_claude_login, "free", lambda name: accounts)
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, 98.0 if account == "drained" else 90.0, now))
+    monkeypatch.setenv(reservation.PRIMARY_RESERVE_ENV, "10")
+    monkeypatch.setattr(reservation, "primary_login", lambda: "primary")
+    record = agent(lane=MASTER, task=MASTER, profile="master", seat="master@sw")
+    assert resume.blocker(record, "/wt", always, lambda *_: True) == (
+        "no free stored master login slot above its drain line and outside the primary reserve"
+    )
+
+
+@pytest.mark.feature("operator-master-up-resume-master-login")
+@pytest.mark.parametrize(
+    ("lane", "harness", "profile", "seat"),
+    [
+        ("eng", "claude", "master", "master@sw"),
+        (MASTER, "codex", "master", "master@sw"),
+        (MASTER, "claude", "master", "master-2@sw"),
+        (MASTER, "claude", "custom-master", "master@sw"),
+    ],
+)
+def test_other_resume_routes_keep_the_recorded_account_quota_check(
+    monkeypatch: pytest.MonkeyPatch, lane: str, harness: str, profile: str, seat: str
+) -> None:
+    from scripts import master_claude_login
+
+    monkeypatch.setattr(master_claude_login, "free", lambda _: pytest.fail("this route does not use a master login"))
+    record = agent(lane=lane, harness=harness, profile=profile, seat=seat)
+    assert resume.blocker(record, "/wt", always, lambda *_: False) == "account a1 out of quota"
+
+
 class ResumingRuntime(FakeRuntime):
     def __init__(self, fail=None):
         super().__init__()
