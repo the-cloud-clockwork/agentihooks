@@ -109,6 +109,8 @@ def _changes(snapshot: dict, seen: Observation) -> list[tuple[str, dict]]:
         snapshot["head"], snapshot["suites"], snapshot["early"] = seen.head, {}, {}
         found += _suites(snapshot, early)
     if seen.state is not None and seen.state != snapshot["state"]:
+        if snapshot["state"] is None and seen.state in TERMINAL:
+            found.append(("pull.opened", {}))
         found.append((ARRIVED.get(seen.state) or ("pull.reopened" if snapshot["state"] else "pull.opened"), {}))
         snapshot["state"] = seen.state
     if snapshot["state"] in TERMINAL:
