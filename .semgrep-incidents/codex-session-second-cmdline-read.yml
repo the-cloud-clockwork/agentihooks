@@ -4,8 +4,8 @@ rules:
     severity: ERROR
     message: >-
       A Codex check already read this process's command line, and this reads it again and indexes the second read.
-      A process that exits between the two reads answers an empty list, the index raises, and on 26 November that
-      ended the hive three daemon beat with every agent on the hive. Read the command line once and judge that list.
+      A process that exits between the two reads answers an empty list, and the index raises out of the hive daemon
+      beat, which ends the daemon with every agent on the hive. Read the command line once and judge that list.
     paths:
       include:
         - /hooks/context/account_sessions.py
