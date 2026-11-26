@@ -1116,7 +1116,7 @@
       ],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2761",
-      "behaviour": "One CI lab scheduler pass starts at most eight waiting heads: the most urgent class first (hotfix, pull request, queue, promotion, backfill) and the longest waiting first within a class. A head still in its quiet window or held by a pause takes no place among the eight; a head put back for its manifest fetch takes one, since its expansion ran on the pass. The other heads keep waiting for a later pass, so the same pass still admits the started heads' held units to the queue however many heads wait.",
+      "behaviour": "One CI lab scheduler pass looks at up to twenty four waiting heads whose quiet window ended, the most urgent class first (hotfix, pull request, queue, promotion, backfill) and the longest waiting first within a class, and starts, retires or drops at most eight of them. A head still in its quiet window or held by a pause takes no place among those looked at; a head put back for its manifest fetch, pending or unanswered, takes one of the twenty four but none of the eight, so the pass moves on to the next waiting head instead of stalling on it. The other heads keep waiting for a later pass, so the same pass still admits the started heads' held units to the queue however many heads wait.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with a fake expander, holding more waiting heads than one pass starts",
       "tests": [
         "tests/ci_lab/test_scheduler_release.py::test_each_pass_starts_eight_waiting_heads_in_class_order_and_admits_their_units_in_the_same_pass",

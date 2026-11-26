@@ -2489,12 +2489,14 @@ key; the builders are pure and read no file, clock or network.
    A head whose action is `closed` is not admitted or held: intake ends the work of its lane, as
    described below.
 2. Each head waits in its lane (repository, branch and class) for the quiet window, 30 seconds by
-   default; a newer head of the lane restarts it and a hotfix waits for none. A pass starts at most
-   eight heads whose window ended (`STARTS_PER_PASS`): the most urgent class first (hotfix, pull
-   request, queue, promotion, backfill) and, within a class, the head that has waited longest. A head
-   still quiet or held by a pause takes no place; a head put back for its manifest fetch takes one,
-   since its expansion ran on the pass. The other heads wait for a later pass, so every pass reaches
-   steps 5 to 8 however many heads wait.
+   default; a newer head of the lane restarts it and a hotfix waits for none. A pass looks at up to
+   twenty four heads whose window ended (`LOOKED_AT_PER_PASS`) and starts, retires or drops at most
+   eight of them (`STARTS_PER_PASS`): the most urgent class first (hotfix, pull request, queue,
+   promotion, backfill) and, within a class, the head that has waited longest. A head still quiet or
+   held by a pause takes no place among those looked at; a head put back for its manifest fetch,
+   pending or unanswered, takes one of the twenty four but none of the eight, so the pass moves on to
+   the next waiting head instead of stalling on it. The other heads wait for a later pass, so every
+   pass reaches steps 5 to 8 however many heads wait.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
    unit per gate step, described in [Static units](#static-units). A merge group, promotion or
