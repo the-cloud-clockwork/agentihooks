@@ -3,12 +3,21 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A unit's run folder is cut with tempfile.mkdtemp(dir=pod.runs), directly in the worker's shared runs folder.
-      Nothing removes it there, so every unit a lab worker runs leaves one more folder behind until the pod is
-      evicted for local storage. Cut the folder inside the root the worker hands the lease instead, which it
-      removes when the unit ends.
+      An executor names the worker's shared runs folder, pod.runs: it cuts a unit's folder there with
+      tempfile.mkdtemp(dir=pod.runs), or hands it as the root to run_static.Settings, run_tests.Lab or a Sandbox,
+      which cut there. Nothing removes a folder cut there, so every unit a lab worker runs leaves one more folder
+      behind until the pod is evicted for local storage. Use the root the worker hands the lease instead, which it
+      removes when the unit ends. Only settings, which creates the folder, and main, which gives it to the worker,
+      name pod.runs.
     paths:
       include:
         - /scripts/ci_lab/executors.py
         - lab-worker-runs-folder-direct-mkdtemp.py
-    pattern: tempfile.mkdtemp(dir=$POD.runs)
+    patterns:
+      - pattern: $POD.runs
+      - pattern-not-inside: |
+          def settings(...):
+              ...
+      - pattern-not-inside: |
+          def main(...):
+              ...
