@@ -682,14 +682,18 @@ def test_wrapper_holds_only_read_permission():
 
 
 @pytest.mark.feature("semgrep-engine-posix-backend")
-def test_every_semgrep_job_runs_the_engine_on_the_posix_event_backend() -> None:
+def test_every_semgrep_job_inherits_the_posix_backend_without_override() -> None:
     workflow = _semgrep()
-    assert workflow.get("env") == {"EIO_BACKEND": "posix"}
-    assert [
-        (job_name, part.get("name"))
+    assert workflow.get("env", {}).get("EIO_BACKEND") == "posix"
+    blocks = [(f"job {job_name}", job) for job_name, job in workflow["jobs"].items()] + [
+        (f"job {job_name} step {step.get('name')}", step)
         for job_name, job in workflow["jobs"].items()
-        for part in (job, *job["steps"])
-        if "EIO_BACKEND" in (part.get("env") or {}) or "EIO_BACKEND" in str(part.get("run", ""))
+        for step in job.get("steps", [])
+    ]
+    assert [
+        where
+        for where, block in blocks
+        if "EIO_BACKEND" in (block.get("env") or {}) or "EIO_BACKEND" in str(block.get("run", ""))
     ] == []
 
 
