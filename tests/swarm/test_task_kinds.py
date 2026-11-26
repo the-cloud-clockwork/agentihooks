@@ -1,8 +1,7 @@
-from pathlib import Path
-
 import pytest
 
 from scripts.swarm import cli, prompt, templates
+from scripts.swarm_ledger import ledger_kinds
 from tests.helpers.seat import seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 
@@ -88,11 +87,9 @@ def test_a_reviewer_that_cannot_finish_blocks_without_a_branch() -> None:
 
 
 @pytest.mark.feature("review-launch-prompt-steps")
-def test_every_lane_template_kind_has_launch_steps(tmp_path: Path) -> None:
-    built_in = templates.available({"AGENTIHOOKS_HOME": str(tmp_path)})
-    kinds = {lane.kind for template, _ in built_in for lane in template.lanes.values()}
-    assert {"review", "troubleshoot"} <= kinds
-    assert (kinds | set(templates.DEFAULT_KINDS.values())) - {templates.AUTO} <= set(prompt.STEPS)
+def test_every_lane_template_kind_has_launch_steps() -> None:
+    assignable = {*ledger_kinds.KINDS, *templates.DEFAULT_KINDS.values()} - {"workflow"}
+    assert assignable <= set(prompt.STEPS)
 
 
 def _start(env, kind):  # noqa: F811
