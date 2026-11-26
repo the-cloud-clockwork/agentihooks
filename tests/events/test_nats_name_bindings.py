@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, Mock, call
 
 import pytest
@@ -17,7 +18,7 @@ def loop():
 
 def test_legacy_event_filter_and_dead_attempt_cap_remain_usable():
     policy = QueuePolicy(max_deliver=4)
-    js = SimpleNamespace(
+    js: Any = SimpleNamespace(
         consumer_info=AsyncMock(
             return_value=SimpleNamespace(config=SimpleNamespace(filter_subjects=None, filter_subject="swarm.>"))
         ),
@@ -36,7 +37,7 @@ def test_event_log_keeps_the_legacy_durable_and_credentials(monkeypatch):
     permissions = {"allow": ["legacy.swarm.>"]}
     monkeypatch.setattr(nats.nkey, "parse_creds", Mock(return_value=("jwt", "key")))
     monkeypatch.setattr(nats.nkey, "claims", Mock(return_value={"nats": {"pub": permissions}}))
-    pull = AsyncMock(return_value="subscription")
+    pull = AsyncMock(return_value=("subscription", None))
     consumer = Mock()
     publish = AsyncMock(return_value=True)
     monkeypatch.setattr(nats, "_pull", pull)
@@ -68,7 +69,7 @@ def test_queue_binding_preserves_identity_credentials_and_lookup_capabilities(mo
     binding, stream, pull = (
         AsyncMock(return_value=legacy),
         AsyncMock(return_value=legacy),
-        AsyncMock(return_value="subscription"),
+        AsyncMock(return_value=("subscription", None)),
     )
     provisioner, consumer = AsyncMock(), Mock()
     monkeypatch.setattr(nats, "queue_binding", binding)
