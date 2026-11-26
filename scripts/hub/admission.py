@@ -32,6 +32,7 @@ ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
 TURN_MS, TURN_TRIES, TURN_WAIT_S = 30_000, 40, 0.05  # pragma: no mutate
 BUSY = "another admission for the hive is in progress"
 ACCOUNT_HOLD = "no permitted harness has a free account seat"
+NO_HARNESS = "the lane agent, required harness and profile permit no harness"
 
 
 def release_key(text: str) -> Version | None:
@@ -136,12 +137,7 @@ class Admission:
             )
             return {hive_admission.HELD: unplaceable}
         timer.mark("placement")
-        from scripts.swarm import tick
-
-        if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
-            print(
-                f"hub: events claim cap swarm={slug} task={task_id} hive={request['hive']}: {reason}", file=sys.stderr
-            )
+        if self._unclaimable(slug, request, view.rows):
             return None
         timer.mark("cap")
         reserved = self._reserved(slug, view.rows[task_id], request["hive"])
@@ -164,6 +160,22 @@ class Admission:
             refused(slug, request, "another holder took the claim")
             return None
         return self._answered(slug, request, started, admitted, timer)
+
+    def _unclaimable(self, slug: str, request: dict[str, Any], rows: dict[str, Any]) -> bool:
+        """True, after printing why, when the task is refused before claim: its claim lives are spent, or its lane
+        agent, required harness and profile permit no harness."""
+        from scripts.swarm import tick
+
+        task_id = request["task"]
+        if reason := tick._lives_spent(slug, self.store, self.ledger, rows, rows[task_id]):
+            print(
+                f"hub: events claim cap swarm={slug} task={task_id} hive={request['hive']}: {reason}", file=sys.stderr
+            )
+            return True
+        if not offer_quota.permitted(self.store.config(slug), request["lane"], rows[task_id]):
+            refused(slug, request, NO_HARNESS)
+            return True
+        return False
 
     def _account_hold(self, slug: str, lane: str, task: dict[str, Any]) -> str:
         environ = dict(os.environ)

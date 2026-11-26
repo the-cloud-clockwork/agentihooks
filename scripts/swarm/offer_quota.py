@@ -100,6 +100,8 @@ class Fit:
         if not isinstance(descriptor, dict):
             self.held = True
             return False
+        if not permitted(self.config, self.lane, data["quota"]):
+            return True
         if self.rows is None:
             self.rows = self.read(self.environ, time.time(), refresh=False)
         admitted = bool(available(self.config, self.lane, data["quota"], self.rows, self.environ))

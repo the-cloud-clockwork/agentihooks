@@ -4,7 +4,6 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.hub import admission
 from scripts.swarm import capacity, offer_quota, runtime
 from scripts.swarm.offer_quota import accounts as real_accounts
 from tests.hub.test_admission import SLUG, ask
@@ -123,7 +122,7 @@ def test_an_offer_no_harness_may_take_is_refused_before_any_account_read_or_clai
     answer = rig.admitter.admit(SLUG, ask())
 
     assert answer is None
-    assert f"refused: {admission.NO_HARNESS}" in capsys.readouterr().err
+    assert "refused: the lane agent, required harness and profile permit no harness" in capsys.readouterr().err
     reader.assert_not_called()
     assert rig.rows["t1"] == before
     assert rig.store.claimant(SLUG, "t1") is None
