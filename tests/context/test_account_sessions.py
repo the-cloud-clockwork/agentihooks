@@ -345,12 +345,13 @@ def test_codex_session_detection_reads_the_command_line_once(tmp_path: Path, mon
     assert reads == [900]
 
 
-@pytest.mark.feature("codex-scan-survives-a-vanishing-process")
 def test_a_codex_process_with_an_empty_command_line_is_no_session(tmp_path: Path) -> None:
     root = tmp_path / "proc"
     _proc(root, 901, "codex", 1, [], {"AH_CX_TOKEN_alpha": "a"})
-    assert acc._is_codex_session(901, root) is False
-    assert acc._managed_execution(901, root) == ""
+    _proc(root, 904, "kthreadd", 0, [], {})
+    for pid in (901, 904):
+        assert acc._is_codex_session(pid, root) is False
+        assert acc._managed_execution(pid, root) == ""
 
 
 @pytest.mark.feature("codex-scan-survives-a-vanishing-process")
