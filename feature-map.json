@@ -4344,7 +4344,9 @@
     },
     {
       "id": "tick-lost-agent-keeps-record-until-retired",
-      "rules": ["lost-reap-drops-after-refused-retire"],
+      "rules": [
+        "lost-reap-drops-after-refused-retire"
+      ],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lost-master-recovery-pane",
       "behaviour": "A lost agent stays recorded while pane retirement refuses, records the refusal and retries next tick; successful retirement closes the pane and drops the record. Deliberate termination also preserves its record on retirement refusal.",
@@ -5919,7 +5921,9 @@
         "tests/swarm/test_dispatcher.py::test_small_lanes_keep_a_positive_focus_share",
         "tests/swarm/test_dispatcher.py::test_small_lanes_yield_focus_when_disabled_or_full"
       ],
-      "rules": ["focus-share-floor-division"]
+      "rules": [
+        "focus-share-floor-division"
+      ]
     },
     {
       "id": "swarm-review-dispatcher-lane-cap",
@@ -11061,6 +11065,19 @@
       ]
     },
     {
+      "id": "master-quota-login-guidance",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mql-texts",
+      "behaviour": "Master quota stop and wait guidance, master handoff refusals, the master login alert and the rendered master persona name agentihooks claude login --master to replenish a login slot; worker advice stays unchanged.",
+      "seam": "quota_policy.render, HerdrRuntime quota refusal callers, master_prompt_stall.LOGIN_ALERT and rendered package master persona",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_quota_exhaustion_text_uses_the_master_login_only_for_masters",
+        "tests/swarm/test_quota_handoff.py::test_quota_handoff_refusal_adds_login_guidance_only_for_a_master",
+        "tests/swarm/test_master_prompt_stall.py::test_master_login_alert_names_the_master_login_command",
+        "tests/test_package_role_skills.py::test_rendered_masters_ask_through_the_inbox_for_a_master_login_slot"
+      ]
+    },
+    {
       "id": "quota-wait-no-session-cron",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-wait-scheduler-timer",
@@ -13222,7 +13239,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-intake-drain",
       "behaviour": "One scheduler intake drains successive head consumer batches until a short or empty fetch or a ten second monotonic budget ends, including batches containing only completed checks, while preserving delivery order and keeping collected heads unacknowledged if a later fetch or observer fails. Remaining heads are read on the next call so release and admission can continue each pass.",
       "seam": "scripts.ci_lab.scheduler.BusInbox.heads over a paginated bus consumer and a controlled monotonic clock",
-      "rules": ["lab-intake-single-batch"],
+      "rules": [
+        "lab-intake-single-batch"
+      ],
       "tests": [
         "tests/ci_lab/test_scheduler_intake.py::test_one_intake_drains_a_backlog_larger_than_the_default_batch",
         "tests/ci_lab/test_scheduler_intake.py::test_a_short_or_empty_batch_ends_intake_without_another_fetch",
