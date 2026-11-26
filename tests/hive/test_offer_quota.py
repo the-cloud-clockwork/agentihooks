@@ -24,9 +24,12 @@ def _seats_read_through_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.feature("event-offer-account-seats")
-@pytest.mark.parametrize(("requires_harness", "codex_sessions"), [("claude", 0), ("claude", 6), ("", 6)])
+@pytest.mark.parametrize(
+    ("requires_harness", "codex_sessions", "lane_agent"),
+    [("claude", 0, "auto"), ("claude", 6, "auto"), ("", 6, "auto"), ("", 0, "claude")],
+)
 def test_full_account_offers_keep_their_owner_generation_and_delivery_until_a_seat_returns(
-    monkeypatch: pytest.MonkeyPatch, requires_harness: str, codex_sessions: int
+    monkeypatch: pytest.MonkeyPatch, requires_harness: str, codex_sessions: int, lane_agent: str
 ) -> None:
     rows = [
         capacity.Account("claude", "claude-a", "OPEN", 3, None, 90, 3),
@@ -56,10 +59,10 @@ def test_full_account_offers_keep_their_owner_generation_and_delivery_until_a_se
     }
     hub = Hub(admitted)
     slots.serve(cast(Any, bus), admitter=cast(Any, hub))
-    config = SwarmConfig("rig", "/repo", 1, 1, scaling="manual", lanes={"eng": {"agent": "auto"}})
+    config = SwarmConfig("rig", "/repo", 1, 1, scaling="manual", lanes={"eng": {"agent": lane_agent}})
     store = SimpleNamespace(slugs=lambda: ["rig"], config=lambda _slug: config)
     local = Mock()
-    harness = requires_harness or "codex"
+    harness = requires_harness or ("codex" if lane_agent == "auto" else lane_agent)
     local.spawn.return_value = Outcome(
         "spawn",
         Status.OK,
@@ -87,7 +90,7 @@ def test_full_account_offers_keep_their_owner_generation_and_delivery_until_a_se
             assert event.to_dict() == original
             clock.now += spoke.config.policy.ack_wait_ms + readiness.UNFIT_NAK_MS
 
-        selected = 0 if requires_harness else 1
+        selected = 1 if harness == "codex" else 0
         rows[selected] = capacity.Account(harness, f"{harness}-a", "OPEN", 0, None, 90, 6)
 
         assert spoke.poll() == "started"
