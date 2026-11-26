@@ -1,0 +1,6 @@
+{
+  "scripts/claude_quota_balancer.py:scripts.claude_quota_balancer.x__open_cache_lock:c94159220629dadf60732f281c5e423d68a716635e85e13b167d8c15a55be241": {
+    "reader": "standards_reader",
+    "reason": "Changes the lock open encoding to None, the locale default. _cache_lock uses the handle only for fcntl.flock and the claude-router-cache.json.lock contents are never read or written anywhere, so no text passes through the codec; the only difference is an EncodingWarning under -X warn_default_encoding, which no repo entry point sets."
+  }
+}
