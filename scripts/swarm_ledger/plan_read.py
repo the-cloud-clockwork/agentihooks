@@ -160,18 +160,21 @@ def _packaged(phase: dict, task: dict) -> bool:
     return not phase.get("plan_ref") and bool(task) and linked(str(task.get("plan_slice")), _url(phase, task))
 
 
-def _own_ref(doc: dict, phase: dict, task: dict) -> dict | None:
-    link = task.get("plan_url") if task else None
+def _own_ref(doc: Mapping[str, Any], phase: Mapping[str, Any], task: Mapping[str, Any]) -> dict[str, str] | None:
+    link = str(task.get("plan_url") or "")
     if not link or link == phase.get("plan_url"):
         return None
-    rows = doc.get("plans", ())
+    rows: list[dict[str, Any]] = doc.get("plans") or []
     artifact = next(
-        (row["artifact"] for row in rows if row.get("artifact") and link in (row.get("url"), row["artifact"])), None
+        (str(row["artifact"]) for row in rows if row.get("artifact") and link in (row.get("url"), row["artifact"])),
+        None,
     )
-    return {"artifact": artifact, "lines": task["plan_lines"]} if artifact else None
+    return {"artifact": artifact, "lines": str(task["plan_lines"])} if artifact else None
 
 
-def _stored(doc: dict, phase: dict, task: dict, load: Callable[[str, str], bytes] | None = None) -> str:
+def _stored(
+    doc: dict[str, Any], phase: dict[str, Any], task: dict[str, Any], load: Callable[[str, str], bytes] | None = None
+) -> str:
     ref = _own_ref(doc, phase, task) or phase.get("plan_ref")
     if not ref and task and _url(phase, task):
         ref = {"artifact": _url(phase, task), "lines": task["plan_lines"]}
