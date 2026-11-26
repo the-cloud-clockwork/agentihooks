@@ -2416,7 +2416,7 @@ key; the builders are pure and read no file, clock or network.
 | `toolchain` | `environment` | The environment key: each variable the unit reads, with its value |
 | `static` | `gate` | Gate name, such as `ruff` or `type_gate` |
 | `static` | `head` | Path to blob id of every head file the gate grades |
-| `static` | `base` | Path to blob id of every base file the gate compares against |
+| `static` | `base` | Path to blob id of every file the gate compares against, at the merge base of the head and its base |
 | `static` | `grader` | Digest of the grader script tree the gate runs: the gate script's import closure at the protected grader revision |
 | `static` | `toolchain` | The toolchain above |
 | `test` | `tests` | Test id to its fingerprint from `scripts/dep_manifest.py` |
@@ -2719,9 +2719,14 @@ A step is a gate step when it has a `run` that calls a tool `static_gates.TOOLS`
 else its name (or the first line of its run) in lower case words joined by `-`, such as
 `semgrep/scan/fail-on-findings-new-against-the-base`. Each unit names one gate step, and
 its key is `static_key` over the gate name, the head files under the gate's registry paths, the
-base files under its base paths, the grader revision and the toolchain (see
-[Inputs per kind](#inputs-per-kind)). The plan groups units by label, so each label is one gate
-with its own check run.
+files under its base paths at the merge base of the head and its base, the grader revision and the
+toolchain (see [Inputs per kind](#inputs-per-kind)). A grade diffs against that merge base, which
+is the delivered base whenever that base is an ancestor of the head and the head itself when the
+base descends from it: GitHub delivers a pull
+request's base with its head, and a base ahead of the fork point would read what dev gained since
+as removed by the head. The grader, the run key and the base a grade names stay the delivered
+base, and a head that shares no history with its base fails expansion. The plan groups units by
+label, so each label is one gate with its own check run.
 
 On dev, `python -m scripts.ci_lab.static_gates --root .` lists 43 gate steps:
 
@@ -3545,7 +3550,9 @@ Each grade is `scripts.ci_lab.scheduler.summary` of its state:
 `agentihooks ci-lab-worker` builds the pod from the [worker environment](#environment), leases units
 from the scheduler and runs each through `scripts.ci_lab.executors`, the adapter its unit kind
 names. Every grant of `POST /lease` carries the job's `head`, `base` and `grader` revisions: the
-scheduler enqueues a grade's misses with the grade's base and its plan's grader revision.
+scheduler enqueues a grade's misses with its plan's grader revision and with the merge base of the
+grade's head and base, which is the grade's base whenever that base is an ancestor of the head
+and the head itself when the base descends from it.
 `POST /lease` answers `426` with no grant, and records no offer, for a worker whose pod runs a
 digest other than `CI_LAB_IMAGE` under a floating tag; a pod pinned by digest is never stale, so a
 release that leaves the chart's tag pinned changes nothing live. Every other request is answered
