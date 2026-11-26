@@ -1,0 +1,23 @@
+{
+  "id": "lab-discovery-parity-with-release",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
+  "behaviour": "A pull request head is refused when the discovery code of the release reads its tree to other static gates than the head's own code does and also to other gates than it reads from the base: a change to how the lab reads gates lands before the tree that needs it, so a scheduler on the release never grades a step the head's code leaves out. A reading is the gate names the discovery command line of one code folder prints for one tree, less each gate that misses a context name and the names in the tree's exclusion catalog.",
+  "seam": "scripts.ci_lab.discovery_parity.problems over three readings, graded over a code folder and a tree on disk, main through its exit status and printed lines, and the lint-actions job of the Tests workflow through its steps",
+  "tests": [
+    "tests/ci_lab/test_discovery_parity.py::test_a_head_the_released_code_reads_as_its_own_code_does_or_as_it_reads_the_base_is_not_refused",
+    "tests/ci_lab/test_discovery_parity.py::test_a_head_the_released_code_reads_unlike_its_own_code_and_unlike_the_base_is_refused_by_gate_name",
+    "tests/ci_lab/test_discovery_parity.py::test_a_side_that_grades_no_gate_of_its_own_is_named_as_none",
+    "tests/ci_lab/test_discovery_parity.py::test_a_head_the_released_code_cannot_read_while_it_reads_the_base_is_refused",
+    "tests/ci_lab/test_discovery_parity.py::test_a_head_its_own_code_cannot_read_is_refused",
+    "tests/ci_lab/test_discovery_parity.py::test_a_reading_runs_the_command_of_the_code_it_is_given_and_drops_a_gate_that_misses_a_name",
+    "tests/ci_lab/test_discovery_parity.py::test_a_reading_leaves_out_the_gates_the_exclusion_catalog_of_its_tree_names",
+    "tests/ci_lab/test_discovery_parity.py::test_a_command_that_fails_gives_a_failed_reading",
+    "tests/ci_lab/test_discovery_parity.py::test_the_command_of_this_checkout_reads_this_checkout_to_the_gates_its_discovery_returns",
+    "tests/ci_lab/test_discovery_parity.py::test_the_command_refuses_a_head_that_drops_the_catalog_while_the_released_code_still_reads_the_install_steps",
+    "tests/ci_lab/test_discovery_parity.py::test_the_command_passes_a_head_that_changes_only_how_gates_are_read",
+    "tests/ci_lab/test_discovery_parity.py::test_the_command_tells_when_the_codes_disagree_on_a_head_that_left_the_released_reading_as_it_was",
+    "tests/ci_lab/test_discovery_parity.py::test_the_command_refuses_a_head_whose_own_code_cannot_read_it",
+    "tests/ci_lab/test_discovery_parity.py::test_the_lint_actions_job_reads_the_head_with_the_scripts_of_main_after_the_base_and_grader_checkouts"
+  ]
+}
