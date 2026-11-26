@@ -16832,7 +16832,11 @@
         "tests/quick/test_cli.py::test_up_persists_default_for_mixed_engineers_without_changing_master",
         "tests/quick/test_cli.py::test_invalid_authentication_never_creates_panes",
         "tests/quick/test_cli.py::test_up_resolves_named_native_references_per_engineer",
-        "tests/quick/test_registry.py::test_legacy_registry_and_saved_authentication_survive_state_changes"
+        "tests/quick/test_registry.py::test_legacy_registry_and_saved_authentication_survive_state_changes",
+        "tests/quick/test_authentication.py::test_common_and_per_engineer_native_authentication_resolve_safe_references",
+        "tests/quick/test_authentication.py::test_invalid_native_authentication_reports_the_exact_refusal",
+        "tests/quick/test_native_authentication.py::test_saved_native_authentication_reaches_the_launcher",
+        "tests/quick/test_native_authentication.py::test_native_init_keeps_explicit_authentication_without_automatic_selection"
       ]
     }
   ],
