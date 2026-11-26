@@ -2420,7 +2420,7 @@ key; the builders are pure and read no file, clock or network.
 | `toolchain` | `environment` | The environment key: each variable the unit reads, with its value |
 | `static` | `gate` | Gate name, such as `ruff` or `type_gate` |
 | `static` | `head` | Path to blob id of every head file the gate grades |
-| `static` | `base` | Path to blob id of every base file the gate compares against |
+| `static` | `base` | Path to blob id of every file the gate compares against, at the merge base of the head and its base |
 | `static` | `grader` | Digest of the grader script tree the gate runs: the gate script's import closure at the protected grader revision |
 | `static` | `toolchain` | The toolchain above |
 | `test` | `tests` | Test id to its fingerprint from `scripts/dep_manifest.py` |
@@ -2493,12 +2493,14 @@ key; the builders are pure and read no file, clock or network.
    A head whose action is `closed` is not admitted or held: intake ends the work of its lane, as
    described below.
 2. Each head waits in its lane (repository, branch and class) for the quiet window, 30 seconds by
-   default; a newer head of the lane restarts it and a hotfix waits for none. A pass starts at most
-   eight heads whose window ended (`STARTS_PER_PASS`): the most urgent class first (hotfix, pull
-   request, queue, promotion, backfill) and, within a class, the head that has waited longest. A head
-   still quiet or held by a pause takes no place; a head put back for its manifest fetch takes one,
-   since its expansion ran on the pass. The other heads wait for a later pass, so every pass reaches
-   steps 5 to 8 however many heads wait.
+   default; a newer head of the lane restarts it and a hotfix waits for none. A pass looks at up to
+   twenty four heads whose window ended (`LOOKED_AT_PER_PASS`) and starts, retires or drops at most
+   eight of them (`STARTS_PER_PASS`): the most urgent class first (hotfix, pull request, queue,
+   promotion, backfill) and, within a class, the head that has waited longest. A head still quiet or
+   held by a pause takes no place among those looked at; a head put back for its manifest fetch,
+   pending or unanswered, takes one of the twenty four but none of the eight, so the pass moves on to
+   the next waiting head instead of stalling on it. The other heads wait for a later pass, so every
+   pass reaches steps 5 to 8 however many heads wait.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
    unit per gate step, described in [Static units](#static-units). A merge group, promotion or
@@ -2743,20 +2745,40 @@ A step is a gate step when it has a `run` that calls a tool `static_gates.TOOLS`
 else its name (or the first line of its run) in lower case words joined by `-`, such as
 `semgrep/scan/fail-on-findings-new-against-the-base`. Each unit names one gate step, and
 its key is `static_key` over the gate name, the head files under the gate's registry paths, the
-base files under its base paths, the grader revision and the toolchain (see
-[Inputs per kind](#inputs-per-kind)). The plan groups units by label, so each label is one gate
-with its own check run.
+files under its base paths at the merge base of the head and its base, the grader revision and the
+toolchain (see [Inputs per kind](#inputs-per-kind)). A grade diffs against that merge base, which
+is the delivered base whenever that base is an ancestor of the head and the head itself when the
+base descends from it: GitHub delivers a pull
+request's base with its head, and a base ahead of the fork point would read what dev gained since
+as removed by the head. The grader, the run key and the base a grade names stay the delivered
+base, and a head that shares no history with its base fails expansion. The plan groups units by
+label, so each label is one gate with its own check run.
 
-On dev, `python -m scripts.ci_lab.static_gates --root .` lists 43 gate steps:
+On dev, `python -m scripts.ci_lab.static_gates --root .` lists 31 gate steps:
 
 | Gate | Steps from | Gate steps |
 |---|---|---|
-| `lint` | The `lint` job of `test.yml` | 28 |
-| `type-gate` | The `type-gate` job of `test.yml` | 2 |
+| `lint` | The `lint` job of `test.yml` | 20 |
+| `type-gate` | The `type-gate` job of `test.yml` | 1 |
 | `semgrep/scan` | The `scan` job of `semgrep.yml` | 4 |
 | `semgrep/feature-tests` | The `feature-tests` job of `semgrep.yml` | 2 |
 | `semgrep/charts` | The `charts` job of `semgrep.yml` | 3 |
-| `test-count` | The `test-count` job of `test.yml` | 4 |
+| `test-count` | The `test-count` job of `test.yml` | 1 |
+
+The eight lint steps that read `github.head_ref`, `github.ref_name`, `github.base_ref`,
+`github.event.before`, `github.event.merge_group.base_sha`, a network, Docker or an earlier
+repository checkout moved to the `lint-actions` job, and `test-count`'s own
+`record-the-head-count-for-the-next-queue-group` step moved to the `collect` job; neither job is
+in `STATIC_JOBS`, so `discover` never walks either one. A Python command that passes inline code,
+`python -c '...'` or a combined form such as `python -Ic '...'`, makes no gate, whatever that code
+imports, repository modules included; a step stays a gate only through its other commands. So
+`type-gate`'s `install-dependencies` step and `test-count`'s `install-dependencies` and
+`fetch-the-base-suite-count-recorded-on-dev` steps stay in their jobs but drop out of discovery
+by that rule alone. A step whose verdict the lab must grade runs a module (`python -m`), a script
+file or a script on standard input (`python -`), and
+`test_the_real_static_jobs_leave_only_their_setup_and_record_fetch_steps_without_a_gate` names
+every run step of the static jobs that `discover` yields no gate for today, the three that pass
+inline code among them, so a new one is a decision.
 
 Before pull request
 [#11978](https://github.com/the-cloud-clockwork/agentihooks/pull/11978), the expander passed only
@@ -2796,15 +2818,13 @@ The static executor supplies these names:
 Since the event is `pull_request` in every class, a lab unit runs or skips each step as a pull
 request run of Actions does. A merge group, promotion or backfill grade can therefore differ from
 that class's Actions run: a step whose `if` needs another event is skipped, and a step whose `if`
-needs `pull_request` runs. Three lab gradable gates read the event name on dev, and
-`tests/ci_lab/test_static_gates.py` pins that list, so a new one fails the test until someone
-checks the pull request event keeps its verdict:
-
-| Gate | In a lab unit |
-|---|---|
-| `lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one` | Its `self-plant` producer runs, since it needs `pull_request` |
-| `test-count/fetch-the-base-suite-count-recorded-on-dev` | Skipped: it also needs the `app-token` producer, a `uses` step. Every failure path of the step exits 0, so it never changes the job's verdict, and the count floor collects the base suite itself |
-| `test-count/record-the-head-count-for-the-next-queue-group` | Skipped: it runs only on `merge_group`, with `continue-on-error`, so it never changes the job's verdict |
+needs `pull_request` runs. No lab gradable gate reads the event name on dev, and
+`tests/ci_lab/test_static_gates.py` pins that empty list, so a new one fails the test until someone
+checks the pull request event keeps its verdict. The three gates that once read it —
+`lint/prove-the-mutation-gate-kills-with-the-real-test-and-fails-with-a-weakened-one` and
+`test-count/fetch-the-base-suite-count-recorded-on-dev` and
+`test-count/record-the-head-count-for-the-next-queue-group` — moved out of `lint` and `test-count`
+into `lint-actions` and `collect`, neither of which `discover` walks.
 
 `scripts.ci_lab.run_static.run` runs the producers before the gate, in job order, in the gate's
 sandbox and run folder, and gives each its own `GITHUB_OUTPUT` file. A `uses` producer, or one
@@ -2821,13 +2841,11 @@ summary the report carries.
 
 A gate with any missing name is not lab gradable. The expander leases no unit for it, so its
 verdict stays with Actions. `python -m scripts.ci_lab.static_gates --root .` prints each gate's
-producers by id, its `reads`, its `matrix` and its `missing`. On dev two `lint` gates are not lab
-gradable:
-
-| Gate | Missing |
-|---|---|
-| `lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading` | `github.head_ref`, `github.ref_name` |
-| `lint/artifact-sanity-checks` | `github.base_ref`, `github.event.before`, `github.event.merge_group.base_sha` |
+producers by id, its `reads`, its `matrix` and its `missing`. On dev no discovered gate is missing
+a name: `lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading`
+(missing `github.head_ref`, `github.ref_name`) and `lint/artifact-sanity-checks` (missing
+`github.base_ref`, `github.event.before`, `github.event.merge_group.base_sha`) moved to the
+`lint-actions` job, which `discover` never walks.
 
 Before pull request
 [#12486](https://github.com/the-cloud-clockwork/agentihooks/pull/12486), the executor supplied
@@ -3002,7 +3020,8 @@ one per `expand_tests.batches` batch, with batches cut at `BATCH_SECONDS` (60) f
 `.test_durations`. Each unit's key is `digests.test_key` over its tests' fingerprints on the head
 tree, the blob ids of the files its tests opened outside the manifest (their records' `outside`
 list), the pytest invocation and the toolchain. The expander reads every head file in one
-`git cat-file --batch` for the fingerprints.
+`git cat-file --batch` for the fingerprints, and `fingerprints` hashes each tree file at most once
+per call, however many tests open, own or reach it.
 
 A batch starts as one test file. A file is split only when its tests' summed durations pass 60
 seconds and none of its tests carries an xdist group. `expand_tests._parts` then deals its tests,
@@ -3569,7 +3588,9 @@ Each grade is `scripts.ci_lab.scheduler.summary` of its state:
 `agentihooks ci-lab-worker` builds the pod from the [worker environment](#environment), leases units
 from the scheduler and runs each through `scripts.ci_lab.executors`, the adapter its unit kind
 names. Every grant of `POST /lease` carries the job's `head`, `base` and `grader` revisions: the
-scheduler enqueues a grade's misses with the grade's base and its plan's grader revision.
+scheduler enqueues a grade's misses with its plan's grader revision and with the merge base of the
+grade's head and base, which is the grade's base whenever that base is an ancestor of the head
+and the head itself when the base descends from it.
 `POST /lease` answers `426` with no grant, and records no offer, for a worker whose pod runs a
 digest other than `CI_LAB_IMAGE` under a floating tag; a pod pinned by digest is never stale, so a
 release that leaves the chart's tag pinned changes nothing live. Every other request is answered
@@ -3588,7 +3609,12 @@ to the runner changes no verdict. Each request names the private copy as its `tr
 session the runner starts runs there and imports that copy's `scripts` package. A mutant unit passes only when every mutant is killed; a runner that exits
 non zero fails its unit. The scheduler splits a function whose mutants price over the 30 minute
 unit time limit into several mutant units, as
-[Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) describes. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
+[Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) describes. Each adapter cuts every folder a unit needs, the report folder included, inside one fresh folder under
+`CI_LAB_WORK_ROOT/runs` that the worker gives the lease; the worker removes that folder once the unit is delivered,
+once its executor raises, and once its lease is lost or abandoned, after the report and log are read, read only
+folders inside it included. The worker cuts the folder before the lease's first heartbeat, so a unit whose folder
+cannot be cut sends no heartbeat and its lease reaps. Each adapter
+uploads a JSON report with the unit's `seconds` (and `flaky`
 for a test unit), which the scheduler stores with the verdict, and releases every tree it cut,
 also when the executor raises. SIGTERM stops leasing and lets running units drain within the
 termination grace: 2100 seconds, the 30 minute unit time limit (`worker.UNIT_TIMEOUT_SECONDS`,

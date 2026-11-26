@@ -1,8 +1,13 @@
+import errno
+import fcntl
 import json
+import os
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -332,6 +337,123 @@ def test_corrupt_cache_is_replaced(monkeypatch, tmp_path):
     assert source == "live"
     assert results[0].account == "ALPHA"
     assert json.loads(cache.read_text())["version"] == 1
+
+
+def _probe_into(calls: list[list[str]]) -> Callable[..., list[balancer.ProbeResult]]:
+    def probe(credentials: list[balancer.Credential], *args: object, **kwargs: object) -> list[balancer.ProbeResult]:
+        calls.append([credential.account for credential in credentials])
+        return [balancer.parse_probe(credential.account, _stream(0.20, 0.30), 100) for credential in credentials]
+
+    return probe
+
+
+def _refuse_lock_open(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+    opened = Path.open
+
+    def refuse(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self.name.endswith(".lock"):
+            raise OSError(code, os.strerror(code), str(self))
+        return opened(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", refuse)
+
+
+@pytest.mark.feature("claude-router-cache-lock-read-only-home")
+def test_a_refresh_holds_the_router_cache_lock_while_it_probes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cache = tmp_path / "state" / "home" / "claude-router-cache.json"
+    lock = cache.with_name("claude-router-cache.json.lock")
+    held: list[bool] = []
+
+    def probe(credentials: list[balancer.Credential], *args: object, **kwargs: object) -> list[balancer.ProbeResult]:
+        with lock.open("a+", encoding="utf-8") as other:
+            try:
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                held.append(True)
+            else:
+                held.append(False)
+        return [balancer.parse_probe(credential.account, _stream(0.20, 0.30), 100) for credential in credentials]
+
+    monkeypatch.setattr(balancer, "probe_credentials", probe)
+    credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
+
+    results, source = balancer.collect_results([credential], cache_file=cache, environ={}, now=1000)
+
+    assert (source, [result.account for result in results]) == ("live", ["ALPHA"])
+    assert held == [True]
+    assert lock.is_file()
+    assert [(at, result.account) for at, result in balancer.cached_observations(cache_file=cache)] == [
+        (1000.0, "ALPHA")
+    ]
+    probe([])
+    assert held == [True, False]
+
+
+@pytest.mark.feature("claude-router-cache-lock-read-only-home")
+def test_a_router_cache_lock_error_other_than_a_read_only_home_still_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cache = tmp_path / "claude-router-cache.json"
+    monkeypatch.setattr(balancer, "probe_credentials", _probe_into([]))
+    _refuse_lock_open(monkeypatch, errno.EACCES)
+
+    with pytest.raises(PermissionError):
+        balancer.cached_observations(cache_file=cache)
+    with pytest.raises(PermissionError):
+        balancer.collect_results([balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")], cache_file=cache, environ={})
+    assert not cache.exists()
+
+
+@pytest.mark.feature("claude-router-cache-lock-read-only-home")
+def test_a_read_only_router_cache_lock_still_reads_the_cached_observations(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cache = tmp_path / "claude-router-cache.json"
+    monkeypatch.setattr(balancer, "probe_credentials", _probe_into([]))
+    balancer.collect_results(
+        [balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")], cache_file=cache, environ={}, now=1000
+    )
+    _refuse_lock_open(monkeypatch, errno.EROFS)
+
+    observed = balancer.cached_observations(cache_file=cache)
+
+    assert [(at, result.account) for at, result in observed] == [(1000.0, "ALPHA")]
+
+
+@pytest.mark.feature("claude-router-cache-lock-read-only-home")
+def test_a_read_only_router_cache_lock_refreshes_without_writing_the_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cache = tmp_path / "home" / "claude-router-cache.json"
+    calls: list[list[str]] = []
+    monkeypatch.setattr(balancer, "probe_credentials", _probe_into(calls))
+    alpha = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret-a")
+    beta = balancer.Credential("AH_CC_TOKEN_BETA", "secret-b")
+    balancer.collect_results([alpha], cache_file=cache, environ={}, now=1000)
+    written = cache.read_bytes()
+    _refuse_lock_open(monkeypatch, errno.EROFS)
+
+    results, source = balancer.collect_results([alpha, beta], cache_file=cache, environ={}, now=1030)
+
+    assert (source, [result.account for result in results]) == ("live", ["ALPHA", "BETA"])
+    assert calls == [["ALPHA"], ["BETA"]]
+    assert cache.read_bytes() == written
+    assert sorted(path.name for path in cache.parent.iterdir()) == [
+        "claude-router-cache.json",
+        "claude-router-cache.json.lock",
+    ]
+
+
+@pytest.mark.feature("claude-router-cache-lock-read-only-home")
+def test_a_router_cache_in_a_missing_read_only_folder_reads_as_empty(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def refuse(self: Path, *args: Any, **kwargs: Any) -> None:
+        raise OSError(errno.EROFS, os.strerror(errno.EROFS), str(self))
+
+    monkeypatch.setattr(Path, "mkdir", refuse)
+
+    assert balancer.cached_observations(cache_file=tmp_path / "missing" / "claude-router-cache.json") == []
 
 
 def test_selection_fails_closed_when_every_week_is_under_five_percent(monkeypatch, tmp_path):

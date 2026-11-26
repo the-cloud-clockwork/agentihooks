@@ -193,6 +193,23 @@ def test_the_first_pass_drops_the_waiting_promotion_heads_stored_under_their_own
 
 
 @pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
+def test_the_first_pass_drops_a_waiting_promotion_head_stored_under_its_own_head_with_no_ref_recorded(
+    lab: Callable[..., Run],
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=500)
+    run.push(HEAD_A, lane="old")
+    run.tick(1000)
+    _unbranched(run, HEAD_A, "old")
+    client = run.lab.client
+    name = f"{REPO}|{HEAD_A}|{PROMOTION}"
+    held = {key: value for key, value in json.loads(client.hget(scheduler.WAITING, name)).items() if key != "ref"}
+    client.hset(scheduler.WAITING, name, json.dumps(held))
+    again = _restarted(run, quiet_ms=500)
+    assert _sweeps(again.tick(1100)) == [_swept(1, 0, 0)]
+    assert again.lab.client.hgetall(scheduler.WAITING) == {}
+
+
+@pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
 def test_the_first_pass_keeps_a_waiting_promotion_head_that_holds_a_grade_ref(lab: Callable[..., Run]) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1),)})}, quiet_ms=500)
     run.push(HEAD_A, lane=HEAD_A, ref=f"{scheduler.GRADE_REFS}{HEAD_A}")

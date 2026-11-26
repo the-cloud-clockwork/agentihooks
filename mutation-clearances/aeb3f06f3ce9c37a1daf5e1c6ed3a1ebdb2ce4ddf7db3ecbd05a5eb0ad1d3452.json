@@ -1,0 +1,6 @@
+{
+  "scripts/ci_queue_retry.py:scripts.ci_queue_retry.x_main:44d4985ab71a4e2bd724323ea099d940c8aef2264e6f405ede8a73bc7a25ee46": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: main imports cast from typing. typing.cast returns its second argument unchanged and never checks or converts the type argument. Replacing the first argument int with None preserves the exact run_id object passed to failed_jobs, all API inputs, decisions, printed output and step outputs."
+  }
+}

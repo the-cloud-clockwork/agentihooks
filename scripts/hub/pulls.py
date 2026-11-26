@@ -19,6 +19,9 @@ from scripts.swarm.store import SwarmError
 BUCKET = "hub-github"
 OPEN = "open"
 POLLED = "polled"
+SWEEP = "sweep"
+HEALTH = "health"
+SLICE_MS = 10_000
 INTERVAL_MS = 300_000
 FLUSH_AFTER_MS = 60_000
 FETCH_ERRORS = (SwarmError, KeyError, TypeError)
@@ -109,6 +112,8 @@ def _changes(snapshot: dict, seen: Observation) -> list[tuple[str, dict]]:
         snapshot["head"], snapshot["suites"], snapshot["early"] = seen.head, {}, {}
         found += _suites(snapshot, early)
     if seen.state is not None and seen.state != snapshot["state"]:
+        if snapshot["state"] is None and seen.state in TERMINAL:
+            found.append(("pull.opened", {}))
         found.append((ARRIVED.get(seen.state) or ("pull.reopened" if snapshot["state"] else "pull.opened"), {}))
         snapshot["state"] = seen.state
     if snapshot["state"] in TERMINAL:
@@ -146,12 +151,24 @@ def _rows(snapshot: dict, found: list[tuple[str, dict]], now: int) -> list[dict]
     return rows
 
 
+def _resumed(urls: list[str], cursor: str | None) -> list[str]:
+    """Return the open URLs from ``cursor`` on, or every one when the cursor has left the index."""
+    return urls[urls.index(cursor) :] if cursor in urls else urls
+
+
 class Pulls:
-    def __init__(self, bus: Bus, fetch: Callable[[str], Observation] = fetch, clock: lease.Clock = lease.wall_ms):
+    def __init__(
+        self,
+        bus: Bus,
+        fetch: Callable[[str], Observation] = fetch,
+        clock: lease.Clock = lease.wall_ms,
+        index: Bus | None = None,
+    ) -> None:
         self._events = bus.events
-        self._state = bus.state(BUCKET)
+        self._state = (bus if index is None else index).state(BUCKET)
         self._fetch = fetch
         self._clock = clock
+        self._late = 0
 
     def reactor(self) -> Reactor:
         return Reactor("pulls", "swarm.*.task.*", self.handle, singleton=True, poll=self.poll)
@@ -160,6 +177,7 @@ class Pulls:
         url = event.data.get("pr_url")
         if event.type == "task.changed" and isinstance(url, str) and URL.fullmatch(url):
             self.track(event.swarm, url)
+        self._late = max(self._late, self._clock() - event.time)
 
     def track(self, swarm: str, url: str) -> None:
         def add(snapshot):
@@ -242,15 +260,24 @@ class Pulls:
         _update(self._state, OPEN, change)
 
     def poll(self, guard: Callable[[], bool] = lambda: True) -> None:
+        """Sweep the open pull requests for at most ``SLICE_MS``, resuming the sweep a previous call paused.
+
+        A sweep starts once ``INTERVAL_MS`` has passed since the last one started, and records its start in
+        ``POLLED`` when it wraps; a rate limit ends it and waits a full interval from this call.
+        """
         if not guard():
             return
-        entry = self._state.get(POLLED)
         now = self._clock()
-        if entry is not None and now < json.loads(entry.value) + INTERVAL_MS:
+        sweep = self._sweep(now)
+        if sweep is None:
             return
+        polled = sweep["started"]
         index = self._state.get(OPEN)
-        for url in json.loads(index.value) if index else []:
+        for url in _resumed(json.loads(index.value) if index else [], sweep.get("next")):
             if not guard():
+                return
+            if self._clock() >= now + SLICE_MS:
+                self._pause(sweep, url)
                 return
             pending = self._snapshot(url)["pending"]
             self._publish(url, [row for row in pending if row["event"]["time"] <= now - FLUSH_AFTER_MS])
@@ -259,7 +286,32 @@ class Pulls:
             except FETCH_ERRORS as exc:
                 print(f"hub: GitHub poll skipped {url}: {exc}", file=sys.stderr)
                 if run_wait.rate_limited(exc):
+                    polled = now
                     break
                 continue
             self.observe(seen)
-        _update(self._state, POLLED, lambda _: now)
+        _update(self._state, POLLED, lambda _: polled)
+        _update(self._state, SWEEP, lambda _: {})
+        self._report({"sweep_ms": self._clock() - sweep["started"]})
+
+    def _sweep(self, now: int) -> dict[str, Any] | None:
+        """Return the sweep in progress, a new one starting at ``now`` once the interval has passed, or None."""
+        entry = self._state.get(SWEEP)
+        sweep: dict[str, Any] = json.loads(entry.value) if entry else {}
+        if sweep:
+            return sweep
+        polled = self._state.get(POLLED)
+        if polled is not None and now < json.loads(polled.value) + INTERVAL_MS:
+            return None
+        return {"started": now}
+
+    def _pause(self, sweep: dict[str, Any], url: str) -> None:
+        """Store ``url`` as the next pull request of ``sweep`` and report the track delay so far."""
+        _update(self._state, SWEEP, lambda _: {**sweep, "next": url})
+        self._report({})
+
+    def _report(self, extra: dict[str, int]) -> None:
+        """Write the oldest task event age handled since the last report, with ``extra``, to ``HEALTH``."""
+        late, self._late = self._late, 0
+        at = self._clock()
+        _update(self._state, HEALTH, lambda value: {**(value or {}), "at": at, "track_delay_ms": late, **extra})

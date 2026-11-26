@@ -1,0 +1,15 @@
+rules:
+  - id: focus-share-floor-division
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A floor divided focus share can become zero for a lane with seats and positive weight.
+      Keep at least one focus seat when both are positive, preserving zero for disabled lanes or focus.
+    patterns:
+      - pattern-inside: |
+          def $FUNCTION(...):
+              ...
+      - metavariable-regex:
+          metavariable: $FUNCTION
+          regex: .*focus.*
+      - pattern: '{$LANE: ($COUNT * $WEIGHT) // 100 for $LANE, $COUNT in $CAPS.items()}'

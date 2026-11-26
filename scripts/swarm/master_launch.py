@@ -123,14 +123,15 @@ def _profile(config):
     return config.lanes.get(MASTER, {}).get("profile") or DEFAULT_PROFILES[MASTER]
 
 
-def _why(previous, config, live):
+def _why(previous: Previous | None, config: Any, live: set[str]) -> str:
     if previous is None:
         return NONE_RECORDED
     if previous.agent.name in live:
         return "it is still running"
     if not previous.agent.harness:
         return "its harness is not recorded"
-    return blocker(previous.agent, config.repo)
+    agent = replace(previous.agent, profile=previous.agent.profile or _profile(config))
+    return blocker(agent, config.repo)
 
 
 def _resume(store: RedisStore, slug: str, runtime: Any, at: int, previous: Previous) -> Launched:

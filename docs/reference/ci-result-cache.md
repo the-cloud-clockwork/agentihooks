@@ -56,7 +56,7 @@ These two tests stay unfixed until slice 1 lands, so they keep proving the retry
 | Durations and coverage baselines: `durations-merged-<sha>`, `coverage-baseline-<tree>` | data | commit or tree | not results |
 | Mutation reuse of graded commits: `own_bases` and `graded_green` in `scripts/ci_mutation/scope.py` | mutation scope | ancestor commit whose pull request Tests run graded every mutation shard | per commit, not per input |
 | Helm kind chart proof: `kind-due` and `helm-kind` | one job | job input key | none: `kind-due` looks up the `helm-kind` key |
-| Pull request branch reuse: `tests/branch_record.py` on each 3.12 leg, `scripts/ci_branch_plan.py` in `test-count` | test | the earlier run's commit, its per test dependency manifest, the venv cache key | same-repo pull requests into dev only; a dev change to `.github/` or `pyproject.toml` between pushes voids every record |
+| Pull request branch reuse: `tests/branch_record.py` on each 3.12 leg, `scripts/ci_branch_plan.py` in `collect` | test | the earlier run's commit, its per test dependency manifest, the venv cache key | same-repo pull requests into dev only; a dev change to `.github/` or `pyproject.toml` between pushes voids every record |
 | Dev push | whole run | none | always runs everything; `ci_reuse.py` decides reuse only for `merge_group`, so the dev push reuse named in the task does not exist yet |
 
 Before slice 1 nothing retried. A failed test failed its shard, the shard failed `Gate — Required`, and the only recovery was a rerun of failed jobs on a pull request or a new queue entry.
@@ -567,9 +567,9 @@ A Tests run of a pull request into dev from a branch of this repository skips ev
 | `unit`, `unit-selected` | `Run tests`, `Run the selected tests` | head | Runs pytest with `--cov-context=test -p tests.dep_inputs -p tests.pass_record` on the command line, `DEP_INPUTS_DIR=dep-inputs` and `CI_RESULTS=ci-results` |
 | `unit`, `unit-selected` | `Record this leg's passed tests` | head | Builds `branch-record/record.json` with `python -m tests.branch_record` |
 | `unit`, `unit-selected` | `Upload this leg's branch record`, `Upload this leg's branch coverage` | none | Publish `branch-record-3.12-<leg>-<attempt>` and `branch-coverage-3.12-<leg>-<attempt>` |
-| `test-count` | `Plan the tests whose inputs did not change` | grader, `origin/dev` | Runs `scripts.ci_branch_plan` after `scripts.ci_test_plan` |
-| `test-count` | `Upload the pull request runs' test plan` | none | Publishes `reused-branch-3.12` when the plan reuses at least one test |
-| `test-count` | `Deselect the reused tests` | grader | Deselects the dev plan and the branch plan together |
+| `collect` | `Plan the tests whose inputs did not change` | grader, `origin/dev` | Runs `scripts.ci_branch_plan` after `scripts.ci_test_plan` |
+| `collect` | `Upload the pull request runs' test plan` | none | Publishes `reused-branch-3.12` when the plan reuses at least one test |
+| `collect` | `Deselect the reused tests` | grader | Deselects the dev plan and the branch plan together |
 | `unit-selected` | `Wait for the early collection`, `Adopt the reused tests from the protected grader` | grader | Hands the leg the deselected tests as `CI_REUSED` |
 | `unit-selected` | `Check every selected test ran once or was reused` | grader | Grades the leg |
 | `shard-check` | `Download the pull request runs' test plan` and the check and summary steps | base | Grades the full scope shards against both plans |
@@ -627,7 +627,7 @@ On a pull request run from this repository that is not test only, `sonar` mints 
 RUN=<tests run id>
 # Records each leg wrote
 gh run view "$RUN" --log | grep "Branch record for leg"
-# Planner decision in test-count
+# Planner decision in collect
 gh run view "$RUN" --log | grep -E "Pull request run [0-9]+ on [0-9a-f]+: [0-9]+ reused|No branch record|Unusable branch record"
 # Tests deselected because an earlier run passed them
 gh run view "$RUN" --log | grep "passed on earlier runs of this pull request"
@@ -645,7 +645,7 @@ gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$RUN/artifacts?per_pa
 - Hypotheses not yet observed: the arcs flushed at each context switch survive a killed worker, the record step finishes inside GitHub's cancellation window, and an earlier `refs/pull/<n>/merge` commit can still be fetched by its sha. A commit that cannot be fetched is a barrier for its run and every older one.
 - A change to a global input between a record's commit and the head invalidates every record, as `dep_manifest.global_input` decides: anything under `.github/` except, for these version 2 manifests, workflow files other than `test.yml` and `test.yml` changes that leave the unit jobs' execution unchanged; `pyproject.toml`; any path starting `.test_durations`; and any `.py` file outside `hooks/`, `scripts/` and `tests/`. 75 of 460 dev commits over 3 days touched `.github/`, `pyproject.toml` or `uv.lock`.
 - The venv cache key carries the UTC day, so a record from an earlier day never matches. Records expire after 7 days.
-- Selected legs now wait for `test-count`'s early collection, up to 4 minutes, before running tests.
+- Selected legs now wait for `collect`'s early collection, up to 4 minutes, before running tests.
 - Selected legs carry no dev coverage for tests the dev plan reuses. Those tests depend on no changed unit, so coverage on changed lines is unaffected; the run's overall coverage figure drops.
 - A selected leg's grader is `origin/dev` when the leg checks out, which can be newer than the planner's.
 
