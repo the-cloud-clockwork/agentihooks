@@ -2,6 +2,7 @@
 
 import argparse
 import contextlib
+import errno
 import fcntl
 import json
 import os
@@ -15,7 +16,7 @@ from dataclasses import KW_ONLY, dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from hooks.context.account_sessions import API_ACCOUNT
 from scripts import operator_env, session_bands
@@ -282,14 +283,26 @@ def _write_cache(path: Path, data: dict[str, Any]) -> None:
         raise
 
 
+def _open_cache_lock(path: Path) -> TextIO | None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path.with_suffix(path.suffix + ".lock").open("a+", encoding="utf-8")
+    except OSError as error:
+        if error.errno != errno.EROFS:
+            raise
+        return None
+
+
 @contextlib.contextmanager
-def _cache_lock(path: Path) -> Generator[None]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    with lock_path.open("a+", encoding="utf-8") as handle:
+def _cache_lock(path: Path) -> Generator[bool]:
+    handle = _open_cache_lock(path)
+    if handle is None:
+        yield False
+        return
+    with handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
-            yield
+            yield True
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
@@ -628,7 +641,7 @@ def collect_results(
     mode = "fable" if include_fable else "normal"
     probe_model = "fable" if include_fable else "haiku"
 
-    with _cache_lock(path):
+    with _cache_lock(path) as locked:
         cache = _read_cache(path)
         modes = cache.setdefault("modes", {})
         mode_data = cast("dict[str, Any]", modes.get(mode)) if isinstance(modes.get(mode), dict) else {}
@@ -670,8 +683,9 @@ def collect_results(
                 new_entries[credential.env_name] = {"observed_at": observed_at, "result": _result_data(result)}
         modes[mode] = {"accounts": new_entries}
         _drop_tokenless(modes, probed, _current_tokens(active_env))
-        with contextlib.suppress(OSError):
-            _write_cache(path, cache)
+        if locked:
+            with contextlib.suppress(OSError):
+                _write_cache(path, cache)
 
     ordered = [live_by_name.get(credential.env_name) or cached.get(credential.env_name) for credential in credentials]
     return [result for result in ordered if result is not None], "live" if missing else "cached"
