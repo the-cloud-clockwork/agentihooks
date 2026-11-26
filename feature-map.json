@@ -5910,6 +5910,18 @@
       ]
     },
     {
+      "id": "swarm-focus-cap-small-lane",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-focus-cap-small-lane",
+      "behaviour": "A lane with positive seats and positive focus weight retains at least one focus seat; zero seats, disabled focus and exhausted focus shares yield focus priority.",
+      "seam": "scripts.swarm.dispatcher._focus_order",
+      "tests": [
+        "tests/swarm/test_dispatcher.py::test_small_lanes_keep_a_positive_focus_share",
+        "tests/swarm/test_dispatcher.py::test_small_lanes_yield_focus_when_disabled_or_full"
+      ],
+      "rules": ["focus-share-floor-division"]
+    },
+    {
       "id": "swarm-review-dispatcher-lane-cap",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2881",
