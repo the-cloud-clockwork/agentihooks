@@ -137,6 +137,7 @@ def test_a_group_whose_commit_titles_name_no_pull_request_posts_on_its_queue_ref
     posted = record.post_group(found, SLUG, forge, LINK, REVIEWER, "r1", ["First"])
     assert forge.posts == [(8, "First")]
     assert [(item.url, item.head) for item in posted] == [(f"{REPO}/pull/8", GROUP)]
+    assert found.redis.hgetall(found.key(SLUG, "review-tasks")) == {"r1": "1"}
 
 
 @pytest.mark.feature("review-queue-group-post")
@@ -163,6 +164,11 @@ def test_a_group_record_holds_its_change_under_the_review_keys_and_expires_with_
     assert record.TTL_SEC - 5 <= found.redis.ttl(key) <= record.TTL_SEC
     assert record.group_of(found, SLUG, GROUP) == record.Group(REPO, GROUP, BASE, 8)
     assert (record.group_of(found, SLUG, BASE), record.group_of(found, "other", GROUP)) == (None, None)
+
+
+@pytest.mark.feature("review-queue-group-post")
+def test_a_commit_link_names_its_group_head_and_a_pull_link_names_none() -> None:
+    assert (record.commit_of(LINK), record.commit_of(f"{LINK}/"), record.commit_of(URL)) == (GROUP, GROUP, "")
 
 
 @pytest.mark.feature("review-queue-group-post")

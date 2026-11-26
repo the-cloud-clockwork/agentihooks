@@ -87,7 +87,7 @@ class GitLabForge:
             page += 1
 
     def group_pulls(self, base: str, head: str) -> tuple[int, ...]:
-        return ()
+        raise ForgeError("GitLab merge requests have no merge queue groups")
 
     def read(self, number: int) -> ChangeRequest:
         raw = self._call("GET", f"{self.api}/{number}")
