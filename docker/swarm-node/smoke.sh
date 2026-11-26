@@ -115,7 +115,7 @@ if [[ "$proof" != profiles ]]; then
         -v "$context/tests/swarm_node/code_mode_probe.py:/opt/probe/code_mode_probe.py:ro" \
         "$image" python /opt/probe/code_mode_probe.py /usr/local/bin/codex > "$output/codex-code-mode.json"
     sandbox_profiles="${WORKER_SANDBOX_PROFILES:?supply the paired profiles rendered from the pinned infrastructure chart}"
-    [[ -s "$sandbox_profiles/ci-lab-worker.json" && -s "$sandbox_profiles/ci-lab-worker" ]]
+    [[ -s "$sandbox_profiles/swarm-codex.json" && -s "$sandbox_profiles/ci-lab-worker" ]]
     sandbox_name="worker-planner-$fixture"
     sed "s/ci-lab-worker/$sandbox_name/g" "$sandbox_profiles/ci-lab-worker" > "$sandbox_profiles/qualification.apparmor"
     docker build --platform linux/amd64 -f "$context/docker/swarm-node/apparmor.Dockerfile" \
@@ -134,7 +134,7 @@ if [[ "$proof" != profiles ]]; then
     sandbox_loaded=1
     docker run --rm --network none --read-only --user 10001:10001 --cap-drop ALL \
         --security-opt no-new-privileges \
-        --security-opt "seccomp=$sandbox_profiles/ci-lab-worker.json" \
+        --security-opt "seccomp=$sandbox_profiles/swarm-codex.json" \
         --security-opt "apparmor=$sandbox_name" \
         --tmpfs /home/worker:uid=10001,gid=10001,exec --tmpfs /tmp \
         -v "$context/tests/swarm_node/planner_sandbox_probe.py:/opt/probe/planner_sandbox_probe.py:ro" \

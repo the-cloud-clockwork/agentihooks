@@ -13,7 +13,9 @@ def qualify(home: Path) -> dict[str, object]:
     report = home / ".agentihooks/swarm/profile-reports/planner-probe.json"
     report.parent.mkdir(parents=True, exist_ok=True)
     forbidden = repository / "forbidden"
-    env = {**os.environ, "HOME": str(home), "CODEX_HOME": str(home / "planner-probe-codex")}
+    codex_home = home / "planner-probe-codex"
+    codex_home.mkdir(exist_ok=True)
+    env = {**os.environ, "HOME": str(home), "CODEX_HOME": str(codex_home)}
     command = ["codex", *codex_plan_mode(env), "sandbox", "--permission-profile", "planner"]
     write = "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('validated')"
     results = []

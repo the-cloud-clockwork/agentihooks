@@ -23,7 +23,7 @@ jobs:
     env:
       WORKER_SCANNER_CACHE: ${{ github.workspace }}/.worker-scanner-cache
       WORKER_PROVEN_IMAGE: agentihooks-worker-proven:${{ github.run_id }}-${{ github.run_attempt }}
-      ANTONCORE_SANDBOX_REF: 7220b8a4d4ab987786daf89966d98f646182ed18
+      ANTONCORE_SANDBOX_REF: 41da074ebf14c8836e27096bb6a65c3b59d6e0c0
     strategy:
       fail-fast: false
       matrix:
@@ -73,8 +73,8 @@ jobs:
           documents = yaml.safe_load_all((output / 'rendered.yaml').read_text())
           config = next(doc for doc in documents if doc and doc['kind'] == 'ConfigMap' and doc['metadata']['name'] == 'ci-lab-node-profiles')
           data = config['data']
-          json.loads(data['ci-lab-worker.json'])
-          for name in ('ci-lab-worker.json', 'ci-lab-worker'):
+          json.loads(data['swarm-codex.json'])
+          for name in ('swarm-codex.json', 'ci-lab-worker'):
               (output / name).write_text(data[name])
           (output / 'source-ref').write_text(os.environ['ANTONCORE_SANDBOX_REF'] + '\n')
           PY
