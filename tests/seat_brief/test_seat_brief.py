@@ -293,7 +293,9 @@ def test_a_swarm_seat_reads_the_swarm_store_the_environment_names(monkeypatch: p
 @pytest.mark.feature("seat-brief")
 def test_the_seat_command_runs_through_the_agentihooks_command_line() -> None:
     assert cli_delegates.delegated_cli(["seat", "brief"]) is seat_brief.main
-    assert "handoff, culture, latest recap and learned notes" in seat_brief.build_parser().format_help()
+    assert "handoff, culture, latest recap and learned notes" in " ".join(
+        seat_brief.build_parser().format_help().split()
+    )
     with pytest.raises(SystemExit):
         seat_brief.main([], {})
 

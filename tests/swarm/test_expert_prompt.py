@@ -55,6 +55,7 @@ LOOP = (
     "Write messages in plain words: no ids, paths, hashes or dashes.\n"
 )
 COMMANDS = (
+    "agentihooks seat brief",
     f"{ME} expert mission",
     f"{ME} merge queue <url>",
     'agentihooks msg send master@sw "<plain words>"',
