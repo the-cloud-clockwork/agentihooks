@@ -32,6 +32,9 @@ class GroupForge:
         self.compared.append((base, head))
         return self.pulls
 
+    def release_pull(self, tag: str) -> int:
+        raise AssertionError(f"a group post resolves no release tag {tag}")
+
     def read(self, number: int) -> ChangeRequest:
         repository = "https://github.com/x/y" if number in self.foreign else REPO
         return ChangeRequest(number, f"{repository}/pull/{number}", "Title", "Body", f"head{number}", "", (), ())
