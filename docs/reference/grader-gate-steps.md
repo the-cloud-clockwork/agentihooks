@@ -72,6 +72,7 @@ manual dispatches. `lint` and `semgrep` are also skipped when the
 | Workflow and job | Step | From the grader | From the head |
 | --- | --- | --- | --- |
 | Tests `lint-actions` | `Refuse marker key vector drift from kernel dev` | `python -m scripts.ci_marker_vectors`, run from `$RUNNER_TEMP/grader` | `tests/fixtures/marker-idempotency-vectors.json` under `--root "$GITHUB_WORKSPACE"` |
+| Tests `lint-actions` | `Hold the static gates the released lab reads equal to the gates the head reads` | `python -m scripts.ci_lab.discovery_parity`, run from `$RUNNER_TEMP/grader` | The workflow, its registry and its exclusion catalog under `--head "$GITHUB_WORKSPACE"`, read once by the `scripts` folder of `main` and once by the head's own |
 | Tests `lint` | `Lint check` | `ruff check` with the grader's `pyproject.toml` | The code. A second `ruff check` also applies the head's own config, so a rule the head adds holds too |
 | Tests `lint` | `Format check` | `ruff format --check` with the grader's `pyproject.toml` | The code |
 | Tests `lint` | `Check every pull request job is a need of Gate Required` | `python -m scripts.ci_wiring`, run from `$RUNNER_TEMP/grader` | The workflows under `--root "$GITHUB_WORKSPACE"` |
@@ -488,6 +489,8 @@ step, `tests/test_gate_protected.py`:
 `tests/context/test_marker_key_vectors.py::test_vector_check_is_on_the_required_tests_path`
 pins the marker step's run text, its kernel checkout and its order in the
 `lint-actions` job. No test covers the guard rule floors step's fallback to the head copy.
+`tests/ci_lab/test_discovery_parity.py::test_the_lint_actions_job_reads_the_head_with_the_scripts_of_main_after_the_base_and_grader_checkouts`
+pins the run text of the released lab step and its place after the base and grader checkouts.
 
 ## Related pages
 

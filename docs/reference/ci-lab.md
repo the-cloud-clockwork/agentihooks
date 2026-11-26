@@ -2944,6 +2944,19 @@ or an empty log, and the required check show only unit keys.
   workflow gets no units, and its Actions job keeps the verdict; `--ci-only` names it.
 - Every expansion parses each workflow file directly in the folder, so one file that does not
   parse drops every head the lab grades at that grader revision.
+- The scheduler reads the grader tree with the discovery code of its image, which is built from
+  `main`. A change to how gates are read that lands on `dev` together with the tree that needs it
+  is misread until a release holds it: after the job split the released scheduler graded the step
+  `Install dependencies` as a unit of test count and of type gate. The `lint-actions` step `Hold
+  the static gates the released lab reads equal to the gates the head reads` refuses such a head.
+  `python -m scripts.ci_lab.discovery_parity --released DIR --base DIR --head DIR` reads the gates
+  a lab grades three times, each as the names the discovery command line of a code folder prints
+  for a tree, less a gate that misses a context name and the names in the tree's exclusion
+  catalog: the `scripts` folder of `main` over the head, the head's own code over the head, and
+  the `scripts` folder of `main` over the base. It exits 1 when the first reading differs from
+  both others, and names the gates only one side grades. A head that changes only the code, or
+  whose tree both codes read alike, passes; land the change to how gates are read first, and the
+  tree that needs it once a release holds that change.
 
 #### Verify
 

@@ -10,9 +10,16 @@ and also to other gates than the released code reads from the base.
 """
 
 import argparse
+import json
+import os
+import subprocess
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from scripts.ci_lab import static_exclusions
+
+COMMAND = ("-m", "scripts.ci_lab.static_gates", "--root")
 DIFFERS = (
     "the released lab reads this head to other static gates than the head's own code does, and to other gates "
     "than it reads from the base"
@@ -27,24 +34,71 @@ Reading = frozenset[str] | None
 
 
 def graded(code: Path, tree: Path) -> Reading:
-    """Return the static gates a lab running the code at `code` grades for the tree at `tree`."""
-    del code, tree
-    return frozenset()
+    """Return the static gates a lab running the code at `code` grades for the tree at `tree`: the names its
+    discovery command line prints, run in its own process from that folder with that folder first on the module
+    path, less each gate that misses a context name and less the names in the tree's exclusion catalog. A command
+    that fails gives no reading, and its error goes to standard error."""
+    folder = code.resolve()
+    command = [sys.executable, *COMMAND, str(tree.resolve())]
+    environ = {**os.environ, "PYTHONPATH": str(folder)}
+    done = subprocess.run(command, cwd=folder, env=environ, capture_output=True, text=True, check=False)
+    if done.returncode:
+        sys.stderr.write(done.stderr)
+        return None
+    gates = [json.loads(line) for line in done.stdout.splitlines() if line.strip()]
+    catalog = tree / static_exclusions.PATH
+    excluded = static_exclusions.read(catalog.read_text()) if catalog.is_file() else {}
+    return frozenset(gate["name"] for gate in gates if not gate["missing"] and gate["name"] not in excluded)
+
+
+def _sides(released: frozenset[str], own: frozenset[str]) -> list[str]:
+    """Name the gates only the released code grades and the gates only the head's code grades, each as none when
+    it has none."""
+    return [
+        f"only the released code grades: {', '.join(sorted(released - own)) or 'none'}",
+        f"only the head's code grades: {', '.join(sorted(own - released)) or 'none'}",
+    ]
 
 
 def problems(released: Reading, own: Reading, before: Reading) -> list[str]:
     """List why a head is refused, from the released reading of the head, the head's own and the released reading
-    of the base."""
-    del released, own, before
-    return []
+    of the base: its own code cannot read it, or the released reading is neither the head's own nor that of the
+    base."""
+    if own is None:
+        return [UNREADABLE]
+    if released in (own, before):
+        return []
+    if released is None:
+        return [BROKEN, REMEDY]
+    return [DIFFERS, *_sides(released, own), REMEDY]
+
+
+def notes(released: Reading, own: frozenset[str]) -> list[str]:
+    """List what a head that is not refused is told when the released reading is not its own: the release reads
+    neither tree, or it reads this head as it reads the base."""
+    if released is None:
+        return [STUCK]
+    return [] if released == own else [LAGS, *_sides(released, own)]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Grade the head at --head against the released code under --released and the base tree at --base."""
+    """Grade the head at --head against the released code under --released and the base tree at --base: print each
+    refusal as an error and exit 1, else print the notes, or the count of gates when the two codes agree."""
     parser = argparse.ArgumentParser()
     for name in ("--released", "--base", "--head"):
         parser.add_argument(name, type=Path, required=True)
-    parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    released, own = graded(args.released, args.head), graded(args.head, args.head)
+    found = problems(released, own, graded(args.released, args.base))
+    if found or own is None:
+        for line in found:
+            print(f"::error::{line}")
+        return 1
+    told = notes(released, own)
+    for line in told:
+        print(f"::notice::{line}")
+    if not told:
+        print(f"Discovery parity: the released code and the head read {len(own)} gates")
     return 0
 
 
