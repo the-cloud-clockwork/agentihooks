@@ -1355,3 +1355,91 @@ def test_main_serves_the_worker_metrics_on_the_contract_port_until_the_worker_dr
     for thread in set(threading.enumerate()) - before:
         thread.join(timeout=5)
         assert not thread.is_alive()
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_static_cuts_its_run_and_report_folders_inside_the_root_the_worker_hands_it_not_the_shared_runs_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, static_trees: FakeWorktrees
+) -> None:
+    gates = {found.name: found for found in static_gates.discover(WORKFLOW, REGISTRY)}
+    name = sorted(gates)[1]
+    summary = folder(tmp_path, "run", {"summary.md": "ok\n"}) / "summary.md"
+    ran = Recorder(run_static.Result(name, 0, tmp_path / "log.txt", summary))
+    monkeypatch.setattr(executors.run_static, "run", ran)
+    pod = pod_of(tmp_path, static_trees)
+    root = tmp_path / "lease-root"
+    root.mkdir()
+
+    finished = executors.static(pod, lease("static", "k", (name,)), root)  # pyright: ignore[reportCallIssue]
+
+    head, base, grader = (static_trees.trees[sha] for sha in ("h1", "b1", "g1"))
+    settings = run_static.Settings(root, tmp_path / "venv", pod.ports, WHITELIST, 30.0, LEASE_CONTEXT)
+    assert ran.calls == [(gates[name], head, base, grader, settings)]
+    assert finished.report.name == "report.json"
+    assert finished.report.parent.parent == root
+    assert list(pod.runs.iterdir()) == []
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_tests_cuts_its_attempt_and_report_folders_inside_the_root_the_worker_hands_it_not_the_shared_runs_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder
+) -> None:
+    tree = folder(tmp_path, "head", {LOCK: "lock-h"})
+    manifest = {"tests": {"tests/a.py::t": {"files": ["scripts/a.py"]}}}
+    suite = executors.Suite(
+        folder(tmp_path, "in", {"manifest.json": json.dumps(manifest)}) / "manifest.json", tmp_path / "flakes.jsonl"
+    )
+    verdict = run_tests.Verdict(PASSED, False, (), {"tests/a.py::t": 0.5}, 1, tmp_path / "log.txt", tmp_path / "cov")
+    ran = Recorder(verdict)
+    monkeypatch.setattr(executors.run_tests, "run", ran)
+    trees = FakeWorktrees({"h1": tree})
+    pod = pod_of(tmp_path, trees)
+    root = tmp_path / "lease-root"
+    root.mkdir()
+    digest = hashlib.sha256(json.dumps(manifest).encode()).hexdigest()
+    unit = Unit("test", "k", ("tests/a.py::t",), json.dumps(manifest), digest)
+
+    finished = executors.tests(
+        pod,
+        suite,
+        Lease("job", "tok", "h1", unit, 1, 1500, "b1", "g1"),
+        root,  # pyright: ignore[reportCallIssue]
+    )
+
+    lab = run_tests.Lab(root, pod.ports, WHITELIST, manifest, tmp_path / "flakes.jsonl", 30.0, False)
+    assert ran.calls == [(("tests/a.py::t",), tree, tmp_path / "venv", 1, lab)]
+    assert finished.report.name == "report.json"
+    assert finished.report.parent.parent == root
+    assert list(pod.runs.iterdir()) == []
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_mutation_cuts_its_request_and_report_folders_inside_the_root_the_worker_hands_it_not_the_shared_runs_folder(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    venv: Recorder,
+    mutation_tree: Path,
+    trampolines: list[tuple[Path, str, set[int]]],
+) -> None:
+    stats = {"stats": [{"status": 0, "tests": {}, "durations": {}, "cpu": 1.0}]}
+    box = Box([(0, stats)], tmp_path)
+    monkeypatch.setattr(executors, "Sandbox", box)
+    grader = tmp_path / "grader"
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": grader}, fetched=frozenset({"h1"}))
+    pod = pod_of(tmp_path, trees)
+    root = tmp_path / "lease-root"
+    root.mkdir()
+
+    finished = executors.mutation(
+        pod,
+        mutation_settings(tmp_path),
+        lease("stats", "k1", ("tests/test_alpha.py",)),
+        root,  # pyright: ignore[reportCallIssue]
+    )
+
+    [(argv, _)] = box.runs
+    assert Path(argv[3]).parent.parent == root
+    assert box.made == [(root, grader, pod.ports, WHITELIST, (grader,))]
+    assert finished.report.name == "report.json"
+    assert finished.report.parent.parent == root
+    assert list(pod.runs.iterdir()) == []

@@ -890,3 +890,115 @@ def test_an_executor_answer_with_an_unknown_outcome_is_refused(tmp_path: Path) -
     assert str(refused.value) == "unknown lab unit outcome 'taken'"
     kept = worker.Finished(outcome="gate_failed", report=tmp_path / "report.json", log=tmp_path / "log.txt")
     assert kept.outcome == "gate_failed"
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_delivered_units_lease_root_is_removed_and_its_report_and_log_upload_whole(
+    scheduler: str, jobs: queue.Queue, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    seen: list[Path] = []
+    report_body = '{"key": "a", "padding": "' + ("x" * 500) + '"}'
+    log_body = "log of h1\n" + ("y" * 500)
+
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
+        seen.append(root)
+        report = root / "report.json"
+        report.write_text(report_body)
+        log = root / "log.txt"
+        log.write_text(log_body)
+        return worker.Finished(outcome="passed", report=report, log=log)
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    one = worker.Worker(
+        worker.Client(scheduler),
+        {"test": held},  # pyright: ignore[reportArgumentType]
+        "pod-1",
+        1,
+        runs,  # pyright: ignore[reportArgumentType]
+        wait_ms=0,
+    )
+
+    one.run_once()
+
+    assert one.drain() == []
+    [root] = seen
+    assert not root.exists()
+    assert list(runs.iterdir()) == []
+    assert sink.bodies == {"/h1:test:a/report": report_body.encode(), "/h1:test:a/log": log_body.encode()}
+    assert found(jobs, "h1:test:a").outcome == "passed"
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_units_lease_root_is_removed_even_though_its_executor_raises_and_its_lease_reaps(
+    scheduler: str, lab: Counted, jobs: queue.Queue, clock: Clock, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    seen: list[Path] = []
+
+    def crash(lease: worker.Lease, root: Path) -> worker.Finished:
+        seen.append(root)
+        raise RuntimeError("unit process crashed")
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    crashing = worker.Worker(
+        worker.Client(scheduler),
+        {"test": crash},  # pyright: ignore[reportArgumentType]
+        "pod-1",
+        1,
+        runs,  # pyright: ignore[reportArgumentType]
+        wait_ms=0,
+        heartbeat_s=0.01,
+    )
+
+    crashing.run_once()
+
+    assert crashing.drain() == []
+    [root] = seen
+    assert not root.exists()
+    assert list(runs.iterdir()) == []
+    assert sink.bodies == {}
+    clock.now += lab.ttl_ms + 1
+    assert lab.reap(clock.now) == [("h1:test:a", "pending")]
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_units_lease_root_is_removed_though_a_lost_lease_delivers_nothing(
+    scheduler: str, lab: Counted, jobs: queue.Queue, sink: Sink, tmp_path: Path
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    release = threading.Event()
+    seen: list[Path] = []
+
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
+        seen.append(root)
+        release.wait(10)
+        report = root / "report.json"
+        report.write_text('{"key": "a"}')
+        log = root / "log.txt"
+        log.write_text("log of h1")
+        return worker.Finished(outcome="passed", report=report, log=log)
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    holding = worker.Worker(
+        worker.Client(scheduler),
+        {"test": held},  # pyright: ignore[reportArgumentType]
+        "pod-1",
+        1,
+        runs,  # pyright: ignore[reportArgumentType]
+        wait_ms=0,
+        heartbeat_s=0.01,
+    )
+    [lease] = holding.run_once()
+    assert beating(lab, 1)
+    assert jobs.finish(found(jobs, lease.job), lease.token, "taken")
+    release.set()
+
+    assert holding.drain() == []
+    [root] = seen
+    assert not root.exists()
+    assert list(runs.iterdir()) == []
+    assert sink.bodies == {}
