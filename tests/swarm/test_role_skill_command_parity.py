@@ -15,7 +15,6 @@ from tests.review.fakes import SLUG, store
 
 pytestmark = pytest.mark.unit
 
-FEATURE = "role-skill-command-parity"
 ROLES = Path(__file__).resolve().parents[2] / "profiles" / "package" / "roles"
 SKILLS = sorted(ROLES.glob("*/.claude/skills/*/SKILL.md"))
 REVIEWER = ROLES / "reviewer" / ".claude" / "skills" / "swarm-reviewer" / "SKILL.md"
@@ -81,7 +80,7 @@ def given(argv: list[str]) -> set[str]:
     return {key for key, value in vars(review_cli.parser().parse_args(argv)).items() if value}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("role-skill-command-parity")
 @pytest.mark.parametrize("skill", SKILLS, ids=skill_id)
 def test_role_skill_close_and_post_commands_match_its_launch_prompt(skill: Path) -> None:
     named = commands(skill.read_text())
@@ -89,7 +88,7 @@ def test_role_skill_close_and_post_commands_match_its_launch_prompt(skill: Path)
     assert sorted(named - accepted) == []
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("role-skill-command-parity")
 def test_reviewer_post_step_passes_the_review_record_refusal_options() -> None:
     refusal = record.done_refusal(store(), SLUG, "review", "review", "r1")
     assert refusal is not None
