@@ -116,6 +116,25 @@ def test_status_reports_herdr_enabled_while_it_is_installed(monkeypatch, runner,
 
 
 @pytest.mark.feature("herdr-enabled-when-installed")
+@pytest.mark.parametrize(
+    ("argv", "calls"),
+    [
+        ([], []),
+        (["status"], []),
+        (["install"], ["install", "configure"]),
+        (["configure"], ["configure"]),
+        (["enable"], ["configure"]),
+    ],
+)
+def test_every_herdr_action_still_runs(monkeypatch, runner, argv, calls):
+    seen = []
+    monkeypatch.setattr(herdr_setup, "install", lambda: seen.append("install") or 0)
+    monkeypatch.setattr(herdr_setup, "configure", lambda: seen.append("configure") or 0)
+    assert herdr_setup.main(argv) == 0
+    assert seen == calls
+
+
+@pytest.mark.feature("herdr-enabled-when-installed")
 def test_an_installed_herdr_cannot_be_disabled(runner):
     with pytest.raises(SystemExit) as refused:
         herdr_setup.main(["disable"])
