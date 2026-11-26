@@ -16912,11 +16912,15 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2910",
       "behaviour": "The hub pulls reactor tracks a pull request from the task change that records it, and its fallback GitHub poll holds the hub loop for at most one ten second slice per call: it resumes the sweep from a stored cursor, starts again from the first open pull request when the cursor left the index, records the sweep start once the sweep wraps, waits a full interval after a rate limit, yields on lease loss, and records the track delay and the last sweep length, so a task change arriving mid sweep is tracked within one slice.",
       "seam": "scripts.hub.pulls.Pulls.handle and scripts.hub.pulls.Pulls.poll run by scripts.hub.runner.HubRunner.run_once",
+      "rules": [
+        "hub-pulls-poll-unbounded-sweep"
+      ],
       "tests": [
         "tests/hub/test_pulls.py::test_hub_runner_tracks_pull_requests_from_ledger_outbox_subjects",
         "tests/hub/test_pulls.py::test_poll_records_its_pass_time",
         "tests/hub/test_pulls.py::test_poll_stops_at_a_rate_limit_and_waits_for_the_next_interval",
         "tests/hub/test_pulls.py::test_poll_yields_when_the_replica_loses_its_lease",
+        "tests/hub/test_pulls.py::test_names_the_poll_slice_and_its_sweep_and_health_keys",
         "tests/hub/test_pulls.py::test_a_poll_returns_after_one_slice_and_the_next_call_resumes_from_its_cursor",
         "tests/hub/test_pulls.py::test_a_sweep_whose_cursor_left_the_open_index_starts_again_from_the_first_open_pull",
         "tests/hub/test_pulls.py::test_a_rate_limit_in_a_resumed_sweep_waits_a_full_interval_from_that_call",

@@ -734,8 +734,13 @@ def polled(bus: MemoryBus) -> int | None:
 
 
 def health(bus: MemoryBus) -> dict | None:
-    entry = bus.state(pulls.BUCKET).get("health")
+    entry = bus.state(pulls.BUCKET).get(pulls.HEALTH)
     return None if entry is None else json.loads(entry.value)
+
+
+@pytest.mark.feature("hub-tracks-pull-requests")
+def test_names_the_poll_slice_and_its_sweep_and_health_keys() -> None:
+    assert (pulls.SLICE_MS, pulls.SWEEP, pulls.HEALTH) == (10_000, "sweep", "health")
 
 
 @pytest.mark.feature("hub-tracks-pull-requests")
@@ -747,6 +752,7 @@ def test_a_poll_returns_after_one_slice_and_the_next_call_resumes_from_its_curso
     hub.poll()
     assert fetched == SWEPT[:2]
     assert polled(bus) is None
+    assert health(bus) == {"at": 11_000, "track_delay_ms": 0}
     hub.poll()
     assert fetched == SWEPT[:4]
     hub.poll()
@@ -830,7 +836,7 @@ def test_a_task_change_published_mid_sweep_is_tracked_within_one_slice() -> None
     tracked = snapshot(bus)
     assert tracked is not None
     assert tracked["swarms"] == ["crew"]
-    assert handled[0] - published[0] <= 10_000
+    assert handled[0] - published[0] <= pulls.SLICE_MS
 
 
 @pytest.mark.feature("hub-tracks-pull-requests")
@@ -845,6 +851,9 @@ def test_the_poll_records_the_track_delay_and_the_sweep_length() -> None:
     hub.handle(task_changed(version=2))
     hub.poll()
     assert health(bus) == {"at": 1_807_000, "track_delay_ms": 1_800_100, "sweep_ms": 6_000}
+    clock.now = 1_801_000 + pulls.INTERVAL_MS
+    hub.poll()
+    assert health(bus) == {"at": 2_107_000, "track_delay_ms": 0, "sweep_ms": 6_000}
 
 
 @pytest.mark.feature("hub-tracks-pull-requests")
