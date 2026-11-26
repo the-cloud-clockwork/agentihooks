@@ -3585,7 +3585,12 @@ to the runner changes no verdict. Each request names the private copy as its `tr
 session the runner starts runs there and imports that copy's `scripts` package. A mutant unit passes only when every mutant is killed; a runner that exits
 non zero fails its unit. The scheduler splits a function whose mutants price over the 30 minute
 unit time limit into several mutant units, as
-[Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) describes. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
+[Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) describes. Each adapter cuts every folder a unit needs, the report folder included, inside one fresh folder under
+`CI_LAB_WORK_ROOT/runs` that the worker gives the lease; the worker removes that folder once the unit is delivered,
+once its executor raises, and once its lease is lost or abandoned, after the report and log are read, read only
+folders inside it included. The worker cuts the folder before the lease's first heartbeat, so a unit whose folder
+cannot be cut sends no heartbeat and its lease reaps. Each adapter
+uploads a JSON report with the unit's `seconds` (and `flaky`
 for a test unit), which the scheduler stores with the verdict, and releases every tree it cut,
 also when the executor raises. SIGTERM stops leasing and lets running units drain within the
 termination grace: 2100 seconds, the 30 minute unit time limit (`worker.UNIT_TIMEOUT_SECONDS`,
