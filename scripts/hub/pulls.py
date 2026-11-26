@@ -155,7 +155,7 @@ class Pulls:
         index: Bus | None = None,
     ) -> None:
         self._events = bus.events
-        self._state = (index or bus).state(BUCKET)
+        self._state = (bus if index is None else index).state(BUCKET)
         self._fetch = fetch
         self._clock = clock
 
