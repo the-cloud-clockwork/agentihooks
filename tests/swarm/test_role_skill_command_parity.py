@@ -20,17 +20,22 @@ SKILLS = sorted(ROLES.glob("*/.claude/skills/*/SKILL.md"))
 REVIEWER = ROLES / "reviewer" / ".claude" / "skills" / "swarm-reviewer" / "SKILL.md"
 CONTINUATION = re.compile(r"\\\n\s*")
 COMMAND = re.compile(
-    r"agentihooks (?:swarm \S+ (?P<verb>done|ready|park|block)|(?P<post>review post|forge post))"
-    r"(?:\s+(?P<flag>--[\w-]+))?"
+    r"agentihooks (?:swarm \S+ (?P<verb>done|ready|park|block)|(?P<post>review post|forge post))(?P<rest>[^`\n;]*)"
 )
+SENTENCE_END = re.compile(r"[.,](?:\s|$)")
+OPTION = re.compile(r"(?<!\S)--[\w-]+")
 REVIEW_POST = re.compile(r"agentihooks review (post\b[^`\n]*)")
-TASK = {"id": "t1", "title": "x", "phase": "p1"}
+TASK = {"id": "t1", "title": "x", "phase": "p1", "generation": 1, "mission": "mission.md"}
 
 
 def commands(text: str) -> set[tuple[str, str]]:
-    """Return each close or post command the text names, as its command words and the flag right after them."""
-    joined = CONTINUATION.sub(" ", text)
-    return {(found["verb"] or found["post"], found["flag"] or "") for found in COMMAND.finditer(joined)}
+    """Return each close or post command the text names with each option it passes, and once with no option."""
+    found: set[tuple[str, str]] = set()
+    for match in COMMAND.finditer(CONTINUATION.sub(" ", text)):
+        command = match["verb"] or match["post"]
+        options = OPTION.findall(SENTENCE_END.split(match["rest"], 1)[0])
+        found |= {(command, ""), *((command, option) for option in options)}
+    return found
 
 
 def lanes(role: str) -> set[str]:
@@ -84,8 +89,7 @@ def given(argv: list[str]) -> set[str]:
 @pytest.mark.parametrize("skill", SKILLS, ids=skill_id)
 def test_role_skill_close_and_post_commands_match_its_launch_prompt(skill: Path) -> None:
     named = commands(skill.read_text())
-    accepted = offered(skill.relative_to(ROLES).parts[0]) if named else set()
-    assert sorted(named - accepted) == []
+    assert sorted(named - offered(skill.relative_to(ROLES).parts[0])) == []
 
 
 @pytest.mark.feature("role-skill-command-parity")

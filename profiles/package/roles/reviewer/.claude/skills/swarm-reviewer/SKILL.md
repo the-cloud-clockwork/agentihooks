@@ -93,17 +93,19 @@ piece of evidence.
    ```bash
    agentihooks review post https://github.com/owner/repo/pull/123 \
      --slug <slug> \
-     --finding "<first finding>" \
-     --finding "<next finding>"
+     --finding '<first finding>' \
+     --finding '<next finding>'
    ```
 
-   Use the `url` the read command printed and one `--finding` per finding.
-   The command takes the forge from the checkout's origin remote, posts each
-   finding as a comment on the change request head and records it, and only
-   recorded findings count for `done` and the queue gate. It prints the
-   record as JSON with each finding's comment URL; keep one for the author
-   message in step 3 and for `done --finding` at close. Done when the record
-   lists every finding.
+   Use the `url` the read command printed and one `--finding` per finding,
+   each in single quotes so the shell runs nothing a finding quotes from the
+   diff; write a single quote inside a finding as `'\''`. The command takes
+   the forge from the checkout's origin remote, posts each finding as a
+   comment on the change request and records it against the change request's
+   current head; only recorded findings count for `done` and the queue gate.
+   It prints the record as JSON with each finding's comment URL; keep one for
+   the author message in step 3 and for `done --finding` at close. Done when
+   the record lists every finding.
 3. Send them to the author:
    `agentihooks msg send <author> "<findings and the review link>"`.
 4. Record the verdict on the task's phase:
