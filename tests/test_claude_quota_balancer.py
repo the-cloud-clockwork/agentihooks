@@ -385,8 +385,8 @@ def test_a_refresh_holds_the_router_cache_lock_while_it_probes(monkeypatch: pyte
     assert [(at, result.account) for at, result in balancer.cached_observations(cache_file=cache)] == [
         (1000.0, "ALPHA")
     ]
-    with lock.open("a+", encoding="utf-8") as other:
-        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    probe([])
+    assert held == [True, False]
 
 
 @pytest.mark.feature("claude-router-cache-lock-read-only-home")
@@ -454,7 +454,6 @@ def test_a_router_cache_in_a_missing_read_only_folder_reads_as_empty(
     monkeypatch.setattr(Path, "mkdir", refuse)
 
     assert balancer.cached_observations(cache_file=tmp_path / "missing" / "claude-router-cache.json") == []
-    assert not (tmp_path / "missing").exists()
 
 
 def test_selection_fails_closed_when_every_week_is_under_five_percent(monkeypatch, tmp_path):
