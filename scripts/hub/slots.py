@@ -1,5 +1,6 @@
 """Account slot admission the hub answers for hive members, so one account total spans every swarm."""
 
+import functools
 import json
 import sys
 from collections.abc import Callable
@@ -77,5 +78,5 @@ def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms, admitter: "Admis
         QUEUE,
         lambda subject, data: handle(bus, subject, data, clock, admitter),
         wait_ms=account_slots.REQUEST_TIMEOUT_MS,
-        refusal=lambda subject, data, error: refusal(subject, data, error, admitter),
+        refusal=functools.partial(refusal, admitter=admitter),
     )

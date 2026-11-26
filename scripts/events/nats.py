@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import datetime
+import functools
 import hashlib
 import logging
 import sys
@@ -838,7 +839,7 @@ class NatsBus:
                 token = SERVE_WAITED_MS.set(waited)
                 try:
                     reply = handler(msg.subject, msg.data)
-                    refused = (lambda error: refusal(msg.subject, msg.data, error)) if refusal else None
+                    refused = functools.partial(refusal, msg.subject, msg.data) if refusal else None
                     self._loop.run(msg.respond(nats_payload.fitted(self._nc, msg.reply, reply, refused)))
                 except Exception as error:
                     self._loop.run(_unreported(error))
