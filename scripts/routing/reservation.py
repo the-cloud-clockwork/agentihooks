@@ -204,7 +204,7 @@ def other_logins(
     environ: Mapping[str, str],
     held: Reservation | None,
     store_of: "Callable[[Mapping[str, str]], RedisStore | None] | None" = None,
-    proc: Path = account_sessions._PROC,
+    proc: Path = account_sessions._PROC,  # pyright: ignore[reportPrivateUsage]
 ) -> tuple[Reservation, ...]:
     """One reservation per declared master login account of `harness` other than `held`'s, each on its own live
     masters."""
