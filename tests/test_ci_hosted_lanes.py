@@ -1,7 +1,9 @@
 import re
+from collections.abc import Iterator
 from functools import cache
 from itertools import product
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -161,13 +163,21 @@ def _triggered(events):
                 yield event, ref
 
 
-def _contexts(where):
+def _required_context(event: str, ref: str, spec: Any) -> bool:
+    if event == "pull_request_target" and isinstance(spec, dict) and spec.get("types") == ["dequeued"]:
+        return False
+    return event in REQUIRED or (event, ref) == ("push", "refs/heads/dev")
+
+
+def _contexts(where: str, required_only: bool = False) -> Iterator[dict[str, Any]]:
     workflow = _workflow(where.split(":")[0])
     runners = [(workflow["name"], workflow[True])]
     if "workflow_call" in workflow[True]:
         runners += [(_workflow(caller)["name"], _workflow(caller)[True]) for caller in CALLERS]
     for title, events in runners:
         for (event, ref), run_id in product(_triggered(events), (1000, 1003, 1006)):
+            if required_only and not _required_context(event, ref, events[event]):
+                continue
             yield {"event_name": event, "ref": ref, "workflow": title, "run_id": run_id}
 
 
@@ -231,14 +241,83 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled() -> None:
     assert seen == LANE_USERS
 
 
-def test_no_required_run_or_its_callee_ever_reaches_a_lane():
+def test_no_required_run_or_its_callee_ever_reaches_a_lane() -> None:
     checked = 0
     for where, block in _blocks():
-        for github in _contexts(where):
-            if github["event_name"] in REQUIRED or (github["event_name"], github["ref"]) == ("push", "refs/heads/dev"):
-                checked += 1
-                assert not _is_lane(_resolve(block, **github)["group"]), (where, github)
+        for github in _contexts(where, required_only=True):
+            checked += 1
+            assert not _is_lane(_resolve(block, **github)["group"]), (where, github)
     assert checked
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+@pytest.mark.parametrize(
+    ("events", "required"),
+    [
+        ({"pull_request_target": {"types": ["dequeued"]}}, False),
+        ({"pull_request_target": None}, True),
+        ({"pull_request_target": {}}, True),
+        ({"pull_request_target": {"types": None}}, True),
+        ({"pull_request_target": {"types": []}}, True),
+        ({"pull_request_target": {"types": "dequeued"}}, True),
+        ({"pull_request_target": {"types": ["opened"]}}, True),
+        ({"pull_request_target": {"types": ["synchronize"]}}, True),
+        ({"pull_request_target": {"types": ["dequeued", "opened"]}}, True),
+        ({"pull_request_target": {"types": ["DEQUEUED"]}}, True),
+        ({"pull_request_target": {"types": ["unknown"]}}, True),
+        ({"pull_request": {"types": ["dequeued"]}}, True),
+        ({"merge_group": None}, True),
+        ({"push": {"branches": ["dev"]}}, True),
+    ],
+    ids=[
+        "dequeued",
+        "null",
+        "default",
+        "null-types",
+        "empty",
+        "scalar",
+        "opened",
+        "synchronize",
+        "mixed",
+        "uppercase",
+        "unknown",
+        "ordinary-pull",
+        "queue",
+        "dev",
+    ],
+)
+def test_only_explicit_dequeued_recovery_is_outside_required_lane_contexts(
+    monkeypatch: pytest.MonkeyPatch, events: dict[str, Any], required: bool
+) -> None:
+    def workflow(name: str) -> dict[str | bool, Any]:
+        return {"name": "Recovery", True: events}
+
+    monkeypatch.setitem(globals(), "_workflow", workflow)
+    contexts = list(_contexts("recovery.yml:retry"))
+    assert contexts
+    assert list(_contexts("recovery.yml:retry", required_only=True)) == (contexts if required else [])
+
+
+@pytest.mark.feature("queue-retry-releases-runner")
+def test_a_reusable_recovery_keeps_its_ordinary_callers_required_contexts(monkeypatch: pytest.MonkeyPatch) -> None:
+    workflows = {
+        "recovery.yml": {
+            "name": "Recovery",
+            True: {"workflow_call": None, "pull_request_target": {"types": ["dequeued"]}},
+        },
+        "caller.yml": {"name": "Caller", True: {"pull_request_target": {"types": ["opened"]}}},
+    }
+
+    def workflow(name: str) -> dict[str | bool, Any]:
+        return workflows[name]
+
+    monkeypatch.setitem(globals(), "_workflow", workflow)
+    monkeypatch.setitem(globals(), "CALLERS", ["caller.yml"])
+    contexts = list(_contexts("recovery.yml:retry"))
+    assert any(context["workflow"] == "Recovery" for context in contexts)
+    required = [context for context in contexts if context["workflow"] == "Caller"]
+    assert required
+    assert list(_contexts("recovery.yml:retry", required_only=True)) == required
 
 
 def test_the_run_id_last_digit_spreads_runs_over_three_lanes() -> None:

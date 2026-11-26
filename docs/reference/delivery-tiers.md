@@ -1340,7 +1340,9 @@ Queue retry runs on `workflow_run` when a Tests run completes. Its job starts on
 - ended `failure` or `cancelled`, and
 - is the first attempt of the run (`run_attempt` 1).
 
-GitHub runs `workflow_run` workflows from the default branch, `main`. A change to `queue-retry.yml` or `scripts/ci_queue_retry.py` merged on `dev` takes effect only after it is [promoted](promotion.md) to `main`. Until then the queue keeps the behaviour of the last promoted release.
+Queue retry also runs on `pull_request_target` with type `dequeued`. That entry passes the pull request number to the same classifier. Both entries check out the default branch and never execute pull request code. The job timeout is five minutes.
+
+GitHub runs these workflows from the default branch, `main`. A change to `queue-retry.yml` or `scripts/ci_queue_retry.py` merged on `dev` takes effect only after it is [promoted](promotion.md) to `main`. Until then the queue keeps the behaviour of the last promoted release.
 
 ### How a failed run is classified
 
@@ -1356,13 +1358,13 @@ GitHub runs `workflow_run` workflows from the default branch, `main`. A change t
 
    The last is recorded when the job log API refuses the read, as it does for a shard lost before it uploaded a log, unless an annotation shows a step exited nonzero. One red shard beside a lost one refuses the requeue.
 4. The pull request number comes from the merge group branch, `gh-readonly-queue/<base>/pr-<number>-<sha>`.
-5. While the pull request is still in the queue, the classifier polls every 30 seconds, up to 30 minutes, for GitHub to drop it. The job's 35 minute timeout covers that wait.
+5. The classifier reads the pull request once. While it remains in the queue, the step writes `requeue=false` and `waiting=true` and ends immediately, releasing its runner and shared hosted lane. The dequeued event resumes classification with `python -m scripts.ci_queue_retry --repo <owner>/<repo> --pull <number>`. It finds the newest Tests merge group run for that pull since its head commit and applies the same first attempt and failed run guards once. A newer successful run, unfinished run or rerun prevents an older loss from being retried. If dequeue arrives before the run finishes, the later run completion performs classification instead. Run inventory reads are bounded to ten pages of one hundred runs; no matching run means no retry.
 6. The pull request must be open and outside the queue. If it left the queue since its head commit, the newest removal must be for failed checks, and there must be at most one failed checks removal. A head that already failed in the queue twice, or that last left the queue for another reason, is not requeued. Pushing a new head starts the count again.
 
-The step prints one JSON line with the decision and writes `requeue`, `pull`, and, on a requeue, the pull request `node` id and `head` commit to the step outputs:
+The step prints one JSON line with the decision and writes `requeue`, `waiting`, `pull`, and, on a requeue, the pull request `node` id and `head` commit to the step outputs:
 
 ```json
-{"run": 1234567890, "pull": 4321, "requeue": true, "reason": "runner lost on unit (3.12, 4); first failed checks removal of this head"}
+{"run": 1234567890, "pull": 4321, "requeue": true, "waiting": false, "reason": "runner lost on unit (3.12, 4); first failed checks removal of this head"}
 ```
 
 ### Enforcement
@@ -1401,7 +1403,8 @@ gh run view <run id> --log | grep -E '"requeue"|Log only'
 | `"requeue": false` with `failed outside the unit shards: <jobs>` | A job other than the unit shards and their dependents failed. | Fix that job; the pull request needs a new queue entry once its checks pass. |
 | `"requeue": false` with `failed without a runner loss signature: <shards>` | A shard failed on a test, or its loss left none of the three signatures. | Read the shard log. Fix a real failure; queue again by hand for an unrecognised runner loss. |
 | `"requeue": false` with `head already left the queue 2 times on failed checks` | The same head was already requeued once and failed again. | Treat it as a real failure until the shard logs show otherwise. |
-| `"requeue": false` with `pull request is not open outside the queue` | The pull request was closed or merged, already queued again, or still in the queue after the 30 minute wait. | None, unless it is open and outside the queue; then queue it by hand. |
+| `"requeue": false` with `"waiting": true` | The pull request remains queued. | The step ends immediately; the dequeued event resumes classification. |
+| `"requeue": false` with `pull request is not open outside the queue` and `"waiting": false` | The pull request was closed or merged. | None. |
 | `"requeue": false` with `failed again on its in-run rerun: <jobs>` | A shard lost its runner, was rerun inside the run, and the rerun failed. | Read the rerun log; queue again by hand once the cause is fixed. |
 | `"requeue": false` with `no unit shard failed` | The run failed or was cancelled with no unit shard carrying a failure or a runner loss signature. | Read the failed job; queue again by hand once it is fixed. |
 | `Classify the failed jobs` fails with `gh: HTTP 404` on `actions/jobs/<id>/logs` | GitHub kept no log for a shard, which can happen when its runner was lost. No decision is printed and nothing is requeued. | Queue the pull request by hand. |

@@ -5010,6 +5010,16 @@
       ]
     },
     {
+      "id": "semgrep-engine-posix-backend",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-semgrep-runner-oom",
+      "behaviour": "Every job of the Semgrep workflow runs semgrep-core on the Eio posix backend, so the engine opens no io_uring ring.",
+      "seam": "the top level env of the Semgrep workflow, inherited by its scan, feature-tests and charts jobs, with no job or step env or run text setting EIO_BACKEND",
+      "tests": [
+        "tests/test_ci_semgrep.py::test_every_semgrep_job_inherits_the_posix_backend_without_override"
+      ]
+    },
+    {
       "id": "feature-suite-harness",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/fsuite1",
