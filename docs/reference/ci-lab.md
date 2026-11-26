@@ -2739,6 +2739,16 @@ On dev, `python -m scripts.ci_lab.static_gates --root .` lists 31 gate steps:
 | `semgrep/charts` | The `charts` job of `semgrep.yml` | 3 |
 | `test-count` | The `test-count` job of `test.yml` | 1 |
 
+Dev's `delivery.yaml` lists `lint`, `type-gate` and `test-count` under `lab.authoritative`, so on a pull
+request those three Actions jobs are skipped and `Gate — Required` reads `lab/lint`, `lab/type-gate` and
+`lab/test-count` in their place. `docs` and `writer-lock` stay on Actions because lab units have no Docker
+daemon. The `semgrep` job stays too: the lab grades only its `scan`, `feature-tests` and `charts` parts, and
+an authoritative gate with no unit posts skipped, which `Gate — Required` reads as red. The Semgrep incident
+rule `lab-authoritative-gate-the-lab-cannot-grade` refuses those three names in the list, and
+`python -m scripts.feature_checks.lab_authority` prints whether a checkout still holds the list, each
+gate's authority, its lab check and the skip clause of its job. `AGENTIHOOKS_LAB_OFF=true` as a repository
+variable hands the three gates back to Actions without a merge.
+
 The eight lint steps that read `github.head_ref`, `github.ref_name`, `github.base_ref`,
 `github.event.before`, `github.event.merge_group.base_sha`, a network, Docker or an earlier
 repository checkout moved to the `lint-actions` job, and `test-count`'s own
@@ -4978,7 +4988,8 @@ pull request cannot enter the merge queue. The check shows on the pull request a
 
 The Tests workflow skips its `writer-lock` job when `lab.authoritative` in `delivery.yaml` names
 `writer-lock`, and `Gate — Required` then reads the `lab/writer-lock` check run in its place
-(`.github/gate-wiring.json`). The list is empty on `dev`, so Actions runs the job.
+(`.github/gate-wiring.json`). The list on `dev` names `lint`, `type-gate` and `test-count` and never
+`writer-lock`, so Actions runs the job.
 
 #### Runner class
 
