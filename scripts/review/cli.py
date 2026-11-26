@@ -51,11 +51,18 @@ def main(argv: list[str]) -> int:
         found = connect()
         agent = _agent(found, args.slug)
         if args.action == "read":
-            result = record.mark(found, args.slug, _forge(), args.url, agent.name, args.finding, args.answer)
+            shown = record.document(
+                record.mark(found, args.slug, _forge(), args.url, agent.name, args.finding, args.answer)
+            )
+        elif record.commit_of(args.url):
+            posted = record.post_group(found, args.slug, _forge(), args.url, agent.name, agent.task, args.finding)
+            shown = [record.document(item) for item in posted]
         else:
-            result = record.post(found, args.slug, _forge(), args.url, agent.name, agent.task, args.finding)
+            shown = record.document(
+                record.post(found, args.slug, _forge(), args.url, agent.name, agent.task, args.finding)
+            )
     except (SwarmError, ForgeError, ValueError, *swarm_store.store_errors()) as error:
         print(f"review: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(record.document(result)))
+    print(json.dumps(shown))
     return 0
