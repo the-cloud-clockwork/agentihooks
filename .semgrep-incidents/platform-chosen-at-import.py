@@ -48,10 +48,3 @@ async def apretool() -> str | None:
     # ok: platform-chosen-at-import
     skip = sys.platform == "win32"
     return None if skip else pretool()
-
-
-class Runner:
-    def windows(self) -> bool:
-        # ok: platform-chosen-at-import
-        found = sys.platform == "win32"
-        return found
