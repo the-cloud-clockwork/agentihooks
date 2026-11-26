@@ -65,7 +65,7 @@ from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRef
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
 from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
 from scripts.ci_lab.pods import Pods, pod_images, unmanaged, worker_pods
-from scripts.ci_lab.queue import DEFAULT, Job, Queue
+from scripts.ci_lab.queue import DEFAULT, RETENTION_MS, Job, Queue
 from scripts.ci_lab.remote.post_receive import GRADE_REFS
 from scripts.ci_lab.retry import Policy, UnitResult, decide, policy
 from scripts.ci_lab.static_gates import REGISTRY, WORKFLOW, discover
@@ -168,6 +168,7 @@ INTAKE_SECONDS = 10
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
 LOOKED_AT_PER_PASS = 24
+DRAINED_PER_PASS = 500
 UNANSWERED_FETCHES = 10
 POST_HOLD_MS = 60_000
 INTERVAL_S = 2.0
@@ -433,11 +434,13 @@ class Ports:
 
 @dataclass(frozen=True)
 class Settings:
-    """The trusted actors, the quiet window of a lane and the retries of a lost unit."""
+    """The trusted actors, the quiet window of a lane, the retries of a lost unit and how long a settled job's record
+    outlives its settling."""
 
     trusted: frozenset[str]
     quiet_ms: int = QUIET_MS
     retries: Policy = Policy()
+    retention_ms: int = RETENTION_MS
 
 
 @dataclass
@@ -736,14 +739,22 @@ class Scheduler:
         self.held: defaultdict[str, int] = defaultdict(int)
         self._demand_cache: dict[str, tuple[str, _Demand]] = {}
         self._quiets: dict[str, _Quiet] = {}
+        self._undrained: list[str] = []
+        self._drained = False
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: on the first pass retire the pull request grades whose head nothing wants, then retire the
-        merge group grades whose merge group is gone, intake, release quiet lanes, reap expired leases, refresh the
-        live grade summaries, enqueue the held units the budget admits, then advance every live grade, counting each
-        finished job in the most urgent tier of the live grades holding it."""
+        merge group grades whose merge group is gone, intake, release quiet lanes, reap expired leases, drain a batch
+        of the old global done set, refresh the live grade summaries, enqueue the held units the budget admits, then
+        advance every live grade, counting each finished job in the most urgent tier of the live grades holding it."""
         swept = self._sweep()
-        actions = [*self._retire_groups(), *self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms)]
+        actions = [
+            *self._retire_groups(),
+            *self._intake(now_ms),
+            *self._release(now_ms),
+            *self._reap(now_ms),
+            *self._drain(),
+        ]
         self._survey()
         actions.extend(self._admit(now_ms))
         tiers, _, _ = self._demand()
@@ -1337,11 +1348,29 @@ class Scheduler:
         actions: list[str] = []
         for expired in self.queue.expired(now_ms):
             job = self.queue.job(expired)
-            if job is not None and (state := self.queue.reap(job, now_ms, self.settings.retries.lost)):
+            if job is not None and (
+                state := self.queue.reap(job, now_ms, self.settings.retries.lost, self.settings.retention_ms)
+            ):
                 self.registry.inc(REAPED[state])
                 actions.append(f"reaped {expired} {state}")
                 release(self.queue, self.ports.pods, job.worker)
         return actions
+
+    def _drain(self) -> list[str]:
+        """Give the jobs the old global done set names the retention, at most DRAINED_PER_PASS a pass, until a read
+        finds it empty; the set is read whole once its last read is drained, since the lab's Redis user may not pop
+        or scan a set, and is never read again in this process once it reads empty."""
+        if self._drained:
+            return []
+        if not self._undrained:
+            self._undrained = self.queue.undrained()
+        batch = self._undrained[-DRAINED_PER_PASS:]
+        del self._undrained[-DRAINED_PER_PASS:]
+        if not batch:
+            self._drained = True
+            return []
+        settled = self.queue.drain(batch, self.settings.retention_ms)
+        return [f"drained {len(batch)} jobs of the old done set, {settled} settled, {len(self._undrained)} left"]
 
     def _admit(self, now_ms: int) -> list[str]:
         """Enqueue the held units the day's budget admits, the most urgent grade first: every unit of a class not shed,
@@ -2235,6 +2264,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
         manifests,
         environ.get(IMAGE, ""),
         pod_images(scheduler.ports.pods),
+        scheduler.settings.retention_ms,
     )
     routes = lease_api.ControlRoutes(client, environ.get(contract.CONTROL_TOKEN, ""), _now_ms)
     ports = (contract.SCHEDULER_PORT, contract.CONTROL_PORT, contract.METRICS_PORT)
