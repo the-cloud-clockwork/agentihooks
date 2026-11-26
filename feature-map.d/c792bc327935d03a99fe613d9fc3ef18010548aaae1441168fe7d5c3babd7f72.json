@@ -2,7 +2,7 @@
   "id": "review-queue-group-post",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t2904",
-  "behaviour": "A reviewer posts the findings of a merge queue group review task on its group commit link: the review pass records each merge group it queues a review task for (repository, head, base and the queue ref pull number) under the review key family with the thirty day review expiry, the forge lists the pull requests the group commit titles end with, falling back to the queue ref pull, every pull request is checked against the forge target before any post, each finding is posted and recorded on every pull request of the group under the group head, it counts once for its task so swarm done closes the review task, a commit link without a group record or naming no pull request is refused, GitLab refuses merge queue groups, and a pull link post keeps recording at the pull head the queue gate reads.",
+  "behaviour": "A reviewer posts the findings of a merge queue group review task on its group commit link: the review pass records each merge group it sees (repository, head, base and the queue ref pull number) under the review key family with the thirty day review expiry, the forge lists the pull requests the group commit titles end with, falling back to the queue ref pull, every pull request is checked against the forge target before any post, each finding is posted and recorded on every pull request of the group under the group head, it counts once for its task so swarm done closes the review task, a commit link without a group record, of another repository than its group or naming no pull request is refused, GitLab refuses merge queue groups, and a pull link post keeps recording at the pull head the queue gate reads.",
   "seam": "scripts.review.record post_group, commit_of, remember_group and group_of with the agentihooks review post command through scripts.review.cli main; scripts.forge.github.GitHubForge.group_pulls through an injected runner and scripts.forge.gitlab.GitLabForge.group_pulls; scripts.tick.steps.review.review_pass over an in memory bus and a fake Redis store",
   "tests": [
     "tests/review/test_record_group.py::test_a_pull_link_post_records_only_at_the_pull_head",
@@ -12,6 +12,7 @@
     "tests/review/test_record_group.py::test_each_finding_of_a_group_post_counts_once_for_its_task",
     "tests/review/test_record_group.py::test_the_done_check_passes_a_review_task_after_its_group_post",
     "tests/review/test_record_group.py::test_a_group_commit_link_without_a_group_record_is_refused_and_posts_nothing",
+    "tests/review/test_record_group.py::test_a_commit_link_of_another_repository_than_its_group_is_refused_and_posts_nothing",
     "tests/review/test_record_group.py::test_a_group_post_without_a_finding_is_refused_and_posts_nothing",
     "tests/review/test_record_group.py::test_a_group_whose_commit_titles_name_no_pull_request_posts_on_its_queue_ref_pull",
     "tests/review/test_record_group.py::test_a_group_naming_no_pull_request_is_refused_and_posts_nothing",
@@ -23,7 +24,6 @@
     "tests/forge/test_group_pulls.py::test_github_lists_no_pull_request_when_no_title_ends_with_a_number",
     "tests/forge/test_group_pulls.py::test_a_failed_compare_raises_with_its_error_text",
     "tests/forge/test_group_pulls.py::test_gitlab_refuses_merge_queue_groups_without_a_request",
-    "tests/tick/steps/test_review_queue.py::test_the_review_pass_records_each_merge_group_it_queues_a_review_task_for",
-    "tests/tick/steps/test_review_queue.py::test_a_merge_group_whose_review_task_the_ledger_holds_records_nothing"
+    "tests/tick/steps/test_review_queue.py::test_the_review_pass_records_each_merge_group_it_queues_a_review_task_for"
   ]
 }

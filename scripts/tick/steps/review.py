@@ -89,16 +89,16 @@ def review_task(short: str, data: dict[str, Any], doc: dict[str, Any]) -> dict[s
 def _queue(
     delivery: Delivery, short: str, slug: str, doc: dict[str, Any], ledger: Any, known: set[str], store: RedisStore
 ) -> list[str]:
-    """Add the review task of one delivery unless the ledger holds its id, recording a merge queue group in the
-    review store first so its reviewers can post on the pull requests it tests, returning the action it took."""
+    """Record a merge queue group in the review store so its reviewers can post on the pull requests it tests, then
+    add the review task of one delivery unless the ledger holds its id, returning the action it took."""
     data = cast(dict[str, Any], delivery.event.data)
     task = review_task(short, data, doc)
-    if task["task"] in known:
-        return []
-    known.add(task["task"])
     if short == "mq":
         group = record.Group(data["repository"], data["head"], data["base"], data["number"] or 0)
         record.remember_group(store, slug, group)
+    if task["task"] in known:
+        return []
+    known.add(task["task"])
     try:
         ledger.add_task(slug, task, SENDER)
     except LedgerRefused as exc:
@@ -110,7 +110,7 @@ def _queue(
 def review_pass(bus: Bus, slug: str, doc: dict[str, Any], ledger: Any, now_ms: int, store: RedisStore) -> list[str]:
     """Queue one review task for each pull request opened, merge queue group and release swarm ``slug`` sees on
     ``bus``, skipping every task id the ledger already holds and every event older than the replay window, and
-    record each merge queue group it queues a task for in ``store``."""
+    record each merge queue group it sees in ``store``."""
     known = {str(t["id"]) for t in doc["tasks"]}
     actions: list[str] = []
     for kind, short in KINDS.items():

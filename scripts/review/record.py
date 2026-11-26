@@ -251,6 +251,8 @@ def post_group(
     group = group_of(store, slug, head)
     if group is None:
         raise SwarmError(f"no merge queue group {head} is recorded in swarm {slug}")
+    if url.rstrip("/") != f"{group.repository}/commit/{head}":
+        raise SwarmError(f"merge queue group {head} belongs to {group.repository}, not {url}")
     pulls = tuple(f"{group.repository}/pull/{number}" for number in _numbers(forge, group))
     for pull in pulls:
         _head(forge, pull)

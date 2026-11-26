@@ -247,11 +247,11 @@ def test_the_review_pass_records_each_merge_group_it_queues_a_review_task_for() 
     ]
 
 
-@pytest.mark.feature("review-queue-group-post")
-def test_a_merge_group_whose_review_task_the_ledger_holds_records_nothing() -> None:
+def test_a_merge_group_whose_review_task_the_ledger_holds_still_records_its_group() -> None:
     bus, ledger, found = open_bus(BusConfig()), Ledger(), store()
     data = {"repository": REPO, "head": "a1", "base": "b1", "number": 7}
     publish(bus, "merge_group.requested", data, "a1")
     queued = review().review_task("mq", data, doc())["task"]
     assert run(bus, ledger, doc({"id": queued}), found) == []
-    assert (ledger.added, found.redis.keys("*")) == ([], [])
+    assert ledger.added == []
+    assert record.group_of(found, SLUG, "a1") == record.Group(REPO, "a1", "b1", 7)

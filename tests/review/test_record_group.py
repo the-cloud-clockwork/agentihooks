@@ -124,6 +124,14 @@ def test_a_group_commit_link_without_a_group_record_is_refused_and_posts_nothing
 
 
 @pytest.mark.feature("review-queue-group-post")
+def test_a_commit_link_of_another_repository_than_its_group_is_refused_and_posts_nothing() -> None:
+    forge, other = GroupForge(), f"https://github.com/x/y/commit/{GROUP}"
+    with pytest.raises(SwarmError, match=f"^merge queue group {GROUP} belongs to {REPO}, not {other}$"):
+        record.post_group(_grouped(), SLUG, forge, other, REVIEWER, "r1", ["First"])
+    assert (forge.compared, forge.posts) == ([], [])
+
+
+@pytest.mark.feature("review-queue-group-post")
 def test_a_group_post_without_a_finding_is_refused_and_posts_nothing() -> None:
     found, forge = _grouped(), GroupForge()
     with pytest.raises(SwarmError, match="^a review posts at least one finding$"):
@@ -134,7 +142,7 @@ def test_a_group_post_without_a_finding_is_refused_and_posts_nothing() -> None:
 @pytest.mark.feature("review-queue-group-post")
 def test_a_group_whose_commit_titles_name_no_pull_request_posts_on_its_queue_ref_pull() -> None:
     found, forge = _grouped(number=8), GroupForge(pulls=())
-    posted = record.post_group(found, SLUG, forge, LINK, REVIEWER, "r1", ["First"])
+    posted = record.post_group(found, SLUG, forge, f"{LINK}/", REVIEWER, "r1", ["First"])
     assert forge.posts == [(8, "First")]
     assert [(item.url, item.head) for item in posted] == [(f"{REPO}/pull/8", GROUP)]
     assert found.redis.hgetall(found.key(SLUG, "review-tasks")) == {"r1": "1"}
