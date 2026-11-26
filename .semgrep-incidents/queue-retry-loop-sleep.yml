@@ -1,0 +1,20 @@
+rules:
+  - id: queue-retry-loop-sleep
+    languages: [python]
+    severity: ERROR
+    message: Queue retry must return waiting and resume after dequeue instead of holding a hosted runner and shared lane in a sleep loop.
+    paths:
+      include:
+        - /scripts/ci_queue_retry.py
+        - queue-retry-loop-sleep.py
+    pattern-either:
+      - pattern: |
+          for $ITEM in $ITEMS:
+              ...
+              time.sleep(...)
+              ...
+      - pattern: |
+          while $CONDITION:
+              ...
+              time.sleep(...)
+              ...
