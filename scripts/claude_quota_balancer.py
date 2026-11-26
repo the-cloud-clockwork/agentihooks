@@ -784,7 +784,7 @@ class ClaudeTokenSource:
         )
 
     def cap(self, result: ProbeResult, now: float) -> int | None:
-        held = (self.held, *self.others) if self.held is not None else self.others
+        held = (each for each in (self.held, *self.others) if each is not None)
         if any(each.closes(result.account, result.seven_day.used) for each in held):
             return 0
         return account_cap(result, now, bool(self.options.get("include_fable")))
