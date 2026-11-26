@@ -100,6 +100,25 @@ def test_other_resume_routes_keep_the_recorded_account_quota_check(
     assert resume.blocker(record, "/wt", always, lambda *_: False) == "account a1 out of quota"
 
 
+@pytest.mark.feature("operator-master-up-resume-master-login")
+@pytest.mark.parametrize(("reset", "allowed"), [(50.0, True), (200.0, False)])
+def test_a_master_login_is_available_again_after_its_week_reset(
+    monkeypatch: pytest.MonkeyPatch, reset: float, allowed: bool
+) -> None:
+    import time
+
+    from scripts import master_claude_login, master_logins
+
+    monkeypatch.setattr(time, "time", lambda: 100.0)
+    monkeypatch.setattr(master_claude_login, "free", lambda name: ["reset-slot"])
+    monkeypatch.setattr(master_logins, "_readings", lambda account: [(90.0, 0.0, 200.0, 100.0, reset)])
+    record = agent(lane=MASTER, task=MASTER, profile="master", seat="master@sw")
+    reason = resume.blocker(record, "/wt", always, lambda *_: True)
+    assert reason == (
+        "" if allowed else "no free stored master login slot above its drain line and outside the primary reserve"
+    )
+
+
 class ResumingRuntime(FakeRuntime):
     def __init__(self, fail=None):
         super().__init__()
