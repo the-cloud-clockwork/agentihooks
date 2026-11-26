@@ -42,3 +42,27 @@ def per_test_via_cache(manifest: dict, tree: Mapping[str, bytes]) -> dict[str, s
         found = {path: _cached_blob(tree, path, cache) for path in opened}
         keys[test] = str(found)
     return keys
+
+
+def per_test_in_a_comprehension(manifest: dict, tree: Mapping[str, bytes]) -> dict[str, str]:
+    # ruleid: lab-fingerprints-hash-file-per-test
+    return {test: str(_blob(tree, record["own"])) for test, record in manifest["tests"].items()}
+
+
+def per_test_with_a_table_made_in_the_loop(manifest: dict, tree: Mapping[str, bytes]) -> dict[str, str]:
+    keys: dict[str, str] = {}
+    for test, record in manifest["tests"].items():
+        cache: dict[str, str | None] = {}
+        opened = record["files"]
+        # ruleid: lab-fingerprints-hash-file-per-test
+        found = {path: _cached_blob(tree, path, cache) for path in opened}
+        keys[test] = str(found)
+    return keys
+
+
+def per_test_with_a_fresh_table_each_read(manifest: dict, tree: Mapping[str, bytes]) -> dict[str, str]:
+    keys: dict[str, str] = {}
+    for test, record in manifest["tests"].items():
+        # ruleid: lab-fingerprints-hash-file-per-test
+        keys[test] = str(_cached_blob(tree, record["own"], {}))
+    return keys
