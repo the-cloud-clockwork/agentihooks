@@ -51,6 +51,7 @@ def _rounds(plants: dict[str, dict[str, Any]]) -> list[dict[str, dict[str, Any]]
             if fits:
                 current[name] = spec
                 content.update(applied)
+        assert current, f"no edit of {sorted(pending)} occurs once in this tree"
         rounds.append(current)
         pending = {name: spec for name, spec in pending.items() if name not in current}
     return rounds
