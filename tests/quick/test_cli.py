@@ -133,6 +133,56 @@ def test_up_persists_default_for_mixed_engineers_without_changing_master(
     ]
 
 
+@pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize(
+    "choice", ["named:missing", "default,named:missing", "default,routed,default", "named:", "interactive"]
+)
+def test_invalid_authentication_never_creates_panes(
+    choice: str, quick_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse_layout(*args: object, **kwargs: object) -> None:
+        pytest.fail("invalid authentication created a layout")
+
+    monkeypatch.setattr(cli.layout, "build", refuse_layout)
+    assert (
+        cli.main(
+            ["up", "--agents", "3", "--harness", "claude,codex", "--auth", choice, "--dir", str(tmp_path)], quick_env
+        )
+        == 2
+    )
+    assert not (tmp_path / "scratchpad" / "repo" / "quick-d039e169" / registry.FILE).exists()
+
+
+@pytest.mark.feature("quick-native-authentication")
+def test_up_resolves_named_native_references_per_engineer(quick_env: dict[str, str], tmp_path: Path) -> None:
+    environ = {**quick_env, "AH_CC_TOKEN_alpha": "unused", "AH_CX_TOKEN_beta": "unused"}
+    assert (
+        cli.main(
+            [
+                "up",
+                "--agents",
+                "3",
+                "--harness",
+                "claude,codex",
+                "--auth",
+                "named:AH_CC_TOKEN_alpha,named:AH_CX_TOKEN_beta",
+                "--dir",
+                str(tmp_path),
+            ],
+            environ,
+        )
+        == 0
+    )
+    swarm = registry.load(tmp_path / "scratchpad" / "repo" / "quick-d039e169")
+    assert swarm is not None
+    assert [(row["auth"], row["account"]) for row in map(cli.dataclasses.asdict, swarm.seats)] == [
+        ("routed", ""),
+        ("named", "alpha"),
+        ("named", "beta"),
+    ]
+    assert "unused" not in registry.path(tmp_path / "scratchpad" / "repo" / "quick-d039e169").read_text()
+
+
 @pytest.mark.feature("quick-swarm")
 def test_up_outside_herdr_fails_loudly(monkeypatch, quick_env, tmp_path, capsys):
     def refuse(environ):

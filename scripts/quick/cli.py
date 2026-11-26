@@ -28,6 +28,9 @@ def parser() -> argparse.ArgumentParser:
     up = sub.add_parser("up", help="Split this herdr pane's tab and launch the engineers; this session is master")
     up.add_argument("--agents", type=int, default=layout.DEFAULT_AGENTS, help="Agents with the master, 2 to 5")
     up.add_argument("--harness", default="claude", help="Engineer harness, or one per engineer: claude,codex")
+    up.add_argument(
+        "--auth", default="routed", help="routed, default or named:reference; one choice or one per engineer"
+    )
     up.add_argument("--dir", default="", help="Directory the engineers work in; default the current one")
     sub.add_parser("status", help="Print every seat of this session's quick swarm")
     given = sub.add_parser("handoff", help="Accept this seat's Handoff v2 and start its successor in this pane")
@@ -63,15 +66,20 @@ def _harnesses(value: str, engineers: int) -> list[str]:
 def _swarm_for(
     args: argparse.Namespace, environ: dict[str, str], caller: str, quick_id: str, directory: Path
 ) -> registry.Swarm:
+    from scripts.quick.authentication import selections
+
     names = layout.seats(args.agents)
     harnesses = _harnesses(args.harness, len(names) - 1)
+    policies = selections(args.auth, harnesses, environ)
     panes = layout.build(caller, args.agents, layout.HerdrPanes(directory, environ))
     harness = environ.get("AGENTIHOOKS_TARGET") or "claude"
     session = environ.get("CLAUDE_CODE_SESSION_ID", "")
     master = registry.Seat(1, names[0], caller, harness, f"{quick_id}-{names[0]}", session_id=session)
     engineers = [
-        registry.Seat(position, name, pane, harness, f"{quick_id}-{name}")
-        for position, (name, pane, harness) in enumerate(zip(names[1:], panes[1:], harnesses, strict=True), 2)
+        registry.Seat(position, name, pane, harness, f"{quick_id}-{name}", auth=mode, account=account)
+        for position, (name, pane, harness, (mode, account)) in enumerate(
+            zip(names[1:], panes[1:], harnesses, policies, strict=True), 2
+        )
     ]
     return registry.Swarm(quick_id, str(directory), (master, *engineers))
 

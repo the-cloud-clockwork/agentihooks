@@ -16829,7 +16829,10 @@
       "behaviour": "Native quick engineers persist routed, default or named authentication independently of the master and retain explicit choices outside automatic quota tiers through successor launches.",
       "seam": "agentihooks quick up authentication, saved Seat policy and native launch",
       "tests": [
-        "tests/quick/test_cli.py::test_up_persists_default_for_mixed_engineers_without_changing_master"
+        "tests/quick/test_cli.py::test_up_persists_default_for_mixed_engineers_without_changing_master",
+        "tests/quick/test_cli.py::test_invalid_authentication_never_creates_panes",
+        "tests/quick/test_cli.py::test_up_resolves_named_native_references_per_engineer",
+        "tests/quick/test_registry.py::test_legacy_registry_and_saved_authentication_survive_state_changes"
       ]
     }
   ],
