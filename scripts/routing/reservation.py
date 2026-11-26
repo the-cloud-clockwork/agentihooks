@@ -173,13 +173,16 @@ def _held(
         import time
 
         rows = aggregate.current(time.time())
-        counts = [
-            rows.get(aggregate.name(f"{harness}:{slug}"), {}).get("masters", 0) + master_agents(store, harness, slug)
+        return tuple(
+            Reservation(
+                harness,
+                slug,
+                rows.get(aggregate.name(f"{harness}:{slug}"), {}).get("masters", 0)
+                + master_agents(store, harness, slug),
+            )
             for slug in slugs
-        ]
-    else:
-        counts = [masters_live(harness, slug, store, proc) for slug in slugs]
-    return tuple(Reservation(harness, slug, masters) for slug, masters in zip(slugs, counts, strict=True))
+        )
+    return tuple(Reservation(harness, slug, masters_live(harness, slug, store, proc)) for slug in slugs)
 
 
 def current(
@@ -202,22 +205,16 @@ def current(
 def other_logins(
     harness: str,
     environ: Mapping[str, str],
-    held: Reservation | None,
-    store_of: "Callable[[Mapping[str, str]], RedisStore | None] | None" = None,
     proc: Path = account_sessions._PROC,  # pyright: ignore[reportPrivateUsage]
 ) -> tuple[Reservation, ...]:
-    """One reservation per declared master login account of `harness` other than `held`'s, each on its own live
+    """One reservation per declared master login account of `harness` beyond its slot 1, each on its own live
     masters."""
     from redis.exceptions import RedisError
 
     try:
-        taken = account_key(held.slug) if held is not None else None
-        slugs = [
-            account.slug
-            for account in master_account.load_logins(environ)
-            if account.harness == harness and account_key(account.slug) != taken
-        ]
-        return _held(harness, slugs, environ, store_of, proc)
+        accounts = master_account.load_logins(environ)
+        slugs = [account.slug for account in accounts if account.harness == harness and account.slot != 1]
+        return _held(harness, slugs, environ, None, proc)
     except (OSError, RedisError):
         return ()
 
@@ -232,10 +229,8 @@ def for_worker(harness: str, environ: Mapping[str, str]) -> Reservation | None:
     return None if is_master_session(environ) else current(harness, environ)
 
 
-def other_logins_for_worker(
-    harness: str, environ: Mapping[str, str], held: Reservation | None
-) -> tuple[Reservation, ...]:
-    return () if is_master_session(environ) else other_logins(harness, environ, held)
+def other_logins_for_worker(harness: str, environ: Mapping[str, str]) -> tuple[Reservation, ...]:
+    return () if is_master_session(environ) else other_logins(harness, environ)
 
 
 _LAUNCH = """

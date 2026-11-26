@@ -20,6 +20,7 @@ class MasterAccount:
     slug: str
     tier: str = ""
     kind: str = SUBSCRIPTION
+    slot: int = 1
 
     @property
     def marker(self) -> str:
@@ -62,26 +63,29 @@ def clear(store: SettingsStore, harnesses: Iterable[str], actor: str, now: float
         store.set(f"master-tier-{harness}", None, actor, now)
 
 
-def _account(values: Mapping[str, object], key: str, harness: str, environ: Mapping[str, str]) -> MasterAccount | None:
+def _account(
+    values: Mapping[str, object], key: str, harness: str, slot: int, environ: Mapping[str, str]
+) -> MasterAccount | None:
     slug = values.get(f"master-account-{key}")
-    if not isinstance(slug, str) or not slug:
+    if not isinstance(slug, str):
         return None
     tier = values.get(f"master-tier-{key}")
-    return MasterAccount(harness, slug, tier if isinstance(tier, str) else "", _kind(harness, slug, environ))
+    return MasterAccount(harness, slug, tier if isinstance(tier, str) else "", _kind(harness, slug, environ), slot)
 
 
 def declared(store: SettingsStore, environ: Mapping[str, str]) -> dict[str, MasterAccount]:
     values = store.all()
-    return {harness: account for harness in HARNESSES if (account := _account(values, harness, harness, environ))}
+    return {harness: account for harness in HARNESSES if (account := _account(values, harness, harness, 1, environ))}
 
 
 def logins(store: SettingsStore, environ: Mapping[str, str]) -> tuple[MasterAccount, ...]:
     """Every declared master login account: each harness's slot 1, then Claude slots 2 to 5, each account once."""
     values = store.all()
-    keys = [(harness, harness) for harness in HARNESSES] + [(f"claude-{slot}", "claude") for slot in LOGIN_SLOTS]
+    keys = [(harness, harness, 1) for harness in HARNESSES]
+    keys += [(f"claude-{slot}", "claude", slot) for slot in LOGIN_SLOTS]
     found: dict[tuple[str, str], MasterAccount] = {}
-    for key, harness in keys:
-        account = _account(values, key, harness, environ)
+    for key, harness, slot in keys:
+        account = _account(values, key, harness, slot, environ)
         if account is not None:
             found.setdefault((account.harness, account.slug), account)
     return tuple(found.values())

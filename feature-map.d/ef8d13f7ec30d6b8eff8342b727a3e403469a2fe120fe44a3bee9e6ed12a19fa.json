@@ -10,7 +10,9 @@
     "tests/routing/test_master_login_ceiling.py::test_a_worker_takes_a_slot_three_account_below_the_ceiling",
     "tests/routing/test_master_login_ceiling.py::test_capacity_closes_a_slot_three_row_past_the_ceiling_beside_slot_one",
     "tests/routing/test_master_login_ceiling.py::test_slot_one_readers_keep_the_single_declared_account",
-    "tests/routing/test_master_login_ceiling.py::test_other_logins_leave_out_the_slot_one_reservation_and_master_sessions",
-    "tests/routing/test_master_login_ceiling.py::test_a_worker_launch_reads_the_other_logins_beside_its_slot_one_reservation"
+    "tests/routing/test_master_login_ceiling.py::test_other_logins_leave_out_slot_one_and_master_sessions",
+    "tests/routing/test_master_login_ceiling.py::test_other_logins_count_the_hive_masters_on_each_login",
+    "tests/routing/test_master_login_ceiling.py::test_other_logins_count_interactive_masters_in_the_given_process_table",
+    "tests/routing/test_master_login_ceiling.py::test_load_logins_reads_the_store_the_routing_client_opens"
   ]
 }

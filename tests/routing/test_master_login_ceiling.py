@@ -1,9 +1,11 @@
 import pytest
 
 from scripts import claude_quota_balancer as balancer
-from scripts.routing import master_account, place, reservation
+from scripts.events import memory
+from scripts.events.config import BusConfig
+from scripts.routing import aggregate, master_account, place, reservation
 from scripts.routing.master_account import MasterAccount
-from scripts.routing.settings import FileSettings
+from scripts.routing.settings import FileSettings, StateSettings
 from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION
 from scripts.swarm import capacity
 
@@ -11,7 +13,8 @@ REASON = "reserved for 1 live master: workers stop at 70% of the week"
 WORKER = {"AGENTIHOOKS_AGENT_NAME": "engineer@1"}
 MASTER = {"AGENTIHOOKS_AGENT_NAME": "master@1"}
 FIRST = MasterAccount("claude", "first", "", INTERACTIVE)
-THIRD = MasterAccount("claude", "third", "", SUBSCRIPTION)
+THIRD = MasterAccount("claude", "third", "", SUBSCRIPTION, 3)
+SESSIONS = reservation.interactive_sessions
 
 
 @pytest.fixture
@@ -81,21 +84,38 @@ def test_slot_one_readers_keep_the_single_declared_account(environ):
 
 
 @pytest.mark.feature("worker-ceiling-every-master-login-slot")
-def test_other_logins_leave_out_the_slot_one_reservation_and_master_sessions(environ):
-    first, third = reservation.Reservation("claude", "first", 1), reservation.Reservation("claude", "third", 1)
-    assert reservation.other_logins_for_worker("claude", {**environ, **WORKER}, first) == (third,)
-    assert reservation.other_logins_for_worker("claude", {**environ, **WORKER}, None) == (first, third)
-    assert reservation.other_logins_for_worker("claude", {**environ, **MASTER}, first) == ()
+def test_other_logins_leave_out_slot_one_and_master_sessions(environ):
+    third = reservation.Reservation("claude", "third", 1)
+    assert reservation.other_logins_for_worker("claude", {**environ, **WORKER}) == (third,)
+    assert reservation.other_logins_for_worker("claude", {**environ, **MASTER}) == ()
+    assert reservation.other_logins("codex", environ) == ()
 
 
 @pytest.mark.feature("worker-ceiling-every-master-login-slot")
-def test_a_worker_launch_reads_the_other_logins_beside_its_slot_one_reservation(environ, tmp_path, monkeypatch):
-    seen = []
-    others = reservation.other_logins_for_worker
-    monkeypatch.setattr(
-        reservation,
-        "other_logins_for_worker",
-        lambda harness, env, held: seen.append(held) or others(harness, env, held),
-    )
-    assert _route(environ, tmp_path, monkeypatch, 69.9, WORKER) == "AH_CC_TOKEN_third"
-    assert seen == [reservation.Reservation("claude", "first", 1)]
+def test_other_logins_count_the_hive_masters_on_each_login(environ, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_RUNTIME_BACKEND", "local")
+    monkeypatch.setattr(aggregate, "current", lambda now: {aggregate.name("claude:third"): {"masters": 1}})
+    held = reservation.other_logins("claude", {**environ, "AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"})
+    assert held == (reservation.Reservation("claude", "third", 2),)
+
+
+@pytest.mark.feature("worker-ceiling-every-master-login-slot")
+def test_other_logins_count_interactive_masters_in_the_given_process_table(environ, tmp_path, monkeypatch):
+    monkeypatch.setattr(reservation, "interactive_sessions", SESSIONS)
+    monkeypatch.setattr(reservation, "master_agents", lambda store, harness, slug: 0)
+    proc = tmp_path / "proc" / "10"
+    proc.mkdir(parents=True)
+    (proc / "cmdline").write_bytes(b"claude\0")
+    (proc / "comm").write_text("claude\n")
+    (proc / "stat").write_text("10 (claude) S 1 1 1 0 -1\n")
+    (proc / "environ").write_bytes(b"AH_ROUTE_INTERACTIVE_third=1\0")
+    held = reservation.other_logins("claude", environ, tmp_path / "proc")
+    assert held == (reservation.Reservation("claude", "third", 1),)
+
+
+@pytest.mark.feature("worker-ceiling-every-master-login-slot")
+def test_load_logins_reads_the_store_the_routing_client_opens(tmp_path, monkeypatch):
+    client = memory.open_bus(BusConfig()).state("routing")
+    StateSettings(client).set("master-account-claude-3", "third", "operator", 1.0)
+    monkeypatch.setattr(place, "_client", lambda environ: client)
+    assert master_account.load_logins({"AGENTIHOOKS_HOME": str(tmp_path), "AH_CC_TOKEN_third": "x"}) == (THIRD,)
