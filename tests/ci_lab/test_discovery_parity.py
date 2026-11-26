@@ -126,6 +126,15 @@ def test_a_side_that_grades_no_gate_of_its_own_is_named_as_none() -> None:
 
 
 @pytest.mark.feature("lab-discovery-parity-with-release")
+def test_the_gates_only_one_side_grades_are_named_in_sorted_order() -> None:
+    names = [f"lint/gate-{index:02d}" for index in range(12)]
+    found = discovery_parity.problems(REAL | frozenset(names), REAL, REAL)
+    assert found[1] == f"only the released code grades: {', '.join(names)}"
+    found = discovery_parity.problems(REAL, REAL | frozenset(names), REAL | INSTALLS)
+    assert found[2] == f"only the head's code grades: {', '.join(names)}"
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
 @pytest.mark.parametrize("before", [REAL, REAL | INSTALLS], ids=["the base is read", "the base reads otherwise"])
 def test_a_head_the_released_code_cannot_read_while_it_reads_the_base_is_refused(before: frozenset[str]) -> None:
     assert discovery_parity.problems(None, REAL, before) == [discovery_parity.BROKEN, discovery_parity.REMEDY]
@@ -202,6 +211,25 @@ def test_a_reading_runs_the_command_from_the_folder_of_the_code_it_is_given(tmp_
         'import json\nfrom pathlib import Path\n\nprint(json.dumps({"name": Path.cwd().name, "missing": []}))\n'
     )
     assert discovery_parity.graded(code, _tree(tmp_path / "tree", {})) == {"code"}
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
+def test_a_reading_runs_with_the_interpreter_of_the_command_whatever_the_search_path_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path))
+    tree = _tree(tmp_path / "tree", {"lint/a": []})
+    assert discovery_parity.graded(_code(tmp_path / "code"), tree) == {"lint/a"}
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
+def test_a_code_folder_with_no_catalog_reader_gives_a_failed_reading(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = _code(tmp_path / "code")
+    (code / "scripts" / "ci_lab" / "static_exclusions.py").unlink()
+    assert discovery_parity.graded(code, _tree(tmp_path / "tree", _gates(REAL))) is None
+    assert "static_exclusions" in capsys.readouterr().err
 
 
 @pytest.mark.feature("lab-discovery-parity-with-release")

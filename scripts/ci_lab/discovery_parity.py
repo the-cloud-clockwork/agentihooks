@@ -3,7 +3,7 @@
 python -m scripts.ci_lab.discovery_parity --released DIR --base DIR --head DIR
 
 The lab scheduler reads static gates with the discovery code of its image, built from main, over a tree of dev: the
-base tree for a pull request or merge group head, the head tree for a promotion or backfill head. A head that lands
+base tree for a hotfix, pull request or merge group head, the head tree for a promotion or backfill head. A head that lands
 on dev becomes that tree, the base of every later pull request and the tree of its own promotion grade, so the head
 tree stands here for what the lab grades from then on. A reading is the gate names the discovery command line of one
 code folder prints for one tree, less each gate that misses a context name and less the names the catalog reader of

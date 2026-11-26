@@ -27,6 +27,9 @@
     "tests/ci_lab/test_discovery_parity.py::test_a_reading_takes_a_code_folder_and_a_tree_named_from_the_working_folder",
     "tests/ci_lab/test_discovery_parity.py::test_the_refusals_and_the_notices_say_what_the_released_lab_reads_and_what_to_land_first",
     "tests/ci_lab/test_discovery_parity.py::test_the_command_needs_the_released_code_the_base_and_the_head",
-    "tests/ci_lab/test_discovery_parity.py::test_the_command_refuses_a_head_whose_catalog_the_released_code_does_not_read"
+    "tests/ci_lab/test_discovery_parity.py::test_the_command_refuses_a_head_whose_catalog_the_released_code_does_not_read",
+    "tests/ci_lab/test_discovery_parity.py::test_the_gates_only_one_side_grades_are_named_in_sorted_order",
+    "tests/ci_lab/test_discovery_parity.py::test_a_reading_runs_with_the_interpreter_of_the_command_whatever_the_search_path_holds",
+    "tests/ci_lab/test_discovery_parity.py::test_a_code_folder_with_no_catalog_reader_gives_a_failed_reading"
   ]
 }
