@@ -37,13 +37,13 @@ class PrivateGit:
     def __init__(self, repo: Path, run: Callable[..., Any]) -> None:
         self.repo = repo
         self.run = run
-        self.calls: list[tuple[list[str], dict[str, str]]] = []
+        self.calls: list[list[str]] = []
 
     def __call__(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         command = list(argv)
         if PRIVATE in command or OTHER in command:
             environ = dict(kwargs.get("env") or os.environ)
-            self.calls.append((command, environ))
+            self.calls.append(command)
             headers = {
                 environ.get(f"GIT_CONFIG_KEY_{index}"): environ.get(f"GIT_CONFIG_VALUE_{index}")
                 for index in range(int(environ.get("GIT_CONFIG_COUNT", "0")))
@@ -97,7 +97,7 @@ def test_private_pull_heads_are_reachable_with_a_read_token(
     assert expander(tmp_path, token).reachable(PRIVATE, origin[2]) is True
     assert token.calls == 1
     assert len(private_git.calls) == 1
-    assert TOKEN not in str(private_git.calls[0][0])
+    assert TOKEN not in str(private_git.calls[0])
 
 
 @pytest.mark.feature("lab-private-repository-refs")
@@ -117,8 +117,8 @@ def test_private_merge_base_lookup_authenticates_dev_listing_and_both_fetches(
     private_git: PrivateGit,
 ) -> None:
     assert expander(tmp_path, Token()).merge_base(PRIVATE, origin[2]) == origin[1]
-    assert sum("fetch" in argv for argv, _ in private_git.calls) == 2
-    assert all(TOKEN not in str(argv) for argv, _ in private_git.calls)
+    assert sum("fetch" in argv for argv in private_git.calls) == 2
+    assert all(TOKEN not in str(argv) for argv in private_git.calls)
 
 
 @pytest.mark.feature("lab-private-repository-refs")
