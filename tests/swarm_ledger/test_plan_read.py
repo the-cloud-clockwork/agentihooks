@@ -1,6 +1,7 @@
 import io
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -511,3 +512,68 @@ def test_stored_plan_text_comes_from_the_given_loader(slug, tmp_path):
 
     assert plan_ranges.stored_text(doc["phases"][0]["plan_ref"], doc, load) == "served plan\n"
     assert asked == [(slug, doc["artifacts"][0]["file"]["id"])]
+
+
+PHASE_ISSUE = "https://github.com/o/r/issues/30"
+OWN_ISSUE = "https://github.com/o/r/issues/31"
+LATER_PLAN = "# Later plan\n\n<!-- slice: later -->\n## Later\nLater work\n"
+OWN_PLAN = "# Own plan\n<!-- slice: mine -->\n## Mine\nMy own work\n"
+OTHER_PLAN = "# Other plan\n\n<!-- slice: other -->\n## Other\nOther work\n"
+
+
+@pytest.fixture
+def owned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    texts = {"later": LATER_PLAN, "own": OWN_PLAN, "other": OTHER_PLAN}
+    files = {name: ledger_artifacts.store("owned", f"{name}.md", text.encode()) for name, text in texts.items()}
+    url = {name: f"http://127.0.0.1:8765/artifacts/owned/{file['id']}" for name, file in files.items()}
+    doc = {
+        "artifacts": [{"plan": True, "file": file} for file in files.values()],
+        "plans": [
+            {"id": "plan-phase", "title": "Phase plan", "artifact": url["other"], "url": PHASE_ISSUE},
+            {"id": "plan-own", "title": "Own plan", "artifact": url["own"], "url": OWN_ISSUE},
+        ],
+        "phases": [{"id": "p1", "plan_url": PHASE_ISSUE, "plan_ref": {"artifact": url["later"], "lines": "1-5"}}],
+        "tasks": [
+            {"id": "mine", "phase": "p1", "plan_url": OWN_ISSUE, "plan_slice": "mine", "plan_lines": "2-4"},
+            {"id": "same", "phase": "p1", "plan_url": PHASE_ISSUE, "plan_slice": "later", "plan_lines": "3-5"},
+            {"id": "plain", "phase": "p1", "plan_lines": "3-4"},
+        ],
+    }
+    SQLiteLedgerRepository(tmp_path / DATABASE).import_document("owned", {**doc, "_meta": {"rev": 1}})
+    return "owned"
+
+
+@pytest.mark.feature("plan-read-task-own-link")
+def test_a_task_whose_link_differs_from_its_phase_link_reads_its_own_plan(
+    owned: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(capsys, ["--task", "mine"], {"AGENTIHOOKS_SWARM": owned}) == OWN_PLAN
+
+
+@pytest.mark.feature("plan-read-task-own-link")
+def test_exact_reads_the_own_plan_lines_of_a_task_whose_link_differs_from_its_phase_link(owned: str) -> None:
+    doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(owned, "tasks", "phases", "artifacts", "plans")
+    task = next(task for task in doc["tasks"] if task["id"] == "mine")
+    assert plan_read.exact(doc, task) == "<!-- slice: mine -->\n## Mine\nMy own work\n"
+
+
+@pytest.mark.feature("plan-read-task-own-link")
+def test_a_task_whose_link_equals_its_phase_link_reads_the_phase_range(
+    owned: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(capsys, ["--task", "same"], {"AGENTIHOOKS_SWARM": owned}) == LATER_PLAN
+
+
+@pytest.mark.feature("plan-read-task-own-link")
+def test_a_task_without_a_link_reads_the_phase_range_beside_plan_rows(
+    owned: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(capsys, ["--task", "plain"], {"AGENTIHOOKS_SWARM": owned}) == LATER_PLAN
+
+
+@pytest.mark.feature("plan-read-task-own-link")
+def test_the_phase_option_reads_the_phase_range_beside_plan_rows(
+    owned: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(capsys, ["--phase", "p1"], {"AGENTIHOOKS_SWARM": owned}) == LATER_PLAN

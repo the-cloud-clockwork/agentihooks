@@ -1,0 +1,17 @@
+{
+  "id": "plan-read-task-own-link",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-plan-read-task-link-first",
+  "behaviour": "agentihooks plan read and plan_read.exact read a task's slice from the task's own plan when its plan link differs from its phase plan link, resolving that link through the plans row whose url or artifact names it, so enhanced tasks sharing a phase whose plan a later publish replaced each read their own section. A task whose link equals its phase link, a task with no link, an unresolved link and the phase option read the phase plan range as before.",
+  "seam": "agentihooks plan read --task and --phase, scripts.swarm_ledger.plan_read.exact",
+  "tests": [
+    "tests/swarm_ledger/test_plan_read.py::test_a_task_whose_link_differs_from_its_phase_link_reads_its_own_plan",
+    "tests/swarm_ledger/test_plan_read.py::test_exact_reads_the_own_plan_lines_of_a_task_whose_link_differs_from_its_phase_link",
+    "tests/swarm_ledger/test_plan_read.py::test_a_task_whose_link_equals_its_phase_link_reads_the_phase_range",
+    "tests/swarm_ledger/test_plan_read.py::test_a_task_without_a_link_reads_the_phase_range_beside_plan_rows",
+    "tests/swarm_ledger/test_plan_read.py::test_the_phase_option_reads_the_phase_range_beside_plan_rows"
+  ],
+  "rules": [
+    "plan-read-phase-range-before-task-link"
+  ]
+}
