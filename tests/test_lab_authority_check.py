@@ -46,6 +46,13 @@ DAMAGE: list[tuple[str, Callable[[Any], object], set[int]]] = [
         lambda document: document["jobs"]["lint"].update({"if": "${{ !cancelled() || " + LINT_CLAUSE + " }}"}),
         {3},
     ),
+    (
+        check.WORKFLOW,
+        lambda document: document["jobs"]["lint"].update(
+            {"if": "${{ always() || !cancelled() && " + LINT_CLAUSE + " }}"}
+        ),
+        {3},
+    ),
 ]
 
 
@@ -94,6 +101,7 @@ def test_the_checkout_holds_every_part_of_the_lab_authority_and_each_is_listed(
         "a job with the skip clause and no needs",
         "the list reordered",
         "a skip clause joined with or",
+        "an or beside the terms that hold the skip clause",
     ],
 )
 def test_a_part_the_checkout_lost_fails_by_name(
@@ -123,6 +131,13 @@ def test_a_listed_gate_whose_job_is_gone_fails_on_the_delivery_file_and_never_ra
     assert capsys.readouterr().out.splitlines() == [
         "FAIL: the checkout lacks a delivery file its reader accepts: lab.authoritative names unknown gates: type-gate"
     ]
+
+
+@pytest.mark.feature("lab-authoritative-static-gates")
+def test_a_checkout_with_no_wiring_file_raises_and_is_never_reported_as_a_delivery_fault(copy: Path) -> None:
+    (copy / check.WIRING).unlink()
+    with pytest.raises(FileNotFoundError):
+        check.main(copy)
 
 
 @pytest.mark.feature("lab-authoritative-static-gates")
