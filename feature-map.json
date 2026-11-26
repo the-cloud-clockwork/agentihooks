@@ -5247,6 +5247,18 @@
       ]
     },
     {
+      "id": "review-launch-prompt-steps",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2911",
+      "behaviour": "The launch prompt of a review lane task of the review kind builds with the reviewer steps: read the change request, write strict findings, post them with review post, then leave and close with done --finding; a reviewer that cannot finish blocks without pushing a branch, and every kind a lane template assigns has launch steps, so no reviewer launch fails building its prompt.",
+      "seam": "The spawn prompt in scripts.swarm.prompt, its step table for the review kind",
+      "tests": [
+        "tests/swarm/test_task_kinds.py::test_a_review_task_gets_the_reviewer_launch_steps",
+        "tests/swarm/test_task_kinds.py::test_a_reviewer_that_cannot_finish_blocks_without_a_branch",
+        "tests/swarm/test_task_kinds.py::test_every_lane_template_kind_has_launch_steps"
+      ]
+    },
+    {
       "id": "planner-enhancement-prompt",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-prompt",

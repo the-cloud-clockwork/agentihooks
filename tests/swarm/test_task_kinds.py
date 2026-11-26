@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.swarm import cli, prompt
+from scripts.swarm import cli, prompt, templates
 from tests.helpers.seat import seat_agent
 from tests.swarm.test_cli import env, run  # noqa: F401
 
@@ -52,6 +52,42 @@ def test_the_prompt_names_post_merge_command_proof():
         "Proof contract. After merge, record --command and --output before swarm done."
     ]
     assert "After merge, record" not in build(contract={"after": "no"})
+
+
+def _review_prompt() -> list[str]:
+    task = {"id": "r1", "title": "Review pull request 7 of repo", "lane": "review", "kind": "review"}
+    return prompt.build("sw", "/repo", "review", "reviewer@a1b2c3-0001", task).splitlines()
+
+
+@pytest.mark.feature("review-launch-prompt-steps")
+def test_a_review_task_gets_the_reviewer_launch_steps() -> None:
+    lines = _review_prompt()
+    steps = [
+        "Work it end to end with the swarm-reviewer skill, then stop. You edit, commit and push nothing:",
+        "1. Read the change request your task names with agentihooks forge read <number> --remote <repository url>: "
+        "its body, the whole diff, the feature map entries it touches and the code it reaches.",
+        "2. Write strict findings whatever the checks say, at least one, each naming the file and line, what breaks, "
+        "its evidence and the smallest fix.",
+        "3. Post them on the change request: agentihooks review post <change request url> --slug sw "
+        '--finding "<finding>", one --finding per finding.',
+        "4. Leave the crew with agentihooks api --slug sw --as reviewer@a1b2c3-0001 leave, then close the task: "
+        "agentihooks swarm sw done --finding <change request url>. The ledger refuses done until review post has "
+        "recorded a finding. The swarm then closes this session; stop working.",
+    ]
+    start = lines.index(steps[0])
+    assert lines[start : start + len(steps)] == steps
+
+
+@pytest.mark.feature("review-launch-prompt-steps")
+def test_a_reviewer_that_cannot_finish_blocks_without_a_branch() -> None:
+    lines = _review_prompt()
+    assert 'If you cannot finish: agentihooks swarm sw block "<plain words naming the blocker>" and stop.' in lines
+    assert not any("open a draft pull request" in line for line in lines)
+
+
+@pytest.mark.feature("review-launch-prompt-steps")
+def test_every_lane_template_kind_has_launch_steps() -> None:
+    assert set(templates.DEFAULT_KINDS.values()) <= set(prompt.STEPS)
 
 
 def _start(env, kind):  # noqa: F811
