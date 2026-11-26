@@ -147,7 +147,7 @@ def test_launch_uses_an_open_sibling_of_the_closed_or_rejected_marker(
 ) -> None:
     task = {**master(setup), "seat": "master@fixture"}
     master_login_hive(setup)
-    write_hive(setup, master_logins=advertised())
+    write_hive(setup, excluded=[], ui="yes", master_login={"claude": "login"}, master_logins=advertised())
     setup.herdr._quota_accounts = [
         Account("claude", "login", "CLOSED", 0, 80, 0, 0),
         Account("claude", "spare", "OPEN", 0, 80, 95, 6),
@@ -163,7 +163,7 @@ def test_launch_uses_an_open_sibling_of_the_closed_or_rejected_marker(
 def test_all_advertised_logins_closed_keep_each_master_floor_reason(setup: Any) -> None:
     task = {**master(setup), "seat": "master@fixture"}
     master_login_hive(setup)
-    write_hive(setup, master_logins=advertised())
+    write_hive(setup, excluded=[], ui="yes", master_login={"claude": "login"}, master_logins=advertised())
     setup.herdr._quota_accounts = [
         Account("claude", "login", "CLOSED", 0, 80, 0, 0),
         Account("claude", "spare", "CLOSED", 0, 80, 1, 0),
