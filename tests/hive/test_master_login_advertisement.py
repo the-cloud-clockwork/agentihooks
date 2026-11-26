@@ -172,3 +172,86 @@ def test_all_advertised_logins_closed_keep_each_master_floor_reason(setup: Any) 
         "no hive for master advertises a claude slot; login is at the master floor with 0% of its week left; "
         "spare is at the master floor with 1% of its week left"
     )
+
+
+def test_heartbeat_reads_the_quota_reset_clock(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks.context import quota_usage
+
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(daemon.master_claude_login, "signed_in", lambda: "login")
+    monkeypatch.setattr(daemon.master_claude_login, "unusable", lambda: "")
+    monkeypatch.setattr(daemon.master_claude_login, "logins", lambda: {1: "login", 4: "spare"})
+    monkeypatch.setattr(daemon.master_claude_login, "failed", lambda number: False)
+    monkeypatch.setattr(daemon.master_claude_login, "preferred", lambda: {})
+    monkeypatch.setattr(daemon.master_claude_login, "slot", lambda: 1)
+    monkeypatch.setattr(balancer, "cached_observations", lambda: [])
+    monkeypatch.setattr(
+        quota_usage,
+        "latest_snapshot",
+        lambda account: (
+            0.0,
+            {
+                "five_hour": {"used_percentage": 0, "resets_at": 1e12},
+                "seven_day": {"used_percentage": {"login": 100, "spare": 5}[account], "resets_at": 1e12},
+            },
+        ),
+    )
+    daemon.beat(redis, "machine")
+    record = registry.show(redis, "machine")
+    assert record is not None
+    assert record["master_login"] == {"claude": "spare"}
+    assert record["master_logins"] == [advertised()[1], advertised()[0]]
+
+
+def test_default_registry_identity_preserves_headless_mode() -> None:
+    record = registry._default("cold")
+    assert record["ui"] == "no"
+    assert record["excluded"] == ["master"]
+    assert record["master_logins"] == []
+
+
+@pytest.mark.parametrize("status", ["revoked", "rejected"])
+def test_probe_rejection_overrides_an_open_capacity_row(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    task = {**master(setup), "seat": "master@fixture"}
+    write_hive(setup, excluded=[], ui="yes", master_login={"claude": "login"}, master_logins=advertised())
+    setup.herdr._quota_accounts = [
+        Account("claude", "login", "OPEN", 0, 80, 80, 6),
+        Account("claude", "spare", "OPEN", 0, 80, 95, 6),
+    ]
+    observed = replace(balancer.revoked_result("login", 100), provider_status=status)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, observed)])
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert isinstance(selected, launch.Selection)
+    assert (selected.hive, selected.account.name, selected.route_kind) == ("remote", "spare", "master-login")
+
+
+def test_rejection_keeps_searching_the_next_hive(setup: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    task = {**master(setup), "seat": "master@fixture"}
+    write_hive(
+        setup,
+        id="a-rejected",
+        excluded=[],
+        ui="yes",
+        master_login={"claude": "login"},
+        master_logins=[advertised()[0]],
+    )
+    write_hive(
+        setup,
+        id="z-healthy",
+        excluded=[],
+        ui="yes",
+        master_login={"claude": "spare"},
+        master_logins=[advertised()[1]],
+    )
+    setup.herdr._quota_accounts = [
+        Account("claude", "login", "OPEN", 0, 80, 80, 6),
+        Account("claude", "spare", "OPEN", 0, 80, 95, 6),
+    ]
+    monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, balancer.revoked_result("login", 100))])
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert isinstance(selected, launch.Selection)
+    assert (selected.hive, selected.account.name, selected.route_kind) == ("z-healthy", "spare", "master-login")

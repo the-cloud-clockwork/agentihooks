@@ -170,9 +170,7 @@ def _refused(reason: str, hives: list[dict], role: str) -> str:
     return f"{reason}: {held}" if held else reason
 
 
-def _holds(logins: dict[str, Any] | list[str], harness: str, key: str) -> bool:
-    if isinstance(logins, list):
-        return any(account_key(account) == key for account in logins)
+def _holds(logins: dict[str, Any], harness: str, key: str) -> bool:
     return harness in logins and account_key(logins[harness]) == key
 
 
@@ -202,7 +200,10 @@ def _checks(
             f"no {kind} for {role} holds the {harness} login for {slot}",
         ),
         (
-            lambda hive: route_kind != MASTER_LOGIN or _holds(master_accounts(hive, harness), harness, key),
+            lambda hive: (
+                route_kind != MASTER_LOGIN
+                or any(account_key(account) == key for account in master_accounts(hive, harness))
+            ),
             f"no {kind} for {role} holds the {harness} master login for {slot}",
         ),
     ]

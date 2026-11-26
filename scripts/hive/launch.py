@@ -192,7 +192,6 @@ def _master_logins(hives: list[dict[str, Any]], front: bool) -> list[dict[str, A
                     for item in hive["master_logins"]
                     if item["harness"] != "claude" or placement.account_key(item["account"]) not in rejected
                 ],
-                "master_login": {**hive["master_login"], "claude": allowed[0] if allowed else ""},
             }
         kept.append(hive)
     return kept
