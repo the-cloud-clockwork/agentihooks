@@ -11,7 +11,6 @@ import contextlib
 import functools
 import http.client
 import json
-import shutil
 import sys
 import tempfile
 import threading
@@ -26,7 +25,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from scripts import ci_cpu_quota
-from scripts.ci_lab import contract
+from scripts.ci_lab import contract, worktrees
 from scripts.ci_lab.outcomes import COMPLETED
 from scripts.ci_lab.units import Unit
 from scripts.scheduler.process_interval import Interval
@@ -259,12 +258,14 @@ class Worker:
     def _unit(self, lease: Lease) -> None:
         """Run one unit in its own fresh folder under runs while its lease heartbeats, then deliver it unless its
         lease was lost or run abandoned it; an executor that raises leaves it to reap, and a heartbeat that hangs
-        only ends the heartbeats. The folder is removed once the unit ends, delivered or not, after its report and
-        log are read; a folder that resists removal is left for the next restart's wipe."""
+        only ends the heartbeats. The folder is cut before the first heartbeat, so a unit whose folder cannot be cut
+        sends none and reaps. The folder is removed once the unit ends, delivered or not, after its report and log
+        are read, read only folders inside it included; a folder that resists removal is left for the next
+        restart's wipe."""
+        root = Path(tempfile.mkdtemp(dir=self.runs))
         lost = threading.Event()
         beat = Interval(functools.partial(self._beat, lease, lost), every=self.heartbeat_s)
         beat.start()
-        root = Path(tempfile.mkdtemp(dir=self.runs))
         try:
             try:
                 finished = self.executors[lease.unit.kind](lease, root)
@@ -274,7 +275,9 @@ class Worker:
             if not (lost.is_set() or self.abandoned.is_set()):
                 self._deliver(lease, finished)
         finally:
-            shutil.rmtree(root, ignore_errors=True)
+            with contextlib.suppress(OSError):
+                worktrees.empty(root)
+                root.rmdir()
 
     def _beat(self, lease: Lease, lost: threading.Event) -> None:
         """Heartbeat the lease, skipping a beat that cannot reach the scheduler or whose reply is cut short; raise Lost
