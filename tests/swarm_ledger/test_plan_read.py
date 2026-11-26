@@ -427,7 +427,7 @@ def test_remote_hive_reads_the_ledger_and_plan_through_the_hosted_server(slug, t
     from scripts.swarm_ledger import ledger, ledger_link
     from scripts.swarm_ledger.storage import read_ledger
 
-    served = read_ledger(tmp_path, slug, "tasks", "phases", "artifacts")
+    served = {"plans": [], **read_ledger(tmp_path, slug, "tasks", "phases", "artifacts", "plans")}
     file_id = served["artifacts"][0]["file"]["id"]
     plan = ledger_artifacts.path_of(slug, file_id).read_bytes()
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path / "absent")
@@ -445,7 +445,7 @@ def test_remote_hive_reads_the_ledger_and_plan_through_the_hosted_server(slug, t
     monkeypatch.setattr(ledger_link, "urlopen", urlopen)
     environ = {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_DEPLOYMENT": "compose", "LEDGER_URL": "https://ledger.test/"}
     assert run(capsys, ["--task", "mid"], environ) == numbered(5, 27)
-    assert reads == [(slug, "tasks", True), (slug, "phases", True), (slug, "artifacts", True)]
+    assert reads == [(slug, "tasks", True), (slug, "phases", True), (slug, "artifacts", True), (slug, "plans", True)]
     assert opened == [(f"https://ledger.test/artifacts/{slug}/{file_id}", ledger.REQUEST_TIMEOUT, environ)]
 
 

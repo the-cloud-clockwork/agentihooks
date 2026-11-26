@@ -160,8 +160,19 @@ def _packaged(phase: dict, task: dict) -> bool:
     return not phase.get("plan_ref") and bool(task) and linked(str(task.get("plan_slice")), _url(phase, task))
 
 
+def _own_ref(doc: dict, phase: dict, task: dict) -> dict | None:
+    link = task.get("plan_url") if task else None
+    if not link or link == phase.get("plan_url"):
+        return None
+    rows = doc.get("plans", ())
+    artifact = next(
+        (row["artifact"] for row in rows if row.get("artifact") and link in (row.get("url"), row["artifact"])), None
+    )
+    return {"artifact": artifact, "lines": task["plan_lines"]} if artifact else None
+
+
 def _stored(doc: dict, phase: dict, task: dict, load: Callable[[str, str], bytes] | None = None) -> str:
-    ref = phase.get("plan_ref")
+    ref = _own_ref(doc, phase, task) or phase.get("plan_ref")
     if not ref and task and _url(phase, task):
         ref = {"artifact": _url(phase, task), "lines": task["plan_lines"]}
     if not ref:
@@ -260,7 +271,7 @@ def main(argv=None, environ=None) -> int:
     from scripts.swarm_ledger.storage import read_ledger
 
     hosted = ledger_link.remote(env)
-    keys = ("tasks", "phases", "artifacts")
+    keys = ("tasks", "phases", "artifacts", "plans")
     doc = _hosted(slug, keys) if hosted else read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, *keys)
     if doc is None:
         raise SystemExit(f"no ledger {slug}")
