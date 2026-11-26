@@ -19,11 +19,14 @@
     "tests/review/test_record_group.py::test_a_group_pull_request_the_forge_reads_elsewhere_stops_every_post",
     "tests/review/test_record_group.py::test_a_group_record_holds_its_change_under_the_review_keys_and_expires_with_them",
     "tests/review/test_record_group.py::test_a_commit_link_names_its_group_head_and_a_pull_link_names_none",
+    "tests/review/test_record_group.py::test_a_group_head_ending_in_a_capital_x_keeps_every_character_of_its_commit_link",
     "tests/review/test_record_group.py::test_the_review_command_prints_one_document_per_pull_request_of_a_group",
     "tests/forge/test_group_pulls.py::test_github_lists_the_unique_pull_requests_the_group_commit_titles_end_with",
     "tests/forge/test_group_pulls.py::test_github_lists_no_pull_request_when_no_title_ends_with_a_number",
     "tests/forge/test_group_pulls.py::test_a_failed_compare_raises_with_its_error_text",
     "tests/forge/test_group_pulls.py::test_gitlab_refuses_merge_queue_groups_without_a_request",
-    "tests/tick/steps/test_review_queue.py::test_the_review_pass_records_each_merge_group_it_queues_a_review_task_for"
+    "tests/tick/steps/test_review_queue.py::test_the_review_pass_records_each_merge_group_it_queues_a_review_task_for",
+    "tests/tick/steps/test_review_queue.py::test_a_merge_group_whose_review_task_the_ledger_holds_still_records_its_group",
+    "tests/tick/steps/test_review_queue.py::test_the_step_records_each_merge_group_in_the_swarm_store"
   ]
 }

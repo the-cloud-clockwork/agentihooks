@@ -177,6 +177,17 @@ def test_a_group_record_holds_its_change_under_the_review_keys_and_expires_with_
 @pytest.mark.feature("review-queue-group-post")
 def test_a_commit_link_names_its_group_head_and_a_pull_link_names_none() -> None:
     assert (record.commit_of(LINK), record.commit_of(f"{LINK}/"), record.commit_of(URL)) == (GROUP, GROUP, "")
+    assert record.commit_of(f"https://github.com/o/commit/commit/{GROUP}") == GROUP
+
+
+@pytest.mark.feature("review-queue-group-post")
+def test_a_group_head_ending_in_a_capital_x_keeps_every_character_of_its_commit_link() -> None:
+    head = f"{GROUP[:-1]}X"
+    found, forge = store(), GroupForge(pulls=(7,))
+    record.remember_group(found, SLUG, record.Group(REPO, head, BASE, 7))
+    posted = record.post_group(found, SLUG, forge, f"{REPO}/commit/{head}/", REVIEWER, "r1", ["First"])
+    assert [(item.url, item.head) for item in posted] == [(f"{REPO}/pull/7", head)]
+    assert forge.posts == [(7, "First")]
 
 
 @pytest.mark.feature("review-queue-group-post")
@@ -190,5 +201,7 @@ def test_the_review_command_prints_one_document_per_pull_request_of_a_group(
     monkeypatch.setattr(cli.Who, "from_env", lambda: Who(name=REVIEWER))
     assert cli.main(["post", LINK, "--slug", SLUG, "--finding", "First"]) == 0
     pulls = (f"{REPO}/pull/7", f"{REPO}/pull/8")
-    saved = [record.document(item) for pull in pulls if (item := record.read(found, SLUG, pull, GROUP))]
+    kept = [item for pull in pulls if (item := record.read(found, SLUG, pull, GROUP))]
+    saved = [record.document(item) for item in kept]
     assert (len(saved), json.loads(capsys.readouterr().out)) == (2, saved)
+    assert [(item.by, item.task) for posted in kept for item in posted.findings] == [(REVIEWER, "r1")] * 2

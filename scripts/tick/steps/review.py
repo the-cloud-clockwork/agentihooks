@@ -86,16 +86,17 @@ def review_task(short: str, data: dict[str, Any], doc: dict[str, Any]) -> dict[s
     }
 
 
-def _queue(
-    delivery: Delivery, short: str, slug: str, doc: dict[str, Any], ledger: Any, known: set[str], store: RedisStore
-) -> list[str]:
-    """Record a merge queue group in the review store so its reviewers can post on the pull requests it tests, then
-    add the review task of one delivery unless the ledger holds its id, returning the action it took."""
-    data = cast(dict[str, Any], delivery.event.data)
-    task = review_task(short, data, doc)
+def _remember(store: RedisStore, slug: str, short: str, data: dict[str, Any]) -> None:
+    """Record a merge queue group in the review store so its reviewers can post on the pull requests it tests."""
     if short == "mq":
-        group = record.Group(data["repository"], data["head"], data["base"], data["number"] or 0)
-        record.remember_group(store, slug, group)
+        record.remember_group(
+            store, slug, record.Group(data["repository"], data["head"], data["base"], data["number"] or 0)
+        )
+
+
+def _queue(delivery: Delivery, short: str, slug: str, doc: dict[str, Any], ledger: Any, known: set[str]) -> list[str]:
+    """Add the review task of one delivery unless the ledger holds its id, returning the action it took."""
+    task = review_task(short, cast(dict[str, Any], delivery.event.data), doc)
     if task["task"] in known:
         return []
     known.add(task["task"])
@@ -117,7 +118,8 @@ def review_pass(bus: Bus, slug: str, doc: dict[str, Any], ledger: Any, now_ms: i
         consumer = bus.for_swarm(slug).events.consumer(_durable(slug, short), subject(slug, *kind.split(".")))
         for delivery in consumer.fetch(BATCH, FETCH_MS):
             if delivery.event.time >= now_ms - REPLAY_MS:
-                actions += _queue(delivery, short, slug, doc, ledger, known, store)
+                _remember(store, slug, short, cast(dict[str, Any], delivery.event.data))
+                actions += _queue(delivery, short, slug, doc, ledger, known)
             delivery.ack()
     return actions
 

@@ -1,7 +1,7 @@
 """Review records: the findings swarm reviewers posted through the forge on one change request head."""
 
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from typing import Any, NamedTuple, Protocol
@@ -40,9 +40,7 @@ class _Redis(Protocol):
 
     def hgetall(self, name: str) -> dict[str, str]: ...
 
-    def hset(self, name: str, *, mapping: Mapping[str, str]) -> int: ...
-
-    def expire(self, name: str, time: int) -> bool: ...
+    def pipeline(self) -> Any: ...
 
     def transaction(self, update: Callable[[Any], Record], key: str, **kwargs: bool) -> Record: ...
 
@@ -210,8 +208,10 @@ def _group_key(store: RedisStore, slug: str, head: str) -> str:
 def remember_group(store: RedisStore, slug: str, found: Group) -> None:
     key = _group_key(store, slug, found.head)
     fields = {"repository": found.repository, "head": found.head, "base": found.base, "number": str(found.number)}
-    _redis(store).hset(key, mapping=fields)
-    _redis(store).expire(key, TTL_SEC)
+    with _redis(store).pipeline() as pipe:
+        pipe.hset(key, mapping=fields)
+        pipe.expire(key, TTL_SEC)
+        pipe.execute()
 
 
 def group_of(store: RedisStore, slug: str, head: str) -> Group | None:
