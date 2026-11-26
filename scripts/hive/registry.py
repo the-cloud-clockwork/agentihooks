@@ -30,6 +30,7 @@ JSON_FIELDS = {
     "slots": list,
     "interactive": dict,
     "master_login": dict,
+    "master_logins": list,
     "repos": list,
     "registered_repos": list,
     "capabilities": list,
@@ -52,7 +53,7 @@ def key(hive_id: str) -> str:
     return f"{ROOT}:hive:{hive_id}"
 
 
-def _default(hive_id: str, ui: str = "no") -> dict:
+def _default(hive_id: str, ui: str = "no") -> dict[str, Any]:
     headless = ui != "yes"
     return {
         "id": hive_id,
@@ -66,6 +67,7 @@ def _default(hive_id: str, ui: str = "no") -> dict:
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
         "master_login": {"claude": ""},
+        "master_logins": [],
         "master_login_enabled": "no",
         "repos": [],
         "capabilities": [],

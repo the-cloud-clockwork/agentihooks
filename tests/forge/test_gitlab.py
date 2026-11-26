@@ -88,6 +88,14 @@ def test_gitlab_posts_a_review_comment_as_a_merge_request_note() -> None:
     assert sent.calls == [("POST", f"{API}/12/notes", HEADERS, b'{"body": "Finding one"}')]
 
 
+@pytest.mark.feature("forge-change-request-seam")
+def test_gitlab_refuses_a_release_lookup_without_a_promotion_flow() -> None:
+    sent = Sent()
+    with pytest.raises(ForgeError, match="^GitLab has no promotion pull request for tag v1.2.3$"):
+        forge(sent).release_pull("v1.2.3")
+    assert sent.calls == []
+
+
 class Opened:
     """A fake urlopen that records the request and answers a fixed body."""
 

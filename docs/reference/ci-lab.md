@@ -1755,7 +1755,7 @@ both of these hold:
 
 | Source | Recorded when | Subject | `head` and `base` | `actor` |
 |---|---|---|---|---|
-| `push` delivery on `/github` | A branch under `refs/heads/` outside the plant prefix moved; a deleted branch, a new branch whose `before` is all zeros, or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
+| `push` delivery on `/github` | The `dev` branch moved; a push to any other branch outside the plant prefix, a deleted branch, a push whose `before` is all zeros, or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
 | `push` delivery on `/github` to a plant branch | A branch under `refs/heads/diffcheck/lab-plant-` (`scripts.ci_lab.webhooks.PLANT_PREFIX`) moved; a deleted branch records nothing | `ci.lab.head.plant` | `after`, and an empty base whatever `before` says | The delivery's sender |
 | `pull_request` delivery on `/github` | The action is `opened`, `synchronize`, `reopened` or `closed` | `ci.lab.head.pull_request` | The pull request's head and base SHA | The pull request's author |
 | `merge_group` delivery on `/github` | The action is `checks_requested` | `ci.lab.head.merge_group` | The group's `head_sha` and `base_sha` | The delivery's sender |
@@ -1764,7 +1764,10 @@ both of these hold:
 
 A pull request head also carries `lane` in its envelope data: the pull request's head branch, or
 `owner:branch` for a pull request from a fork (`scripts.ci_lab.webhooks.pull_lane`). The scheduler
-keys the head's lane on it, so a newer head of the pull request supersedes the older one. No other
+keys the head's lane on it, so a newer head of the pull request supersedes the older one. A push
+head carries `dev` as its lane, the only branch a push is recorded for, so a newer push to `dev`
+replaces the one waiting and supersedes the one being graded, so a repository holds at most one
+waiting head of a push to `dev`. No other
 head carries the key, and the scheduler reads an envelope without it as before. A `closed` head
 asks for no grade: it names the lane whose work the scheduler ends, described in
 [Scheduler loop](#scheduler-loop).
@@ -2489,12 +2492,14 @@ key; the builders are pure and read no file, clock or network.
    A head whose action is `closed` is not admitted or held: intake ends the work of its lane, as
    described below.
 2. Each head waits in its lane (repository, branch and class) for the quiet window, 30 seconds by
-   default; a newer head of the lane restarts it and a hotfix waits for none. A pass starts at most
-   eight heads whose window ended (`STARTS_PER_PASS`): the most urgent class first (hotfix, pull
-   request, queue, promotion, backfill) and, within a class, the head that has waited longest. A head
-   still quiet or held by a pause takes no place; a head put back for its manifest fetch takes one,
-   since its expansion ran on the pass. The other heads wait for a later pass, so every pass reaches
-   steps 5 to 8 however many heads wait.
+   default; a newer head of the lane restarts it and a hotfix waits for none. A pass looks at up to
+   twenty four heads whose window ended (`LOOKED_AT_PER_PASS`) and starts, retires or drops at most
+   eight of them (`STARTS_PER_PASS`): the most urgent class first (hotfix, pull request, queue,
+   promotion, backfill) and, within a class, the head that has waited longest. A head still quiet or
+   held by a pause takes no place among those looked at; a head put back for its manifest fetch,
+   pending or unanswered, takes one of the twenty four but none of the eight, so the pass moves on to
+   the next waiting head instead of stalling on it. The other heads wait for a later pass, so every
+   pass reaches steps 5 to 8 however many heads wait.
 3. Expansion reads the grader's test workflow and input key registry and the head and base trees
    from the git mirror with `git ls-tree` and `git show`, never a checkout, and keys one static
    unit per gate step, described in [Static units](#static-units). A merge group, promotion or
@@ -2652,6 +2657,17 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   <run> still grades <head>`. When the lane names a grade that already finished, or one pushed
   to a grade ref, the close starts from the live grades of the closed head that name the lane,
   and the lane keeps naming the grade it names.
+- A push that named no branch gets no promotion grade. Intake holds no head of the promotion class
+  that has no grade ref and whose lane is its own head, and prints `ignored <head>: a push that
+  named no branch asks for no grade`. On its first pass a scheduler retires what is stored that
+  way: `Scheduler._retire_pushes` drops every such waiting head, forgets every such live grade and
+  drops the pending units of that head unless another live grade grades it. It reads each promotion
+  grade document once, one at a time: of a grade it retires it keeps only the head, and of a grade
+  it keeps it holds the summary at the revision stored before the read, so the same pass reads that
+  grade again only when another writer stored it in between. Nothing is posted. One
+  line counts them, `retired the promotion grades of pushes that named no branch: <n> waiting heads
+  dropped, <n> live grades retired, <n> pending units dropped`, and a pass that finds none prints
+  no line.
 - On its first pass a scheduler retires the stale grades a restart finds live. For each repository
   with a live pull request grade that has no grade ref, `scripts.ci_lab.stale_heads.OpenHeads`
   reads the open pull request heads and the heads of the plant branches through the lab App: two
@@ -3583,7 +3599,12 @@ to the runner changes no verdict. Each request names the private copy as its `tr
 session the runner starts runs there and imports that copy's `scripts` package. A mutant unit passes only when every mutant is killed; a runner that exits
 non zero fails its unit. The scheduler splits a function whose mutants price over the 30 minute
 unit time limit into several mutant units, as
-[Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) describes. Each adapter uploads a JSON report with the unit's `seconds` (and `flaky`
+[Mutant units over the sandbox timeout](#mutant-units-over-the-sandbox-timeout) describes. Each adapter cuts every folder a unit needs, the report folder included, inside one fresh folder under
+`CI_LAB_WORK_ROOT/runs` that the worker gives the lease; the worker removes that folder once the unit is delivered,
+once its executor raises, and once its lease is lost or abandoned, after the report and log are read, read only
+folders inside it included. The worker cuts the folder before the lease's first heartbeat, so a unit whose folder
+cannot be cut sends no heartbeat and its lease reaps. Each adapter
+uploads a JSON report with the unit's `seconds` (and `flaky`
 for a test unit), which the scheduler stores with the verdict, and releases every tree it cut,
 also when the executor raises. SIGTERM stops leasing and lets running units drain within the
 termination grace: 2100 seconds, the 30 minute unit time limit (`worker.UNIT_TIMEOUT_SECONDS`,
