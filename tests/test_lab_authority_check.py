@@ -27,6 +27,7 @@ HELD = [
         )
     ),
 ]
+LINT_CLAUSE = check.CLAUSE.format(gate="lint")
 DAMAGE: list[tuple[str, Callable[[Any], object], set[int]]] = [
     (delivery.DELIVERY, lambda document: document["lab"]["authoritative"].remove("test-count"), {0, 7}),
     (delivery.DELIVERY, lambda document: document["lab"]["authoritative"].append("docs"), {0}),
@@ -39,6 +40,12 @@ DAMAGE: list[tuple[str, Callable[[Any], object], set[int]]] = [
     (check.WORKFLOW, lambda document: document["jobs"]["test-count"].update({"if": "${{ !cancelled() }}"}), {9}),
     (check.WORKFLOW, lambda document: document["jobs"]["lint"]["needs"].remove("lab-verdict"), {3}),
     (check.WORKFLOW, lambda document: document["jobs"]["lint"].pop("needs"), {3}),
+    (delivery.DELIVERY, lambda document: document["lab"]["authoritative"].reverse(), {0}),
+    (
+        check.WORKFLOW,
+        lambda document: document["jobs"]["lint"].update({"if": "${{ !cancelled() || " + LINT_CLAUSE + " }}"}),
+        {3},
+    ),
 ]
 
 
@@ -85,6 +92,8 @@ def test_the_checkout_holds_every_part_of_the_lab_authority_and_each_is_listed(
         "a skip clause dropped",
         "a lab verdict need dropped",
         "a job with the skip clause and no needs",
+        "the list reordered",
+        "a skip clause joined with or",
     ],
 )
 def test_a_part_the_checkout_lost_fails_by_name(
@@ -103,3 +112,23 @@ def test_a_delisted_gate_whose_job_is_gone_fails_by_name_on_the_list_its_authori
     _edit(copy / check.WORKFLOW, lambda document: document["jobs"].pop("type-gate"))
     assert check.main(copy) == 1
     assert capsys.readouterr().out.splitlines() == _lacking({0, 4, 6})
+
+
+@pytest.mark.feature("lab-authoritative-static-gates")
+def test_a_listed_gate_whose_job_is_gone_fails_on_the_delivery_file_and_never_raises(
+    copy: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _edit(copy / check.WORKFLOW, lambda document: document["jobs"].pop("type-gate"))
+    assert check.main(copy) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "FAIL: the checkout lacks a delivery file its reader accepts: lab.authoritative names unknown gates: type-gate"
+    ]
+
+
+@pytest.mark.feature("lab-authoritative-static-gates")
+def test_a_job_whose_whole_condition_is_the_skip_clause_holds_it(
+    copy: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _edit(copy / check.WORKFLOW, lambda document: document["jobs"]["lint"].update({"if": "${{ " + LINT_CLAUSE + " }}"}))
+    assert check.main(copy) == 0
+    assert capsys.readouterr().out.splitlines() == HELD
