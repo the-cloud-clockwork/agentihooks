@@ -161,7 +161,7 @@ def _packaged(phase: dict, task: dict) -> bool:
 
 
 def _own_ref(doc: Mapping[str, Any], phase: Mapping[str, Any], task: Mapping[str, Any]) -> dict[str, str] | None:
-    link = str(task.get("plan_url") or "")
+    link = task.get("plan_url")
     if not link or link == phase.get("plan_url"):
         return None
     rows: list[dict[str, Any]] = doc.get("plans") or []
