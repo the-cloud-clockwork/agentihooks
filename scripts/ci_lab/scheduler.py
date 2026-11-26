@@ -657,6 +657,11 @@ def _quiet(state: State, revision: int) -> _Quiet:
     )
 
 
+def _revision(revisions: Mapping[str, str], run: str) -> int:
+    """Return a live grade's stored revision, a missing one reading as 0."""
+    return int(revisions.get(run, 0))
+
+
 def _still(quiet: _Quiet, states: Sequence[str | None], now_ms: int, repo_hold: int) -> bool:
     """Return whether advancing a grade would change nothing: no open job is gone or finished and none waiting to
     start is leased, given their states in waiting then started order, and either a moved check run waits out its
@@ -864,7 +869,7 @@ class Scheduler:
         revisions, *present = pipe.execute()
         quiets: dict[str, _Quiet] = {}
         for run in (run for run, exists in zip(runs, present) if exists):
-            revision = int(revisions.get(run, 0))
+            revision = _revision(revisions, run)
             if (quiet := self._quiets.get(run)) is not None and quiet.revision == revision:
                 quiets[run] = quiet
             elif (state := self.grade(run)) is not None:
@@ -1173,11 +1178,10 @@ class Scheduler:
     def _retire_pushes(self) -> list[str]:
         """Drop every waiting promotion head and close every live promotion grade a push that named no branch asked
         for, which holds its own head as its lane and no grade ref: the run is forgotten and the pending jobs of its
-        head are dropped unless another live grade grades that head. Nothing is posted. Each grade document is read
-        alone, once: of a grade it retires only the head is kept, and of a grade it keeps the summary at the revision
-        stored before the read, so the survey of the same pass reads that grade no second time. One line counts the
-        waiting heads dropped, the grades retired and the pending units dropped; a pass that finds none adds no
-        line."""
+        head are dropped unless another live grade grades that head. Nothing is posted. Each promotion grade
+        document is read alone, once: of a grade it retires only the head is kept, and of a grade it keeps the summary
+        at the revision stored before the read. One line counts the waiting heads dropped, the grades retired and the
+        pending units dropped; a pass that finds none adds no line."""
         held = {name: json.loads(raw) for name, raw in self.client.hgetall(WAITING).items()}
         waiting = sorted(
             name
@@ -1196,7 +1200,7 @@ class Scheduler:
             if grade is not None and stale_heads.branchless(grade.tier, grade.lane, grade.head, grade.ref):
                 gone[run] = grade.head
             elif grade is not None:
-                self._quiets[run] = _quiet(grade, int(revisions.get(run, 0)))
+                self._quiets[run] = _quiet(grade, _revision(revisions, run))
         kept = {origin["head"] for run, origin in origins.items() if run not in gone}
         dropped = 0
         for run, head in sorted(gone.items()):
