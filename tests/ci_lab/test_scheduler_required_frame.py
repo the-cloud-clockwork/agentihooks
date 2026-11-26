@@ -109,7 +109,7 @@ def test_a_legacy_grade_derives_required_from_its_stored_gates(
 ) -> None:
     plan = scheduler.frame(tier, TREE, BASE, {})
     run = lab({HEAD_A: plan})
-    request = scheduler.GradeRequest(REPO, HEAD_A, BASE, tier, "trusted")
+    request = scheduler.GradeRequest(REPO, HEAD_A, BASE, tier, "trusted", False)
     run.engine._start(request, "feature", "", 1000)
     old = run.grade(HEAD_A)
     document = json.loads(run.lab.client.get(scheduler.GRADES + old.run))
