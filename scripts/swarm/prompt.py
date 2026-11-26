@@ -784,7 +784,7 @@ def research_steps(me, led, name, phase):
 def review_steps(me: str, led: str, name: str, phase: str) -> list[str]:
     """A reviewer's launch steps: read the change request, post strict findings through review post, which records
     the finding done requires, then leave and close with the change request link; a reviewer edits nothing."""
-    slug = me.rsplit(" ", 1)[1]
+    slug = me.rpartition(" ")[2]
     return [
         "Work it end to end with the swarm-reviewer skill, then stop. You edit, commit and push nothing:",
         "1. Read the change request your task names with agentihooks forge read <number> --remote <repository url>: "
