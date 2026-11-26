@@ -322,7 +322,7 @@ class Admission:
         self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], timer: _StepTimer
     ) -> dict[str, Any] | None:
         from scripts.hive import orders
-        from scripts.swarm import launch_check, preempt, profile_choice, tick
+        from scripts.swarm import launch_check, preempt, profile_choice, prompt, tick
 
         task_id, lane, now = request["task"], request["lane"], self.clock()
         row = rows[task_id]
@@ -360,7 +360,7 @@ class Admission:
         claimed[orders.SEEDS] = self._seeds(slug, claimed, doc, name)
         timer.mark("seeds")
         primed = tick.primed(self.store, slug, seat, claimed)
-        task = successor_fill.task(primed, self.store.config(slug), record.lane)
+        task = prompt.carried(successor_fill.task(primed, self.store.config(slug), record.lane))
         timer.mark("primed")
         task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {
@@ -520,6 +520,20 @@ class Admission:
 
         release(self.store, slug, agent)
         self._release(slug, agent.task, agent.name)
+
+    def unsent(self, slug: str, request: dict[str, Any], reason: str) -> dict[str, str]:
+        """The held answer for an admission whose answer cannot reach the asking hive; that hive's own admission of the
+        offer is freed and forgotten first, so its task reopens at once instead of after its launch check lapses."""
+        key = self._key(slug, request)
+        admitted = self._held(key)
+        if admitted and admitted["hive"] == request["hive"]:
+            agents: list[AgentRecord] = cast(Any, self.store).agents(slug)
+            if agent := next((each for each in agents if each.name == admitted["name"]), None):
+                self.free(slug, agent)
+            self.store.redis.delete(key)
+        refusal = f"the admission answer cannot cross the bus, {reason}"
+        refused(slug, request, refusal)
+        return {hive_admission.HELD: refusal}
 
     def failed(self, slug: str, request: dict) -> bool:
         key = self._key(slug, request)

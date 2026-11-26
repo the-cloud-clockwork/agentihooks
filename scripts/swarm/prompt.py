@@ -434,7 +434,7 @@ def artifact_line(led):
     )
 
 
-def priming_lines(task):
+def priming_lines(task: dict[str, Any]) -> list[str]:
     seat = f"Your seat {task['seat']}" if task.get("seat") else "Your seat"
     handoff, recaps, learned = task.get("handoff", ""), task.get("recaps") or [], task.get("learned") or []
     culture = task.get("culture", "")
@@ -464,14 +464,22 @@ def priming_lines(task):
     lines.append("5. Older recaps, newest first:")
     for recap in older[:OLDER_RECAPS]:
         lines += [f"{_by(recap)}:".capitalize(), recap["text"]]
-    if len(older) > OLDER_RECAPS:
-        lines.append(f"{len(older) - OLDER_RECAPS} older recaps are kept on the seat and not shown.")
+    hidden = task.get(RECAPS_TOTAL, len(recaps)) - 1 - OLDER_RECAPS
+    if hidden > 0:
+        lines.append(f"{hidden} older recaps are kept on the seat and not shown.")
     return lines
 
 
 def carried(task: dict[str, Any]) -> dict[str, Any]:
-    """The task an admission carries to the hive that renders its prompt."""
-    return task
+    """The task with only the recaps and learned notes its prompt shows and the seat's whole recap count, so an
+    admission carries what the hive renders instead of every recap the seat holds."""
+    recaps = task.get("recaps") or []
+    return {
+        **task,
+        "recaps": recaps[: 1 + OLDER_RECAPS],
+        RECAPS_TOTAL: task.get(RECAPS_TOTAL, len(recaps)),
+        "learned": [note for note in task.get("learned") or [] if not note.get("withheld")],
+    }
 
 
 def handoff_lines(task: dict[str, Any]) -> list[str]:

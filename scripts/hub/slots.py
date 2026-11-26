@@ -58,8 +58,12 @@ def handle(
 
 
 def refusal(subject: str, data: bytes, error: PayloadTooLarge, admitter: "Admission") -> bytes:
-    """The answer to a slot request whose own answer cannot cross the bus."""
-    raise error
+    """The answer to a slot request whose own answer cannot cross the bus even compressed: an admission releases what
+    it claimed and is held with the reason, any other operation answers the error."""
+    request = json.loads(data)
+    if request.get("op") != "admit":
+        return json.dumps({"ok": False, "error": str(error)}).encode()
+    return json.dumps({"ok": True, "result": admitter.unsent(subject.split(".")[1], request, str(error))}).encode()
 
 
 def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms, admitter: "Admission | None" = None) -> None:
@@ -73,4 +77,5 @@ def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms, admitter: "Admis
         QUEUE,
         lambda subject, data: handle(bus, subject, data, clock, admitter),
         wait_ms=account_slots.REQUEST_TIMEOUT_MS,
+        refusal=lambda subject, data, error: refusal(subject, data, error, admitter),
     )
