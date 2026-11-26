@@ -2,6 +2,8 @@
 
 import json
 import os
+import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -55,14 +57,42 @@ def quota_ignored(harness, account):
     return True
 
 
-def blocker(agent, worktree, exists=os.path.isdir, has_quota=account_quota):
+def _master_login_blocker(name: str) -> str:
+    from scripts import master_claude_login, master_logins
+    from scripts.routing import reservation
+
+    now = time.time()
+    if any(
+        master_logins.usage(account, now)[1] < reservation.MASTER_LEAVES
+        and not reservation.primary_reserved(account, master_logins.week_left(account, now), os.environ)
+        for account in master_claude_login.free(name)
+    ):
+        return ""
+    return "no free stored master login slot above its drain line and outside the primary reserve"
+
+
+def blocker(
+    agent: AgentRecord,
+    worktree: str,
+    exists: Callable[[str], bool] = os.path.isdir,
+    has_quota: Any = account_quota,
+) -> str:
     """Why the agent cannot reopen its own conversation; empty when it can."""
+    from scripts.swarm_v2 import front_door
+
     if not agent.conversation_id:
         return "no conversation id"
     if not worktree:
         return "no worktree"
     if not exists(worktree):
         return "worktree gone"
+    if (
+        agent.lane == MASTER
+        and agent.harness == "claude"
+        and agent.profile == "master"
+        and front_door.holds(agent.seat.partition("@")[2], agent.seat)
+    ):
+        return _master_login_blocker(agent.name)
     if agent.account and has_quota(agent.harness, agent.account) is False:
         return f"account {agent.account} out of quota"
     return ""
