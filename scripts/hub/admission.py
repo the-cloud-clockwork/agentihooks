@@ -19,7 +19,7 @@ from scripts.handoff import envelope, transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
 from scripts.hub import branch_heads, lease
-from scripts.swarm import admission_view, capacity, offer_quota, readiness, run_window, successor_fill
+from scripts.swarm import admission_view, offer_quota, readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
@@ -167,8 +167,8 @@ class Admission:
 
     def _account_hold(self, slug: str, lane: str, task: dict[str, Any]) -> str:
         environ = dict(os.environ)
-        accounts = capacity.hive_accounts(self.store)(environ, time.time(), refresh=False)
-        return ACCOUNT_HOLD if not offer_quota.available(self.store.config(slug), lane, task, accounts, environ) else ""
+        rows = offer_quota.accounts(environ, time.time(), redis=self.store.redis)
+        return ACCOUNT_HOLD if not offer_quota.available(self.store.config(slug), lane, task, rows, environ) else ""
 
     def _held(self, offer: str) -> dict[str, Any] | None:
         """The admission kept for the offer, whichever hive asked for it; None when none is kept."""

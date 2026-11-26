@@ -1,4 +1,3 @@
-from collections.abc import Iterator
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import ANY, Mock
@@ -66,23 +65,17 @@ def test_an_admitted_spoke_takes_only_from_its_own_lane_with_the_requested_timeo
 
 
 @pytest.fixture
-def rig(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
+def rig():
     from scripts.events.config import BusConfig, QueuePolicy
     from scripts.events.envelope import Envelope
     from scripts.events.memory import open_bus
     from scripts.hive.spoke import Spoke, SpokeConfig
-    from scripts.swarm import capacity
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 
-    accounts = [
-        capacity.Account("claude", "claude-a", "OPEN", 0, None, 90, 6),
-        capacity.Account("codex", "codex-a", "OPEN", 0, None, 90, 6),
-    ]
-    monkeypatch.setattr(capacity, "accounts", Mock(side_effect=lambda *_args, **_kwargs: list(accounts)))
     policy = QueuePolicy(max_deliver=3, backoff_ms=(10, 20))
     clock = SimpleNamespace(now=0)
     bus = open_bus(BusConfig(), clock=lambda: clock.now)
-    config = SpokeConfig(SimpleNamespace(slug="rig", lanes={}), "eng", "hive-a", policy)
+    config = SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a", policy)
     tasks, runtime = Mock(), Mock()
     request = SpawnRequest(
         config.swarm,
@@ -899,7 +892,7 @@ def test_the_spoke_claim_and_launch_work_with_the_real_nats_backend(tmp_path):
                     0,
                     12,
                     "readiness",
-                    {"lane": "eng", "generation": 0},
+                    {"lane": "eng", "generation": 0, "quota": {}},
                 )
             )
             spoke = Spoke(config, spoke_bus, runtime, tasks, reading)

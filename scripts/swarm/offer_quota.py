@@ -32,8 +32,15 @@ def _saved(task: Mapping[str, Any]) -> dict[str, Any]:
     return dict[str, Any](task.get("launch_assignment") or handoff.get("launch") or {})
 
 
+def accounts(environ: dict[str, str], now: float, refresh: bool = False, redis: Any = None) -> list[capacity.Account]:
+    """The account rows an event offer seat check reads: the hive quota reports on ``redis`` for the hub, the hive's
+    own readings for a spoke."""
+    read: Callable[..., list[capacity.Account]] = getattr(capacity, "accounts")
+    return read(environ, now, refresh=refresh, redis=redis)
+
+
 def permitted(config: SwarmConfig, lane: str, task: Mapping[str, Any]) -> tuple[str, ...]:
-    lanes = dict[str, Any](getattr(config, "lanes"))
+    lanes = dict[str, Any](getattr(config, "lanes", {}))
     chosen = dict[str, Any](lanes.get(lane, {}))
     requested = chosen.get("agent")
     requested = "" if requested in (None, "", "auto") else requested
@@ -55,7 +62,6 @@ def available(
     rows: Sequence[capacity.Account],
     environ: Mapping[str, str],
 ) -> tuple[str, ...]:
-    candidates = capacity.unreserved(list(rows)) if lane == MASTER else rows
     thresholds = getattr(quota_handoff.Thresholds, "from_env")(dict(environ))
     saved = _saved(task)
     handoff = dict[str, Any](task.get("handoff_envelope") or {})
@@ -65,7 +71,7 @@ def available(
         for harness in permitted(config, lane, task)
         if any(
             row.harness == harness and not getattr(quota_handoff, "exclusion")(row, thresholds, predecessor)
-            for row in candidates
+            for row in rows
         )
     )
 
@@ -79,7 +85,7 @@ class Fit:
         read: Callable[..., list[capacity.Account]] | None = None,
     ) -> None:
         self.config, self.lane, self.fit = config, lane, fit
-        self.read: Callable[..., list[capacity.Account]] = read or getattr(capacity, "accounts")
+        self.read: Callable[..., list[capacity.Account]] = read or accounts
         self.environ = dict(os.environ)
         self.rows: list[capacity.Account] | None = None
         self.held = False
@@ -87,6 +93,8 @@ class Fit:
     def __call__(self, event: Envelope) -> bool:
         if not self.fit(event):
             return False
+        if self.lane == MASTER:
+            return True
         data = dict[str, Any](getattr(event, "data"))
         descriptor = data.get("quota")
         if not isinstance(descriptor, dict):

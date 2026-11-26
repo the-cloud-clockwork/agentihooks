@@ -4,9 +4,15 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.swarm import capacity, runtime
+from scripts.swarm import capacity, offer_quota, runtime
+from scripts.swarm.offer_quota import accounts as real_accounts
 from tests.hub.test_admission import SLUG, ask
 from tests.hub.test_admission import rig as rig
+
+
+@pytest.fixture(autouse=True)
+def _seats_read_through_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(offer_quota, "accounts", real_accounts)
 
 
 def _accounts(monkeypatch: pytest.MonkeyPatch, rows: list[capacity.Account]) -> Mock:

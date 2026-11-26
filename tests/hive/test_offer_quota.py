@@ -11,10 +11,16 @@ from scripts.events.memory import open_bus
 from scripts.hive import lanes
 from scripts.hive.spoke import Spoke, claim_key
 from scripts.hub import slots
-from scripts.swarm import capacity, readiness, runtime
+from scripts.swarm import capacity, offer_quota, readiness, runtime
+from scripts.swarm.offer_quota import accounts as real_accounts
 from scripts.swarm.store import SwarmConfig
 from scripts.swarm_v2.runtime.base import Outcome, Status
 from tests.hive.test_lanes import Hub, offer
+
+
+@pytest.fixture(autouse=True)
+def _seats_read_through_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(offer_quota, "accounts", real_accounts)
 
 
 @pytest.mark.feature("event-offer-account-seats")

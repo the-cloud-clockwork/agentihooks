@@ -7,8 +7,14 @@ import pytest
 
 from scripts.events.envelope import Envelope
 from scripts.swarm import capacity, offer_quota, profile_choice, runtime
+from scripts.swarm.offer_quota import accounts as real_accounts
 from scripts.swarm.store import SwarmConfig
 from scripts.swarm.tick import SpawnError
+
+
+@pytest.fixture(autouse=True)
+def _seats_read_through_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(offer_quota, "accounts", real_accounts)
 
 
 def _event_task(requires_harness: str = "") -> dict[str, object]:
@@ -107,6 +113,23 @@ def test_an_admitted_spawn_keeps_quota_rows_owned_by_the_tick_pass(
     reader.assert_not_called()
     launcher.assert_called_once()
     assert [(row.name, row.sessions) for row in local._quota_accounts] == [("claude-a", 1)]
+
+
+@pytest.mark.feature("event-offer-account-seats")
+def test_an_admitted_relaunch_with_its_saved_launch_reads_no_quota_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [capacity.Account("claude", "claude-a", "OPEN", 3, None, 90, 3)]
+    local, config, reader, launcher = _event_runtime(tmp_path, monkeypatch, rows)
+    saved = {"profile": "planner", "harness": "claude", "model": "m", "effort": "high", "account": "kept"}
+
+    local.spawn(config, "plan", "planner@a1b2c3-0001", {**_event_task("claude"), "launch_assignment": saved})
+
+    reader.assert_not_called()
+    launcher.assert_called_once()
+    argv = launcher.call_args.args[4]
+    assert argv[argv.index("--route") + 1] == "kept"
+    assert not hasattr(local, "_quota_accounts")
 
 
 @pytest.fixture
@@ -241,12 +264,13 @@ def test_available_excludes_quota_predecessor(config: SwarmConfig) -> None:
 
 
 @pytest.mark.feature("event-offer-account-seats")
-def test_available_master_unreserves_capacity(config: SwarmConfig) -> None:
-    row = replace(account("claude", cap=0), reserved="primary", unreserved_cap=2)
-    assert offer_quota.available(config, "plan", {}, [row], {}) == ()
-    assert offer_quota.available(config, "master", {}, [row], {}) == ("claude",)
-    assert row.cap == 0
-    assert row.reserved == "primary"
+def test_fit_passes_master_offers_without_reading_accounts(config: SwarmConfig) -> None:
+    read = Mock(return_value=[])
+    fits = offer_quota.Fit(config, "master", lambda offered: True, read)
+    assert fits(event())
+    assert not fits.held
+    read.assert_not_called()
+    assert not offer_quota.Fit(config, "master", lambda offered: False, read)(event({}))
 
 
 @pytest.mark.feature("event-offer-account-seats")
