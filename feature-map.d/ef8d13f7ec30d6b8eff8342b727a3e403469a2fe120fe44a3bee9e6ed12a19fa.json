@@ -9,6 +9,8 @@
     "tests/routing/test_master_login_ceiling.py::test_a_worker_offer_on_a_slot_three_account_past_the_ceiling_is_refused",
     "tests/routing/test_master_login_ceiling.py::test_a_worker_takes_a_slot_three_account_below_the_ceiling",
     "tests/routing/test_master_login_ceiling.py::test_capacity_closes_a_slot_three_row_past_the_ceiling_beside_slot_one",
-    "tests/routing/test_master_login_ceiling.py::test_slot_one_readers_keep_the_single_declared_account"
+    "tests/routing/test_master_login_ceiling.py::test_slot_one_readers_keep_the_single_declared_account",
+    "tests/routing/test_master_login_ceiling.py::test_other_logins_leave_out_the_slot_one_reservation_and_master_sessions",
+    "tests/routing/test_master_login_ceiling.py::test_a_worker_launch_reads_the_other_logins_beside_its_slot_one_reservation"
   ]
 }

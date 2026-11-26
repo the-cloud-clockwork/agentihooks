@@ -78,3 +78,24 @@ def test_slot_one_readers_keep_the_single_declared_account(environ):
     assert reservation.current("claude", environ) == reservation.Reservation("claude", "first", 1)
     assert reservation.for_worker("claude", {**environ, **WORKER}) == reservation.Reservation("claude", "first", 1)
     assert reservation.current("codex", environ) is None
+
+
+@pytest.mark.feature("worker-ceiling-every-master-login-slot")
+def test_other_logins_leave_out_the_slot_one_reservation_and_master_sessions(environ):
+    first, third = reservation.Reservation("claude", "first", 1), reservation.Reservation("claude", "third", 1)
+    assert reservation.other_logins_for_worker("claude", {**environ, **WORKER}, first) == (third,)
+    assert reservation.other_logins_for_worker("claude", {**environ, **WORKER}, None) == (first, third)
+    assert reservation.other_logins_for_worker("claude", {**environ, **MASTER}, first) == ()
+
+
+@pytest.mark.feature("worker-ceiling-every-master-login-slot")
+def test_a_worker_launch_reads_the_other_logins_beside_its_slot_one_reservation(environ, tmp_path, monkeypatch):
+    seen = []
+    others = reservation.other_logins_for_worker
+    monkeypatch.setattr(
+        reservation,
+        "other_logins_for_worker",
+        lambda harness, env, held: seen.append(held) or others(harness, env, held),
+    )
+    assert _route(environ, tmp_path, monkeypatch, 69.9, WORKER) == "AH_CC_TOKEN_third"
+    assert seen == [reservation.Reservation("claude", "first", 1)]
