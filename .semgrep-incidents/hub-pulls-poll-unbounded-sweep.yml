@@ -4,9 +4,8 @@ rules:
     severity: ERROR
     message: >-
       The pulls reactor poll runs on the single hub loop thread, so a fetch loop over every open pull request with no
-      time slice holds every reactor for the whole sweep. On 24 and 25 November one sweep took about three minutes of
-      every pass and task changes waited sixteen hours to be tracked. Check the elapsed time against SLICE_MS before
-      each fetch and pause the sweep at a stored cursor.
+      time slice holds every reactor for the whole sweep and task changes wait behind it. Check the elapsed time
+      against SLICE_MS before each fetch and pause the sweep at a stored cursor.
     paths:
       include:
         - /scripts/hub/pulls.py
