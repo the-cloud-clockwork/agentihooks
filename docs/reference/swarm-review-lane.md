@@ -296,6 +296,17 @@ that pull request merges, unless `--filed` names a follow up. The `--must`,
 `--check` and `--judge` contract goes into the agent's prompt as its proof
 contract line.
 
+A release review task links its release tag page, and `agentihooks review
+post` and `agentihooks review read` take that link as is. The review record
+asks the forge for the promotion pull request whose squash merge the tag
+points at, then reads its head, posts every finding on it and keeps the record
+under the pull request link, so the posts count for the task and `done` closes
+it. A tag with no single promotion pull request, such as one made by the
+manual release workflow or by reusing an older tag's tree, is refused with a
+forge error naming the tag. GitLab has no promotion flow, so its release
+links stay refused as links that name no change request. A merge queue link
+names a commit, not a change request, and stays refused.
+
 ## Where reviewers launch
 
 A review task launches a reviewer on every path an engineering task takes. The

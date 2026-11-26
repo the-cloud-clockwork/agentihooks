@@ -156,10 +156,14 @@ def _resumed(urls: list[str], cursor: str | None) -> list[str]:
 
 class Pulls:
     def __init__(
-        self, bus: Bus, fetch: Callable[[str], Observation] = fetch, clock: lease.Clock = lease.wall_ms
+        self,
+        bus: Bus,
+        fetch: Callable[[str], Observation] = fetch,
+        clock: lease.Clock = lease.wall_ms,
+        index: Bus | None = None,
     ) -> None:
         self._events = bus.events
-        self._state = bus.state(BUCKET)
+        self._state = (bus if index is None else index).state(BUCKET)
         self._fetch = fetch
         self._clock = clock
         self._late = 0

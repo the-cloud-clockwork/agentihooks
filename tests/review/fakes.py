@@ -18,6 +18,7 @@ class FakeForge:
         self.url = url
         self.reads: list[int] = []
         self.posts: list[tuple[int, str]] = []
+        self.tags: list[str] = []
 
     def read(self, number: int) -> ChangeRequest:
         self.reads.append(number)
@@ -26,6 +27,10 @@ class FakeForge:
     def post(self, number: int, body: str) -> str:
         self.posts.append((number, body))
         return f"{URL}#issuecomment-{len(self.posts)}"
+
+    def release_pull(self, tag: str) -> int:
+        self.tags.append(tag)
+        return int(self.url.rpartition("/")[2])
 
 
 def store() -> RedisStore:
