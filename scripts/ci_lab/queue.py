@@ -3,6 +3,7 @@
 import json
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from itertools import batched
 from typing import Any
 
 from scripts.ci_lab.delivery import CLASSES
@@ -16,6 +17,7 @@ RANKS = len(CLASSES)
 UNRANKED = RANKS
 BAND = 2**40
 PAGE = 64
+BATCH = 500
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,31 @@ def _head(head: str, state: str) -> str:
     return _key("head", head, state)
 
 
+def _decode(job: str, record: Mapping[str, str]) -> Job | None:
+    """Return the job a record holds, or None when the record is gone."""
+    if not record:
+        return None
+    return Job(
+        id=job,
+        head=record["head"],
+        unit=Unit(
+            kind=record["kind"],
+            key=record["key"],
+            members=tuple(json.loads(record["members"])),
+            manifest_digest=record.get("manifest_digest", ""),
+        ),
+        requirement=Requirement(slots=int(record["slots"]), capabilities=frozenset(json.loads(record["capabilities"]))),
+        state=record["state"],
+        attempts=int(record["attempts"]),
+        worker=record["worker"],
+        outcome=record["outcome"],
+        base=record["base"],
+        grader=record["grader"],
+        leased_ms=int(record.get("leased_ms", 0)),
+        rank=int(record.get("rank", UNRANKED)),
+    )
+
+
 class Queue:
     """Job records and their state sets; every transition is one Lua script, so a crash never strands a job."""
 
@@ -201,6 +228,7 @@ class Queue:
                 "kind": unit.kind,
                 "key": unit.key,
                 "members": json.dumps(unit.members),
+                "manifest_digest": unit.manifest_digest,
                 "slots": need.slots,
                 "capabilities": json.dumps(sorted(need.capabilities)),
                 "state": "pending",
@@ -221,6 +249,16 @@ class Queue:
         keys = [_key("pending"), _head(head, "pending")]
         return [job for job in self.pending() if job in mine and self._drop(keys=[_job(job), *keys], args=[job])]
 
+    def drop(self, head: str) -> list[str]:
+        """Remove the head's pending jobs and return them by name; its leased jobs run to completion. The jobs are
+        read from the head's own pending set and dropped in one pipeline, so the whole pending order is never read."""
+        jobs = sorted(self.members(head, "pending"))
+        keys = [_key("pending"), _head(head, "pending")]
+        pipe = self.client.pipeline()
+        for job in jobs:
+            self._drop(keys=[_job(job), *keys], args=[job], client=pipe)
+        return [job for job, dropped in zip(jobs, pipe.execute()) if dropped]
+
     def pending(self) -> list[str]:
         return list(self.client.zrange(_key("pending"), 0, -1))
 
@@ -240,25 +278,16 @@ class Queue:
         return set(self.client.smembers(_head(head, state)))
 
     def job(self, job: str) -> Job | None:
-        record = self.client.hgetall(_job(job))
-        if not record:
-            return None
-        return Job(
-            id=job,
-            head=record["head"],
-            unit=Unit(kind=record["kind"], key=record["key"], members=tuple(json.loads(record["members"]))),
-            requirement=Requirement(
-                slots=int(record["slots"]), capabilities=frozenset(json.loads(record["capabilities"]))
-            ),
-            state=record["state"],
-            attempts=int(record["attempts"]),
-            worker=record["worker"],
-            outcome=record["outcome"],
-            base=record["base"],
-            grader=record["grader"],
-            leased_ms=int(record.get("leased_ms", 0)),
-            rank=int(record.get("rank", UNRANKED)),
-        )
+        return _decode(job, self.client.hgetall(_job(job)))
+
+    def jobs(self, jobs: Sequence[str]) -> Iterator[Job | None]:
+        """Yield, in order, what job returns for each id, reading the records with HGETALL in pipelines of at most
+        BATCH ids that open no transaction, each batch read only once the one before it was taken."""
+        for batch in batched(jobs, BATCH):
+            pipe = self.client.pipeline(transaction=False)
+            for job in batch:
+                pipe.hgetall(_job(job))
+            yield from map(_decode, batch, pipe.execute())
 
     def slots(self, jobs: Sequence[str]) -> dict[str, tuple[int, int]]:
         """Return the slots and lease start of each job whose record still exists, read with HMGET in one pipeline that
@@ -271,6 +300,14 @@ class Queue:
             for job, (slots, leased) in zip(jobs, pipe.execute())
             if slots is not None
         }
+
+    def states(self, jobs: Sequence[str]) -> list[str | None]:
+        """Return each job's state in order, None for a job whose record is gone, read with HGET in one pipeline that
+        opens no transaction and builds no job."""
+        pipe = self.client.pipeline(transaction=False)
+        for job in jobs:
+            pipe.hget(_job(job), "state")
+        return pipe.execute()
 
     def token(self, job: str) -> str:
         return str(self.client.hget(_job(job), "token") or "")

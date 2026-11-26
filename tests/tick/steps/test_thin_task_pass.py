@@ -1,30 +1,43 @@
 """The thin task pass tick step queues one enhancement plan task for each thin open engineer or ci task, marks the
 task as needing enhancement in the same ledger write and tells the master once."""
 
+import io
+import json
+import urllib.error
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from email.message import Message
 from importlib import import_module
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 
 from scripts.swarm import thin_task
 from scripts.swarm.ledger_client import LedgerRefused
-from scripts.swarm_ledger import ledger_server
+from scripts.swarm_ledger import ledger_enhancement, ledger_server
+from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import schemas
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.tick import registry
 from scripts.tick.adapters.fakes import FakeLedger, fake_tools
 from scripts.tick.adapters.ledger import ClientLedger
 from scripts.tick.deadline import Deadline
-from scripts.tick.steps import CallStep, actions_of, hook_domains
+from scripts.tick.steps import CallStep, actions_of, hook_domains, thin
 
 pytestmark = pytest.mark.unit
 
 SLUG = "sw"
 EFFECTS = frozenset({"inbox", "ledger"})
 NEEDED = {"enhancement": "needed"}
-MARK = {"op": "task_enhancement", "id": "thin-mark-t1", "by": "swarm", "item": "tasks/t1", "enhancement": "needed"}
+MARK = {
+    "op": "task_enhancement",
+    "id": "thin-mark-t1",
+    "by": "swarm",
+    "item": "tasks/t1",
+    "enhancement": "needed",
+    "expected": None,
+}
 THIN: dict[str, Any] = {
     "id": "t1",
     "title": "Fix the claim",
@@ -34,10 +47,29 @@ THIN: dict[str, Any] = {
     "phase": "p1",
     "description": "Fix the claim.",
 }
+PHASELESS = {key: value for key, value in THIN.items() if key != "phase"}
+OWN_PHASE = {
+    "op": "phase_add",
+    "id": "thin-phase-t1",
+    "by": "swarm",
+    "phase": "enhance-t1",
+    "title": "Plan the thin task Fix the claim",
+    "description": "Holds task t1 and its enhancement plan, so the planner publishes that plan into this phase.",
+    "planning": "manual",
+    "not_duplicate": "Each thin task with no phase gets a phase of its own for its enhancement plan.",
+}
+MOVE = {
+    "op": "task_update",
+    "id": "thin-move-t1",
+    "by": "swarm",
+    "item": "tasks/t1",
+    "fields": {"phase": "enhance-t1"},
+}
 FULL = (
     "Add the step body seam scripts.tick.steps.thin so every open engineer task with a thin text gets one planner "
     "enhancement task and the master hears about it once, while tasks that already carry a plan stay untouched by "
-    "the pass. Done when the pull request is merged."
+    "the pass. Tests observe scripts.tick.steps.thin writes one planner enhancement per thin task. "
+    "Done when the pull request is merged."
 )
 
 
@@ -95,11 +127,16 @@ def _step() -> CallStep:
     return found
 
 
-def _run(tasks: list[dict[str, Any]], ledger: FakeLedger | None = None, deadline: Deadline | None = None) -> Pass:
+def _run(
+    tasks: list[dict[str, Any]],
+    ledger: FakeLedger | None = None,
+    deadline: Deadline | None = None,
+    doc: dict[str, Any] | None = None,
+) -> Pass:
     held = ledger or FakeLedger({})
     inbox = Inbox()
     values: dict[str, Any] = {
-        "doc": {"tasks": tasks},
+        "doc": {**(doc or {}), "tasks": tasks},
         "tools": replace(fake_tools(), ledger=held).for_effects(EFFECTS),
         "deadline": deadline or Deadline.after(5),
         "slug": SLUG,
@@ -122,14 +159,16 @@ def _added(found: Pass) -> list[dict[str, Any]]:
 
 
 def _applied(tasks: list[dict[str, Any]], operations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The ledger rows after a pass's writes: each task add as a new open row in its lane and phase, and each
-    enhancement operation set on its target."""
+    """The ledger rows after a pass's writes: each task add as a new open row in its lane and phase, each task update
+    merged into its target and each enhancement operation set on its target; a phase add leaves the rows as they are."""
     rows = {task["id"]: dict(task) for task in tasks}
     for operation in operations:
         if operation["op"] == "task_add":
             added = {"id": operation["task"], "state": "open", "lane": operation["lane"], "phase": operation["phase"]}
             rows[operation["task"]] = added
-        else:
+        elif operation["op"] == "task_update":
+            rows[operation["item"].removeprefix("tasks/")].update(operation["fields"])
+        elif operation["op"] == "task_enhancement":
             rows[operation["item"].removeprefix("tasks/")]["enhancement"] = operation["enhancement"]
     return list(rows.values())
 
@@ -216,6 +255,26 @@ def test_a_task_that_is_not_an_unmarked_thin_open_engineer_task_gets_no_write(ta
     assert (found.lines, found.calls(), found.inbox.sent) == ([], [], [])
 
 
+@pytest.mark.feature("thin-skip-open-pr")
+@pytest.mark.parametrize(
+    ("fields", "checked"),
+    [
+        ({"pr_url": "https://github.com/o/r/pull/7"}, False),
+        ({"branch": "engineer-1"}, False),
+        ({"pr_url": "", "branch": ""}, True),
+    ],
+    ids=["pull request", "branch", "empty"],
+)
+def test_only_an_open_task_without_a_pull_request_or_branch_gets_the_thin_mark(
+    fields: dict[str, Any], checked: bool
+) -> None:
+    """A thin open task that carries a pull request link or a branch gets no enhancement write, while empty values
+    still leave it checked and marked."""
+    held = {**THIN, **fields}
+    found = _run([held])
+    assert (thin.unchecked(held), bool(_operations(found)), bool(found.lines)) == (checked, checked, checked)
+
+
 @pytest.mark.feature("tick-thin-task-pass")
 @pytest.mark.parametrize("lane", [{"lane": "ci", "kind": "ci"}, {"lane": "eng"}, {}], ids=["ci", "eng", "no lane"])
 def test_a_thin_ci_or_engineer_task_is_queued_whatever_its_lane_field(lane: dict[str, str]) -> None:
@@ -283,12 +342,33 @@ def test_two_thin_tasks_are_both_queued_and_named_in_one_master_notice() -> None
 
 
 @pytest.mark.feature("tick-thin-task-pass")
-def test_a_thin_task_with_no_phase_or_description_gets_an_enhancement_task_with_neither() -> None:
-    """A thin task with no phase gets an enhancement task with no phase, whose description says it had none."""
-    task = {key: value for key, value in THIN.items() if key != "phase"} | {"description": ""}
-    [added] = _added(_run([task]))
-    assert "phase" not in added
+def test_a_thin_task_with_no_phase_gets_a_manual_phase_of_its_own_holding_it_and_its_enhancement() -> None:
+    """A thin task with no phase gets, in its one ledger write, a manual planning phase named like its enhancement
+    task, a move into that phase, its enhancement task added in it and its mark, in that order; the description of a
+    task with none says so, and the next pass over the rows that write produced changes nothing."""
+    task = PHASELESS | {"description": ""}
+    first = _run([task])
+    [phase, moved, added, marked] = _operations(first)
+    assert (phase, moved, marked) == (OWN_PHASE, MOVE, MARK)
+    assert {key: added[key] for key in ("op", "id", "task", "lane", "kind", "phase", "enhances")} == {
+        "op": "task_add",
+        "id": "thin-add-t1",
+        "task": "enhance-t1",
+        "lane": "plan",
+        "kind": "plan",
+        "phase": "enhance-t1",
+        "enhances": "t1",
+    }
     assert added["description"].endswith("Its current description: none.")
+    assert [name for name, _ in first.calls()] == ["mutate"]
+    assert first.lines == ["queued enhance-t1 for thin task t1"]
+    after = _applied([task], _operations(first))
+    assert after == [
+        {**task, "phase": "enhance-t1", **NEEDED},
+        {"id": "enhance-t1", "state": "open", "lane": "plan", "phase": "enhance-t1"},
+    ]
+    second = _run(after)
+    assert (second.lines, second.calls(), second.inbox.sent) == ([], [], [])
 
 
 @pytest.mark.feature("tick-thin-task-pass")
@@ -298,12 +378,108 @@ def test_a_spent_deadline_takes_no_task() -> None:
     assert (found.lines, found.calls(), found.inbox.sent) == ([], [], [])
 
 
+def _frozen(target: str) -> dict[str, Any]:
+    """A ledger with phase p1 under plan a, phase p2 under plan b and one freeze record on ``target``."""
+    return {
+        "plans": [{"id": "a", "title": "Claims"}, {"id": "b", "title": "Hives"}],
+        "phases": [{"id": "p1", "title": "Build", "plan": "plans/a"}, {"id": "p2", "title": "Ship", "plan": "plans/b"}],
+        "freezes": [
+            {"id": f"freeze-{target}", "verb": "freeze", "target": target, "by": "operator", "at": 1, "reason": ""}
+        ],
+    }
+
+
 @pytest.mark.feature("tick-thin-task-pass")
-def test_every_write_of_a_pass_is_one_the_ledger_api_accepts() -> None:
+@pytest.mark.parametrize(
+    "target", ["tasks/t1", "phases/p1", "plans/a"], ids=["task freeze", "phase freeze", "plan freeze"]
+)
+def test_a_thin_task_held_by_a_freeze_gets_no_enhancement_write(target: str) -> None:
+    """A thin open task under a freeze on itself, its phase or its phase's plan gets no ledger write, no action line
+    and no master notice."""
+    found = _run([THIN], doc=_frozen(target))
+    assert (found.lines, found.calls(), found.inbox.sent) == ([], [], [])
+
+
+@pytest.mark.feature("tick-thin-task-pass")
+def test_an_unfrozen_thin_task_beside_a_frozen_phase_still_gets_its_enhancement() -> None:
+    """In a ledger whose phase p1 is frozen, a thin task in the open phase p2 still gets its one enhancement write
+    and the master notice naming it."""
+    found = _run([{**THIN, "id": "t2", "phase": "p2"}], doc=_frozen("phases/p1"))
+    assert found.lines == ["queued enhance-t2 for thin task t2"]
+    assert [operation["id"] for operation in _operations(found)] == ["thin-add-t2", "thin-mark-t2"]
+    assert found.inbox.sent == [("swarm", f"master@{SLUG}", _notice("enhance-t2"), True)]
+
+
+@pytest.mark.feature("tick-thin-task-pass")
+@pytest.mark.parametrize(
+    ("task", "batch"),
+    [
+        (THIN, ["task_add", "task_enhancement"]),
+        (PHASELESS, ["phase_add", "task_update", "task_add", "task_enhancement"]),
+    ],
+    ids=["phase", "no phase"],
+)
+def test_every_write_of_a_pass_is_one_the_ledger_api_accepts(task: dict[str, Any], batch: list[str]) -> None:
     """Through the real ledger adapter the first pass over a thin task sends one batch, the enhancement task add and
-    the enhancement mark, and the ledger API's own operation check accepts every operation in it."""
+    the enhancement mark, led for a task with no phase by its own phase add and its move into it, and the ledger API's
+    own operation check accepts every operation in it."""
     client = Accepting()
-    found = _run([THIN], cast(FakeLedger, ClientLedger(SLUG, lambda remaining: cast(Any, client))))
+    found = _run([task], cast(FakeLedger, ClientLedger(SLUG, lambda remaining: cast(Any, client))))
     assert client.refused == []
-    assert [[operation["op"] for operation in batch] for batch in client.sent] == [["task_add", "task_enhancement"]]
+    assert [[operation["op"] for operation in sent] for sent in client.sent] == [batch]
     assert found.lines == ["queued enhance-t1 for thin task t1"]
+
+
+@pytest.mark.feature("thin-task-enhancement-snapshot")
+@pytest.mark.parametrize("held", [{}, {"enhancement": None}, {"enhancement": ""}], ids=["absent", "null", "empty"])
+def test_the_thin_mark_carries_the_enhancement_value_read(held: dict[str, Any]) -> None:
+    assert thin.unchecked({**THIN, **held}) is True
+    found = _run([{**THIN, **held}])
+    assert _operations(found)[-1] == {**MARK, "expected": held.get("enhancement")}
+
+
+@pytest.mark.feature("thin-task-enhancement-snapshot")
+@pytest.mark.parametrize("decided", ["planned", "skipped"])
+def test_a_revision_retry_preserves_the_thin_snapshot_and_refuses_a_concurrent_decision(
+    monkeypatch: pytest.MonkeyPatch, decided: str
+) -> None:
+    row = {"id": "t1"}
+    posts: list[dict[str, Any]] = []
+    paths: list[str] = []
+    ctx = Mock()
+    ctx.refused = []
+    client = api_client.ResourceClient("http://ledger.test", {})
+
+    def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        assert slug == SLUG
+        paths.append(path)
+        if path == "tasks/t1":
+            return {"revision": f"{len(posts) + 1:064x}"}
+        assert path == "operations"
+        assert payload is not None
+        posts.append(json.loads(json.dumps(payload)))
+        if len(posts) == 1:
+            row["enhancement"] = decided
+            body = (
+                b'{"error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}}'
+            )
+            raise urllib.error.HTTPError("http://ledger.test", 409, "Refused", Message(), io.BytesIO(body))
+        schemas.check_operations(payload, ledger_server.core, ("t1",))
+        [mark] = [operation for operation in payload["ops"] if operation["op"] == "task_enhancement"]
+        ledger_enhancement.apply({"tasks": [row]}, mark, ctx)
+        return {"rejected": ctx.refused}
+
+    monkeypatch.setattr(client, "request", request)
+    monkeypatch.setattr(api_client.time, "sleep", Mock())
+    found = _run([THIN], cast(FakeLedger, ClientLedger(SLUG, lambda remaining: client)))
+    assert paths == ["tasks/t1", "operations", "tasks/t1", "operations"]
+    assert [post["guards"] for post in posts] == [{"tasks/t1": f"{1:064x}"}, {"tasks/t1": f"{2:064x}"}]
+    assert [[operation for operation in post["ops"] if operation["op"] == "task_enhancement"] for post in posts] == [
+        [{**MARK, "expected": None}],
+        [{**MARK, "expected": None}],
+    ]
+    assert row == {"id": "t1", "enhancement": decided}
+    assert found.lines == ["refused the enhancement of t1: ledger sw refused: ['task t1 enhancement changed']"]
+    assert found.inbox.sent == []
+    ctx.stamp.assert_not_called()
+    ctx.record.assert_not_called()

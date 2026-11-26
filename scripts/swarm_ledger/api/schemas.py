@@ -70,10 +70,15 @@ PAGINATION = {
     "properties": {
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
         "cursor": {"type": "string", "pattern": "^[a-f0-9]{64}:[0-9]{1,12}$"},
-        "state": {"enum": ["done"]},
+        "state": {"enum": ["done", "open"]},
         "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "q": {"type": "string", "maxLength": 200},
         "targets": {"type": "string", "minLength": 1, "maxLength": 500},
+        "ids": {"type": "string", "maxLength": 8000},
+        "states": {"type": "string", "maxLength": 200},
+        "pinned": {"enum": ["1"]},
+        "branches": {"type": "string", "maxLength": 8000},
+        "fields": {"type": "string", "maxLength": 500},
     },
 }
 
@@ -101,7 +106,7 @@ FIELDS = {
     "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up workstation requires_harness needs workflow case covers_job enhances",
     "task_update": "by item fields if_state if_match if_plan_lines_missing quote",
     "task_rank": "by item rank if_owned",
-    "task_enhancement": "by item enhancement",
+    "task_enhancement": "by item enhancement expected",
     "task_group": "by item members",
     "task_ungroup": "by item if_match",
     "task_split": "by item halves",
@@ -175,6 +180,7 @@ KIND_TYPES = {
     "artifact_add": {"plan": {"type": "boolean"}},
     "freeze_set": {"only": {"type": "boolean"}, "position": {"enum": ["top", "bottom"]}},
     "plan_add": {"artifact": {"type": "string", "maxLength": 100000}, "source": {"type": "object"}},
+    "task_enhancement": {"expected": {"enum": [None, "", "needed", "planned", "skipped"]}},
     "task_rank": {"if_owned": {"type": "boolean"}},
     "time_left": {"lab": {"type": "object"}},
 }

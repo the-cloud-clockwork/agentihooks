@@ -1,0 +1,12 @@
+{
+  "id": "metrics-spool-configured-home",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-kingston-disk-writers",
+  "behaviour": "The metrics spool uses the configured agentihooks home and preserves its default location when the setting is absent or empty.",
+  "seam": "metrics outbox path resolution and opening its SQLite database with WAL in the resolved directory",
+  "tests": [
+    "tests/swarm/test_metrics_outbox_home.py::test_metrics_spool_keeps_the_default_home",
+    "tests/swarm/test_metrics_outbox_home.py::test_metrics_spool_honours_the_configured_home",
+    "tests/swarm/test_metrics_outbox_home.py::test_metrics_spool_opens_under_the_configured_home"
+  ]
+}

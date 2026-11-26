@@ -1,0 +1,26 @@
+rules:
+  - id: codex-planner-canary-ancestor-only
+    languages: [python]
+    severity: ERROR
+    message: Resolve a planner canary through its recorded launch when the Codex sandbox hides the harness ancestor.
+    patterns:
+      - pattern-inside: |
+          def $VALIDATE(...):
+              ...
+      - metavariable-regex:
+          metavariable: $VALIDATE
+          regex: ^validate(?:_|$)
+      - pattern: process()
+  - id: codex-planner-canary-recorded-late
+    languages: [python]
+    severity: ERROR
+    message: Record the Codex planner launch before opening the turn that runs its canary.
+    pattern-either:
+      - pattern: |
+          open_turn(...)
+          ...
+          binding.bind_sandbox(...)
+      - pattern: |
+          $RECORD = $REPLACE(..., active_turn_id=open_turn(...), ...)
+          ...
+          binding.bind_sandbox(...)

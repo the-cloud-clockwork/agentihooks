@@ -230,10 +230,11 @@ def launch_token(slug: str, name: str) -> str:
 
 
 def client(slug: str, timeout: float = REQUEST_TIMEOUT) -> Any:
-    """The ledger API client for slug: the ledger API route code run in this process over the shared database."""
-    from scripts.tick.adapters import database_ledger
+    """The ledger API client for slug: this host's warm writer first, else the ledger API route code run in this
+    process over the shared database."""
+    from scripts.tick.adapters import writer_client
 
-    return database_ledger.client(base(slug), timeout)
+    return writer_client.client(base(slug), timeout)
 
 
 def request(slug: str, ops: list[dict[str, Any]] | None = None, timeout: float | None = None) -> dict[str, Any]:

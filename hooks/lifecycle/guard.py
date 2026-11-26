@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -26,6 +27,8 @@ def _setting(key: str, default: str) -> str:
 
 
 def enabled() -> bool:
+    if sys.platform == "win32":
+        return False
     return _setting("LIFECYCLE_GC_ENABLED", "true").lower() in ("1", "true", "yes")
 
 

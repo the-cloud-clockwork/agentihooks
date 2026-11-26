@@ -14,11 +14,11 @@ from packaging.version import InvalidVersion, Version
 
 from scripts import updater
 from scripts.events.bus import SERVE_WAITED_MS
-from scripts.handoff import transfers
+from scripts.handoff import envelope, transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
 from scripts.hub import branch_heads, lease
-from scripts.swarm import readiness, run_window, successor_fill
+from scripts.swarm import admission_view, readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
@@ -84,9 +84,10 @@ class Admission:
         ledger: LedgerClient | None = None,
         source: readiness.Source | None = None,
         clock: lease.Clock = lease.wall_ms,
-    ):
+    ) -> None:
         self._store, self.ledger, self.clock = store, ledger or LedgerClient(service=True), clock
         self.source = source or readiness.Source(store, self.ledger)
+        self.view = admission_view.Narrow(lambda: self.store, self.ledger, self.source)
 
     @property
     def store(self) -> RedisStore:
@@ -120,9 +121,8 @@ class Admission:
             return None
         timer.mark("stopped")
         task_id, lane, generation = request["task"], request["lane"], request["generation"]
-        view = self.source.snapshot(slug)
-        timer.mark("snapshot")
-        if withdrawn := readiness.withdrawal(
+        view = self.view.task(slug, task_id, timer.mark)
+        if withdrawn := admission_view.withdrawal(
             SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view
         ):
             return self._withdrawn(slug, request, offer, withdrawn)
@@ -142,7 +142,7 @@ class Admission:
             )
             return None
         timer.mark("cap")
-        reserved = self._reserved(view, view.rows[task_id], request["hive"])
+        reserved = self._reserved(slug, view.rows[task_id], request["hive"])
         with self._turn(request["hive"], offer) as busy:
             timer.mark("turn")
             if not busy and (kept := self._kept(slug, request, offer)):
@@ -240,15 +240,15 @@ class Admission:
             return "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
         return ""
 
-    def _reserved(self, view: readiness.Snapshot, row: dict[str, Any], hive: str) -> int:
-        """The root slots kept for the waiting tasks only the root hive takes of every events swarm, the asking swarm
-        read from its own view, when this task could run on any hive; none for another hive or a task only the root
-        hive takes."""
+    def _reserved(self, slug: str, row: dict[str, Any], hive: str) -> int:
+        """The root slots kept for the waiting tasks only the root hive takes of every events swarm, each read through
+        its open pinned tasks, when this task could run on any hive; none for another hive or a task only the root hive
+        takes."""
         if hive != readiness.ROOT or readiness.root_only(row):
             return 0
         capabilities = readiness.declared(self.store, hive)
-        views = [view, *(self.source.snapshot(slug) for slug in self.source.slugs() if slug != view.slug)]
-        return sum(readiness.root_waiting(each, capabilities) for each in views)
+        slugs = [slug, *(each for each in self.source.slugs() if each != slug)]
+        return sum(self.view.waiting(each, capabilities) for each in slugs)
 
     @contextmanager
     def _turn(self, hive: str, offer: str) -> Iterator[str]:
@@ -322,7 +322,7 @@ class Admission:
         self, slug: str, request: dict[str, Any], rows: dict[str, Any], doc: dict[str, Any], timer: _StepTimer
     ) -> dict[str, Any] | None:
         from scripts.hive import orders
-        from scripts.swarm import launch_check, profile_choice, tick
+        from scripts.swarm import launch_check, preempt, profile_choice, tick
 
         task_id, lane, now = request["task"], request["lane"], self.clock()
         row = rows[task_id]
@@ -351,14 +351,17 @@ class Admission:
         self.store.seats.occupy(seat, name, now)
         claimed: dict[str, Any] = {**row, **live}
         claimed.update(self._continuation(slug, name, claimed, rows))
+        timer.mark("continuation")
         claimed["overlaps"] = tick._sharing(claimed, rows, self.store.agents(slug))
         members: list[str] = claimed.get("group_members") or []
         claimed["group"] = [
             {key: rows[member][key] for key in ("id", "title", "description")} for member in members if member in rows
         ]
         claimed[orders.SEEDS] = self._seeds(slug, claimed, doc, name)
+        timer.mark("seeds")
         primed = tick.primed(self.store, slug, seat, claimed)
         task = successor_fill.task(primed, self.store.config(slug), record.lane)
+        timer.mark("primed")
         task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {
             "execution_id": agent.execution_id,
@@ -372,6 +375,7 @@ class Admission:
         except Exception:
             self._release(slug, task_id, name)
             raise
+        timer.mark("transfer")
         admitted = {
             "hive": request["hive"],
             "name": name,
@@ -379,6 +383,7 @@ class Admission:
         }
         self.store.redis.set(self._key(slug, request), json.dumps(admitted), px=ADMITTED_MS)
         launch_check.begin(self.store, slug, agent, now, owner=launch_check.HUB)
+        preempt.attempted(self.store, slug, task_id, now)
         return admitted
 
     def _stack_base(self, slug: str, task: dict, rows: dict) -> list[dict]:
@@ -403,6 +408,7 @@ class Admission:
         config = self.store.config(slug)
         reclaim, origin = branch_heads.reclaimer(config)
         repo = config.repo_origin or config.repo
+        rows = {**self.view.branched(slug, envelope.candidates(lives, task.get("branch") or "")), **rows}
         if handoff:
             saved: dict[str, Any] = self.store.handoff_envelope(slug, task_id) or {}
             resolved = continuation.resolve(repo, task, rows, lives, saved, reclaim, origin)
@@ -521,7 +527,11 @@ class Admission:
         admitted = json.loads(held) if held else None
         if not admitted or admitted["hive"] != request["hive"]:
             return False
+        from scripts.hive.launch import ACCOUNT_FULL
+
         task_id, harness, reason = request["task"], request["harness"], request["reason"]
+        if "No account slot available" in reason or reason.startswith(ACCOUNT_FULL):
+            harness = ""
         self.store.note_launch_failure(slug, task_id, reason, harness)
         if harness:
             admitted["task"]["avoid_harness"] = harness

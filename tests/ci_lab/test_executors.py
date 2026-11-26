@@ -1,6 +1,7 @@
 import dataclasses
 import hashlib
 import json
+import math
 import os
 import signal
 import subprocess
@@ -18,13 +19,24 @@ from typing import Any, cast
 import pytest
 
 from scripts import ci_wiring
-from scripts.ci_lab import contract, executors, metrics, run_static, run_tests, static_gates, venvs, worker
+from scripts.ci_lab import (
+    contract,
+    executors,
+    expand_mutation,
+    metrics,
+    run_static,
+    run_tests,
+    static_gates,
+    venvs,
+    worker,
+)
 from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import CannotRun, Outcome, PortAllocator, PortRange
 from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.worker import Finished, Lease
 from scripts.ci_lab.worktrees import Mirror, Worktrees
+from scripts.ci_mutation import scope
 
 WORKFLOW = """
 on: pull_request
@@ -51,9 +63,30 @@ if sys.argv[1] == "venv":
     pathlib.Path(sys.argv[-1]).mkdir(parents=True, exist_ok=True)
 """
 GIT = ("git", "-c", "user.name=lab", "-c", "user.email=lab@example.invalid")
+RUNNER = """import json
+import sys
+from pathlib import Path
+
+answers = json.loads(Path(__file__).with_name("answers.json").read_text())
+kind = json.loads(Path(sys.argv[1]).read_text())["kind"]
+Path(sys.argv[2]).write_text(json.dumps(answers[kind]))
+sys.exit(answers["code"])
+"""
+MUTANTS = ("scripts.alpha.x_first__mutmut_1", "scripts.alpha.x_first__mutmut_2")
+REACHING = {
+    "status": 0,
+    "tests": {"scripts.alpha.x_first": ["tests/test_alpha.py::test_a"]},
+    "durations": {"tests/test_alpha.py::test_a": 0.5},
+    "cpu": 0.0,
+}
+TRAMPOLINED = {
+    "hooks/pkg/gamma.py": ["hooks.pkg.gamma.x_third__mutmut_1"],
+    "scripts/alpha.py": ["scripts.alpha.x_first__mutmut_1", "scripts.alpha.x_first__mutmut_2"],
+}
 
 
 CACHED = {"git": {"hits": 1, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
+CACHED_WITH_GRADER = {"git": {"hits": 2, "misses": 0}, "uv": {"hits": 1, "misses": 0}}
 ROOT = Path(__file__).resolve().parents[2]
 LEASE_CONTEXT = {
     "inputs.base": "b1",
@@ -65,12 +98,7 @@ LEASE_CONTEXT = {
     "github.run_attempt": "1",
     "github.run_number": "1",
 }
-REFUSED = {
-    "lint/refuse-changelog-fragments-named-off-the-branch-or-opening-without-a-section-heading": (
-        "no value for 'github.head_ref' in the context"
-    ),
-    "lint/artifact-sanity-checks": "no value for 'github.base_ref' in the context",
-}
+REFUSED: dict[str, str] = {}
 SECRET_WORKFLOW = r"""
 jobs:
   lint:
@@ -89,7 +117,7 @@ class FakeWorktrees:
         self.trees = trees
         self.broken = broken
         self.fetched = fetched
-        self.calls: list[tuple[str, object]] = []
+        self.calls: list[tuple[object, ...]] = []
 
     def lease(self, head: str) -> tuple[Path, bool]:
         if head == self.broken:
@@ -100,8 +128,8 @@ class FakeWorktrees:
     def release(self, head: str) -> None:
         self.calls.append(("release", head))
 
-    def own(self, head: str) -> tuple[Path, bool]:
-        self.calls.append(("own", head))
+    def own(self, head: str, base: str) -> tuple[Path, bool]:
+        self.calls.append(("own", head, base))
         return self.trees[head], head in self.fetched
 
     def drop(self, tree: Path) -> None:
@@ -128,8 +156,10 @@ class Box:
         self.requests: list[dict[str, Any]] = []
         self.runs: list[tuple[list[str], float]] = []
 
-    def __call__(self, root: Path, cwd: Path, ports: PortAllocator, whitelist: dict[str, str]) -> "Box":
-        self.made.append((root, cwd, ports, whitelist))
+    def __call__(
+        self, root: Path, cwd: Path, ports: PortAllocator, whitelist: dict[str, str], readonly: tuple[Path, ...] = ()
+    ) -> "Box":
+        self.made.append((root, cwd, ports, whitelist, readonly))
         return self
 
     def run(self, argv: list[str], timeout: float) -> Outcome:
@@ -159,8 +189,8 @@ def pod_of(root: Path, trees: FakeWorktrees) -> executors.Pod:
     return pod
 
 
-def lease(kind: str, key: str, members: tuple[str, ...], slots: int = 1) -> Lease:
-    return Lease("job", "tok", "h1", Unit(kind, key, members), slots, 1500, "b1", "g1")
+def lease(kind: str, key: str, members: tuple[str, ...], slots: int = 1, manifest: str = "") -> Lease:
+    return Lease("job", "tok", "h1", Unit(kind, key, members, manifest), slots, 1500, "b1", "g1")
 
 
 def folder(root: Path, name: str, files: dict[str, str]) -> Path:
@@ -317,6 +347,78 @@ def test_static_releases_every_tree_it_leased_when_a_lease_or_the_gate_raises(
     assert static_trees.calls == [("lease", "h1"), ("release", "h1")]
 
 
+BASELINE_WORKFLOW = """
+on: pull_request
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: New findings
+        run: semgrep scan --error --config rules.yml --baseline-commit "$BASE" tests
+      - name: Every finding
+        run: semgrep scan --error --config rules.yml tests
+"""
+LEASED = [("lease", "h1"), ("lease", "b1"), ("lease", "g1")]
+RELEASED = [("release", "h1"), ("release", "b1"), ("release", "g1")]
+
+
+class PrivateWorktrees(FakeWorktrees):
+    def own(self, head: str, base: str) -> tuple[Path, bool]:
+        super().own(head, base)
+        return self.trees[f"own {head}"], False
+
+
+@pytest.fixture
+def baseline_trees(tmp_path: Path) -> PrivateWorktrees:
+    head = folder(tmp_path, "head", {LOCK: "lock-h"})
+    private = folder(tmp_path, "private", {LOCK: "lock-h"})
+    base = folder(tmp_path, "base", {LOCK: "lock-b"})
+    files = {".github/workflows/test.yml": BASELINE_WORKFLOW, ".github/input-keys.json": "{}", LOCK: "lock-g"}
+    grader = folder(tmp_path, "grader", files)
+    return PrivateWorktrees({"h1": head, "own h1": private, "b1": base, "g1": grader})
+
+
+@pytest.mark.feature("lab-static-baseline-gate-own-tree")
+@pytest.mark.parametrize(("name", "tree"), [("semgrep/new-findings", "own h1"), ("semgrep/every-finding", "h1")])
+def test_static_runs_only_a_gate_that_rewrites_its_tree_in_a_private_tree_of_the_head_and_drops_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    venv: Recorder,
+    baseline_trees: PrivateWorktrees,
+    name: str,
+    tree: str,
+) -> None:
+    gates = {found.name: found for found in static_gates.discover(BASELINE_WORKFLOW)}
+    summary = folder(tmp_path, "run", {"summary.md": "ok\n"}) / "summary.md"
+    ran = Recorder(run_static.Result(name, 0, tmp_path / "log.txt", summary))
+    monkeypatch.setattr(executors.run_static, "run", ran)
+    pod = pod_of(tmp_path, baseline_trees)
+
+    finished = executors.static(pod, lease("static", "k", (name,)))
+
+    trees = baseline_trees.trees
+    settings = run_static.Settings(pod.runs, tmp_path / "venv", pod.ports, WHITELIST, 30.0, LEASE_CONTEXT)
+    assert ran.calls == [(gates[name], trees[tree], trees["b1"], trees["g1"], settings)]
+    assert [call[1] for call in venv.calls] == [trees["h1"]]
+    assert finished.outcome == PASSED
+    private = [("own", "h1", "b1"), ("drop", trees["own h1"])] if tree == "own h1" else []
+    assert baseline_trees.calls == [*LEASED, *private, *RELEASED]
+
+
+@pytest.mark.feature("lab-static-baseline-gate-own-tree")
+def test_static_drops_the_private_tree_of_a_gate_that_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, baseline_trees: PrivateWorktrees
+) -> None:
+    monkeypatch.setattr(executors.run_static, "run", Recorder(RuntimeError("gate")))
+    pod = pod_of(tmp_path, baseline_trees)
+
+    with pytest.raises(RuntimeError, match="^gate$"):
+        executors.static(pod, lease("static", "k", ("semgrep/new-findings",)))
+
+    private = baseline_trees.trees["own h1"]
+    assert baseline_trees.calls == [*LEASED, ("own", "h1", "b1"), ("drop", private), *RELEASED]
+
+
 @pytest.fixture
 def bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     folder = tmp_path / "bin"
@@ -386,16 +488,8 @@ def test_static_grades_every_test_count_gate_of_the_real_workflow_on_a_clean_tre
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, bwrap: None
 ) -> None:
     graded, skipped = _graded_on_a_clean_tree(monkeypatch, tmp_path, "test-count")
-    assert graded == {
-        "test-count/install-dependencies": PASSED,
-        "test-count/fetch-the-base-suite-count-recorded-on-dev": PASSED,
-        "test-count/hold-the-base-revision-s-test-count": PASSED,
-        "test-count/record-the-head-count-for-the-next-queue-group": PASSED,
-    }
-    assert skipped == {
-        "test-count/fetch-the-base-suite-count-recorded-on-dev",
-        "test-count/record-the-head-count-for-the-next-queue-group",
-    }
+    assert graded == {"test-count/hold-the-base-revision-s-test-count": PASSED}
+    assert skipped == set()
 
 
 @pytest.mark.feature("lab-static-step-env")
@@ -478,7 +572,22 @@ def test_tests_runs_the_batch_on_the_lockfile_venv_with_the_manifest_and_flake_l
     finished = executors.tests(
         pod,
         suite,
-        Lease("job", "tok", "h1", Unit("test", "k", ("tests/a.py::t",), json.dumps(manifest)), 3, 1500, "b1", "g1"),
+        Lease(
+            "job",
+            "tok",
+            "h1",
+            Unit(
+                "test",
+                "k",
+                ("tests/a.py::t",),
+                json.dumps(manifest),
+                hashlib.sha256(json.dumps(manifest).encode()).hexdigest(),
+            ),
+            3,
+            1500,
+            "b1",
+            "g1",
+        ),
     )
 
     assert venv.calls == [
@@ -506,7 +615,7 @@ def report_of_tests(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, verdict: ru
     )
     monkeypatch.setattr(executors.run_tests, "run", Recorder(verdict))
     pod = pod_of(tmp_path, FakeWorktrees({"h1": tree}))
-    unit = Unit("test", "unit-key", ("tests/a.py::t", "tests/a.py::u"), "{}")
+    unit = Unit("test", "unit-key", ("tests/a.py::t", "tests/a.py::u"), "{}", hashlib.sha256(b"{}").hexdigest())
     return report(executors.tests(pod, suite, Lease("job", "tok", "h1", unit, 1, 1500, "b1", "g1")), pod)
 
 
@@ -574,10 +683,10 @@ def mutation_tree(tmp_path: Path) -> Path:
         "mutation",
         {
             "pyproject.toml": '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/pkg"]\n',
-            "hooks/pkg/gamma.py": "",
+            "hooks/pkg/gamma.py": "def third():\n    return 3\n",
             "hooks/pkgold/delta.py": "",
             LOCK: "lock-m",
-            "scripts/alpha.py": "def first():\n    return 1\n",
+            "scripts/alpha.py": "def first():\n    return 1\n\n\ndef second():\n    return 2\n",
             "scripts/pkg/__init__.py": "",
             "scripts/notes.txt": "",
             "hooks/beta.py": "",
@@ -588,31 +697,72 @@ def mutation_tree(tmp_path: Path) -> Path:
             "tests/unit/test_data.json": "",
         },
     )
-    subprocess.run([*GIT, "init", "-q", str(tree)], check=True)
+    subprocess.run([*GIT, "init", "-q", "-b", "b1", str(tree)], check=True)
     subprocess.run([*GIT, "-C", str(tree), "add", "."], check=True)
-    subprocess.run([*GIT, "-C", str(tree), "commit", "-q", "-m", "tree"], check=True)
+    subprocess.run([*GIT, "-C", str(tree), "commit", "-q", "-m", "base"], check=True)
+    subprocess.run([*GIT, "-C", str(tree), "switch", "-q", "-c", "h1"], check=True)
+    folder(
+        tmp_path,
+        "mutation",
+        {
+            "hooks/pkg/gamma.py": "def third():\n    return 5\n",
+            "scripts/alpha.py": "def first():\n    return 4\n\n\ndef second():\n    return 2\n",
+            "scripts/notes.txt": "note\n",
+            "hooks/beta.py": "LIMIT = 1\n",
+            "tests/test_alpha.py": "def test_a():\n    pass\n",
+        },
+    )
+    subprocess.run([*GIT, "-C", str(tree), "commit", "-q", "-a", "-m", "head"], check=True)
     return tree
 
 
 @pytest.fixture
-def trampolines(monkeypatch: pytest.MonkeyPatch) -> Recorder:
-    recorder = Recorder(None)
-    monkeypatch.setattr(executors.run_mutation, "trampoline", recorder)
-    return recorder
+def trampolines(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path, str, set[int]]]:
+    calls: list[tuple[Path, str, set[int]]] = []
+
+    def trampoline(tree: Path, path: str, changed: set[int]) -> list[str]:
+        calls.append((tree, path, set(changed)))
+        return TRAMPOLINED.get(path, [])
+
+    monkeypatch.setattr(executors.run_mutation, "trampoline", trampoline)
+    return calls
 
 
 def mutation_settings(tmp_path: Path) -> executors.Mutation:
     return executors.Mutation(tmp_path / "cache", tmp_path / "killers.json", 60.0, 4)
 
 
+def answering(tree: Path, code: int, status: str) -> Path:
+    rows = [{"name": mutant, "status": status, "seconds": 0.0} for mutant in MUTANTS]
+    answers = {
+        "code": code,
+        "stats": {"stats": [REACHING], "runner": tree.name},
+        "mutant": {"collection_seconds": 0.0, "rows": rows, "runner": tree.name},
+    }
+    files = {"scripts/__init__.py": "", "scripts/ci_lab/__init__.py": "", "scripts/ci_lab/run_mutation.py": RUNNER}
+    return folder(tree.parent, tree.name, {**files, "scripts/ci_lab/answers.json": json.dumps(answers)})
+
+
+def python_in(venv: Path) -> None:
+    python = venv / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    python.chmod(0o755)
+
+
 @pytest.mark.feature("lab-worker-executors")
 def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, mutation_tree: Path, trampolines: Recorder
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    venv: Recorder,
+    mutation_tree: Path,
+    trampolines: list[tuple[Path, str, set[int]]],
 ) -> None:
     stats = {"stats": [{"status": 0, "tests": {}, "durations": {}, "cpu": 1.0}]}
     box = Box([(0, stats)], tmp_path)
     monkeypatch.setattr(executors, "Sandbox", box)
-    trees = FakeWorktrees({"h1": mutation_tree}, fetched=frozenset({"h1"}))
+    grader = tmp_path / "grader"
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": grader}, fetched=frozenset({"h1"}))
     pod = pod_of(tmp_path, trees)
 
     finished = executors.mutation(pod, mutation_settings(tmp_path), lease("stats", "k1", ("tests/test_alpha.py",)))
@@ -625,16 +775,17 @@ def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
             venvs.Build(pod.ports, WHITELIST, 30.0),
         )
     ]
-    assert trampolines.calls == [
-        (mutation_tree, "hooks/pkg/gamma.py"),
-        (mutation_tree, "scripts/alpha.py"),
-        (mutation_tree, "scripts/pkg/__init__.py"),
+    assert trampolines == [
+        (mutation_tree, "hooks/beta.py", {1}),
+        (mutation_tree, "hooks/pkg/gamma.py", {2}),
+        (mutation_tree, "scripts/alpha.py", {2}),
     ]
     assert box.requests == [
         {
             "kind": "stats",
             "key": "k1",
             "options": OPTIONS,
+            "tree": str(mutation_tree),
             "root": str(mutation_tree),
             "cache": str(tmp_path / "cache"),
             "members": ["tests/test_alpha.py"],
@@ -648,19 +799,20 @@ def test_mutation_runs_a_stats_unit_with_its_tree_as_root_and_the_stats_cache(
         pod.runs,
     )
     assert timeout == 30.0
-    assert box.made == [(pod.runs, mutation_tree, pod.ports, WHITELIST)]
+    assert box.made == [(pod.runs, grader, pod.ports, WHITELIST, (grader,))]
     assert finished == Finished(PASSED, finished.report, tmp_path / "log1.txt")
     assert report(finished, pod) == {
         **stats,
         "seconds": 2.5,
-        "caches": {"git": {"hits": 0, "misses": 1}, "uv": {"hits": 1, "misses": 0}},
+        "caches": {"git": {"hits": 1, "misses": 1}, "uv": {"hits": 1, "misses": 0}},
     }
-    assert trees.calls == [("own", "h1"), ("drop", mutation_tree)]
+    assert trees.calls == [("lease", "g1"), ("own", "h1", "b1"), ("drop", mutation_tree), ("release", "g1")]
 
 
 @pytest.mark.feature("lab-worker-executors")
+@pytest.mark.usefixtures("venv", "trampolines")
 def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reaching_its_function(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, mutation_tree: Path, trampolines: Recorder
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation_tree: Path
 ) -> None:
     durations = {"tests/test_alpha.py::test_a": 0.5, "tests/unit/test_beta.py::test_b": 0.25}
     reached = {"scripts.alpha.x_first": ["tests/test_alpha.py::test_a"], "scripts.alpha.x_second": ["x"]}
@@ -672,23 +824,30 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
     }
     box = Box([(0, stats), (0, graded)], tmp_path)
     monkeypatch.setattr(executors, "Sandbox", box)
-    pod = pod_of(tmp_path, FakeWorktrees({"h1": mutation_tree}))
+    grader = tmp_path / "grader"
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": mutation_tree, "g1": grader}))
 
-    finished = executors.mutation(pod, mutation_settings(tmp_path), lease("mutant", "m1", members))
+    traced = ["tests/unit/test_beta.py", "tests/unit/test_new.py"]
+
+    finished = executors.mutation(
+        pod, mutation_settings(tmp_path), lease("mutant", "m1", members, manifest=json.dumps(traced))
+    )
 
     assert box.requests == [
         {
             "kind": "stats",
             "key": "m1",
             "options": OPTIONS,
+            "tree": str(mutation_tree),
             "root": str(mutation_tree),
             "cache": str(tmp_path / "cache"),
-            "members": ["tests/test_alpha.py", "tests/unit/test_beta.py"],
+            "members": traced,
         },
         {
             "kind": "mutant",
             "key": "m1",
             "options": OPTIONS,
+            "tree": str(mutation_tree),
             "members": list(members),
             "killers": str(tmp_path / "killers.json"),
             "tests": {"tests/test_alpha.py::test_a": 0.5},
@@ -696,9 +855,9 @@ def test_mutation_grades_a_mutant_unit_with_the_tests_its_trees_stats_show_reach
             "cap": 4,
         },
     ]
-    assert box.made == [(pod.runs, mutation_tree, pod.ports, WHITELIST)] * 2
+    assert box.made == [(pod.runs, grader, pod.ports, WHITELIST, (grader,))] * 2
     assert finished == Finished(PASSED, finished.report, tmp_path / "log2.txt")
-    assert report(finished, pod) == {**graded, "seconds": 2.5, "caches": CACHED}
+    assert report(finished, pod) == {**graded, "seconds": 2.5, "caches": CACHED_WITH_GRADER}
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -724,32 +883,192 @@ def test_mutation_fails_a_mutant_unit_whose_runner_fails_or_whose_mutant_lives(
     results = [result for _, result in scripted]
     box = Box(list(scripted), tmp_path)
     monkeypatch.setattr(executors, "Sandbox", box)
-    trees = FakeWorktrees({"h1": mutation_tree})
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": tmp_path / "grader"})
     pod = pod_of(tmp_path, trees)
 
-    finished = executors.mutation(
-        pod, mutation_settings(tmp_path), lease("mutant", "m1", ("scripts.alpha.x_first__mutmut_1",))
-    )
+    unit = lease("mutant", "m1", ("scripts.alpha.x_first__mutmut_1",), manifest='["tests/test_alpha.py"]')
+
+    finished = executors.mutation(pod, mutation_settings(tmp_path), unit)
 
     assert finished == Finished(FAILED, finished.report, tmp_path / log)
     assert len(box.runs) == runs
-    assert report(finished, pod) == {**(results[-1] or {}), "seconds": 2.5, "caches": CACHED}
-    assert trees.calls == [("own", "h1"), ("drop", mutation_tree)]
+    assert report(finished, pod) == {**(results[-1] or {}), "seconds": 2.5, "caches": CACHED_WITH_GRADER}
+    assert trees.calls == [("lease", "g1"), ("own", "h1", "b1"), ("drop", mutation_tree), ("release", "g1")]
 
 
 @pytest.mark.feature("lab-worker-executors")
+@pytest.mark.usefixtures("venv", "trampolines")
 def test_mutation_drops_its_private_tree_when_the_runner_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, venv: Recorder, mutation_tree: Path, trampolines: Recorder
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation_tree: Path
 ) -> None:
     monkeypatch.setattr(executors, "Sandbox", Recorder(CannotRun("no bwrap")))
-    trees = FakeWorktrees({"h1": mutation_tree})
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": tmp_path / "grader"})
 
     with pytest.raises(CannotRun, match="^no bwrap$"):
         executors.mutation(
             pod_of(tmp_path, trees), mutation_settings(tmp_path), lease("stats", "k", ("tests/test_alpha.py",))
         )
 
-    assert trees.calls == [("own", "h1"), ("drop", mutation_tree)]
+    assert trees.calls == [("lease", "g1"), ("own", "h1", "b1"), ("drop", mutation_tree), ("release", "g1")]
+
+
+@pytest.mark.feature("lab-mutation-protected-runner")
+@pytest.mark.parametrize(
+    ("code", "status", "verdict"), [(0, "killed", PASSED), (0, "survived", FAILED), (3, "killed", FAILED)]
+)
+@pytest.mark.usefixtures("bwrap", "trampolines", "venv")
+def test_mutation_answers_the_verdict_and_rows_of_the_runner_process_it_starts(
+    tmp_path: Path, mutation_tree: Path, code: int, status: str, verdict: str
+) -> None:
+    python_in(tmp_path / "venv")
+    head, grader = answering(mutation_tree, code, status), answering(tmp_path / "grader", code, status)
+    pod = pod_of(tmp_path, FakeWorktrees({"h1": head, "g1": grader}))
+
+    finished = executors.mutation(
+        pod, mutation_settings(tmp_path), lease("mutant", "m1", MUTANTS, manifest='["tests/test_alpha.py"]')
+    )
+
+    rows = [{"name": mutant, "status": status, "seconds": 0.0} for mutant in MUTANTS]
+    assert finished.outcome == verdict
+    assert report(finished, pod).get("rows") == (None if code else rows)
+
+
+@pytest.mark.feature("lab-mutation-protected-runner")
+@pytest.mark.parametrize(
+    ("grader", "head", "verdict"),
+    [
+        ((0, "survived"), (0, "killed"), FAILED),
+        ((0, "killed"), (3, "survived"), PASSED),
+        ((3, "killed"), (0, "killed"), FAILED),
+    ],
+)
+@pytest.mark.usefixtures("bwrap", "trampolines", "venv")
+def test_the_grader_trees_runner_decides_a_mutant_unit_whatever_the_head_runner_answers(
+    tmp_path: Path, mutation_tree: Path, grader: tuple[int, str], head: tuple[int, str], verdict: str
+) -> None:
+    python_in(tmp_path / "venv")
+    trees = FakeWorktrees({"h1": answering(mutation_tree, *head), "g1": answering(tmp_path / "grader", *grader)})
+    pod = pod_of(tmp_path, trees)
+
+    finished = executors.mutation(
+        pod, mutation_settings(tmp_path), lease("mutant", "m1", MUTANTS, manifest='["tests/test_alpha.py"]')
+    )
+
+    code, status = grader
+    rows = [{"name": mutant, "status": status, "seconds": 0.0} for mutant in MUTANTS]
+    graded = {} if code else {"collection_seconds": 0.0, "rows": rows, "runner": "grader"}
+    assert finished.outcome == verdict
+    assert report(finished, pod) == {**graded, "seconds": 2.5, "caches": CACHED_WITH_GRADER}
+    assert trees.calls == [("lease", "g1"), ("own", "h1", "b1"), ("drop", mutation_tree), ("release", "g1")]
+
+
+@pytest.mark.feature("lab-mutation-protected-runner")
+@pytest.mark.usefixtures("bwrap", "trampolines", "venv")
+def test_the_grader_trees_runner_answers_a_stats_unit_whatever_the_head_runner_answers(
+    tmp_path: Path, mutation_tree: Path
+) -> None:
+    python_in(tmp_path / "venv")
+    trees = FakeWorktrees(
+        {"h1": answering(mutation_tree, 3, "killed"), "g1": answering(tmp_path / "grader", 0, "killed")}
+    )
+    pod = pod_of(tmp_path, trees)
+
+    finished = executors.mutation(pod, mutation_settings(tmp_path), lease("stats", "k1", ("tests/test_alpha.py",)))
+
+    assert finished.outcome == PASSED
+    assert report(finished, pod) == {
+        "stats": [REACHING],
+        "runner": "grader",
+        "seconds": 2.5,
+        "caches": CACHED_WITH_GRADER,
+    }
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+@pytest.mark.usefixtures("venv", "trampolines")
+@pytest.mark.parametrize(
+    ("members", "manifest", "refusal"),
+    [
+        (
+            ("scripts.alpha.x_first__mutmut_1",),
+            "",
+            "^mutant unit m1 carries no manifest of the test files to trace$",
+        ),
+        (
+            ("scripts.alpha.x_third__mutmut_1", "scripts.alpha.x_first__mutmut_2", "scripts.alpha.x_second__mutmut_1"),
+            "[]",
+            "^mutant unit m1 names mutants its tree holds behind no trampoline: "
+            r"\['scripts.alpha.x_second__mutmut_1', 'scripts.alpha.x_third__mutmut_1'\]$",
+        ),
+    ],
+)
+def test_mutation_refuses_a_mutant_unit_with_no_manifest_or_a_member_its_tree_holds_behind_no_trampoline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mutation_tree: Path,
+    members: tuple[str, ...],
+    manifest: str,
+    refusal: str,
+) -> None:
+    box = Box([], tmp_path)
+    monkeypatch.setattr(executors, "Sandbox", box)
+    trees = FakeWorktrees({"h1": mutation_tree, "g1": tmp_path / "grader"})
+
+    with pytest.raises(ValueError, match=refusal):
+        executors.mutation(
+            pod_of(tmp_path, trees), mutation_settings(tmp_path), lease("mutant", "m1", members, manifest=manifest)
+        )
+
+    assert box.runs == []
+    assert trees.calls == [("lease", "g1"), ("own", "h1", "b1"), ("drop", mutation_tree), ("release", "g1")]
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+@pytest.mark.parametrize("timeout", [math.inf, expand_mutation.MUTANT_SECONDS])
+def test_the_worker_trampolines_the_mutants_the_scheduler_names_for_a_change(tmp_path: Path, timeout: float) -> None:
+    kept = "def keep(amount):\n    return amount + 5\n"
+    sample = (
+        "import functools\n\n\n"
+        "def first(amount):\n    return amount + 1\n\n\n"
+        "def second(amount):\n    return amount - 2\n\n\n"
+        "@functools.cache\ndef third(amount):\n    return amount + 3\n\n\n"
+        "if True:\n\n    def guarded(amount):\n        return amount + 4\n\n\n"
+        "class Meter:\n    def read(self, amount):\n        return amount * 3\n\n"
+        "    class Inner:\n        def deep(self, amount):\n            return amount + 6\n"
+    )
+    files = {
+        "pyproject.toml": (
+            '[project]\nname = "change"\n\n[project.optional-dependencies]\ndev = ["mutmut==3.6.0"]\n\n'
+            '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/"]\n'
+        ),
+        "scripts/sample.py": sample,
+        "scripts/plain.py": "LIMIT = 1\n",
+        "hooks/other.py": kept,
+    }
+    tree = folder(tmp_path, "change", files)
+    subprocess.run([*GIT, "init", "-q", "-b", "b1", str(tree)], check=True)
+    subprocess.run([*GIT, "-C", str(tree), "add", "."], check=True)
+    subprocess.run([*GIT, "-C", str(tree), "commit", "-q", "-m", "base"], check=True)
+    subprocess.run([*GIT, "-C", str(tree), "switch", "-q", "-c", "h1"], check=True)
+    edited = sample
+    for old, new in (("+ 1", "+ 7"), ("+ 3", "+ 8"), ("+ 4", "+ 9"), ("* 3", "* 9"), ("+ 6", "+ 5")):
+        edited = edited.replace(f"amount {old}", f"amount {new}")
+    folder(tmp_path, "change", {"scripts/sample.py": edited, "scripts/plain.py": "LIMIT = 2\n"})
+    subprocess.run([*GIT, "-C", str(tree), "commit", "-q", "-a", "-m", "head"], check=True)
+    units = expand_mutation.mutant_units(tree, scope.changes_since(tree, "b1", "h1"), {}, {}, timeout=timeout)
+
+    names = executors._trampolined(tree, "b1", "h1")  # pyright: ignore[reportPrivateUsage]
+
+    assert names == [member for unit in units for member in unit.members]
+    assert (len(units) == len(names)) is (timeout != math.inf)
+    assert len(names) > len({executors.function_of(name) for name in names}) > 1
+    assert any("first" in name for name in names) and any("Meter" in name and "read" in name for name in names)
+    assert not any(function in name for name in names for function in ("second", "guarded", "deep"))
+    written = (tree / "scripts/sample.py").read_text()
+    assert "x_first__mutmut_1" in written
+    assert "x_second" not in written
+    assert (tree / "scripts/plain.py").read_text() == "LIMIT = 2\n"
+    assert (tree / "hooks/other.py").read_text() == kept
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -768,11 +1087,6 @@ def test_covering_takes_each_test_a_stats_record_shows_reaching_the_function_wit
 def test_function_of_names_the_function_a_mutant_mutates() -> None:
     assert executors.function_of("scripts.alpha.xǁQueueǁenqueue__mutmut_12") == "scripts.alpha.xǁQueueǁenqueue"
     assert executors.function_of("scripts.alpha.x_a__mutmut_b__mutmut_3") == "scripts.alpha.x_a__mutmut_b"
-
-
-def test_the_tracked_listing_refuses_a_tree_git_cannot_read(tmp_path: Path) -> None:
-    with pytest.raises(subprocess.CalledProcessError):
-        executors._tracked(folder(tmp_path, "plain", {"a.py": ""}))  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.mark.feature("lab-worker-executors")
@@ -952,6 +1266,34 @@ def test_main_runs_the_worker_over_the_adapters_until_sigterm_stops_it(
     assert capsys.readouterr().err == (
         "usage: agentihooks ci-lab-worker [-h]\nagentihooks ci-lab-worker: error: unrecognized arguments: --unknown\n"
     )
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_main_empties_the_work_root_before_it_builds_its_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class Service:
+        def run(self) -> list[Lease]:
+            handlers[signal.SIGTERM](signal.SIGTERM, None)
+            return []
+
+        def stop(self) -> None:
+            pass
+
+    handlers: dict[int, Callable[[int, object], None]] = {}
+    monkeypatch.setattr(executors.worker, "build", lambda *args: Service())
+    monkeypatch.setattr(executors.signal, "signal", lambda number, handler: handlers.__setitem__(number, handler))
+    monkeypatch.setattr(executors.contract, "METRICS_PORT", 0)
+    environ = environ_of(tmp_path)
+    stale = tmp_path / "work" / "trees" / "old-head" / "left"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("stale")
+
+    assert executors.main([], environ) == 0
+
+    assert not stale.exists()
+    assert (tmp_path / "work" / "runs").is_dir()
+    assert (tmp_path / "work" / "venvs").is_dir()
 
 
 @pytest.mark.feature("lab-worker-metrics")

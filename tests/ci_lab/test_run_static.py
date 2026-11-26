@@ -147,6 +147,17 @@ def test_a_step_keeps_the_ruff_cache_in_its_run_folder_outside_every_tree(
     assert run_static.run(named, head, base, grader, settings).log.read_text() == "/elsewhere\n"
 
 
+@pytest.mark.feature("lab-type-gate-one-per-worker")
+def test_a_step_runs_one_type_checker_at_a_time_unless_its_env_names_another_count(
+    tmp_path: Path, settings: run_static.Settings
+) -> None:
+    head, base, grader = _folders(tmp_path)
+    result = run_static.run(_step('echo "$AGENTIHOOKS_TYPE_WORKERS"\n'), head, base, grader, settings)
+    assert result.log.read_text() == "1\n"
+    named = _step('echo "$AGENTIHOOKS_TYPE_WORKERS"\n', (("AGENTIHOOKS_TYPE_WORKERS", "3"),))
+    assert run_static.run(named, head, base, grader, settings).log.read_text() == "3\n"
+
+
 @pytest.mark.feature("lab-static-step-tools")
 def test_ruff_passes_on_a_head_tree_that_refuses_writes(tmp_path: Path, settings: run_static.Settings) -> None:
     head, base, grader = _folders(tmp_path)

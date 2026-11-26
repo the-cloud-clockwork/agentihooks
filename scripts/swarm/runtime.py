@@ -1,6 +1,7 @@
 """Swarm agents as herdr panes: spawn through init-agent, find live ones by name, retire by the process recorded at
 spawn."""
 
+import functools
 import json
 import os
 import shutil
@@ -9,7 +10,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -68,11 +69,13 @@ TICK_ONLY = ("SWARM_SECRET", "AGENTIHOOKS_LEDGER_AGENT_TOKEN")
 REPO_VARIABLE = "AGENTIHOOKS_SWARM_REPO"
 
 
-def codex_plan_mode(environ):
+def codex_plan_mode(environ: Mapping[str, str]) -> list[str]:
     home = Path(environ.get("HOME") or Path.home())
     ledger = Path(environ.get("LEDGER_DIR") or home / "development-ledger").expanduser()
+    exports = Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "ledger-exports"
     grants = ", ".join(
-        f'{json.dumps(str(root))}="write"' for root in (ledger, home / ".agentihooks" / "swarm", home / "scratchpad")
+        f'{json.dumps(str(root))}="write"'
+        for root in (ledger, home / ".agentihooks" / "swarm", home / "scratchpad", exports)
     )
     return [
         "-c",
@@ -490,6 +493,7 @@ class HerdrRuntime:
         self._quota_handoffs = {}
         self._quota_preferred = {}
         requirements = {}
+        claude_only = functools.cache(plugins.claude_only)
         for lane, tasks in ready.items():
             options = []
             for task in tasks:
@@ -508,7 +512,7 @@ class HerdrRuntime:
                     options.append((task["requires_harness"],))
                 elif requested:
                     options.append((requested,))
-                elif plugins.claude_only(profile):
+                elif claude_only(profile):
                     options.append(("claude",))
                 elif (
                     saved.get("harness") in agent_choice.AGENTS

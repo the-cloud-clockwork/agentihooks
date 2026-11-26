@@ -20,13 +20,20 @@ LINT_CONTROLS = [
     "Hold dead code in hooks and scripts",
     "Hold the locked guard tests",
     "Pin thresholds, floors and allowlists against the base",
-    "Fail on known vulnerabilities new against the base",
-    "Run every Swarm Ledger dashboard query against this head's metrics tables",
 ]
 LINT_SETUP = [
     "Install ruff",
     "Install PyYAML",
     "Install vulture",
+    "Check out the base revision",
+    "Check out the protected grader",
+]
+ACTIONS_CONTROLS = [
+    "Fail on known vulnerabilities new against the base",
+    "Run every Swarm Ledger dashboard query against this head's metrics tables",
+]
+ACTIONS_SETUP = [
+    "Install PyYAML",
     "Set up uv",
     "Check out the base revision",
     "Check out the protected grader",
@@ -109,6 +116,8 @@ def test_required_gate_runs_after_parallel_unit_and_lint() -> None:
         <= set(gate["needs"])
         <= required
         | {
+            "collect",
+            "lint-actions",
             "swarm-image",
             "worker-image",
             "shard-check",
@@ -150,29 +159,39 @@ def test_required_gate_runs_after_parallel_unit_and_lint() -> None:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
 
 
-def test_cheap_gates_share_the_lint_job_and_each_grades_after_an_earlier_red():
+def test_cheap_gates_share_the_lint_job_and_each_grades_after_an_earlier_red() -> None:
     jobs = _workflow()["jobs"]
     assert not {"size", "wiring", "dependency-audit"} & set(jobs)
     assert not {"size", "wiring", "dependency-audit"} & set(jobs["gate-required"]["needs"])
     assert jobs["lint"]["timeout-minutes"] == 10
-    steps = {step.get("name"): step for step in jobs["lint"]["steps"]}
-    assert all("continue-on-error" not in step for step in steps.values())
-    names = list(steps)
-    assert all("if" not in steps[name] for name in LINT_SETUP)
-    after = names[names.index(LINT_CONTROLS[-1]) + 1 :]
-    assert after and all(steps[name]["if"].startswith("${{ !cancelled()") for name in after)
+    assert jobs["lint-actions"]["timeout-minutes"] == 10
+    lint_steps = {step.get("name"): step for step in jobs["lint"]["steps"]}
+    actions_steps = {step.get("name"): step for step in jobs["lint-actions"]["steps"]}
+    assert all("continue-on-error" not in step for step in lint_steps.values())
+    assert all("continue-on-error" not in step for step in actions_steps.values())
+    assert all("if" not in lint_steps[name] for name in LINT_SETUP)
+    assert all("if" not in actions_steps[name] for name in ACTIONS_SETUP)
+    assert list(lint_steps)[-1] == LINT_CONTROLS[-1]
+    actions_names = list(actions_steps)
+    after = actions_names[actions_names.index(ACTIONS_CONTROLS[-1]) + 1 :]
+    assert after and all(actions_steps[name]["if"].startswith("${{ !cancelled()") for name in after)
 
 
-@pytest.mark.parametrize("control", LINT_CONTROLS)
-def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_red(control):
-    names = [step.get("name") for step in _workflow()["jobs"]["lint"]["steps"]]
-    step = _workflow()["jobs"]["lint"]["steps"][names.index(control)]
+@pytest.mark.parametrize(
+    ("job", "control", "setup"),
+    [("lint", control, LINT_SETUP) for control in LINT_CONTROLS]
+    + [("lint-actions", control, ACTIONS_SETUP) for control in ACTIONS_CONTROLS],
+    ids=[f"lint-{control}" for control in LINT_CONTROLS] + [f"lint-actions-{control}" for control in ACTIONS_CONTROLS],
+)
+def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_red(job, control, setup) -> None:
+    names = [step.get("name") for step in _workflow()["jobs"][job]["steps"]]
+    step = _workflow()["jobs"][job]["steps"][names.index(control)]
     assert step["if"] == "${{ !cancelled() }}"
-    assert max(names.index(name) for name in LINT_SETUP) < names.index(control)
+    assert max(names.index(name) for name in setup) < names.index(control)
 
 
-def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
-    steps = _workflow()["jobs"]["lint"]["steps"]
+def test_lint_actions_grades_dashboard_columns_with_the_antoncore_dev_checker() -> None:
+    steps = _workflow()["jobs"]["lint-actions"]["steps"]
     token = next((s for s in steps if s.get("id") == "app-token"), None)
     assert token is not None
     assert token["with"]["repositories"] == "antoncore"
@@ -199,9 +218,9 @@ def test_rest_checkout_reads_selected_files_from_one_revision_and_fails_closed(t
     import os
     import tarfile
 
-    script = next(step for step in _workflow()["jobs"]["lint"]["steps"] if step.get("id") == "antoncore-checkout")[
-        "run"
-    ]
+    script = next(
+        step for step in _workflow()["jobs"]["lint-actions"]["steps"] if step.get("id") == "antoncore-checkout"
+    )["run"]
     archive = tmp_path / "source.tar.gz"
     with tarfile.open(archive, "w:gz") as bundle:
         for name in ("checker.py", "dashboards/one.json", "unselected.txt"):
@@ -254,12 +273,12 @@ def test_rest_checkout_reads_selected_files_from_one_revision_and_fails_closed(t
         assert output.read_text() == "revision=source-revision\n"
 
 
-def test_lint_prepares_the_dashboard_checker_in_the_background_before_the_other_lint_steps():
-    steps = _workflow()["jobs"]["lint"]["steps"]
+def test_lint_actions_prepares_the_dashboard_checker_in_the_background_before_its_other_steps() -> None:
+    steps = _workflow()["jobs"]["lint-actions"]["steps"]
     names = [step.get("name") for step in steps]
     prepare = steps[names.index("Prepare the dashboard query checker in the background")]
     check = steps[names.index("Run every Swarm Ledger dashboard query against this head's metrics tables")]
-    assert names.index(prepare["name"]) < min(names.index(name) for name in LINT_SETUP)
+    assert names.index(prepare["name"]) < min(names.index(name) for name in ACTIONS_SETUP)
     assert prepare["env"]["CLICKHOUSE"] == check["env"]["CLICKHOUSE"]
     assert "orjson==" in prepare["run"]
     assert "-m pip install" not in check["run"]
@@ -342,7 +361,7 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
     assert base["run"].replace('echo "BASE: $BASE"\n', "") == (
         'BASE="$(git merge-base "$BASE" HEAD)"\ngit worktree add --detach "$RUNNER_TEMP/base" "$BASE"\n'
     )
-    serial = (
+    assert floor["run"] == (
         'if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then\n'
         '  echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."\n'
         "  exit 1\n"
@@ -350,30 +369,7 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
         'cd "$RUNNER_TEMP/base"\n'
         'python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
-    parallel = serial.replace(
-        'cd "$RUNNER_TEMP/base"\npython -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n',
-        """python -c 'import json; from pathlib import Path; from tests.duration_coverage import collected_tests; Path("collected.json").write_text(json.dumps(collected_tests(Path.cwd())))' > "$RUNNER_TEMP/collection.log" 2>&1 &
-collection_pid=$!
-(
-  cd "$RUNNER_TEMP/base"
-  python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
-) &
-floor_pid=$!
-status=0
-wait "$collection_pid" || status=$?
-wait "$floor_pid" || status=$?
-cat "$RUNNER_TEMP/collection.log"
-exit "$status"
-""",
-    )
-    shared = serial + (
-        'if [[ ! -f "$TEST_COUNT_HEAD_COLLECTION" ]]; then\n'
-        '  cd "$GITHUB_WORKSPACE"\n'
-        "  python -c 'import json, os; from pathlib import Path; from tests.duration_coverage import collected_tests; "
-        'Path(os.environ["TEST_COUNT_HEAD_COLLECTION"]).write_text(json.dumps(collected_tests(Path.cwd())))\'\n'
-        "fi\n"
-    )
-    assert floor["run"] in (serial, parallel, shared)
+    assert "TEST_COUNT_HEAD_COLLECTION" not in floor["env"]
 
 
 def test_dev_records_the_suite_count_and_the_count_floor_reads_it_only_through_the_base_grader():
@@ -421,7 +417,7 @@ def test_a_merge_group_records_its_head_count_for_the_next_group_after_its_early
 
     recorder = yaml.safe_load((_ROOT / ".github/workflows/count-record.yml").read_text())["jobs"]["count-record"]
     recorded = next(step for step in recorder["steps"] if step.get("name") == "Upload the suite count record")
-    count = _workflow()["jobs"]["test-count"]["steps"]
+    count = _workflow()["jobs"]["collect"]["steps"]
     names = [step.get("name") for step in count]
     record = count[names.index("Record the head count for the next queue group")]
     upload = count[names.index("Upload the head count for the next queue group")]
@@ -496,15 +492,18 @@ def test_fetching_the_dev_count_record_never_fails_and_writes_only_a_dev_record(
 
 @pytest.mark.parametrize("answer", ["reviews", "fail"])
 @pytest.mark.feature("count-floor-retirement-needs-code-owner-approval")
-def test_a_pull_request_count_floor_reads_its_reviews_on_the_app_token(tmp_path: Path, answer: str) -> None:
+def test_the_collect_job_reads_the_pull_request_reviews_on_the_app_token_for_the_approval_hold(
+    tmp_path: Path, answer: str
+) -> None:
     from tests.test_ci_hosted_lanes import _evaluate
 
-    count = _workflow()["jobs"]["test-count"]["steps"]
-    names = [step.get("name") for step in count]
-    mint = count[names.index("Mint the token that reads the dev count record")]
-    fetch = count[names.index("Read the pull request reviews")]
-    floor = count[names.index("Hold the base revision's test count")]
-    assert names.index(mint["name"]) < names.index(fetch["name"]) < names.index(floor["name"])
+    jobs = _workflow()["jobs"]
+    collect = jobs["collect"]["steps"]
+    names = [step.get("name") for step in collect]
+    mint = collect[names.index("Mint the token that reads the dev count record")]
+    fetch = collect[names.index("Read the pull request reviews")]
+    hold = collect[names.index("Hold each new retirement to a code owner's approval")]
+    assert names.index(mint["name"]) < names.index(fetch["name"]) < names.index(hold["name"])
     assert mint["with"]["permission-pull-requests"] == "read"
     assert fetch["env"] == {
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
@@ -514,8 +513,17 @@ def test_a_pull_request_count_floor_reads_its_reviews_on_the_app_token(tmp_path:
     assert _evaluate(condition, event_name="pull_request") is True
     assert _evaluate(condition, event_name="merge_group") is False
     assert _evaluate(condition, event_name="workflow_dispatch") is False
-    assert floor["env"]["TEST_COUNT_REVIEWS"] == "${{ runner.temp }}/pull-reviews.jsonl"
-    assert floor["env"]["TEST_COUNT_REVIEWED_HEAD"] == "${{ github.event.pull_request.head.sha }}"
+    assert hold["if"] == "github.event_name == 'pull_request'"
+    assert hold["env"] == {
+        "TEST_COUNT_REVIEWS": "${{ runner.temp }}/pull-reviews.jsonl",
+        "TEST_COUNT_REVIEWED_HEAD": "${{ github.event.pull_request.head.sha }}",
+    }
+    count = {step.get("name"): step for step in jobs["test-count"]["steps"]}
+    assert "Read the pull request reviews" not in count
+    assert (
+        not {"TEST_COUNT_REVIEWS", "TEST_COUNT_REVIEWED_HEAD"}
+        & count["Hold the base revision's test count"]["env"].keys()
+    )
     runner = tmp_path / "runner"
     runner.mkdir()
     bin_dir = tmp_path / "bin"
@@ -571,7 +579,7 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
         "test-count": _step("test-count", "Check out the base revision"),
         "lint": _step("lint", "Check out the base revision"),
         "docs": next(s for s in jobs.get("docs", jobs["lint"])["steps"] if s.get("id") == "docs"),
-        "artifacts": next(s for s in jobs["lint"]["steps"] if s.get("id") == "artifacts"),
+        "artifacts": next(s for s in jobs["lint-actions"]["steps"] if s.get("id") == "artifacts"),
     }
     event = {"pull_request": {"base": {"sha": pinned}}}
     logs = {}
@@ -745,7 +753,9 @@ def test_a_superseded_base_falls_back_to_the_newest_dev_baseline_before_the_arti
     assert restored["if"] == (
         "steps.cached.outputs.cache-hit != 'true' && steps.cached.outputs.cache-matched-key != ''"
     )
-    assert hold["env"]["BASE"] == "${{ steps.restored.outputs.commit || steps.base.outputs.commit }}"
+    assert hold["env"]["BASE"] == (
+        "${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}"
+    )
 
 
 @pytest.mark.parametrize("measured", ["ancestor", "unrelated", "unrecorded"])
@@ -777,7 +787,9 @@ def test_the_newest_dev_baseline_grades_only_from_an_ancestor_of_the_head(tmp_pa
 
 
 @pytest.mark.parametrize(("kept", "found"), [("0 1", "id=run-2\n"), ("0 0", None)])
-def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(tmp_path, kept, found):
+def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(
+    tmp_path: Path, kept: str, found: str | None
+) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     first, second = kept.split()
@@ -789,6 +801,7 @@ def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(tmp_pa
         '  */runs\\?*) if [[ $2 == *"status=success"* ]]; then printf "run-1\\nrun-2\\n"; else printf "run-1 push\\nrun-2 push\\n"; fi ;;\n'
         f"  */run-1/*) echo {first} ;;\n"
         f"  */run-2/*) echo {second} ;;\n"
+        "  */actions/artifacts\\?*) echo '[]' ;;\n"
         "esac\n"
     )
     (bin_dir / "gh").chmod(0o755)
@@ -800,6 +813,119 @@ def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(tmp_pa
     result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
     assert (result.returncode == 0) == (found is not None)
     assert output.read_text() == (found or "")
+    error = "::error::No measured Tests run on base base kept a live coverage-baseline artifact"
+    assert (error in result.stdout) == (found is None), result.stdout + result.stderr
+
+
+def _dev_push_jobs(publish: str) -> dict[str, object]:
+    jobs: list[dict[str, object]] = [
+        {"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in range(1, 21)
+    ]
+    steps = [
+        {"name": "Compute the coverage baseline", "conclusion": "success"},
+        {"name": "Publish the passed dev coverage baseline", "conclusion": publish},
+    ]
+    jobs.append({"name": "coverage-baseline", "conclusion": publish, "steps": steps})
+    return {"total_count": len(jobs), "jobs": jobs}
+
+
+@pytest.mark.feature("coverage-ratchet-grades-from-the-nearest-measured-ancestor")
+@pytest.mark.parametrize(
+    ("published", "restored"),
+    [
+        (
+            (("newer", 104, "measured"), ("nearest", 102, "measured"), ("older", 101, "measured")),
+            (102, "nearest"),
+        ),
+        (
+            (("newer", 104, "measured"), ("nearest", 102, "unmeasured"), ("older", 101, "measured")),
+            (101, "older"),
+        ),
+        (
+            (("newer", 104, "measured"), ("nearest", 102, "expired"), ("older", 101, "measured")),
+            (101, "older"),
+        ),
+        (
+            (("nearest", 106, "unmeasured"), ("nearest", 102, "measured"), ("older", 101, "measured")),
+            (102, "nearest"),
+        ),
+        ((("newer", 104, "measured"), ("side", 105, "measured")), None),
+        ((("newer", 104, "measured"), ("side", 105, "measured"), ("nearest", 102, "unmeasured")), None),
+    ],
+    ids=[
+        "nearest-measured",
+        "nearest-unmeasured",
+        "nearest-expired",
+        "nearest-rerun-unmeasured",
+        "outside-history-only",
+        "no-measured-ancestor",
+    ],
+)
+def test_a_base_whose_run_published_no_baseline_grades_from_its_nearest_measured_ancestor(
+    tmp_path: Path, published: tuple[tuple[str, int, str], ...], restored: tuple[int, str] | None
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    commits = {name: _commit(repo, {"a": name}) for name in ("older", "nearest", "base", "newer")}
+    _git(repo, "checkout", "-q", "-b", "side", commits["older"])
+    commits["side"] = _commit(repo, {"b": "side"})
+    _git(repo, "checkout", "-q", "--detach", commits["newer"])
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    base_runs = [{"id": 7, "event": "push", "head_branch": "dev", "head_sha": commits["base"]}]
+    (fake / "base-runs.json").write_text(json.dumps({"workflow_runs": base_runs}))
+    artifacts = [
+        {
+            "name": "coverage-baseline",
+            "expired": state == "expired",
+            "workflow_run": {"id": run, "head_branch": "dev", "head_sha": commits[name]},
+        }
+        for name, run, state in published
+    ]
+    (fake / "artifacts.json").write_text(json.dumps({"total_count": len(artifacts), "artifacts": artifacts}))
+    for _, run, state in published:
+        publish = "failure" if state == "unmeasured" else "success"
+        (fake / f"jobs-{run}.json").write_text(json.dumps(_dev_push_jobs(publish)))
+    (fake / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "endpoint=$2\n"
+        'case "$endpoint" in\n'
+        '  */compare/*) body=\'{"status": "ahead"}\' ;;\n'
+        '  */workflows/test.yml/runs\\?*) body=$(cat "$FAKE/base-runs.json") ;;\n'
+        "  */runs/7/artifacts\\?*) body='{\"artifacts\": []}' ;;\n"
+        '  */actions/artifacts\\?*) body=$(cat "$FAKE/artifacts.json") ;;\n'
+        '  */jobs\\?*) run=${endpoint#*/runs/}; body=$(cat "$FAKE/jobs-${run%%/*}.json") ;;\n'
+        '  *) echo "unexpected API endpoint: $endpoint" >&2; exit 1 ;;\n'
+        "esac\n"
+        "while [[ $1 != --jq ]]; do shift; done\n"
+        'jq -r "$2" <<< "$body"\n'
+    )
+    (fake / "gh").chmod(0o755)
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(
+        os.environ,
+        PATH=f"{fake}:{os.environ['PATH']}",
+        FAKE=str(fake),
+        BASE=commits["base"],
+        GITHUB_REPOSITORY="o/r",
+        GITHUB_OUTPUT=str(output),
+    )
+    step = _step("coverage-ratchet", "Find the run that published the base baseline")
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, capture_output=True, text=True)
+    expected = f"id={restored[0]}\ncommit={commits[restored[1]]}\n" if restored else ""
+    assert (result.returncode, output.read_text()) == (0 if restored else 1, expected), result.stdout + result.stderr
+    error = f"::error::No measured Tests run on base {commits['base']} kept a live coverage-baseline artifact"
+    assert (error in result.stdout) == (restored is None)
+
+
+@pytest.mark.feature("coverage-ratchet-grades-from-the-nearest-measured-ancestor")
+def test_the_base_grader_and_the_hold_grade_the_commit_the_lookup_restored() -> None:
+    graded = "${{ steps.restored.outputs.commit || steps.base-run.outputs.commit || steps.base.outputs.commit }}"
+    for name in ("Check out the base grader", "Hold every line the base ran"):
+        assert _step("coverage-ratchet", name)["env"]["BASE"] == graded
 
 
 def test_coverage_ratchet_grades_a_batched_dev_push_against_the_previous_tip(tmp_path):

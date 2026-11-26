@@ -93,31 +93,36 @@ def _start_handoff(store: Any, args: argparse.Namespace) -> str:
 
 
 def cmd_status(store: Any, args: argparse.Namespace) -> None:
-    """Print where each running lineage stands, or the one named, running or ended: its state, its effort, its expert
-    and its mission."""
+    """Print where each running lineage stands, or the one named, running or ended: its state, its effort, its expert,
+    its mission and, while it runs, its last failed launch."""
     store.config(args.slug)
     if args.lineage:
         rows = [expert_lineage.get(store, args.slug, args.lineage)]
     else:
         rows = expert_lineage.running(store, args.slug)
     agents = store.agents(args.slug)
+    failed = expert_lineage.launch_failures(store, args.slug)
     if args.json:
-        print(json.dumps([{**asdict(row), "occupant": occupant(agents, row.id)} for row in rows]))
+        seats = [(row, occupant(agents, row.id)) for row in rows]
+        print(
+            json.dumps([{**asdict(row), "occupant": by, "launch_failure": failed.get(row.id, {})} for row, by in seats])
+        )
         return
     for row in rows:
-        print(stands(row, occupant(agents, row.id)))
+        print(stands(row, occupant(agents, row.id), failed.get(row.id)))
     if not rows:
         print(expert_lineage.NO_RUNNING)
 
 
-def stands(lineage: expert_lineage.Lineage, expert: str) -> str:
+def stands(lineage: expert_lineage.Lineage, expert: str, failure: dict[str, Any] | None) -> str:
     """Where one lineage stands, in one line: its state, effort and mission, the expert on its seat while it runs,
-    who started it and who ended it."""
+    who started it and who ended it, and its last failed launch while no expert is on its seat."""
     seat = f", {expert or VACANT}" if lineage.state == expert_lineage.RUNNING else ""
     ended = f", ended by {lineage.ended_by}: {lineage.note}" if lineage.ended_by else ""
+    failed = f"; last launch as {failure['agent']} failed: {failure['reason']}" if failure and not expert else ""
     return (
         f"{lineage.id} {lineage.state} at {lineage.effort}{seat}: {lineage.title} "
-        f"(started by {lineage.started_by}{ended})"
+        f"(started by {lineage.started_by}{ended}{failed})"
     )
 
 

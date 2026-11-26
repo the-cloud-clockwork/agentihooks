@@ -23,6 +23,7 @@ from scripts.swarm_ledger.repository import hierarchy
 AUTHOR = "readiness"
 UNFIT_NAK_MS = 5_000
 PREFERRED, ORDERED, REST = range(3)
+LAST: tuple[int, ...] = (REST + 1,)
 
 
 class Classes(NamedTuple):
@@ -48,6 +49,11 @@ class Snapshot:
     def classes(self) -> Classes:
         """The classes of the snapshot's offers, worked out once for every read of the snapshot."""
         return _classes(self.doc)
+
+    @cached_property
+    def admitted(self) -> frozenset[str] | None:
+        """The focus queue of the snapshot's document, worked out once for every claimable check over it."""
+        return freeze.admitted(self.doc, self.graph)
 
 
 def _classes(doc: dict[str, Any]) -> Classes:
@@ -129,19 +135,19 @@ class Source:
         )
 
 
-def ready(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> bool:
+def ready(task: dict, rows: dict, doc: dict, graph: dict, fix: str, admitted_queue: Any = freeze.UNCACHED) -> bool:
     return (
         task.get("state") == "open"
         and not task.get("out_of_scope")
         and not task.get("merged_into")
-        and not claim_hold.holds(task, rows, doc, graph, fix)  # pyright: ignore[reportUnknownArgumentType]
+        and not claim_hold.holds(task, rows, doc, graph, fix, admitted_queue)  # pyright: ignore[reportUnknownArgumentType]
     )
 
 
 def claimable(task: dict, lane: str, view: Snapshot) -> bool:
     return (
         task.get("lane") == lane
-        and ready(task, view.rows, view.doc, view.graph, view.fix)
+        and ready(task, view.rows, view.doc, view.graph, view.fix, admitted_queue=view.admitted)
         and not view.claimed(task["id"])
         and view.admits(task)
     )
@@ -252,8 +258,8 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
 def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePolicy()) -> list[str]:
     """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned, and
     withdraws the stale offers there before the fresh ones join them; an offer still queued is not offered again, so
-    one that waits past the dedupe window stays a single copy, unless it waits ``behind`` an offer of a higher class,
-    when it is withdrawn and offered again after it."""
+    one that waits past the dedupe window stays a single copy, unless it waits ``behind`` an offer the hub would offer
+    before it, when it is withdrawn and offered again after it."""
     events = offers(view, now_ms)
     offered = {event.id for event in events}
     lanes = dict.fromkeys([*LANES, *(event.data["lane"] for event in events)])
@@ -288,17 +294,19 @@ def _sweep(queue: WorkQueue, view: Snapshot) -> list[Envelope]:
 
 
 def behind(kept: list[Envelope], fresh: list[Envelope], view: Snapshot, now_ms: int) -> set[str]:
-    """The ids of one lane's waiting offers that sit ahead of an offer of a higher class, waiting or about to be
-    offered, and are at least one dedupe window old, so offering one again behind it is never dropped by the bus
-    dedupe and moves it at most once per window. The classes are the ones the snapshot gives its offers: the urgent
-    or focused tasks, then the tasks under an operator order, then the rest."""
+    """The ids of one lane's waiting offers that sit ahead of an offer the hub would offer before them, waiting or
+    about to be offered, and are at least one dedupe window old, so offering one again behind it is never dropped by
+    the bus dedupe and moves it at most once per window. An offer is graded by the key it is offered by wherever that
+    key is the whole order: one under an operator order by its order time then its rank, one of the rest by its rank.
+    The urgent or focused offers share one grade, so none of them moves behind another."""
     band = view.classes.band
 
-    def grade(event: Envelope) -> int:
-        return band(view.rows[event.key])[0]
+    def grade(event: Envelope) -> tuple[int, ...]:
+        found = band(view.rows[event.key])
+        return found[:1] if found[0] == PREFERRED else found
 
     window = BusConfig().dedupe_window_ms
-    best = min(map(grade, fresh), default=REST)
+    best = min(map(grade, fresh), default=LAST)
     moving: set[str] = set()
     for event in reversed(kept):
         own = grade(event)

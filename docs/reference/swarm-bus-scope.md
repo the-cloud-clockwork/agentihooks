@@ -385,13 +385,17 @@ answer budget from when the hub received the request. The budget, `ANSWER_MS` in
 admission and a hive that gave up gets the same admission when it asks again for that offer. The hub logs:
 
 ```text
-hub: events admission swarm=rig task=t1 hive=one late: finished after 9120 ms, past the 8000 ms answer budget, claim kept release=3 held=1 stopped=0 snapshot=12 withdrawal=0 placement=40 cap=2 turn=0 full=1 claim=30 seat=18 execution=9 ledger=4
+hub: events admission swarm=rig task=t1 hive=one late: finished after 9120 ms, past the 8000 ms answer budget, claim kept release=3 held=1 stopped=0 row=4 rows=5 parts=2 withdrawal=1 placement=40 cap=2 turn=0 full=1 claim=10 seat=8 execution=9 ledger=4 continuation=3 seeds=6 primed=9 transfer=2
 ```
 
 `finished after` counts from receipt, queue wait included. The step timings after `claim kept` count from when the
 handler started, so their sum falls short of `finished after` by at least the time the request spent in the queue. In this
 example the request queued for 9 000 ms of its 9 120 ms. A late line with small steps therefore points at a full serve
-pool, not at a slow admission step.
+pool, not at a slow admission step. `row`, `rows` and `parts` time the admission's narrow ledger reads, which replaced
+the single `snapshot` mark of releases before pull request
+[#13245](https://github.com/the-cloud-clockwork/agentihooks/pull/13245), and `continuation`, `seeds`, `primed` and
+`transfer` time the work after the ledger write. The hives pillar lists every mark under
+[Admission timing marks](../pillars/hives.md#admission-timing-marks).
 
 `NatsBus.close` returns without waiting for the handlers still running and cancels every queued request: those never
 start and are never answered, and their hives time out.
@@ -528,7 +532,7 @@ deleted. antoncore lists no `retired` entry for `swarm-hive` yet.
 
 ## The grant check
 
-The `lint` job of the agentihooks test workflow runs `scripts.ci_hive_nats_grants` on pull requests into `dev` and
+The `lint-actions` job of the agentihooks test workflow runs `scripts.ci_hive_nats_grants` on pull requests into `dev` and
 admitted manual dispatches, never in a merge group or on a push. It runs from the protected grader in the
 `Hold the hive member NATS grants equal to the antoncore hive user` step. It reads antoncore dev's NATS values and
 users files and compares the grants agentihooks renders with the antoncore users:

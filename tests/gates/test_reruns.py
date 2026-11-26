@@ -1,10 +1,13 @@
 import json
 import subprocess
+from pathlib import Path
+from typing import Any
 
 import pytest
 
-from scripts.gates import Call, Gate, Who
+from scripts.gates import Call, Gate, Who, entry, reruns
 from scripts.gates.budget import Budget
+from scripts.gates.log import swarm_home
 from scripts.gates.reruns import RerunBudget, Target, exempt, gh_jobs, refusal, targets
 from scripts.gates.verdicts import Verdicts
 
@@ -38,6 +41,15 @@ def gate_over(found, seen=None):
         return found[target.run or target.job]
 
     return RerunBudget(jobs=jobs)
+
+
+def payload(command: str, tool_use_id: str) -> dict[str, Any]:
+    return {
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "tool_use_id": tool_use_id,
+        "session_id": "engineer-session",
+    }
 
 
 def test_it_is_a_gate_that_ships_enforcing_with_two_reruns():
@@ -132,6 +144,109 @@ def test_two_reruns_in_one_command_both_count(tmp_path):
     gate = gate_over({"1": FAILED, "2": FAILED, "3": FAILED})
     assert gate.decide(bash("gh run rerun 1 && gh run rerun 2"), ME, state(tmp_path)).allowed
     assert not gate.decide(bash("gh run rerun 3"), ME, state(tmp_path)).allowed
+
+
+@pytest.mark.feature("rerun-budget-counts-admitted-reruns")
+def test_released_gives_back_the_rerun_its_call_counted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    gate = gate_over({"1": FAILED, "2": FAILED})
+    for run, call in (("1", "toolu_1"), ("2", "toolu_2")):
+        assert gate.decide(Call.from_payload(payload(f"gh run rerun {run}", call)), ME, state(tmp_path)).allowed
+    reruns.released(payload("gh run rerun 1", "toolu_1"), tmp_path)
+    assert Budget("demo", "reruns", tmp_path).spent(HEAD, "reruns") == 1
+
+
+@pytest.mark.feature("rerun-budget-counts-admitted-reruns")
+def test_a_command_the_gate_refuses_at_the_cap_gives_back_its_earlier_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    gate = gate_over({"1": FAILED, "2": FAILED, "3": FAILED})
+    assert gate.decide(Call.from_payload(payload("gh run rerun 1", "toolu_1")), ME, state(tmp_path)).allowed
+    both = payload("gh run rerun 2 && gh run rerun 3", "toolu_2")
+    assert not gate.decide(Call.from_payload(both), ME, state(tmp_path)).allowed
+    reruns.released(both, tmp_path)
+    assert Budget("demo", "reruns", tmp_path).spent(HEAD, "reruns") == 1
+
+
+@pytest.mark.feature("rerun-budget-counts-admitted-reruns")
+def test_released_gives_back_only_the_reruns_of_its_own_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    counted = payload("gh run rerun 1", "toolu_1")
+    assert gate_over({"1": FAILED}).decide(Call.from_payload(counted), ME, state(tmp_path)).allowed
+    for other in (payload("ls", "toolu_1"), payload("gh run rerun 1", "toolu_9"), payload("gh run rerun 1", "")):
+        reruns.released(other, tmp_path)
+    assert Budget("demo", "reruns", tmp_path).spent(HEAD, "reruns") == 1
+
+
+@pytest.mark.feature("rerun-budget-counts-admitted-reruns")
+def test_a_gate_call_carries_the_tool_use_id_of_its_hook_payload() -> None:
+    from scripts.gates import base
+
+    assert base.Call.from_payload(payload("gh run rerun 1", "toolu_1")).tool_use_id == "toolu_1"
+    assert base.Call.from_payload({"tool_name": "Bash"}).tool_use_id == ""
+
+
+@pytest.mark.feature("rerun-budget-counts-admitted-reruns")
+def test_a_rerun_panic_refuses_leaves_both_reruns_of_the_head_unspent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import fakeredis
+
+    from hooks import hook_manager
+    from hooks.context import blocker_window, conditions, context_recycle, quota_policy
+    from scripts.swarm import panic
+    from scripts.swarm.health import activity
+    from scripts.swarm.store import RedisStore
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda environ=None: redis)
+    panic.engage(RedisStore(redis), "demo", "60 errors in the last hour", True, [], 0)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path / "ledgers"))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ME.name)
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    gate = gate_over({"5": FAILED})
+
+    def conditions_run_the_reruns_gate(hook: dict[str, Any]) -> None:
+        entry.evaluate(gate, Call.from_payload(hook))
+
+    monkeypatch.setattr(conditions, "write_guard", lambda *args: None)
+    monkeypatch.setattr(conditions, "pre_effect", conditions_run_the_reruns_gate)
+    monkeypatch.setattr(quota_policy, "pretool", lambda *args: (None, None))
+    monkeypatch.setattr(hook_manager, "_operator_question", lambda hook: "")
+    monkeypatch.setattr(context_recycle, "gate", lambda *args: None)
+    monkeypatch.setattr("hooks.context.local_test_guard.check_local_tests", lambda hook: None)
+    monkeypatch.setattr("hooks.context.swarm_wait_nudge.check_github_watch", lambda hook: None)
+    frozen = blocker_window.FROZEN.format(slug="demo", reason="60 errors in the last hour")
+    for call in ("toolu_a", "toolu_b"):
+        with pytest.raises(hook_manager.BlockAction) as refused:
+            hook_manager.EVENT_HANDLERS["PreToolUse"](payload("gh run rerun 5 --failed", call))
+        assert str(refused.value) == frozen
+    assert [row["kind"] for row in rows(swarm_home()) if row["gate"] == "reruns"] == ["count", "count"]
+    assert Budget("demo", "reruns").spent(HEAD, "reruns") == 0
+    assert activity.open_calls("demo", ME.name) == []
+
+
+@pytest.mark.feature("rerun-budget-counts-admitted-reruns")
+def test_a_rerun_the_pre_tool_use_handler_admits_keeps_its_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hooks import hook_manager
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    gate = gate_over({"5": FAILED})
+
+    def admitted(hook: dict[str, Any]) -> None:
+        assert gate.decide(Call.from_payload(hook), ME, Verdicts("demo", "reruns")).allowed
+
+    monkeypatch.setattr(hook_manager, "on_pre_tool_use", admitted)
+    for call in ("toolu_a", "toolu_b"):
+        hook_manager.EVENT_HANDLERS["PreToolUse"](payload("gh run rerun 5 --failed", call))
+    assert Budget("demo", "reruns").spent(HEAD, "reruns") == 2
 
 
 def test_a_rerun_naming_no_run_or_no_jobs_is_let_through_unread(tmp_path):

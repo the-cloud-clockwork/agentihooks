@@ -116,16 +116,19 @@ another file descriptor, such as `2>&1`, writes no file and passes.
 
 | Command | Target it names |
 |---|---|
-| `mv`, `rm`, `rmdir`, `touch`, `mkdir`, `chmod`, `chown`, `truncate`, `tee`, `unlink` | every operand |
+| `mv`, `rm`, `rmdir`, `touch`, `chown`, `tee`, `unlink` | every operand |
+| `chmod` | every operand but the first, which is the mode; every operand when the mode is written as a dash word such as `-w` or given by `--reference`; files named only at run time with `-L` or `--dereference`, which newer coreutils use to follow links and coreutils 9.1 rejects, or with a long option that is abbreviated or not one of chmod's own |
+| `truncate` | every operand; the `-s`, `--size`, `-r` and `--reference` values are values |
+| `mkdir` | every operand; the `-m` or `--mode` value is a value |
 | `cp`, `ln`, `install`, `rsync` | the `-t` or `--target-directory` value, otherwise the last operand |
 | `sed`, `perl` with `-i` or `--in-place` | each edited file, the script left out |
 | `dd` | the `of=` value |
 | `sort` | the `-o` or `--output` value |
 | `uniq` | the second operand |
-| `patch` | files named only at run time, unless `--dry-run` |
+| `patch` | its last `-d` or `--directory` folder, each joined to the one before, or the current folder; the `-o`, `--output`, `-r` and `--reject-file` values and the patched file operand, named from that folder; nothing for `--dry-run`; files named only at run time with `-B`, `-Y`, `--prefix`, `--basename-prefix`, `--follow-symlinks`, or a long option that is abbreviated or not one of GNU patch's own |
 | `gzip`, `gunzip`, `bzip2`, `bunzip2`, `xz`, `unxz`, `zstd`, `unzstd` | every operand, unless `-c`, `-l`, `-t`, `--stdout`, `--to-stdout`, `--list` or `--test` streams the output |
-| `tar` | files named only at run time, for the `x`, `c`, `r`, `u` and `A` modes and the long modes `--extract`, `--get`, `--create`, `--append`, `--update`, `--delete` and `--concatenate` |
-| `unzip` | files named only at run time, unless `-l`, `-t`, `-p`, `-v`, `-Z` or `-z` |
+| `tar` | for `c`, `r`, `u`, `A`, `--create`, `--append`, `--update`, `--delete`, `--concatenate` and `--catenate`: each `-f` or `--file` archive, also named from every `-C` folder, nothing for `-`; for `x`, `--extract` and `--get`: each `-C` or `--directory` folder, joined to the one before, and the current folder unless a `-C` comes before every member, nothing with `-O` or `--to-stdout`; files named only at run time with no archive or a remote `host:` archive, and in every mode, listing included, with `-I`, `-F`, `-g`, `-P`, `--to-command`, `--use-compress-program`, `--checkpoint-action`, `--info-script`, `--new-volume-script`, `--listed-incremental`, `--index-file`, `--volno-file`, `--rsh-command`, `--rmt-command`, `--remove-files`, `--absolute-names`, `--one-top-level`, `--transform`, `--xform`, or a long option that is abbreviated or not one of GNU tar's own. An old style first word such as `xfC` is read letter by letter, each value in order |
+| `unzip` | each `-d` folder, or the current folder; nothing for `-l`, `-t`, `-p`, `-v`, `-Z` or `-z`, alone or in a cluster; files named only at run time with `-:` or any word starting `--` |
 | `curl` | the `-o` or `--output` value other than `-`; files named only at run time for `-O`, `--remote-name` or `--remote-name-all` |
 | `wget` | the `-O` or `--output-document` value; files named only at run time when it has none; nothing for `-O-` or `--spider` |
 | `find` | the `-fprint`, `-fprint0`, `-fls` or `-fprintf` value; `-delete` is refused on its own |
@@ -219,7 +222,7 @@ The shell `<phrase>` is one of:
 | Phrase | Cause |
 |---|---|
 | `writes <target>` | the last target outside the allowed folders |
-| `writes files named only at run time` | a placeholder, `xargs`, `patch`, `tar`, `unzip`, `curl -O` or `wget` without `-O` |
+| `writes files named only at run time` | a placeholder, `xargs`, `curl -O`, `wget` without `-O`, an option missing its value, a `tar` create with no archive or a remote one, or a `chmod`, `patch`, `tar` or `unzip` option refused in the table above |
 | `runs git <subcommand>` | a git subcommand outside the read set |
 | `runs git with -c configuration` | `git -c` or `--config-env` |
 | `writes a file with git --output` | `--output` on a git line |
@@ -325,8 +328,10 @@ The task folder must be spelled out. A path built from `$AGENTIHOOKS_SWARM` or
 |---|---|
 | `writes ./~/scratchpad/...` | the tilde is quoted or escaped; write `~/scratchpad/...` unquoted |
 | `writes $HOME/scratchpad/...` | a variable makes the target known only at run time; write `~/scratchpad/...` |
-| `writes +x` or `writes 755` from `chmod` | the mode operand counts as a path; run `cd ~/scratchpad && chmod +x run.sh` |
-| `writes files named only at run time` from `tar` or `unzip` | extraction is refused even into the scratchpad; list with `tar -tzf` or `unzip -l`, or print one member with `unzip -p` |
+| `writes ./` or `writes <folder>/` from `tar`, `unzip` or `patch` | the extraction or patch folder is outside; add `-C ~/scratchpad/<dir>` before the first member name, `-d ~/scratchpad/<dir>`, or run it after `cd ~/scratchpad` |
+| `writes <archive>` from `tar` with `-C` | a relative archive is judged from the current folder and from every `-C` folder; give the archive as `~/scratchpad/<name>` |
+| `writes ./~/scratchpad/.../` from `--directory=~/...` or `-d~/...` | the shell leaves a tilde glued to its option unexpanded; put a space before `~/scratchpad` |
+| `writes files named only at run time` from `chmod`, `tar`, `unzip` or `patch` | an option that follows links, runs a command, writes a side file, rewrites member names or allows parent folders, an abbreviated or unknown long option, or an option missing its value; drop it or write the long name in full |
 | `writes files named only at run time` from `xargs` or `find -exec` | the files come from the input; run the write with the folder in the command, or send the change to its author |
 | `runs git commit`, `runs git checkout`, `runs gh pr checkout` | a read only seat never changes a checkout; read the change with `gh pr diff <n>`, or `git fetch` and `git diff` |
 | a write into the task folder is refused | check that `AGENTIHOOKS_SWARM` and `AGENTIHOOKS_SWARM_TASK` are set and valid, that the task is not a master task, and that no part of `~/.agentihooks/swarm/<swarm>/tasks/<task>` is a symlink |
@@ -337,10 +342,17 @@ The task folder must be spelled out. A path built from `$AGENTIHOOKS_SWARM` or
 - The shell reader reads the command text only. A program that opens files
   itself passes: `python3 -c "open('app.py', 'w')"`, `node -e ...` and a script
   run by path, such as `bash ~/scratchpad/run.sh`.
-- `tar` and `unzip` extraction is refused into every folder, the scratchpad
-  included.
-- `chmod` and `chown` count their mode or owner operand as a path, so they pass
-  only when that operand resolves inside an allowed folder.
+- `tar`, `unzip` and `patch` are judged by their destination folder. The member
+  names inside an archive and the file names inside a diff are not read; the
+  tools' defaults strip or refuse absolute and `..` names, and the options that
+  lift those defaults (`-P`, `-:`) stay refused.
+- A symlink already inside the destination folder that points outside it is
+  not seen: `tar` and `unzip` write a member named through it to its target.
+  GNU patch 2.7.4 and later refuse such a path unless `--follow-symlinks` is
+  given (GNU patch NEWS for 2.7.4, CVE-2015-1196), and that option stays
+  refused. Recursive `cp` and `rsync` into such a folder share this limit.
+- `chown` counts its owner operand as a path, so it passes only when that
+  operand resolves inside an allowed folder.
 - Serena writes need an absolute path. A relative `relative_path` is refused,
   and `rename_symbol` is refused for every path.
 - A shim that crashes or times out lets the call through.

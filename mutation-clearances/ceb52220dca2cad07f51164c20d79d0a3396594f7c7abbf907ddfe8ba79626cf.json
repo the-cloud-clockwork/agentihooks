@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/enhance_sweep.py:scripts.swarm.enhance_sweep.x_sweep:883553268670698e03fb3b830afbdf04c494ed7eb024f33931486d0ef4a5987f": {
+    "reader": "/root/standards_reader",
+    "reason": "Equivalent: writes is observed only by its truthiness before pacing. Decrementing from zero leaves it false before the first write and nonzero before every later write, preserving every pause and output."
+  }
+}

@@ -78,7 +78,7 @@ def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
         return True
     marks: dict[str, str] = {}
     if "by" in op:
-        marks = {"relayed_by": op["by"], "relayed_from": ledger_relay.RELAYED_FROM, **proof}
+        marks = ledger_relay.marks_of(op, proof)
     if setting:
         item[MARK] = {"at": ctx.at, "by": op.get("by", "operator"), **proof}
     else:

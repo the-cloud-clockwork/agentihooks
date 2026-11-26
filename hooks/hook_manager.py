@@ -25,6 +25,7 @@ import os
 import re
 import sys
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -320,6 +321,7 @@ def on_session_start(payload: dict) -> None:
     from hooks.lifecycle.codex_refresh_kick import kick as codex_refresh_kick
 
     codex_refresh_kick()
+    _herdr_resume(payload)
     _swarm_ledger(payload)
     _hive_join(payload, "start")
     otel.emit_event(
@@ -331,9 +333,7 @@ def on_session_start(payload: dict) -> None:
     )
 
     _request_trace_flush(payload, "start")
-    from hooks.context import documentation_session
-
-    documentation_session.start(payload)
+    _start_documentation_session(payload)
 
     tracer = otel.get_tracer()
     if tracer:
@@ -477,7 +477,7 @@ def on_session_start(payload: dict) -> None:
 
     from hooks.config import BROADCAST_ENABLED
 
-    if BROADCAST_ENABLED:
+    if BROADCAST_ENABLED and sys.platform != "win32":
         try:
             from hooks.context.account_sessions import agent_pid, session_account
             from hooks.context.broadcast import (
@@ -554,9 +554,7 @@ def on_session_end(payload: dict) -> None:
         },
     )
     _request_trace_flush(payload, "end")
-    from hooks.context import documentation_session
-
-    documentation_session.end(payload)
+    _end_documentation_session(payload)
 
     if session_id and transcript_path:
         from hooks.observability.transcript import log_new_entries
@@ -667,7 +665,7 @@ def on_session_end(payload: dict) -> None:
 
     from hooks.config import BROADCAST_ENABLED
 
-    if BROADCAST_ENABLED:
+    if BROADCAST_ENABLED and sys.platform != "win32":
         try:
             from hooks.context.account_sessions import agent_pid
             from hooks.context.broadcast import heartbeat_sessions, mark_session_closed
@@ -735,7 +733,7 @@ def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
     run("swarm_ledger", _swarm_ledger, payload)
     run("trace_flush", _request_trace_flush, payload, "prompt")
     run("quota_usage", _prompt_quota_usage, session_id)
-    run("quota_policy", _prompt_quota_policy, payload, session_id)
+    run("quota_policy", _prompt_quota_policy, payload, session_id, typed)
     run("claude_md_cap", _prompt_claude_md_cap, payload, session_id)
     run("enforcements", _prompt_enforcements, payload, session_id)
     run("ci_manifesto", _prompt_ci_manifesto, session_id)
@@ -763,7 +761,9 @@ def _prompt_quota_usage(session_id: str) -> None:
         log("quota usage user prompt failed", {"error": str(e)})
 
 
-def _prompt_quota_policy(payload: dict, session_id: str) -> None:
+def _prompt_quota_policy(payload: dict, session_id: str, typed: bool) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.config import QUOTA_POLICY_ENABLED
 
@@ -771,7 +771,11 @@ def _prompt_quota_policy(payload: dict, session_id: str) -> None:
             from hooks.common import inject_context as _inject_quota_policy
             from hooks.context.quota_policy import prompt_context, record_push_signal
 
-            if session_id not in _KNOWN_SUBAGENT_IDS and record_push_signal(session_id, payload.get("prompt", "")):
+            if (
+                typed
+                and session_id not in _KNOWN_SUBAGENT_IDS
+                and record_push_signal(session_id, payload.get("prompt", ""))
+            ):
                 log("quota policy: operator push-to-100 signal", {"session_id": session_id})
             _policy_text = prompt_context(session_id, payload.get("cwd", ""))
             if _policy_text:
@@ -1055,6 +1059,8 @@ def _inject_inbox(session_id: str, cwd: str = "") -> None:
 
 
 def _confirm_inbox(session_id: str) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.context.inbox_delivery import confirm_shown
 
@@ -1063,7 +1069,48 @@ def _confirm_inbox(session_id: str) -> None:
         log("inbox confirmation failed", {"error": str(e)})
 
 
+def _start_documentation_session(payload: dict) -> None:
+    """Start the documentation session; on Windows it is skipped, because it reaches the swarm ledger."""
+    if sys.platform == "win32":
+        return
+    from hooks.context import documentation_session
+
+    documentation_session.start(payload)
+
+
+def _end_documentation_session(payload: dict[str, Any]) -> None:
+    """End the documentation session; on Windows it is skipped, because it reaches the swarm ledger."""
+    if sys.platform == "win32":
+        return
+    from hooks.context import documentation_session
+
+    documentation_session.end(payload)
+
+
+def _recycle_directive(session_id: str) -> str | None:
+    """The context recycle directive; none on Windows, which runs no quota routing."""
+    if sys.platform == "win32":
+        return None
+    from hooks.context.context_recycle import directive
+
+    return directive(session_id)
+
+
+def _stop_block_for(payload: dict) -> str | None:
+    """The condition that blocks this Stop, then the operator-mode refusal, which Windows does not run."""
+    from hooks.context import conditions
+
+    block = conditions.stop_block(payload) or None
+    if block is None and sys.platform != "win32":
+        from hooks.context import operator_mode
+
+        block = operator_mode.reply_refusal(payload) or None
+    return block
+
+
 def _inject_after_tool(payload: dict) -> None:
+    if sys.platform == "win32":
+        return
     from hooks.common import inject_context
     from hooks.context.quota_policy import posttool_context
 
@@ -1078,6 +1125,8 @@ def _inject_after_tool(payload: dict) -> None:
 
 
 def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.context.swarm_heartbeat import beat, heard, report
         from scripts.swarm.safety_nudge import record
@@ -1093,6 +1142,8 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
 
 
 def _swarm_outcome(payload: dict) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.context.swarm_heartbeat import outcome
         from hooks.observability.consultation import search
@@ -1104,12 +1155,23 @@ def _swarm_outcome(payload: dict) -> None:
 
 
 def _master_login_checkpoint() -> None:
+    if sys.platform == "win32":
+        return
     try:
         from scripts import master_claude_login
 
         master_claude_login.checkpoint(os.environ)
     except Exception as e:
         log("master login checkpoint failed", {"error": str(e)})
+
+
+def _herdr_resume(payload: Any) -> None:
+    try:
+        from hooks.lifecycle.herdr_resume import kick
+
+        kick(payload)
+    except (ImportError, OSError, ValueError) as exc:
+        log("herdr resume report failed", {"error": type(exc).__name__})
 
 
 def _hive_join(payload: dict, event: str) -> None:
@@ -1122,6 +1184,8 @@ def _hive_join(payload: dict, event: str) -> None:
 
 
 def _swarm_ledger(payload: dict) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.context.swarm_ledger import run
 
@@ -1151,6 +1215,14 @@ def _swarm_tool_end(payload: dict) -> None:
     finish(call_id=payload.get("tool_use_id") or "")
 
 
+def _denied_tool_end(payload: dict[str, Any]) -> None:
+    """A denied call never runs: end it for the stall clock, then give back the CI reruns the reruns gate counted."""
+    _swarm_tool_end(payload)
+    from scripts.gates.reruns import released
+
+    released(payload)
+
+
 def on_post_tool_use_failure(payload: dict[str, Any]) -> None:
     """Handle PostToolUseFailure: close the stall clock and count the failure in the retry breaker."""
     _swarm_tool_end(payload)
@@ -1163,6 +1235,8 @@ def on_post_tool_use_failure(payload: dict[str, Any]) -> None:
 
 
 def _operator_words(payload: dict) -> bool:
+    if sys.platform == "win32":
+        return False
     try:
         from hooks.context.operator_words import typed
 
@@ -1179,6 +1253,8 @@ def _scheduled_prompt(payload: dict[str, Any]) -> None:
 
 
 def _operator_mode(payload: dict, typed: bool) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.common import inject_context
         from hooks.context.operator_mode import notice
@@ -1217,6 +1293,8 @@ def _operator_question(payload: dict) -> str:
 
 
 def _operator_reminder(payload: dict) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.common import inject_context
         from hooks.context import operator_mode
@@ -1243,6 +1321,8 @@ def _arm_gate_lifts(payload: dict) -> None:
 
 
 def _refocus_blocks(session_id: str, event: str) -> list[str]:
+    if sys.platform == "win32":
+        return []
     try:
         from hooks.context.quick_swarm import refocus
         from hooks.context.swarm_refocus import refocus_context
@@ -1347,6 +1427,17 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
         log("plan_read_guard failed", {"error": str(e)})
 
 
+@contextmanager
+def _shell_guard(name: str) -> Iterator[None]:
+    try:
+        yield
+    except BlockAction:
+        raise
+    except Exception as e:
+        log(f"{name} check failed", {"error": str(e)})
+        print(f"WARNING: {name} check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
+
+
 def _check_shell_guards(payload: dict[str, Any]) -> None:
     from hooks.context.approval_guard import check_approval
     from hooks.context.local_test_guard import check_local_tests
@@ -1361,21 +1452,23 @@ def _check_shell_guards(payload: dict[str, Any]) -> None:
         raise BlockAction(_blocker_block)
     if payload.get("tool_name") != "Bash":
         return
-    try:
-        from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
-        from hooks.context.master_coding import protection_refusal
-        from hooks.context.venv_guard import check_venv_guard
+    with _shell_guard("branch_guard"):
+        from hooks.context.branch_guard import check_branch_guard
 
         check_branch_guard(payload)
+    with _shell_guard("commit_on_main"):
+        from hooks.context.branch_guard import check_commit_on_main
+
         check_commit_on_main(payload)
+    with _shell_guard("master_coding"):
+        from hooks.context.master_coding import protection_refusal
+
         if refusal := protection_refusal(payload):
             raise BlockAction(refusal)
+    with _shell_guard("venv_guard"):
+        from hooks.context.venv_guard import check_venv_guard
+
         check_venv_guard(payload)
-    except BlockAction:
-        raise
-    except Exception as e:
-        log("branch_guard check failed", {"error": str(e)})
-        print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
 
 
 def _fit_pretool(blocks: list[tuple[str, str]]) -> str:
@@ -1437,7 +1530,7 @@ def on_pre_tool_use(payload: dict) -> None:
     try:
         from hooks.config import QUOTA_POLICY_ENABLED
 
-        if QUOTA_POLICY_ENABLED:
+        if QUOTA_POLICY_ENABLED and sys.platform != "win32":
             from hooks.context.quota_policy import pretool as _quota_policy_pretool
 
             _quota_policy_block, _quota_policy_ctx = _quota_policy_pretool(
@@ -1759,8 +1852,6 @@ def on_pre_tool_use(payload: dict) -> None:
     _can_inject_pretool = can_inject_context("PreToolUse")
     _recycle_ctx = None
     try:
-        from hooks.context.context_recycle import directive as _recycle_directive
-
         if _can_inject_pretool:
             _recycle_ctx = _recycle_directive(payload.get("session_id", ""))
     except Exception as e:
@@ -1969,7 +2060,6 @@ def on_post_tool_use(payload: dict) -> None:
         if not can_inject_context("PreToolUse"):
             from hooks.common import inject_context
             from hooks.config import BROADCAST_ENABLED
-            from hooks.context.context_recycle import directive as _recycle_directive
 
             recycle_context = _recycle_directive(_trace_session_id)
             if recycle_context:
@@ -2234,7 +2324,7 @@ def on_post_tool_use(payload: dict) -> None:
 def _link_codex_rollout(transcript_path: str) -> None:
     from hooks.targets import is_codex
 
-    if not is_codex():
+    if not is_codex() or sys.platform == "win32":
         return
     try:
         from scripts import codex_rollouts
@@ -2242,6 +2332,15 @@ def _link_codex_rollout(transcript_path: str) -> None:
         codex_rollouts.link_current(transcript_path)
     except Exception as e:
         log("codex rollout link failed", {"error": str(e)})
+
+
+def _close_handed_off(payload: dict[str, Any]) -> bool:
+    """Close a session its successor took over; Windows runs no handoffs."""
+    if sys.platform == "win32":
+        return False
+    from hooks.lifecycle.handoff_close import on_stop
+
+    return on_stop(payload)
 
 
 def on_stop(payload: dict) -> None:
@@ -2253,9 +2352,7 @@ def on_stop(payload: dict) -> None:
     """
     _stop_block = None
     try:
-        from hooks.context import conditions, operator_mode
-
-        _stop_block = conditions.stop_block(payload) or operator_mode.reply_refusal(payload) or None
+        _stop_block = _stop_block_for(payload)
     except Exception as e:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:
@@ -2421,9 +2518,7 @@ def on_stop(payload: dict) -> None:
         log("session refresh failed", {"error": str(e)})
 
     try:
-        from hooks.lifecycle.handoff_close import on_stop as handoff_close_on_stop
-
-        if handoff_close_on_stop(payload):
+        if _close_handed_off(payload):
             log("handed-off session close scheduled", {"session_id": session_id})
     except Exception as e:
         log("handed-off session close failed", {"error": str(e)})
@@ -2603,8 +2698,10 @@ def on_status_line(payload: dict) -> None:
 
 
 def on_notification(payload: dict) -> None:
-    """Handle Notification event."""
+    """Handle Notification event; Windows records no swarm remote control notice."""
     log("Notification", payload)
+    if sys.platform == "win32":
+        return
     try:
         from scripts.swarm import remote_control
 
@@ -2627,6 +2724,8 @@ def on_pre_compact(payload: dict) -> None:
 
 
 def _request_trace_flush(payload: dict, reason: str) -> None:
+    if sys.platform == "win32":
+        return
     try:
         from hooks.observability import trace_flush
 
@@ -2746,7 +2845,7 @@ EVENT_HANDLERS = {
     "SessionStart": on_session_start,
     "SessionEnd": on_session_end,
     "UserPromptSubmit": on_user_prompt_submit,
-    "PreToolUse": lambda payload: tool_end.closing_denied(on_pre_tool_use, payload, BlockAction, _swarm_tool_end),
+    "PreToolUse": lambda payload: tool_end.closing_denied(on_pre_tool_use, payload, BlockAction, _denied_tool_end),
     "PostToolUse": on_post_tool_use,
     "Stop": on_stop,
     "SubagentStart": on_subagent_start,

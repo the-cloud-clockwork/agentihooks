@@ -55,6 +55,7 @@ TIMEOUT_SECONDS = 60.0
 DELIVERY_CALLS = 5
 GRACE_SECONDS = UNIT_TIMEOUT_SECONDS + DELIVERY_CALLS * TIMEOUT_SECONDS
 REFUSED = 403
+RESTART = 426
 SERVER_ERROR = 500
 REDIS = "REDIS"
 
@@ -102,7 +103,11 @@ class Lost(RuntimeError):
 def _lease(grant: Mapping[str, Any]) -> Lease:
     """Read one grant of the lease API's POST /lease reply."""
     unit = Unit(
-        kind=grant["kind"], key=grant["key"], members=tuple(grant["members"]), manifest=grant.get("manifest", "")
+        kind=grant["kind"],
+        key=grant["key"],
+        members=tuple(grant["members"]),
+        manifest=grant.get("manifest", ""),
+        manifest_digest=grant.get("manifest_digest", ""),
     )
     return Lease(
         grant["job"],
@@ -199,7 +204,8 @@ class Worker:
     def run_once(self) -> list[Lease]:
         """Lease units into the free slots and start each on its executor, or wait for a running unit to end while
         every slot is busy; return the leases started. A lease call the scheduler does not answer, or answers with a
-        server error, starts nothing and waits out its backoff; any other error answer raises."""
+        server error, starts nothing and waits out its backoff; a restart answer stops the worker without raising or
+        backing off, since the lab wants another image; any other error answer raises."""
         free = self.free()
         if free <= 0:
             wait(list(self.running), return_when=FIRST_COMPLETED)
@@ -207,6 +213,10 @@ class Worker:
         try:
             leases = self.client.lease(self.name, free, self.capabilities, self.wait_ms)
         except (OSError, http.client.HTTPException) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code == RESTART:
+                print("ci-lab worker: the lab wants another image, restarting", file=sys.stderr)
+                self.stop()
+                return []
             if isinstance(error, urllib.error.HTTPError) and error.code < SERVER_ERROR:
                 raise
             self._back_off(error)

@@ -4,18 +4,26 @@ target stays held from eng and ci claims until full autonomy or the seat that de
 import json
 import re
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
-from scripts.swarm import claim_hold, enhance_review, plan_review, slice_check
+from scripts.swarm import claim_hold, enhance_review, plan_review, prompt, slice_check
 from scripts.swarm import cli as swarm_cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm_ledger import ledger as ledger_cli
 from scripts.swarm_ledger import ledger_artifacts, ledger_enhancement, ledger_link, plan_read
 from scripts.swarm_ledger import ledger_core as package_core
 from scripts.swarm_ledger.api import schemas
+from scripts.tick import registry
+from scripts.tick.adapters.fakes import FakeLedger, fake_tools
+from scripts.tick.deadline import Deadline
+from scripts.tick.steps import CallStep
+from scripts.tick.steps import thin as thin_step
 from tests.swarm.test_phase_planning import DONE_WHEN, MASTER_SEAT, SLUG, core, env, items, state  # noqa: F401
 from tests.swarm.test_thin_hold import view
 
@@ -44,7 +52,7 @@ PARTS = (
 
 
 def section(*missing: str) -> str:
-    rows = ["### Seams", "The close calls `enhance_review.close` from swarm done."]
+    rows = ["### Seams", "The tests observe swarm done exits zero after `enhance_review.close`."]
     for name in PARTS:
         if name not in missing:
             rows += [f"### {name}", f"Plain words about {name.lower()}."]
@@ -121,6 +129,58 @@ def sliced(ledger: Any, body: str, description: str = DONE_WHEN) -> None:
 def asked(store: RedisStore) -> str:
     [ask] = [i for i in items(store, MASTER_SEAT) if ENHANCE in i.text]
     return str(ask.text)
+
+
+@dataclass
+class Applying(FakeLedger):
+    """A tick ledger port that applies every batch to the test ledger through the ledger server's own checks."""
+
+    def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> object:
+        ops = [dict(operation) for operation in operations]
+        core.check_body({"ops": ops})
+        found, rejected = core.sync(SLUG, ops=ops)
+        assert rejected == []
+        return found
+
+
+def thin_pass() -> list[str]:
+    """Run the thin task pass tick step once over the test ledger, writing through Applying."""
+    step = {found.name: found for found in registry.steps()}["thin task pass"]
+    tools = replace(fake_tools(), ledger=Applying()).for_effects(frozenset({"inbox", "ledger"}))
+    values: dict[str, Any] = {
+        "doc": state(SLUG),
+        "tools": tools,
+        "deadline": Deadline.after(5),
+        "slug": SLUG,
+        "inbox": Mock(),
+    }
+    assert isinstance(step, CallStep)
+    lines: list[str] = step.call(None, values.__getitem__)
+    return lines
+
+
+def served(slug: str, ops: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    found, rejected = core.sync(slug, ops=ops)
+    return {**found, "rejected": rejected}
+
+
+def publish_plan(monkeypatch: pytest.MonkeyPatch, path: Path, phase: str) -> None:
+    """Run the planner's publish-plan command into ``phase`` against the test ledger, storing the plan as a ledger
+    artifact."""
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", ENHANCE)
+    monkeypatch.setattr(ledger_cli, "call", served)
+    monkeypatch.setattr(
+        ledger_cli,
+        "upload_artifact",
+        lambda slug, name, source, request: ledger_artifacts.store(slug, "plan.md", Path(source).read_bytes()),
+    )
+    monkeypatch.setattr(
+        ledger_cli.ledger_publish,
+        "publish",
+        lambda source, title, repo, artifact, issue_title: (artifact(source, title), "artifact"),
+    )
+    argv = ["--slug", SLUG, "--as", PLANNER, "publish-plan", str(path), "--phase", phase]
+    ledger_cli.cmd_publish_plan(ledger_cli.build_parser().parse_args(argv))
 
 
 @pytest.fixture
@@ -208,6 +268,38 @@ def test_full_autonomy_closes_a_complete_enhancement_and_releases_the_target(
     assert (task(ENHANCE)["state"], task(TARGET)["enhancement"]) == ("done", "planned")
     assert hold(TARGET) == ""
     assert not [i for i in items(store, MASTER_SEAT) if ENHANCE in i.text]
+
+
+@pytest.mark.feature("thin-phaseless-enhance-publish")
+def test_the_planner_of_a_thin_task_with_no_phase_publishes_into_its_own_phase_and_closes(
+    seats: Seats, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A thin task added with no phase gets from the thin task pass a manual phase of its own holding it and its
+    enhancement task; the claimed planner publishes its plan into the phase its prompt names with publish-plan, points
+    the task at its section and closes its plan task with done, which marks the task planned and releases its hold."""
+    store, ledger = seats
+    autonomy(store, "full")
+    ledger.add_task(SLUG, {"task": TARGET, "title": "Task t1", "lane": "eng", "description": "Thin."}, "swarm")
+    assert thin_step.unchecked(task(TARGET))
+    assert thin_pass() == ["queued enhance-t1 for thin task t1"]
+    assert (task(TARGET)["phase"], task(ENHANCE)["phase"], hold(TARGET)) == (ENHANCE, ENHANCE, HELD)
+    ledger.update_task(SLUG, ENHANCE, {"state": "claimed", "claimed_by": PLANNER})
+    assert core.sync(SLUG, ops=[{"op": "join", "id": "join-enhancer", "by": PLANNER, "role": "member"}])[1] == []
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        f"# Plan for task t1\n<!-- slice: {ANCHOR} -->\n## Enhance task t1\n{section()}\n", encoding="utf-8"
+    )
+    told = re.search(
+        r"publish-plan <plan file> --phase (\S+)\.", prompt.build(SLUG, "/repo", "plan", PLANNER, task(ENHANCE))
+    )
+    assert told is not None and told.group(1) == ENHANCE
+    publish_plan(monkeypatch, plan, told.group(1))
+    url = json.loads(capsys.readouterr().out)["plan_url"]
+    fields = {"plan_url": url, "plan_slice": ANCHOR, "description": DONE_WHEN, "territory": ["scripts/swarm"]}
+    ledger.update_task(SLUG, TARGET, fields, by=PLANNER)
+    code, out = cli(capsys, PLANNER, "done", "--slice", TARGET)
+    assert (code, out["state"]) == (0, "done")
+    assert (task(ENHANCE)["state"], task(TARGET)["enhancement"], hold(TARGET)) == ("done", "planned", "")
 
 
 @pytest.mark.feature("swarm-enhance-close")
@@ -391,7 +483,7 @@ def test_a_task_update_never_writes_an_enhancement(thin: Seats) -> None:
 def test_enhances_survives_task_add_and_the_hosted_schemas_accept_the_fields(thin: Seats) -> None:
     assert task(ENHANCE)["enhances"] == TARGET
     assert "enhances" in schemas.FIELDS["task_add"].split()
-    assert schemas.FIELDS["task_enhancement"].split() == ["by", "item", "enhancement"]
+    assert schemas.FIELDS["task_enhancement"].split() == ["by", "item", "enhancement", "expected"]
 
 
 @pytest.mark.feature("swarm-enhance-close")
@@ -424,3 +516,72 @@ def test_the_plan_reader_fetches_a_hosted_ledger_with_its_loader(monkeypatch: py
     doc, load = plan_read.fetched(SLUG, environ)
     assert doc == {"slug": SLUG, "keys": ("tasks", "phases", "artifacts")}
     assert load is not None and load(SLUG, "plan.md") == f"True {SLUG} plan.md".encode()
+
+
+@pytest.mark.feature("task-enhancement-expected-value")
+@pytest.mark.parametrize(
+    "held,expected",
+    [
+        ({}, "needed"),
+        ({"enhancement": None}, ""),
+        ({"enhancement": ""}, None),
+        ({"enhancement": "needed"}, ""),
+        ({"enhancement": "planned"}, None),
+        ({"enhancement": "skipped"}, ""),
+    ],
+)
+def test_a_stale_enhancement_expectation_refuses_without_effects(held: dict[str, Any], expected: str | None) -> None:
+    row = {"id": TARGET, **held}
+    doc = {"tasks": [row]}
+    ctx = Mock()
+    ctx.refused = []
+    operation = {**VALID, "expected": expected}
+    assert ledger_enhancement.apply(doc, operation, ctx) is False
+    assert ctx.refused == [f"task {TARGET} enhancement changed"]
+    assert row == {"id": TARGET, **held}
+    ctx.stamp.assert_not_called()
+    ctx.record.assert_not_called()
+
+
+@pytest.mark.feature("task-enhancement-expected-value")
+@pytest.mark.parametrize(
+    "held",
+    [
+        {},
+        {"enhancement": None},
+        {"enhancement": ""},
+        {"enhancement": "needed"},
+        {"enhancement": "planned"},
+        {"enhancement": "skipped"},
+    ],
+)
+def test_a_matching_enhancement_expectation_passes_the_api_and_writes(held: dict[str, Any]) -> None:
+    row = {"id": TARGET, **held}
+    operation = {**VALID, "expected": held.get("enhancement")}
+    schemas.check_operations({"operation_id": "guarded", "ops": [operation], "guards": {}}, core, (TARGET,))
+    ctx = Mock()
+    ctx.refused = []
+    assert ledger_enhancement.apply({"tasks": [row]}, operation, ctx) is True
+    assert row == {"id": TARGET, "enhancement": "needed"}
+    assert ctx.refused == []
+    ctx.stamp.assert_called_once_with(f"tasks/{TARGET}/enhancement", "swarm")
+    ctx.record.assert_called_once_with("swarm", "enhancement set", f"tasks/{TARGET}", text="needed")
+
+
+@pytest.mark.feature("task-enhancement-expected-value")
+def test_an_omitted_enhancement_expectation_keeps_legacy_writes() -> None:
+    row = {"id": TARGET, "enhancement": "planned"}
+    ctx = Mock()
+    ctx.refused = []
+    ledger_enhancement.check(VALID)
+    assert ledger_enhancement.apply({"tasks": [row]}, VALID, ctx) is True
+    assert row["enhancement"] == "needed"
+    assert ctx.refused == []
+
+
+@pytest.mark.feature("task-enhancement-expected-value")
+@pytest.mark.parametrize("expected", [1, True, [], {}, "other"])
+def test_the_enhancement_expectation_rejects_invalid_values(expected: Any) -> None:
+    with pytest.raises(ValueError) as error:
+        ledger_enhancement.check({**VALID, "expected": expected})
+    assert str(error.value) == ledger_enhancement.SHAPE

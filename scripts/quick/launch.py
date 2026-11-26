@@ -8,7 +8,6 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from scripts.quick import paths, registry, seeds
-from scripts.quick.layout import MASTER
 from scripts.quick.member import DIR_ENV, QUICK_ENV, SEAT_ENV, Member
 
 WAIT_BARE_S = 60.0
@@ -166,18 +165,16 @@ def force(
     start: Start = init_agent,
     sleep: Callable[[float], None] = time.sleep,
 ) -> str:
-    """End an engineer's live but unusable agent with its pane kept, then start its successor; the outcome.
+    """End a seat's live but unusable agent with its pane kept, then start its successor; the outcome.
 
     The seat reads launching while its agent is ended, so no tick starts a successor the end could reach; the
-    successor then waits up to WAIT_BARE_S for the pane to return to a bare shell. The master is the operator's own
-    session and a seat being launched already has a successor coming, so neither is ended.
+    successor then waits up to WAIT_BARE_S for the pane to return to a bare shell. A seat being launched already
+    has a successor coming and is not ended.
     """
     swarm = registry.load(folder)
     seat = swarm.seat(seat_name) if swarm else None
     if seat is None:
         return "no-seat"
-    if seat.seat == MASTER:
-        return "master"
     if seat.state == registry.LAUNCHING or registry.take(folder, seat_name, seat.state, registry.LAUNCHING) is None:
         return "launching"
     try:

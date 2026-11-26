@@ -1,6 +1,5 @@
 """Execution-local transcript spool; only ``acknowledged`` sequences are durable beyond this disk."""
 
-import fcntl
 import hashlib
 import json
 import os
@@ -10,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from hooks.compat import fcntl
 from hooks.memory.collector import Batch
 from scripts.scheduler.process_interval import Interval
 
