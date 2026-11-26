@@ -353,6 +353,20 @@ def test_a_lane_without_focus_holders_keeps_its_first_focus_slot():
     assert order["h"] < order["a"]
 
 
+@pytest.mark.feature("swarm-focus-cap-small-lane")
+@pytest.mark.parametrize("seats,weight", [(1, 1), (1, 50), (1, 60), (2, 1), (2, 49), (2, 60)])
+def test_small_lanes_keep_a_positive_focus_share(seats: int, weight: int) -> None:
+    order = dispatcher._focus_order(focus_split(0), {"eng": seats}, weight)
+    assert order["h"] < order["a"]
+
+
+@pytest.mark.feature("swarm-focus-cap-small-lane")
+@pytest.mark.parametrize("seats,weight,holders", [(0, 60, 0), (1, 0, 0), (1, 60, 1), (2, 60, 1)])
+def test_small_lanes_yield_focus_when_disabled_or_full(seats: int, weight: int, holders: int) -> None:
+    order = dispatcher._focus_order(focus_split(holders), {"eng": seats}, weight)
+    assert order["h"] == order["a"]
+
+
 @pytest.mark.feature("swarm-plan-cap-floor")
 @pytest.mark.parametrize(
     ("plan", "found", "caps"),
