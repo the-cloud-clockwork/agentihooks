@@ -1,0 +1,19 @@
+rules:
+  - id: nats-reply-without-size-path
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A NATS reply is sent without nats_payload.fitted, so a reply over the server payload limit is dropped and the
+      requester only times out; on 26 November a 1.13 MB hub admission never reached its hive while the hub kept the
+      claim, the agent and the execution, four launches in a row. Send every reply through nats_payload.fitted, which
+      compresses an oversized reply and hands one that still does not fit to the serve's refusal.
+    paths:
+      include:
+        - /scripts/events/*.py
+        - nats-reply-without-size-path.py
+    patterns:
+      - pattern: $MSG.respond($REPLY)
+      - pattern-not: $MSG.respond(nats_payload.fitted(...))
+      - pattern-not-inside: |
+          $REPLY = nats_payload.fitted(...)
+          ...
