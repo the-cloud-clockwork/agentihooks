@@ -3,6 +3,7 @@ import json
 import math
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -56,6 +57,13 @@ def _runtime_dir(environ: dict[str, str]) -> Path:
 
 def _started_marker(launcher: Path) -> Path:
     return launcher.with_suffix(".started")
+
+
+def _started_at(marker: Path, environ: dict[str, str]) -> int:
+    started_at = int(marker.stat().st_mtime * 1000)
+    if not environ.get("AGENTIHOOKS_QUICK_SWARM"):
+        marker.unlink(missing_ok=True)
+    return started_at
 
 
 def _route_report(launcher: Path) -> Path:
@@ -520,6 +528,22 @@ def _opening_prompt(prompt: str, path: Path) -> str:
     return f"{binding.PROMPT}\n\n{OPENING_FILE_INSTRUCTION}{path}"
 
 
+def _replace_quick_launchers(launcher: Path, safe_name: str) -> None:
+    from scripts.herdr_gc import _alive, _launch_pid
+
+    for previous in launcher.parent.glob(f"{safe_name}-*.sh"):
+        if (
+            previous == launcher
+            or re.fullmatch(r"\d{6}-\d{6}-\d+\.sh", previous.name.removeprefix(f"{safe_name}-")) is None
+        ):
+            continue
+        pid = _launch_pid(previous)
+        if pid is None or _alive(pid):
+            continue
+        for suffix in (".sh", ".prompt", ".opening", ".route", ".started"):
+            previous.with_suffix(suffix).unlink(missing_ok=True)
+
+
 def _write_launcher(
     directory: Path,
     name: str,
@@ -565,14 +589,15 @@ def _write_launcher(
         )
         held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
         command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} -- {prompt_arg}"
-    cleanup = [str(launcher), *([] if app_server or prompt_file is None else [str(prompt_file)])]
+    quick = bool(environ.get("AGENTIHOOKS_QUICK_SWARM"))
+    cleanup = [] if quick else [str(launcher), *([] if app_server or prompt_file is None else [str(prompt_file)])]
     shell = environ.get("SHELL") or "/bin/bash"
     launcher.write_text(
         "#!/usr/bin/env bash\n"
         "set -u\n"
         "set -m\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
-        f": > {shlex.quote(str(_started_marker(launcher)))}\n"
+        f'echo "$$" > {shlex.quote(str(_started_marker(launcher)))}\n'
         f"{operator_env.source_line(environ)}"
         f"{_access_export()}"
         f"{_predecessor_export(environ)}"
@@ -599,6 +624,8 @@ def _write_launcher(
         encoding="utf-8",
     )
     launcher.chmod(0o700)
+    if quick:
+        _replace_quick_launchers(launcher, safe_name)
     return launcher, prompt_file
 
 
@@ -1280,8 +1307,7 @@ def main(
             )
             return 2
         time.sleep(0.25)
-    launcher_at = int(marker.stat().st_mtime * 1000)
-    marker.unlink(missing_ok=True)
+    launcher_at = _started_at(marker, active_env)
     report.append("status=started")
     report.append(f"launcher_at={launcher_at}")
     if _detached(args, active_env):
