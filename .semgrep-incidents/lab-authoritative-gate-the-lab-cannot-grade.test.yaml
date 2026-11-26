@@ -1,0 +1,53 @@
+lab:
+  # ok: lab-authoritative-gate-the-lab-cannot-grade
+  authoritative: [lint, type-gate, test-count]
+  check_prefix: lab
+---
+lab:
+  # ok: lab-authoritative-gate-the-lab-cannot-grade
+  authoritative: []
+  queue:
+    # ok: lab-authoritative-gate-the-lab-cannot-grade
+    authoritative: [test-count]
+---
+lab:
+  # ok: lab-authoritative-gate-the-lab-cannot-grade
+  authoritative: [lint, semgrep/scan, semgrep/charts]
+---
+lab:
+  # ok: lab-authoritative-gate-the-lab-cannot-grade
+  authoritative:
+    - lint
+    - type-gate
+    - test-count
+---
+lab:
+  # ruleid: lab-authoritative-gate-the-lab-cannot-grade
+  authoritative: [lint, docs, type-gate]
+---
+lab:
+  # ruleid: lab-authoritative-gate-the-lab-cannot-grade
+  authoritative: [writer-lock]
+---
+lab:
+  # ruleid: lab-authoritative-gate-the-lab-cannot-grade
+  authoritative: [lint, type-gate, test-count, semgrep]
+---
+lab:
+  # ruleid: lab-authoritative-gate-the-lab-cannot-grade
+  authoritative: [lint, writer-lock/scenario]
+---
+lab:
+  # ruleid: lab-authoritative-gate-the-lab-cannot-grade
+  authoritative:
+    - lint
+    - docs
+    - test-count
+---
+lab:
+  authoritative: [lint]
+  queue:
+    # ruleid: lab-authoritative-gate-the-lab-cannot-grade
+    authoritative:
+      - test-count
+      - "semgrep"
