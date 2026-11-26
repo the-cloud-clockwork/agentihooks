@@ -2746,7 +2746,10 @@ daemon. The `semgrep` job stays too: the lab grades only its `scan`, `feature-te
 an authoritative gate with no unit posts skipped, which `Gate — Required` reads as red. The Semgrep incident
 rule `lab-authoritative-gate-the-lab-cannot-grade` refuses those three names in the list, and
 `python -m scripts.feature_checks.lab_authority` prints whether a checkout still holds the list, each
-gate's authority, its lab check and the skip clause of its job. `AGENTIHOOKS_LAB_OFF=true` as a repository
+gate's authority, its lab check and the skip clause of its job. Hazard: while the lab posts no `lab/lint`,
+`lab/type-gate` or `lab/test-count` check on pull request heads, `lab-verdict` reads each missing verdict as a
+failure once its 1200 second wait ends and `Gate — Required` fails every pull request. A gate is
+listed only once its shadow report holds the acceptance rule over fifty heads. `AGENTIHOOKS_LAB_OFF=true` as a repository
 variable hands the three gates back to Actions without a merge.
 
 The eight lint steps that read `github.head_ref`, `github.ref_name`, `github.base_ref`,

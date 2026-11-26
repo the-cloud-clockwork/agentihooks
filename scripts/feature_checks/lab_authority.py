@@ -1,6 +1,8 @@
 """Live check of the lab authoritative static gates: this checkout lists lint, type-gate and test-count as lab
 authoritative, keeps their authority through the exclusion catalog, declares the lab check that replaces each job
-and skips each job behind the lab verdict. It prints one line per part and reads only files in the checkout."""
+and skips each job behind the lab verdict, with the skip clause as one of the terms its condition joins with and.
+It prints one line per part and reads only files in the checkout; a delivery file its reader refuses fails with
+one line."""
 
 import json
 import sys
@@ -17,6 +19,13 @@ WORKFLOW = ".github/workflows/test.yml"
 CLAUSE = "fromJSON(needs.lab-verdict.outputs.authoritative || '{{}}')['{gate}'] != true"
 HELD = "the checkout holds {part}"
 LACKS = "FAIL: the checkout lacks {part}"
+UNREAD = "a delivery file its reader accepts: {error}"
+
+
+def _terms(condition: object) -> list[str]:
+    """The terms a job condition joins with and, read without its expression braces."""
+    text = str(condition).removeprefix("${{").removesuffix("}}")
+    return [term.strip() for term in text.split("&&")]
 
 
 def parts(root: Path) -> list[tuple[str, bool]]:
@@ -29,7 +38,7 @@ def parts(root: Path) -> list[tuple[str, bool]]:
     found = [("exactly lint, type-gate and test-count in the lab authoritative list", listed == list(GATES))]
     for gate in GATES:
         job = jobs.get(gate, {})
-        skipped = CLAUSE.format(gate=gate) in str(job.get("if")) and "lab-verdict" in job.get("needs", [])
+        skipped = CLAUSE.format(gate=gate) in _terms(job.get("if")) and "lab-verdict" in job.get("needs", [])
         replaced = checks.get(f"lab/{gate}", {}).get("replaces") == f"test.yml/{gate}"
         found += [
             (f"lab authority for {gate}", gate in kept),
@@ -40,7 +49,11 @@ def parts(root: Path) -> list[tuple[str, bool]]:
 
 
 def main(root: Path | None = None) -> int:
-    found = parts(ROOT if root is None else root)
+    try:
+        found = parts(ROOT if root is None else root)
+    except delivery.DeliveryError as error:
+        print(LACKS.format(part=UNREAD.format(error=error)))
+        return 1
     for part, held in found:
         print((HELD if held else LACKS).format(part=part))
     return int(not all(held for _, held in found))
