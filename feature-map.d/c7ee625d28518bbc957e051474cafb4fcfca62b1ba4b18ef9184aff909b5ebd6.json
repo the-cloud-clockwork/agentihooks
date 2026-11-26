@@ -1,10 +1,12 @@
 {
   "id": "first-read-gate",
   "origin": "operator",
+  "operator_words": "This prevented a recurring error I've been having with my agents that they sometimes ignore reading their learnings, culture, or seat notes.",
+  "ordered_at": "2026-11-26",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-first-read-gate",
   "behaviour": "Seated Claude Code and Codex sessions observe a requirement to run seat brief before ordinary tools; successful brief sets a session marker and compaction clears it. Standalone sessions and bootstrap calls stay exempt.",
   "seam": "scripts.gates.first_read.FirstRead and package pre, post and start conditions",
-  "rules": [],
+  "rules": ["first-read-pre-any-fast-exit"],
   "tests": [
     "tests/gates/test_first_read.py::test_unread_seat_requires_brief",
     "tests/gates/test_first_read.py::test_standalone_is_outside_gate",
@@ -26,6 +28,12 @@
     "tests/hooks/test_first_read_conditions.py::test_successful_brief_marks_its_session",
     "tests/hooks/test_first_read_conditions.py::test_unsuccessful_or_running_brief_does_not_mark",
     "tests/hooks/test_first_read_conditions.py::test_unrelated_command_and_standalone_do_not_mark",
-    "tests/hooks/test_first_read_conditions.py::test_compaction_clears_only_current_session"
+    "tests/hooks/test_first_read_conditions.py::test_compaction_clears_only_current_session",
+    "tests/gates/test_first_read.py::test_marker_home_default_and_empty_session",
+    "tests/gates/test_first_read.py::test_mounted_canary_path_setup_is_exempt",
+    "tests/gates/test_first_read.py::test_bootstrap_cannot_hide_other_work",
+    "tests/gates/test_first_read.py::test_similar_tool_and_foreign_prompt_are_not_exempt",
+    "tests/hooks/test_first_read_conditions.py::test_codex_code_mode_success_marks",
+    "tests/hooks/test_first_read_conditions.py::test_missing_or_unsuccessful_call_never_marks"
   ]
 }

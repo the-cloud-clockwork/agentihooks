@@ -115,8 +115,8 @@ def test_only_own_opening_prompt_is_exempt(monkeypatch: pytest.MonkeyPatch, tmp_
     gate = first_read.FirstRead()
     assert gate.decide(Call(tool="Read", tool_input={"file_path": str(own)}, session="s"), ME, None).allowed
     assert not gate.decide(Call(tool="Read", tool_input={"file_path": str(other)}, session="s"), ME, None).allowed
-    assert not gate.decide(
-        Call(tool="Read", tool_input={"file_path": str(own), "limit": 1}, session="s"), ME, None
+    assert gate.decide(
+        Call(tool="Read", tool_input={"file_path": str(own), "offset": 1, "limit": 1}, session="s"), ME, None
     ).allowed
 
 
@@ -165,3 +165,53 @@ def test_existing_mode_and_standalone_contracts_are_preserved(monkeypatch: pytes
     monkeypatch.setattr(entry.modes, "swarm_gates", lambda *args: {})
     monkeypatch.setenv("AGENTIHOOKS_GATE_IDENTITY", "off")
     assert entry.evaluate(PinnedIdentity(), Call(tool="Bash", tool_input={"command": "pwd"}), {}) == 0
+
+
+@pytest.mark.feature("first-read-gate")
+def test_marker_home_default_and_empty_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert first_read.marker_path("session") == tmp_path / ".agentihooks" / "first-read" / "session"
+    assert not first_read.FirstRead().matches(Call(tool="Write"))
+    assert first_read.FirstRead().decide(Call(tool="Write"), ME, None).allowed
+
+
+@pytest.mark.feature("first-read-gate")
+def test_mounted_canary_path_setup_is_exempt() -> None:
+    command = "python -c 'import sys; sys.path.insert(0, \"/repo\"); from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123"
+    assert (
+        first_read.FirstRead().decide(Call(tool="Bash", tool_input={"command": command}, session="s"), ME, None).allowed
+    )
+
+
+@pytest.mark.feature("first-read-gate")
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python -c 'import sys; from other import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "python -c 'import os; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "python -c 'x = 1; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "python -c 'sys.path.insert(1, \"/repo\"); from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "python -c 'print(1); from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "python -c 'if' --canary abc123",
+        "python -c 'from scripts.profiles.binding import main' --canary abc123",
+        "python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --other abc123",
+        "python -c '",
+        'await tools.exec_command({cmd: "agentihooks seat brief"}); await tools.exec_command({cmd: "pwd"});',
+    ],
+)
+def test_bootstrap_cannot_hide_other_work(command: str) -> None:
+    assert (
+        not first_read.FirstRead()
+        .decide(Call(tool="Bash", tool_input={"command": command}, session="s"), ME, None)
+        .allowed
+    )
+
+
+@pytest.mark.feature("first-read-gate")
+def test_similar_tool_and_foreign_prompt_are_not_exempt(tmp_path: Path) -> None:
+    gate = first_read.FirstRead()
+    assert not gate.decide(Call(tool="mcp__other__condition_show", session="s"), ME, None).allowed
+    assert not gate.decide(
+        Call(tool="Read", tool_input={"file_path": str(tmp_path / "opening.prompt")}, session="s"), ME, None
+    ).allowed
