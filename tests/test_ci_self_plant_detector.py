@@ -11,7 +11,7 @@ _ROOT = Path(__file__).parent.parent
 
 
 def _self_plant_changed(tmp_path: Path, edited: str) -> str:
-    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint-actions"]["steps"]
     [step] = [step for step in steps if step.get("id") == "self-plant"]
     repo = tmp_path / "repo"
     (repo / "scripts/ci_mutation").mkdir(parents=True)

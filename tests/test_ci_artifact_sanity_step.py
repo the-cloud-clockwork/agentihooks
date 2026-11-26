@@ -1,4 +1,4 @@
-"""The lint job's artifact sanity step runs the protected grader copy of the checker on the head page folder."""
+"""The lint-actions job's artifact sanity step runs the protected grader copy of the checker on the head page folder."""
 
 import ast
 import os
@@ -24,8 +24,8 @@ NO_PAGES = (
 )
 
 
-def _lint_steps() -> list[dict[str, str]]:
-    return yaml.safe_load((ROOT / ".github" / "workflows" / "test.yml").read_text())["jobs"]["lint"]["steps"]
+def _lint_actions_steps() -> list[dict[str, str]]:
+    return yaml.safe_load((ROOT / ".github" / "workflows" / "test.yml").read_text())["jobs"]["lint-actions"]["steps"]
 
 
 def _named(steps: list[dict[str, str]], name: str) -> dict[str, str]:
@@ -65,7 +65,7 @@ def _run_step(tmp_path: Path, grader_option: str | None) -> tuple[int, str]:
         "GITHUB_WORKSPACE": str(head),
         "CALLS": str(tmp_path / "calls"),
     }
-    script = _named(_lint_steps(), "Artifact sanity checks")["run"]
+    script = _named(_lint_actions_steps(), "Artifact sanity checks")["run"]
     command = ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script]
     done = subprocess.run(command, cwd=head, env=env, capture_output=True, text=True)
     calls = tmp_path / "calls"
@@ -139,7 +139,7 @@ def _interpreter_installs(run: str) -> set[str]:
 
 
 def test_the_grader_is_checked_out_before_the_artifact_checks() -> None:
-    steps = _lint_steps()
+    steps = _lint_actions_steps()
     grader = _named(steps, "Check out the protected grader")
     assert steps.index(grader) < steps.index(_named(steps, "Artifact sanity checks"))
 
@@ -164,7 +164,7 @@ def test_the_step_detects_the_option_the_checker_really_declares() -> None:
 
 @pytest.mark.feature("ci-artifact-sanity-interpreter-imports")
 def test_the_lint_interpreter_installs_every_package_the_artifact_checker_imports() -> None:
-    steps = _lint_steps()
+    steps = _lint_actions_steps()
     before = steps[: steps.index(_named(steps, "Artifact sanity checks"))]
     runs = [step.get("run", "") for step in before if not step.get("continue-on-error")]
     installed = {name for run in runs for name in _interpreter_installs(run)}
