@@ -29,7 +29,7 @@ def parts(root: Path) -> list[tuple[str, bool]]:
     found = [("exactly lint, type-gate and test-count in the lab authoritative list", listed == list(GATES))]
     for gate in GATES:
         job = jobs.get(gate, {})
-        skipped = CLAUSE.format(gate=gate) in str(job.get("if", "")) and "lab-verdict" in job.get("needs", [])
+        skipped = CLAUSE.format(gate=gate) in str(job.get("if")) and "lab-verdict" in job.get("needs", [])
         replaced = checks.get(f"lab/{gate}", {}).get("replaces") == f"test.yml/{gate}"
         found += [
             (f"lab authority for {gate}", gate in kept),
