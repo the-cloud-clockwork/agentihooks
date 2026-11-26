@@ -2660,8 +2660,9 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   compares the head's repository with the served set by owner and name, with no `.git` suffix and
   case folded, and prints `ignored <head>: <repository> is not a served repository`: it holds no
   waiting entry, checks no actor, resolves no plant base, expands nothing and posts no check. Work
-  already stored for such a repository is not swept: each held head is dropped at its next start,
-  when it cannot be expanded. The service serves the
+  already stored for such a repository is not swept: each held head gets one more start, and when
+  it cannot be expanded there the release step drops it and posts its failed required check on
+  its commit. The service serves the
   repositories `CI_LAB_SERVED_REPOSITORIES` lists, or else the one `CI_LAB_REPOSITORY` names. The
   trust list and the shadow recorder stay those of the repository `CI_LAB_REPOSITORY` names.
 - A push that named no branch gets no promotion grade. Intake holds no head of the promotion class
