@@ -1766,8 +1766,8 @@ A pull request head also carries `lane` in its envelope data: the pull request's
 `owner:branch` for a pull request from a fork (`scripts.ci_lab.webhooks.pull_lane`). The scheduler
 keys the head's lane on it, so a newer head of the pull request supersedes the older one. A push
 head carries `dev` as its lane, the only branch a push is recorded for, so a newer push to `dev`
-replaces the one waiting and supersedes the one being graded, and the promotion class holds one
-waiting head a repository. No other
+replaces the one waiting and supersedes the one being graded, so a repository holds at most one
+waiting head of a push to `dev`. No other
 head carries the key, and the scheduler reads an envelope without it as before. A `closed` head
 asks for no grade: it names the lane whose work the scheduler ends, described in
 [Scheduler loop](#scheduler-loop).
