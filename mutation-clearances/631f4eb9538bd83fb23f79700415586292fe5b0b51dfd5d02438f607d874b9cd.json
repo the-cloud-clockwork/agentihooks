@@ -1,0 +1,6 @@
+{
+  "scripts/tick/steps/review.py:scripts.tick.steps.review.x_review_pass:49f4d6a99172169be4bddf503f73aa2c238f2ec7b82ef6db79b58230d9eb6593": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its value argument unchanged at runtime, so cast(None, x) produces identical output and no test can observe the mutant."
+  }
+}

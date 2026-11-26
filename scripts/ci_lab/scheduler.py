@@ -126,8 +126,19 @@ REAPED = {"pending": contract.UNITS_REDELIVERED_TOTAL, "lost": contract.UNITS_LO
 REQUIRED = "required"
 EVENTS = ("pull_request", "pull_request", "merge_group", "push", "workflow_dispatch")
 GRADED_EVENTS = frozenset({"merge_group", "pull_request"})
-QUEUE_REQUIRED = ("select", "split", "shard-check", "test-count")
-PULL_REQUIRED = ("select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock")
+QUEUE_REQUIRED = ("select", "split", "shard-check", "test-count", "collect")
+PULL_REQUIRED = (
+    "select",
+    "collect",
+    "test-count",
+    "lint",
+    "lint-actions",
+    "type-gate",
+    "docs",
+    "semgrep",
+    "sonar",
+    "writer-lock",
+)
 SCOPED = {"full": ("split", "unit", "shard-check"), "selected": ("unit-selected",)}
 SCOPES = frozenset({"full", "selected", "none"})
 UNIT_JOBS = ("unit", "unit-lost", "unit-rerun")
@@ -141,7 +152,7 @@ STATS_JOB = "mutation-stats"
 MUTANT_JOB = "mutation"
 MANIFEST_KINDS = (expand_tests.KIND, "mutant")
 ALWAYS_SKIPPABLE = frozenset({"unit-lost", "unit-rerun", "queue-baseline", "unit-selected"})
-PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
+PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "lint-actions", "semgrep", "test-count", "collect"})
 HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent) if item.default is MISSING)
 STATIC = "static"
 WHOLE_TREE = "."
@@ -156,6 +167,7 @@ FETCH_MS = 100
 INTAKE_SECONDS = 10
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
+LOOKED_AT_PER_PASS = 24
 UNANSWERED_FETCHES = 10
 POST_HOLD_MS = 60_000
 INTERVAL_S = 2.0
@@ -339,8 +351,9 @@ class Plan:
     """How to grade one head: the tree and grader revision it reads, the units of each gate, the jobs the tier skips,
     the job outputs and flags the `Gate — Required` rules read, the dev commit of the dependency manifest its test
     units are keyed on, empty when it keys none, the authoritative gates a hotfix or pull request grade runs no unit
-    of, each posted as a skipped check, and the gates the grader's delivery.yaml lists as authoritative for the head's
-    class."""
+    of, each posted as a skipped check, the gates the grader's delivery.yaml lists as authoritative for the head's
+    class, and the merge base of the head and its base that its static units diff against, empty when the base is
+    that merge base."""
 
     tree: str
     grader: str
@@ -351,6 +364,7 @@ class Plan:
     manifest: str = ""
     idle: frozenset[str] = frozenset()
     authoritative: frozenset[str] = frozenset()
+    merge_base: str = ""
 
 
 class Inbox(Protocol):
@@ -446,8 +460,9 @@ class State:
     """A grade's state: what it grades, its units by gate, whether a newer head superseded it, what it posted, the
     id of each check run it posted, the grade ref a lab remote push wrote its head to, if any, the dev commit of the
     dependency manifest its test units are keyed on, if any, the authoritative gates it runs no unit of, the gates it
-    posts as lab/<gate> rather than lab-shadow/<gate>, and the clock before which it posts nothing after GitHub refused
-    one of its posts."""
+    posts as lab/<gate> rather than lab-shadow/<gate>, the clock before which it posts nothing after GitHub refused
+    one of its posts, and the merge base of its head and base that a worker checks out as its base, empty when the
+    base is that merge base."""
 
     run: str
     repo: str
@@ -471,6 +486,7 @@ class State:
     idle: list[str] = field(default_factory=list[str])
     authoritative: list[str] = field(default_factory=list[str])
     hold: int = 0
+    merge_base: str = ""
 
 
 def _parse(raw: str | bytes) -> State:
@@ -994,16 +1010,20 @@ class Scheduler:
         return [f"dropped the waiting head {waiting['request']['head']}"]
 
     def _release(self, now_ms: int) -> list[str]:
-        """Start at most `STARTS_PER_PASS` held heads whose quiet window ended, except one a pause of its class holds:
-        the most urgent class first and the longest waiting first within a class. A head still quiet or paused takes no
-        place, and the rest wait for a later pass, so every pass reaches admission. A head whose manifest fetch still
-        runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never answered or
-        answered with a server error waits out the window again, until the `UNANSWERED_FETCHES`th such fetch in a row,
-        counted in its waiting entry; that fetch and any other expansion failure drop the head and post its failed
-        required check run. Each of these takes a place, since its expansion ran on the pass."""
+        """Look at up to `LOOKED_AT_PER_PASS` held heads whose quiet window ended, except one a pause of its class
+        holds: the most urgent class first and the longest waiting first within a class. A head still quiet or paused
+        takes no place among those looked at, and the rest wait for a later pass, so every pass reaches admission.
+        A head whose manifest fetch still runs off the pass keeps its place and its window for the next pass; one
+        whose fetch GitHub never answered or answered with a server error waits out the window again, its count of
+        such fetches in a row kept in its waiting entry, until the `UNANSWERED_FETCHES`th one. Neither takes one of
+        the `STARTS_PER_PASS` places, only one of the `LOOKED_AT_PER_PASS` looked at, so the pass moves on to the
+        next waiting head instead of stalling on it. Starting a head, retiring it or dropping it after its last
+        expansion failure each take one of those `STARTS_PER_PASS` places, since each is the pass's last word on
+        that head."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         started = 0
+        looked_at = 0
         for name, raw in sorted(self.client.hgetall(WAITING).items(), key=_urgency):
             held = json.loads(raw)
             request = _request(held["request"])
@@ -1012,11 +1032,12 @@ class Scheduler:
                 pauses, CLASSES[request.tier], request.head, held["lane"]
             ):
                 continue
-            started += 1
+            looked_at += 1
             self.client.hdel(WAITING, name)
             ref = held.get("ref", "")
             try:
                 actions.append(self._start(request, held["lane"], ref, now_ms))
+                started += 1
             except FetchPending as error:
                 self.client.hset(WAITING, name, raw)
                 actions.append(f"holding {request.head}: {error}")
@@ -1026,6 +1047,7 @@ class Scheduler:
                     self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unanswered": fetches}))
                     actions.append(f"holding {request.head}: {error}")
                 else:
+                    started += 1
                     refusal = FetchRefused(
                         f"{fetches} manifest fetches in a row got no answer or a server error, the last: {error}"
                     )
@@ -1039,9 +1061,10 @@ class Scheduler:
                 yaml.YAMLError,
                 jsonschema.ValidationError,
             ) as error:
+                started += 1
                 actions.append(f"cannot expand {request.head}: {error}")
                 actions.extend(self._refuse(request, ref, error, now_ms))
-            if started == STARTS_PER_PASS:
+            if started == STARTS_PER_PASS or looked_at == LOOKED_AT_PER_PASS:
                 break
         return actions
 
@@ -1196,6 +1219,7 @@ class Scheduler:
             manifest=plan.manifest,
             idle=sorted(plan.idle),
             authoritative=sorted(plan.authoritative),
+            merge_base=plan.merge_base,
         )
         source = self._merge_group(request, plan.tree)
         misses: list[Unit] = []
@@ -1304,7 +1328,7 @@ class Scheduler:
                     )
                     waiting += DEFAULT.slots
             if admitted:
-                self.queue.enqueue(admitted, state.head, {}, state.base, state.grader, state.tier)
+                self.queue.enqueue(admitted, state.head, {}, state.merge_base or state.base, state.grader, state.tier)
                 self._keep(state)
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions
@@ -1796,18 +1820,30 @@ class MirrorExpander:
             return {}
         return static_exclusions.read(self._git(mirror, "show", f"{grader}:{static_exclusions.PATH}"))
 
+    def _diffed(self, mirror: Mirror, request: GradeRequest, base: dict[str, str]) -> tuple[str, dict[str, str]]:
+        """Return what a head's static units diff against: the merge base of the request's head and base with the
+        files of its tree, or no merge base and the base's own files when the base is that merge base. Git fails
+        when head and base share no history."""
+        found = self._git(mirror, "merge-base", request.head, request.base).strip()
+        if found == request.base:
+            return "", base
+        return found, self._files(mirror, found)
+
     def expand(self, request: GradeRequest) -> Plan:
         """Return one unit per supported static gate outside the protected exclusion catalog, with Actions retaining
-        authority for jobs with exclusions, keyed by the files each gate reads at head and base, the unit job's test
+        authority for jobs with exclusions, keyed by the files each gate reads at head and at the merge base of head
+        and base, the unit job's test
         units of a plant pull request, merge group, promotion or backfill head and the mutation stats and mutant units of a promotion or
         backfill head, framed by the request's tier with the authoritative gates of the grader's delivery.yaml for a
-        hotfix or pull request head, with the dev commit of the manifest its test units are keyed on.
+        hotfix or pull request head, with the dev commit of the manifest its test units are keyed on. The plan names
+        the merge base when it is not the base itself.
         """
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
         for sha in dict.fromkeys((request.head, request.base, grader)):
             mirror.fetch(sha)
         head, base = self._files(mirror, request.head), self._files(mirror, request.base)
+        merge_base, diffed = self._diffed(mirror, request, base)
         workflow = self._git(mirror, "show", f"{grader}:{WORKFLOW.as_posix()}")
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
         excluded = self._exclusions(mirror, grader, head if grader == request.head else base)
@@ -1817,7 +1853,7 @@ class MirrorExpander:
             if gate.missing or gate.name in excluded:
                 continue
             inputs = StaticInputs(
-                gate.name, _within(head, gate.paths), _within(base, gate.base_paths), grader, toolchain
+                gate.name, _within(head, gate.paths), _within(diffed, gate.base_paths), grader, toolchain
             )
             gates.setdefault(gate.job, []).append(Unit(STATIC, static_key(inputs), (gate.name,)))
         commit = ""
@@ -1843,7 +1879,7 @@ class MirrorExpander:
             sorted(listed),
             request.plant,
         )
-        return replace(plan, manifest=commit)
+        return replace(plan, manifest=commit, merge_base=merge_base)
 
     def _tests(
         self,

@@ -122,7 +122,10 @@ def _member(environ: Mapping[str, str]) -> member.Member:
 
 def _status(environ: Mapping[str, str]) -> int:
     for seat in _member(environ).swarm.seats:
-        print(json.dumps(dataclasses.asdict(seat)))
+        row = dataclasses.asdict(seat)
+        if seat.position > 1:
+            row["automatic_tiers"] = seat.auth == "routed"
+        print(json.dumps(row))
     return 0
 
 

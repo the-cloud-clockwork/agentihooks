@@ -174,14 +174,22 @@ def _holds(logins: dict[str, Any], harness: str, key: str) -> bool:
     return harness in logins and account_key(logins[harness]) == key
 
 
+def master_accounts(hive: dict[str, Any], harness: str) -> list[str]:
+    if hive.get("master_logins"):
+        return [item["account"] for item in hive["master_logins"] if item["harness"] == harness]
+    account = hive["master_login"].get(harness)
+    return [account] if account else []
+
+
 def _checks(
     role: str, harness: str, slot: str, route_kind: str, repo: str, kind: str = HIVE
 ) -> list[tuple[Callable[[dict[str, Any]], bool], str]]:
     key = account_key(slot)
     return [
         (
-            lambda hive: any(
-                item["harness"] == harness and account_key(item["account"]) == key for item in hive["slots"]
+            lambda hive: (
+                (role == MASTER and route_kind == MASTER_LOGIN)
+                or any(item["harness"] == harness and account_key(item["account"]) == key for item in hive["slots"])
             ),
             f"no {kind} for {role} advertises the {harness} slot {slot}",
         ),
@@ -192,7 +200,10 @@ def _checks(
             f"no {kind} for {role} holds the {harness} login for {slot}",
         ),
         (
-            lambda hive: route_kind != MASTER_LOGIN or _holds(hive["master_login"], harness, key),
+            lambda hive: (
+                route_kind != MASTER_LOGIN
+                or any(account_key(account) == key for account in master_accounts(hive, harness))
+            ),
             f"no {kind} for {role} holds the {harness} master login for {slot}",
         ),
     ]
@@ -289,9 +300,20 @@ def local_full(waited: Wait, local_agents: int, local_max: int, reserved: int) -
     return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents{kept}")
 
 
-def _private_master(hive: dict, harness: str, front: bool) -> bool:
+def _private_master(hive: dict[str, Any], harness: str, front: bool) -> bool:
     return front and (
-        bool(hive["master_login"].get(harness)) or (harness == "claude" and hive.get("master_login_enabled") == YES)
+        bool(master_accounts(hive, harness)) or (harness == "claude" and hive.get("master_login_enabled") == YES)
+    )
+
+
+def _open_master_login(hive: dict[str, Any], harness: str, login: str, closed: frozenset[str]) -> str | None:
+    return next(
+        (
+            account
+            for account in master_accounts(hive, harness) or [""]
+            if login in ("", account) and account_key(account) not in closed
+        ),
+        None,
     )
 
 
@@ -314,10 +336,10 @@ def place_master(
     candidates = []
     for hive in listing:
         headless = hive["ui"] != YES
-        account = hive["master_login"].get(harness, "")
         forced = _private_master(hive, harness, front)
         if forced:
-            if login in ("", account) and account_key(account) not in closed:
+            account = _open_master_login(hive, harness, login, closed)
+            if account is not None:
                 placed = MasterPlacement(hive["id"], account, MASTER_LOGIN, False)
                 candidates.append((headless, not bool(account), _order(MASTER)(hive), account, placed))
             continue

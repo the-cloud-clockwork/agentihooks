@@ -532,7 +532,7 @@ deleted. antoncore lists no `retired` entry for `swarm-hive` yet.
 
 ## The grant check
 
-The `lint` job of the agentihooks test workflow runs `scripts.ci_hive_nats_grants` on pull requests into `dev` and
+The `lint-actions` job of the agentihooks test workflow runs `scripts.ci_hive_nats_grants` on pull requests into `dev` and
 admitted manual dispatches, never in a merge group or on a push. It runs from the protected grader in the
 `Hold the hive member NATS grants equal to the antoncore hive user` step. It reads antoncore dev's NATS values and
 users files and compares the grants agentihooks renders with the antoncore users:

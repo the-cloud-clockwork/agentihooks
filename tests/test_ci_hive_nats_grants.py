@@ -330,7 +330,7 @@ def test_another_member_inbox_differs_from_the_shared_user_inbox(tmp_path, capsy
 
 def test_lint_grades_the_member_grants_against_the_antoncore_dev_hive_user():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
-    steps = workflow["jobs"]["lint"]["steps"]
+    steps = workflow["jobs"]["lint-actions"]["steps"]
     checkout = next(s for s in steps if s.get("env", {}).get("REPOSITORY") == "the-cloud-clockwork/antoncore")
     assert checkout["env"]["REF"] == "dev"
     assert grants.HIVE_VALUES in checkout["env"]["SELECTED_PATHS"].split()
@@ -342,7 +342,7 @@ def test_lint_grades_the_member_grants_against_the_antoncore_dev_hive_user():
 
 
 def test_lint_refuses_a_grader_without_the_grant_check(tmp_path):
-    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint-actions"]["steps"]
     check = next(s for s in steps if "scripts.ci_hive_nats_grants" in s.get("run", ""))
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "ci_hive_nats_grants.py").write_text(
@@ -488,7 +488,7 @@ def test_the_controller_grant_serves_hub_slot_requests():
 
 
 def test_lint_checks_out_the_antoncore_service_users():
-    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint-actions"]["steps"]
     checkout = next(s for s in steps if s.get("env", {}).get("REPOSITORY") == "the-cloud-clockwork/antoncore")
     assert grants.SERVICE_USERS in checkout["env"]["SELECTED_PATHS"].split()
 

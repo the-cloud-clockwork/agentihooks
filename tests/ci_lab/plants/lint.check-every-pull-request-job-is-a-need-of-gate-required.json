@@ -4,8 +4,8 @@
   "edits": [
     {
       "path": ".github/workflows/test.yml",
-      "before": "  gate-required:\n    name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate \u2014 Required' }}\n    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast, lab-verdict]\n",
-      "after": "  gate-required:\n    name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate \u2014 Required' }}\n    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, type-gate, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast, lab-verdict]\n"
+      "before": "  gate-required:\n    name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate \u2014 Required' }}\n    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, collect, coverage-ratchet, lint, lint-actions, type-gate, docs, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast, lab-verdict]\n",
+      "after": "  gate-required:\n    name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate \u2014 Required' }}\n    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, collect, coverage-ratchet, lint, lint-actions, type-gate, sonar, dep-manifest, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast, lab-verdict]\n"
     }
   ]
 }

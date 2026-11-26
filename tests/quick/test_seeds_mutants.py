@@ -25,8 +25,8 @@ def test_the_master_seed_pins_every_exact_sentence(tmp_path: Path) -> None:
             "how a seat launches and registers, how messages travel, and how to troubleshoot or force a handoff.",
             "Take work from whatever source the operator names, tickets, issues or pull requests, with the tools you have.",
             "Your engineers, the only agents you contact:",
-            f"- eng-1 in pane 2 (claude, session quick-abc-eng-1); seat folder {paths.seat_dir(tmp_path, 'eng-1')}",
-            f"- eng-2 in pane 3 (codex, session quick-abc-eng-2); seat folder {paths.seat_dir(tmp_path, 'eng-2')}",
+            f"- eng-1 in pane 2 (claude, session quick-abc-eng-1); seat folder {paths.seat_dir(tmp_path, 'eng-1')}; authentication routed, automatic tiers",
+            f"- eng-2 in pane 3 (codex, session quick-abc-eng-2); seat folder {paths.seat_dir(tmp_path, 'eng-2')}; authentication routed, automatic tiers",
             "At the start tell each engineer to wait for the operator's instructions. The operator briefs each "
             "engineer directly; the engineer writes its plan to its seat folder and reports it to you before it "
             "starts. Engineers own their plans: assign work only when the operator asks you to.",

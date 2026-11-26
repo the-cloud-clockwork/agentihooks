@@ -93,8 +93,10 @@ def test_codex_native_default_bypasses_automatic_account_enumeration(
     ],
 )
 def test_native_default_preserves_and_repins_rendered_profile_binding(
-    agent: str, variable: str, credential: str, persona: str, tmp_path: Path
+    agent: str, variable: str, credential: str, persona: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from types import SimpleNamespace
+
     from scripts.profiles import binding
 
     ordinary = tmp_path / f".{agent}"
@@ -103,7 +105,12 @@ def test_native_default_preserves_and_repins_rendered_profile_binding(
     source = tmp_path / "rendered" / agent
     source.mkdir(parents=True)
     (source / persona).write_text("Engineer --canary abcdef0123456789abcdef01")
-    (source.parent / f"{agent}.sources.json").write_text("[]")
+    (source.parent / f"{agent}.sources.json").write_text(
+        json.dumps([{"locator": {"repo": "/fixture/source", "path": "profile", "blob": "rendered"}}])
+    )
+    monkeypatch.setattr(
+        binding.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="original")
+    )
     (source / "state").mkdir()
     (source / "state" / "retained").write_text("shared state")
     (source / "plans").mkdir()
@@ -112,6 +119,9 @@ def test_native_default_preserves_and_repins_rendered_profile_binding(
     original = binding.inspect(source, "engineer", agent)
     report = tmp_path / "request.json"
     binding.request(report, "engineer", agent, source)
+    monkeypatch.setattr(
+        binding.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="advanced")
+    )
     child = native_default.prepare(
         agent,
         {

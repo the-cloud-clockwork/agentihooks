@@ -256,7 +256,8 @@ def reserved_accounts(rows: list[Account], environ: Mapping[str, str]) -> list[A
     store = reservation._store(environ)
     for harness in LABELS:
         held = reservation.current(harness, environ)
-        rows = latch(reserve(rows, held), held, store)
+        for each in (held, *reservation.other_logins(harness, environ)):
+            rows = latch(reserve(rows, each), each, store)
     return rows
 
 
