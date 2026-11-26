@@ -17001,6 +17001,9 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-claim-watch-flake",
       "behaviour": "Swarm guards skip Windows and enforce Linux claim ownership before context recycling at each call, regardless of the platform during the first import.",
       "seam": "hooks.context.swarm_gates.pretool",
+      "rules": [
+        "platform-chosen-at-import"
+      ],
       "tests": [
         "tests/test_claim_watch.py::test_swarm_gates_choose_the_platform_at_each_call"
       ]

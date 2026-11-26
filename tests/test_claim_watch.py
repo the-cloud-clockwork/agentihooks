@@ -1,3 +1,4 @@
+import importlib.util
 import subprocess
 import sys
 import time
@@ -325,9 +326,6 @@ def test_the_pre_tool_hook_denies_the_next_call_of_a_replaced_claimant(monkeypat
 @pytest.mark.feature("swarm-gates-platform-invocation")
 @pytest.mark.parametrize("import_platform", ["win32", "linux"])
 def test_swarm_gates_choose_the_platform_at_each_call(monkeypatch: pytest.MonkeyPatch, import_platform: str) -> None:
-    import importlib.util
-    import sys
-
     from hooks.context import context_recycle, swarm_gates
 
     spec = importlib.util.spec_from_file_location("isolated_swarm_gates", swarm_gates.__file__)
