@@ -388,7 +388,7 @@ def test_quota_exhaustion_text_uses_the_master_login_only_for_masters(
             else "Tell the operator this session waits until the reset at later, then stop. "
         )
         expected = (
-            f"QUOTA WAIT — {head} The 7-day window still has 1.5% left and no other account qualifies ({others}).\n"
+            f"QUOTA WAIT — {head} The 7-day window still has 2% left and no other account qualifies ({others}).\n"
             f'1. Run: agentihooks swarm quota-swarm wait 60 --reason "quota reset at {at}"\n'
             "If this wait ends before the reset time in its reason, declare another bounded wait "
             "until that time, even if QUOTA WAIT no longer appears.\n"
