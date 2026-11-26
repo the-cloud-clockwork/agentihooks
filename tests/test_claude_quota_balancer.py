@@ -424,7 +424,7 @@ def test_a_read_only_router_cache_lock_still_reads_the_cached_observations(
 def test_a_read_only_router_cache_lock_refreshes_without_writing_the_cache(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    cache = tmp_path / "claude-router-cache.json"
+    cache = tmp_path / "home" / "claude-router-cache.json"
     calls: list[list[str]] = []
     monkeypatch.setattr(balancer, "probe_credentials", _probe_into(calls))
     alpha = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret-a")
@@ -438,7 +438,7 @@ def test_a_read_only_router_cache_lock_refreshes_without_writing_the_cache(
     assert (source, [result.account for result in results]) == ("live", ["ALPHA", "BETA"])
     assert calls == [["ALPHA"], ["BETA"]]
     assert cache.read_bytes() == written
-    assert sorted(path.name for path in tmp_path.iterdir()) == [
+    assert sorted(path.name for path in cache.parent.iterdir()) == [
         "claude-router-cache.json",
         "claude-router-cache.json.lock",
     ]
