@@ -2,10 +2,11 @@
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from scripts.gates.base import Who
-from scripts.handoff import check
+from scripts.handoff import check, transfers
 from scripts.inbox.seats import MATURITIES
 from scripts.quick import member, paths
 from scripts.swarm import naming, priming_trace
@@ -36,6 +37,14 @@ def recap_of(handoff: str) -> str:
     """The recap a Handoff v2 document yields, its Done, Stopped at and Next sections, as the swarm handoff derives it."""
     found = [(heading, check.section(handoff, heading)) for heading in RECAP_SECTIONS]
     return "\n\n".join(f"## {heading}\n{text}" for heading, text in found if text)
+
+
+def read_file(path: Path) -> str:
+    """A quick seat file's text, empty when the file does not exist; any other read failure raises its OSError."""
+    try:
+        return path.read_text()
+    except FileNotFoundError:
+        return ""
 
 
 def learned_text(notes: list[dict[str, Any]]) -> str:
@@ -73,7 +82,7 @@ class RedisSeat:
         )
         return Brief(
             seat=agent.seat,
-            handoff=store.handoff(self.slug, agent.task),
+            handoff=store.handoff(self.slug, agent.task) or transfers.last_handoff(store, self.slug, agent.task),  # pyright: ignore[reportUnknownMemberType]
             culture=held["culture"],
             recap=recaps[0]["text"] if recaps else "",
             learned=learned_text(held["learned"]),
@@ -88,13 +97,13 @@ class QuickSeat:
 
     def brief(self) -> Brief:
         folder, seat = self.found.folder, self.found.seat.seat
-        handoff = paths.read_text(paths.handoff(folder, seat))
+        handoff = read_file(paths.handoff(folder, seat))
         return Brief(
             seat=f"{seat} of quick swarm {self.found.swarm.quick_id}",
             handoff=handoff,
-            culture=paths.read_text(paths.culture(folder)),
+            culture=read_file(paths.culture(folder)),
             recap=recap_of(handoff),
-            learned=paths.read_text(paths.learned(folder, seat)),
+            learned=read_file(paths.learned(folder, seat)),
         )
 
 

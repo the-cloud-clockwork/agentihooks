@@ -10,6 +10,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 import scripts.seat_brief as seat_brief
 from hooks.context import injection_trace
 from scripts import cli_delegates
+from scripts.handoff import transfers
 from scripts.quick import member, paths, registry, seeds
 from scripts.seat_brief import sources
 from scripts.swarm import prompt
@@ -161,6 +162,45 @@ def test_a_quick_seat_with_empty_files_names_each_part_as_none(
         "Seat eng-1 of quick swarm quick-abc.\nHandoff:\nnone\nCulture:\nnone\nLatest recap:\nnone\n"
         "Learned notes:\nnone\n"
     )
+
+
+@pytest.mark.feature("seat-brief")
+def test_a_successor_reads_the_handoff_its_transfer_kept_after_the_live_key_is_cleared(
+    store: RedisStore, capsys: pytest.CaptureFixture[str]
+) -> None:
+    predecessor = AgentRecord("engineer@323133-0000", "eng", "t1", seat=SEAT)
+    store.put_handoff("sw", "t1", HANDOFF, seat=SEAT)
+    transfers.record(store, "sw", predecessor, "context", HANDOFF, 1)
+    store.clear_handoff("sw", "t1")
+
+    assert seat_brief.main(["brief"], SEATED) == 0
+
+    assert _part(capsys.readouterr().out, "Handoff") == HANDOFF.strip()
+
+
+@pytest.mark.feature("seat-brief")
+def test_an_unreadable_quick_seat_file_prints_the_error_and_exits_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    environ = _quick(tmp_path)
+    paths.learned(tmp_path, "eng-1").unlink()
+    paths.learned(tmp_path, "eng-1").mkdir()
+
+    assert seat_brief.main(["brief"], environ) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("seat brief: [Errno 21] Is a directory")
+
+
+@pytest.mark.feature("seat-brief")
+def test_a_missing_quick_seat_file_reads_as_none(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    environ = _quick(tmp_path)
+    paths.culture(tmp_path).unlink()
+
+    assert seat_brief.main(["brief"], environ) == 0
+
+    assert _part(capsys.readouterr().out, "Culture") == "none"
 
 
 @pytest.mark.feature("seat-brief")

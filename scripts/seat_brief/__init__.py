@@ -35,7 +35,7 @@ def main(argv: list[str], environ: Mapping[str, str] | None = None) -> int:
     try:
         source = sources.find(os.environ if environ is None else environ)
         brief = source.brief() if source else None
-    except (SwarmError, *store_errors()) as exc:
+    except (SwarmError, OSError, *store_errors()) as exc:
         print(f"seat brief: {exc}", file=sys.stderr)
         return 1
     print(render(brief) if brief else NO_SEAT)
