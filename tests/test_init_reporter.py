@@ -83,6 +83,24 @@ def test_init_verbose_controls_all_details(verbose, monkeypatch, capsys):
         assert "=" not in output
 
 
+@pytest.mark.feature("delivery-requirements-summary")
+def test_init_ends_with_the_delivery_requirements_summary(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts import herdr_setup, install
+
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    monkeypatch.setattr(install, "_load_state", lambda: {})
+    monkeypatch.setattr(install, "cmd_init_unified", lambda args: None)
+    monkeypatch.setattr(herdr_setup, "init_step", lambda *args: None)
+    monkeypatch.setattr(sys, "argv", ["agentihooks", "init", "--profile", "default"])
+    install.main()
+    last = capsys.readouterr().out.splitlines()[-1]
+    assert last.startswith("Delivery requirements: deliver each change as one complete pull request.")
+    assert "Split it in two only when it changes more than 20 files" in last
+    assert last.endswith("never a workaround the user did not ask for.")
+
+
 @pytest.mark.parametrize("stored_profile", ["engineer", "package:engineer", "engineer,brain", "anton,brain"])
 def test_codex_reuses_operator_profile(stored_profile, monkeypatch):
     from argparse import Namespace
