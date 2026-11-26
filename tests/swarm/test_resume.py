@@ -51,12 +51,13 @@ def test_the_quota_check_asks_about_the_agents_own_harness_and_account():
 
 @pytest.mark.feature("operator-master-up-resume-master-login")
 @pytest.mark.parametrize("accounts", [["slot-1", "slot-4"], ["slot-4"]])
+@pytest.mark.parametrize("seat", ["master@sw", ""])
 def test_a_front_door_master_checks_free_master_logins_instead_of_its_old_account(
-    monkeypatch: pytest.MonkeyPatch, accounts: list[str]
+    monkeypatch: pytest.MonkeyPatch, accounts: list[str], seat: str
 ) -> None:
     from scripts import master_claude_login, master_logins
 
-    record = agent(lane=MASTER, task=MASTER, profile="master", seat="master@sw", account="slot-1")
+    record = agent(lane=MASTER, task=MASTER, profile="master", seat=seat, account="slot-1")
     monkeypatch.setattr(master_claude_login, "free", lambda name: accounts if name == record.name else [])
     monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, 100.0 if account == "slot-1" else 5.0, now))
     assert resume.blocker(record, "/wt", always, lambda *_: pytest.fail("the previous account is not the route")) == ""
@@ -72,6 +73,7 @@ def test_a_front_door_master_names_the_login_slots_when_none_has_room(
 
     monkeypatch.setattr(master_claude_login, "free", lambda name: accounts)
     monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, 98.0 if account == "drained" else 90.0, now))
+    monkeypatch.setattr(master_logins, "week_left", lambda account, now: {"drained": 2.0, "primary": 10.0}[account])
     monkeypatch.setenv(reservation.PRIMARY_RESERVE_ENV, "10")
     monkeypatch.setattr(reservation, "primary_login", lambda: "primary")
     record = agent(lane=MASTER, task=MASTER, profile="master", seat="master@sw")

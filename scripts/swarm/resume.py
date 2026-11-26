@@ -90,7 +90,7 @@ def blocker(
         agent.lane == MASTER
         and agent.harness == "claude"
         and agent.profile == "master"
-        and front_door.holds(agent.seat.partition("@")[2], agent.seat)
+        and front_door.holds(agent.seat.removeprefix("master@"), agent.seat)
     ):
         return _master_login_blocker(agent.name)
     if agent.account and has_quota(agent.harness, agent.account) is False:
