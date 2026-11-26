@@ -109,6 +109,8 @@ def _changes(snapshot: dict, seen: Observation) -> list[tuple[str, dict]]:
         snapshot["head"], snapshot["suites"], snapshot["early"] = seen.head, {}, {}
         found += _suites(snapshot, early)
     if seen.state is not None and seen.state != snapshot["state"]:
+        if snapshot["state"] is None and seen.state in TERMINAL:
+            found.append(("pull.opened", {}))
         found.append((ARRIVED.get(seen.state) or ("pull.reopened" if snapshot["state"] else "pull.opened"), {}))
         snapshot["state"] = seen.state
     if snapshot["state"] in TERMINAL:
@@ -147,9 +149,15 @@ def _rows(snapshot: dict, found: list[tuple[str, dict]], now: int) -> list[dict]
 
 
 class Pulls:
-    def __init__(self, bus: Bus, fetch: Callable[[str], Observation] = fetch, clock: lease.Clock = lease.wall_ms):
+    def __init__(
+        self,
+        bus: Bus,
+        fetch: Callable[[str], Observation] = fetch,
+        clock: lease.Clock = lease.wall_ms,
+        index: Bus | None = None,
+    ) -> None:
         self._events = bus.events
-        self._state = bus.state(BUCKET)
+        self._state = (bus if index is None else index).state(BUCKET)
         self._fetch = fetch
         self._clock = clock
 

@@ -8,7 +8,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
@@ -67,7 +67,9 @@ def beat(redis: "Redis", local_id: str) -> None:
     if not member:
         _index_hive(redis, local_id)
     fields = {name: report[name] for name in ("slots", "interactive", "repos")}
-    fields["master_login"] = {"claude": master_claude_login.signed_in()}
+    logins = _master_login_inventory()
+    fields["master_logins"] = logins
+    fields["master_login"] = {"claude": logins[0]["account"] if logins else master_claude_login.signed_in()}
     fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
     fields["version"] = updater.installed_version()
     beat_ms = int(time.time() * 1000)
@@ -105,6 +107,38 @@ def beat(redis: "Redis", local_id: str) -> None:
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
     registry.finished(redis, local_id, int(time.time() * 1000))
+
+
+def _master_login_inventory() -> list[dict[str, Any]]:
+    from scripts import master_logins
+    from scripts.routing import reservation
+
+    if master_claude_login.unusable():
+        return []
+    offered = master_claude_login.logins()
+    now = time.time()
+    ranks = master_claude_login.preferred()
+    marker = master_claude_login.slot()
+    ordered = sorted(
+        offered,
+        key=lambda number: (
+            master_claude_login.failed(number),
+            master_logins.usage(offered[number], now)[1] >= reservation.MASTER_LEAVES,
+            ranks.get(offered[number], len(ranks)),
+            -master_logins.left(offered[number], now),
+            number != marker,
+            number,
+        ),
+    )
+    return [
+        {
+            "harness": "claude",
+            "account": offered[number],
+            "slot": number,
+            "week_left": master_logins.week_left(offered[number], now),
+        }
+        for number in ordered
+    ]
 
 
 def poll_orders(consumer: "Consumer", apply: Callable[[], None] | None = None) -> None:
