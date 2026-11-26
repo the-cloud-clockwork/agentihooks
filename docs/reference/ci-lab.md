@@ -2659,7 +2659,8 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   that has no grade ref and whose lane is its own head, and prints `ignored <head>: a push that
   named no branch asks for no grade`. On its first pass a scheduler retires what is stored that
   way: `Scheduler._retire_pushes` drops every such waiting head, forgets every such live grade and
-  drops the pending units of that head unless another live grade grades it. Nothing is posted. One
+  drops the pending units of that head unless another live grade grades it. It reads the grade
+  documents one at a time and keeps only each head. Nothing is posted. One
   line counts them, `retired the promotion grades of pushes that named no branch: <n> waiting heads
   dropped, <n> live grades retired, <n> pending units dropped`, and a pass that finds none prints
   no line.
