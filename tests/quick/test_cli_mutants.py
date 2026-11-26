@@ -55,7 +55,7 @@ def test_parser_declares_every_subcommand_with_its_exact_help_and_options() -> N
 
 
 def _namespace(agents: int = 4, harness: str = "claude") -> argparse.Namespace:
-    return argparse.Namespace(agents=agents, harness=harness)
+    return argparse.Namespace(agents=agents, harness=harness, auth="routed")
 
 
 def test_swarm_for_reads_the_target_harness_and_the_raw_session_from_the_environ(

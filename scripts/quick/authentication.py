@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 
-from scripts.quick import QuickError
+from scripts.quick.guard import QuickError
 
 
 def _named(reference: str, harness: str, environ: Mapping[str, str]) -> str:
@@ -29,7 +29,7 @@ def selections(value: str, harnesses: list[str], environ: Mapping[str, str]) -> 
         raise QuickError(f"authentication needs one choice or {len(harnesses)} engineer choices")
     active = dict(environ)
     operator_env.fill(active)
-    result = []
+    result: list[tuple[str, str]] = []
     for choice, harness in zip(values, harnesses, strict=True):
         if choice in ("routed", "default"):
             result.append((choice, ""))
