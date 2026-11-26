@@ -5,6 +5,7 @@ import pytest
 
 from scripts.ci_lab import control, manifests, scheduler
 from scripts.ci_lab.intake import GradeRequest
+from scripts.ci_lab.retry import Policy
 from tests.ci_lab.test_scheduler import Run, plan, unit
 from tests.ci_lab.test_scheduler import lab as _lab
 
@@ -226,3 +227,77 @@ def test_eight_heads_whose_tenth_unanswered_fetch_arrives_in_the_same_pass_take_
     records = [json.loads(raw) for raw in run.lab.client.hvals(scheduler.WAITING)]
     assert {record["unanswered"] for record in records} == {9}
     assert run.grades() == []
+
+
+@pytest.mark.feature("lab-scheduler-release-keeps-a-cut-short-head")
+def test_a_head_cut_short_by_a_stop_during_its_expansion_is_started_by_the_next_scheduler_and_graded(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run, heads = backlog(lab, 1)
+    head = heads[0]
+    planned = run.lab.expander.expand
+
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        if not run.lab.expander.seen:
+            run.lab.expander.seen.append(request)
+            raise KeyboardInterrupt
+        return planned(request)
+
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
+    run.push(head, lane="lane-0", event="merge_group")
+    run.tick(1000)
+    with pytest.raises(KeyboardInterrupt):
+        run.tick(1600)
+    assert run.lab.client.hlen(scheduler.WAITING) == 1
+    raw = next(iter(run.lab.client.hgetall(scheduler.WAITING).values()))
+    assert json.loads(raw)["starts"] == 1
+    again = Run(run.lab, run.lab.build(500, Policy(), None))
+    again.tick(2200)
+    assert again.grade(head).run in again.lab.client.smembers(scheduler.LIVE)
+    assert again.lab.client.hgetall(scheduler.WAITING) == {}
+
+
+@pytest.mark.feature("lab-scheduler-release-keeps-a-cut-short-head")
+def test_five_starts_in_a_row_cut_short_by_a_stop_count_up_and_the_sixth_pass_refuses_the_head(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run, heads = backlog(lab, 1)
+    head = heads[0]
+
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
+    run.push(head, lane="lane-0", event="merge_group")
+    at = 1000
+    run.tick(at)
+    for count in range(1, scheduler.CUT_SHORT_STARTS + 1):
+        at += 600
+        with pytest.raises(KeyboardInterrupt):
+            run.tick(at)
+        assert run.lab.client.hlen(scheduler.WAITING) == 1
+        raw = next(iter(run.lab.client.hgetall(scheduler.WAITING).values()))
+        assert json.loads(raw)["starts"] == count
+    at += 600
+    actions = run.tick(at)
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
+    assert any(f"{scheduler.CUT_SHORT_STARTS} starts" in action for action in actions)
+    assert run.lab.poster.moves(head, scheduler.REQUIRED) == [("completed", "failure")]
+
+
+@pytest.mark.feature("lab-scheduler-release-keeps-a-cut-short-head")
+def test_an_expander_error_the_release_loop_does_not_name_still_removes_the_waiting_field_before_it_leaves_the_pass(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run, heads = backlog(lab, 1)
+    head = heads[0]
+
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
+    run.push(head, lane="lane-0", event="merge_group")
+    run.tick(1000)
+    with pytest.raises(OSError):
+        run.tick(1600)
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}

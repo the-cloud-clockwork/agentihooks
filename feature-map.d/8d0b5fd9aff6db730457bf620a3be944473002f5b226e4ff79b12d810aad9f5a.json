@@ -1,0 +1,12 @@
+{
+  "id": "lab-scheduler-release-keeps-a-cut-short-head",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+  "behaviour": "A head stays in the CI lab scheduler's waiting hash across a start that cannot be repeated, with the count of starts begun and not finished kept in its waiting record; a scheduler stopped or killed while it checks or expands the head finds it still waiting on its next pass, in the same process or a new one, and starts it again. The waiting field comes out of the hash only once the start cannot be repeated: before an unreachable head is retired, right after the expansion returns and before the first grade write, and in every refusal branch. A head cut short five times in a row is refused instead of started a sixth time, with a failed required check naming the count, so a head whose expansion keeps killing the process cannot hold the scheduler in a crash loop forever. Any other error the release loop does not name still takes the head out of the waiting hash before it leaves the pass, so one bad head cannot stop every later pass.",
+  "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with a fake expander that raises KeyboardInterrupt or an unnamed error while it expands a waiting head",
+  "tests": [
+    "tests/ci_lab/test_scheduler_release.py::test_a_head_cut_short_by_a_stop_during_its_expansion_is_started_by_the_next_scheduler_and_graded",
+    "tests/ci_lab/test_scheduler_release.py::test_five_starts_in_a_row_cut_short_by_a_stop_count_up_and_the_sixth_pass_refuses_the_head",
+    "tests/ci_lab/test_scheduler_release.py::test_an_expander_error_the_release_loop_does_not_name_still_removes_the_waiting_field_before_it_leaves_the_pass"
+  ]
+}
