@@ -681,6 +681,18 @@ def test_wrapper_holds_only_read_permission():
     assert _semgrep()["permissions"] == {"contents": "read"}
 
 
+@pytest.mark.feature("semgrep-engine-posix-backend")
+def test_every_semgrep_job_runs_the_engine_on_the_posix_event_backend() -> None:
+    workflow = _semgrep()
+    assert workflow.get("env") == {"EIO_BACKEND": "posix"}
+    assert [
+        (job_name, part.get("name"))
+        for job_name, job in workflow["jobs"].items()
+        for part in (job, *job["steps"])
+        if "EIO_BACKEND" in (part.get("env") or {}) or "EIO_BACKEND" in str(part.get("run", ""))
+    ] == []
+
+
 def test_feature_tests_and_charts_have_runner_classes():
     classes = json.loads((_ROOT / ".github/runner-classes.json").read_text())
     assert {key for key in classes if key.startswith("semgrep.yml/")} == {
