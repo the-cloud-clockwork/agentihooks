@@ -215,3 +215,43 @@ def test_similar_tool_and_foreign_prompt_are_not_exempt(tmp_path: Path) -> None:
     assert not gate.decide(
         Call(tool="Read", tool_input={"file_path": str(tmp_path / "opening.prompt")}, session="s"), ME, None
     ).allowed
+
+
+@pytest.mark.feature("first-read-gate")
+@pytest.mark.parametrize(
+    "command",
+    [
+        "$(id)/agentihooks seat brief",
+        "\u0060id\u0060/agentihooks seat brief",
+        "$(id)/python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary $(id)",
+    ],
+)
+def test_shell_expansion_is_not_a_bootstrap_command(command: str) -> None:
+    assert (
+        not first_read.FirstRead()
+        .decide(Call(tool="Bash", tool_input={"command": command}, session="s"), ME, None)
+        .allowed
+    )
+
+
+@pytest.mark.feature("first-read-gate")
+def test_registry_identity_is_a_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    def registry() -> Who:
+        return ME
+
+    monkeypatch.delenv("AGENTIHOOKS_SWARM")
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    monkeypatch.setattr(first_read.Who, "from_env", registry)
+    first_read.reset({"session_id": "registry", "source": "startup"})
+    assert first_read.membership_path("registry").read_text() == "1"
+    assert first_read.FirstRead().matches(Call(tool="Write", session="registry"))
+    first_read.mark(
+        {
+            "session_id": "registry",
+            "tool_name": "Bash",
+            "tool_input": {"command": "agentihooks seat brief"},
+            "tool_response": {"exit_code": 0},
+        }
+    )
+    assert first_read.marker_path("registry").read_text() == "1"

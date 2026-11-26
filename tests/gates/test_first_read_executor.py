@@ -128,3 +128,35 @@ def test_shell_shim_fast_exits_without_python(tmp_path: Path, monkeypatch: pytes
         AGENTIHOOKS_HOME=str(tmp_path / "ahome"),
     )
     assert subprocess.run(["/bin/bash", str(shim)], env=env, capture_output=True, timeout=3).returncode == 0
+
+
+@pytest.mark.feature("first-read-gate")
+def test_registry_member_reaches_shell_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.gates.base import Who
+
+    def registry() -> Who:
+        return Who(name="engineer@registry", swarm="proof")
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "ahome"))
+    monkeypatch.delenv("AGENTIHOOKS_QUICK_SEAT", raising=False)
+    monkeypatch.setattr(first_read.Who, "from_env", registry)
+    first_read.reset({"session_id": "registry", "source": "startup"})
+    python = tmp_path / "python-probe"
+    python.write_text("#!/usr/bin/env bash\nset -euo pipefail\nexit 23\n")
+    python.chmod(0o700)
+    cli = tmp_path / "agentihooks"
+    cli.write_text(f"#!{python}\n")
+    cli.chmod(0o700)
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}:/bin",
+        "AGENTIHOOKS_HOME": str(tmp_path / "ahome"),
+        "AGENTIHOOKS_SWARM": "",
+        "AGENTIHOOKS_AGENT_NAME": "",
+        "AGENTIHOOKS_QUICK_SEAT": "",
+        "AH_SESSION_ID": "registry",
+    }
+    result = subprocess.run(
+        ["/bin/bash", str(CONDITIONS / "pre-any-first_read.sh")], env=env, capture_output=True, timeout=3
+    )
+    assert result.returncode == 23

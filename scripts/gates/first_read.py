@@ -23,14 +23,14 @@ def marker_path(session: str) -> Path:
     return Path(home) / "first-read" / session
 
 
+def membership_path(session: str) -> Path:
+    return marker_path(session).parent / ".members" / session
+
+
 def _member(who: Who | None = None) -> bool:
     if os.environ.get("AGENTIHOOKS_QUICK_SEAT"):
         return True
-    return (
-        who.pinned
-        if who is not None
-        else bool(os.environ.get("AGENTIHOOKS_SWARM") and os.environ.get("AGENTIHOOKS_AGENT_NAME"))
-    )
+    return (who or Who.from_env()).pinned
 
 
 def _command(command: str) -> str:
@@ -46,7 +46,8 @@ def _command(command: str) -> str:
 
 def _words(command: str) -> list[str]:
     try:
-        return shlex.split(_command(command))
+        words = shlex.split(_command(command))
+        return [] if words and any(char in words[0] for char in "$`") else words
     except ValueError:
         return []
 
@@ -83,7 +84,7 @@ def _canary(command: str) -> bool:
     words = _words(command)
     if len(words) != 5 or not re.fullmatch(r"python[0-9.]*", Path(words[0]).name):
         return False
-    if words[1] != "-c" or words[3] != "--canary":
+    if words[1] != "-c" or words[3] != "--canary" or not re.fullmatch(r"[0-9a-fA-F]+", words[4]):
         return False
     try:
         statements = ast.parse(words[2]).body
@@ -114,7 +115,9 @@ def _text_succeeded(response: str) -> bool:
     except ValueError:
         if response.startswith("Script completed") and "\nOutput:\n" in response:
             return _succeeded(response.split("\nOutput:\n", 1)[1].strip())
-        return bool(re.search(r"^Process exited with code 0$", response, re.MULTILINE))
+        header = response.split("\nFinal output:", 1)[0]
+        status = re.search(r"^Process exited with code (-?\d+)$", header, re.MULTILINE)
+        return status is not None and status.group(1) == "0"
     return _succeeded(decoded)
 
 
@@ -138,10 +141,10 @@ def _succeeded(response: object) -> bool:
 
 
 def mark(payload: dict[str, Any]) -> None:
-    if not _member() or payload.get("tool_name") != "Bash":
+    if payload.get("tool_name") != "Bash":
         return
     call = Call.from_payload(payload)
-    if not call.session or not is_brief(call.command) or not _succeeded(payload.get("tool_response")):
+    if not call.session or not is_brief(call.command) or not _succeeded(payload.get("tool_response")) or not _member():
         return
     path = marker_path(call.session)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -149,8 +152,17 @@ def mark(payload: dict[str, Any]) -> None:
 
 
 def reset(payload: dict[str, Any]) -> None:
-    if payload.get("source") == "compact" and payload.get("session_id"):
-        marker_path(str(payload["session_id"])).unlink(missing_ok=True)
+    session = str(payload.get("session_id") or "")
+    if not session:
+        return
+    if payload.get("source") == "compact":
+        marker_path(session).unlink(missing_ok=True)
+    path = membership_path(session)
+    if _member():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("1")
+    else:
+        path.unlink(missing_ok=True)
 
 
 class FirstRead:

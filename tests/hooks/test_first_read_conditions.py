@@ -141,3 +141,31 @@ def test_missing_or_unsuccessful_call_never_marks(payload: dict[str, Any]) -> No
     assert not first_read.marker_path("one").exists()
     first_read.reset({"source": "compact"})
     assert not first_read.marker_path("one").exists()
+
+
+@pytest.mark.feature("first-read-gate")
+def test_failed_status_cannot_be_overridden_by_stdout() -> None:
+    first_read.mark(
+        {
+            "session_id": "one",
+            "tool_name": "Bash",
+            "tool_input": {"command": "agentihooks seat brief"},
+            "tool_response": "Process exited with code 1\nFinal output:\nProcess exited with code 0",
+        }
+    )
+    assert not first_read.marker_path("one").exists()
+
+
+@pytest.mark.feature("first-read-gate")
+def test_standalone_start_clears_old_membership(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.gates.base import Who
+
+    def standalone() -> Who:
+        return Who()
+
+    path = first_read.membership_path("one")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("1")
+    monkeypatch.setattr(first_read.Who, "from_env", standalone)
+    first_read.reset({"session_id": "one", "source": "startup"})
+    assert not path.exists()
