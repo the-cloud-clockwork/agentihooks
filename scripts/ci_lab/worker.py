@@ -11,7 +11,9 @@ import contextlib
 import functools
 import http.client
 import json
+import shutil
 import sys
+import tempfile
 import threading
 import traceback
 import urllib.error
@@ -89,7 +91,7 @@ class Finished:
             raise ValueError(f"unknown lab unit outcome {self.outcome!r}")
 
 
-Executor = Callable[[Lease], Finished]
+Executor = Callable[[Lease, Path], Finished]
 
 
 class Refused(RuntimeError):
@@ -177,6 +179,7 @@ class Worker:
     executors: Mapping[str, Executor]
     name: str
     slots: int
+    runs: Path
     capabilities: frozenset[str] = CAPABILITIES
     wait_ms: int = LEASE_WAIT_MS
     heartbeat_s: float = HEARTBEAT_SECONDS
@@ -254,18 +257,24 @@ class Worker:
         return list(self.running.values())
 
     def _unit(self, lease: Lease) -> None:
-        """Run one unit while its lease heartbeats, then deliver it unless its lease was lost or run abandoned it; an
-        executor that raises leaves it to reap, and a heartbeat that hangs only ends the heartbeats."""
+        """Run one unit in its own fresh folder under runs while its lease heartbeats, then deliver it unless its
+        lease was lost or run abandoned it; an executor that raises leaves it to reap, and a heartbeat that hangs
+        only ends the heartbeats. The folder is removed once the unit ends, delivered or not, after its report and
+        log are read; a folder that resists removal is left for the next restart's wipe."""
         lost = threading.Event()
         beat = Interval(functools.partial(self._beat, lease, lost), every=self.heartbeat_s)
         beat.start()
+        root = Path(tempfile.mkdtemp(dir=self.runs))
         try:
-            finished = self.executors[lease.unit.kind](lease)
+            try:
+                finished = self.executors[lease.unit.kind](lease, root)
+            finally:
+                with contextlib.suppress(RuntimeError):
+                    beat.close()
+            if not (lost.is_set() or self.abandoned.is_set()):
+                self._deliver(lease, finished)
         finally:
-            with contextlib.suppress(RuntimeError):
-                beat.close()
-        if not (lost.is_set() or self.abandoned.is_set()):
-            self._deliver(lease, finished)
+            shutil.rmtree(root, ignore_errors=True)
 
     def _beat(self, lease: Lease, lost: threading.Event) -> None:
         """Heartbeat the lease, skipping a beat that cannot reach the scheduler or whose reply is cut short; raise Lost
@@ -307,8 +316,13 @@ def slots(environ: Mapping[str, str], cpus: int, quota: float | None) -> int:
 
 
 def build(
-    environ: Mapping[str, str], executors: Mapping[str, Executor], name: str, cpus: int, quota: float | None
+    environ: Mapping[str, str],
+    executors: Mapping[str, Executor],
+    name: str,
+    cpus: int,
+    quota: float | None,
+    runs: Path,
 ) -> Worker:
     """Return the pod's worker over the scheduler URL its environment names, with its slots from the CPU quota."""
     allowed = environment(environ)
-    return Worker(Client(allowed[contract.SCHEDULER_URL]), executors, name, slots(allowed, cpus, quota))
+    return Worker(Client(allowed[contract.SCHEDULER_URL]), executors, name, slots(allowed, cpus, quota), runs)

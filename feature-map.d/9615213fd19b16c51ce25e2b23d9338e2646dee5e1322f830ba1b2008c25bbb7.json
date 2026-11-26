@@ -11,5 +11,8 @@
     "tests/ci_lab/test_executors.py::test_static_cuts_its_run_and_report_folders_inside_the_root_the_worker_hands_it_not_the_shared_runs_folder",
     "tests/ci_lab/test_executors.py::test_tests_cuts_its_attempt_and_report_folders_inside_the_root_the_worker_hands_it_not_the_shared_runs_folder",
     "tests/ci_lab/test_executors.py::test_mutation_cuts_its_request_and_report_folders_inside_the_root_the_worker_hands_it_not_the_shared_runs_folder"
+  ],
+  "rules": [
+    "lab-worker-runs-folder-direct-mkdtemp"
   ]
 }
