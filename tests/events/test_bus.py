@@ -30,6 +30,8 @@ class _NoNak:
 
 
 class _Consumer:
+    created: int | None = None
+
     def fetch(self, batch: int, timeout_ms: int) -> list[Delivery]:
         return []
 

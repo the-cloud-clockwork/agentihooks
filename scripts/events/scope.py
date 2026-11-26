@@ -76,6 +76,11 @@ class MergedConsumer:
         self._consumers: dict[int, Consumer] = {}
         self._cursor = 0
 
+    @property
+    def created(self) -> int | None:
+        times = [consumer.created for consumer in self._consumers.values()]
+        return min((at for at in times if at is not None), default=None)
+
     def fetch(self, batch: int, timeout_ms: int) -> list[Delivery]:
         logs = self._logs()
         deliveries = []

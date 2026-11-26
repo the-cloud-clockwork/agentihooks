@@ -1,8 +1,10 @@
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from scripts.events import scope
+from scripts.events.bus import EventLog
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.events.memory import open_bus
@@ -100,6 +102,16 @@ def test_aggregate_fetch_rotates_sources_with_sustained_backlog():
     consumer = scope.MergedConsumer(lambda: logs, "durable", "swarm.>", None)
     assert [consumer.fetch(2, 100) for _ in range(6)] == [[0, 0], [1, 1], [2, 2]] * 2
     assert calls == [0, 1, 2, 0, 1, 2]
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_merged_consumer_reports_the_earliest_created_time_its_children_know() -> None:
+    children = [SimpleNamespace(fetch=lambda *_: [], created=at) for at in (300, None, 100)]
+    logs = cast(list[EventLog], [SimpleNamespace(consumer=lambda *_, child=child: child) for child in children])
+    consumer = scope.MergedConsumer(lambda: logs, "durable", "swarm.>", None)
+    assert consumer.created is None
+    assert consumer.fetch(10, 1_000) == []
+    assert consumer.created == 100
 
 
 def test_scoped_adapters_forward_owned_work_and_explicit_policy():

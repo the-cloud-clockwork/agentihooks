@@ -126,6 +126,14 @@ def test_a_consumer_carries_the_queue_policy(bus):
     assert (work.max_deliver, work.backoff) == (-1, [0.2, 0.4])
 
 
+@pytest.mark.feature("swarm-review-trigger")
+def test_an_event_log_consumer_reports_its_durable_creation_time(bus: nats.NatsBus) -> None:
+    first = bus.events.consumer("watcher", "swarm.>")
+    info = bus._loop.run(bus._js.consumer_info(nats.EVENT_STREAM, "watcher"))
+    assert first.created == int(info.created.timestamp() * 1000)
+    assert bus.events.consumer("watcher", "swarm.>").created == first.created
+
+
 def test_a_durable_without_an_inactive_threshold_stays_and_one_with_it_is_reaped_once_idle(bus):
     bus.events.consumer("kept", "swarm.>", LOG_POLICY)
     bus.events.consumer("idle", "swarm.>", QueuePolicy(max_deliver=3, ack_wait_ms=1_000, inactive_ms=500))
