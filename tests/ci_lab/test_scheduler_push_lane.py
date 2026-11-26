@@ -315,6 +315,29 @@ def test_the_first_pass_reads_each_promotion_grade_it_keeps_once_stored_with_a_r
 
 
 @pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
+def test_the_first_pass_reads_again_a_promotion_grade_it_keeps_that_another_scheduler_saved_during_its_read(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)})})
+    run.push(HEAD_A, lane="dev")
+    run.tick(1000)
+    kept = run.grade(HEAD_A)
+    again = _restarted(run)
+    read: list[str] = []
+    grade = again.engine.grade
+
+    def counted(name: str) -> scheduler.State | None:
+        if not read:
+            run.engine.save(kept)
+        read.append(name)
+        return grade(name)
+
+    monkeypatch.setattr(again.engine, "grade", counted)
+    again.tick(1100)
+    assert read == [kept.run, kept.run]
+
+
+@pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
 def test_the_first_pass_counts_the_pushes_with_no_branch_before_the_stale_pull_request_grades_and_lists_once(
     tmp_path: Path,
 ) -> None:
