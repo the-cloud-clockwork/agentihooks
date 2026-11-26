@@ -1,0 +1,21 @@
+{
+  "id": "lab-settled-job-retention",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-job-expiry",
+  "behaviour": "A lab queue job that settles, finished by its worker or reaped lost, keeps its record and its head done set for the scheduler's retention and then expires, so settled records no longer accumulate in the swarm Redis. A requeue reap or a retry clears the expiry, so a job running again never expires mid run. No transition writes the old global done set any more; each scheduler pass drains at most one batch of it, giving every done or lost record it names the same expiry, and stops reading it once it reads empty. The retention default outlives the longest measured gap between a job settling and its grade collecting it, so a grade still takes the real outcome, and a slot whose record is gone is dropped as before.",
+  "seam": "scripts.ci_lab.queue.Queue.finish, reap, retry and drain over fakeredis, scripts.ci_lab.leases.Leases.complete and reap, scripts.ci_lab.scheduler.Scheduler.tick through its drain step and its collect of a grade, scripts.ci_lab.scheduler.main wiring the lease layer, and scripts.ci_lab.compact.compact over the old done set",
+  "tests": [
+    "tests/ci_lab/test_queue_retention.py::test_a_grade_takes_a_settled_job_s_outcome_and_drops_a_slot_whose_job_record_is_gone",
+    "tests/ci_lab/test_queue_retention.py::test_compaction_keeps_working_when_the_old_done_set_names_a_job_whose_record_is_gone",
+    "tests/ci_lab/test_queue_retention.py::test_the_retention_default_outlives_an_hour_and_is_the_scheduler_setting_default",
+    "tests/ci_lab/test_queue_retention.py::test_finish_sets_the_retention_on_the_job_record_and_its_head_done_set",
+    "tests/ci_lab/test_queue_retention.py::test_a_lost_reap_sets_the_retention_and_a_requeue_reap_leaves_the_record_without_one",
+    "tests/ci_lab/test_queue_retention.py::test_retry_clears_the_retention_of_a_settled_job",
+    "tests/ci_lab/test_queue_retention.py::test_finish_reap_and_retry_leave_the_old_global_done_set_unwritten",
+    "tests/ci_lab/test_queue_retention.py::test_drain_removes_each_named_job_and_gives_only_done_or_lost_records_the_retention",
+    "tests/ci_lab/test_queue_retention.py::test_each_pass_drains_at_most_one_batch_of_the_old_done_set_then_stops_reading_it",
+    "tests/ci_lab/test_queue_retention.py::test_a_settled_job_keeps_its_record_within_the_retention_until_its_grade_collects_it",
+    "tests/ci_lab/test_queue_retention.py::test_lease_completion_and_reaping_settle_with_the_lease_layer_retention",
+    "tests/ci_lab/test_queue_retention.py::test_main_gives_leases_the_scheduler_retention"
+  ]
+}
