@@ -5271,6 +5271,18 @@
       ]
     },
     {
+      "id": "review-launch-prompt-steps",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2911",
+      "behaviour": "The launch prompt of a review lane task of the review kind builds with the reviewer steps: read the change request, write strict findings, post them with review post, then leave and close with done --finding; a reviewer that cannot finish blocks without pushing a branch, and every kind a lane template may assign has launch steps, except workflow, which the workflow runner runs without a launch prompt, so no reviewer launch fails building its prompt.",
+      "seam": "The spawn prompt in scripts.swarm.prompt, its step table for the review kind",
+      "tests": [
+        "tests/swarm/test_task_kinds.py::test_a_review_task_gets_the_reviewer_launch_steps",
+        "tests/swarm/test_task_kinds.py::test_a_reviewer_that_cannot_finish_blocks_without_a_branch",
+        "tests/swarm/test_task_kinds.py::test_every_lane_template_kind_has_launch_steps"
+      ]
+    },
+    {
       "id": "planner-enhancement-prompt",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-prompt",
@@ -16991,6 +17003,29 @@
       "seam": "hooks.context.swarm_gates.pretool",
       "tests": [
         "tests/test_claim_watch.py::test_swarm_gates_choose_the_platform_at_each_call"
+      ]
+    },
+    {
+      "id": "hub-tracks-pull-requests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2910",
+      "behaviour": "The hub pulls reactor tracks a pull request from the task change that records it, and its fallback GitHub poll holds the hub loop for at most one ten second slice per call: it resumes the sweep from a stored cursor, starts again from the first open pull request when the cursor left the index, records the sweep start once the sweep wraps, waits a full interval after a rate limit, yields on lease loss, and records the track delay and the last sweep length, so a task change arriving mid sweep is tracked within one slice.",
+      "seam": "scripts.hub.pulls.Pulls.handle and scripts.hub.pulls.Pulls.poll run by scripts.hub.runner.HubRunner.run_once",
+      "rules": [
+        "hub-pulls-poll-unbounded-sweep"
+      ],
+      "tests": [
+        "tests/hub/test_pulls.py::test_hub_runner_tracks_pull_requests_from_ledger_outbox_subjects",
+        "tests/hub/test_pulls.py::test_poll_records_its_pass_time",
+        "tests/hub/test_pulls.py::test_poll_stops_at_a_rate_limit_and_waits_for_the_next_interval",
+        "tests/hub/test_pulls.py::test_poll_yields_when_the_replica_loses_its_lease",
+        "tests/hub/test_pulls.py::test_names_the_poll_slice_and_its_sweep_and_health_keys",
+        "tests/hub/test_pulls.py::test_a_poll_returns_after_one_slice_and_the_next_call_resumes_from_its_cursor",
+        "tests/hub/test_pulls.py::test_a_sweep_whose_cursor_left_the_open_index_starts_again_from_the_first_open_pull",
+        "tests/hub/test_pulls.py::test_a_rate_limit_in_a_resumed_sweep_waits_a_full_interval_from_that_call",
+        "tests/hub/test_pulls.py::test_a_task_change_published_mid_sweep_is_tracked_within_one_slice",
+        "tests/hub/test_pulls.py::test_the_poll_records_the_track_delay_and_the_sweep_length",
+        "tests/hub/test_pulls.py::test_a_poll_slice_records_the_track_delay_before_its_sweep_ends"
       ]
     }
   ],
