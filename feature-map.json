@@ -3089,7 +3089,8 @@
         "tests/review/test_cli.py::test_forge_selection_uses_the_current_remote_and_environment",
         "tests/review/test_cli.py::test_review_post_requires_a_url_and_swarm",
         "tests/review/test_cli.py::test_post_help_runs_and_names_the_post_arguments",
-        "tests/hive/test_auth.py::test_a_member_reviewer_posts_findings_only_with_the_review_keys"
+        "tests/hive/test_auth.py::test_a_member_reviewer_posts_findings_only_with_the_review_keys",
+        "tests/review/test_record_release.py::test_a_merge_queue_commit_link_is_refused_and_posts_nothing"
       ]
     },
     {
@@ -6973,7 +6974,10 @@
         "tests/forge/test_cli.py::test_the_origin_remote_of_the_current_checkout_is_the_default",
         "tests/forge/test_cli.py::test_a_forge_failure_prints_its_reason_and_returns_one",
         "tests/forge/test_cli.py::test_a_failing_forge_call_prints_its_reason_and_returns_one",
-        "tests/forge/test_cli.py::test_a_missing_body_file_prints_its_reason_and_returns_one"
+        "tests/forge/test_cli.py::test_a_missing_body_file_prints_its_reason_and_returns_one",
+        "tests/forge/test_github.py::test_github_names_the_promotion_pull_request_that_produced_a_release_tag",
+        "tests/forge/test_github.py::test_a_release_tag_without_one_promotion_pull_request_is_refused",
+        "tests/forge/test_gitlab.py::test_gitlab_refuses_a_release_lookup_without_a_promotion_flow"
       ]
     },
     {
