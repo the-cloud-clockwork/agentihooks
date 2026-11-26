@@ -12785,7 +12785,7 @@
     {
       "id": "quick-swarm",
       "origin": "inventory",
-      "behaviour": "A quick swarm runs in one herdr tab with no Redis or ledger server: the session that runs quick up becomes the master in pane 1 and up to four engineers open in the panes to its right, every seat injected with its role, seat folder and plan state; a seat that hands off at its compaction limit is ended with its pane kept and its successor starts in that same pane from the seat's handoff, a room message tells an idle receiving seat at once, and the quick tick, run by the hourly safety nudge round, nudges idle engineers, tells seats of room messages, relaunches a pending seat and starts again an engineer whose agent exited, and never types into a pane at a bare shell; every agent gets an equal column, quick up fails an engineer whose agent exits at launch, and outside herdr quick up refuses loudly; a seat's agent lands only on a routed account: a quick seat launch never falls back to bare Claude, the router reads the operator's token block when the pane's shell never loaded it, and a launch whose agent was not routed fails and leaves the seat pending; the tick ends an engineer whose idle agent shows Claude's signed-out notice below its input box, whether its seat is ready or pending, with its pane kept and its seat held launching, and starts it again, and quick relaunch --force does the same for a named seat, never the master.",
+      "behaviour": "A quick swarm runs in one herdr tab with no Redis or ledger server: the session that runs quick up becomes the master in pane 1 and up to four engineers open in the panes to its right, every seat injected with its role, seat folder and plan state; a seat that hands off at its compaction limit is ended with its pane kept and its successor starts in that same pane from the seat's handoff, a room message tells an idle receiving seat at once, and the quick tick, run by the hourly safety nudge round, nudges idle engineers, tells seats of room messages, relaunches a pending seat and starts again an engineer whose agent exited, and never types into a pane at a bare shell; every agent gets an equal column, quick up fails an engineer whose agent exits at launch, and outside herdr quick up refuses loudly; a seat's agent lands only on a routed account: a quick seat launch never falls back to bare Claude, the router reads the operator's token block when the pane's shell never loaded it, and a launch whose agent was not routed fails and leaves the seat pending; the tick ends an engineer whose idle agent shows Claude's signed-out notice below its input box, whether its seat is ready or pending, with its pane kept and its seat held launching, and starts it again, and quick relaunch --force does the same for a named seat, including the master, whose successor binds in the preserved pane.",
       "seam": "scripts.quick (guard, layout, registry, member, seeds, handoff, room, launch, tick, cli), hooks.context.quick_swarm, the quick branches of hooks.context.context_recycle and hooks.lifecycle.handoff_close, init-agent --pane and its quick seat route check, and the token block read of scripts.claude_quota_balancer.select_launch_credential",
       "tests": [
         "tests/quick/test_cli.py::test_up_seats_the_caller_as_master_and_launches_the_engineers",
@@ -12839,12 +12839,49 @@
         "tests/test_claude_quota_balancer.py::test_a_launch_routes_over_the_operator_token_block_its_shell_never_loaded",
         "tests/quick/test_room_tick_launch.py::test_an_engineer_whose_agent_is_signed_out_is_started_again_and_the_master_never_is",
         "tests/quick/test_room_tick_launch.py::test_force_ends_the_seat_agent_with_its_pane_kept_and_starts_its_successor",
-        "tests/quick/test_room_tick_launch.py::test_force_never_ends_the_master_nor_a_seat_being_launched",
+        "tests/quick/test_room_tick_launch.py::test_force_never_ends_a_seat_being_launched_or_a_missing_seat",
         "tests/quick/test_cli_mutants.py::test_relaunch_force_ends_the_live_agent_and_starts_its_successor",
         "tests/test_init_agent.py::test_a_successor_without_account_tokens_refuses_and_its_seat_never_reads_ready",
         "tests/quick/test_room_tick_launch.py::test_a_notice_above_the_input_box_a_busy_agent_or_an_unreadable_pane_is_never_forced"
       ],
       "semgrep_rule": "feature-quick-swarm-pane-typing"
+    },
+    {
+      "id": "quick-master-force-relaunch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quick-master-relaunch",
+      "behaviour": "Forcing the quick master seat ends its current agent while keeping the pane, starts one successor and records its new session binding before the seat reads ready.",
+      "seam": "scripts.quick.launch.force and registry.bind",
+      "tests": [
+        "tests/quick/test_room_tick_launch.py::test_force_ends_the_master_and_starts_a_bound_successor"
+      ]
+    },
+    {
+      "id": "quick-launcher-survival",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quick-master-relaunch",
+      "behaviour": "A quick launcher and its PID marker survive agent exit and launch acceptance. A same-name successor removes dead predecessor launchers and inputs, preserving live launchers and other names. Ordinary launches retain exit cleanup.",
+      "seam": "scripts.init_agent._write_launcher and main",
+      "tests": [
+        "tests/test_init_agent.py::test_a_quick_launcher_survives_exit_until_a_successor_replaces_it",
+        "tests/test_init_agent.py::test_successor_cleanup_keeps_live_launchers_and_other_agent_names",
+        "tests/test_init_agent.py::test_successor_cleanup_reaches_dead_launchers_after_every_skipped_entry",
+        "tests/test_init_agent.py::test_only_a_quick_successor_removes_dead_launchers_with_a_recorded_pid",
+        "tests/test_init_agent.py::test_a_successor_written_at_the_same_path_is_kept",
+        "tests/test_init_agent.py::test_an_ordinary_launcher_still_removes_itself_after_exit",
+        "tests/test_init_agent.py::test_a_quick_launch_keeps_its_started_marker_after_acceptance"
+      ]
+    },
+    {
+      "id": "live-launcher-gc",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quick-master-relaunch",
+      "behaviour": "Run folder cleanup preserves old launch files whose started marker holds a live positive PID. Dead, missing, malformed and unreadable markers keep the existing age rule.",
+      "seam": "scripts.herdr_gc.clean_run_dir",
+      "tests": [
+        "tests/test_herdr_gc.py::test_old_launchers_with_live_started_pids_survive_cleanup",
+        "tests/test_herdr_gc.py::test_an_out_of_range_started_pid_uses_the_age_rule"
+      ]
     },
     {
       "id": "tick-progress-heads",
