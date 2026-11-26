@@ -132,7 +132,8 @@ def test_a_reopened_pull_request_returns_to_the_poll():
     assert open_urls(bus) == [URL]
 
 
-def test_a_webhook_url_in_other_casing_reaches_the_tracked_pull_request():
+@pytest.mark.feature("hub-pull-first-look-opened")
+def test_a_webhook_url_in_other_casing_reaches_the_tracked_pull_request() -> None:
     bus, hub, consumer = setup()
     other_casing = URL.replace("acme/widgets", "Acme/Widgets")
     hub.handle(task_changed())
@@ -142,6 +143,8 @@ def test_a_webhook_url_in_other_casing_reaches_the_tracked_pull_request():
     hub.observe(Observation(other_casing, "merged", "a1"))
     events = drain(consumer)
     assert [(e.swarm, e.type, e.key, e.data["url"]) for e in events] == [
+        ("crew", "pull.opened", URL, URL),
+        ("other", "pull.opened", URL, URL),
         ("crew", "pull.merged", URL, URL),
         ("other", "pull.merged", URL, URL),
     ]
@@ -258,12 +261,33 @@ def test_state_transitions_name_what_happened():
     assert snapshot(bus)["state"] == "merged"
 
 
-def test_first_observation_of_a_merged_pull_request_reports_the_merge():
+@pytest.mark.feature("hub-pull-first-look-opened")
+def test_first_observation_of_a_merged_pull_request_reports_the_merge() -> None:
     bus, hub, consumer = setup()
     hub.handle(task_changed())
     hub.observe(Observation(URL, "merged", "a1", True))
-    assert [e.type for e in drain(consumer)] == ["pull.merged"]
+    assert [e.type for e in drain(consumer)] == ["pull.opened", "pull.merged"]
     assert snapshot(bus)["queued"] is False
+
+
+@pytest.mark.feature("hub-pull-first-look-opened")
+@pytest.mark.parametrize(
+    ("state", "published"),
+    [("open", ["pull.opened"]), ("merged", ["pull.opened", "pull.merged"]), ("closed", ["pull.opened", "pull.closed"])],
+)
+def test_a_first_look_publishes_opened_before_any_terminal_event(state: str, published: list[str]) -> None:
+    bus, hub, consumer = setup()
+    hub.handle(task_changed())
+    hub.handle(task_changed("other"))
+    hub.observe(Observation(URL, state, "a1"))
+    assert kinds(drain(consumer)) == [
+        (swarm, kind, version) for version, kind in enumerate(published, 1) for swarm in ("crew", "other")
+    ]
+    stored = snapshot(bus)
+    assert stored is not None
+    assert (stored["version"], stored["pending"]) == (len(published), [])
+    hub.observe(Observation(URL, state, "a1"))
+    assert drain(consumer) == []
 
 
 def test_leaving_the_queue_without_merging_is_a_dequeue():
@@ -461,7 +485,8 @@ def test_a_snapshot_that_stays_contended_raises():
     assert len(attempts) == 8
 
 
-def test_terminal_pull_requests_leave_the_poll_and_are_not_tracked_again():
+@pytest.mark.feature("hub-pull-first-look-opened")
+def test_terminal_pull_requests_leave_the_poll_and_are_not_tracked_again() -> None:
     bus, hub, consumer = setup()
     hub.handle(task_changed())
     hub.handle(task_changed(url=OTHER))
@@ -473,6 +498,7 @@ def test_terminal_pull_requests_leave_the_poll_and_are_not_tracked_again():
     assert snapshot(bus)["swarms"] == ["crew", "late"]
     hub.observe(Observation(URL, "merged", "a1"))
     assert [(e.swarm, e.type) for e in drain(consumer)] == [
+        ("crew", "pull.opened"),
         ("crew", "pull.closed"),
         ("crew", "pull.merged"),
         ("late", "pull.merged"),
