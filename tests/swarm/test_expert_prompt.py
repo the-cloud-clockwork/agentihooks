@@ -29,7 +29,11 @@ OPENING = (
     "You claim no ledger task and file no follow up. You complete every instruction of the mission: no exception, no "
     "workaround, no excuse. A problem you meet is solved at its root, inside the mission.\n"
 )
-NO_HISTORY = "Your seat expert-1@sw has no history yet: no handoff document, no recap and no learned notes.\n"
+NO_HISTORY = (
+    "Your seat expert-1@sw has no history yet: no handoff document, no recap and no learned notes.\n"
+    "Run agentihooks seat brief before your first command: it prints your seat's handoff, culture, latest recap and "
+    "learned notes from the store that keeps them.\n"
+)
 LOOP = (
     "\n"
     "Your loop is the swarm-expert skill: every change goes through the dev cycle, a pull request is queued on green "

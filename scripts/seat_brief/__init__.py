@@ -33,9 +33,10 @@ def main(argv: list[str], environ: Mapping[str, str] | None = None) -> int:
     """Print the brief of the seat this session holds, or the no seat line; 1 when the seat's store fails."""
     build_parser().parse_args(argv)
     try:
-        sources.find(os.environ if environ is None else environ)
+        source = sources.find(os.environ if environ is None else environ)
+        brief = source.brief() if source else None
     except (SwarmError, *store_errors()) as exc:
         print(f"seat brief: {exc}", file=sys.stderr)
         return 1
-    print(NO_SEAT)
+    print(render(brief) if brief else NO_SEAT)
     return 0
