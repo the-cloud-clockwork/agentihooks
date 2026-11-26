@@ -11,37 +11,36 @@ from scripts import herdr_host, herdr_panes, init_agent
 INSTALLED = herdr_host.binary
 
 
-def _which(monkeypatch, tmp_path, found):
+def _which(monkeypatch, found):
     asked = []
 
     def which(command, path=None):
         asked.append((command, path))
         return found.get(path)
 
-    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(herdr_host.shutil, "which", which)
     return asked
 
 
 @pytest.mark.feature("herdr-enabled-when-installed")
-def test_herdr_is_found_in_the_local_bin_its_installer_uses(monkeypatch, tmp_path):
-    local = str(tmp_path / ".local" / "bin")
-    asked = _which(monkeypatch, tmp_path, {local: f"{local}/herdr"})
+def test_herdr_is_found_in_the_local_bin_its_installer_uses(monkeypatch):
+    local = str(Path.home() / ".local" / "bin")
+    asked = _which(monkeypatch, {local: f"{local}/herdr"})
     assert INSTALLED() == f"{local}/herdr"
     assert asked == [("herdr", None), ("herdr", local)]
 
 
 @pytest.mark.feature("herdr-enabled-when-installed")
-def test_herdr_on_path_comes_before_the_local_bin(monkeypatch, tmp_path):
-    local = str(tmp_path / ".local" / "bin")
-    asked = _which(monkeypatch, tmp_path, {None: "/usr/bin/herdr", local: f"{local}/herdr"})
+def test_herdr_on_path_comes_before_the_local_bin(monkeypatch):
+    local = str(Path.home() / ".local" / "bin")
+    asked = _which(monkeypatch, {None: "/usr/bin/herdr", local: f"{local}/herdr"})
     assert INSTALLED() == "/usr/bin/herdr"
     assert asked == [("herdr", None)]
 
 
 @pytest.mark.feature("herdr-enabled-when-installed")
-def test_no_herdr_anywhere_is_none(monkeypatch, tmp_path):
-    _which(monkeypatch, tmp_path, {})
+def test_no_herdr_anywhere_is_none(monkeypatch):
+    _which(monkeypatch, {})
     assert INSTALLED() is None
 
 
