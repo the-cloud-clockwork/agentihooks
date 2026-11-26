@@ -154,3 +154,43 @@ def test_the_urgent_task_starts_on_the_freed_seat_after_one_handoff(episode: Any
     agent = next(agent for agent in episode.store.agents(SLUG) if agent.name == request.name)
     assert (agent.task, agent.state, agent.seat) == ("urgent", "working", seat)
     assert len(_asks(episode)) == 1
+
+
+def _successor(rig: Any, elapsed_ms: int) -> AgentRecord:
+    _leave(rig, "lower")
+    rig.now.ms = 2 + elapsed_ms
+    rig.store = RedisStore(rig.store.redis)
+    return _hold(rig, "lower", 2)
+
+
+def _rotate(rig: Any, holders: list[AgentRecord]) -> list[str]:
+    rig.rows["other"]["rank"] = "urgent"
+    full = {"eng": ([rig.rows["other"]], holders)}
+    assert preempt.step(SLUG, rig.store, rig.rows, rig.found, full, rig.now.ms - 1, probe=lambda lane, row: "") == []
+    return preempt.step(SLUG, rig.store, rig.rows, rig.found, full, rig.now.ms, probe=lambda lane, row: "")
+
+
+@pytest.mark.feature("hub-preemption-victim-rotation")
+def test_recent_victim_task_rotates_to_other_holder(episode: Any) -> None:
+    successor = _successor(episode, 600_000)
+    episode.rows["higher"]["rank"] = "low"
+    other = next(agent for agent in episode.store.agents(SLUG) if agent.task == "higher")
+    actions = _rotate(episode, [other, successor])
+    assert len(actions) == 1
+    assert f"asked {other.name} to hand off" in actions[0]
+    assert len([item for item in _asks(episode) if item.task == "higher"]) == 1
+    assert len(_asks(episode)) == 2
+
+
+@pytest.mark.feature("hub-preemption-victim-rotation")
+@pytest.mark.parametrize(
+    ("elapsed_ms", "expected_asks"),
+    [(600_000, 0), (1_799_999, 0), (1_800_000, 1), (1_800_001, 1)],
+)
+def test_recent_victim_task_waits_for_thirty_minutes(episode: Any, elapsed_ms: int, expected_asks: int) -> None:
+    successor = _successor(episode, elapsed_ms)
+    actions = _rotate(episode, [successor])
+    assert len(actions) == expected_asks
+    assert len(_asks(episode)) == 1 + expected_asks
+    if expected_asks:
+        assert f"asked {successor.name} to hand off" in actions[0]
