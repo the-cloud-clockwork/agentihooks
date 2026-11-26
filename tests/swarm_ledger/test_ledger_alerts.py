@@ -1345,3 +1345,37 @@ def test_new_alert_appends_a_row_and_marks_the_context_dirty() -> None:
     }
     assert doc["alerts"] == [alert]
     assert context.dirty is True
+
+
+@pytest.mark.feature("ledger-alert-warning-without-context")
+def test_warning_raised_appends_a_row_from_a_revision_and_a_time_with_no_context() -> None:
+    doc = {"alerts": []}
+    changed = ledger_alerts.warning_raised(doc, 3, RAISE_WARNING_AT, (ledger_alerts.SIZE, "grew too large"), [])
+    assert changed is True
+    assert doc["alerts"] == [
+        {
+            "id": "al-3-0",
+            "text": "grew too large",
+            "source": "size",
+            "target": "master",
+            "state": "open",
+            "at": RAISE_WARNING_AT,
+            "rev": 3,
+        }
+    ]
+
+
+@pytest.mark.feature("ledger-alert-warning-without-context")
+def test_alert_row_builds_a_row_from_a_revision_and_a_time_with_no_context() -> None:
+    doc = {"alerts": []}
+    row = ledger_alerts.alert_row(doc, 6, RAISE_WARNING_AT, ledger_alerts.SIZE, "a fresh warning", "master")
+    assert row == {
+        "id": "al-6-0",
+        "text": "a fresh warning",
+        "source": "size",
+        "target": "master",
+        "state": "open",
+        "at": RAISE_WARNING_AT,
+        "rev": 6,
+    }
+    assert doc["alerts"] == [row]
