@@ -2032,9 +2032,9 @@ def build(
 ) -> Scheduler:
     """Return the service's scheduler over its clients and the day's budget, trusting the runner trust list of the
     repository's dev, serving the repositories the environment lists or else that one repository, its mirrors
-    falling back to the lab remote the environment names. Once `AGENTIHOOKS_LAB_APP`
-    names the lab's GitHub App, its bus inbox hands each completed check of the repository to a shadow recorder on
-    the scheduler's registry; without it completed checks are acknowledged unrecorded."""
+    falling back to the lab remote the environment names. Once `AGENTIHOOKS_LAB_APP` names the lab's GitHub App, its
+    bus inbox hands each completed check of the repository to a shadow recorder on the scheduler's registry; without
+    it completed checks are acknowledged unrecorded."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
     node, root = Path(environ[contract.GIT_MIRROR]), Path(environ[MIRROR_STORE])
     expander = MirrorExpander(node, root, toolchain, StoredManifests(objects), Store(client, objects).get, lab(environ))

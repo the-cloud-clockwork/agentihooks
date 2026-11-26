@@ -6,6 +6,7 @@ repository it is set up for.
 """
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -39,11 +40,20 @@ IGNORED = f"ignored {HEAD_A}: {OTHER} is not a served repository"
 RECEIVED = f"received {HEAD_A} on dev"
 
 
+@dataclass
+class Based(Expander):
+    based: list[str] = field(default_factory=list[str])
+
+    def merge_base(self, repo: str, head: str) -> str:
+        self.based.append(head)
+        return super().merge_base(repo, head)
+
+
 @pytest.fixture
 def lab(tmp_path: Path) -> Callable[[frozenset[str] | None], Run]:
     def make(served: frozenset[str] | None) -> Run:
         plans = {HEAD_A: plan({"lint": (unit(1),)})}
-        state = Lab(fake_redis(), LocalObjects(tmp_path / "objects"), Inbox(), Expander(plans))
+        state = Lab(fake_redis(), LocalObjects(tmp_path / "objects"), Inbox(), Based(plans))
         ports = scheduler.Ports(state.inbox, state.expander, state.checks, state.hotfixes, state.kube)
         settings = scheduler.Settings(frozenset({ACTOR}), 0, Policy(), served)
         return Run(state, scheduler.Scheduler(state.client, state.objects, ports, settings, None))
@@ -96,6 +106,7 @@ def service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., sc
         GITHUB,
         f"{GITHUB}.git",
         f"{GITHUB}/",
+        f"{GITHUB}.git/",
         "https://github.com/The-Cloud-Clockwork/AgentiHooks",
         REPO,
     ],
@@ -150,7 +161,8 @@ def test_a_head_of_a_repository_that_is_not_served_is_ignored_whatever_asks_for_
     assert run.tick(1000) == [IGNORED]
     assert run.lab.client.hgetall(scheduler.WAITING) == {}
     assert run.grades() == []
-    assert run.lab.expander.seen == []
+    expander = run.lab.expander
+    assert isinstance(expander, Based) and (expander.seen, expander.based) == ([], [])
     assert (run.lab.repos, run.lab.poster.posts) == ([], [])
 
 
@@ -190,6 +202,7 @@ def test_the_service_scheduler_serves_the_repository_it_is_set_up_for_unless_the
 ) -> None:
     assert service({}).settings.served == {SLUG}
     assert service({contract.SERVED_REPOSITORIES: ""}).settings.served == {SLUG}
+    assert service({scheduler.REPOSITORY: OTHER}).settings.served == {OTHER_SLUG}
     listed = f"{OTHER}, https://github.com/acme/widgets.git"
     assert service({contract.SERVED_REPOSITORIES: listed}).settings.served == {OTHER_SLUG, "acme/widgets"}
 
