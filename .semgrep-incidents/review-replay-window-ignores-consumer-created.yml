@@ -16,3 +16,15 @@ rules:
       - pattern: $EVENT.time < $NOW - REPLAY_MS
       - pattern: $NOW - $EVENT.time <= REPLAY_MS
       - pattern: $NOW - $EVENT.time > REPLAY_MS
+      - pattern: $EVENT.time > $NOW - REPLAY_MS
+      - pattern: $EVENT.time <= $NOW - REPLAY_MS
+      - pattern: $NOW - REPLAY_MS <= $EVENT.time
+      - pattern: $NOW - REPLAY_MS < $EVENT.time
+      - pattern: $NOW - REPLAY_MS > $EVENT.time
+      - pattern: $NOW - REPLAY_MS >= $EVENT.time
+      - pattern: $NOW - $EVENT.time < REPLAY_MS
+      - pattern: $NOW - $EVENT.time >= REPLAY_MS
+      - pattern: REPLAY_MS > $NOW - $EVENT.time
+      - pattern: REPLAY_MS >= $NOW - $EVENT.time
+      - pattern: REPLAY_MS < $NOW - $EVENT.time
+      - pattern: REPLAY_MS <= $NOW - $EVENT.time

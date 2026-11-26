@@ -104,19 +104,13 @@ def test_aggregate_fetch_rotates_sources_with_sustained_backlog():
     assert calls == [0, 1, 2, 0, 1, 2]
 
 
-@pytest.mark.feature("swarm-review-trigger")
-def test_a_merged_consumer_reports_the_earliest_created_time_its_children_know() -> None:
-    def merged(*created: int | None) -> scope.MergedConsumer:
-        children = [SimpleNamespace(fetch=lambda *_: [], created=at) for at in created]
-        logs = cast(list[EventLog], [SimpleNamespace(consumer=lambda *_, child=child: child) for child in children])
-        return scope.MergedConsumer(lambda: logs, "durable", "swarm.>", None)
-
-    known, unknown = merged(300, 100), merged(300, None, 100)
-    assert known.created is None
-    assert known.fetch(10, 1_000) == []
-    assert known.created == 100
-    assert unknown.fetch(10, 1_000) == []
-    assert unknown.created is None
+def test_a_merged_consumer_reports_no_created_time_even_when_every_child_knows_one() -> None:
+    children = [SimpleNamespace(fetch=lambda *_: [], created=at) for at in (300, 100)]
+    logs = cast(list[EventLog], [SimpleNamespace(consumer=lambda *_, child=child: child) for child in children])
+    merged = scope.MergedConsumer(lambda: logs, "durable", "swarm.>", None)
+    assert merged.created is None
+    assert merged.fetch(10, 1_000) == []
+    assert merged.created is None
 
 
 def test_scoped_adapters_forward_owned_work_and_explicit_policy():

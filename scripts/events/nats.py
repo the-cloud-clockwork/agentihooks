@@ -524,11 +524,10 @@ class NatsWorkQueue:
             loop.run(provision_queue(js, names, config, swarm is not None))
         elif swarm is not None:
             require_migrated(loop.run(js.stream_info(self._stream)))
-        subscription, created = loop.run(
+        subscription, _ = loop.run(
             _pull(js, self._stream, names.durable, self._filter, policy, config.provision, legacy_durable)
         )
         self._consumer = NatsConsumer(loop, subscription, js, policy, f"queue.{name}", swarm, config.credentials)
-        self._consumer.created = created
 
     def offer(self, event: Envelope) -> bool:
         if self._swarm is not None:

@@ -26,6 +26,7 @@ ACTIVE = ("running", "drained")
 BATCH = 50
 FETCH_MS = 100
 REPLAY_MS = 6 * 3_600_000
+BACKLOG_MS = 24 * 3_600_000
 KINDS = {"pull.opened": "pr", "merge_group.requested": "mq", "release.published": "rel"}
 NOUNS = {"pr": "pull request", "mq": "merge queue group", "rel": "release"}
 
@@ -128,9 +129,11 @@ def review_pass(bus: Bus, slug: str, doc: dict[str, Any], ledger: Any, now_ms: i
 
 def _oldest(created: int | None, now_ms: int) -> int:
     """The oldest event time the review pass queues: the replay window start, or the consumer's creation when that
-    is earlier, so a backlog published after the consumer exists is never cut by the window."""
+    is earlier, so a backlog published after the consumer exists is never cut by the window, and never older than
+    the backlog cap, because a swarm paused for days would otherwise queue a review for every change of that
+    period."""
     window = now_ms - REPLAY_MS
-    return window if created is None else min(created, window)
+    return window if created is None else max(now_ms - BACKLOG_MS, min(created, window))
 
 
 def _review_pass(tick: Any, get: Callable[[str], Any]) -> list[str]:

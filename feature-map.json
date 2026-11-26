@@ -16671,7 +16671,7 @@
     {
       "id": "swarm-review-trigger",
       "origin": "inventory",
-      "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; an event older than the six hour replay window still queues when it was published at or after its review consumer was created, and with no known creation time the window alone decides; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
+      "behaviour": "The tick step review pass queues one review lane task per pull request, merge queue group and release a running swarm with a review cap sees, keyed by the change so a repeat adds nothing; an event older than the six hour replay window still queues when it was published at or after its review consumer was created and inside the one day backlog cap, and with no known creation time the window alone decides; the hub webhook publishes merge group and release events to every swarm tracking a pull request in that repository.",
       "seam": "scripts.tick.steps.review.review_pass over scripts.events.bus.Consumer.created, scripts.hub.github_webhooks.repository_events and scripts.hub.pulls.Pulls.announce",
       "rules": [
         "review-replay-window-ignores-consumer-created"
@@ -16708,9 +16708,11 @@
         "tests/tick/steps/test_review_queue.py::test_a_backlog_older_than_the_replay_window_queues_when_the_consumer_is_older_still",
         "tests/tick/steps/test_review_queue.py::test_an_event_older_than_the_window_and_the_consumer_queues_nothing",
         "tests/tick/steps/test_review_queue.py::test_a_consumer_with_no_created_time_keeps_the_replay_window_rule",
+        "tests/tick/steps/test_review_queue.py::test_a_backlog_older_than_the_cap_queues_nothing_even_when_the_consumer_is_older_still",
+        "tests/tick/steps/test_review_queue.py::test_a_backlog_event_at_the_cap_still_queues",
         "tests/events/test_memory.py::test_a_memory_consumer_keeps_the_wall_clock_time_it_was_created_at",
         "tests/events/test_memory.py::test_open_bus_stamps_consumers_from_the_wall_clock_by_default",
-        "tests/events/test_scope.py::test_a_merged_consumer_reports_the_earliest_created_time_its_children_know",
+        "tests/events/test_scope.py::test_a_merged_consumer_reports_no_created_time_even_when_every_child_knows_one",
         "tests/events/test_nats.py::test_an_event_log_consumer_reports_its_durable_creation_time"
       ]
     },

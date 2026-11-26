@@ -203,6 +203,21 @@ def test_a_consumer_with_no_created_time_keeps_the_replay_window_rule() -> None:
 
 
 @pytest.mark.feature("swarm-review-trigger")
+def test_a_backlog_older_than_the_cap_queues_nothing_even_when_the_consumer_is_older_still() -> None:
+    bus, ledger = open_bus(BusConfig(), wall=lambda: NOW - review().BACKLOG_MS - 60_000), Ledger()
+    publish(bus, "pull.opened", {"url": PULL}, PULL, NOW - review().BACKLOG_MS - 1)
+    assert run(bus, ledger) == []
+    assert ledger.added == []
+
+
+@pytest.mark.feature("swarm-review-trigger")
+def test_a_backlog_event_at_the_cap_still_queues() -> None:
+    bus, ledger = open_bus(BusConfig(), wall=lambda: NOW - review().BACKLOG_MS - 60_000), Ledger()
+    publish(bus, "pull.opened", {"url": PULL}, PULL, NOW - review().BACKLOG_MS)
+    assert len(run(bus, ledger)) == 1
+
+
+@pytest.mark.feature("swarm-review-trigger")
 def test_a_ledger_refusal_is_skipped_and_never_fails_the_pass(capsys: pytest.CaptureFixture[str]) -> None:
     bus = open_bus(BusConfig())
     publish(bus, "pull.opened", {"url": PULL}, PULL)
