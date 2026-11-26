@@ -15,6 +15,7 @@ TTL_SEC = 30 * 24 * 3600
 OPEN = "open"
 READ = "read"
 ANSWERED = "answered"
+RELEASE_TAG = "/releases/tag/"
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,11 @@ def _head(forge: Forge, url: str) -> str:
     return found.head
 
 
+def _change_url(forge: Forge, url: str) -> str:
+    repository, release, tag = url.rstrip("/").partition(RELEASE_TAG)
+    return f"{repository}/pull/{forge.release_pull(tag)}" if release else url
+
+
 def _post_one(store: RedisStore, forge: Forge, target: Record, who: Who, body: str) -> Record:
     comment = forge.post(number_of(target.url), body)
 
@@ -159,6 +165,7 @@ def _mark(found: Record, by: str, ids: Sequence[str], answer: str) -> Record:
 
 
 def mark(store: RedisStore, slug: str, forge: Forge, url: str, by: str, ids: Sequence[str], answer: str) -> Record:
+    url = _change_url(forge, url)
     head = _head(forge, url)
     return _write(store, slug, url, head, lambda found: _mark(found, by, ids, answer), "")
 
@@ -167,6 +174,7 @@ def post(store: RedisStore, slug: str, forge: Forge, url: str, by: str, task: st
     cleaned = tuple(text for body in bodies if (text := body.strip()))
     if not cleaned:
         raise SwarmError("a review posts at least one finding")
+    url = _change_url(forge, url)
     found = Record(url, _head(forge, url))
     who = Who(name=by, swarm=slug, task=task)
     for body in cleaned:

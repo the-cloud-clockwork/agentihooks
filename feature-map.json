@@ -3089,7 +3089,8 @@
         "tests/review/test_cli.py::test_forge_selection_uses_the_current_remote_and_environment",
         "tests/review/test_cli.py::test_review_post_requires_a_url_and_swarm",
         "tests/review/test_cli.py::test_post_help_runs_and_names_the_post_arguments",
-        "tests/hive/test_auth.py::test_a_member_reviewer_posts_findings_only_with_the_review_keys"
+        "tests/hive/test_auth.py::test_a_member_reviewer_posts_findings_only_with_the_review_keys",
+        "tests/review/test_record_release.py::test_a_merge_queue_commit_link_is_refused_and_posts_nothing"
       ]
     },
     {
@@ -6401,6 +6402,23 @@
       ]
     },
     {
+      "id": "claude-router-cache-lock-read-only-home",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-planner-router-lock-grant",
+      "behaviour": "When the agentihooks home is read only, as in a Codex planner sandbox, the Claude router cache lock is skipped instead of failing: cached observations still read, a refresh still returns results and writes nothing, and a missing cache folder reads as empty. Any other lock error still raises. On a writable home the lock file is created and held exclusively while a refresh probes and writes the cache.",
+      "seam": "scripts.claude_quota_balancer._cache_lock through cached_observations and collect_results",
+      "rules": [
+        "claude-router-cache-lock-without-read-only-fallback"
+      ],
+      "tests": [
+        "tests/test_claude_quota_balancer.py::test_a_refresh_holds_the_router_cache_lock_while_it_probes",
+        "tests/test_claude_quota_balancer.py::test_a_router_cache_lock_error_other_than_a_read_only_home_still_raises",
+        "tests/test_claude_quota_balancer.py::test_a_read_only_router_cache_lock_still_reads_the_cached_observations",
+        "tests/test_claude_quota_balancer.py::test_a_read_only_router_cache_lock_refreshes_without_writing_the_cache",
+        "tests/test_claude_quota_balancer.py::test_a_router_cache_in_a_missing_read_only_folder_reads_as_empty"
+      ]
+    },
+    {
       "id": "hive-release-drain-live-agents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2283",
@@ -6973,7 +6991,10 @@
         "tests/forge/test_cli.py::test_the_origin_remote_of_the_current_checkout_is_the_default",
         "tests/forge/test_cli.py::test_a_forge_failure_prints_its_reason_and_returns_one",
         "tests/forge/test_cli.py::test_a_failing_forge_call_prints_its_reason_and_returns_one",
-        "tests/forge/test_cli.py::test_a_missing_body_file_prints_its_reason_and_returns_one"
+        "tests/forge/test_cli.py::test_a_missing_body_file_prints_its_reason_and_returns_one",
+        "tests/forge/test_github.py::test_github_names_the_promotion_pull_request_that_produced_a_release_tag",
+        "tests/forge/test_github.py::test_a_release_tag_without_one_promotion_pull_request_is_refused",
+        "tests/forge/test_gitlab.py::test_gitlab_refuses_a_release_lookup_without_a_promotion_flow"
       ]
     },
     {
@@ -10472,6 +10493,26 @@
       "seam": "HiveLaunch spawn account retry through master selection",
       "tests": [
         "tests/hive/test_master_fallback_launch.py::test_a_front_door_master_retry_leaves_a_full_native_login_for_a_subscription_slot"
+      ]
+    },
+    {
+      "id": "hive-all-master-logins",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mql-advertise",
+      "behaviour": "Hive heartbeats advertise every stored master login with its week left and retain the best legacy login; front door masters try all advertised logins, preserving legacy routes and floor refusals.",
+      "seam": "daemon beat registry output and front door master placement through HiveLaunch selection",
+      "tests": [
+        "tests/hive/test_master_login_advertisement.py::test_beat_advertises_every_stored_login_and_the_best_legacy_account",
+        "tests/hive/test_master_login_advertisement.py::test_front_door_tries_slot_four_when_marker_slot_one_is_closed",
+        "tests/hive/test_master_login_advertisement.py::test_legacy_record_and_secondary_master_keep_their_routes",
+        "tests/hive/test_master_login_advertisement.py::test_front_door_keeps_advertised_ranking_instead_of_account_alphabetical_order",
+        "tests/hive/test_master_login_advertisement.py::test_launch_uses_an_open_sibling_of_the_closed_or_rejected_marker",
+        "tests/hive/test_master_login_advertisement.py::test_all_advertised_logins_closed_keep_each_master_floor_reason",
+        "tests/hive/test_master_login_advertisement.py::test_best_legacy_login_follows_the_launch_ranking",
+        "tests/hive/test_master_login_advertisement.py::test_advertised_private_login_passes_hive_checks_without_a_worker_slot"
+      ],
+      "rules": [
+        "hive-marker-only-master-login"
       ]
     },
     {
