@@ -9,6 +9,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from scripts.ci_lab.units import Priority, priority_of
 from scripts.ci_lab.webhooks import NOTICE, PLANT, HeadEvent, pull_lane
@@ -71,20 +72,18 @@ def admit(event: HeadEvent, trusted: Collection[str]) -> GradeRequest | None:
 def slug(repo: str) -> str:
     """Return the owner and name of a repository URL, case folded: its path with no slash at either end and no
     trailing `.git`."""
-    return repo
+    return urlsplit(repo).path.strip("/").removesuffix(".git").casefold()
 
 
 def served(listed: str, repository: str) -> frozenset[str]:
     """Return the slugs of the repositories a scheduler serves: those a list of URLs separated by commas or white
     space names, and when it names none, the one repository the service is set up for."""
-    del listed, repository
-    return frozenset()
+    return frozenset(slug(name) for name in listed.replace(",", " ").split() or [repository])
 
 
 def serves(repositories: Collection[str] | None, repo: str) -> bool:
     """Whether a head of the repository is served; a scheduler with no set of served repositories serves every one."""
-    del repositories, repo
-    return True
+    return repositories is None or slug(repo) in repositories
 
 
 def answered(request: GradeRequest, negative: Callable[[str, str], bool]) -> bool:

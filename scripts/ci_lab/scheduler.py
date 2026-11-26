@@ -59,7 +59,7 @@ from scripts.ci_lab.capacity import Load
 from scripts.ci_lab.checks import Checks, Output, PostRefused
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
-from scripts.ci_lab.intake import GradeRequest, admit
+from scripts.ci_lab.intake import GradeRequest, admit, served, serves
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
@@ -883,6 +883,9 @@ class Scheduler:
         fixes = self.ports.hotfixes() if heads else frozenset[str]()
         actions: list[str] = []
         for head in heads:
+            if not serves(self.settings.served, head.event.repo):
+                actions.append(f"ignored {head.event.head}: {head.event.repo} is not a served repository")
+                continue
             if head.event.action == CLOSED:
                 actions.append(self._close(head.event, head.lane))
                 continue
@@ -2028,7 +2031,8 @@ def build(
     environ: Mapping[str, str], client: Any, objects: Objects, consumer: Consumer, spending: budget.Budget
 ) -> Scheduler:
     """Return the service's scheduler over its clients and the day's budget, trusting the runner trust list of the
-    repository's dev, its mirrors falling back to the lab remote the environment names. Once `AGENTIHOOKS_LAB_APP`
+    repository's dev, serving the repositories the environment lists or else that one repository, its mirrors
+    falling back to the lab remote the environment names. Once `AGENTIHOOKS_LAB_APP`
     names the lab's GitHub App, its bus inbox hands each completed check of the repository to a shadow recorder on
     the scheduler's registry; without it completed checks are acknowledged unrecorded."""
     toolchain = Toolchain(sys.version.split()[0], {}, "", "", environ.get(IMAGE, ""), {})
@@ -2045,7 +2049,8 @@ def build(
     hotfixes, pods = control.Priorities(client, _now_ms), worker_pods(environ)
     ports = Ports(inbox, expander, poster, hotfixes, pods, stale_heads.OpenHeads())
     repository = environ[REPOSITORY]
-    settings = Settings(expander.trusted(repository), retries=expander.retries(repository))
+    listed = served(environ.get(contract.SERVED_REPOSITORIES, ""), repository)
+    settings = Settings(expander.trusted(repository), retries=expander.retries(repository), served=listed)
     scheduler = Scheduler(client, objects, ports, settings, spending)
     app = environ.get(shadow_report.LAB_APP)
     if app:
