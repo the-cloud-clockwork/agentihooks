@@ -2,13 +2,14 @@
   "id": "delivery-requirements-summary",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-review-file-limit",
-  "behaviour": "Every agent session starts with a delivery requirements summary of at most fifty words, and agentihooks init ends with the same line: deliver each change as one complete pull request, split it in two only when it changes more than AGENTIHOOKS_CODEREVIEW_FILELIMIT files (default 20), never split smaller for size alone, and always deliver or offer the source root fix, never a workaround the user did not ask for. SessionStart injects it on the Claude, Codex and Copilot targets, for standalone sessions and swarm seats alike.",
+  "behaviour": "Every agent session starts with a delivery requirements summary of at most fifty words, and agentihooks init ends with the same line: deliver each change as one complete pull request, split it in two only when it changes more than AGENTIHOOKS_CODEREVIEW_FILELIMIT files (default 20), never split smaller for size alone, and always deliver or offer the source root fix, never a workaround the user did not ask for. SessionStart injects it on the Claude, Codex and Copilot targets, for standalone sessions and swarm seats alike, ranked with the enforcements so a full context budget keeps it.",
   "seam": "hooks.context.delivery_requirements.render and summary, hooks.hook_manager.main on a SessionStart payload per target, and scripts.install.main on an init command",
   "tests": [
     "tests/context/test_delivery_requirements.py::test_the_file_limit_defaults_to_twenty_and_the_summary_names_it",
     "tests/context/test_delivery_requirements.py::test_an_env_file_limit_changes_the_number_the_summary_names",
     "tests/context/test_delivery_requirements.py::test_the_summary_stays_within_fifty_words_and_names_both_rules",
     "tests/context/test_delivery_requirements.py::test_the_summary_reads_the_current_file_limit",
+    "tests/context/test_delivery_requirements.py::test_a_full_session_start_budget_keeps_the_summary",
     "tests/test_hook_manager.py::test_every_session_start_carries_the_delivery_requirements_summary",
     "tests/test_init_reporter.py::test_init_ends_with_the_delivery_requirements_summary"
   ]

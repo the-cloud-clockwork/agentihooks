@@ -59,3 +59,23 @@ def test_the_summary_stays_within_fifty_words_and_names_both_rules(limit: int) -
 def test_the_summary_reads_the_current_file_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("hooks.config.CODEREVIEW_FILELIMIT", 7)
     assert delivery_requirements.summary() == delivery_requirements.render(7)
+
+
+@pytest.mark.feature("delivery-requirements-summary")
+def test_a_full_session_start_budget_keeps_the_summary(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from hooks import config
+    from hooks.common import inject_context
+    from hooks.targets import emitter
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.setattr(config, "HOOK_INJECTION_MAX_CHARS", 9000)
+    monkeypatch.setattr(emitter, "_buffer", [])
+    monkeypatch.setattr(emitter, "_forced", True)
+    monkeypatch.setattr(emitter, "_plain", True)
+    inject_context("PROJECT CONTEXT\n" + "p\n" * 6000, also_log=False, skip_compression=True)
+    delivery_requirements.inject_on_session_start()
+    emitter.flush("SessionStart")
+
+    assert delivery_requirements.summary() in capsys.readouterr().out
