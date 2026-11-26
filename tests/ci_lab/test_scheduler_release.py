@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable
 
 import pytest
@@ -73,11 +74,12 @@ def test_the_eight_heads_a_pass_starts_are_the_longest_waiting_and_quiet_or_paus
 
 @pytest.mark.feature("lab-scheduler-release-bound")
 @pytest.mark.parametrize("held", [manifests.FetchPending, manifests.FetchUnanswered])
-def test_a_head_put_back_for_its_manifest_fetch_still_takes_one_of_the_eight_places(
+def test_a_head_put_back_for_its_manifest_fetch_takes_no_place_and_the_pass_moves_on_to_later_heads(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, held: type[manifests.FetchUnanswered]
 ) -> None:
     run, heads = backlog(lab, 9)
     fetching = heads[:8]
+    starting = heads[8]
     planned = run.lab.expander.expand
 
     def expand(request: GradeRequest) -> scheduler.Plan:
@@ -91,6 +93,81 @@ def test_a_head_put_back_for_its_manifest_fetch_still_takes_one_of_the_eight_pla
         run.push(head, lane=f"lane-{number}", event="merge_group")
         run.tick(1000 + number)
     run.tick(1600)
-    assert [request.head for request in run.lab.expander.seen] == fetching
+    assert [request.head for request in run.lab.expander.seen] == heads
+    assert [grade.head for grade in run.grades()] == [starting]
+    assert run.lab.client.hlen(scheduler.WAITING) == 8
+
+
+@pytest.mark.feature("lab-scheduler-release-bound")
+@pytest.mark.parametrize("held", [manifests.FetchPending, manifests.FetchUnanswered])
+def test_eight_heads_put_back_for_their_manifest_fetch_do_not_use_up_the_eight_starts_the_eight_heads_behind_them_take(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, held: type[manifests.FetchUnanswered]
+) -> None:
+    run, heads = backlog(lab, 16)
+    fetching, starting = heads[:8], heads[8:]
+    planned = run.lab.expander.expand
+
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        found = planned(request)
+        if request.head in fetching:
+            raise held(f"manifest of {request.base} is still fetching")
+        return found
+
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
+    for number, head in enumerate(heads):
+        run.push(head, lane=f"lane-{number}", event="merge_group")
+        run.tick(1000 + number)
+    run.tick(1700)
+    assert [request.head for request in run.lab.expander.seen] == heads
+    assert sorted(grade.head for grade in run.grades()) == starting
+    assert run.lab.client.hlen(scheduler.WAITING) == 8
+
+
+@pytest.mark.feature("lab-scheduler-release-bound")
+@pytest.mark.parametrize("held", [manifests.FetchPending, manifests.FetchUnanswered])
+def test_more_than_twenty_four_heads_all_put_back_for_their_manifest_fetch_one_pass_looks_at_exactly_twenty_four(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, held: type[manifests.FetchUnanswered]
+) -> None:
+    run, heads = backlog(lab, 30)
+    planned = run.lab.expander.expand
+
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        planned(request)
+        raise held(f"manifest of {request.base} is still fetching")
+
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
+    for number, head in enumerate(heads):
+        run.push(head, lane=f"lane-{number}", event="merge_group")
+        run.tick(1000 + number)
+    run.tick(1700)
+    assert [request.head for request in run.lab.expander.seen] == heads[:24]
     assert run.grades() == []
-    assert run.lab.client.hlen(scheduler.WAITING) == 9
+    assert run.lab.client.hlen(scheduler.WAITING) == 30
+
+
+@pytest.mark.feature("lab-scheduler-release-bound")
+@pytest.mark.parametrize("held", [manifests.FetchPending, manifests.FetchUnanswered])
+def test_a_head_put_back_for_its_manifest_fetch_keeps_its_waiting_record(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, held: type[manifests.FetchUnanswered]
+) -> None:
+    run, heads = backlog(lab, 1)
+    head = heads[0]
+    planned = run.lab.expander.expand
+
+    def expand(request: GradeRequest) -> scheduler.Plan:
+        planned(request)
+        raise held(f"manifest of {request.base} is still fetching")
+
+    monkeypatch.setattr(run.lab.expander, "expand", expand)
+    run.push(head, lane="lane-0", event="merge_group")
+    run.tick(1000)
+    run.tick(1600)
+    raw = next(iter(run.lab.client.hgetall(scheduler.WAITING).values()))
+    record = json.loads(raw)
+    assert run.lab.client.hlen(scheduler.WAITING) == 1
+    if held is manifests.FetchPending:
+        assert record["since"] == 1000
+        assert "unanswered" not in record
+    else:
+        assert record["since"] == 1600
+        assert record["unanswered"] == 1

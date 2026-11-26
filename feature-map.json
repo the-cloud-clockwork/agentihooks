@@ -1121,7 +1121,10 @@
       "tests": [
         "tests/ci_lab/test_scheduler_release.py::test_each_pass_starts_eight_waiting_heads_in_class_order_and_admits_their_units_in_the_same_pass",
         "tests/ci_lab/test_scheduler_release.py::test_the_eight_heads_a_pass_starts_are_the_longest_waiting_and_quiet_or_paused_heads_take_no_place",
-        "tests/ci_lab/test_scheduler_release.py::test_a_head_put_back_for_its_manifest_fetch_still_takes_one_of_the_eight_places"
+        "tests/ci_lab/test_scheduler_release.py::test_a_head_put_back_for_its_manifest_fetch_takes_no_place_and_the_pass_moves_on_to_later_heads",
+        "tests/ci_lab/test_scheduler_release.py::test_eight_heads_put_back_for_their_manifest_fetch_do_not_use_up_the_eight_starts_the_eight_heads_behind_them_take",
+        "tests/ci_lab/test_scheduler_release.py::test_more_than_twenty_four_heads_all_put_back_for_their_manifest_fetch_one_pass_looks_at_exactly_twenty_four",
+        "tests/ci_lab/test_scheduler_release.py::test_a_head_put_back_for_its_manifest_fetch_keeps_its_waiting_record"
       ]
     },
     {
