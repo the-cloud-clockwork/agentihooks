@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from scripts.claude_quota_balancer import RowMarks
 
 HARNESSES = ("claude", "codex")
+LOGIN_SLOTS = range(2, 6)
 
 
 @dataclass(frozen=True)
@@ -61,13 +62,29 @@ def clear(store: SettingsStore, harnesses: Iterable[str], actor: str, now: float
         store.set(f"master-tier-{harness}", None, actor, now)
 
 
+def _account(values: Mapping[str, object], key: str, harness: str, environ: Mapping[str, str]) -> MasterAccount | None:
+    slug = values.get(f"master-account-{key}")
+    if not isinstance(slug, str) or not slug:
+        return None
+    tier = values.get(f"master-tier-{key}")
+    return MasterAccount(harness, slug, tier if isinstance(tier, str) else "", _kind(harness, slug, environ))
+
+
 def declared(store: SettingsStore, environ: Mapping[str, str]) -> dict[str, MasterAccount]:
     values = store.all()
-    return {
-        harness: MasterAccount(harness, slug, values.get(f"master-tier-{harness}") or "", _kind(harness, slug, environ))
-        for harness in HARNESSES
-        if (slug := values.get(f"master-account-{harness}"))
-    }
+    return {harness: account for harness in HARNESSES if (account := _account(values, harness, harness, environ))}
+
+
+def logins(store: SettingsStore, environ: Mapping[str, str]) -> tuple[MasterAccount, ...]:
+    """Every declared master login account: each harness's slot 1, then Claude slots 2 to 5, each account once."""
+    values = store.all()
+    keys = [(harness, harness) for harness in HARNESSES] + [(f"claude-{slot}", "claude") for slot in LOGIN_SLOTS]
+    found: dict[tuple[str, str], MasterAccount] = {}
+    for key, harness in keys:
+        account = _account(values, key, harness, environ)
+        if account is not None:
+            found.setdefault((account.harness, account.slug), account)
+    return tuple(found.values())
 
 
 def load(environ: Mapping[str, str]) -> dict[str, MasterAccount]:
@@ -75,6 +92,13 @@ def load(environ: Mapping[str, str]) -> dict[str, MasterAccount]:
     from scripts.routing.settings import open_store
 
     return declared(open_store(place._client(environ), environ), environ)
+
+
+def load_logins(environ: Mapping[str, str]) -> tuple[MasterAccount, ...]:
+    from scripts.routing import place
+    from scripts.routing.settings import open_store
+
+    return logins(open_store(place._client(environ), environ), environ)
 
 
 def row_marks(current: str = "", environ: Mapping[str, str] = os.environ) -> "RowMarks":

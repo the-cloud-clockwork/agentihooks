@@ -1,13 +1,17 @@
 import pytest
 
 from scripts import claude_quota_balancer as balancer
-from scripts.routing import place, reservation
+from scripts.routing import master_account, place, reservation
+from scripts.routing.master_account import MasterAccount
 from scripts.routing.settings import FileSettings
+from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION
 from scripts.swarm import capacity
 
 REASON = "reserved for 1 live master: workers stop at 70% of the week"
 WORKER = {"AGENTIHOOKS_AGENT_NAME": "engineer@1"}
 MASTER = {"AGENTIHOOKS_AGENT_NAME": "master@1"}
+FIRST = MasterAccount("claude", "first", "", INTERACTIVE)
+THIRD = MasterAccount("claude", "third", "", SUBSCRIPTION)
 
 
 @pytest.fixture
@@ -37,6 +41,12 @@ def _route(environ, tmp_path, monkeypatch, week_used, agent):
 
 def _row(name, week_left):
     return capacity.Account("claude", name, "OPEN", 1, 80.0, week_left, 6)
+
+
+@pytest.mark.feature("worker-ceiling-every-master-login-slot")
+def test_the_reader_returns_every_declared_master_login_account(environ):
+    assert master_account.load_logins(environ) == (FIRST, THIRD)
+    assert master_account.load(environ) == {"claude": FIRST}
 
 
 @pytest.mark.feature("worker-ceiling-every-master-login-slot")

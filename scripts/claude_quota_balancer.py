@@ -772,6 +772,7 @@ class ClaudeTokenSource:
     sessions: Mapping[str, int] = field(default_factory=cast("Callable[[], dict[str, int]]", dict))
     exclude: frozenset[str] = frozenset()
     held: "Reservation | None" = None
+    others: "tuple[Reservation, ...]" = ()
 
     def results(self, environ: Mapping[str, str], now: float | None = None) -> tuple[list[ProbeResult], str]:
         credentials = discover_credentials(environ)
@@ -783,7 +784,8 @@ class ClaudeTokenSource:
         )
 
     def cap(self, result: ProbeResult, now: float) -> int | None:
-        if self.held is not None and self.held.closes(result.account, result.seven_day.used):
+        held = (self.held, *self.others) if self.held is not None else self.others
+        if any(each.closes(result.account, result.seven_day.used) for each in held):
             return 0
         return account_cap(result, now, bool(self.options.get("include_fable")))
 
@@ -834,7 +836,9 @@ def select_credential(
     }
     from scripts.routing import reservation
 
-    tokens = ClaudeTokenSource(options, live, frozenset(excluded), reservation.for_worker(HARNESS, active_env))
+    held = reservation.for_worker(HARNESS, active_env)
+    others = reservation.other_logins_for_worker(HARNESS, active_env, held)
+    tokens = ClaudeTokenSource(options, live, frozenset(excluded), held, others)
     results, source = tokens.results(active_env)
     seats = tokens.offer(results, timestamp)
     reserve = {
