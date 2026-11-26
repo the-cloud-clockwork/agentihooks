@@ -1,0 +1,6 @@
+{
+  "scripts/claude_quota_balancer.py:scripts.claude_quota_balancer.x__open_cache_lock:bb87bfd12d09a38a6b178d1c981c8875195cb929210a8c56be12ebac9af6c131": {
+    "reader": "standards_reader",
+    "reason": "Changes the lock open encoding from utf-8 to UTF-8. Python normalizes both names to the same codec, and _cache_lock uses the handle only for fcntl.flock; the zero byte claude-router-cache.json.lock is never read or written by _open_cache_lock, _cache_lock, cached_observations, collect_results or any other module, so no text is encoded or decoded."
+  }
+}
