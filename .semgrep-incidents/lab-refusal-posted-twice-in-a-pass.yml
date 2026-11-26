@@ -11,11 +11,15 @@ rules:
       include:
         - /scripts/ci_lab/scheduler.py
         - lab-refusal-posted-twice-in-a-pass.py
-    patterns:
-      - pattern: $POSTER.post($HEAD, REQUIRED, "completed", "failure", ...)
-      - pattern-not-inside: |
-          def _fail(...):
-              ...
+    pattern-either:
+      - patterns:
+          - pattern: $POSTER.post($HEAD, REQUIRED, "completed", "failure", ...)
+          - pattern-not-inside: |
+              def _fail(...):
+                  ...
+      - patterns:
+          - pattern: $POSTER.post($HEAD, REQUIRED, "completed", "failure", ...)
+          - pattern-not-inside: |
               if $RUN in $SAID:
                   return []
               $SAID.add($RUN)

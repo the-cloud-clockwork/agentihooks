@@ -8,6 +8,7 @@ import pytest
 from scripts.ci_lab import scheduler
 from scripts.ci_lab.checks import Output
 from scripts.ci_lab.digests import Toolchain
+from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.webhooks import HeadEvent
 from scripts.dep_manifest import _git
@@ -119,10 +120,14 @@ def test_a_head_retired_for_one_request_and_refused_for_another_in_a_pass_gets_b
     def reach(repo: str, head: str) -> bool:
         return next(answers)
 
+    def unplanned(request: GradeRequest) -> scheduler.Plan:
+        raise KeyError(request.head)
+
     monkeypatch.setattr(run.lab.expander, "reachable", reach)
+    monkeypatch.setattr(run.lab.expander, "expand", unplanned)
     run.push(HEAD_A, lane="first", event="pull_request", action="synchronize")
     run.push(HEAD_A, lane="second")
-    run.tick(1000)
+    assert run.tick(1000)[-2:] == [f"retiring {HEAD_A}: {REASON}", f"cannot expand {HEAD_A}: {HEAD_A!r}"]
     assert [(post[0], post[4].run) for post in run.lab.poster.posts] == [
         (HEAD_A, "uncarried-1000"),
         (HEAD_A, "unexpanded-1000"),
