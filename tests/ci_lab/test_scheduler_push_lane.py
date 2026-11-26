@@ -6,6 +6,7 @@ first pass of a scheduler retires the promotion work stored under its own head a
 """
 
 import json
+import weakref
 from collections.abc import Callable
 from pathlib import Path
 
@@ -262,6 +263,33 @@ def test_a_live_promotion_grade_that_lost_its_document_is_not_read_as_a_push_wit
     again = _restarted(run)
     assert _sweeps(again.tick(1100)) == []
     assert again.grades() == []
+
+
+@pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
+def test_the_first_pass_holds_one_parsed_promotion_grade_at_a_time_however_many_it_retires(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    heads = [f"{number:x}" * 40 for number in range(1, 6)]
+    run = lab({head: plan({"lint": (unit(number),)}) for number, head in enumerate(heads, 1)})
+    for head in heads:
+        run.push(head, lane=f"old-{head[0]}")
+    run.tick(1000)
+    for head in heads:
+        _unbranched(run, head, f"old-{head[0]}")
+    again = _restarted(run)
+    alive: list[weakref.ref[scheduler.State]] = []
+    sizes: list[int] = []
+    parse = scheduler._parse
+
+    def counted(raw: str | bytes) -> scheduler.State:
+        state = parse(raw)
+        alive.append(weakref.ref(state))
+        sizes.append(sum(ref() is not None for ref in alive))
+        return state
+
+    monkeypatch.setattr(scheduler, "_parse", counted)
+    assert _sweeps(again.tick(1100)) == [_swept(0, 5, 5)]
+    assert max(sizes) <= 2
 
 
 @pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
