@@ -16838,7 +16838,12 @@
         "tests/quick/test_native_authentication.py::test_saved_native_authentication_reaches_the_launcher",
         "tests/quick/test_native_authentication.py::test_native_init_keeps_explicit_authentication_without_automatic_selection",
         "tests/test_native_default.py::test_native_default_isolates_local_login_from_master_and_routed_credentials",
-        "tests/test_native_default.py::test_codex_native_default_bypasses_automatic_account_enumeration"
+        "tests/test_native_default.py::test_codex_native_default_bypasses_automatic_account_enumeration",
+        "tests/test_native_default.py::test_native_default_preserves_and_repins_rendered_profile_binding",
+        "tests/test_native_default.py::test_native_default_missing_local_login_never_uses_the_master",
+        "tests/test_native_default.py::test_claude_native_default_checks_and_launches_the_isolated_login",
+        "tests/quick/test_authentication_quota.py::test_bound_explicit_quick_engineers_bypass_automatic_quota_switching",
+        "tests/quick/test_authentication_quota.py::test_routed_or_unverified_quick_members_retain_quota_policy"
       ]
     }
   ],

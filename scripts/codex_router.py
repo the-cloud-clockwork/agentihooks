@@ -765,8 +765,18 @@ def main(
 
             declared = interactive.account("codex", active, run)
             account, placement, live, cap = CodexAccount(declared.slug), "forced", 0, "?"
+        elif route == "default":
+            from scripts.routing import native_default
+
+            try:
+                active = native_default.prepare("codex", active)
+            except (OSError, ValueError) as error:
+                raise RoutingError(str(error)) from error
+            if not default_signed_in(active, run):
+                raise RoutingError("native default login is unavailable")
+            account, placement, live, cap = CodexAccount(CODEX_DEFAULT), "forced", 0, "?"
         else:
-            account, placement, live, cap = _route(active, route, run, exclude)
+            account, placement, live, cap = _route(active, route.removeprefix("named:"), run, exclude)
             account = credential(account, active)
     except RoutingError as exc:
         print(f"agentihooks codex: {exc}", file=sys.stderr)

@@ -864,6 +864,12 @@ def _transport(args: argparse.Namespace, agent: str) -> str:
     return APP_SERVER
 
 
+def _auth_value(value: str) -> str:
+    if value in ("interactive", "default") or (value.startswith("named:") and value.removeprefix("named:")):
+        return value
+    raise argparse.ArgumentTypeError("authentication must be interactive, default or named:reference")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Open a routed Claude session in a new terminal")
     parser.add_argument("--dir", default="", help="Target directory; relative paths resolve below the configured base")
@@ -928,7 +934,9 @@ def _parser() -> argparse.ArgumentParser:
         default="",
         help=AGENT_HELP,
     )
-    parser.add_argument("--auth", default="", help="interactive, default or named:reference authentication")
+    parser.add_argument(
+        "--auth", type=_auth_value, default="", help="interactive, default or named:reference authentication"
+    )
     parser.add_argument("--profile", default="", help="Role profile for this run")
     parser.add_argument("--claim-fence", default="", help="Pinned event bus claim identity for this execution")
     parser.add_argument(
@@ -1123,9 +1131,8 @@ def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:
     if args.auth and args.auth != "interactive":
         from scripts.quick.authentication import selections
 
-        if args.auth == "routed":
-            raise ValueError("routed authentication uses --routed-only")
-        selections(args.auth, [args.agent or "claude"], environ)
+        mode, account = selections(args.auth, [args.agent or "claude"], environ)[0]
+        args.auth = mode if mode == "default" else f"named:{account}"
 
 
 def _routed_only(args: argparse.Namespace) -> bool:

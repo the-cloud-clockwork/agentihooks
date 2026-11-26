@@ -91,10 +91,10 @@ def _resolve_claude_home() -> Path:
 CLAUDE_HOME = _resolve_claude_home()
 ROUTE_LAUNCHERS = {
     "interactive": "scripts.routing.interactive",
+    "default": "scripts.routing.native_default",
     "master-login": "scripts.master_claude_login",
     "claude-ai": "scripts.routing.claude_ai",
 }
-
 # Persistent state directory for user-level agentihooks configuration.
 # Overridable via AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
 AGENTIHOOKS_STATE_DIR = Path(os.environ.get("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
@@ -5358,7 +5358,7 @@ def cmd_claude(extra_args: list[str]) -> None:
                 route_lock.close()
             return import_module(ROUTE_LAUNCHERS[route]).launch_claude(claude_bin, extra_args, os.environ, report)
         decision = (
-            forced(os.environ, route)
+            forced(os.environ, route.removeprefix("named:"))
             if route
             else select_launch_credential(
                 os.environ,

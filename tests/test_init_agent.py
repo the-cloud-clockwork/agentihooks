@@ -700,9 +700,9 @@ def test_a_routed_quick_seat_starts(
 
 
 def test_only_a_launch_that_had_to_be_routed_and_was_not_is_refused_with_its_own_line() -> None:
-    handoff = argparse.Namespace(handoff=True, routed_only=False)
-    routed_only = argparse.Namespace(handoff=False, routed_only=True)
-    plain = argparse.Namespace(handoff=False, routed_only=False)
+    handoff = argparse.Namespace(handoff=True, routed_only=False, auth="")
+    routed_only = argparse.Namespace(handoff=False, routed_only=True, auth="")
+    plain = argparse.Namespace(handoff=False, routed_only=False, auth="")
     assert init_agent._unrouted(handoff, {"status": "bare"}) == (
         "handoff=failed",
         "handoff failed; the new session was not routed to another account",
