@@ -56,7 +56,7 @@ from scripts.ci_lab import (
     static_exclusions,
 )
 from scripts.ci_lab.capacity import Load
-from scripts.ci_lab.checks import Checks, Output, PostRefused
+from scripts.ci_lab.checks import Checks, Output, PostRefused, Token
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit
@@ -1718,7 +1718,9 @@ class MirrorExpander:
         manifests: Manifests,
         verdicts: Verdicts,
         lab: Lab | None = None,
+        auth: Callable[[str], Token] | None = None,
     ) -> None:
+        self.auth = auth
         self.node = node
         self.root = root
         self.toolchain = toolchain

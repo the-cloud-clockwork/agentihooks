@@ -92,6 +92,7 @@ class Mirror:
     remote: str
     lab: Lab | None = None
     repository: str | None = None  # pragma: no mutate
+    environ: Mapping[str, str] | None = None
 
     def fetch(self, sha: str) -> bool:
         """Make sha present in the store, fetching only its missing objects from the remote, else from the lab remote
