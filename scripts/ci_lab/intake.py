@@ -71,8 +71,8 @@ def admit(event: HeadEvent, trusted: Collection[str]) -> GradeRequest | None:
 
 def slug(repo: str) -> str:
     """Return the owner and name of a repository URL, case folded: its path with no slash at either end and no
-    trailing `.git`."""
-    return urlsplit(repo).path.strip("/").removesuffix(".git").casefold()
+    trailing `.git` in any case."""
+    return urlsplit(repo).path.strip("/").casefold().removesuffix(".git")
 
 
 def served(listed: str, repository: str) -> frozenset[str]:

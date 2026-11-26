@@ -2656,10 +2656,12 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   <run> still grades <head>`. When the lane names a grade that already finished, or one pushed
   to a grade ref, the close starts from the live grades of the closed head that name the lane,
   and the lane keeps naming the grade it names.
-- A head of a repository the scheduler does not serve gets no grade. Before anything else, intake
+- A new head of a repository the scheduler does not serve gets no grade. Before anything else, intake
   compares the head's repository with the served set by owner and name, with no `.git` suffix and
   case folded, and prints `ignored <head>: <repository> is not a served repository`: it holds no
-  waiting entry, checks no actor, expands nothing and posts no check. The service serves the
+  waiting entry, checks no actor, resolves no plant base, expands nothing and posts no check. Work
+  already stored for such a repository is not swept: each held head is dropped at its next start,
+  when it cannot be expanded. The service serves the
   repositories `CI_LAB_SERVED_REPOSITORIES` lists, or else the one `CI_LAB_REPOSITORY` names. The
   trust list and the shadow recorder stay those of the repository `CI_LAB_REPOSITORY` names.
 - A push that named no branch gets no promotion grade. Intake holds no head of the promotion class

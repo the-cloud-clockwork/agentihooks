@@ -2,7 +2,7 @@
   "id": "lab-serves-listed-repositories",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
-  "behaviour": "The lab scheduler grades only the repositories it serves. The service reads the set from CI_LAB_SERVED_REPOSITORIES, a list of repository URLs, or else serves the one repository CI_LAB_REPOSITORY names, and compares a repository by its owner and name with no .git suffix, case folded. Intake ignores a head of any other repository before it checks the actor: it holds no waiting entry, expands nothing, posts no check and names the head in an ignored line. A scheduler built with no set of served repositories serves every repository.",
+  "behaviour": "The lab scheduler grades only the repositories it serves. The service reads the set from CI_LAB_SERVED_REPOSITORIES, a list of repository URLs, or else serves the one repository CI_LAB_REPOSITORY names, and compares a repository by its owner and name with no .git suffix, case folded. Intake ignores a head of any other repository before it checks the actor: it holds no waiting entry, resolves no plant base, expands nothing, posts no check and names the head in an ignored line. A scheduler built with no set of served repositories serves every repository.",
   "seam": "scripts.ci_lab.intake slug, served and serves over strings; Scheduler.tick over its fakes with a served set, through its actions, the waiting hash, the grades, the requests the expander saw and the checks posted; scheduler.build over an environment mapping, through the served set of the scheduler it returns",
   "rules": [
     "lab-scheduler-built-without-served-repositories"

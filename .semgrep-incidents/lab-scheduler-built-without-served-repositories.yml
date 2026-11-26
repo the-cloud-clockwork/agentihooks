@@ -14,5 +14,8 @@ rules:
       - pattern-inside: |
           def build(...):
               ...
-      - pattern: Settings(...)
-      - pattern-not: Settings(..., served=$SERVED, ...)
+      - pattern-either:
+          - patterns:
+              - pattern: Settings(...)
+              - pattern-not: Settings(..., served=$SERVED, ...)
+          - pattern: Settings(..., served=None, ...)
