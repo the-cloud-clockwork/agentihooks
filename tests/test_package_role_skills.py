@@ -343,6 +343,7 @@ def test_rendered_masters_ask_through_the_inbox_for_a_master_login_slot(world: o
     from scripts.profiles import render
 
     out = render.render_codex("package:master")
+    assert out is not None
     advice = (
         "When every master login slot is spent, ask through the inbox for a slot added with "
         "`agentihooks claude login --master`."

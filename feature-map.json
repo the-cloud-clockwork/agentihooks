@@ -4344,9 +4344,7 @@
     },
     {
       "id": "tick-lost-agent-keeps-record-until-retired",
-      "rules": [
-        "lost-reap-drops-after-refused-retire"
-      ],
+      "rules": ["lost-reap-drops-after-refused-retire"],
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lost-master-recovery-pane",
       "behaviour": "A lost agent stays recorded while pane retirement refuses, records the refusal and retries next tick; successful retirement closes the pane and drops the record. Deliberate termination also preserves its record on retirement refusal.",
@@ -5921,9 +5919,7 @@
         "tests/swarm/test_dispatcher.py::test_small_lanes_keep_a_positive_focus_share",
         "tests/swarm/test_dispatcher.py::test_small_lanes_yield_focus_when_disabled_or_full"
       ],
-      "rules": [
-        "focus-share-floor-division"
-      ]
+      "rules": ["focus-share-floor-division"]
     },
     {
       "id": "swarm-review-dispatcher-lane-cap",
@@ -13239,9 +13235,7 @@
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-intake-drain",
       "behaviour": "One scheduler intake drains successive head consumer batches until a short or empty fetch or a ten second monotonic budget ends, including batches containing only completed checks, while preserving delivery order and keeping collected heads unacknowledged if a later fetch or observer fails. Remaining heads are read on the next call so release and admission can continue each pass.",
       "seam": "scripts.ci_lab.scheduler.BusInbox.heads over a paginated bus consumer and a controlled monotonic clock",
-      "rules": [
-        "lab-intake-single-batch"
-      ],
+      "rules": ["lab-intake-single-batch"],
       "tests": [
         "tests/ci_lab/test_scheduler_intake.py::test_one_intake_drains_a_backlog_larger_than_the_default_batch",
         "tests/ci_lab/test_scheduler_intake.py::test_a_short_or_empty_batch_ends_intake_without_another_fetch",
