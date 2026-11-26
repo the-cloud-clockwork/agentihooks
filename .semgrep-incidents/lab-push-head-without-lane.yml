@@ -1,0 +1,21 @@
+rules:
+  - id: lab-push-head-without-lane
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A push head event built without its lane takes its own sha as lane, so no newer push replaces it and the lab
+      holds and grades every pushed commit in the promotion class. Pass the pushed branch as the last argument or as
+      the lane keyword.
+    paths:
+      include:
+        - /scripts/ci_lab/
+        - /scripts/hub/
+        - lab-push-head-without-lane.py
+    patterns:
+      - pattern-either:
+          - pattern: HeadEvent("push", ...)
+          - pattern: HeadEvent(PUSH, ...)
+          - pattern: HeadEvent(..., event="push", ...)
+          - pattern: HeadEvent(..., event=PUSH, ...)
+      - pattern-not: HeadEvent($EVENT, $REPO, $HEAD, $BASE, $ACTOR, $ACTION, $LANE)
+      - pattern-not: HeadEvent(..., lane=$LANE, ...)
