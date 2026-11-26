@@ -3298,7 +3298,8 @@ jobs:
         run: |
           git fetch --no-tags origin main
           mkdir "$RUNNER_TEMP/released"
-          git archive FETCH_HEAD scripts | tar -x -C "$RUNNER_TEMP/released"
+          git archive --output "$RUNNER_TEMP/released.tar" FETCH_HEAD scripts
+          tar -x -f "$RUNNER_TEMP/released.tar" -C "$RUNNER_TEMP/released"
           if [[ -f "$RUNNER_TEMP/grader/scripts/ci_lab/discovery_parity.py" ]]; then
             cd "$RUNNER_TEMP/grader"
           fi

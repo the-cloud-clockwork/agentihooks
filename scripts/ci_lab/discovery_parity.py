@@ -2,11 +2,14 @@
 
 python -m scripts.ci_lab.discovery_parity --released DIR --base DIR --head DIR
 
-The lab scheduler reads the static gates of a head with the discovery code of its image, built from main, over a
-tree of dev. A reading is the gate names the discovery command line of one code folder prints for one tree, less
-each gate that misses a context name and less the names in the tree's exclusion catalog; a command that fails
-gives a failed reading. A head is refused when the released code reads it to other gates than its own code does
-and also to other gates than the released code reads from the base.
+The lab scheduler reads static gates with the discovery code of its image, built from main, over a tree of dev: the
+base tree for a pull request or merge group head, the head tree for a promotion or backfill head. A head that lands
+on dev becomes that tree, the base of every later pull request and the tree of its own promotion grade, so the head
+tree stands here for what the lab grades from then on. A reading is the gate names the discovery command line of one
+code folder prints for one tree, less each gate that misses a context name and less the names the catalog reader of
+that same code finds in the tree's exclusion catalog; a command that fails gives a failed reading. A head is refused
+when the released code reads it to other gates than its own code does and also to other gates than the released code
+reads from the base.
 """
 
 import argparse
@@ -17,9 +20,13 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from scripts.ci_lab import static_exclusions
-
 COMMAND = ("-m", "scripts.ci_lab.static_gates", "--root")
+CATALOG = (
+    "-c",
+    "import json, sys; from pathlib import Path; from scripts.ci_lab import static_exclusions as catalog; "
+    "path = Path(sys.argv[1]) / catalog.PATH; "
+    "print(json.dumps(sorted(catalog.read(path.read_text())) if path.is_file() else []))",
+)
 DIFFERS = (
     "the released lab reads this head to other static gates than the head's own code does, and to other gates "
     "than it reads from the base"
@@ -33,22 +40,29 @@ REMEDY = "land the change to how gates are read first, and the tree that needs i
 Reading = frozenset[str] | None
 
 
-def graded(code: Path, tree: Path) -> Reading:
-    """Return the static gates a lab running the code at `code` grades for the tree at `tree`: the names its
-    discovery command line prints, run in its own process from that folder with that folder first on the module
-    path, less each gate that misses a context name and less the names in the tree's exclusion catalog. A command
-    that fails gives no reading, and its error goes to standard error."""
-    folder = code.resolve()
-    command = [sys.executable, *COMMAND, str(tree.resolve())]
+def _printed(folder: Path, arguments: Sequence[str]) -> str | None:
+    """Return what a Python command of the code at `folder` prints, run in its own process from that folder with
+    that folder first on the module path, or nothing when it fails, its error going to standard error."""
     environ = {**os.environ, "PYTHONPATH": str(folder)}
+    command = [sys.executable, *arguments]
     done = subprocess.run(command, cwd=folder, env=environ, capture_output=True, text=True, check=False)
     if done.returncode:
         sys.stderr.write(done.stderr)
         return None
-    gates = [json.loads(line) for line in done.stdout.splitlines() if line.strip()]
-    catalog = tree / static_exclusions.PATH
-    excluded = static_exclusions.read(catalog.read_text()) if catalog.is_file() else {}
-    return frozenset(gate["name"] for gate in gates if not gate["missing"] and gate["name"] not in excluded)
+    return done.stdout
+
+
+def graded(code: Path, tree: Path) -> Reading:
+    """Return the static gates a lab running the code at `code` grades for the tree at `tree`: the names its
+    discovery command line prints, less each gate that misses a context name and less the names its own catalog
+    reader finds in the tree's exclusion catalog. A command or a reader that fails gives no reading."""
+    folder, root = code.resolve(), str(tree.resolve())
+    gates = _printed(folder, [*COMMAND, root])
+    excluded = None if gates is None else _printed(folder, [*CATALOG, root])
+    if gates is None or excluded is None:
+        return None
+    found = (json.loads(line) for line in gates.splitlines() if line.strip())
+    return frozenset(gate["name"] for gate in found if not gate["missing"]) - frozenset(json.loads(excluded))
 
 
 def _sides(released: frozenset[str], own: frozenset[str]) -> list[str]:
