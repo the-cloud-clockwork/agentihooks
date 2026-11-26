@@ -155,7 +155,9 @@ def _resumed(urls: list[str], cursor: str | None) -> list[str]:
 
 
 class Pulls:
-    def __init__(self, bus: Bus, fetch: Callable[[str], Observation] = fetch, clock: lease.Clock = lease.wall_ms):
+    def __init__(
+        self, bus: Bus, fetch: Callable[[str], Observation] = fetch, clock: lease.Clock = lease.wall_ms
+    ) -> None:
         self._events = bus.events
         self._state = bus.state(BUCKET)
         self._fetch = fetch

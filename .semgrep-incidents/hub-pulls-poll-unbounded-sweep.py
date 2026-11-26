@@ -1,7 +1,14 @@
+from abc import ABC, abstractmethod
+
 SLICE_MS = 10_000
 
 
-class Sweeping:
+class Poller(ABC):
+    @abstractmethod
+    def poll(self) -> None: ...
+
+
+class Sweeping(Poller):
     def poll(self) -> None:
         # ruleid: hub-pulls-poll-unbounded-sweep
         for url in self._open():
@@ -12,7 +19,7 @@ class Sweeping:
             self.observe(seen)
 
 
-class Sliced:
+class Sliced(Poller):
     def poll(self) -> None:
         now = self._clock()
         # ok: hub-pulls-poll-unbounded-sweep
