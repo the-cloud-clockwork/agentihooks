@@ -20,6 +20,7 @@ DIFFERS = (
 BROKEN = "the released lab cannot read the static gates of this head, and it reads those of the base"
 UNREADABLE = "the head's own code cannot read the static gates of the head"
 LAGS = "the released lab reads this head to other static gates than the head's own code does, as it reads the base"
+STUCK = "the released lab cannot read the static gates of this head, as it cannot read those of the base"
 REMEDY = "land the change to how gates are read first, and the tree that needs it once a release holds that change"
 
 Reading = frozenset[str] | None

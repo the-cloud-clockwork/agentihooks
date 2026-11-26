@@ -117,6 +117,15 @@ def test_a_reading_runs_the_command_of_the_code_it_is_given_and_drops_a_gate_tha
 
 
 @pytest.mark.feature("lab-discovery-parity-with-release")
+def test_a_reading_runs_the_code_it_is_given_when_python_leaves_the_working_folder_off_its_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTHONSAFEPATH", "1")
+    tree = _tree(tmp_path / "tree", {"lint/a": [], "lint/b": []})
+    assert discovery_parity.graded(_code(tmp_path / "new", ignored=["lint/b"]), tree) == {"lint/a"}
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
 def test_a_reading_leaves_out_the_gates_the_exclusion_catalog_of_its_tree_names(tmp_path: Path) -> None:
     code = _code(tmp_path / "code")
     gates = _gates(REAL, INSTALLS)
@@ -194,6 +203,17 @@ def test_the_command_refuses_a_head_whose_own_code_cannot_read_it(
     head = _code(_tree(tmp_path / "head", gates), fails=True)
     assert _run(released, _tree(tmp_path / "base", gates), head) == 1
     assert capsys.readouterr().out.splitlines() == [f"::error::{discovery_parity.UNREADABLE}"]
+
+
+@pytest.mark.feature("lab-discovery-parity-with-release")
+def test_the_command_tells_when_the_released_code_reads_neither_the_head_nor_the_base(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    gates = _gates(REAL)
+    released = _code(tmp_path / "released", fails=True)
+    head = _code(_tree(tmp_path / "head", gates))
+    assert _run(released, _tree(tmp_path / "base", gates), head) == 0
+    assert capsys.readouterr().out.splitlines() == [f"::notice::{discovery_parity.STUCK}"]
 
 
 def _lint_actions() -> list[dict[str, Any]]:

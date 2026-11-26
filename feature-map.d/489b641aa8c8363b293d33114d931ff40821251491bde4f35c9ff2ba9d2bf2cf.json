@@ -11,6 +11,8 @@
     "tests/ci_lab/test_discovery_parity.py::test_a_head_the_released_code_cannot_read_while_it_reads_the_base_is_refused",
     "tests/ci_lab/test_discovery_parity.py::test_a_head_its_own_code_cannot_read_is_refused",
     "tests/ci_lab/test_discovery_parity.py::test_a_reading_runs_the_command_of_the_code_it_is_given_and_drops_a_gate_that_misses_a_name",
+    "tests/ci_lab/test_discovery_parity.py::test_a_reading_runs_the_code_it_is_given_when_python_leaves_the_working_folder_off_its_path",
+    "tests/ci_lab/test_discovery_parity.py::test_the_command_tells_when_the_released_code_reads_neither_the_head_nor_the_base",
     "tests/ci_lab/test_discovery_parity.py::test_a_reading_leaves_out_the_gates_the_exclusion_catalog_of_its_tree_names",
     "tests/ci_lab/test_discovery_parity.py::test_a_command_that_fails_gives_a_failed_reading",
     "tests/ci_lab/test_discovery_parity.py::test_the_command_of_this_checkout_reads_this_checkout_to_the_gates_its_discovery_returns",
