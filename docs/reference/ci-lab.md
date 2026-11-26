@@ -2531,7 +2531,9 @@ key; the builders are pure and read no file, clock or network.
    transition writes the old global done set `agentihooks-ci:queue:done` any more: each pass drains at
    most `DRAINED_PER_PASS` (500) of the jobs it still names, giving each done or lost one the same
    expiry, and stops reading it once a read finds it empty. The set is read whole once per drain round,
-   since the lab's Redis user may not pop or scan a set.
+   since the lab's Redis user may not pop or scan a set. A grade that has not collected a settled job
+   within the retention, which takes passes failing for six hours while the lease API still takes
+   completions, marks that slot `dropped`.
 7. Finished jobs are collected. A job whose outcome `retry.decide` allows another run under
    `lab.retry` goes back to pending with one more attempt, so a `crash` reruns once by default.
    Otherwise a graded outcome with an uploaded report becomes a verdict in the
