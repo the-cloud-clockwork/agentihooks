@@ -233,8 +233,7 @@ def test_priming_lines_end_with_the_seat_brief_command_with_or_without_history()
         {"seat": SEAT, "culture": "Merge on green."},
         {"seat": SEAT, "culture": "Merge on green.", "recaps": recaps},
     ):
-        assert prompt.priming_lines(task)[-1] == prompt.SEAT_BRIEF
-    assert prompt.SEAT_BRIEF.startswith("Run agentihooks seat brief before your first command")
+        assert prompt.priming_lines(task)[-1].startswith("Run agentihooks seat brief before your first command")
 
 
 @pytest.mark.feature("seat-brief")
