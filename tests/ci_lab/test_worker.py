@@ -1085,3 +1085,30 @@ def test_a_unit_whose_lease_root_cannot_be_cut_heartbeats_nothing_and_its_lease_
     assert sink.bodies == {}
     clock.now += lab.ttl_ms + 1
     assert lab.reap(clock.now) == [("h1:test:a", "pending")]
+
+
+@pytest.mark.feature("lab-worker-run-directory-reclaimed")
+def test_a_unit_whose_lease_root_resists_removal_is_delivered_and_reports_no_crash(
+    scheduler: str, jobs: queue.Queue, sink: Sink, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    jobs.enqueue([UNIT_A], "h1", {})
+    seen: list[Path] = []
+
+    def held(lease: worker.Lease, root: Path) -> worker.Finished:
+        seen.append(root)
+        root.rmdir()
+        root.write_text("")
+        return finished(tmp_path, lease)
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    one = worker.Worker(worker.Client(scheduler), {"test": held}, "pod-1", 1, runs, wait_ms=0)
+
+    one.run_once()
+
+    assert one.drain() == []
+    [root] = seen
+    assert root.is_file()
+    assert sink.bodies == {"/h1:test:a/report": b'{"key": "a"}', "/h1:test:a/log": b"log of h1"}
+    assert found(jobs, "h1:test:a").outcome == "passed"
+    assert "crashed" not in capsys.readouterr().err
