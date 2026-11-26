@@ -2891,8 +2891,12 @@ reads `cannot expand <head> against <base>: <error>`, so the head still shows a 
 with no plan has no authoritative gates, so the check posts under the shadow name. A post of that
 check that the App token, GitHub or the network refuses is recorded as
 `cannot post the failed required check on <head>: <error>` and not retried, since the dropped head
-keeps no grade, and the pass goes on. A head pushed to a grade ref gets no check run, since
-GitHub does not hold that head. A manifest fetch that raises `FetchPending` or
+keeps no grade, and the pass goes on. One head can wait under several names, a push and a pull
+request of one commit for one: `Scheduler._fail` posts the failed check of a refusal once for
+each repository, head and run id in a pass, and a second request of that head refused or retired
+in the same pass posts nothing and keeps its own action line. The run id holds the time of the
+pass, so a head refused again in a later pass gets a new check run. A head pushed to a grade ref
+gets no check run, since GitHub does not hold that head. A manifest fetch that raises `FetchPending` or
 `FetchUnanswered` holds the head again instead, as
 `holding <head>: <error>`, until the tenth `FetchUnanswered` in a row drops the head with this
 check run; [Test units](#test-units) describes both. The scheduler service prints

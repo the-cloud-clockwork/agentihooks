@@ -736,12 +736,14 @@ class Scheduler:
         self.held: defaultdict[str, int] = defaultdict(int)
         self._demand_cache: dict[str, tuple[str, _Demand]] = {}
         self._quiets: dict[str, _Quiet] = {}
+        self._said: set[tuple[str, str, str]] = set()
 
     def tick(self, now_ms: int) -> list[str]:
         """Run one pass: on the first pass retire the pull request grades whose head nothing wants, then retire the
         merge group grades whose merge group is gone, intake, release quiet lanes, reap expired leases, refresh the
         live grade summaries, enqueue the held units the budget admits, then advance every live grade, counting each
-        finished job in the most urgent tier of the live grades holding it."""
+        finished job in the most urgent tier of the live grades holding it. A pass begins with no refusal said."""
+        self._said.clear()
         swept = self._sweep()
         actions = [*self._retire_groups(), *self._intake(now_ms), *self._release(now_ms), *self._reap(now_ms)]
         self._survey()
@@ -1088,7 +1090,13 @@ class Scheduler:
         """Post a completed required check run with conclusion failure and the reason as its summary on a head with no
         plan; such a head has no authoritative gates, so the check posts as lab-shadow/required. The post is tried
         once, outside the post holds, and a post the App token, GitHub or the network refuses is recorded and not
-        retried, since the head keeps no grade."""
+        retried, since the head keeps no grade. A pass says one run of one head once: a second waiting request of
+        the head, failed in the same pass under the same run id, posts nothing, since the poster refuses a second
+        completed post of a check run."""
+        said = (request.repo, request.head, external)
+        if said in self._said:
+            return []
+        self._said.add(said)
         output = Output(title, reason, (), external, "unknown", f"{request.repo}/commit/{request.head}")
         try:
             self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
