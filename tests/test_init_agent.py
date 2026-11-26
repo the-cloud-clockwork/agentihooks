@@ -90,6 +90,48 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     assert "host=linux" in capsys.readouterr().out
 
 
+@pytest.mark.feature("live-session-route-forces-claude")
+def test_the_claude_ai_route_is_never_handed_to_codex_rotation(monkeypatch, tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = tmp_path / "runtime"
+    _, profile_env = _profile(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        init_agent.agent_choice,
+        "choose",
+        lambda requested, environ: (requested, "requested") if requested else ("codex", "rotation"),
+    )
+    monkeypatch.setattr(
+        init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks" if name == "agentihooks" else None
+    )
+    monkeypatch.setattr(
+        init_agent,
+        "_launch_command",
+        lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
+    )
+
+    rc = init_agent.main(
+        [
+            "--dir",
+            str(project),
+            "--name",
+            "live-session-test",
+            "--prompt",
+            "hello",
+            "--dry-run",
+            "--",
+            "--route",
+            "claude-ai",
+        ],
+        {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(runtime), "SHELL": "/bin/bash", **profile_env},
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "agent=claude" in out
+    assert "agent=codex" not in out
+
+
 def test_private_master_login_gets_its_coordinated_launch_deadline(monkeypatch, tmp_path):
     from scripts import master_login_chain as chain
 
