@@ -75,7 +75,7 @@ def test_a_planner_without_a_literal_ceiling_fails(
 
 
 def test_lint_grades_the_planner_ceiling_against_the_antoncore_dev_batch_chart() -> None:
-    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint-actions"]["steps"]
     checkout = next(s for s in steps if s.get("env", {}).get("REPOSITORY") == "the-cloud-clockwork/antoncore")
     assert checkout["env"]["REF"] == "dev"
     assert ceiling.BATCH_VALUES in checkout["env"]["SELECTED_PATHS"].split()
@@ -86,7 +86,7 @@ def test_lint_grades_the_planner_ceiling_against_the_antoncore_dev_batch_chart()
 
 
 def _run_check(tmp_path: Path, graded: bool) -> subprocess.CompletedProcess[str]:
-    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint-actions"]["steps"]
     check = next(s for s in steps if "scripts.ci_batch_runner_ceiling" in s.get("run", ""))
     grader = tmp_path / "runner" / "grader"
     for root, name in ((tmp_path, "head"), (grader, "grader")):
