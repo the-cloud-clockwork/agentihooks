@@ -23,6 +23,8 @@
     "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_keeps_a_promotion_grade_on_a_named_lane",
     "tests/ci_lab/test_scheduler_push_lane.py::test_a_live_promotion_grade_that_lost_its_document_is_not_read_as_a_push_with_no_branch",
     "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_holds_one_parsed_promotion_grade_at_a_time_however_many_it_retires",
+    "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_reads_each_promotion_grade_it_keeps_once_stored_with_a_revision_or_without",
+    "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_reads_again_a_promotion_grade_it_keeps_that_another_scheduler_saved_during_its_read",
     "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_counts_the_pushes_with_no_branch_before_the_stale_pull_request_grades_and_lists_once"
   ]
 }
