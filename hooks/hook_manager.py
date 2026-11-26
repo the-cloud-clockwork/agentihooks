@@ -321,6 +321,7 @@ def on_session_start(payload: dict) -> None:
     from hooks.lifecycle.codex_refresh_kick import kick as codex_refresh_kick
 
     codex_refresh_kick()
+    _herdr_resume(payload)
     _swarm_ledger(payload)
     _hive_join(payload, "start")
     otel.emit_event(
@@ -553,9 +554,7 @@ def on_session_end(payload: dict) -> None:
         },
     )
     _request_trace_flush(payload, "end")
-    from hooks.context import documentation_session
-
-    documentation_session.end(payload)
+    _end_documentation_session(payload)
 
     if session_id and transcript_path:
         from hooks.observability.transcript import log_new_entries
@@ -666,7 +665,7 @@ def on_session_end(payload: dict) -> None:
 
     from hooks.config import BROADCAST_ENABLED
 
-    if BROADCAST_ENABLED:
+    if BROADCAST_ENABLED and sys.platform != "win32":
         try:
             from hooks.context.account_sessions import agent_pid
             from hooks.context.broadcast import heartbeat_sessions, mark_session_closed
@@ -1079,6 +1078,15 @@ def _start_documentation_session(payload: dict) -> None:
     documentation_session.start(payload)
 
 
+def _end_documentation_session(payload: dict[str, Any]) -> None:
+    """End the documentation session; on Windows it is skipped, because it reaches the swarm ledger."""
+    if sys.platform == "win32":
+        return
+    from hooks.context import documentation_session
+
+    documentation_session.end(payload)
+
+
 def _recycle_directive(session_id: str) -> str | None:
     """The context recycle directive; none on Windows, which runs no quota routing."""
     if sys.platform == "win32":
@@ -1155,6 +1163,15 @@ def _master_login_checkpoint() -> None:
         master_claude_login.checkpoint(os.environ)
     except Exception as e:
         log("master login checkpoint failed", {"error": str(e)})
+
+
+def _herdr_resume(payload: Any) -> None:
+    try:
+        from hooks.lifecycle.herdr_resume import kick
+
+        kick(payload)
+    except (ImportError, OSError, ValueError) as exc:
+        log("herdr resume report failed", {"error": type(exc).__name__})
 
 
 def _hive_join(payload: dict, event: str) -> None:

@@ -22,6 +22,7 @@ STEPS = [
     ("_prompt_quota_policy", ({}, "session", False), "hooks.context.quota_policy"),
     ("_request_trace_flush", ({}, "stop"), "hooks.observability.trace_flush"),
     ("_close_handed_off", ({},), "hooks.lifecycle.handoff_close"),
+    ("_end_documentation_session", ({},), "hooks.context.documentation_session"),
 ]
 
 
@@ -104,3 +105,20 @@ def test_notification_reaches_remote_control_only_off_windows(
     assert notice.call_count == calls
     if calls:
         notice.assert_called_once_with(payload)
+
+
+@pytest.mark.parametrize(("platform", "calls"), [("win32", 0), ("linux", 1)])
+def test_session_end_reaches_the_documentation_session_only_off_windows(
+    monkeypatch: pytest.MonkeyPatch, platform: str, calls: int
+) -> None:
+    """The documentation session reaches the swarm ledger, so a Windows session end skips it."""
+    from hooks import hook_manager
+
+    end = Mock()
+    monkeypatch.setattr("hooks.context.documentation_session.end", end)
+    monkeypatch.setattr(sys, "platform", platform)
+    payload = {"session_id": "s"}
+    hook_manager.on_session_end(payload)
+    assert end.call_count == calls
+    if calls:
+        end.assert_called_once_with(payload)

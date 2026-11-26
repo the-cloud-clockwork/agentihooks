@@ -1,0 +1,14 @@
+{
+  "id": "guard-stripping-keeps-unquoted-heredoc-substitutions",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t2896",
+  "behaviour": "The shared command stripping keeps the command substitutions bash runs inside an unquoted heredoc body, plain or dash tab indented, written with a dollar parenthesis or backticks, each on a line of its own with any heredoc inside it cut the same way, so branch guard refuses a direct push to main written as such a substitution. A single quoted delimiter body, escaped substitution text and process substitution text, which bash never runs in a body, stay data and are cut.",
+  "seam": "hooks.context._strip.strip_non_command_content, observed through hooks.context.branch_guard.check_branch_guard on Bash payloads",
+  "tests": [
+    "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_the_substitutions_of_an_unquoted_body",
+    "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_keeps_a_lone_surrogate_inside_an_unquoted_body_substitution",
+    "tests/context/test_strip_heredoc_delimiter_line.py::test_stripping_drops_a_quoted_body_and_body_text_bash_never_runs",
+    "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_refuses_a_push_to_main_in_an_unquoted_body_substitution",
+    "tests/context/test_strip_heredoc_delimiter_line.py::test_branch_guard_lets_a_push_substitution_in_a_quoted_body_pass"
+  ]
+}
