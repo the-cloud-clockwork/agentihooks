@@ -23,7 +23,7 @@ jobs:
     env:
       WORKER_SCANNER_CACHE: ${{ github.workspace }}/.worker-scanner-cache
       WORKER_PROVEN_IMAGE: agentihooks-worker-proven:${{ github.run_id }}-${{ github.run_attempt }}
-      ANTONCORE_SANDBOX_REF: 41da074ebf14c8836e27096bb6a65c3b59d6e0c0
+      ANTONCORE_SANDBOX_REF: 268500b5510330c2f4e7600a932f9a91a1ba637c
     strategy:
       fail-fast: false
       matrix:

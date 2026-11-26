@@ -36,7 +36,7 @@ def test_profile_defaults_and_shared_service_security_are_preserved() -> None:
 def test_native_smoke_reads_the_pinned_chart_with_scoped_secret_references() -> None:
     workflows = CHART.parents[2] / ".github/workflows"
     job = yaml.safe_load((workflows / "swarm-node-smoke.yml").read_text())["jobs"]["worker-image"]
-    assert job["env"]["ANTONCORE_SANDBOX_REF"] == "41da074ebf14c8836e27096bb6a65c3b59d6e0c0"
+    assert job["env"]["ANTONCORE_SANDBOX_REF"] == "268500b5510330c2f4e7600a932f9a91a1ba637c"
     assert not any("runner." in str(value) for value in job["env"].values())
     render = next(step for step in job["steps"] if step.get("name") == "Render both native sandbox profiles")
     assert render["env"]["WORKER_SANDBOX_PROFILES"] == "${{ runner.temp }}/worker-image-evidence/sandbox-profiles"
