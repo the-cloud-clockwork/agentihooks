@@ -14,7 +14,10 @@ from scripts.ci_lab.intake import HeadEvent
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.worktrees import Mirror
 from scripts.github_app import GitAuthRefused
+from tests.ci_lab.test_scheduler import Run
+from tests.ci_lab.test_scheduler import lab as lab
 from tests.ci_lab.test_scheduler import origin as origin
+from tests.ci_lab.test_scheduler_retire import REPO, _listing, _queued, unit
 from tests.ci_lab.test_scheduler_uncarried import ACTOR, FakeKube, Inbox, Poster, _git, _no_tests, _unknown, fake_redis
 
 PRIVATE = "https://github.com/the-cloud-clockwork/antoncore"
@@ -252,3 +255,17 @@ def test_production_reuses_one_scoped_contents_read_auth_per_repository(
     assert auth.call_args_list[0].args == ("github.com/the-cloud-clockwork/antoncore",)
     assert auth.call_args_list[1].args == ("github.com/the-cloud-clockwork/agentihooks-bundle",)
     assert all(call.kwargs == {"permissions": {"contents": "read"}} for call in auth.call_args_list)
+
+
+@pytest.mark.feature("lab-private-repository-refs")
+def test_a_read_token_refusal_preserves_live_merge_groups(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _queued(lab, unit(1))
+    live = {grade.run for grade in run.grades()}
+    pending = run.engine.queue.pending()
+    error = GitAuthRefused("repository contents read denied")
+    monkeypatch.setattr(_listing(run), "groups", Mock(side_effect=error))
+    assert run.tick(1100) == [f"cannot list the merge groups of {REPO}: {error}"]
+    assert run.lab.client.smembers(scheduler.LIVE) == live
+    assert run.engine.queue.pending() == pending

@@ -16,6 +16,7 @@
     "tests/ci_lab/test_private_repository_refs.py::test_a_private_pull_starts_grading_without_an_expansion_refusal",
     "tests/ci_lab/test_private_repository_refs.py::test_a_token_refusal_is_visible_to_the_waiting_pass_without_logging_the_token",
     "tests/ci_lab/test_private_repository_refs.py::test_file_origins_need_no_app_credentials",
-    "tests/ci_lab/test_private_repository_refs.py::test_production_reuses_one_scoped_contents_read_auth_per_repository"
+    "tests/ci_lab/test_private_repository_refs.py::test_production_reuses_one_scoped_contents_read_auth_per_repository",
+    "tests/ci_lab/test_private_repository_refs.py::test_a_read_token_refusal_preserves_live_merge_groups"
   ]
 }
