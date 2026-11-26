@@ -8,6 +8,7 @@ from scripts.swarm import capacity, offer_quota, runtime
 from scripts.swarm.offer_quota import accounts as real_accounts
 from tests.hub.test_admission import SLUG, ask
 from tests.hub.test_admission import rig as rig
+from tests.hub.test_admission_claim_cap import lives
 
 
 @pytest.fixture(autouse=True)
@@ -122,7 +123,9 @@ def test_an_offer_no_harness_may_take_is_refused_before_any_account_read_or_clai
     answer = rig.admitter.admit(SLUG, ask())
 
     assert answer is None
-    assert "refused: the lane agent, required harness and profile permit no harness" in capsys.readouterr().err
+    refusal = capsys.readouterr().err
+    assert f"events admission swarm={SLUG} task=t1 " in refusal
+    assert "refused: the lane agent, required harness and profile permit no harness" in refusal
     reader.assert_not_called()
     assert rig.rows["t1"] == before
     assert rig.store.claimant(SLUG, "t1") is None
@@ -130,3 +133,25 @@ def test_an_offer_no_harness_may_take_is_refused_before_any_account_read_or_clai
     assert rig.store.claims(SLUG, "t1") == lives
     assert rig.store.agents(SLUG) == []
     assert rig.ledger.writes == []
+
+
+@pytest.mark.feature("event-offer-account-seats")
+def test_a_claim_cap_refusal_stops_before_reading_account_seats(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reader = _accounts(
+        monkeypatch,
+        [
+            capacity.Account("claude", "claude-a", "OPEN", 0, None, 90, 3),
+            capacity.Account("codex", "codex-a", "OPEN", 0, None, 90, 6),
+        ],
+    )
+    lives(rig, 3)
+    generation = rig.store.claim_generation(SLUG, "t1")
+
+    assert rig.admitter.admit(SLUG, ask()) is None
+
+    reader.assert_not_called()
+    assert rig.store.claim_generation(SLUG, "t1") == generation
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []

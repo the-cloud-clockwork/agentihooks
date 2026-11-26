@@ -2146,6 +2146,7 @@
         "tests/hub/test_offer_quota.py::test_a_claude_offer_is_held_before_claim_until_its_account_has_a_seat",
         "tests/hub/test_offer_quota.py::test_a_mixed_offer_waits_for_either_harness_without_spending_a_claim_life",
         "tests/hub/test_offer_quota.py::test_an_offer_no_harness_may_take_is_refused_before_any_account_read_or_claim",
+        "tests/hub/test_offer_quota.py::test_a_claim_cap_refusal_stops_before_reading_account_seats",
         "tests/hive/test_offer_quota.py::test_full_account_offers_keep_their_owner_generation_and_delivery_until_a_seat_returns",
         "tests/swarm/test_offer_quota.py::test_a_fresh_admitted_runtime_reads_accounts_before_launching_required_claude",
         "tests/swarm/test_offer_quota.py::test_a_mixed_admitted_offer_uses_codex_when_only_codex_has_an_account_seat",
