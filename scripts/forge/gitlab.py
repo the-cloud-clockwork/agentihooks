@@ -108,6 +108,9 @@ class GitLabForge:
         note = self._call("POST", f"{self.api}/{number}/notes", {"body": body})
         return f"{self.web}/-/merge_requests/{number}#note_{note['id']}"
 
+    def release_pull(self, tag: str) -> int:
+        raise ForgeError(f"GitLab has no promotion pull request for tag {tag}")
+
     def state(self, number: int) -> MergeRequestState:
         url = f"{self.web}/-/merge_requests/{number}"
         try:

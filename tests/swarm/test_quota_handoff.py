@@ -660,6 +660,29 @@ def test_a_refusal_with_no_observed_accounts_says_so():
     )
 
 
+@pytest.mark.feature("master-quota-login-guidance")
+@pytest.mark.parametrize("lane", ["master", "eng", "ci", "plan"])
+@pytest.mark.parametrize("observed", [False, True])
+def test_quota_handoff_refusal_adds_login_guidance_only_for_a_master(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane: str, observed: bool
+) -> None:
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "old"))
+    rt._quota_accounts = [account("old")] if observed else []
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    detail = "claude old is the account handing off" if observed else "no accounts were observed"
+    expected = f"no claude account can take the quota handoff from claude account old: {detail}"
+    if lane == "master":
+        expected += "; ask through the inbox for a master login slot added with agentihooks claude login --master"
+    with pytest.raises(runtime.SpawnError) as caught:
+        rt._quota_transfer(LAUNCH, "engineer", {}, lane, "claude")
+    assert str(caught.value) == expected
+    rt._quota_handoffs = {(lane, 0): ("claude", "old")}
+    rt._quota_ready_ids = {lane: ["task"]}
+    rt._quota_held = {}
+    assert rt._quota_successor_accounts({lane: [("claude",)]}) == {lane: {0: set()}}
+    assert rt._quota_held == {"task": expected}
+
+
 def test_a_relaunch_without_a_quota_handoff_keeps_its_own_account(tmp_path, monkeypatch):
     rows = [capacity.Account("codex", "default", "OPEN", 0, 90, 90, 6)]
     monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: list(rows))

@@ -36,7 +36,7 @@ LOGIN_ALERT_KEY = "master-login-alert"
 LOGIN_ALERT_SOURCE = "master-login"
 LOGIN_ALERT = (
     "The master hit the Claude login limit again and no stored master login is left that passes its check; "
-    "log in one master login slot again so the master can run."
+    "add a master login slot with agentihooks claude login --master so the master can run."
 )
 LOGIN_RECOVERY = """## Intent
 Continue as the master of {slug}; {name} {limited} and the swarm recycled it so the relaunch takes another stored login.

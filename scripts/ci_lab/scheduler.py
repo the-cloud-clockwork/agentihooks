@@ -126,8 +126,19 @@ REAPED = {"pending": contract.UNITS_REDELIVERED_TOTAL, "lost": contract.UNITS_LO
 REQUIRED = "required"
 EVENTS = ("pull_request", "pull_request", "merge_group", "push", "workflow_dispatch")
 GRADED_EVENTS = frozenset({"merge_group", "pull_request"})
-QUEUE_REQUIRED = ("select", "split", "shard-check", "test-count")
-PULL_REQUIRED = ("select", "test-count", "lint", "type-gate", "docs", "semgrep", "sonar", "writer-lock")
+QUEUE_REQUIRED = ("select", "split", "shard-check", "test-count", "collect")
+PULL_REQUIRED = (
+    "select",
+    "collect",
+    "test-count",
+    "lint",
+    "lint-actions",
+    "type-gate",
+    "docs",
+    "semgrep",
+    "sonar",
+    "writer-lock",
+)
 SCOPED = {"full": ("split", "unit", "shard-check"), "selected": ("unit-selected",)}
 SCOPES = frozenset({"full", "selected", "none"})
 UNIT_JOBS = ("unit", "unit-lost", "unit-rerun")
@@ -141,7 +152,7 @@ STATS_JOB = "mutation-stats"
 MUTANT_JOB = "mutation"
 MANIFEST_KINDS = (expand_tests.KIND, "mutant")
 ALWAYS_SKIPPABLE = frozenset({"unit-lost", "unit-rerun", "queue-baseline", "unit-selected"})
-PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "semgrep", "test-count"})
+PUSH_SKIPPABLE = frozenset({"type-gate", "lint", "lint-actions", "semgrep", "test-count", "collect"})
 HEAD_FIELDS = tuple(item.name for item in fields(HeadEvent) if item.default is MISSING)
 STATIC = "static"
 WHOLE_TREE = "."
@@ -156,6 +167,7 @@ FETCH_MS = 100
 INTAKE_SECONDS = 10
 QUIET_MS = 30_000
 STARTS_PER_PASS = 8
+LOOKED_AT_PER_PASS = 24
 UNANSWERED_FETCHES = 10
 POST_HOLD_MS = 60_000
 INTERVAL_S = 2.0
@@ -998,16 +1010,20 @@ class Scheduler:
         return [f"dropped the waiting head {waiting['request']['head']}"]
 
     def _release(self, now_ms: int) -> list[str]:
-        """Start at most `STARTS_PER_PASS` held heads whose quiet window ended, except one a pause of its class holds:
-        the most urgent class first and the longest waiting first within a class. A head still quiet or paused takes no
-        place, and the rest wait for a later pass, so every pass reaches admission. A head whose manifest fetch still
-        runs off the pass keeps its place and window for the next pass; one whose fetch GitHub never answered or
-        answered with a server error waits out the window again, until the `UNANSWERED_FETCHES`th such fetch in a row,
-        counted in its waiting entry; that fetch and any other expansion failure drop the head and post its failed
-        required check run. Each of these takes a place, since its expansion ran on the pass."""
+        """Look at up to `LOOKED_AT_PER_PASS` held heads whose quiet window ended, except one a pause of its class
+        holds: the most urgent class first and the longest waiting first within a class. A head still quiet or paused
+        takes no place among those looked at, and the rest wait for a later pass, so every pass reaches admission.
+        A head whose manifest fetch still runs off the pass keeps its place and its window for the next pass; one
+        whose fetch GitHub never answered or answered with a server error waits out the window again, its count of
+        such fetches in a row kept in its waiting entry, until the `UNANSWERED_FETCHES`th one. Neither takes one of
+        the `STARTS_PER_PASS` places, only one of the `LOOKED_AT_PER_PASS` looked at, so the pass moves on to the
+        next waiting head instead of stalling on it. Starting a head, retiring it or dropping it after its last
+        expansion failure each take one of those `STARTS_PER_PASS` places, since each is the pass's last word on
+        that head."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         started = 0
+        looked_at = 0
         for name, raw in sorted(self.client.hgetall(WAITING).items(), key=_urgency):
             held = json.loads(raw)
             request = _request(held["request"])
@@ -1016,11 +1032,12 @@ class Scheduler:
                 pauses, CLASSES[request.tier], request.head, held["lane"]
             ):
                 continue
-            started += 1
+            looked_at += 1
             self.client.hdel(WAITING, name)
             ref = held.get("ref", "")
             try:
                 actions.append(self._start(request, held["lane"], ref, now_ms))
+                started += 1
             except FetchPending as error:
                 self.client.hset(WAITING, name, raw)
                 actions.append(f"holding {request.head}: {error}")
@@ -1030,6 +1047,7 @@ class Scheduler:
                     self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unanswered": fetches}))
                     actions.append(f"holding {request.head}: {error}")
                 else:
+                    started += 1
                     refusal = FetchRefused(
                         f"{fetches} manifest fetches in a row got no answer or a server error, the last: {error}"
                     )
@@ -1043,9 +1061,10 @@ class Scheduler:
                 yaml.YAMLError,
                 jsonschema.ValidationError,
             ) as error:
+                started += 1
                 actions.append(f"cannot expand {request.head}: {error}")
                 actions.extend(self._refuse(request, ref, error, now_ms))
-            if started == STARTS_PER_PASS:
+            if started == STARTS_PER_PASS or looked_at == LOOKED_AT_PER_PASS:
                 break
         return actions
 

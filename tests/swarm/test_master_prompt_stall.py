@@ -436,6 +436,14 @@ def test_a_repeat_login_recycle_raises_no_alert_while_a_stored_slot_is_spare(
     assert ledger.alerts == []
 
 
+@pytest.mark.feature("master-quota-login-guidance")
+def test_master_login_alert_names_the_master_login_command() -> None:
+    assert master_prompt_stall.LOGIN_ALERT == (
+        "The master hit the Claude login limit again and no stored master login is left that passes its check; "
+        "add a master login slot with agentihooks claude login --master so the master can run."
+    )
+
+
 @pytest.mark.feature("master-login-limit-recovery")
 def test_a_login_limit_recycle_marks_the_slots_the_master_holds(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch

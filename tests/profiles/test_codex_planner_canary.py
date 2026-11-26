@@ -242,12 +242,13 @@ def test_the_supervisor_records_the_launch_before_the_canary_turn(
 
 @pytest.mark.feature("codex-planner-sandbox-canary")
 def test_planner_permissions_keep_the_repository_read_only(tmp_path: Path) -> None:
-    args = runtime.codex_plan_mode({"HOME": str(tmp_path)})
+    args = runtime.codex_plan_mode({"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / ".agentihooks")})
     assert args == [
         "-c",
         'permissions.planner={extends=":read-only", network={enabled=true}, filesystem={'
         f'"{tmp_path}/development-ledger"="write", '
-        f'"{tmp_path}/.agentihooks/swarm"="write", "{tmp_path}/scratchpad"="write"}}}}',
+        f'"{tmp_path}/.agentihooks/swarm"="write", "{tmp_path}/scratchpad"="write", '
+        f'"{tmp_path}/.agentihooks/ledger-exports"="write"}}}}',
         "-c",
         'default_permissions="planner"',
     ]
