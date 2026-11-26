@@ -73,7 +73,7 @@ def test_a_swapped_stored_manifest_is_refused_and_the_next_unit_still_runs(
         HEAD_B: scheduler.Plan(TREE, BASE, {"unit": (second,)}),
     }
     run = lab(plans)
-    run.push(HEAD_A, lane=HEAD_A)
+    run.push(HEAD_A, lane="first")
     with monkeypatch.context() as held:
         held.setattr(run.engine, "_admit", lambda _now: [])
         run.tick(1000)
@@ -105,7 +105,7 @@ def test_a_swapped_stored_manifest_is_refused_and_the_next_unit_still_runs(
     assert cast(support.FakeWorktrees, pod.trees.worktrees).calls == []
     assert venv.calls == []
     assert ran.calls == []
-    run.push(HEAD_B, lane=HEAD_B)
+    run.push(HEAD_B, lane="second")
     run.tick(1002)
     following = leased(run)
     assert following.head == HEAD_B

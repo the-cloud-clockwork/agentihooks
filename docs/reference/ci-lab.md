@@ -1755,7 +1755,7 @@ both of these hold:
 
 | Source | Recorded when | Subject | `head` and `base` | `actor` |
 |---|---|---|---|---|
-| `push` delivery on `/github` | A branch under `refs/heads/` outside the plant prefix moved; a deleted branch, a new branch whose `before` is all zeros, or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
+| `push` delivery on `/github` | The `dev` branch moved; a push to any other branch outside the plant prefix, a deleted branch, a push whose `before` is all zeros, or a tag records nothing | `ci.lab.head.push` | `after` and `before` | The delivery's sender |
 | `push` delivery on `/github` to a plant branch | A branch under `refs/heads/diffcheck/lab-plant-` (`scripts.ci_lab.webhooks.PLANT_PREFIX`) moved; a deleted branch records nothing | `ci.lab.head.plant` | `after`, and an empty base whatever `before` says | The delivery's sender |
 | `pull_request` delivery on `/github` | The action is `opened`, `synchronize`, `reopened` or `closed` | `ci.lab.head.pull_request` | The pull request's head and base SHA | The pull request's author |
 | `merge_group` delivery on `/github` | The action is `checks_requested` | `ci.lab.head.merge_group` | The group's `head_sha` and `base_sha` | The delivery's sender |
@@ -1764,7 +1764,10 @@ both of these hold:
 
 A pull request head also carries `lane` in its envelope data: the pull request's head branch, or
 `owner:branch` for a pull request from a fork (`scripts.ci_lab.webhooks.pull_lane`). The scheduler
-keys the head's lane on it, so a newer head of the pull request supersedes the older one. No other
+keys the head's lane on it, so a newer head of the pull request supersedes the older one. A push
+head carries `dev` as its lane, the only branch a push is recorded for, so a newer push to `dev`
+replaces the one waiting and supersedes the one being graded, and the promotion class holds one
+waiting head a repository. No other
 head carries the key, and the scheduler reads an envelope without it as before. A `closed` head
 asks for no grade: it names the lane whose work the scheduler ends, described in
 [Scheduler loop](#scheduler-loop).
@@ -2652,6 +2655,14 @@ The lab also ends the work of pull request heads nobody wants graded any more, i
   <run> still grades <head>`. When the lane names a grade that already finished, or one pushed
   to a grade ref, the close starts from the live grades of the closed head that name the lane,
   and the lane keeps naming the grade it names.
+- A push that named no branch gets no promotion grade. Intake holds no head of the promotion class
+  that has no grade ref and whose lane is its own head, and prints `ignored <head>: a push that
+  named no branch asks for no grade`. On its first pass a scheduler retires what is stored that
+  way: `Scheduler._retire_pushes` drops every such waiting head, forgets every such live grade and
+  drops the pending units of that head unless another live grade grades it. Nothing is posted. One
+  line counts them, `retired the promotion grades of pushes that named no branch: <n> waiting heads
+  dropped, <n> live grades retired, <n> pending units dropped`, and a pass that finds none prints
+  no line.
 - On its first pass a scheduler retires the stale grades a restart finds live. For each repository
   with a live pull request grade that has no grade ref, `scripts.ci_lab.stale_heads.OpenHeads`
   reads the open pull request heads and the heads of the plant branches through the lab App: two
