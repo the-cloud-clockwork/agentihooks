@@ -3,10 +3,10 @@ import json
 import os
 import re
 import subprocess
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlencode
 
 from scripts.ci_budget import rate_limit
 
@@ -28,8 +28,8 @@ STEP_EXITED = re.compile(
     r"(?:Process completed with exit code (?:[1-9]|[1-9]\d|1[01]\d|12[0-7])\.|" + STEP_TIMED_OUT.pattern + ")"
 )
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
-EXIT_POLLS = 60
-EXIT_POLL_SECONDS = 30
+RUN_PAGE_SIZE = 100
+RUN_PAGES = 10
 
 
 def base_name(job_name: str) -> str:
@@ -167,40 +167,59 @@ def pull_state(repo: str, number: int) -> dict[str, Any]:
     return json.loads(_api("graphql", "-f", f"query={query}"))["data"]["repository"]["pullRequest"]
 
 
-def pull_after_exit(repo: str, number: int) -> dict[str, Any]:
-    pull = pull_state(repo, number)
-    for _ in range(EXIT_POLLS):
-        if not pull.get("isInMergeQueue"):
-            return pull
-        time.sleep(EXIT_POLL_SECONDS)
-        pull = pull_state(repo, number)
-    return pull
+def run_for_pull(repo: str, number: int, since: str) -> dict[str, Any] | None:
+    for page in range(1, RUN_PAGES + 1):
+        query = urlencode({"event": "merge_group", "created": f">={since}", "per_page": RUN_PAGE_SIZE, "page": page})
+        inventory = json.loads(_api(f"repos/{repo}/actions/workflows/test.yml/runs?{query}"))
+        runs = inventory["workflow_runs"]
+        if matching := [run for run in runs if pull_number(run) == number]:
+            return max(matching, key=lambda run: run["id"])
+        if not runs or page * RUN_PAGE_SIZE >= inventory["total_count"]:
+            break
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
-    parser.add_argument("--run-id", type=int, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--run-id", type=int)
+    source.add_argument("--pull", type=int)
     args = parser.parse_args(argv)
-    # unit-lost imports this module with the light runner's bare python3, which has no PyYAML.
     import yaml
 
-    run = json.loads(_api(f"repos/{args.repo}/actions/runs/{args.run_id}"))
-    retry, reason = decide(run, failed_jobs(args.repo, args.run_id), yaml.safe_load(WORKFLOW.read_text()))
-    number = pull_number(run)
+    pull = None
+    if args.pull is not None:
+        pull = pull_state(args.repo, args.pull)
+        since = pull["commits"]["nodes"][-1]["commit"]["committedDate"]
+        run = run_for_pull(args.repo, args.pull, since) or {}
+    else:
+        run = json.loads(_api(f"repos/{args.repo}/actions/runs/{args.run_id}"))
+    run_id = args.run_id if args.run_id is not None else run.get("id")
+    number = args.pull if args.pull is not None else pull_number(run)
+    retry, reason = (
+        decide(run, failed_jobs(args.repo, cast(int, run_id)), yaml.safe_load(WORKFLOW.read_text()))
+        if run
+        else (False, "no merge group run for this pull request head")
+    )
     if retry and number is None:
         retry, reason = False, f"no pull request in queue branch {run.get('head_branch')}"
     node = head = ""
+    waiting = False
     if retry:
-        pull = pull_after_exit(args.repo, cast(int, number))
+        if pull is None:
+            pull = pull_state(args.repo, cast(int, number))
+        waiting = bool(pull.get("isInMergeQueue"))
         allowed, why = requeue(pull)
         retry, reason = allowed, f"{reason}; {why}"
         if retry:
             node, head = pull["id"], pull["commits"]["nodes"][-1]["commit"]["oid"]
-    print(json.dumps({"run": args.run_id, "pull": number, "requeue": retry, "reason": reason}))
+    print(json.dumps({"run": run_id, "pull": number, "requeue": retry, "waiting": waiting, "reason": reason}))
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as handle:
-            handle.write(f"requeue={str(retry).lower()}\npull={number or ''}\nnode={node}\nhead={head}\n")
+            handle.write(
+                f"requeue={str(retry).lower()}\nwaiting={str(waiting).lower()}\npull={number or ''}\nnode={node}\nhead={head}\n"
+            )
     return 0
 
 
