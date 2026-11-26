@@ -362,6 +362,27 @@ def test_swarm_gates_choose_the_platform_at_each_call(monkeypatch: pytest.Monkey
     assert calls == ["recycle"]
 
 
+@pytest.mark.feature("swarm-gates-platform-invocation")
+def test_windows_runs_neither_swarm_gate_at_the_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks.context import context_recycle, swarm_gates
+
+    calls: list[str] = []
+
+    def claim() -> str:
+        calls.append("claim")
+        return "stop"
+
+    def recycle(tool_name: str, tool_input: dict[str, object], session_id: str) -> str:
+        calls.append("recycle")
+        return "handoff"
+
+    monkeypatch.setattr(claim_watch, "check", claim)
+    monkeypatch.setattr(context_recycle, "gate", recycle)
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert swarm_gates.pretool("Bash", {}, "s1") is None
+    assert calls == []
+
+
 @pytest.mark.wall_clock
 def test_a_ledger_answering_after_five_seconds_does_not_slow_a_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks.context import context_recycle, swarm_gates

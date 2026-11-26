@@ -17005,7 +17005,8 @@
         "platform-chosen-at-import"
       ],
       "tests": [
-        "tests/test_claim_watch.py::test_swarm_gates_choose_the_platform_at_each_call"
+        "tests/test_claim_watch.py::test_swarm_gates_choose_the_platform_at_each_call",
+        "tests/test_claim_watch.py::test_windows_runs_neither_swarm_gate_at_the_call"
       ]
     },
     {
