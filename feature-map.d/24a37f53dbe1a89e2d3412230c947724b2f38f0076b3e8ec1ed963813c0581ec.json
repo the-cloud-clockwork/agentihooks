@@ -2,7 +2,7 @@
   "id": "lab-promotion-grade-only-for-dev-push",
   "origin": "regression",
   "ledger_item": "ledger:rig-grade-swarm/tasks/cut-flip-static-gates",
-  "behaviour": "The lab asks for a promotion grade only for a push to dev, on the dev lane: a newer push to dev replaces the one waiting and supersedes the one being graded, a push to any other branch names no head, and the first pass of a scheduler retires the waiting heads and live grades of the promotion class with no grade ref whose lane is their own head, which is how a push that named no branch was held.",
+  "behaviour": "The lab asks for a promotion grade only for a push to dev, on the dev lane: a newer push to dev replaces the one waiting and supersedes the one being graded, a push to any other branch names no head, a push that named no branch is asked no grade, and the first pass of a scheduler retires the waiting heads and live grades of the promotion class with no grade ref whose lane is their own head, which is how a push that named no branch was held.",
   "seam": "scripts.ci_lab.webhooks.head_events over a push delivery, and Scheduler.tick over its fakes through its actions, the waiting hash, the live grades and the pending units",
   "rules": [
     "lab-push-head-without-lane"
@@ -13,6 +13,8 @@
     "tests/ci_lab/test_scheduler_push_lane.py::test_a_newer_push_to_dev_replaces_the_push_waiting_on_the_dev_lane",
     "tests/ci_lab/test_scheduler_push_lane.py::test_a_newer_push_to_dev_supersedes_the_dev_grade_before_it",
     "tests/ci_lab/test_scheduler_push_lane.py::test_a_push_to_a_branch_other_than_dev_holds_no_head_and_starts_no_grade",
+    "tests/ci_lab/test_scheduler_push_lane.py::test_a_push_that_named_no_branch_is_asked_no_grade",
+    "tests/ci_lab/test_scheduler_push_lane.py::test_a_hotfix_push_and_a_grade_ref_push_that_named_no_branch_are_still_held",
     "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_retires_the_live_promotion_grades_whose_lane_is_their_own_head",
     "tests/ci_lab/test_scheduler_push_lane.py::test_the_first_pass_drops_the_waiting_promotion_heads_whose_lane_is_their_own_head",
     "tests/ci_lab/test_scheduler_push_lane.py::test_a_retired_promotion_grade_keeps_the_units_of_a_head_another_live_grade_grades",

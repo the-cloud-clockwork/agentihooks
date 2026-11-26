@@ -112,6 +112,26 @@ def test_a_push_to_a_branch_other_than_dev_holds_no_head_and_starts_no_grade(lab
 
 
 @pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
+def test_a_push_that_named_no_branch_is_asked_no_grade(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})}, quiet_ms=500)
+    run.push(HEAD_A, lane=HEAD_A)
+    run.push(HEAD_B, lane="dev")
+    assert f"ignored {HEAD_A}: a push that named no branch asks for no grade" in run.tick(1000)
+    assert list(run.lab.client.hgetall(scheduler.WAITING)) == [DEV_LANE]
+
+
+@pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
+def test_a_hotfix_push_and_a_grade_ref_push_that_named_no_branch_are_still_held(lab: Callable[..., Run]) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})}, quiet_ms=500)
+    run.lab.fixes.add(HEAD_A)
+    run.push(HEAD_A, lane=HEAD_A)
+    run.push(HEAD_B, lane=HEAD_B, ref=f"{scheduler.GRADE_REFS}{HEAD_B}")
+    assert [action for action in run.tick(1000) if action.startswith("ignored")] == []
+    assert run.grade(HEAD_A).tier == int(Priority.HOTFIX)
+    assert list(run.lab.client.hgetall(scheduler.WAITING)) == [f"{REPO}|{HEAD_B}|{int(Priority.PROMOTION)}"]
+
+
+@pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
 def test_the_first_pass_retires_the_live_promotion_grades_whose_lane_is_their_own_head(lab: Callable[..., Run]) -> None:
     first, second, third = unit(1), unit(2), unit(3)
     run = lab({HEAD_A: plan({"lint": (first,)}), HEAD_B: plan({"lint": (second,)}), HEAD_C: plan({"lint": (third,)})})
