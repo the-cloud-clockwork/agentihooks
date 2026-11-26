@@ -16982,6 +16982,16 @@
       "tests": [
         "tests/test_ci_branch_lanes.py::test_only_the_trusted_tests_workflow_may_use_dedicated_dispatch_lanes"
       ]
+    },
+    {
+      "id": "swarm-gates-platform-invocation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-claim-watch-flake",
+      "behaviour": "Swarm guards skip Windows and enforce Linux claim ownership before context recycling at each call, regardless of the platform during the first import.",
+      "seam": "hooks.context.swarm_gates.pretool",
+      "tests": [
+        "tests/test_claim_watch.py::test_swarm_gates_choose_the_platform_at_each_call"
+      ]
     }
   ],
   "unmapped_rules": [

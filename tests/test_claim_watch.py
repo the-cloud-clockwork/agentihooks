@@ -322,6 +322,50 @@ def test_the_pre_tool_hook_denies_the_next_call_of_a_replaced_claimant(monkeypat
     assert [argv for argv, _ in spawn.calls] == [[*INTERPRETER, "swarm", "sw", "--as", NAME, "exit"]]
 
 
+@pytest.mark.feature("swarm-gates-platform-invocation")
+@pytest.mark.parametrize("import_platform", ["win32", "linux"])
+def test_swarm_gates_choose_the_platform_at_each_call(
+    monkeypatch: pytest.MonkeyPatch, import_platform: str
+) -> None:
+    import importlib.util
+    import sys
+
+    from hooks.context import context_recycle, swarm_gates
+
+    spec = importlib.util.spec_from_file_location("isolated_swarm_gates", swarm_gates.__file__)
+    assert spec is not None and spec.loader is not None
+    fresh = importlib.util.module_from_spec(spec)
+    monkeypatch.setattr(sys, "platform", import_platform)
+    spec.loader.exec_module(fresh)
+    calls = []
+
+    def claim() -> str:
+        calls.append("claim")
+        return "stop"
+
+    def recycle(tool_name: str, tool_input: dict, session_id: str) -> str:
+        calls.append("recycle")
+        return "handoff"
+
+    monkeypatch.setattr(claim_watch, "check", claim)
+    monkeypatch.setattr(context_recycle, "gate", recycle)
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert fresh.pretool("Bash", {}, "s1") is None
+    assert calls == []
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert fresh.pretool("Bash", {}, "s1") == "stop"
+    assert calls == ["claim"]
+    monkeypatch.setattr(claim_watch, "check", lambda: None)
+    calls.clear()
+    assert fresh.pretool("Bash", {}, "s1") == "handoff"
+    assert calls == ["recycle"]
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert fresh.pretool("Bash", {}, "s1") is None
+    assert calls == ["recycle"]
+
+
 @pytest.mark.wall_clock
 def test_a_ledger_answering_after_five_seconds_does_not_slow_a_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks.context import context_recycle, swarm_gates
