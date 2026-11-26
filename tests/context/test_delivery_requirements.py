@@ -52,7 +52,7 @@ def test_the_summary_stays_within_fifty_words_and_names_both_rules(limit: int) -
     assert text.startswith("Delivery requirements: deliver each change as one complete pull request.")
     assert f"Split it in two only when it changes more than {limit} files" in text
     assert "never split smaller for size alone." in text
-    assert "Always deliver or offer the source root fix, never a workaround the user did not ask for." in text
+    assert text.endswith(" Always deliver or offer the source root fix, never a workaround the user did not ask for.")
 
 
 @pytest.mark.feature("delivery-requirements-summary")
