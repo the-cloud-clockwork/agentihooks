@@ -48,3 +48,40 @@ def test_companion_identity_refuses_another_executable(
     tools = {"tools": {name: {"companion": "codex", "version": "0.162.0"}}}
     with pytest.raises(ValueError, match=f"binary usage mismatch: {name}"):
         worker_image.tool_versions(tools, tmp_path)
+
+
+@pytest.mark.feature("codex-planner-native-sandbox")
+@pytest.mark.parametrize("failure", ["", "namespace", "repository", "report"])
+def test_native_qualification_requires_command_report_and_write_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from tests.swarm_node import planner_sandbox_probe
+
+    calls = []
+
+    def run(command: list[str], **kwargs: object) -> CompletedProcess[str]:
+        calls.append((command, kwargs))
+        target = Path(command[-1])
+        code = 0
+        if failure == "namespace":
+            code = 1
+        elif target.name == "forbidden":
+            code = 0 if failure == "repository" else 1
+            if not code:
+                target.write_text("validated")
+        elif target.suffix == ".json" and failure != "report":
+            target.write_text("validated")
+        return CompletedProcess(command, code, "", "namespace denied" if failure == "namespace" else "")
+
+    monkeypatch.setattr(planner_sandbox_probe.subprocess, "run", run)
+    report = planner_sandbox_probe.qualify(tmp_path)
+    assert report["passed"] is (not failure)
+    assert len(calls) == 3
+    for command, options in calls:
+        assert command[command.index("--permission-profile") + 1] == "planner"
+        assert "danger-full-access" not in command
+        assert 'extends=":read-only"' in command[2]
+        assert options["timeout"] == 30
+        assert options["capture_output"] is True
+    if failure == "namespace":
+        assert "namespace denied" in str(report)

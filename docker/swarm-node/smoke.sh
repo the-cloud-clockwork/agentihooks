@@ -104,6 +104,20 @@ if [[ "$proof" != profiles ]]; then
     docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 --tmpfs /tmp \
         -v "$context/tests/swarm_node/code_mode_probe.py:/opt/probe/code_mode_probe.py:ro" \
         "$image" python /opt/probe/code_mode_probe.py /usr/local/bin/codex > "$output/codex-code-mode.json"
+    sandbox_profiles="${WORKER_SANDBOX_PROFILES:?supply the paired profiles rendered from the pinned infrastructure chart}"
+    [[ -s "$sandbox_profiles/ci-lab-worker.json" && -s "$sandbox_profiles/ci-lab-worker" ]]
+    docker run --rm --network none --read-only --user 10001:10001 --cap-drop ALL \
+        --security-opt no-new-privileges \
+        --security-opt "seccomp=$sandbox_profiles/ci-lab-worker.json" \
+        --security-opt apparmor=ci-lab-worker \
+        --tmpfs /home/worker:uid=10001,gid=10001,exec --tmpfs /tmp \
+        -v "$context/tests/swarm_node/planner_sandbox_probe.py:/opt/probe/planner_sandbox_probe.py:ro" \
+        "$image" python /opt/probe/planner_sandbox_probe.py \
+        > "$output/planner-sandbox.json" 2> "$output/planner-sandbox.log" || {
+            status=$?
+            cat "$output/planner-sandbox.log" "$output/planner-sandbox.json" >&2
+            exit "$status"
+        }
 
 fi
 

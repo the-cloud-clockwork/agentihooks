@@ -56,7 +56,12 @@ elif args[0] == 'rm':
     if os.environ['FAILURE'] == 'slow-removal' and '-f' not in args:
         time.sleep(2.5)
 elif args[0] == 'run':
-    if '/opt/probe/profile-probe.sh' in args:
+    if '/opt/probe/planner_sandbox_probe.py' in args:
+        if os.environ['FAILURE'] == 'sandbox':
+            print('bubblewrap namespace denied', file=sys.stderr)
+            sys.exit(23)
+        print(json.dumps({'passed': True}))
+    elif '/opt/probe/profile-probe.sh' in args:
         (state / f'probe-{os.getpid()}').touch()
         deadline = time.monotonic() + 3
         while len(list(state.glob('probe-*'))) < 6:
@@ -106,7 +111,9 @@ if os.environ['FAILURE'] == 'profile-evidence':
 """
 
 
-def run_proof(tmp_path, failure, proof="all", driver="[]", extra=None):
+def run_proof(
+    tmp_path: Path, failure: str, proof: str = "all", driver: str = "[]", extra: dict[str, str] | None = None
+) -> tuple[subprocess.CompletedProcess[str], list[list[str]], Path, Path]:
     state = tmp_path / "state"
     state.mkdir()
     if proof != "all":
@@ -157,6 +164,10 @@ def run_proof(tmp_path, failure, proof="all", driver="[]", extra=None):
         path = commands / name
         path.write_text(content)
         path.chmod(0o755)
+    profiles = tmp_path / "sandbox-profiles"
+    profiles.mkdir()
+    (profiles / "ci-lab-worker.json").write_text("{}")
+    (profiles / "ci-lab-worker").write_text("profile ci-lab-worker {}")
     output = tmp_path / "evidence"
     env = (
         {key: value for key, value in os.environ.items() if key != "WORKER_BASE_CONTEXT"}
@@ -167,6 +178,7 @@ def run_proof(tmp_path, failure, proof="all", driver="[]", extra=None):
             "ARCHIVE": str(archive),
             "FAILURE": failure,
             "DRIVER": driver,
+            "WORKER_SANDBOX_PROFILES": str(profiles),
         }
         | (extra or {})
     )
@@ -200,7 +212,7 @@ def test_independent_worker_proofs_overlap_and_keep_every_check(tmp_path: Path) 
     assert "--no-cache-filter" in builds[-1]
     assert builds[-1][builds[-1].index("--no-cache-filter") + 1] == "worker"
     runs = [call for call in calls if call[0] == "run"]
-    assert len(runs) == 13
+    assert len(runs) == 14
     assert [call[-1] for call in runs if "/opt/probe/code_mode_probe.py" in call] == ["/usr/local/bin/codex"]
     assert all("--read-only" in call and call[call.index("--network") + 1] == "none" for call in runs)
     profiles = [call[-1] for call in runs if "/opt/probe/profile-probe.sh" in call]
@@ -221,7 +233,7 @@ def test_a_failed_background_worker_check_keeps_the_proof_red(tmp_path, failure,
     assert calls[-1][:2] == ["image", "rm"]
 
 
-@pytest.mark.parametrize("proof,builds,runs", [("startup", 5, 6), ("rebuild", 1, 1), ("profiles", 1, 7)])
+@pytest.mark.parametrize("proof,builds,runs", [("startup", 5, 7), ("rebuild", 1, 1), ("profiles", 1, 7)])
 def test_worker_proof_modes_run_only_their_independent_checks(
     tmp_path: Path, proof: str, builds: int, runs: int
 ) -> None:
@@ -240,6 +252,32 @@ def test_worker_proof_modes_run_only_their_independent_checks(
             assert json.loads((output / name).read_text())["codex_probe"]["registration_to_container_exit_seconds"] < 2
     assert (state / "scanner-pulled").exists()
     assert (state / "scan-agentihooks-worker-proof-finished").exists()
+
+
+@pytest.mark.feature("codex-planner-native-sandbox")
+def test_startup_qualifies_the_native_planner_under_worker_security(tmp_path: Path) -> None:
+    result, calls, _, output = run_proof(tmp_path, "", "startup")
+    assert result.returncode == 0, result.stderr
+    call = next(call for call in calls if "/opt/probe/planner_sandbox_probe.py" in call)
+    assert call[call.index("--user") + 1] == "10001:10001"
+    assert call[call.index("--cap-drop") + 1] == "ALL"
+    assert "no-new-privileges" in call
+    assert f"seccomp={tmp_path}/sandbox-profiles/ci-lab-worker.json" in call
+    assert "apparmor=ci-lab-worker" in call
+    assert "seccomp=unconfined" not in call
+    assert "apparmor=unconfined" not in call
+    assert json.loads((output / "planner-sandbox.json").read_text()) == {"passed": True}
+
+
+@pytest.mark.feature("codex-planner-native-sandbox")
+def test_native_sandbox_failure_keeps_startup_red_and_retains_diagnostics(tmp_path: Path) -> None:
+    result, calls, _, output = run_proof(tmp_path, "sandbox", "startup")
+    assert result.returncode == 23
+    assert "bubblewrap namespace denied" in result.stderr
+    assert "bubblewrap namespace denied" in (output / "planner-sandbox.log").read_text()
+    assert not (output / "mode-result.json").exists()
+    assert not list(output.glob("context-*"))
+    assert calls[-1][:2] == ["image", "rm"]
 
 
 @pytest.mark.parametrize("failure,kept", [("", True), ("scan", False)])
