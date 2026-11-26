@@ -100,16 +100,26 @@ def _queue(delivery: Delivery, short: str, slug: str, doc: dict[str, Any], ledge
 
 def review_pass(bus: Bus, slug: str, doc: dict[str, Any], ledger: Any, now_ms: int) -> list[str]:
     """Queue one review task for each pull request opened, merge queue group and release swarm ``slug`` sees on
-    ``bus``, skipping every task id the ledger already holds and every event older than the replay window."""
+    ``bus``, skipping every task id the ledger already holds and every event older than both the replay window and
+    the review consumer's creation."""
     known = {str(t["id"]) for t in doc["tasks"]}
     actions: list[str] = []
     for kind, short in KINDS.items():
         consumer = bus.for_swarm(slug).events.consumer(_durable(slug, short), subject(slug, *kind.split(".")))
-        for delivery in consumer.fetch(BATCH, FETCH_MS):
-            if delivery.event.time >= now_ms - REPLAY_MS:
+        deliveries = consumer.fetch(BATCH, FETCH_MS)
+        oldest = _oldest(consumer.created, now_ms)
+        for delivery in deliveries:
+            if delivery.event.time >= oldest:
                 actions += _queue(delivery, short, slug, doc, ledger, known)
             delivery.ack()
     return actions
+
+
+def _oldest(created: int | None, now_ms: int) -> int:
+    """The oldest event time the review pass queues: the replay window start, or the consumer's creation when that
+    is earlier, so a backlog published after the consumer exists is never cut by the window."""
+    window = now_ms - REPLAY_MS
+    return window if created is None else min(created, window)
 
 
 def _review_pass(tick: Any, get: Callable[[str], Any]) -> list[str]:

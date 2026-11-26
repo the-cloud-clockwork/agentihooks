@@ -35,7 +35,7 @@ def subject_matches(pattern: str, subject: str) -> bool:
 
 
 class _Runtime:
-    def __init__(self, clock: Clock, wall: Clock = _wall_ms):
+    def __init__(self, clock: Clock, wall: Clock = _wall_ms) -> None:
         self.clock = clock
         self.wall = wall
         self.cond = threading.Condition()
@@ -176,7 +176,7 @@ class _Pending:
 
 
 class MemoryConsumer:
-    def __init__(self, log: "MemoryEventLog", subject: str, policy: QueuePolicy, durable: str):
+    def __init__(self, log: "MemoryEventLog", subject: str, policy: QueuePolicy, durable: str) -> None:
         self.subject = subject
         self.policy = policy
         self._log = log
@@ -305,7 +305,7 @@ class MemoryBus:
         runtime: _Runtime | None = None,
         swarm: str | None = None,
         wall: Clock = _wall_ms,
-    ):
+    ) -> None:
         self._config, self._swarm = config, swarm
         self._owned = runtime is None
         self._runtime = runtime if runtime is not None else _Runtime(clock, wall)

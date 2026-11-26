@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock, call
@@ -20,7 +21,10 @@ def test_legacy_event_filter_and_dead_attempt_cap_remain_usable():
     policy = QueuePolicy(max_deliver=4)
     js: Any = SimpleNamespace(
         consumer_info=AsyncMock(
-            return_value=SimpleNamespace(config=SimpleNamespace(filter_subjects=None, filter_subject="swarm.>"))
+            return_value=SimpleNamespace(
+                config=SimpleNamespace(filter_subjects=None, filter_subject="swarm.>"),
+                created=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
+            )
         ),
         add_consumer=AsyncMock(),
         pull_subscribe_bind=AsyncMock(),

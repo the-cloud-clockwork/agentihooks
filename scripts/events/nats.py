@@ -507,7 +507,7 @@ class NatsWorkQueue:
         policy: QueuePolicy,
         config: BusConfig,
         swarm: str | None = None,
-    ):
+    ) -> None:
         self.policy, self._loop, self._js, self._swarm = policy, loop, js, swarm
         names = queue_names(name, swarm)
         legacy = legacy_queue_stream(name) if swarm is None else legacy_stream_name(swarm, f"QUEUE_{names.durable}")
