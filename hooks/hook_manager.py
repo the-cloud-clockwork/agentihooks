@@ -321,6 +321,7 @@ def on_session_start(payload: dict) -> None:
     from hooks.lifecycle.codex_refresh_kick import kick as codex_refresh_kick
 
     codex_refresh_kick()
+    _herdr_resume(payload)
     _swarm_ledger(payload)
     _hive_join(payload, "start")
     otel.emit_event(
@@ -1162,6 +1163,15 @@ def _master_login_checkpoint() -> None:
         master_claude_login.checkpoint(os.environ)
     except Exception as e:
         log("master login checkpoint failed", {"error": str(e)})
+
+
+def _herdr_resume(payload: Any) -> None:
+    try:
+        from hooks.lifecycle.herdr_resume import kick
+
+        kick(payload)
+    except (ImportError, OSError, ValueError) as exc:
+        log("herdr resume report failed", {"error": type(exc).__name__})
 
 
 def _hive_join(payload: dict, event: str) -> None:
