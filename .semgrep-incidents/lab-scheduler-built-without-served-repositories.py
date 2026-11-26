@@ -12,6 +12,12 @@ class EveryRepository:
         return Settings(frozenset({environ["CI_LAB_REPOSITORY"]}))
 
 
+class NoRepositoryNamed:
+    def build(self, environ: Mapping[str, str]) -> Settings:
+        # ruleid: lab-scheduler-built-without-served-repositories
+        return Settings(frozenset({environ["CI_LAB_REPOSITORY"]}), served=None)
+
+
 class ServedRepositories:
     def build(self, environ: Mapping[str, str]) -> Settings:
         repository = environ["CI_LAB_REPOSITORY"]

@@ -107,6 +107,7 @@ def service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., sc
         f"{GITHUB}.git",
         f"{GITHUB}/",
         f"{GITHUB}.git/",
+        f"{GITHUB}.GIT",
         "https://github.com/The-Cloud-Clockwork/AgentiHooks",
         REPO,
     ],
