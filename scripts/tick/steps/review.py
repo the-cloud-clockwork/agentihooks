@@ -14,6 +14,7 @@ from scripts.events.factory import open_bus
 from scripts.events.subjects import subject
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import SENDER
+from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import ledger_comments
 from scripts.tick import registry
 from scripts.tick.step import Lane
@@ -98,7 +99,7 @@ def _queue(delivery: Delivery, short: str, slug: str, doc: dict[str, Any], ledge
     return [f"queued {task['task']} to review a {NOUNS[short]}"]
 
 
-def review_pass(bus: Bus, slug: str, doc: dict[str, Any], ledger: Any, now_ms: int) -> list[str]:
+def review_pass(bus: Bus, slug: str, doc: dict[str, Any], ledger: Any, now_ms: int, store: RedisStore) -> list[str]:
     """Queue one review task for each pull request opened, merge queue group and release swarm ``slug`` sees on
     ``bus``, skipping every task id the ledger already holds and every event older than the replay window."""
     known = {str(t["id"]) for t in doc["tasks"]}
@@ -121,7 +122,7 @@ def _review_pass(tick: Any, get: Callable[[str], Any]) -> list[str]:
     config = get("store").config(get("slug"))
     if config.state not in ACTIVE or config.max_review <= 0:
         return []
-    return review_pass(bus, get("slug"), get("doc"), get("ledger"), tick.now_ms())
+    return review_pass(bus, get("slug"), get("doc"), get("ledger"), tick.now_ms(), get("store"))
 
 
 registry.register(

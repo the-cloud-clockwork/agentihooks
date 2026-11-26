@@ -19,6 +19,9 @@ class FakeForge:
         self.reads: list[int] = []
         self.posts: list[tuple[int, str]] = []
 
+    def group_pulls(self, base: str, head: str) -> tuple[int, ...]:
+        return ()
+
     def read(self, number: int) -> ChangeRequest:
         self.reads.append(number)
         return ChangeRequest(number, self.url, "Title", "Body", self.head, "", (), ())

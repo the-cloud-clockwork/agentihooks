@@ -31,6 +31,9 @@ class GitHubForge:
             raise ForgeError(f"gh failed: {done.stderr.strip()}")
         return done.stdout
 
+    def group_pulls(self, base: str, head: str) -> tuple[int, ...]:
+        return ()
+
     def read(self, number: int) -> ChangeRequest:
         raw = json.loads(self._gh(["pr", "view", str(number), "--json", FIELDS]))
         return ChangeRequest(

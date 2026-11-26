@@ -188,3 +188,24 @@ def done_refusal(store: RedisStore, slug: str, kind: str, lane: str, task: str) 
 def require_done(store: RedisStore, slug: str, kind: str, lane: str, task: str) -> None:
     if reason := done_refusal(store, slug, kind, lane, task):
         raise SwarmError(reason)
+
+
+class Group(NamedTuple):
+    repository: str
+    head: str
+    base: str
+    number: int
+
+
+def remember_group(store: RedisStore, slug: str, found: Group) -> None:
+    return None
+
+
+def group_of(store: RedisStore, slug: str, head: str) -> Group | None:
+    return None
+
+
+def post_group(
+    store: RedisStore, slug: str, forge: Forge, url: str, by: str, task: str, bodies: Sequence[str]
+) -> tuple[Record, ...]:
+    return ()

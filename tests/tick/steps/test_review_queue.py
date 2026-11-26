@@ -11,7 +11,10 @@ from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.memory import MemoryBus, open_bus
 from scripts.events.subjects import subject
+from scripts.review import record
 from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm.store import RedisStore
+from tests.review.fakes import store
 
 pytestmark = pytest.mark.unit
 
@@ -58,8 +61,10 @@ def publish(
     bus.events.publish(subject(swarm, *kind.split(".")), event)
 
 
-def run(bus: MemoryBus, ledger: Ledger, state: dict[str, Any] | None = None) -> list[str]:
-    return review().review_pass(bus, SLUG, state or doc(), ledger, NOW)
+def run(
+    bus: MemoryBus, ledger: Ledger, state: dict[str, Any] | None = None, found: RedisStore | None = None
+) -> list[str]:
+    return review().review_pass(bus, SLUG, state or doc(), ledger, NOW, store() if found is None else found)
 
 
 @pytest.mark.feature("swarm-review-trigger")
@@ -80,7 +85,7 @@ def test_one_pull_opened_event_queues_exactly_one_review_task_and_a_repeat_queue
 @pytest.mark.feature("swarm-review-trigger")
 def test_a_merge_group_and_a_release_each_queue_one_review_task() -> None:
     bus, ledger = open_bus(BusConfig()), Ledger()
-    publish(bus, "merge_group.requested", {"repository": REPO, "head": "a1", "number": 7})
+    publish(bus, "merge_group.requested", {"repository": REPO, "head": "a1", "base": "b1", "number": 7})
     publish(bus, "release.published", {"repository": REPO, "tag": "v1.2.3", "url": f"{REPO}/releases/tag/v1.2.3"})
     assert len(run(bus, ledger)) == 2
     group, release = (task for _, task, _ in ledger.added)
@@ -97,7 +102,7 @@ def test_a_scoped_bus_review_pass_queues_only_its_own_swarm_events() -> None:
     events: dict[str, list[tuple[str, dict[str, Any]]]] = {
         swarm: [
             ("pull.opened", {"url": f"{REPO}/pull/{number}"}),
-            ("merge_group.requested", {"repository": REPO, "head": f"h{number}", "number": number}),
+            ("merge_group.requested", {"repository": REPO, "head": f"h{number}", "base": "b1", "number": number}),
             ("release.published", {"repository": REPO, "tag": f"v{number}", "url": f"{REPO}/releases/tag/v{number}"}),
         ]
         for swarm, number in ((SLUG, 7), (OTHER, 8))
@@ -107,7 +112,7 @@ def test_a_scoped_bus_review_pass_queues_only_its_own_swarm_events() -> None:
             publish(bus, kind, data, key=swarm, swarm=swarm)
     for swarm, changes in events.items():
         ledger = Ledger()
-        assert len(review().review_pass(bus, swarm, doc(), ledger, NOW)) == 3
+        assert len(review().review_pass(bus, swarm, doc(), ledger, NOW, store())) == 3
         expected = {review().review_task(review().KINDS[kind], data, doc())["task"] for kind, data in changes}
         assert {task["task"] for _, task, _ in ledger.added} == expected
         assert {slug for slug, _, _ in ledger.added} == {swarm}
@@ -224,3 +229,29 @@ def test_the_step_opens_the_configured_shared_bus(monkeypatch: pytest.MonkeyPatc
     assert module._bus() == "bus"
     assert [config.backend for config in opened] == ["nats"]
     module._bus.cache_clear()
+
+
+@pytest.mark.feature("review-queue-group-post")
+def test_the_review_pass_records_each_merge_group_it_queues_a_review_task_for() -> None:
+    bus, ledger, found = open_bus(BusConfig()), Ledger(), store()
+    publish(bus, "merge_group.requested", {"repository": REPO, "head": "a1", "base": "b1", "number": 7}, "a1")
+    publish(bus, "merge_group.requested", {"repository": REPO, "head": "a2", "base": "b2", "number": None}, "a2")
+    publish(bus, "pull.opened", {"url": PULL}, PULL)
+    publish(bus, "release.published", {"repository": REPO, "tag": "v1", "url": f"{REPO}/releases/tag/v1"}, "v1")
+    assert len(run(bus, ledger, found=found)) == 4
+    assert record.group_of(found, SLUG, "a1") == record.Group(REPO, "a1", "b1", 7)
+    assert record.group_of(found, SLUG, "a2") == record.Group(REPO, "a2", "b2", 0)
+    assert sorted(found.redis.keys(found.key(SLUG, "review", "group", "*"))) == [
+        found.key(SLUG, "review", "group", "a1"),
+        found.key(SLUG, "review", "group", "a2"),
+    ]
+
+
+@pytest.mark.feature("review-queue-group-post")
+def test_a_merge_group_whose_review_task_the_ledger_holds_records_nothing() -> None:
+    bus, ledger, found = open_bus(BusConfig()), Ledger(), store()
+    data = {"repository": REPO, "head": "a1", "base": "b1", "number": 7}
+    publish(bus, "merge_group.requested", data, "a1")
+    queued = review().review_task("mq", data, doc())["task"]
+    assert run(bus, ledger, doc({"id": queued}), found) == []
+    assert (ledger.added, found.redis.keys("*")) == ([], [])
