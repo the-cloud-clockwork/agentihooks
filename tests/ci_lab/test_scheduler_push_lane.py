@@ -293,6 +293,28 @@ def test_the_first_pass_holds_one_parsed_promotion_grade_at_a_time_however_many_
 
 
 @pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
+def test_the_first_pass_reads_each_promotion_grade_it_keeps_once_stored_with_a_revision_or_without(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = lab({HEAD_A: plan({"lint": (unit(1),)}), HEAD_B: plan({"lint": (unit(2),)})})
+    run.push(HEAD_A, lane="dev")
+    run.push(HEAD_B, lane="other")
+    run.tick(1000)
+    run.lab.client.hdel(scheduler.REVISIONS, run.grade(HEAD_B).run)
+    again = _restarted(run)
+    read: list[str] = []
+    grade = again.engine.grade
+
+    def counted(name: str) -> scheduler.State | None:
+        read.append(name)
+        return grade(name)
+
+    monkeypatch.setattr(again.engine, "grade", counted)
+    assert _sweeps(again.tick(1100)) == []
+    assert read == sorted(_runs(run))
+
+
+@pytest.mark.feature("lab-promotion-grade-only-for-dev-push")
 def test_the_first_pass_counts_the_pushes_with_no_branch_before_the_stale_pull_request_grades_and_lists_once(
     tmp_path: Path,
 ) -> None:
