@@ -303,9 +303,9 @@ points at, then reads its head, posts every finding on it and keeps the record
 under the pull request link, so the posts count for the task and `done` closes
 it. A tag with no single promotion pull request, such as one made by the
 manual release workflow or by reusing an older tag's tree, is refused with a
-forge error naming the tag. GitLab has no promotion flow and refuses release
-links. A merge queue link names a commit, not a change request, and stays
-refused.
+forge error naming the tag. GitLab has no promotion flow, so its release
+links stay refused as links that name no change request. A merge queue link
+names a commit, not a change request, and stays refused.
 
 ## Where reviewers launch
 
