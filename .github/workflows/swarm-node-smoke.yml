@@ -23,7 +23,6 @@ jobs:
     env:
       WORKER_SCANNER_CACHE: ${{ github.workspace }}/.worker-scanner-cache
       WORKER_PROVEN_IMAGE: agentihooks-worker-proven:${{ github.run_id }}-${{ github.run_attempt }}
-      WORKER_SANDBOX_PROFILES: ${{ runner.temp }}/worker-image-evidence/sandbox-profiles
       ANTONCORE_SANDBOX_REF: 7220b8a4d4ab987786daf89966d98f646182ed18
     strategy:
       fail-fast: false
@@ -60,6 +59,8 @@ jobs:
           python-version: '3.12'
       - name: Render both native sandbox profiles
         if: matrix.proof == 'startup'
+        env:
+          WORKER_SANDBOX_PROFILES: ${{ runner.temp }}/worker-image-evidence/sandbox-profiles
         run: |
           python -m pip install --constraint .github/ci-tools/parser.lock PyYAML==6.0.3
           mkdir -p "$WORKER_SANDBOX_PROFILES"
@@ -97,6 +98,7 @@ jobs:
           WORKER_PROOF: ${{ matrix.proof }}
           WORKER_LAYERS: ${{ steps.layers.outputs.cache-matched-key && format('{0}/worker-layers', runner.temp) || '' }}
           WORKER_KEEP_IMAGE: ${{ matrix.proof == 'startup' && env.WORKER_PROVEN_IMAGE || '' }}
+          WORKER_SANDBOX_PROFILES: ${{ runner.temp }}/worker-image-evidence/sandbox-profiles
         run: bash docker/swarm-node/smoke.sh "$RUNNER_TEMP/worker-image-evidence" "$WORKER_PROOF"
       - uses: actions/cache/save@v4
         if: success() && matrix.proof == 'startup'

@@ -11,6 +11,7 @@
     "tests/swarm_node/test_planner_sandbox.py::test_native_qualification_requires_command_report_and_write_refusal",
     "tests/test_worker_image_parallel_proof.py::test_startup_qualifies_the_native_planner_under_worker_security",
     "tests/test_worker_image_parallel_proof.py::test_native_sandbox_failure_keeps_startup_red_and_retains_diagnostics",
+    "tests/test_worker_image_parallel_proof.py::test_malformed_rendered_apparmor_never_qualifies_the_planner",
     "tests/swarm_node/test_sandbox_chart.py::test_paired_profile_render_proof_is_connected",
     "tests/swarm_node/test_sandbox_chart.py::test_profile_defaults_and_shared_service_security_are_preserved",
     "tests/swarm_node/test_sandbox_chart.py::test_native_smoke_reads_the_pinned_chart_with_scoped_secret_references"

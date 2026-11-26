@@ -56,7 +56,14 @@ elif args[0] == 'rm':
     if os.environ['FAILURE'] == 'slow-removal' and '-f' not in args:
         time.sleep(2.5)
 elif args[0] == 'run':
-    if '/opt/probe/planner_sandbox_probe.py' in args:
+    if '--add' in args or '--remove' in args:
+        if '--add' in args:
+            mount = args[args.index('-v') + 1].split(':')[0]
+            policy = (Path(mount) / 'qualification.apparmor').read_text()
+            if not policy.startswith('profile worker-planner-'):
+                print('invalid qualification AppArmor policy', file=sys.stderr)
+                sys.exit(24)
+    elif '/opt/probe/planner_sandbox_probe.py' in args:
         if os.environ['FAILURE'] == 'sandbox':
             print('bubblewrap namespace denied', file=sys.stderr)
             sys.exit(23)
@@ -202,7 +209,7 @@ def test_independent_worker_proofs_overlap_and_keep_every_check(tmp_path: Path) 
     assert (state / "scan-agentihooks-worker-proof-finished").exists()
     assert (state / "scan-agentihooks-worker-rebuild-finished").exists()
     builds = [call for call in calls if call[0] == "build"]
-    assert len(builds) == 6
+    assert len(builds) == 7
     rejections = [call for call in builds if any(value.endswith("/rejection.Dockerfile") for value in call)]
     assert len(rejections) == 4
     assert all(call[call.index("--network") + 1] == "none" for call in rejections)
@@ -212,7 +219,7 @@ def test_independent_worker_proofs_overlap_and_keep_every_check(tmp_path: Path) 
     assert "--no-cache-filter" in builds[-1]
     assert builds[-1][builds[-1].index("--no-cache-filter") + 1] == "worker"
     runs = [call for call in calls if call[0] == "run"]
-    assert len(runs) == 14
+    assert len(runs) == 16
     assert [call[-1] for call in runs if "/opt/probe/code_mode_probe.py" in call] == ["/usr/local/bin/codex"]
     assert all("--read-only" in call and call[call.index("--network") + 1] == "none" for call in runs)
     profiles = [call[-1] for call in runs if "/opt/probe/profile-probe.sh" in call]
@@ -233,7 +240,7 @@ def test_a_failed_background_worker_check_keeps_the_proof_red(tmp_path, failure,
     assert calls[-1][:2] == ["image", "rm"]
 
 
-@pytest.mark.parametrize("proof,builds,runs", [("startup", 5, 7), ("rebuild", 1, 1), ("profiles", 1, 7)])
+@pytest.mark.parametrize("proof,builds,runs", [("startup", 6, 9), ("rebuild", 1, 1), ("profiles", 1, 7)])
 def test_worker_proof_modes_run_only_their_independent_checks(
     tmp_path: Path, proof: str, builds: int, runs: int
 ) -> None:
@@ -263,7 +270,15 @@ def test_startup_qualifies_the_native_planner_under_worker_security(tmp_path: Pa
     assert call[call.index("--cap-drop") + 1] == "ALL"
     assert "no-new-privileges" in call
     assert f"seccomp={tmp_path}/sandbox-profiles/ci-lab-worker.json" in call
-    assert "apparmor=ci-lab-worker" in call
+    apparmor = next(value for value in call if value.startswith("apparmor="))
+    assert apparmor.startswith("apparmor=worker-planner-")
+    load = next(command for command in calls if "--add" in command)
+    remove = next(command for command in calls if "--remove" in command)
+    assert load[-1] == remove[-1] == "/profiles/qualification.apparmor"
+    assert "--privileged" in load and "--privileged" not in call
+    policy = (tmp_path / "sandbox-profiles/qualification.apparmor").read_text()
+    assert apparmor.removeprefix("apparmor=") in policy
+    assert "ci-lab-worker" not in policy
     assert "seccomp=unconfined" not in call
     assert "apparmor=unconfined" not in call
     assert json.loads((output / "planner-sandbox.json").read_text()) == {"passed": True}
@@ -277,6 +292,21 @@ def test_native_sandbox_failure_keeps_startup_red_and_retains_diagnostics(tmp_pa
     assert "bubblewrap namespace denied" in (output / "planner-sandbox.log").read_text()
     assert not (output / "mode-result.json").exists()
     assert not list(output.glob("context-*"))
+    assert calls[-1][:2] == ["image", "rm"]
+
+
+@pytest.mark.feature("codex-planner-native-sandbox")
+def test_malformed_rendered_apparmor_never_qualifies_the_planner(tmp_path: Path) -> None:
+    profiles = tmp_path / "invalid-profiles"
+    profiles.mkdir()
+    (profiles / "ci-lab-worker.json").write_text("{}")
+    (profiles / "ci-lab-worker").write_text("malformed policy")
+    result, calls, _, output = run_proof(tmp_path, "", "startup", extra={"WORKER_SANDBOX_PROFILES": str(profiles)})
+    assert result.returncode == 24
+    assert "invalid qualification AppArmor policy" in result.stderr
+    assert not any("/opt/probe/planner_sandbox_probe.py" in call for call in calls)
+    assert not any("--remove" in call for call in calls)
+    assert not (output / "mode-result.json").exists()
     assert calls[-1][:2] == ["image", "rm"]
 
 
