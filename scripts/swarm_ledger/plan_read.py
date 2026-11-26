@@ -255,7 +255,7 @@ def fetched(slug: str, env: Mapping[str, str]) -> tuple[dict[str, Any] | None, C
     return doc, functools.partial(_served, env) if hosted else None
 
 
-def main(argv=None, environ=None) -> int:
+def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
     env = os.environ if environ is None else environ
     parser = argparse.ArgumentParser(prog="agentihooks plan", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
