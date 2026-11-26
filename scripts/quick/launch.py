@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from scripts.quick import paths, registry, seeds
+from scripts.quick import paths, recipe, registry, seeds, tick
 from scripts.quick.layout import MASTER
 from scripts.quick.member import DIR_ENV, QUICK_ENV, SEAT_ENV, Member
 
@@ -59,20 +59,45 @@ def _write_opening(found: Member) -> Path:
     return target
 
 
+def start_command(
+    folder: Path, swarm: registry.Swarm, seat: registry.Seat, base: Mapping[str, str], prompt_file: Path
+) -> int:
+    """Run the seat's saved command in its pane through a launcher holding its quick variables; 0 once herdr runs it.
+
+    A Claude or Codex wrapper also gets the opening prompt file; a plain program never does.
+    """
+    env = environ(base, folder, swarm, seat)
+    exports = {name: env[name] for name in (QUICK_ENV, SEAT_ENV, DIR_ENV)}
+    if recipe.kind(seat) != recipe.PROGRAM:
+        exports[recipe.PROMPT_ENV] = str(prompt_file)
+    seat_dir = paths.seat_dir(folder, seat.seat)
+    recipe.forget(seat_dir)
+    launcher = seat_dir / recipe.LAUNCHER
+    launcher.write_text(recipe.script(seat.command, exports, seat_dir / recipe.PID, swarm.directory))
+    launcher.chmod(0o700)
+    return 0 if tick.LiveHerdr(env).run(seat.pane_id, launcher) else 1
+
+
 def start_seat(folder: Path, swarm: registry.Swarm, seat: registry.Seat, base: Mapping[str, str], start: Start) -> int:
-    """Open the seat's agent in its pane with its opening prompt."""
+    """Open the seat's agent, or run its saved command, in its pane with its opening prompt."""
     prompt_file = _write_opening(Member(folder, swarm, seat))
+    if seat.command:
+        return start_command(folder, swarm, seat, base, prompt_file)
     return start(argv(swarm, seat, prompt_file), environ(base, folder, swarm, seat))
 
 
 def start_all(folder: Path, swarm: registry.Swarm, base: Mapping[str, str]) -> dict[str, int]:
-    """Open every engineer's agent at once, each in its own pane; the exit status per seat."""
+    """Open every engineer's agent or saved command at once, each in its own pane; the exit status per seat."""
     running: dict[str, subprocess.Popen[bytes]] = {}
+    commands: dict[str, int] = {}
     for seat in swarm.seats[1:]:
         prompt_file = _write_opening(Member(folder, swarm, seat))
+        if seat.command:
+            commands[seat.seat] = start_command(folder, swarm, seat, base, prompt_file)
+            continue
         command = [sys.executable, "-m", "scripts.init_agent", *argv(swarm, seat, prompt_file)]
         running[seat.seat] = subprocess.Popen(command, env=environ(base, folder, swarm, seat))
-    return {name: process.wait() for name, process in running.items()}
+    return {**commands, **{name: process.wait() for name, process in running.items()}}
 
 
 def exited(
@@ -109,6 +134,13 @@ def bound(folder: Path, before: registry.Seat, *, sleep: Callable[[float], None]
     return _recorded(folder, before)
 
 
+def ready(folder: Path, before: registry.Seat, *, sleep: Callable[[float], None]) -> bool:
+    """Whether the seat's new occupant is ready: a bound session for an agent, the recorded live process for a program."""
+    if recipe.kind(before) == recipe.PROGRAM:
+        return recipe.alive(paths.seat_dir(folder, before.seat))
+    return bound(folder, before, sleep=sleep)
+
+
 def relaunch(
     folder: Path,
     seat_name: str,
@@ -139,7 +171,7 @@ def relaunch(
     try:
         code = start_seat(folder, swarm, taken, base, start)
         gone = code != 0 or bool(exited([taken], bare, sleep=sleep))
-        pending = gone or not bound(folder, taken, sleep=sleep)
+        pending = gone or not ready(folder, taken, sleep=sleep)
     finally:
         registry.set_state(folder, seat_name, registry.PENDING if pending else registry.READY)
     if code != 0:

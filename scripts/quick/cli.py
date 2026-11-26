@@ -10,7 +10,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from scripts.quick import guard, handoff, launch, layout, member, paths, registry, room, tick
+from scripts.quick import guard, handoff, launch, layout, member, paths, recipe, registry, room, tick
 from scripts.quick.guard import QuickError
 from scripts.swarm import safety_nudge
 
@@ -27,7 +27,15 @@ def parser() -> argparse.ArgumentParser:
     sub = root.add_subparsers(dest="command", required=True)
     up = sub.add_parser("up", help="Split this herdr pane's tab and launch the engineers; this session is master")
     up.add_argument("--agents", type=int, default=layout.DEFAULT_AGENTS, help="Agents with the master, 2 to 5")
-    up.add_argument("--harness", default="claude", help="Engineer harness, or one per engineer: claude,codex")
+    up.add_argument("--harness", default="claude", help="Engineer harness, or one per engineer: claude,codex,program")
+    up.add_argument(
+        "--command", default="", help="JSON argument list every engineer runs instead of its built in launch"
+    )
+    up.add_argument(
+        "--engineer-command",
+        action="append",
+        help="N=JSON argument list engineer N runs instead of the common command",
+    )
     up.add_argument(
         "--auth", default="routed", help="routed, default or named:reference; one choice or one per engineer"
     )
@@ -71,14 +79,15 @@ def _swarm_for(
     names = layout.seats(args.agents)
     harnesses = _harnesses(args.harness, len(names) - 1)
     policies = selections(args.auth, harnesses, environ)
+    commands = recipe.recipes(args.command, args.engineer_command or [], harnesses, environ)
     panes = layout.build(caller, args.agents, layout.HerdrPanes(directory, environ))
     harness = environ.get("AGENTIHOOKS_TARGET") or "claude"
     session = environ.get("CLAUDE_CODE_SESSION_ID", "")
     master = registry.Seat(1, names[0], caller, harness, f"{quick_id}-{names[0]}", session_id=session)
     engineers = [
-        registry.Seat(position, name, pane, harness, f"{quick_id}-{name}", auth=mode, account=account)
-        for position, (name, pane, harness, (mode, account)) in enumerate(
-            zip(names[1:], panes[1:], harnesses, policies, strict=True), 2
+        registry.Seat(position, name, pane, harness, f"{quick_id}-{name}", auth=mode, account=account, command=command)
+        for position, (name, pane, harness, (mode, account), command) in enumerate(
+            zip(names[1:], panes[1:], harnesses, policies, commands, strict=True), 2
         )
     ]
     return registry.Swarm(quick_id, str(directory), (master, *engineers))
@@ -120,9 +129,14 @@ def _member(environ: Mapping[str, str]) -> member.Member:
     return found
 
 
+def _status_row(seat: registry.Seat) -> dict[str, object]:
+    row: dict[str, object] = {key: value for key, value in dataclasses.asdict(seat).items() if key != "command"}
+    return {**row, "identity": recipe.identity(seat), "capabilities": recipe.capabilities(seat)}
+
+
 def _status(environ: Mapping[str, str]) -> int:
     for seat in _member(environ).swarm.seats:
-        print(json.dumps(dataclasses.asdict(seat)))
+        print(json.dumps(_status_row(seat)))
     return 0
 
 
