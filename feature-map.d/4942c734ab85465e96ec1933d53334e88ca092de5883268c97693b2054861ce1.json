@@ -1,0 +1,26 @@
+{
+  "id": "seat-brief",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-first-read-brief",
+  "behaviour": "agentihooks seat brief prints the caller's seat handoff, culture, latest recap and learned notes, in that order and under plain labels, from the swarm Redis seat store for a swarm seat or from the quick seat files for a quick seat, with the quick recap derived from the handoff and corrected learned notes withheld; a standalone session gets one no seat line and exit 0, a store failure prints the error and exits 1. The swarm priming lines, the quick openings and the seat notes reminder name the command.",
+  "seam": "scripts.seat_brief.main, scripts.swarm.prompt.priming_lines, scripts.quick.seeds.opening and hooks.context.seat_notes.reminder",
+  "tests": [
+    "tests/seat_brief/test_seat_brief.py::test_a_swarm_seat_brief_prints_its_handoff_culture_latest_recap_and_learned_notes",
+    "tests/seat_brief/test_seat_brief.py::test_a_swarm_seat_with_nothing_kept_names_each_part_as_none",
+    "tests/seat_brief/test_seat_brief.py::test_a_corrected_learned_note_stays_withheld_from_the_brief",
+    "tests/seat_brief/test_seat_brief.py::test_a_quick_seat_brief_prints_its_handoff_culture_derived_recap_and_learned_file",
+    "tests/seat_brief/test_seat_brief.py::test_a_quick_seat_with_empty_files_names_each_part_as_none",
+    "tests/seat_brief/test_seat_brief.py::test_a_recap_keeps_only_the_sections_a_handoff_filled",
+    "tests/seat_brief/test_seat_brief.py::test_a_standalone_session_gets_the_no_seat_line",
+    "tests/seat_brief/test_seat_brief.py::test_a_swarm_name_without_an_agent_record_or_a_seat_holds_no_seat",
+    "tests/seat_brief/test_seat_brief.py::test_a_store_failure_prints_the_error_and_exits_one",
+    "tests/seat_brief/test_seat_brief.py::test_a_swarm_seat_reads_the_swarm_store_the_environment_names",
+    "tests/seat_brief/test_seat_brief.py::test_the_seat_command_runs_through_the_agentihooks_command_line",
+    "tests/seat_brief/test_seat_brief.py::test_priming_lines_end_with_the_seat_brief_command_with_or_without_history",
+    "tests/seat_brief/test_seat_brief.py::test_every_quick_opening_names_the_seat_brief_command",
+    "tests/seat_brief/test_learned_scope_reader.py::test_a_seat_reads_its_own_notes_and_the_canon_and_insight_of_other_seats",
+    "tests/quick/test_seat_paths.py::test_a_quick_seat_keeps_its_handoff_and_learned_notes_in_its_seat_folder",
+    "tests/quick/test_seat_paths.py::test_creating_a_quick_folder_leaves_every_seat_file_a_reader_opens",
+    "tests/test_seat_notes.py::test_the_line_names_the_seat_brief_command"
+  ]
+}
