@@ -1,0 +1,6 @@
+{
+  "scripts/feature_checks/lab_authority.py:scripts.feature_checks.lab_authority.x__terms:a203c63e6d35b92cb9c34cad750e68a98c8902415efc5c517e0aa5ca9b2acb91": {
+    "reader": "standards_reader",
+    "reason": "depth -= (mark == \"(\") - (mark == \")\") keeps depth as the exact negation of the original balance, and its only read is depth == 0, which negation preserves, so no _terms result changes."
+  }
+}
