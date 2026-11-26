@@ -194,3 +194,14 @@ def test_recent_victim_task_waits_for_thirty_minutes(episode: Any, elapsed_ms: i
     assert len(_asks(episode)) == 1 + expected_asks
     if expected_asks:
         assert f"asked {successor.name} to hand off" in actions[0]
+
+
+@pytest.mark.feature("hub-preemption-victim-rotation")
+def test_victim_task_history_survives_claim_refund_and_expires(episode: Any) -> None:
+    victim = next(agent for agent in episode.store.agents(SLUG) if agent.task == "lower")
+    assert preempt.take_victim(episode.store, SLUG, victim.name)
+    key = episode.store.key(SLUG, "preempt-recent-victim", "lower")
+    assert episode.store.redis.get(key) == "2"
+    assert 0 < episode.store.redis.pttl(key) <= 1_800_000
+    _successor(episode, 600_000)
+    assert episode.store.redis.get(key) == "2"

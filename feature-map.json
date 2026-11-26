@@ -2751,7 +2751,11 @@
       "seam": "preempt.step through the hub relaunch fixture; victim task history; thirty minute boundary",
       "tests": [
         "tests/hub/test_preemption_relaunch.py::test_recent_victim_task_rotates_to_other_holder",
-        "tests/hub/test_preemption_relaunch.py::test_recent_victim_task_waits_for_thirty_minutes"
+        "tests/hub/test_preemption_relaunch.py::test_recent_victim_task_waits_for_thirty_minutes",
+        "tests/hub/test_preemption_relaunch.py::test_victim_task_history_survives_claim_refund_and_expires"
+      ],
+      "rules": [
+        "preempt-repeated-victim-task"
       ]
     },
     {
