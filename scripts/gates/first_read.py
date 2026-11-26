@@ -30,7 +30,8 @@ def membership_path(session: str) -> Path:
 def _member(who: Who | None = None) -> bool:
     if os.environ.get("AGENTIHOOKS_QUICK_SEAT"):
         return True
-    return (who or Who.from_env()).pinned
+    identity: Who = who or cast(Any, Who).from_env()
+    return identity.pinned
 
 
 def _command(command: str) -> str:
@@ -47,7 +48,7 @@ def _command(command: str) -> str:
 def _words(command: str) -> list[str]:
     try:
         words = shlex.split(_command(command))
-        return [] if words and any(char in words[0] for char in "$`") else words
+        return [] if words and any(char in words[0] for char in "$`<>(){}|;&\n") else words
     except ValueError:
         return []
 

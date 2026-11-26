@@ -222,6 +222,9 @@ def test_similar_tool_and_foreign_prompt_are_not_exempt(tmp_path: Path) -> None:
     "command",
     [
         "$(id)/agentihooks seat brief",
+        "<(id)/agentihooks seat brief",
+        ">(id)/agentihooks seat brief",
+        "<(id)/python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
         "\u0060id\u0060/agentihooks seat brief",
         "$(id)/python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
         "python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary $(id)",
