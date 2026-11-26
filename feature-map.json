@@ -6380,6 +6380,23 @@
       ]
     },
     {
+      "id": "claude-router-cache-lock-read-only-home",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-planner-router-lock-grant",
+      "behaviour": "When the agentihooks home is read only, as in a Codex planner sandbox, the Claude router cache lock is skipped instead of failing: cached observations still read, a refresh still returns results and writes nothing, and a missing cache folder reads as empty. Any other lock error still raises. On a writable home the lock file is created and held exclusively while a refresh probes and writes the cache.",
+      "seam": "scripts.claude_quota_balancer._cache_lock through cached_observations and collect_results",
+      "rules": [
+        "claude-router-cache-lock-without-read-only-fallback"
+      ],
+      "tests": [
+        "tests/test_claude_quota_balancer.py::test_a_refresh_holds_the_router_cache_lock_while_it_probes",
+        "tests/test_claude_quota_balancer.py::test_a_router_cache_lock_error_other_than_a_read_only_home_still_raises",
+        "tests/test_claude_quota_balancer.py::test_a_read_only_router_cache_lock_still_reads_the_cached_observations",
+        "tests/test_claude_quota_balancer.py::test_a_read_only_router_cache_lock_refreshes_without_writing_the_cache",
+        "tests/test_claude_quota_balancer.py::test_a_router_cache_in_a_missing_read_only_folder_reads_as_empty"
+      ]
+    },
+    {
       "id": "hive-release-drain-live-agents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2283",
