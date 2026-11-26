@@ -83,5 +83,6 @@ def test_native_qualification_requires_command_report_and_write_refusal(
         assert 'extends=":read-only"' in command[2]
         assert options["timeout"] == 30
         assert options["capture_output"] is True
+        assert Path(options["env"]["CODEX_HOME"]).is_dir()
     if failure == "namespace":
         assert "namespace denied" in str(report)

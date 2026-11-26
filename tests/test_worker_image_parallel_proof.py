@@ -173,7 +173,7 @@ def run_proof(
         path.chmod(0o755)
     profiles = tmp_path / "sandbox-profiles"
     profiles.mkdir()
-    (profiles / "ci-lab-worker.json").write_text("{}")
+    (profiles / "swarm-codex.json").write_text("{}")
     (profiles / "ci-lab-worker").write_text("profile ci-lab-worker {}")
     output = tmp_path / "evidence"
     env = (
@@ -269,7 +269,7 @@ def test_startup_qualifies_the_native_planner_under_worker_security(tmp_path: Pa
     assert call[call.index("--user") + 1] == "10001:10001"
     assert call[call.index("--cap-drop") + 1] == "ALL"
     assert "no-new-privileges" in call
-    assert f"seccomp={tmp_path}/sandbox-profiles/ci-lab-worker.json" in call
+    assert f"seccomp={tmp_path}/sandbox-profiles/swarm-codex.json" in call
     apparmor = next(value for value in call if value.startswith("apparmor="))
     assert apparmor.startswith("apparmor=worker-planner-")
     load = next(command for command in calls if "--add" in command)
@@ -299,7 +299,7 @@ def test_native_sandbox_failure_keeps_startup_red_and_retains_diagnostics(tmp_pa
 def test_malformed_rendered_apparmor_never_qualifies_the_planner(tmp_path: Path) -> None:
     profiles = tmp_path / "invalid-profiles"
     profiles.mkdir()
-    (profiles / "ci-lab-worker.json").write_text("{}")
+    (profiles / "swarm-codex.json").write_text("{}")
     (profiles / "ci-lab-worker").write_text("malformed policy")
     result, calls, _, output = run_proof(tmp_path, "", "startup", extra={"WORKER_SANDBOX_PROFILES": str(profiles)})
     assert result.returncode == 24
