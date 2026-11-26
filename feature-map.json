@@ -3089,7 +3089,8 @@
         "tests/review/test_cli.py::test_forge_selection_uses_the_current_remote_and_environment",
         "tests/review/test_cli.py::test_review_post_requires_a_url_and_swarm",
         "tests/review/test_cli.py::test_post_help_runs_and_names_the_post_arguments",
-        "tests/hive/test_auth.py::test_a_member_reviewer_posts_findings_only_with_the_review_keys"
+        "tests/hive/test_auth.py::test_a_member_reviewer_posts_findings_only_with_the_review_keys",
+        "tests/review/test_record_release.py::test_a_merge_queue_commit_link_is_refused_and_posts_nothing"
       ]
     },
     {
@@ -3656,6 +3657,23 @@
         "tests/swarm/test_master_launch.py::test_a_resumed_master_keeps_its_execution_and_seat_so_its_handoff_finds_it",
         "tests/swarm/test_master_launch.py::test_a_master_resumed_after_a_later_master_ended_is_the_last_master",
         "tests/swarm/test_lifetime.py::test_a_master_resumed_inside_the_idle_limit_stays"
+      ]
+    },
+    {
+      "id": "operator-master-up-resume-master-login",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mql-resume-slot",
+      "behaviour": "A front door Claude master resumes its conversation through a free stored master login above the drain line and outside the primary reserve, records the account actually placed and refuses with the login slot reason when no stored login is eligible. Other resume routes retain the recorded account quota check.",
+      "seam": "agentihooks swarm master up --last; swarm.resume.blocker; master_claude_login.prepare",
+      "tests": [
+        "tests/swarm/test_master_launch.py::test_a_quota_stopped_master_resumes_on_the_placed_master_login_account",
+        "tests/swarm/test_master_launch.py::test_a_master_with_a_custom_fallback_keeps_its_recorded_account_refusal",
+        "tests/swarm/test_resume.py::test_a_front_door_master_checks_free_master_logins_instead_of_its_old_account",
+        "tests/swarm/test_resume.py::test_a_front_door_master_names_the_login_slots_when_none_has_room",
+        "tests/swarm/test_resume.py::test_other_resume_routes_keep_the_recorded_account_quota_check",
+        "tests/swarm/test_resume.py::test_a_master_login_is_available_again_after_its_week_reset",
+        "tests/test_master_claude_login.py::test_a_drained_login_cannot_outrank_a_failed_login_with_room",
+        "tests/test_master_claude_login.py::test_a_single_drained_login_is_not_claimed"
       ]
     },
     {
@@ -5253,6 +5271,18 @@
       ]
     },
     {
+      "id": "review-launch-prompt-steps",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2911",
+      "behaviour": "The launch prompt of a review lane task of the review kind builds with the reviewer steps: read the change request, write strict findings, post them with review post, then leave and close with done --finding; a reviewer that cannot finish blocks without pushing a branch, and every kind a lane template may assign has launch steps, except workflow, which the workflow runner runs without a launch prompt, so no reviewer launch fails building its prompt.",
+      "seam": "The spawn prompt in scripts.swarm.prompt, its step table for the review kind",
+      "tests": [
+        "tests/swarm/test_task_kinds.py::test_a_review_task_gets_the_reviewer_launch_steps",
+        "tests/swarm/test_task_kinds.py::test_a_reviewer_that_cannot_finish_blocks_without_a_branch",
+        "tests/swarm/test_task_kinds.py::test_every_lane_template_kind_has_launch_steps"
+      ]
+    },
+    {
       "id": "planner-enhancement-prompt",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-enhance-prompt",
@@ -6401,6 +6431,23 @@
       ]
     },
     {
+      "id": "claude-router-cache-lock-read-only-home",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-planner-router-lock-grant",
+      "behaviour": "When the agentihooks home is read only, as in a Codex planner sandbox, the Claude router cache lock is skipped instead of failing: cached observations still read, a refresh still returns results and writes nothing, and a missing cache folder reads as empty. Any other lock error still raises. On a writable home the lock file is created and held exclusively while a refresh probes and writes the cache.",
+      "seam": "scripts.claude_quota_balancer._cache_lock through cached_observations and collect_results",
+      "rules": [
+        "claude-router-cache-lock-without-read-only-fallback"
+      ],
+      "tests": [
+        "tests/test_claude_quota_balancer.py::test_a_refresh_holds_the_router_cache_lock_while_it_probes",
+        "tests/test_claude_quota_balancer.py::test_a_router_cache_lock_error_other_than_a_read_only_home_still_raises",
+        "tests/test_claude_quota_balancer.py::test_a_read_only_router_cache_lock_still_reads_the_cached_observations",
+        "tests/test_claude_quota_balancer.py::test_a_read_only_router_cache_lock_refreshes_without_writing_the_cache",
+        "tests/test_claude_quota_balancer.py::test_a_router_cache_in_a_missing_read_only_folder_reads_as_empty"
+      ]
+    },
+    {
       "id": "hive-release-drain-live-agents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2283",
@@ -6973,7 +7020,10 @@
         "tests/forge/test_cli.py::test_the_origin_remote_of_the_current_checkout_is_the_default",
         "tests/forge/test_cli.py::test_a_forge_failure_prints_its_reason_and_returns_one",
         "tests/forge/test_cli.py::test_a_failing_forge_call_prints_its_reason_and_returns_one",
-        "tests/forge/test_cli.py::test_a_missing_body_file_prints_its_reason_and_returns_one"
+        "tests/forge/test_cli.py::test_a_missing_body_file_prints_its_reason_and_returns_one",
+        "tests/forge/test_github.py::test_github_names_the_promotion_pull_request_that_produced_a_release_tag",
+        "tests/forge/test_github.py::test_a_release_tag_without_one_promotion_pull_request_is_refused",
+        "tests/forge/test_gitlab.py::test_gitlab_refuses_a_release_lookup_without_a_promotion_flow"
       ]
     },
     {
@@ -10472,6 +10522,26 @@
       "seam": "HiveLaunch spawn account retry through master selection",
       "tests": [
         "tests/hive/test_master_fallback_launch.py::test_a_front_door_master_retry_leaves_a_full_native_login_for_a_subscription_slot"
+      ]
+    },
+    {
+      "id": "hive-all-master-logins",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-mql-advertise",
+      "behaviour": "Hive heartbeats advertise every stored master login with its week left and retain the best legacy login; front door masters try all advertised logins, preserving legacy routes and floor refusals.",
+      "seam": "daemon beat registry output and front door master placement through HiveLaunch selection",
+      "tests": [
+        "tests/hive/test_master_login_advertisement.py::test_beat_advertises_every_stored_login_and_the_best_legacy_account",
+        "tests/hive/test_master_login_advertisement.py::test_front_door_tries_slot_four_when_marker_slot_one_is_closed",
+        "tests/hive/test_master_login_advertisement.py::test_legacy_record_and_secondary_master_keep_their_routes",
+        "tests/hive/test_master_login_advertisement.py::test_front_door_keeps_advertised_ranking_instead_of_account_alphabetical_order",
+        "tests/hive/test_master_login_advertisement.py::test_launch_uses_an_open_sibling_of_the_closed_or_rejected_marker",
+        "tests/hive/test_master_login_advertisement.py::test_all_advertised_logins_closed_keep_each_master_floor_reason",
+        "tests/hive/test_master_login_advertisement.py::test_best_legacy_login_follows_the_launch_ranking",
+        "tests/hive/test_master_login_advertisement.py::test_advertised_private_login_passes_hive_checks_without_a_worker_slot"
+      ],
+      "rules": [
+        "hive-marker-only-master-login"
       ]
     },
     {
@@ -16923,6 +16993,29 @@
       "seam": "ci_branch_lanes.problems",
       "tests": [
         "tests/test_ci_branch_lanes.py::test_only_the_trusted_tests_workflow_may_use_dedicated_dispatch_lanes"
+      ]
+    },
+    {
+      "id": "hub-tracks-pull-requests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2910",
+      "behaviour": "The hub pulls reactor tracks a pull request from the task change that records it, and its fallback GitHub poll holds the hub loop for at most one ten second slice per call: it resumes the sweep from a stored cursor, starts again from the first open pull request when the cursor left the index, records the sweep start once the sweep wraps, waits a full interval after a rate limit, yields on lease loss, and records the track delay and the last sweep length, so a task change arriving mid sweep is tracked within one slice.",
+      "seam": "scripts.hub.pulls.Pulls.handle and scripts.hub.pulls.Pulls.poll run by scripts.hub.runner.HubRunner.run_once",
+      "rules": [
+        "hub-pulls-poll-unbounded-sweep"
+      ],
+      "tests": [
+        "tests/hub/test_pulls.py::test_hub_runner_tracks_pull_requests_from_ledger_outbox_subjects",
+        "tests/hub/test_pulls.py::test_poll_records_its_pass_time",
+        "tests/hub/test_pulls.py::test_poll_stops_at_a_rate_limit_and_waits_for_the_next_interval",
+        "tests/hub/test_pulls.py::test_poll_yields_when_the_replica_loses_its_lease",
+        "tests/hub/test_pulls.py::test_names_the_poll_slice_and_its_sweep_and_health_keys",
+        "tests/hub/test_pulls.py::test_a_poll_returns_after_one_slice_and_the_next_call_resumes_from_its_cursor",
+        "tests/hub/test_pulls.py::test_a_sweep_whose_cursor_left_the_open_index_starts_again_from_the_first_open_pull",
+        "tests/hub/test_pulls.py::test_a_rate_limit_in_a_resumed_sweep_waits_a_full_interval_from_that_call",
+        "tests/hub/test_pulls.py::test_a_task_change_published_mid_sweep_is_tracked_within_one_slice",
+        "tests/hub/test_pulls.py::test_the_poll_records_the_track_delay_and_the_sweep_length",
+        "tests/hub/test_pulls.py::test_a_poll_slice_records_the_track_delay_before_its_sweep_ends"
       ]
     }
   ],

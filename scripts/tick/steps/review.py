@@ -12,8 +12,10 @@ from scripts.events.bus import Bus, Delivery
 from scripts.events.config import DEFAULT_BACKEND, BusConfig
 from scripts.events.factory import open_bus
 from scripts.events.subjects import subject
+from scripts.review import record
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import SENDER
+from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import ledger_comments
 from scripts.tick import registry
 from scripts.tick.step import Lane
@@ -84,6 +86,14 @@ def review_task(short: str, data: dict[str, Any], doc: dict[str, Any]) -> dict[s
     }
 
 
+def _remember(store: RedisStore, slug: str, short: str, data: dict[str, Any]) -> None:
+    """Record a merge queue group in the review store so its reviewers can post on the pull requests it tests."""
+    if short == "mq":
+        record.remember_group(
+            store, slug, record.Group(data["repository"], data["head"], data["base"], data["number"] or 0)
+        )
+
+
 def _queue(delivery: Delivery, short: str, slug: str, doc: dict[str, Any], ledger: Any, known: set[str]) -> list[str]:
     """Add the review task of one delivery unless the ledger holds its id, returning the action it took."""
     task = review_task(short, cast(dict[str, Any], delivery.event.data), doc)
@@ -98,15 +108,17 @@ def _queue(delivery: Delivery, short: str, slug: str, doc: dict[str, Any], ledge
     return [f"queued {task['task']} to review a {NOUNS[short]}"]
 
 
-def review_pass(bus: Bus, slug: str, doc: dict[str, Any], ledger: Any, now_ms: int) -> list[str]:
+def review_pass(bus: Bus, slug: str, doc: dict[str, Any], ledger: Any, now_ms: int, store: RedisStore) -> list[str]:
     """Queue one review task for each pull request opened, merge queue group and release swarm ``slug`` sees on
-    ``bus``, skipping every task id the ledger already holds and every event older than the replay window."""
+    ``bus``, skipping every task id the ledger already holds and every event older than the replay window, and
+    record each merge queue group it sees in ``store``."""
     known = {str(t["id"]) for t in doc["tasks"]}
     actions: list[str] = []
     for kind, short in KINDS.items():
         consumer = bus.for_swarm(slug).events.consumer(_durable(slug, short), subject(slug, *kind.split(".")))
         for delivery in consumer.fetch(BATCH, FETCH_MS):
             if delivery.event.time >= now_ms - REPLAY_MS:
+                _remember(store, slug, short, cast(dict[str, Any], delivery.event.data))
                 actions += _queue(delivery, short, slug, doc, ledger, known)
             delivery.ack()
     return actions
@@ -121,7 +133,7 @@ def _review_pass(tick: Any, get: Callable[[str], Any]) -> list[str]:
     config = get("store").config(get("slug"))
     if config.state not in ACTIVE or config.max_review <= 0:
         return []
-    return review_pass(bus, get("slug"), get("doc"), get("ledger"), tick.now_ms())
+    return review_pass(bus, get("slug"), get("doc"), get("ledger"), tick.now_ms(), get("store"))
 
 
 registry.register(
