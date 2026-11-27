@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -42,6 +43,10 @@ def test_the_whole_tree_type_check_runs_from_the_checked_out_tree_on_a_push_to_d
     assert enabled(tree["if"], "push", {})
     for event in ("pull_request", "merge_group"):
         assert not enabled(tree["if"], event, {})
+    admitted = {"admission": SimpleNamespace(result="success")}
+    refused = {"admission": SimpleNamespace(result="failure")}
+    assert enabled(tree["if"], "workflow_dispatch", admitted)
+    assert not enabled(tree["if"], "workflow_dispatch", refused)
 
 
 def test_the_whole_tree_type_check_gates_promotion_but_not_gate_required() -> None:

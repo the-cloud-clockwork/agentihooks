@@ -2772,8 +2772,9 @@ On dev, `python -m scripts.ci_lab.static_gates --root .` lists 31 gate steps:
 The `type-gate` gate step carries `TYPE_GATE_DIRECT_IMPORTERS: "1"` in its own step env, so this
 gate and the lab unit `discover` builds from it grade only a pull request's changed files and
 their direct importers. A separate `type-gate-tree` job grades the whole tree against its own
-committed baseline at promotion; it runs on a push to `dev`, outside `STATIC_JOBS`, so the lab
-never discovers or runs it, and its verdict stays with Actions.
+committed baseline at promotion; it runs on a push to `dev`, and on a `workflow_dispatch` whose
+`admission` job succeeded (a plant proof), outside `STATIC_JOBS`, so the lab never discovers or
+runs it, and its verdict stays with Actions.
 
 The eight lint steps that read `github.head_ref`, `github.ref_name`, `github.base_ref`,
 `github.event.before`, `github.event.merge_group.base_sha`, a network, Docker or an earlier
