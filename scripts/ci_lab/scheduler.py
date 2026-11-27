@@ -57,14 +57,14 @@ from scripts.ci_lab import (
     static_exclusions,
 )
 from scripts.ci_lab.capacity import Load
-from scripts.ci_lab.checks import Checks, Output, PostRefused, Token
+from scripts.ci_lab.checks import Checks, MoveRefused, Output, PostRefused, Token
 from scripts.ci_lab.delivery import CLASSES, DELIVERY, DELIVERY_SCHEMA, load_runtime
 from scripts.ci_lab.digests import LOCKFILE, GradeInputs, StaticInputs, Toolchain, digest, grade_key, static_key
 from scripts.ci_lab.intake import GradeRequest, admit, served, serves
 from scripts.ci_lab.leases import Leases, release
 from scripts.ci_lab.manifests import Background, Fetcher, FetchPending, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import Objects, S3Objects, Uploads, flakes_path, manifest_folder, unit_path, upload_path
-from scripts.ci_lab.outcomes import CANNOT_RUN, DROPPED, FAILED, LOSSES, PASSED
+from scripts.ci_lab.outcomes import DROPPED, FAILED, PASSED, UNGRADED
 from scripts.ci_lab.pods import Pods, pod_images, unmanaged, worker_pods
 from scripts.ci_lab.queue import DEFAULT, RETENTION_MS, Job, Queue
 from scripts.ci_lab.remote.post_receive import GRADE_REFS
@@ -121,7 +121,7 @@ TREES = f"{PREFIX}tree:"
 ORIGINS = f"{PREFIX}origins"
 MERGE_GROUPS = "refs/heads/gh-readonly-queue/*"
 GROUPS_TIMEOUT_S = 30.0
-UNGRADED = frozenset({*LOSSES, CANNOT_RUN, DROPPED})
+NEUTRAL = "neutral"
 FINISHED = frozenset({"done", "lost"})
 REAPED = {"pending": contract.UNITS_REDELIVERED_TOTAL, "lost": contract.UNITS_LOST_TOTAL}
 REQUIRED = "required"
@@ -609,10 +609,13 @@ def job_id(head: str, unit: Unit) -> str:
 
 
 def _verdict(slots: Sequence[Slot]) -> str | None:
-    """Return success or failure once every slot is final, else None."""
+    """Return a gate's conclusion once every slot is final, else None: success when every unit passed, failure when
+    a unit failed, and neutral when the only units without a pass ended without a verdict."""
     if not all(slot.outcome for slot in slots):
         return None
-    return "success" if all(slot.outcome == PASSED for slot in slots) else "failure"
+    if all(slot.outcome == PASSED for slot in slots):
+        return "success"
+    return NEUTRAL if all(slot.outcome == PASSED or slot.outcome in UNGRADED for slot in slots) else "failure"
 
 
 def _target(state: State, refs: Sequence[str]) -> tuple[str, str | None]:
@@ -639,6 +642,30 @@ def _scope(state: State) -> str:
     return state.outputs.get("select", {}).get("scope", "none")
 
 
+def _lost(slots: Sequence[Slot]) -> str:
+    """Return the line the summary of a check that concludes neutral adds for its units that ended without a
+    verdict: how many, their keys and that a rerequest of the check grades them again."""
+    keys = [slot.key for slot in slots if slot.outcome in UNGRADED]
+    listed = ", ".join(keys)
+    return (
+        f"\n{len(keys)} units ended without a verdict, lost by the lab: {listed}. "
+        "A rerequest of this check grades them again."
+    )
+
+
+def _concluded(state: State) -> str:
+    """Return the required check's conclusion over the grade's gates by its tier's rules: success when they pass,
+    neutral when they would pass had each neutral gate passed, and failure otherwise."""
+    event, needs = EVENTS[state.tier], _needs(state)
+    if fold(event, needs, state.flags):
+        return "success"
+    granted = {
+        gate: {**record, "result": "success"} if record["result"] == NEUTRAL else record
+        for gate, record in needs.items()
+    }
+    return NEUTRAL if fold(event, granted, state.flags) else "failure"
+
+
 def _checks(state: State) -> dict[str, tuple[str, str | None]]:
     """Return each check run's target: one per gate with units, one skipped per authoritative gate the grade runs no
     unit of, and the required check folding the gates."""
@@ -648,7 +675,7 @@ def _checks(state: State) -> dict[str, tuple[str, str | None]]:
     targets.update(dict.fromkeys(state.idle, ("completed", "skipped")))
     status, conclusion = _target(state, list(state.units))
     if status == "completed" and not state.superseded:
-        conclusion = "success" if fold(EVENTS[state.tier], _needs(state), state.flags) else "failure"
+        conclusion = _concluded(state)
     targets[REQUIRED] = (status, conclusion)
     return targets
 
@@ -1150,12 +1177,15 @@ class Scheduler:
         """Post a completed required check run with conclusion failure and the reason as its summary on a head with no
         plan; such a head has no authoritative gates, so the check posts as lab-shadow/required. The post is tried
         once, outside the post holds, and a post the App token, GitHub or the network refuses is recorded and not
-        retried, since the head keeps no grade."""
+        retried, since the head keeps no grade. A head already refused or retired once in this pass finds its
+        required check already completed and that is recorded instead of posted again."""
         output = Output(title, reason, (), external, "unknown", f"{request.repo}/commit/{request.head}")
         try:
             self.ports.checks(_slug(request.repo)).post(request.head, REQUIRED, "completed", "failure", output, True)
         except (GitAuthRefused, PostRefused, OSError) as refusal:
             return [f"cannot post the failed {REQUIRED} check on {request.head}: {refusal}"]
+        except MoveRefused:
+            return [f"the failed {REQUIRED} check of {request.head} was already posted in this pass"]
         return []
 
     def _retire(self, request: GradeRequest, now_ms: int) -> str:
@@ -1637,13 +1667,17 @@ class Scheduler:
         return actions
 
     def _output(self, state: State, check: str, status: str) -> Output:
-        """Return a check run's output: its units, none for a skipped authoritative gate, the grade run, the grader
-        revision, the head's commit page and, on a gate's check run, the stored log of each failed static unit."""
+        """Return a check run's output: its units, none for a skipped authoritative gate, the units a check that
+        concludes neutral lost without a verdict, the grade run, the grader revision, the head's commit page and, on
+        a gate's check run, the stored log of each failed static unit."""
         refs = list(state.units) if check == REQUIRED else state.gates.get(check, [])
-        units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in (state.units[ref] for ref in refs))
+        slots = [state.units[ref] for ref in refs]
+        units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in slots)
         title = f"{CLASSES[state.tier]} grade {status}"
         summary = f"{len(units)} units of {check} on {state.head} against {state.base}"
-        logs = () if check == REQUIRED else self._logs([state.units[ref] for ref in refs])
+        if _checks(state)[check][1] == NEUTRAL:
+            summary += _lost(slots)
+        logs = () if check == REQUIRED else self._logs(slots)
         return Output(title, summary, units, state.run, state.grader, f"{state.repo}/commit/{state.head}", logs)
 
     def _logs(self, slots: Sequence[Slot]) -> tuple[tuple[Unit, str], ...]:

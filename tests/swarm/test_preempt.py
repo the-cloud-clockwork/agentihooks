@@ -122,8 +122,7 @@ def test_an_attempt_opens_no_episode_and_each_write_expires_within_the_window(st
 
 @pytest.mark.feature("repeated-subject-notices-pass-the-seen-claim")
 def test_each_ask_for_one_waiting_task_passes_the_seen_claim(store: RedisStore) -> None:
-    """A holder asked again for the same waiting task after its lane freed and filled again and its answer window
-    passed reads the new ask."""
+    """A holder reads a new ask after its lane refills and both the answer window and victim cooldown pass."""
     from scripts.inbox import seen
 
     inbox = InboxStore(store.redis)
@@ -132,8 +131,8 @@ def test_each_ask_for_one_waiting_task_passes_the_seen_claim(store: RedisStore) 
     (first,) = seen.claim(inbox, "e2")
     preempt.step(SLUG, store, ROWS, doc(), {}, 3)
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 4)
-    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2 + preempt.ANSWER_MS)
-    assert [item.ref for item in seen.claim(inbox, "e2")] == [f"preempt:t3:{2 + preempt.ANSWER_MS}"]
+    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2 + preempt.VICTIM_MS)
+    assert [item.ref for item in seen.claim(inbox, "e2")] == [f"preempt:t3:{2 + preempt.VICTIM_MS}"]
     assert first.ref == "preempt:t3:2"
 
 

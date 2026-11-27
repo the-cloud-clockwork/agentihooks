@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, replace
 from typing import cast
 
-from .bus import Bus, Delivery, EventLog, StateConflict, StateEntry, WorkQueue
+from .bus import Bus, Delivery, EventLog, PayloadTooLarge, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import dead_letter
 from .envelope import Envelope
@@ -376,7 +376,12 @@ class MemoryBus:
             return self._buckets.setdefault(bucket, MemoryStateStore(self._runtime))
 
     def serve(
-        self, subject: str, queue: str, handler: Callable[[str, bytes], bytes], wait_ms: int | None = None
+        self,
+        subject: str,
+        queue: str,
+        handler: Callable[[str, bytes], bytes],
+        wait_ms: int | None = None,
+        refusal: Callable[[str, bytes, PayloadTooLarge], bytes] | None = None,
     ) -> None:
         with self._runtime.cond:
             self._runtime.require_open()
