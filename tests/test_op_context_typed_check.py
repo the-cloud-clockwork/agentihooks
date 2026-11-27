@@ -2,6 +2,7 @@
 the ledger core, and over the Semgrep rule that holds the same shape."""
 
 import ast
+import fnmatch
 import importlib
 import inspect
 import sys
@@ -13,8 +14,11 @@ import pytest
 import yaml
 
 from scripts.feature_checks import op_context_typed as check
-from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_ledger.op_context import OpContext
+
+check.importable()
+
+from scripts.swarm_ledger import ledger_core as core  # noqa: E402
+from scripts.swarm_ledger.op_context import OpContext  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
@@ -205,30 +209,94 @@ def test_the_member_set_equals_what_the_functions_use() -> None:
 
 
 @pytest.mark.feature("ledger-op-context-typed")
-def test_handed_discovers_a_module_through_an_attribute_a_from_import_and_a_keyword() -> None:
+def test_handed_discovers_a_module_bound_by_a_bare_import_and_called_by_attribute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "plant_bare_mod.py").write_text("def apply(doc, op, ctx):\n    return True\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
     tree = ast.parse(
-        "import ledger_a\n"
-        "from scripts.swarm_ledger import ledger_b\n"
-        "from ledger_c import run\n\n\n"
-        "def apply_op(doc, op, ctx):\n"
-        "    ledger_a.apply(doc, op, ctx)\n"
-        "    ledger_b.apply(doc, op=op, ctx=ctx)\n"
-        "    return run(doc, op, ctx)\n"
+        "import plant_bare_mod\n\n\ndef apply_op(doc, op, ctx):\n    return plant_bare_mod.apply(doc, op, ctx)\n"
     )
-    assert check.handed(tree) == {"ledger_a", "ledger_b", "ledger_c"}
+    discovered = check.handed(tree, tmp_path)
+    assert {found.__name__ for found in discovered} == {"plant_bare_mod"}
 
 
 @pytest.mark.feature("ledger-op-context-typed")
-def test_handed_ignores_a_call_that_does_not_pass_the_context_on() -> None:
-    tree = ast.parse("import ledger_a\n\n\ndef check_op(op):\n    return ledger_a.check(op)\n")
-    assert check.handed(tree) == set()
+def test_handed_discovers_a_module_imported_as_a_submodule_and_called_by_attribute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = tmp_path / "plant_pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "plant_sub.py").write_text("def apply(doc, op, ctx):\n    return True\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    tree = ast.parse(
+        "from plant_pkg import plant_sub\n\n\ndef apply_op(doc, op, ctx):\n    return plant_sub.apply(doc, op, ctx)\n"
+    )
+    discovered = check.handed(tree, package)
+    assert {found.__name__ for found in discovered} == {"plant_pkg.plant_sub"}
 
 
 @pytest.mark.feature("ledger-op-context-typed")
-def test_registry_modules_finds_only_a_dict_whose_values_are_every_one_a_module() -> None:
-    held = module("ledger_plant_held")
+def test_handed_discovers_a_function_called_bare_from_a_plain_from_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "plant_bare_fn.py").write_text("def run(doc, op, ctx):\n    return True\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    tree = ast.parse(
+        "from plant_bare_fn import run\n\n\ndef apply_op(doc, op, ctx):\n    return run(doc, op, ctx=ctx)\n"
+    )
+    discovered = check.handed(tree, tmp_path)
+    assert {found.__name__ for found in discovered} == {"plant_bare_fn"}
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_handed_discovers_modules_through_aliased_imports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "plant_aliased_a.py").write_text("def apply(doc, op, ctx):\n    return True\n")
+    (tmp_path / "plant_aliased_b.py").write_text("def run(doc, op, ctx):\n    return True\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    tree = ast.parse(
+        "import plant_aliased_a as a_mod\n"
+        "from plant_aliased_b import run as b_run\n\n\n"
+        "def apply_op(doc, op, ctx):\n"
+        "    a_mod.apply(doc, op, ctx)\n"
+        "    return b_run(doc, op, ctx)\n"
+    )
+    discovered = check.handed(tree, tmp_path)
+    assert {found.__name__ for found in discovered} == {"plant_aliased_a", "plant_aliased_b"}
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_handed_ignores_a_call_to_a_module_outside_the_folder(tmp_path: Path) -> None:
+    tree = ast.parse("import copy\n\n\ndef apply_op(doc, op, ctx):\n    return copy.copy(ctx)\n")
+    assert check.handed(tree, tmp_path) == set()
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_handed_ignores_a_call_that_does_not_pass_the_context_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "plant_unused.py").write_text("def check(op):\n    return True\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    tree = ast.parse("import plant_unused\n\n\ndef check_op(op):\n    return plant_unused.check(op)\n")
+    assert check.handed(tree, tmp_path) == set()
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_handed_skips_a_call_bound_to_a_module_that_cannot_be_resolved(tmp_path: Path) -> None:
+    tree = ast.parse(
+        "import plant_does_not_exist_anywhere_at_all_123\n\n\n"
+        "def apply_op(doc, op, ctx):\n"
+        "    return plant_does_not_exist_anywhere_at_all_123.apply(doc, op, ctx)\n"
+    )
+    assert check.handed(tree, tmp_path) == set()
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_registry_modules_keeps_the_module_values_of_a_mixed_dict() -> None:
+    held = module("plant_registry_held")
     owner = module("plant_registry_owner")
-    setattr(owner, "REGISTRY", {"op": held})
+    setattr(owner, "MIXED", {"op": held, "other": "not a module"})
     setattr(owner, "NAMES", {"op": "not a module"})
     setattr(owner, "EMPTY", {})
     assert check._registry_modules(owner) == {held}
@@ -238,20 +306,20 @@ def test_registry_modules_finds_only_a_dict_whose_values_are_every_one_a_module(
 def test_a_module_the_core_hands_the_context_to_is_discovered_and_graded_untyped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / "ledger_plant_handed.py").write_text("def apply(doc, op, ctx) -> bool:\n    return True\n")
+    (tmp_path / "plant_handed.py").write_text("def apply(doc, op, ctx) -> bool:\n    return True\n")
     (tmp_path / "plant_core_handed.py").write_text(
         "from scripts.swarm_ledger.op_context import OpContext\n"
-        "import ledger_plant_handed\n\n\n"
+        "import plant_handed\n\n\n"
         "def apply_op(doc, op, ctx: OpContext) -> bool:\n"
-        "    return ledger_plant_handed.apply(doc, op, ctx)\n"
+        "    return plant_handed.apply(doc, op, ctx)\n"
     )
     monkeypatch.syspath_prepend(str(tmp_path))
     plant_core = importlib.import_module("plant_core_handed")
     modules = check.op_modules(plant_core)
-    assert {found.__name__ for found in modules} == {"plant_core_handed", "ledger_plant_handed"}
+    assert {found.__name__ for found in modules} == {"plant_core_handed", "plant_handed"}
     assert check.lines(modules, context()) == [
-        "FAIL: ledger_plant_handed.apply takes the op context untyped",
         "plant_core_handed: 1 functions take the op context, each by the Protocol",
+        "FAIL: plant_handed.apply takes the op context untyped",
         HELD,
     ]
 
@@ -280,3 +348,31 @@ def test_the_ledger_package_folder_joins_the_import_path_once(monkeypatch: pytes
 def test_the_rule_grades_every_ledger_module_by_one_glob_with_no_hand_kept_list() -> None:
     rule: dict[str, Any] = yaml.safe_load(RULE.read_text())["rules"][0]
     assert sorted(rule["paths"]["include"]) == sorted({GLOB, FIXTURE})
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_the_rule_glob_covers_every_module_the_live_check_discovers() -> None:
+    rule: dict[str, Any] = yaml.safe_load(RULE.read_text())["rules"][0]
+    globs = rule["paths"]["include"]
+    repo_root = ROOT.resolve()
+    for found in check.op_modules():
+        repo_path = "/" + str(Path(str(found.__file__)).resolve().relative_to(repo_root))
+        assert any(fnmatch.fnmatch(repo_path, glob) for glob in globs)
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_rebound_names_a_function_that_renames_the_op_context() -> None:
+    tree = ast.parse("def apply_op(doc, op, ctx):\n    c = ctx\n    return c\n")
+    assert check.rebound(tree, "plant_core") == ["FAIL: plant_core.apply_op renames the op context to c"]
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_rebound_is_empty_when_no_function_renames_the_op_context() -> None:
+    tree = ast.parse("def apply_op(doc, op, ctx):\n    return ctx.rev\n")
+    assert check.rebound(tree, "plant_core") == []
+
+
+@pytest.mark.feature("ledger-op-context-typed")
+def test_the_real_core_never_renames_its_op_context() -> None:
+    tree = ast.parse(Path(str(core.__file__)).read_text())
+    assert check.rebound(tree, "ledger_core") == []
