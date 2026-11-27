@@ -13,6 +13,8 @@
     "tests/swarm/test_compact_priming.py::test_the_same_continuity_still_renders_as_the_complete_four_part_brief",
     "tests/swarm/test_resume.py::test_a_resume_adds_one_brief_and_confirmation_without_repeating_the_handoff",
     "tests/swarm/test_resume.py::test_a_resumed_master_is_given_the_next_action_its_confirmation_accepts",
+    "tests/swarm/test_resume.py::test_an_unseated_resume_retains_its_inline_handoff_without_a_seat_brief",
+    "tests/swarm/test_resume.py::test_resume_entry_modules_import_in_a_fresh_interpreter",
     "tests/seat_brief/test_seat_brief.py::test_a_swarm_seat_brief_prints_its_handoff_culture_latest_recap_and_learned_notes",
     "tests/seat_brief/test_seat_brief.py::test_a_swarm_seat_with_nothing_kept_names_each_part_as_none",
     "tests/seat_brief/test_seat_brief.py::test_a_corrected_learned_note_stays_withheld_from_the_brief",
