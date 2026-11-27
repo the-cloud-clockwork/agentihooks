@@ -16,7 +16,7 @@ LABELS = ("Handoff", "Culture", "Latest recap", "Learned notes")
 def build_parser() -> argparse.ArgumentParser:
     """The agentihooks seat command line; brief is its one command and reads only."""
     parser = argparse.ArgumentParser(prog="agentihooks seat", description="Read the seat this session holds.")
-    commands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(required=True)
     commands.add_parser("brief", help="Print the seat's handoff, culture, latest recap and learned notes, in order")
     return parser
 
@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
 def render(brief: sources.Brief) -> str:
     """The brief under plain labels in reading order, a missing part shown as none."""
     lines = [f"Seat {brief.seat}."]
-    for label, text in zip(LABELS, (brief.handoff, brief.culture, brief.recap, brief.learned), strict=True):
+    for label, text in zip(LABELS, (brief.handoff, brief.culture, brief.recap, brief.learned)):
         lines += [f"{label}:", text.strip() or NONE]
     return "\n".join(lines)
 
