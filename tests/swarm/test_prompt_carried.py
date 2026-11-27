@@ -35,6 +35,13 @@ def test_a_carried_task_renders_the_same_prompt_and_trace_as_the_whole_task() ->
 
 
 @pytest.mark.feature("hub-admission-reply-fits-bus")
+def test_a_task_carried_twice_keeps_the_seat_recap_count() -> None:
+    once = prompt.carried(whole())
+
+    assert prompt.carried(once) == once
+
+
+@pytest.mark.feature("hub-admission-reply-fits-bus")
 def test_a_carried_task_keeps_only_the_learned_notes_its_prompt_counts() -> None:
     assert [note["text"] for note in prompt.carried(whole())["learned"]] == ["canon note", "data note", "plain note"]
 
