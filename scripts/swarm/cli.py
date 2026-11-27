@@ -1614,6 +1614,10 @@ def cmd_status(store: Any, args: Any) -> None:
         + "  ".join(f"{name}={modes.label(mode)}" for name, mode in catalog.current(config.gates).items())
     )
     print("tasks  " + "  ".join(f"{k} {v}" for k, v in counts.items()))
+    spawned = store.spawns(args.slug)
+    print(
+        "spawns last hour  " + ("  ".join(f"{harness} {count}" for harness, count in sorted(spawned.items())) or "none")
+    )
     print(plan_shape.report(tasks, config.max_eng)["summary"])
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))

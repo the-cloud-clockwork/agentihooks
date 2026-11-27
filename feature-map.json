@@ -17466,6 +17466,31 @@
         "quick-authentication-unconditional-route",
         "quick-initial-native-launch-without-take"
       ]
+    },
+    {
+      "id": "swarm-status-hourly-spawns",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2779",
+      "behaviour": "Successful local placements and hub starts record harness and launch time once per launch; state rewrites and duplicate delivery add no spawn. Status reports and text show counts per harness for the last hour.",
+      "seam": "Accepted local placement and resume completions and hub started events record launches; RedisStore.spawns feeds status_report and cmd_status.",
+      "tests": [
+        "tests/swarm/test_spawn_counts.py::test_status_counts_one_claude_and_one_codex_spawn_placed_in_the_last_hour",
+        "tests/swarm/test_spawn_counts.py::test_a_redelivered_start_and_a_rewritten_placed_agent_count_one_spawn_each",
+        "tests/swarm/test_spawn_counts.py::test_text_status_prints_the_last_hour_spawns_per_harness",
+        "tests/swarm/test_spawn_counts.py::test_spawn_window_includes_both_boundaries_ignores_future_and_reads_without_writes",
+        "tests/swarm/test_spawn_counts.py::test_spawn_identity_preserves_relaunches_and_deduplicates_replayed_launches",
+        "tests/swarm/test_spawn_counts.py::test_an_unplaced_record_adds_no_spawn",
+        "tests/swarm/test_spawn_counts.py::test_a_start_already_counted_as_a_claim_still_repairs_its_missing_spawn",
+        "tests/swarm/test_spawn_counts.py::test_a_same_name_master_resume_adds_a_new_launch",
+        "tests/swarm/test_spawn_counts.py::test_a_local_launch_refused_during_admission_adds_no_spawn",
+        "tests/hive/test_resume_order.py::test_a_native_hive_resume_records_its_spawn_before_answering_done",
+        "tests/hive/test_resume_order.py::test_a_native_hive_resume_closes_the_new_process_when_spawn_recording_fails",
+        "tests/swarm/test_spawn_counts.py::test_a_resumed_process_stays_counted_when_its_metadata_write_fails",
+        "tests/swarm/test_spawn_counts.py::test_a_local_launch_is_retired_when_its_spawn_cannot_be_recorded",
+        "tests/swarm/test_spawn_counts.py::test_an_anonymous_spawn_is_not_recorded",
+        "tests/swarm/test_spawn_counts.py::test_a_launch_at_the_first_positive_millisecond_is_counted",
+        "tests/swarm/test_spawn_counts.py::test_a_handoff_restart_records_its_returned_launch_and_conversation"
+      ]
     }
   ],
   "unmapped_rules": [
