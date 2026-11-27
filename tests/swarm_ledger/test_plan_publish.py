@@ -836,7 +836,7 @@ def test_a_task_publish_reads_utf8_names_its_repo_and_a_refused_op_without_a_rea
     with pytest.raises(SystemExit) as raised:
         ledger.cmd_publish_plan(args)
     assert raised.value.code == (
-        "task_update on the ledger refused without a reason from the server: "
+        "task_update on tasks/doc refused without a reason from the server: "
         "check that the entry exists, that you may change it and that its text is not empty"
     )
     assert reads == [("plan.md", "utf-8")]
