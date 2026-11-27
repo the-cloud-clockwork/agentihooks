@@ -471,8 +471,8 @@ def priming_lines(task: dict[str, Any]) -> list[str]:
 
 
 def carried(task: dict[str, Any]) -> dict[str, Any]:
-    """The task with only the recaps and learned notes its prompt shows and the seat's whole recap count, so an
-    admission carries what the hive renders instead of every recap the seat holds."""
+    """The task with only the recaps its prompt shows, the seat's whole recap count, and its learned notes less the
+    withheld ones, so an admission carries what the hive renders and counts instead of every recap the seat holds."""
     recaps = task.get("recaps") or []
     return {
         **task,

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -35,8 +36,8 @@ def hub(rig: SimpleNamespace, limit: int) -> Any:
     return opened
 
 
-def asked(opened: Any, request: dict[str, Any]) -> bytes:
-    """The answer the hub sent for one admit request from the request's hive."""
+def delivered(opened: Any, request: dict[str, Any]) -> SimpleNamespace:
+    """The admit request from the request's hive once the hub served it."""
     message = SimpleNamespace(
         subject=f"slots.{SLUG}.{request['hive']}",
         data=json.dumps({"op": "admit", **request}).encode(),
@@ -45,6 +46,12 @@ def asked(opened: Any, request: dict[str, Any]) -> bytes:
     )
     asyncio.run(opened._nc.subscribe.await_args.kwargs["cb"](message))
     opened._serving.shutdown(wait=True)
+    return message
+
+
+def asked(opened: Any, request: dict[str, Any]) -> bytes:
+    """The answer the hub sent for one admit request from the request's hive."""
+    message = delivered(opened, request)
     message.respond.assert_awaited_once()
     return message.respond.await_args.args[0]
 
@@ -97,6 +104,24 @@ def test_an_admission_that_cannot_cross_the_bus_releases_its_claim_with_a_named_
     assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("open", "")
     assert offer(rig) is None
     assert f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: {reason}" in capsys.readouterr().err
+
+
+@pytest.mark.feature(FEATURE)
+def test_an_admission_whose_held_answer_cannot_cross_the_bus_releases_its_claim_and_sends_nothing(
+    rig: SimpleNamespace, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.ERROR, logger=nats.__name__)
+
+    message = delivered(hub(rig, 50), ask())
+
+    message.respond.assert_not_awaited()
+    logged = [record.getMessage() for record in caplog.records if record.name == nats.__name__]
+    assert len(logged) == 1
+    assert re.fullmatch(r"reply\.subject: payload \d+ exceeds server limit 50", logged[0])
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("open", "")
+    assert offer(rig) is None
 
 
 @pytest.mark.feature(FEATURE)
