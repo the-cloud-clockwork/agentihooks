@@ -105,8 +105,18 @@ def _generation(root: Path, pod: str) -> Path:
     return generation
 
 
+def _prepare(root: Path, pod: str, limit: int) -> Path:
+    generation = _generation(root, pod)
+    if allocated_bytes(root) > limit:
+        shutil.rmtree(generation)
+        generation = _generation(root, pod)
+        if allocated_bytes(root) > limit:
+            raise PolicyError("cache root exceeds its limit after owned generation reset")
+    return generation
+
+
 @contextmanager
-def _owned(root: Path, pod: str) -> Generator[Path, None, None]:
+def _owned(root: Path, pod: str, limit: int) -> Generator[Path, None, None]:
     try:
         descriptor = os.open(root / ".lock", os.O_CREAT | os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
     except OSError as exc:
@@ -120,7 +130,7 @@ def _owned(root: Path, pod: str) -> Generator[Path, None, None]:
         except OSError as exc:
             raise PolicyError("cache already has an owner") from exc
         try:
-            generation = _generation(root, pod)
+            generation = _prepare(root, pod, limit)
         except OSError as exc:
             raise PolicyError(f"cache generation cannot be prepared: {exc}") from exc
         yield generation
@@ -152,12 +162,12 @@ def allocated_bytes(root: Path) -> int:
 
 
 def _invalidate(generation: Path, reason: str) -> None:
-    print(f"ci-lab cache invalidated: {reason}", file=sys.stderr, flush=True)
     try:
         with (generation / ".invalid").open("w") as marker:
             marker.write(reason)
             marker.flush()
             os.fsync(marker.fileno())
+        print(f"ci-lab cache invalidated: {reason}", file=sys.stderr, flush=True)
     finally:
         _terminate(1)
 
@@ -184,7 +194,7 @@ def run(
     if configuration is None:
         return start(environ)
     root, limit, pod = configuration
-    with _owned(root, pod) as generation:
+    with _owned(root, pod, limit) as generation:
         resolved = dict(environ) | {
             contract.GIT_MIRROR: str(generation / "node"),
             "CI_LAB_MIRROR_STORE": str(generation / "store"),

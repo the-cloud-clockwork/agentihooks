@@ -177,6 +177,12 @@ nonzero, ending all private-namespace children, including detached Git processes
 start resets the invalid generation before constructing cache consumers. Healthy service
 exit stops the scanner before releasing ownership.
 
+Every enabled startup also measures usage under the ownership lock before consumers start.
+It resets an over-limit owned generation and refuses an unmeasurable or still-over-limit root.
+This protects restart when filesystem failure prevented the invalid marker from being saved.
+A prior error whose marker could not be saved cannot be distinguished from healthy data
+when the next startup successfully measures usage below the limit.
+
 Release runtime support before deploying a chart that requires the policy. An availability
 rollback restores the former bounded `emptyDir` chart through Git before runtime support
 is removed. The required flag makes a runtime-only rollback refuse startup.

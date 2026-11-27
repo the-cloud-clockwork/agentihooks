@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from io import StringIO
 from pathlib import Path
 from threading import Event, Thread
 
@@ -443,3 +444,63 @@ def test_unsafe_owned_entries_refuse_without_following_symlinks(
     with pytest.raises(cache.PolicyError):
         cache.run(lambda _found: 0, policy)
     assert retained.read_text() == "foreign"
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_logging_failure_cannot_prevent_invalid_marker_or_termination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class BrokenStderr(StringIO):
+        def write(self, _text: str) -> int:
+            raise OSError("stderr unavailable")
+
+    statuses: list[int] = []
+    monkeypatch.setattr(cache.sys, "stderr", BrokenStderr())
+    monkeypatch.setattr(cache, "_terminate", statuses.append)
+    with pytest.raises(OSError, match="stderr unavailable"):
+        cache._invalidate(tmp_path, "budget exceeded")
+    assert (tmp_path / ".invalid").read_text() == "budget exceeded"
+    assert statuses == [1]
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_unmarked_excess_is_reset_before_restart_consumers(policy: dict[str, str]) -> None:
+    def exceed(found: Mapping[str, str]) -> int:
+        (Path(found["CI_LAB_MIRROR_STORE"]) / "excess").write_bytes(b"x" * (2 * 1024 * 1024))
+        return 0
+
+    def restart(found: Mapping[str, str]) -> int:
+        assert list(Path(found["CI_LAB_MIRROR_STORE"]).iterdir()) == []
+        return 31
+
+    cache.run(exceed, policy)
+    assert cache.run(restart, policy) == 31
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_startup_measurement_failure_refuses_before_consumers(
+    policy: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started: list[Mapping[str, str]] = []
+
+    def failed(_root: Path) -> int:
+        raise PermissionError("cannot measure cache")
+
+    monkeypatch.setattr(cache, "allocated_bytes", failed)
+    with pytest.raises(cache.PolicyError):
+        cache.run(lambda found: started.append(found) or 0, policy)
+    assert started == []
+
+
+@pytest.mark.feature("lab-scheduler-cache-policy")
+def test_invalid_marker_failure_still_terminates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    statuses: list[int] = []
+
+    def failed(_path: Path, *_args: object, **_kwargs: object) -> None:
+        raise OSError("filesystem full")
+
+    monkeypatch.setattr(Path, "open", failed)
+    monkeypatch.setattr(cache, "_terminate", statuses.append)
+    with pytest.raises(OSError, match="filesystem full"):
+        cache._invalidate(tmp_path, "budget exceeded")
+    assert statuses == [1]

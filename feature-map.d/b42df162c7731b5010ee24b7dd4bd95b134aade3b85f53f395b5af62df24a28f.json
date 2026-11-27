@@ -24,6 +24,10 @@
     "tests/ci_lab/test_scheduler_cache.py::test_owned_root_cleanup_preserves_foreign_directories_and_symlink_targets",
     "tests/ci_lab/test_scheduler_cache.py::test_consumer_exception_releases_the_lock_and_retains_healthy_cache",
     "tests/ci_lab/test_scheduler_cache.py::test_allocated_bytes_tolerates_a_file_renamed_during_the_scan",
-    "tests/ci_lab/test_scheduler_cache.py::test_unsafe_owned_entries_refuse_without_following_symlinks"
+    "tests/ci_lab/test_scheduler_cache.py::test_unsafe_owned_entries_refuse_without_following_symlinks",
+    "tests/ci_lab/test_scheduler_cache.py::test_logging_failure_cannot_prevent_invalid_marker_or_termination",
+    "tests/ci_lab/test_scheduler_cache.py::test_unmarked_excess_is_reset_before_restart_consumers",
+    "tests/ci_lab/test_scheduler_cache.py::test_startup_measurement_failure_refuses_before_consumers",
+    "tests/ci_lab/test_scheduler_cache.py::test_invalid_marker_failure_still_terminates"
   ]
 }
