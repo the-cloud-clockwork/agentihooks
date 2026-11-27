@@ -1,6 +1,5 @@
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
@@ -24,7 +23,9 @@ def _install_module():
 
 
 def binary() -> str | None:
-    return shutil.which("herdr")
+    from scripts import herdr_host
+
+    return herdr_host.binary()
 
 
 def choice() -> bool | None:
@@ -35,7 +36,8 @@ def choice() -> bool | None:
 def record(enabled: bool) -> None:
     _i = _install_module()
     state = _i._load_state()
-    state["herdr"] = {"enabled": enabled, "decided_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    decided = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    state["herdr"] = {**_herdr_state(), "enabled": enabled, "decided_at": decided}
     _i._save_state(state)
 
 
@@ -172,24 +174,22 @@ def configure() -> int:
 
 
 def init_step(flag: str, interactive: bool) -> None:
-    """Ask once whether agentihooks should use herdr, remember it, then install or configure it."""
+    """Configure herdr wherever it is installed; a missing herdr is installed when the flag or the one-time answer
+    says so."""
     if flag in ("yes", "no"):
         record(flag == "yes")
-    elif choice() is None and interactive:
+    elif binary() is None and choice() is None and interactive:
         answer = input("Install herdr, the terminal runtime agentihooks opens agents in? [Y/n] ").strip().lower()
         record(answer not in ("n", "no"))
-    if choice() is not True:
-        return
-    if binary() is None and install() != 0:
+    if binary() is None and (choice() is not True or install() != 0):
         return
     configure()
 
 
 def status() -> int:
     exe = binary()
-    decided = choice()
     print(f"binary={exe or 'missing'}")
-    print(f"enabled={'unset' if decided is None else str(decided).lower()}")
+    print(f"enabled={str(exe is not None).lower()}")
     for name, state in integration_status().items():
         if name in INTEGRATIONS:
             print(f"integration.{name}={state}")
@@ -198,15 +198,12 @@ def status() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks herdr", description="Install and configure herdr")
-    parser.add_argument("action", nargs="?", choices=("status", "install", "configure", "enable", "disable"))
+    parser.add_argument("action", nargs="?", choices=("status", "install", "configure", "enable"))
     args = parser.parse_args(argv)
     if args.action is None:
         if binary() is None and sys.stdin.isatty():
             answer = input("herdr is not installed. Install it now? [Y/n] ").strip().lower()
             init_step("no" if answer in ("n", "no") else "yes", interactive=False)
-        return status()
-    if args.action == "disable":
-        record(False)
         return status()
     if args.action == "status":
         return status()

@@ -993,22 +993,12 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _herdr_enabled(environ: dict[str, str]) -> bool:
-    home = Path(environ.get("AGENTIHOOKS_HOME") or Path(environ.get("HOME", str(Path.home()))) / ".agentihooks")
-    try:
-        state = json.loads((home / "state.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return True
-    herdr = state.get("herdr") if isinstance(state, dict) else None
-    return not (isinstance(herdr, dict) and herdr.get("enabled") is False)
-
-
 def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
-    """(host, explicit): the flag, then $AGENTIHOOKS_TERMINAL_HOST, then herdr when installed and enabled."""
+    """(host, explicit): the flag, then $AGENTIHOOKS_TERMINAL_HOST, then herdr when installed."""
     choice = requested or environ.get("AGENTIHOOKS_TERMINAL_HOST", "")
     if choice:
         return choice, True
-    return ("herdr" if herdr_host.binary() and _herdr_enabled(environ) else "native"), False
+    return ("herdr" if herdr_host.binary() else "native"), False
 
 
 def _start_herdr(
