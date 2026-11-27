@@ -39,6 +39,111 @@ def test_the_agent_flag_explains_the_rotation_default():
     assert agent.help == init_agent.AGENT_HELP
 
 
+@pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize(("selection", "route"), [("default", "native-default"), ("named:alpha", "named:alpha")])
+def test_native_init_keeps_explicit_authentication_without_automatic_selection(
+    harness: str,
+    selection: str,
+    route: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def refuse_router(*args: object, **kwargs: object) -> None:
+        pytest.fail("explicit native authentication called automatic selection")
+
+    monkeypatch.setattr(init_agent.agent_choice, "choose", refuse_router)
+    monkeypatch.setattr(init_agent.operator_env, "fill", lambda environ: None)
+    monkeypatch.setattr(init_agent, "_bind_brain", lambda environ: None)
+    environ = {
+        "HOME": str(tmp_path),
+        "AGENTIHOOKS_HOME": str(tmp_path / "state"),
+        "AH_CC_TOKEN_alpha": "unused",
+        "AH_CX_TOKEN_alpha": "unused",
+    }
+    assert (
+        init_agent.main(
+            ["--dry-run", "--host", "herdr", "--agent", harness, "--auth", selection, "--dir", str(tmp_path)],
+            environ=environ,
+        )
+        == 0
+    )
+    output = dict(line.split("=", 1) for line in capsys.readouterr().out.splitlines() if "=" in line)
+    assert output["agent"] == harness
+    assert f"--route {route}" in Path(output["launcher"]).read_text()
+
+
+@pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize(
+    ("value", "valid"),
+    [
+        ("", True),
+        ("interactive", True),
+        ("default", True),
+        ("named:alpha", True),
+        ("named:", False),
+        ("invalid", False),
+    ],
+)
+def test_native_authentication_parser_reports_exact_values(value: str, valid: bool) -> None:
+    import argparse
+
+    if valid:
+        assert init_agent._auth_value(value) == value
+    else:
+        with pytest.raises(argparse.ArgumentTypeError) as error:
+            init_agent._auth_value(value)
+        assert str(error.value) == "authentication must be interactive, default or named:reference"
+
+
+@pytest.mark.feature("quick-native-authentication")
+def test_native_authentication_help_names_the_supported_modes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLUMNS", "160")
+    lines = init_agent._parser().format_help().splitlines()
+    line = next(line for line in lines if line.lstrip().startswith("--auth AUTH"))
+    assert line.split() == ["--auth", "AUTH", "interactive,", "default", "or", "named:reference", "authentication"]
+
+
+@pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize(("harness", "prefix"), [(None, "AH_CC_TOKEN_"), ("codex", "AH_CX_TOKEN_")])
+def test_native_authentication_request_resolves_the_selected_harness(
+    harness: str | None, prefix: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import argparse
+
+    from scripts.gates import entry
+
+    monkeypatch.setattr(entry, "native", lambda *args, **kwargs: False)
+    monkeypatch.setattr(init_agent.operator_env, "fill", lambda environ: None)
+    args = argparse.Namespace(auth="named:alpha", routed_only=False, agent=harness)
+    init_agent._auth_request(args, {f"{prefix}alpha": "fixture"})
+    assert args.auth == "named:alpha"
+
+
+@pytest.mark.feature("quick-native-authentication")
+def test_native_authentication_request_refuses_contradictory_routing(monkeypatch: pytest.MonkeyPatch) -> None:
+    import argparse
+
+    from scripts.gates import entry
+
+    monkeypatch.setattr(entry, "native", lambda *args, **kwargs: False)
+    args = argparse.Namespace(auth="default", routed_only=True, agent="claude")
+    with pytest.raises(ValueError) as error:
+        init_agent._auth_request(args, {})
+    assert str(error.value) == "explicit authentication cannot combine with --routed-only"
+
+
+@pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize(
+    ("auth", "expected"), [("", False), ("interactive", False), ("default", True), ("named:alpha", True)]
+)
+def test_native_authentication_keeps_routed_refusal_scoped_to_explicit_modes(auth: str, expected: bool) -> None:
+    import argparse
+
+    assert init_agent._routed_only(argparse.Namespace(auth=auth, handoff=None, routed_only=False)) is expected
+
+
 def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeypatch, tmp_path, capsys):
     project = tmp_path / "project"
     project.mkdir()

@@ -710,7 +710,7 @@ def _route(environ: Mapping[str, str], route: str, run: Callable, exclude: str) 
     if route.startswith("named:"):
         reference = route.removeprefix("named:").removeprefix(CODEX_TOKEN_PREFIX)
         name = f"{CODEX_TOKEN_PREFIX}{reference}"
-        pool = token_accounts({name: environ.get(name, "")})
+        pool = token_accounts({key: value for key, value in environ.items() if key == name})
         account, placement, _ = select(pool, {}, sessions, time.time(), reference, environ)
         return account, placement, sessions.get(account.name, 0), "?"
     if route == API_ACCOUNT:

@@ -984,7 +984,9 @@ def forced(environ: Mapping[str, str], route: str) -> RouteDecision:
     if route.startswith("named:"):
         reference = route.removeprefix("named:").removeprefix(TOKEN_PREFIX)
         name = f"{TOKEN_PREFIX}{reference}"
-        credential = credential_for_slug(discover_credentials({name: environ.get(name, "")}), reference)
+        credential = credential_for_slug(
+            discover_credentials({key: value for key, value in environ.items() if key == name}), reference
+        )
         return RouteDecision(credential, None, "forced")
     if route != API_ACCOUNT:
         return RouteDecision(credential_for_slug(discover_credentials(environ), route), None, "forced")

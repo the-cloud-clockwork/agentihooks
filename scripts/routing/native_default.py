@@ -17,7 +17,7 @@ def _configuration(source: Path, home: Path) -> None:
             if entry.name == "plans":
                 shutil.copytree(entry, target, symlinks=True)
             else:
-                target.symlink_to(entry.resolve(), target_is_directory=True)
+                target.symlink_to(entry.resolve())
         else:
             shutil.copy2(entry, target)
 

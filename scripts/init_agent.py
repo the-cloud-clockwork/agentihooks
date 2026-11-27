@@ -896,7 +896,7 @@ def _transport(args: argparse.Namespace, agent: str) -> str:
 
 
 def _auth_value(value: str) -> str:
-    if value in ("", "interactive", "default") or (value.startswith("named:") and value.removeprefix("named:")):
+    if value in ("", "interactive", "default") or (value.startswith("named:") and value != "named:"):
         return value
     raise argparse.ArgumentTypeError("authentication must be interactive, default or named:reference")
 
