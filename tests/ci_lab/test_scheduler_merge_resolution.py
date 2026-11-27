@@ -84,6 +84,27 @@ def test_a_pending_merge_resolution_holds_the_head_for_a_later_pass(lab: Callabl
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_required_frame_regrade_of_a_resolved_merge_resolves_the_merge_again(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    port = Mock(return_value=(MERGE, PARENT))
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    _push(run, HEAD_A, 41)
+    run.tick(1000)
+    old = run.grade(HEAD_A)
+    assert old.pull_number == 41
+    monkeypatch.setattr(scheduler, "PULL_REQUIRED", (*scheduler.PULL_REQUIRED, "release-job"))
+    actions = run.tick(2000)
+    assert any(action.startswith("grading ") for action in actions)
+    replacement = next(grade for grade in run.grades() if grade.run != old.run)
+    assert replacement.pull_number == 41
+    assert replacement.graded_commit == MERGE
+    assert port.call_count == 2
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_head_with_no_merge_yet_waits_out_the_window_then_falls_back_at_the_bound(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})

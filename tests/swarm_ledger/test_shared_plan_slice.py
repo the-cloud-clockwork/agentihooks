@@ -121,10 +121,11 @@ class TestRefusal:
 
     def test_resending_a_task_its_own_shared_slice_is_not_refused(self, table):
         from types import SimpleNamespace
+        from typing import Any
 
         from scripts.swarm_ledger import ledger_tasks
 
-        ctx = SimpleNamespace(refused=[])
+        ctx: Any = SimpleNamespace(refused=[])
         op = {"item": "tasks/t1", "fields": {"plan_slice": "table"}}
         assert ledger_tasks._set_slice(table, op, ctx) is True
         assert ctx.refused == []

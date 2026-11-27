@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 
 from scripts.swarm_ledger import ledger_title
@@ -58,7 +60,7 @@ def test_the_refusals_name_the_operation_and_its_limit():
 
 @pytest.mark.parametrize(("op", "field"), [("title_set", "title"), ("overview_set", "overview")])
 def test_apply_stores_the_trimmed_text_once_and_records_it(op, field):
-    doc, ctx = {"title": "Old", "overview": "old"}, Ctx()
+    doc, ctx = {"title": "Old", "overview": "old"}, cast(Any, Ctx())
     assert ledger_title.apply(doc, {"op": op, "id": "e1", "text": "  New text  "}, ctx) is True
     assert doc[field] == "New text"
     assert ctx.stamps == [(field, "operator")]

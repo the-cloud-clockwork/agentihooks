@@ -1,6 +1,9 @@
 """Adding a source to a ledger after it was created, such as the ledger of a Doctor linked to it."""
 
 import re
+from typing import Any
+
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("source_add",)
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -14,7 +17,7 @@ def check(op):
         raise ValueError(f"source must be text of at most {MAX_SOURCE} characters")
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     sources = doc.setdefault("sources", [])
     if op["source"] not in sources:
         sources.append(op["source"])

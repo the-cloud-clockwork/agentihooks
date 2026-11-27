@@ -5,6 +5,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger.api.resources import revision
+from scripts.swarm_ledger.op_context import OpContext
 from scripts.swarm_ledger.repository import LedgerRepository
 from scripts.swarm_v2.authority import TaskAuthority, TaskClaim
 
@@ -276,7 +277,7 @@ class CompletionGate:
     def __init__(self, outcomes: Outcomes, token: str, generation: int, outcome: dict) -> None:
         self.outcomes, self.token, self.generation, self.outcome = outcomes, token, generation, outcome
 
-    def apply(self, doc: dict, op: dict, ctx: object, apply_op: Callable[..., bool]) -> bool:
+    def apply(self, doc: dict, op: dict, ctx: OpContext, apply_op: Callable[..., bool]) -> bool:
         from scripts.swarm_ledger import ledger_tasks
 
         claim = self.outcomes._receipt(self.token, self.generation, self.outcome)

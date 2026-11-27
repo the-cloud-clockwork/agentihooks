@@ -374,6 +374,7 @@ class Plan:
     authoritative: frozenset[str] = frozenset()
     merge_base: str = ""
     graded_commit: str = ""
+    required: tuple[str, ...] = ()
 
 
 class Inbox(Protocol):
@@ -518,6 +519,8 @@ class State:
     merge_base: str = ""
     graded_commit: str = ""
     merge_fallback: bool = False
+    required: list[str] = field(default_factory=list[str])
+    pull_number: int = 0
 
 
 def _parse(raw: str | bytes) -> State:
@@ -525,6 +528,12 @@ def _parse(raw: str | bytes) -> State:
     store."""
     data = json.loads(raw)
     data["flags"] = Flags(**data["flags"])
+    if "required" not in data:
+        data["required"] = (
+            [gate for gate in data["gates"] if gate not in (FAIL_FAST, *UNIT_JOBS)]
+            if data["tier"] < Priority.PROMOTION
+            else []
+        )
     for slot in data["units"].values():
         slot.pop("manifest", None)
     data["units"] = {ref: Slot(**slot) for ref, slot in data["units"].items()}
@@ -651,6 +660,10 @@ def _needs(state: State) -> dict[str, dict[str, Any]]:
     return {job: {"result": result, "outputs": dict(state.outputs.get(job, {}))} for job, result in results.items()}
 
 
+def _scope(state: State) -> str:
+    return state.outputs.get("select", {}).get("scope", "none")
+
+
 def _lost(slots: Sequence[Slot]) -> str:
     """Return the line the summary of a check that concludes neutral adds for its units that ended without a
     verdict: how many, their keys and that a rerequest of the check grades them again."""
@@ -687,6 +700,8 @@ def _concluded(state: State) -> str:
 def _checks(state: State) -> dict[str, tuple[str, str | None]]:
     """Return each check run's target: one per gate with units, one skipped per authoritative gate the grade runs no
     unit of, and the required check folding the gates."""
+    if not state.superseded and state.required != list(_frame_required(state.tier, _scope(state))):
+        return {}
     targets = {gate: _target(state, refs) for gate, refs in state.gates.items() if refs}
     targets.update(dict.fromkeys(state.idle, ("completed", "skipped")))
     status, conclusion = _target(state, list(state.units))
@@ -721,6 +736,8 @@ class _Quiet:
     relayed: bool
     hold: int
     final: bool
+    required: tuple[str, ...]
+    scope: str
 
 
 def _quiet(state: State, revision: int) -> _Quiet:
@@ -738,6 +755,8 @@ def _quiet(state: State, revision: int) -> _Quiet:
         relayed=state.ref.startswith(GRADE_REFS),
         hold=state.hold,
         final=all(slot.outcome for slot in slots),
+        required=tuple(state.required),
+        scope=_scope(state),
     )
 
 
@@ -750,6 +769,8 @@ def _still(quiet: _Quiet, states: Sequence[str | None], now_ms: int, repo_hold: 
     """Return whether advancing a grade would change nothing: no open job is gone or finished and none waiting to
     start is leased, given their states in waiting then started order, and either a moved check run waits out its
     hold or nothing moved and the grade cannot close."""
+    if quiet.required != _frame_required(quiet.tier, quiet.scope):
+        return False
     if any(state is None or state in FINISHED for state in states) or "leased" in states[: len(quiet.waiting)]:
         return False
     if quiet.moved:
@@ -1378,12 +1399,17 @@ class Scheduler:
             request.repo, request.head, request.base, CLASSES[request.tier], plan.grader, request.graded_commit
         )
         run = grade_key(inputs)
-        if self.client.exists(GRADES + run):
+        carried: dict[str, str] = {}
+        if existing := self.grade(run):
             if not request.bypass_negative:
-                self._take_lane(request, lane, run)
-                return f"already graded {run}"
+                matching = self._matching(request, lane, run, plan.required)
+                if matching is not None:
+                    self._take_lane(request, lane, matching)
+                    return f"already graded {matching}"
+            if existing.required != list(plan.required):
+                carried = self._replace_frame(existing)
             run = f"{run}-{now_ms}"
-        carried = self._supersede(request, lane)
+        carried.update(self._supersede(request, lane))
         state = State(
             run=run,
             repo=request.repo,
@@ -1403,6 +1429,8 @@ class Scheduler:
             merge_base=plan.merge_base,
             graded_commit=plan.graded_commit,
             merge_fallback=fallback,
+            required=list(plan.required),
+            pull_number=request.pull_number,
         )
         source = self._merge_group(request, plan.tree)
         misses: list[Unit] = []
@@ -1419,6 +1447,22 @@ class Scheduler:
         self.client.set(f"{LANES}{request.repo}|{lane}|{int(request.tier)}", run)
         return f"grading {run} with {len(misses)} of {len(state.units)} units held"
 
+    def _matching(self, request: GradeRequest, lane: str, run: str, required: tuple[str, ...]) -> str | None:
+        latest = self.client.get(f"{LANES}{request.repo}|{lane}|{int(request.tier)}")
+        for candidate in dict.fromkeys((run, latest)):
+            if candidate is None or not (candidate == run or candidate.startswith(f"{run}-")):
+                continue
+            state = self.grade(candidate)
+            if state is not None and not state.superseded and state.required == list(required):
+                return candidate
+        return None
+
+    def _replace_frame(self, state: State) -> dict[str, str]:
+        state.superseded = True
+        self.save(state)
+        self._drop(state.run)
+        return {ref: slot.job for ref, slot in state.units.items() if slot.job and not (slot.outcome or slot.held)}
+
     def _merge_group(self, request: GradeRequest, tree: str) -> State | None:
         """Return the passing merge group grade of the tree a push grade grades, if one exists."""
         if request.tier != Priority.PROMOTION:
@@ -1430,7 +1474,11 @@ class Scheduler:
         """Drop the pending and held units of the lane's older head and return its unfinished jobs by unit."""
         previous = self.client.get(f"{LANES}{request.repo}|{lane}|{int(request.tier)}")
         old = None if previous is None else self.grade(previous)
-        if old is None or old.head == request.head:
+        if old is None:
+            return {}
+        if old.head == request.head:
+            if old.required != list(_frame_required(old.tier, _scope(old))):
+                return self._replace_frame(old)
             return {}
         dropped = set(self.queue.supersede(old.head))
         old.superseded = True
@@ -1572,6 +1620,23 @@ class Scheduler:
         queued = [slot for slot in state.units.values() if not (slot.outcome or slot.held) and slot.job]
         for slot, job in zip(queued, self.queue.jobs([slot.job for slot in queued])):
             self._collect(slot, job, tiers, state)
+        scope = _scope(state)
+        if not state.superseded and state.required != list(_frame_required(state.tier, scope)):
+            self._keep(state)
+            request = GradeRequest(
+                state.repo,
+                state.head,
+                state.base,
+                Priority(state.tier),
+                "scheduler",
+                False,
+                plant=scope == "full",
+                pull_number=state.pull_number,
+            )
+            try:
+                return [self._start(request, state.lane, state.ref, now_ms, name="")]
+            except (FetchPending, FetchUnanswered, Unmerged, merges.MergePending, merges.MergeUnanswered) as error:
+                return [f"holding the required-frame regrade of {state.head}: {error}"]
         actions = self._post(state, now_ms)
         if all(slot.outcome for slot in state.units.values()) and not _moved(state):
             self._drop(run)
@@ -1806,6 +1871,14 @@ def authoritative_gates(block: Mapping[str, Any], tier: Priority) -> frozenset[s
     return frozenset(block["authoritative"])
 
 
+def _frame_required(tier: int, scope: str) -> tuple[str, ...]:
+    if tier >= Priority.PROMOTION:
+        return ()
+    if tier == Priority.QUEUE:
+        return QUEUE_REQUIRED
+    return (*PULL_REQUIRED, *SCOPED.get(scope, ()))
+
+
 def frame(
     tier: Priority,
     tree: str,
@@ -1825,21 +1898,22 @@ def frame(
     queue suite with no lost unit rerun; both keep the authoritative gates, which post as lab/<gate>; a promotion or
     backfill grade takes every lab gate, since those rules require no job by name, and lists none.
     """
+    scope = "full" if tier == Priority.PULL_REQUEST and plant else "none"
+    required = _frame_required(tier, scope)
     if tier >= Priority.PROMOTION:
-        return Plan(tree, grader, dict(gates))
+        return Plan(tree, grader, dict(gates), required=required)
     listed = frozenset(authoritative)
     if tier == Priority.QUEUE:
-        required = (*QUEUE_REQUIRED, FAIL_FAST, UNIT_JOBS[0])
-        queued = {job: gates.get(job, ()) for job in required}
-        return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed)
-    scope = "full" if tier == Priority.PULL_REQUEST and plant else "none"
-    required = (*PULL_REQUIRED, *SCOPED.get(scope, ()))
+        queued = {job: gates.get(job, ()) for job in (*required, FAIL_FAST, UNIT_JOBS[0])}
+        return Plan(tree, grader, queued, frozenset(UNIT_JOBS[1:]), authoritative=listed, required=required)
     framed = {
         job: tuple(unit for key, units in gates.items() if key == job or key.startswith(f"{job}/") for unit in units)
         for job in required
     }
     idle = frozenset(gate for gate in authoritative if not framed.get(gate))
-    return Plan(tree, grader, framed, outputs={"select": {"scope": scope}}, idle=idle, authoritative=listed)
+    return Plan(
+        tree, grader, framed, outputs={"select": {"scope": scope}}, idle=idle, authoritative=listed, required=required
+    )
 
 
 @dataclass(frozen=True)

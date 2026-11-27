@@ -176,6 +176,7 @@ def _graded_needs(promote: dict[str, Any], analysis: str = "A1") -> dict[str, Si
         "coverage-baseline",
         "flake-budget",
         "sonar",
+        "sonar-after-unit",
         "hierarchy-cpu",
         "tick-scale",
         "tick-pattern-tree",
