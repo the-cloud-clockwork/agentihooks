@@ -30,7 +30,7 @@ def _configuration(source: Path, home: Path) -> None:
 
 def _rename_trust_key(key: SingleKey, value: Item, source: str, target: str) -> None:
     original = key.as_string()
-    if key.delimiter == "'" and any(char == "'" or ord(char) < 32 for char in target):
+    if key.delimiter == "'" and any(char in "'\x7f" or ord(char) < 32 for char in target):
         replacement = original.replace(original.strip(), SingleKey(target + key.key.removeprefix(source)).as_string())
     else:
         encoded_source = source
