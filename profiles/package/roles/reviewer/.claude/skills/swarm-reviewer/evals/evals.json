@@ -1,7 +1,7 @@
 [
   {
     "query": "You are a reviewer in swarm app-build, review pull request 42",
-    "expected_behavior": "Joins the ledger, reads the review task, then the pull request body, the whole diff, the feature map entries the diff touches and the callers and tests of each changed unit; posts one review comment with at least one finding that names the file, what breaks and its evidence; sends the findings to the author with msg send and closes with swarm done --finding and the review link."
+    "expected_behavior": "Joins the ledger, reads the review task, then the pull request body, the whole diff, the feature map entries the diff touches and the callers and tests of each changed unit; posts at least one finding with review post, each naming the file, what breaks and its evidence; sends the findings to the author with msg send and closes with swarm done --finding and the review link."
   },
   {
     "query": "every check on this merge request is green, just approve it",

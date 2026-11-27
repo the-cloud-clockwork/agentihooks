@@ -1,0 +1,6 @@
+{
+  "scripts/claude_quota_balancer.py:scripts.claude_quota_balancer.x__open_cache_lock:48efb8b23b67298613a4de5e494e8ec504a18b075fbcc479f547cac955ea3ae4": {
+    "reader": "standards_reader",
+    "reason": "Drops the encoding keyword from the lock open, which equals encoding None, the locale default. _cache_lock uses the handle only for fcntl.flock and the claude-router-cache.json.lock contents are never read or written anywhere, so no text passes through the codec; the trailing comma is syntax only."
+  }
+}
