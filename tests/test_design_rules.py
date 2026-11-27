@@ -111,11 +111,69 @@ def test_a_changed_signature_is_graded(tmp_path):
     )
 
 
-def test_a_redefined_function_is_graded_under_its_own_numbered_key(tmp_path):
+@pytest.mark.feature("design-rules-same-name-pairing")
+def test_a_redefined_function_is_graded_under_its_own_numbered_key(tmp_path: Path) -> None:
     head = {"scripts/job.py": TYPED + "\n\n" + UNTYPED}
     assert _grade(tmp_path, {"scripts/job.py": TYPED}, head) == (
         1,
         ["untyped: scripts/job.py::load#2 lacks type hints on path, return"],
+    )
+
+
+@pytest.mark.feature("design-rules-same-name-pairing")
+def test_an_identical_redefinition_is_graded_once_as_new(tmp_path: Path) -> None:
+    head = {"scripts/job.py": UNTYPED + "\n\n" + UNTYPED}
+    assert _grade(tmp_path, {"scripts/job.py": UNTYPED}, head) == (
+        1,
+        ["untyped: scripts/job.py::load#2 lacks type hints on path, return"],
+    )
+
+
+@pytest.mark.feature("design-rules-same-name-pairing")
+def test_same_named_definitions_both_edited_pair_in_order(tmp_path: Path) -> None:
+    before = "def load(path: str) -> str:\n    return path\n\n\ndef load(options: dict) -> str:\n    return ''\n"
+    after = before.replace("return path", "return path * 2").replace("return ''", "return 'x'")
+    assert _grade(tmp_path, {"scripts/job.py": before}, {"scripts/job.py": after}) == (2, [])
+
+
+@pytest.mark.feature("design-rules-same-name-pairing")
+def test_an_edited_function_pairs_with_its_own_name_after_another_is_deleted(tmp_path: Path) -> None:
+    stop = "def stop(options: dict) -> None:\n    pass\n"
+    before = "def start(path: str) -> str:\n    return path\n\n\n" + stop
+    after = stop.replace("pass", "return None")
+    assert _grade(tmp_path, {"scripts/job.py": before}, {"scripts/job.py": after}) == (1, [])
+
+
+@pytest.mark.feature("design-rules-same-name-pairing")
+def test_only_the_new_definition_above_an_unchanged_same_named_one_is_graded(tmp_path: Path) -> None:
+    head = {"scripts/job.py": "def load(path):\n    return path\n\n\n" + UNTYPED}
+    assert _grade(tmp_path, {"scripts/job.py": UNTYPED}, head) == (
+        1,
+        ["untyped: scripts/job.py::load lacks type hints on path, return"],
+    )
+
+
+@pytest.mark.feature("design-rules-same-name-pairing")
+def test_the_survivor_of_a_deleted_same_named_definition_is_not_graded(tmp_path: Path) -> None:
+    before = "def load(path):\n    return path\n\n\n" + UNTYPED
+    assert _grade(tmp_path, {"scripts/job.py": before}, {"scripts/job.py": UNTYPED}) == (0, [])
+
+
+@pytest.mark.feature("design-rules-same-name-pairing")
+def test_reordered_same_named_definitions_are_not_graded(tmp_path: Path) -> None:
+    first = "def load(path):\n    return path\n"
+    before = {"scripts/job.py": first + "\n\n" + UNTYPED}
+    assert _grade(tmp_path, before, {"scripts/job.py": UNTYPED + "\n\n" + first}) == (0, [])
+
+
+@pytest.mark.feature("design-rules-same-name-pairing")
+def test_nested_functions_follow_the_definition_their_outer_pairs_with(tmp_path: Path) -> None:
+    inner = "    def inner(x):\n        return x\n"
+    old = "def load(path: str) -> str:\n" + inner + "    return inner(path)\n"
+    new = "def load(path: str) -> str:\n" + inner + "    return path\n"
+    assert _grade(tmp_path, {"scripts/job.py": old}, {"scripts/job.py": new + "\n\n" + old}) == (
+        2,
+        ["untyped: scripts/job.py::load.inner lacks type hints on x, return"],
     )
 
 
