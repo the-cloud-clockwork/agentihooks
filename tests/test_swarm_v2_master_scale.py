@@ -603,7 +603,9 @@ def test_a_launched_seat_is_primed_with_its_seat_handoff(swarm):
     name, task = runtime.masters[0]
 
     assert task["handoff"] == "# Handoff v2\nseat two notes"
-    assert "seat two notes" in prompt.build(SLUG, "/repo", MASTER, name, task)
+    text = prompt.build(SLUG, "/repo", MASTER, name, task)
+    assert "seat two notes" not in text
+    assert text.splitlines().count(prompt.SEAT_BRIEF) == 1
     assert store.handoff(SLUG, "master-2") == ""
 
 
