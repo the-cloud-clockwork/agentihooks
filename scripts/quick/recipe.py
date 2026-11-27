@@ -101,13 +101,18 @@ def identity(seat: Seat) -> dict[str, str | int]:
 
 
 def script(argv: Sequence[str], exports: Mapping[str, str], pid_file: Path, directory: str) -> str:
-    runner = "from pathlib import Path; import sys; from scripts.quick.recipe import run_program; sys.exit(run_program(Path(sys.argv[1]), sys.argv[2:]))"
+    name = run_program.__name__
+    runner = (
+        f"from pathlib import Path; import sys; from {run_program.__module__} import {name}; "
+        f"sys.exit({name}(Path(sys.argv[1]), sys.argv[2:]))"
+    )
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         *(f"export {name}={shlex.quote(value)}" for name, value in sorted(exports.items())),
-        f"cd -- {shlex.quote(directory)}",
-        f"{shlex.join([sys.executable, '-I', '-c', runner, str(pid_file), *argv])} || true",
+        f"if cd -- {shlex.quote(directory)}; then",
+        f"    {shlex.join([sys.executable, '-I', '-c', runner, str(pid_file), *argv])} || true",
+        "fi",
         "exec /bin/bash -l",
     ]
     return "\n".join(lines) + "\n"

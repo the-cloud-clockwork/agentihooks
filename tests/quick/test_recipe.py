@@ -161,10 +161,10 @@ def test_the_launcher_keeps_every_argument_literal_and_records_its_process(tmp_p
     lines = text.splitlines()
     assert lines[0] == "#!/usr/bin/env bash"
     assert "export AGENTIHOOKS_QUICK_SEAT='eng 1'" in lines
-    assert f"cd -- {shlex.quote('/work dir')}" in lines
+    assert f"if cd -- {shlex.quote('/work dir')}; then" in lines
     assert any("run_program" in line and shlex.quote(str(tmp_path / "pid file")) in line for line in lines)
     assert lines[-1] == "exec /bin/bash -l"
-    assert shlex.split(lines[-2].removesuffix(" || true"))[-len(argv) :] == list(argv)
+    assert shlex.split(lines[-3].removesuffix(" || true"))[-len(argv) :] == list(argv)
 
 
 @pytest.mark.feature("quick-local-command")
@@ -184,7 +184,7 @@ def test_a_command_seat_runs_its_launcher_in_its_own_pane_without_init_agent(
     assert pane == "w1:p2" and os.access(launcher, os.X_OK)
     assert recipe.PROMPT_ENV not in text
     assert "export AGENTIHOOKS_QUICK_SEAT=eng-1" in text and f"export AGENTIHOOKS_QUICK_DIR={tmp_path}" in text
-    assert shlex.split(text.splitlines()[-2].removesuffix(" || true"))[-2:] == [TOOL, "two words"]
+    assert shlex.split(text.splitlines()[-3].removesuffix(" || true"))[-2:] == [TOOL, "two words"]
 
 
 @pytest.mark.feature("quick-local-command")
@@ -306,7 +306,7 @@ def test_force_and_relaunch_reuse_the_saved_command(tmp_path: Path, monkeypatch:
     registry.set_state(tmp_path, "eng-1", registry.PENDING)
     launch.relaunch(tmp_path, "eng-1", {}, bare=lambda pane: True, sleep=lambda seconds: None, wait_s=0.0)
     assert [
-        shlex.split(launcher.read_text().splitlines()[-2].removesuffix(" || true"))[-2:] for _, launcher in panes.runs
+        shlex.split(launcher.read_text().splitlines()[-3].removesuffix(" || true"))[-2:] for _, launcher in panes.runs
     ] == [[TOOL, "keep me"]] * 2
 
 
@@ -404,9 +404,18 @@ def test_the_program_launcher_stops_when_its_directory_is_missing(tmp_path: Path
     launcher = tmp_path / "launcher.sh"
     command = (sys.executable, "-c", "from pathlib import Path; import sys; Path(sys.argv[1]).touch()", str(result))
     launcher.write_text(recipe.script(command, {}, tmp_path / recipe.PID, str(tmp_path / "missing")))
-    completed = subprocess.run(["bash", str(launcher)], capture_output=True, check=False)
-    assert completed.returncode != 0
-    assert not result.exists()
+    completed = subprocess.run(
+        ["bash", str(launcher)],
+        input="printf 'shell-restored\\n'\nexit\n",
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=15,
+    )
+    assert completed.returncode == 0
+    assert "shell-restored" in completed.stdout
+    assert "missing" in completed.stderr
+    assert not result.exists() and not (tmp_path / recipe.PID).exists()
 
 
 @pytest.mark.feature("quick-local-command")
@@ -571,7 +580,10 @@ def test_program_exit_restores_a_shell_even_in_a_project_with_its_own_scripts_pa
         calls.append(seat)
         return "started"
 
-    rows = tick.round_for(tmp_path, Shell(), retry, 10_000.0)
+    def refuse_force(folder: Path, seat: str) -> str:
+        pytest.fail("an exited program used forced relaunch")
+
+    rows = tick.round_for(tmp_path, Shell(), retry, 10_000.0, refuse_force)
     assert rows[1] == {"seat": "eng-1", "outcome": "revived-started"}
     assert calls == ["eng-1"] and swarm.seats[1].command == command
 
