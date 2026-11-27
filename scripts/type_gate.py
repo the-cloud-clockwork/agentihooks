@@ -341,7 +341,7 @@ def _grade_tree(head: Path) -> int:
     measured error is growth.
     """
     base = load(head) or {}
-    counts = measure(head, None)
+    counts = measure(head)
     return _report(counts, base, _growth(base, counts, None))
 
 
