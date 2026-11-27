@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from scripts.ci_lab.outcomes import LOSSES, PASSED
+from scripts.ci_lab.outcomes import LOSSES, PASSED, UNGRADED
 
 __all__ = ["Policy", "UnitResult", "decide", "policy", "red"]
 
@@ -41,8 +41,9 @@ def decide(result: UnitResult, rules: Policy = DEFAULT) -> str:
 
 
 def red(result: UnitResult) -> bool:
-    """Return whether the result, once final, makes its unit's grade red."""
-    return result.outcome != PASSED
+    """Return whether the result, once final, makes its unit's grade red: a failure with a verdict does, and neither
+    a pass nor a result that ends without a verdict, which leaves the grade neutral."""
+    return result.outcome != PASSED and result.outcome not in UNGRADED
 
 
 def policy(lab: Mapping[str, Any]) -> Policy:

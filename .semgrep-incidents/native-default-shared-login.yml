@@ -1,0 +1,43 @@
+rules:
+  - id: native-default-shared-login
+    languages: [python]
+    severity: ERROR
+    message: Native default execution must copy the existing login into its private home without sharing a writable login.
+    paths:
+      include:
+        - /scripts/routing/native_default.py
+        - native-default-shared-login.py
+    pattern-either:
+      - pattern: ($HOME / "auth.json").symlink_to(...)
+      - pattern: ($HOME / ".credentials.json").symlink_to(...)
+  - id: native-named-route-stripped
+    message: Retain the named authentication namespace until the native selector resolves the exact reference.
+    languages: [python]
+    severity: ERROR
+    paths:
+      include:
+        - scripts/install.py
+        - scripts/codex_router.py
+        - native-default-shared-login.py
+    pattern-either:
+      - pattern: forced($ENV, $ROUTE.removeprefix("named:"))
+      - pattern: _route($ENV, $ROUTE.removeprefix("named:"), ...)
+  - id: native-named-route-empty
+    message: Reject an empty named reference before it can enter automatic account selection.
+    languages: [python]
+    severity: ERROR
+    paths:
+      include:
+        - /scripts/codex_router.py
+        - native-default-shared-login.py
+    patterns:
+      - pattern: select($POOL, $QUOTAS, $SESSIONS, $NOW, $REFERENCE, $ENV)
+      - pattern-inside: |
+          $REFERENCE = $ROUTE.removeprefix("named:").removeprefix($PREFIX)
+          ...
+      - pattern-not-inside: |
+          $REFERENCE = $ROUTE.removeprefix("named:").removeprefix($PREFIX)
+          ...
+          if not $REFERENCE:
+              raise ...
+          ...

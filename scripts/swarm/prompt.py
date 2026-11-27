@@ -63,6 +63,8 @@ RECON_FIRST = (
     "gate refuses an edit or commit before a passing verdict and outside the kept areas and your task's territory.",
 )
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
+OLDER_RECAPS = 3
+RECAPS_TOTAL = "recaps_total"
 SEAT_BRIEF = (
     "Run agentihooks seat brief before your first command: it prints your seat's handoff, culture, latest recap and "
     "learned notes from the store that keeps them."
@@ -450,6 +452,18 @@ def priming_lines(task: dict[str, Any]) -> list[str]:
     if task.get("handoff") or task.get("handoff_envelope") or task.get("transfer"):
         lines += handoff_lines(task)
     return [*lines, SEAT_BRIEF]
+
+
+def carried(task: dict[str, Any]) -> dict[str, Any]:
+    """The task with only the recaps its prompt shows, the seat's whole recap count, and its learned notes less the
+    withheld ones, so an admission carries what the hive renders and counts instead of every recap the seat holds."""
+    recaps = task.get("recaps") or []
+    return {
+        **task,
+        "recaps": recaps[: 1 + OLDER_RECAPS],
+        RECAPS_TOTAL: task.get(RECAPS_TOTAL, len(recaps)),
+        "learned": [note for note in task.get("learned") or [] if not note.get("withheld")],
+    }
 
 
 def handoff_lines(task: dict[str, Any]) -> list[str]:
