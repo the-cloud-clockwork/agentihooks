@@ -1953,7 +1953,7 @@ class MirrorExpander:
             timeout_s=FETCH_TIMEOUT_S,
         )
 
-def _fetch(self, mirror: Mirror, sha: str) -> None:
+    def _fetch(self, mirror: Mirror, sha: str) -> None:
         try:
             mirror.fetch(sha)
         except subprocess.TimeoutExpired as error:
