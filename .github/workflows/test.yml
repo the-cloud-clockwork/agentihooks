@@ -3215,11 +3215,13 @@ jobs:
         run: |
           logs="$RUNNER_TEMP/lint-scans"
           mkdir -p "$logs"
-          (cd "$RUNNER_TEMP/grader" && python -m scripts.ci_cpu_quota > /dev/null)
+          failed=""
+          (cd "$RUNNER_TEMP/grader" && python -m scripts.ci_cpu_quota > /dev/null) || failed="$failed cpu-quota"
           pids=()
           order=()
           (
-          trap 'echo "$SECONDS" > "$logs/wall-clock.seconds"' EXIT
+          start=$SECONDS
+          trap 'echo "$((SECONDS - start))" > "$logs/wall-clock.seconds"' EXIT
           if [[ -f "$RUNNER_TEMP/grader/scripts/ci_wall_clock.py" ]]; then
             cd "$RUNNER_TEMP/grader"
             python -m scripts.ci_wall_clock --root "$GITHUB_WORKSPACE"
@@ -3230,7 +3232,8 @@ jobs:
           pids+=("$!")
           order+=("wall-clock")
           (
-          trap 'echo "$SECONDS" > "$logs/dead-code.seconds"' EXIT
+          start=$SECONDS
+          trap 'echo "$((SECONDS - start))" > "$logs/dead-code.seconds"' EXIT
           if [[ -f "$RUNNER_TEMP/grader/scripts/dead_code.py" ]]; then
             cd "$RUNNER_TEMP/grader"
           fi
@@ -3239,7 +3242,8 @@ jobs:
           pids+=("$!")
           order+=("dead-code")
           (
-          trap 'echo "$SECONDS" > "$logs/feature-map.seconds"' EXIT
+          start=$SECONDS
+          trap 'echo "$((SECONDS - start))" > "$logs/feature-map.seconds"' EXIT
           if ! grep -qs -- '"--base"' "$RUNNER_TEMP/grader/scripts/feature_map.py"; then
             echo "::error::The protected grader carries no feature map validator that grades against the base, so nothing trusted can grade."
             exit 1
@@ -3249,7 +3253,6 @@ jobs:
           ) > "$logs/feature-map.log" 2>&1 < /dev/null &
           pids+=("$!")
           order+=("feature-map")
-          failed=""
           for index in "${!pids[@]}"; do
             wait "${pids[$index]}" || failed="$failed ${order[$index]}"
           done

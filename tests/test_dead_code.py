@@ -289,8 +289,11 @@ def test_the_gate_runs_in_lint_graded_by_dev_against_the_base() -> None:
 
 
 def _run_step(tmp_path: Path, workspace: Path) -> subprocess.CompletedProcess[str]:
-    assert DEAD_CODE_SCAN in _step()["run"]
-    (tmp_path / "grader").mkdir()
+    scripts = tmp_path / "grader" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "__init__.py").write_text("")
+    for module in ("ci_cpu_quota", "ci_wall_clock", "feature_map"):
+        (scripts / f"{module}.py").write_text('ARGUMENT = "--base"\n')
     _tree(tmp_path / "base", {"hooks/guard.py": USED})
     env = dict(
         os.environ,
@@ -298,7 +301,7 @@ def _run_step(tmp_path: Path, workspace: Path) -> subprocess.CompletedProcess[st
         GITHUB_WORKSPACE=str(workspace),
         PATH=f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
     )
-    return subprocess.run(["bash", "-e", "-c", DEAD_CODE_SCAN], env=env, cwd=_ROOT, capture_output=True, text=True)
+    return subprocess.run(["bash", "-e", "-c", _step()["run"]], env=env, cwd=_ROOT, capture_output=True, text=True)
 
 
 def test_before_dev_carries_the_grader_a_planted_unused_function_is_red(tmp_path):

@@ -203,7 +203,8 @@ def _scan_env(tmp_path: Path, failing: tuple[str, ...]) -> dict[str, str]:
     scripts = tmp_path / "grader" / "scripts"
     scripts.mkdir(parents=True)
     (scripts / "__init__.py").write_text("")
-    (scripts / "ci_cpu_quota.py").write_text("print(1)\n")
+    quota = f'import sys\n\nprint("cpu quota read", file=sys.stderr)\nsys.exit({int("cpu-quota" in failing)})\n'
+    (scripts / "ci_cpu_quota.py").write_text(quota)
     for scan, module in LINT_SCANS.items():
         stub = f'import sys\n\nARGUMENT = "--base"\nprint("{scan} scanned")\nsys.exit({int(scan in failing)})\n'
         (scripts / f"{module}.py").write_text(stub)
@@ -241,6 +242,7 @@ def test_the_lint_scans_pass_when_every_scan_passes(tmp_path: Path) -> None:
     output = "".join(result.stdout + result.stderr for result in results)
     assert [result.returncode for result in results] == [0] * len(results), output
     assert [scan for scan in LINT_SCANS if f"{scan} scanned" in output] == list(LINT_SCANS)
+    assert output.count("cpu quota read") == 1
     assert "::error::" not in output
 
 
@@ -249,14 +251,16 @@ def test_one_lint_step_runs_each_scan_in_its_own_background_subshell() -> None:
     [step] = _scan_steps()
     assert step["name"] == COMBINED_SCANS
     for scan in LINT_SCANS:
+        timed = f'(\nstart=$SECONDS\ntrap \'echo "$((SECONDS - start))" > "$logs/{scan}.seconds"\' EXIT\n'
+        assert timed in step["run"]
         assert f') > "$logs/{scan}.log" 2>&1 < /dev/null &\npids+=("$!")\norder+=("{scan}")\n' in step["run"]
     assert 'wait "${pids[$index]}" || failed="$failed ${order[$index]}"\n' in step["run"]
 
 
 @pytest.mark.parametrize(
     "failing",
-    [("wall-clock",), ("dead-code",), ("feature-map",), ("wall-clock", "feature-map")],
-    ids=["wall-clock", "dead-code", "feature-map", "wall-clock-and-feature-map"],
+    [("wall-clock",), ("dead-code",), ("feature-map",), ("wall-clock", "feature-map"), ("cpu-quota",)],
+    ids=["wall-clock", "dead-code", "feature-map", "wall-clock-and-feature-map", "cpu-quota"],
 )
 @pytest.mark.feature("lint-scans-run-together")
 def test_the_combined_lint_scans_step_names_every_failed_scan_and_no_other(
@@ -267,6 +271,7 @@ def test_the_combined_lint_scans_step_names_every_failed_scan_and_no_other(
     errors = [line for line in result.stdout.splitlines() if line.startswith("::error::")]
     assert result.returncode == 1, result.stdout + result.stderr
     assert errors == [f"::error::Lint scans failed on {' '.join(failing)}"]
+    assert [scan for scan in LINT_SCANS if f"{scan} scanned" in result.stdout] == list(LINT_SCANS)
 
 
 def test_lint_actions_grades_dashboard_columns_with_the_antoncore_dev_checker() -> None:
