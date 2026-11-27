@@ -165,6 +165,8 @@ def test_bundle_raises_when_marking_the_commit_for_the_bundle_fails(
 
     with pytest.raises(subprocess.CalledProcessError) as failed:
         expander.bundle(sha)
+    assert failed.value.cmd[3] == "update-ref"
+    assert failed.value.cmd[-1] == BOGUS_SHA
     assert failed.value.stderr
     assert _git(store, "for-each-ref", "refs/lab-bundle/").strip() == ""
 
