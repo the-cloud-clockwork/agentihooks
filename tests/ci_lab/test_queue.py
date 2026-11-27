@@ -78,10 +78,12 @@ def test_enqueue_skips_jobs_already_known(jobs: queue.Queue) -> None:
 
 @pytest.mark.feature("lab-lost-unit-leaves-gate-neutral")
 def test_enqueue_starts_a_lost_job_again_as_a_fresh_pending_job(jobs: queue.Queue, client: Any) -> None:
+    record = f"{queue.PREFIX}job:h1:test:a"
     jobs.enqueue([unit("a")], "h1", {})
     assert take(jobs, "h1:test:a", expires_ms=100)
     assert jobs.reap(found(jobs, "h1:test:a"), 100, 0) == "lost"
     assert jobs.tally(found(jobs, "h1:test:a")) is True
+    assert client.pttl(record) > 0
 
     assert jobs.enqueue([unit("a")], "h1", {}, base="b2", grader="g2", rank=1) == ["h1:test:a"]
 
@@ -91,7 +93,7 @@ def test_enqueue_starts_a_lost_job_again_as_a_fresh_pending_job(jobs: queue.Queu
     assert jobs.pending() == ["h1:test:a"]
     assert jobs.members("h1", "pending") == {"h1:test:a"}
     assert jobs.members("h1", "done") == set()
-    assert client.smembers(f"{queue.PREFIX}done") == set()
+    assert client.pttl(record) == -1
     assert jobs.tally(job) is True
 
 
@@ -110,7 +112,7 @@ def test_enqueue_starts_a_job_its_worker_ended_without_a_verdict_again(
     assert (job.state, job.attempts, job.outcome) == ("pending", 0, "")
     assert jobs.pending() == ["h1:test:a"]
     assert jobs.members("h1", "done") == set()
-    assert client.smembers(f"{queue.PREFIX}done") == set()
+    assert client.pttl(f"{queue.PREFIX}job:h1:test:a") == -1
 
 
 @pytest.mark.parametrize("outcome", ["passed", "failed", "gate_failed", "survived"])
@@ -285,7 +287,6 @@ def test_reap_requeues_while_attempts_remain_then_marks_lost(jobs: queue.Queue) 
     assert (lost.state, lost.outcome, lost.attempts) == ("lost", "lost", 1)
     assert jobs.token("h1:test:a") == ""
     assert jobs.members("h1", "done") == {"h1:test:a"}
-    assert jobs.client.smembers("agentihooks-ci:queue:done") == {"h1:test:a"}
     assert jobs.members("h1", "leased") == set()
     assert jobs.pending() == ["h1:test:b"]
 
@@ -317,7 +318,6 @@ def test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt(jobs: 
     assert jobs.pending() == ["h1:test:b", "h1:test:a"]
     assert jobs.members("h1", "pending") == {"h1:test:a", "h1:test:b"}
     assert jobs.members("h1", "done") == set()
-    assert jobs.client.smembers("agentihooks-ci:queue:done") == set()
     assert jobs.retry(record) is False
 
     assert take(jobs, "h1:test:a", "w2", "t2")
@@ -464,13 +464,11 @@ def test_every_key_carries_the_lab_prefix(jobs: queue.Queue, client) -> None:
     assert keys == {
         "agentihooks-ci:queue:seq",
         "agentihooks-ci:queue:pending",
-        "agentihooks-ci:queue:done",
         "agentihooks-ci:queue:head:h1:pending",
         "agentihooks-ci:queue:head:h1:done",
         "agentihooks-ci:queue:job:h1:test:a",
         "agentihooks-ci:queue:job:h1:test:b",
     }
-    assert client.smembers("agentihooks-ci:queue:done") == {"h1:test:a"}
 
 
 def test_missing_job_reads_none(jobs: queue.Queue) -> None:

@@ -2535,7 +2535,15 @@ key; the builders are pure and read no file, clock or network.
    `queue.PAGE` (64) jobs at a time, so a poll that fills its free slots from the first page reads
    one page.
 6. Expired leases requeue while `lab.retry.lost` of the repository's dev `delivery.yaml` allows (once by
-   default); the next loss is `lost`.
+   default); the next loss is `lost`. A job that settles, `done` when its worker completes it or `lost`
+   when reaping gives up, keeps its job hash and its head's done set for `Settings.retention_ms`
+   (`queue.RETENTION_MS`, six hours) and then expires; a requeue or a retry clears the expiry. No
+   transition writes the old global done set `agentihooks-ci:queue:done` any more: each pass drains at
+   most `DRAINED_PER_PASS` (500) of the jobs it still names, giving each done or lost one the same
+   expiry, and stops reading it once a read finds it empty. The set is read whole once per drain round,
+   since the lab's Redis user may not pop or scan a set. If a grade has not collected a settled job
+   within the retention, its slot is marked `dropped`. That happens only when passes fail for longer
+   than the retention while the lease API keeps accepting completions.
 7. Finished jobs are collected. A job whose outcome `retry.decide` allows another run under
    `lab.retry` goes back to pending with one more attempt, so a `crash` reruns once by default.
    Otherwise a graded outcome with an uploaded report becomes a verdict in the
@@ -3115,7 +3123,8 @@ at startup over every live grade, which took the swarm Redis from about 4 GiB to
 starts on a release without that copy, moves every manifest a live grade's slot or a queued, leased
 or finished job hash still carries to its object store path and removes it from Redis. It finds those
 records through the live grade set and the queue's state sets, so the lab's Redis user, which may not
-SCAN, runs it. An unfinished test slot whose batch has no stored manifest gets the batch's slice of the
+SCAN, runs it. Finished job hashes are found through the old global done set until the scheduler has
+drained it; a job it names whose hash has expired is skipped. An unfinished test slot whose batch has no stored manifest gets the batch's slice of the
 packed manifest at its grade's commit. A grade the scheduler writes while the command runs stays as
 the scheduler wrote it, manifests included, so run the command again while `grades written meanwhile`
 reads above zero. The command prints its counts as
@@ -4520,7 +4529,7 @@ Each scheduler pass applies the counts on two paths:
 
 | Event | What the scheduler does |
 |---|---|
-| A lease expires | `queue.Queue.reap` moves the job back to pending with one more `attempts` while `attempts` is below `lab.retry.lost`, else sets its state and outcome to `lost` |
+| A lease expires | `queue.Queue.reap` moves the job back to pending with one more `attempts` while `attempts` is below `lab.retry.lost`, its hash kept with no expiry, else sets its state and outcome to `lost`, its hash and its head's done set expiring after the retention |
 | A worker completes a lease | `decide` reads the job's outcome and `attempts`; on `retry`, `queue.Queue.retry` moves the job back to pending with one more `attempts` and the unit stays open, else the outcome is final |
 | A unit's executor raises | The unit stops heartbeating and its lease is never completed, so it reaches the scheduler as an expired lease. The worker prints `ci-lab worker: unit <job> crashed: <repr of the error>` to standard error on its next lease cycle, followed by the error's traceback, whose last line names the path a missing file error could not open |
 
@@ -4532,7 +4541,8 @@ retry path.
 `queue.Queue.retry` moves only a job whose state is `done`: it adds one to `attempts`, clears the
 job's worker and outcome and adds it back to the pending set under the same job id with a new
 sequence number in the class it was enqueued under, as `queue.Queue.reap` does for an expired
-lease; a job in any other state is left as it is and the call returns `False`. A job
+lease, and removes the expiry its finish set, so a job running again never expires mid run; a job in
+any other state is left as it is and the call returns `False`. A job
 reaping marked `lost` never reaches it, since reaping marks a job `lost` only once its `attempts`
 reached `lab.retry.lost`, where `decide` is `final`.
 
