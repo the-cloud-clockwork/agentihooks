@@ -9,10 +9,10 @@ from scripts.hive import account_slots
 def _used(value: dict[str, Any], hive: str, now: int) -> int:
     holders = sum(
         1
-        for row in value.get("holders", {}).values()
+        for row in value["holders"].values()
         if row["hive"] == hive and row["expires_ms"] > now and not row.get("master")
     )
-    report = value.get("hives", {}).get(hive)
+    report = value["hives"].get(hive)
     if report is None or report["expires_ms"] <= now:
         return holders
     return holders + max(report["sessions"] - len(report["observed"]), 0)

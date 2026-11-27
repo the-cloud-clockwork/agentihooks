@@ -2475,7 +2475,7 @@ def test_full_hive_accounts_hold_without_spending_a_claim_or_writing(rig: Simple
 
     answered = rig.admitter.admit(SLUG, ask())
 
-    assert answered is not None and "no free account seat" in answered["held"]
+    assert answered == {"held": "no free account seat on the asking hive"}
     assert rig.rows["t1"] == before
     assert rig.store.claimant(SLUG, "t1") is None
     assert rig.store.claim_generation(SLUG, "t1") == 0
@@ -2523,7 +2523,7 @@ def test_a_codex_lane_ignores_free_claude_seats(rig: SimpleNamespace, seat_bus: 
 
     answered = rig.admitter.admit(SLUG, ask())
 
-    assert answered is not None and "no free account seat" in answered["held"]
+    assert answered == {"held": "no free account seat on the asking hive"}
     assert rig.store.claimant(SLUG, "t1") is None
     assert rig.ledger.writes == []
 
@@ -2553,7 +2553,7 @@ def test_a_closed_hive_account_holds_without_reading_occupancy(
 
     answered = rig.admitter.admit(SLUG, ask())
 
-    assert answered is not None and "no free account seat" in answered["held"]
+    assert answered == {"held": "no free account seat on the asking hive"}
     assert rig.ledger.writes == []
     seat_bus.opened.assert_not_called()
 
@@ -2621,6 +2621,7 @@ def test_hive_account_occupancy_counts_only_live_local_workers(
 @pytest.mark.feature("hub-admission-hive-account-seat")
 def test_an_unreported_account_has_a_free_hive_seat(seat_bus: Any) -> None:
     assert admission_seats.available("hive-a", [{"harness": "claude", "account": "new", "cap": 1}], ("claude",), 7_000)
+    seat_bus.opened.assert_called_once_with(BusConfig.from_environ())
 
 
 @pytest.mark.feature("hub-admission-hive-account-seat")
