@@ -6,7 +6,7 @@ from .config import QueuePolicy
 from .envelope import Envelope
 from .subjects import PREFIX, subject
 
-LANES = ("eng", "ci", "plan")
+LANES = ("eng", "ci", "review", "plan")
 
 
 def require_owner(swarm: str, event: Envelope) -> None:
@@ -75,6 +75,12 @@ class MergedConsumer:
         self._logs, self._durable, self._logical, self._policy = logs, durable, logical, policy
         self._consumers: dict[int, Consumer] = {}
         self._cursor = 0
+
+    @property
+    def created(self) -> int | None:
+        """None: each child durable is created when its log is first visited, so one time across them would let a
+        newly created child replay history older than the window."""
+        return None
 
     def fetch(self, batch: int, timeout_ms: int) -> list[Delivery]:
         logs = self._logs()

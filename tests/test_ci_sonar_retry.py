@@ -1,12 +1,16 @@
+import contextlib
 import importlib.util
 import os
+import ssl
 import subprocess
 import threading
 import time
+from collections.abc import Iterator
+from http.client import HTTPMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import pytest
 import yaml
@@ -376,3 +380,150 @@ def test_a_refused_upstream_answer_is_logged_with_who_refused(monkeypatch, capsy
         assert part in line
     assert "client-id-fixture" not in log
     assert "client-secret-fixture" not in log
+
+
+def _keep_alive_backend(close_after: int | None = None) -> tuple[ThreadingHTTPServer, list[tuple[int, str]]]:
+    seen: list[tuple[int, str]] = []
+
+    class KeepAlive(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:
+            self.answer()
+
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.answer()
+
+        def answer(self) -> None:
+            seen.append((self.client_address[1], self.command))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+            if len(seen) == close_after:
+                self.close_connection = True
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    return ThreadingHTTPServer(("127.0.0.1", 0), KeepAlive), seen
+
+
+@contextlib.contextmanager
+def _serving(monkeypatch: pytest.MonkeyPatch, backend: ThreadingHTTPServer) -> Iterator[int]:
+    module = _proxy_module()
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), module.SonarProxy)
+    monkeypatch.setenv("SONAR_HOST_URL", f"http://127.0.0.1:{backend.server_port}")
+    monkeypatch.setenv("CF_ACCESS_CLIENT_ID", "client-id-fixture")
+    monkeypatch.setenv("CF_ACCESS_CLIENT_SECRET", "client-secret-fixture")
+    servers = (backend, proxy)
+    threads = [threading.Thread(target=server.serve_forever) for server in servers]
+    for thread in threads:
+        thread.start()
+    try:
+        yield proxy.server_port
+    finally:
+        for connection in module.IDLE:
+            connection.close()
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+
+
+def _status(port: int, method: str) -> int:
+    request = Request(
+        f"http://127.0.0.1:{port}/api/system/status", data=b"report" if method == "POST" else None, method=method
+    )
+    with urlopen(request, timeout=5) as response:
+        return response.status
+
+
+def test_later_gets_reach_the_upstream_on_the_first_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend, seen = _keep_alive_backend()
+    with _serving(monkeypatch, backend) as port:
+        assert [_status(port, "GET"), _status(port, "GET"), _status(port, "GET")] == [200, 200, 200]
+    assert [method for _, method in seen] == ["GET", "GET", "GET"]
+    assert len({client for client, _ in seen}) == 1
+
+
+def test_a_post_neither_takes_nor_leaves_a_pooled_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend, seen = _keep_alive_backend()
+    with _serving(monkeypatch, backend) as port:
+        assert [_status(port, method) for method in ("GET", "POST", "GET")] == [200, 200, 200]
+    assert [method for _, method in seen] == ["GET", "POST", "GET"]
+    (first, _), (posted, _), (last, _) = seen
+    assert last == first
+    assert posted != first
+
+
+def test_a_pooled_connection_the_upstream_closed_is_replaced(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend, seen = _keep_alive_backend(close_after=2)
+    with _serving(monkeypatch, backend) as port:
+        assert [_status(port, "GET"), _status(port, "GET"), _status(port, "GET")] == [200, 200, 200]
+    clients = [client for client, _ in seen]
+    assert len(clients) == 3
+    assert clients[0] == clients[1]
+    assert clients[2] != clients[0]
+
+
+class _Answer:
+    status = 200
+    headers = HTTPMessage()
+    will_close = False
+
+    def read(self) -> bytes:
+        return b"fresh"
+
+
+class _Upstream:
+    def __init__(self, failure: OSError | None) -> None:
+        self.failure = failure
+        self.sent: list[str] = []
+        self.closed = False
+
+    def request(self, method: str, url: str, body: bytes | None = None, headers: dict[str, str] | None = None) -> None:
+        self.sent.append(url)
+        if self.failure is not None:
+            raise self.failure
+
+    def getresponse(self) -> _Answer:
+        return _Answer()
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [ssl.SSLEOFError(8, "EOF occurred in violation of protocol"), BrokenPipeError(32, "Broken pipe")],
+    ids=["tls-close-without-notify", "broken-pipe"],
+)
+def test_a_pooled_connection_that_fails_before_an_answer_is_replaced(
+    monkeypatch: pytest.MonkeyPatch, failure: OSError
+) -> None:
+    module = _proxy_module()
+    stale, fresh = _Upstream(failure), _Upstream(None)
+    module.IDLE.append(stale)
+    monkeypatch.setattr(module, "upstream", lambda origin: fresh)
+    monkeypatch.setenv("SONAR_HOST_URL", "https://sonar.example/prefix")
+    status, _, payload = module.exchange("GET", "/api/system/status", None, {})
+    assert (status, payload) == (200, b"fresh")
+    assert stale.closed
+    assert stale.sent == fresh.sent == ["/prefix/api/system/status"]
+    assert module.IDLE == [fresh]
+
+
+def test_a_pooled_connection_that_times_out_is_not_resent(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _proxy_module()
+    stale = _Upstream(TimeoutError("timed out"))
+    module.IDLE.append(stale)
+    monkeypatch.setattr(module, "upstream", lambda origin: pytest.fail("a timed out GET was sent again"))
+    monkeypatch.setenv("SONAR_HOST_URL", "https://sonar.example")
+    with pytest.raises(TimeoutError):
+        module.exchange("GET", "/api/system/status", None, {})
+    assert stale.closed
+    assert module.IDLE == []

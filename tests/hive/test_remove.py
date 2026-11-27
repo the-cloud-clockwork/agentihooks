@@ -14,6 +14,7 @@ from scripts.handoff import transfers
 from scripts.handoff.transfers import first_next
 from scripts.hive import auth, cli, create, create_github, create_render, join_report, machine, registry, remove
 from scripts.hive.placement import choose, place_master
+from scripts.inbox import exits
 from scripts.inbox.seats import SeatRegistry
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord
@@ -48,9 +49,16 @@ TEMPLATE_READ = [
 ]
 READS = [
     list(machine.LIST),
+    list(machine.LIST),
     TEMPLATE_READ,
     ["gh", "api", "repos/the-cloud-clockwork/antoncore/git/trees/dev?recursive=1", "--jq", remove.TREE],
 ]
+STOP = (
+    "for unit in agentihooks-hive.service agentihooks-scheduler.service; do "
+    'if test -f "$HOME/.config/systemd/user/$unit"; then systemctl --user disable --now "$unit" || exit 1; '
+    'echo "$unit"; fi; done'
+)
+STEP_TITLES = ["drain", "host", "member", "signer", "herdr", "herdr", "registry", "registry", "registry"]
 
 
 class Swarm:
@@ -255,7 +263,7 @@ def _written(store, tmp_path):
     return keys, sorted(store.redis.acl_users()), sorted(path.name for path in tmp_path.iterdir())
 
 
-def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, tmp_path):
+def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store: Any, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
     known = str(tmp_path / "known_hosts")
 
@@ -263,6 +271,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
 
     assert done == [
         f"drain: drained {member}: 1 agents ordered to hand off; 0 handed off: none; 0 claims released: none; 0 agents retired: none",
+        f"host: {TARGET} has no agentihooks user service to stop",
         f"member: revoked member {member} and its Redis user",
         f"signer: {remove.NO_SIGNER}",
         "herdr: removed herdr machine anton-9: hive removed",
@@ -273,7 +282,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
         f"manifests: opened pull request {PR} deleting {', '.join(OWNED)}; it merges once its checks pass",
         "openbao: deleted OpenBao secret/k8s/agentihooks-hive-anton-9",
     ]
-    assert [item.text for item in _orders(store, SEAT)] == [remove.ORDER.format(hive=member, slug=SLUG)]
+    assert [item.text for item in _orders(store, "engineer@1")] == [remove.ORDER.format(hive=member, slug=SLUG)]
     assert not auth.member(store.redis, member)
     assert f"hive-{member}" not in store.redis.acl_users()
     assert member not in store.redis.smembers(registry.INDEX)
@@ -285,7 +294,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
     repo, message = "the-cloud-clockwork/antoncore", "Remove worker hive anton-9\n\nOpened by agentihooks hive remove."
     posted = ["--input", "-", "--jq", ".sha"]
     assert [argv for argv, _ in run.calls if argv[0] == "gh"] == [
-        *READS[1:],
+        *READS[2:],
         ["gh", "pr", "list", "-R", repo, "--head", "remove-anton-9", "--state", "all", "--json", "url,state"]
         + ["--jq", '[.[] | select(.state != "CLOSED")][0].url // ""'],
         ["gh", "api", f"repos/{repo}/git/ref/heads/dev", "--jq", ".object.sha"],
@@ -303,7 +312,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
     assert bao.opener.requests == [("DELETE", "https://bao.example/v1/secret/metadata/k8s/agentihooks-hive-anton-9")]
 
 
-def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp_path):
+def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store: Any, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
     host = _host(Clock(store, member, 2), run, tmp_path)
     remove.remove(store, bao, plan, host)
@@ -314,6 +323,7 @@ def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp
 
     assert again == [
         f"drain: drained {member}: 0 agents ordered to hand off; 0 handed off: none; 0 claims released: none; 0 agents retired: none",
+        "host: herdr holds no machine anton-9, so there is no SSH route to stop its services on",
         f"member: {member} holds no member credential",
         f"signer: {remove.NO_SIGNER}",
         "herdr: herdr holds no machine anton-9",
@@ -323,7 +333,7 @@ def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp
     ]
     assert _written(store, tmp_path) == before
     assert [argv for argv, _ in run.calls[calls:]] == READS
-    assert len(_orders(store, SEAT)) == 1
+    assert len(_orders(store, "engineer@1")) == 1
 
 
 def test_a_rerun_by_name_after_a_remove_that_failed_midway_finishes_on_the_real_name(store, tmp_path):
@@ -439,7 +449,7 @@ def test_remove_lists_exactly_the_manifests_hive_create_wrote(label: str) -> Non
         f"would open a pull request into the-cloud-clockwork/antoncore dev deleting {', '.join(written)} "
         "and merge it once its checks pass"
     ]
-    assert [argv for argv, _ in run.calls] == READS[1:]
+    assert [argv for argv, _ in run.calls] == READS[2:]
 
 
 def test_remove_still_finds_the_prefixed_layout_of_older_hives() -> None:
@@ -533,7 +543,7 @@ def test_a_hive_remove_drain_records_its_owner_reason_and_deadline(store, tmp_pa
     )
 
 
-def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
+def test_a_dry_run_prints_every_step_first_and_writes_nothing(store: Any, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
     host = _host(Clock(store, member, 99), run, tmp_path)
     before = _written(store, tmp_path)
@@ -542,6 +552,7 @@ def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
 
     assert shown == [
         f"drain: would stop placement on {member} and wait up to 600 seconds for engineer@1 to hand off",
+        f"host: would stop and disable agentihooks-hive.service and agentihooks-scheduler.service where installed on {TARGET}",
         f"member: would revoke member {member} and its Redis user",
         f"signer: {remove.NO_SIGNER}",
         "herdr: would remove herdr machine anton-9 and the host key of [10.10.30.207]:2222",
@@ -557,7 +568,89 @@ def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
     assert "draining" not in registry.show(store.redis, member)
     assert [argv for argv, _ in run.calls] == READS
     assert bao.opener.requests == []
-    assert _orders(store, SEAT) == []
+    assert _orders(store, "engineer@1") == []
+
+
+@pytest.mark.feature("hive-remove-stops-host-services")
+def test_remove_of_a_machine_hive_stops_and_disables_its_services_over_its_ssh_route_first(
+    store: Any, tmp_path: Path
+) -> None:
+    member, run, bao, plan = _removal(store, tmp_path)
+    stopping = ["ssh", "-o", "BatchMode=yes", TARGET, STOP]
+
+    def machine_hive(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        done = run(argv, **kwargs)
+        if argv == stopping:
+            return subprocess.CompletedProcess(argv, 0, "agentihooks-hive.service\nagentihooks-scheduler.service\n", "")
+        return done
+
+    done = remove.remove(store, bao, plan, _host(Clock(store, member, 2), machine_hive, tmp_path))
+
+    assert done[1] == f"host: stopped and disabled agentihooks-hive.service, agentihooks-scheduler.service on {TARGET}"
+    assert [line.split(":")[0] for line in done] == [*STEP_TITLES, "manifests", "openbao"]
+    assert (stopping, machine.SSH_TIMEOUT_S) in run.calls
+    commands = [argv for argv, _ in run.calls]
+    assert commands.index(stopping) < commands.index(["herdr", "machine", "remove", "p7"])
+    assert run.inputs[commands.index(stopping)] is None
+    assert not auth.member(store.redis, member)
+
+
+@pytest.mark.feature("hive-remove-stops-host-services")
+@pytest.mark.parametrize(
+    ("answer", "error"),
+    [
+        (
+            subprocess.CompletedProcess(["ssh"], 255, "", "ssh: connect to host 10.10.30.207 port 2222: timed out\n"),
+            "ssh exited 255: ssh: connect to host 10.10.30.207 port 2222: timed out",
+        ),
+        (subprocess.TimeoutExpired("ssh", 60), "ssh failed (Command 'ssh' timed out after 60 seconds)"),
+    ],
+    ids=["refused", "timed-out"],
+)
+def test_an_unreachable_host_is_named_and_every_other_step_still_runs(
+    store: Any, tmp_path: Path, answer: "subprocess.CompletedProcess[str] | subprocess.TimeoutExpired", error: str
+) -> None:
+    member, run, bao, plan = _removal(store, tmp_path)
+
+    def unreachable(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        done = run(argv, **kwargs)
+        if argv[0] != "ssh":
+            return done
+        if isinstance(answer, subprocess.TimeoutExpired):
+            raise answer
+        return answer
+
+    done = remove.remove(store, bao, plan, _host(Clock(store, member, 2), unreachable, tmp_path))
+
+    assert done[1] == (
+        f"host: could not stop the services on {TARGET} ({error}); "
+        "stop and disable agentihooks-hive.service and agentihooks-scheduler.service there by hand"
+    )
+    assert [line.split(":")[0] for line in done] == [*STEP_TITLES, "manifests", "openbao"]
+    assert not auth.member(store.redis, member)
+    assert ["herdr", "machine", "remove", "p7"] in [argv for argv, _ in run.calls]
+
+
+@pytest.mark.feature("hive-remove-stops-host-services")
+@pytest.mark.parametrize(("code", "printed"), [(0, "agentihooks-hive.service\n"), (1, "")], ids=["stopped", "refused"])
+def test_the_host_stop_disables_only_the_installed_units_and_fails_on_a_refused_stop(
+    tmp_path: Path, code: int, printed: str
+) -> None:
+    units = tmp_path / ".config" / "systemd" / "user"
+    units.mkdir(parents=True)
+    (units / "agentihooks-hive.service").write_text("")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    log = tmp_path / "systemctl.log"
+    systemctl = tools / "systemctl"
+    systemctl.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexit {code}\n')
+    systemctl.chmod(0o755)
+    env = {"HOME": str(tmp_path), "PATH": f"{tools}:/usr/bin:/bin"}
+
+    ran = subprocess.run(["sh", "-c", STOP], env=env, capture_output=True, text=True, timeout=30, check=False)
+
+    assert (ran.returncode, ran.stdout) == (code, printed)
+    assert log.read_text() == "--user disable --now agentihooks-hive.service\n"
 
 
 class Drill(Clock):
@@ -603,10 +696,11 @@ def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_
 
     done = remove.remove(store, bao, plan, _host(clock, Run(), tmp_path, ledger))
 
-    assert done[:4] == [
+    assert done[:5] == [
         f"drain: drained {member}: 5 agents ordered to hand off; 2 handed off: engineer@1, engineer@7; "
         "3 claims released: t2, t3, t6; 6 agents retired: ci@2, ci@6, engineer@1, engineer@3, engineer@5, engineer@7",
         "drain: engineer@3, engineer@5 still ran after 30 seconds and were retired",
+        "host: herdr holds no machine anton-9, so there is no SSH route to stop its services on",
         f"member: revoked member {member} and its Redis user",
         f"signer: {remove.NO_SIGNER}",
     ]
@@ -699,7 +793,9 @@ def _orders(store, seat):
     return [item for inbox in InboxStore(store.redis).worlds() for item in inbox.inbox(seat)]
 
 
-def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_are_gone(store, tmp_path):
+def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_are_gone(
+    store: Any, tmp_path: Path
+) -> None:
     member = _member(store)
     _agent(store, member)
     clock = Clock(store, member, 2)
@@ -709,7 +805,7 @@ def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_a
     assert settled == f"hive {member} drained: every agent handed off, 1 ordered to hand off"
     assert (clock.now, clock.slept) == (2 * remove.POLL_S, 2)
     assert registry.show(store.redis, member)["draining"] == "yes"
-    orders = _orders(store, SEAT)
+    orders = _orders(store, "engineer@1")
     assert [(item.sender, item.text) for item in orders] == [
         (remove.SENDER, remove.ROLL.format(hive=member, slug=SLUG))
     ]
@@ -718,7 +814,7 @@ def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_a
     assert "even while you wait on checks, a merge or a reply" in orders[0].text
 
 
-def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
+def test_a_stopping_hive_with_no_agents_orders_nothing(store: Any, tmp_path: Path) -> None:
     member = _member(store)
     clock = Clock(store, member, 99)
 
@@ -726,7 +822,7 @@ def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
 
     assert settled == f"hive {member} drained: every agent handed off, 0 ordered to hand off"
     assert clock.slept == 0
-    assert _orders(store, SEAT) == []
+    assert _orders(store, "engineer@1") == []
 
 
 def _remote(store: Any, member: str, name: str, seat: str, report: dict | None, launched_at: int = 0) -> None:
@@ -762,8 +858,8 @@ def test_a_release_roll_orders_no_seat_whose_agent_ended_or_never_reported_past_
 
     assert settled == f"hive {member} drained: every agent handed off, 0 ordered to hand off"
     assert clock.slept == 0
-    assert _orders(store, f"ci-2@{SLUG}") == []
-    assert _orders(store, f"ci-3@{SLUG}") == []
+    assert _orders(store, "ci@2") == []
+    assert _orders(store, "ci@3") == []
 
 
 @pytest.mark.feature("hive-release-drain-live-agents")
@@ -778,19 +874,19 @@ def test_a_release_roll_still_orders_a_reporting_agent_and_one_launched_under_a_
     settled = remove.settle(store, member, 3600, _host(Clock(store, member, 1), Run(), tmp_path))
 
     assert settled == f"hive {member} drained: every agent handed off, 3 ordered to hand off"
-    for seat in (f"ci-2@{SLUG}", f"ci-3@{SLUG}", f"ci-4@{SLUG}"):
-        assert [item.text for item in _orders(store, seat)] == [remove.ROLL.format(hive=member, slug=SLUG)]
+    for name in ("ci@2", "ci@3", "ci@4"):
+        assert [item.text for item in _orders(store, name)] == [remove.ROLL.format(hive=member, slug=SLUG)]
 
 
 class Successor:
     def __init__(self, store):
         self.store, self.now, self.slept = store, 0.0, 0
 
-    def sleep(self, seconds):
+    def sleep(self, seconds: float) -> None:
         self.slept += 1
         self.now += seconds
         for agent in self.store.agents(SLUG):
-            if _orders(self.store, agent.seat):
+            if _orders(self.store, agent.name):
                 self.store.put_agent(SLUG, replace(agent, state="finished"))
 
     def __call__(self):
@@ -811,9 +907,9 @@ def test_a_release_roll_ends_its_drain_one_poll_after_its_agents_obey_the_order_
 
 
 class Answering(Successor):
-    def sleep(self, seconds):
-        for item in _orders(self.store, SEAT):
-            InboxStore(self.store.redis).close(item.id, SEAT, "done", "handed off")
+    def sleep(self, seconds: float) -> None:
+        for item in _orders(self.store, "engineer@1"):
+            InboxStore(self.store.redis).close(item.id, "engineer@1", "done", "handed off")
         super().sleep(seconds)
 
 
@@ -821,33 +917,81 @@ def _withdrawn(member):
     return f"cancelled: {remove.WITHDRAWN.format(hive=member)}"
 
 
+def _removed(member: str) -> str:
+    return f"cancelled: hive {member} was removed, so its hand off order no longer applies"
+
+
 def test_a_release_roll_withdraws_every_unanswered_order_when_its_drain_ends_so_a_later_occupant_reads_none(
-    store, tmp_path
-):
+    store: Any, tmp_path: Path
+) -> None:
     member = _member(store)
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
 
     remove.settle(store, member, 3600, _host(Successor(store), Run(), tmp_path))
 
-    for seat, successor in ((SEAT, "engineer@2"), (f"ci-1@{SLUG}", "ci@2")):
-        assert [(item.state, item.reason) for item in _orders(store, seat)] == [("cancelled", _withdrawn(member))]
+    for name, seat, successor in (("engineer@1", SEAT, "engineer@2"), ("ci@1", f"ci-1@{SLUG}", "ci@2")):
+        assert [(item.state, item.reason) for item in _orders(store, name)] == [("cancelled", _withdrawn(member))]
         SeatRegistry(store.redis).occupy(seat, successor, 1)
         assert InboxStore(store.redis).open_mail(successor) == []
 
 
-def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store, tmp_path):
+class Relieved(Successor):
+    def __init__(self, store: Any, seat: str, successor: str) -> None:
+        super().__init__(store)
+        self.seat, self.successor = seat, successor
+        self.held: list[str] = []
+        self.read: list[str] = []
+
+    def sleep(self, seconds: float) -> None:
+        inbox = InboxStore(self.store.redis)
+        for agent in self.store.agents(SLUG):
+            if agent.seat == self.seat and agent.name != self.successor:
+                self.held = [item.text for item in inbox.open_mail(agent.name)]
+                exits.settle(inbox, agent.name, self.seat, "handed off")
+                self.store.put_agent(SLUG, replace(agent, state="finished"))
+        SeatRegistry(self.store.redis).occupy(self.seat, self.successor, 2)
+        successor = AgentRecord(self.successor, "ci", "t4", seat=self.seat, hive="hive-one", state="working")
+        self.store.put_agent(SLUG, successor)
+        self.read = [item.text for item in inbox.open_mail(self.successor)]
+        self.slept += 1
+        self.now += seconds
+
+
+@pytest.mark.feature("hive-drain-order-one-life")
+def test_a_release_roll_order_reaches_only_the_agent_on_the_draining_hive_and_closes_when_it_leaves_its_seat(
+    store: Any, tmp_path: Path
+) -> None:
+    member = _member(store)
+    seat = f"ci-4@{SLUG}"
+    store.put_agent(SLUG, AgentRecord("ci@4", "ci", "t4", seat=seat, hive=member, state="working"))
+    SeatRegistry(store.redis).occupy(seat, "ci@4", 1)
+    clock = Relieved(store, seat, "ci@5")
+
+    remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
+
+    assert clock.read == []
+    assert clock.held == [remove.ROLL.format(hive=member, slug=SLUG)]
+    assert [(item.state, item.reason) for item in _orders(store, "ci@4")] == [
+        ("done", "done: ci@4 handed off; its hive hand off order ended with it")
+    ]
+    assert _orders(store, seat) == []
+
+
+def test_a_release_roll_keeps_the_outcome_of_an_order_its_agent_answered(store: Any, tmp_path: Path) -> None:
     member = _member(store)
     _agent(store, member)
     store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
 
     remove.settle(store, member, 3600, _host(Answering(store), Run(), tmp_path))
 
-    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("done", "done: handed off")]
-    assert [(item.state, item.reason) for item in _orders(store, f"ci-1@{SLUG}")] == [("cancelled", _withdrawn(member))]
+    assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("done", "done: handed off")]
+    assert [(item.state, item.reason) for item in _orders(store, "ci@1")] == [("cancelled", _withdrawn(member))]
 
 
-def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(store, tmp_path, monkeypatch):
+def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(
+    store: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.handoff import envelope
 
     member = _member(store)
@@ -857,12 +1001,42 @@ def test_a_release_roll_that_writes_recovery_handoffs_withdraws_its_orders_too(s
     settled = remove.settle(store, member, 30, _host(Clock(store, member, 99), Run(), tmp_path))
 
     assert settled.startswith(f"hive {member} stops after 30 seconds; engineer@1 did not hand off")
-    assert [(item.state, item.reason) for item in _orders(store, SEAT)] == [("cancelled", _withdrawn(member))]
+    assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("cancelled", _withdrawn(member))]
+
+
+@pytest.mark.feature("hive-remove-drain-withdraws-orders")
+def test_a_hive_remove_drain_withdraws_every_unanswered_order_when_it_ends_so_a_later_occupant_reads_none(
+    store: Any, tmp_path: Path
+) -> None:
+    member = _member(store)
+    _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
+    plan = remove.Plan(member, "anton-9", "p", wait_s=600)
+
+    remove.drain(store, plan, _host(Successor(store), Run(), tmp_path))
+
+    for name, seat, successor in (("engineer@1", SEAT, "engineer@2"), ("ci@1", f"ci-1@{SLUG}", "ci@2")):
+        assert [(item.state, item.reason) for item in _orders(store, name)] == [("cancelled", _removed(member))]
+        SeatRegistry(store.redis).occupy(seat, successor, 1)
+        assert InboxStore(store.redis).open_mail(successor) == []
+
+
+@pytest.mark.feature("hive-remove-drain-withdraws-orders")
+def test_a_hive_remove_drain_keeps_the_outcome_of_an_order_its_agent_answered(store: Any, tmp_path: Path) -> None:
+    member = _member(store)
+    _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
+    plan = remove.Plan(member, "anton-9", "p", wait_s=600)
+
+    remove.drain(store, plan, _host(Answering(store), Run(), tmp_path))
+
+    assert [(item.state, item.reason) for item in _orders(store, "engineer@1")] == [("done", "done: handed off")]
+    assert [(item.state, item.reason) for item in _orders(store, "ci@1")] == [("cancelled", _removed(member))]
 
 
 def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_at_the_deadline(
-    store, tmp_path, monkeypatch
-):
+    store: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.handoff import envelope
 
     member = _member(store)
@@ -883,7 +1057,7 @@ def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_
         "so each got a recovery handoff and its task reopens once the swarm retires it"
     )
     assert (clock.now, clock.slept) == (30, 2)
-    assert [len(_orders(store, seat)) for seat in (SEAT, f"eng-2@{SLUG}")] == [1, 1]
+    assert [len(_orders(store, name)) for name in ("engineer@1", "engineer@2")] == [1, 1]
     for name, task, seat in (("engineer@1", "t1", SEAT), ("engineer@2", "t2", f"eng-2@{SLUG}")):
         text = remove.RECOVERY.format(name=name, task=task, hive=member, wait=30, folder=folder(SLUG, task), pushed="")
         assert store.handoffs[(SLUG, task)] == (text, seat)
@@ -906,6 +1080,23 @@ def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_
     ]
 
 
+@pytest.mark.feature("master-handoff-carries-orders")
+def test_a_master_still_running_at_the_deadline_gets_a_recovery_envelope_naming_its_orders_unknown(
+    store: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.handoff import envelope
+
+    member = _member(store)
+    _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("master@1", "master", "master", seat=f"master@{SLUG}", hive=member))
+    monkeypatch.setattr(envelope, "build", lambda swarm, slug, agent, reason, rows, at, run: {"agent": agent.name})
+
+    remove.settle(store, member, 30, _host(Clock(store, member, 99), Run(), tmp_path))
+
+    assert store.envelopes[(SLUG, "t1")] == {"agent": "engineer@1"}
+    assert store.envelopes[(SLUG, "master")] == {"agent": "master@1", "orders": "unknown"}
+
+
 @pytest.mark.feature("hive-drain-push-resume")
 def test_a_release_roll_orders_each_agent_to_commit_and_push_before_it_hands_off(store: Any, tmp_path: Path) -> None:
     member = _member(store)
@@ -913,7 +1104,7 @@ def test_a_release_roll_orders_each_agent_to_commit_and_push_before_it_hands_off
 
     remove.settle(store, member, 3600, _host(Clock(store, member, 1), Run(), tmp_path))
 
-    (order,) = _orders(store, SEAT)
+    (order,) = _orders(store, "engineer@1")
     assert "commit and push your branch so no work is lost with the pod" in order.text
     assert order.text.index("commit and push") < order.text.index("hand off with the handoff skill")
 

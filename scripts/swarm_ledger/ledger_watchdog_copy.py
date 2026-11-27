@@ -4,6 +4,8 @@ import hashlib
 import re
 from typing import Any
 
+from scripts.swarm_ledger.op_context import OpContext
+
 OPS = ("watchdog_copy",)
 FIELD = "watchdog_copy"
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -18,7 +20,7 @@ def check(op: dict[str, Any]) -> None:
         raise ValueError(f"the watchdog copy must be text of at most {MAX_COPY} characters")
 
 
-def apply(doc: dict[str, Any], op: dict[str, str], ctx: Any) -> bool:
+def apply(doc: dict[str, Any], op: dict[str, str], ctx: OpContext) -> bool:
     digest = hashlib.sha256(op["text"].encode()).hexdigest()
     held: dict[str, Any] = doc.get(FIELD) or {}
     if held.get("digest") == digest:

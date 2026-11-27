@@ -1,0 +1,12 @@
+rules:
+  - id: preempt-repeated-victim-task
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Holder names change after handoff. Exclude recent victim tasks before choosing
+      the lowest ranked newest holder so one task is not repeatedly preempted.
+    paths:
+      include:
+        - /scripts/swarm/preempt.py
+        - preempt-repeated-victim-task.py
+    pattern: _victim([$H for $H in $HOLDERS if $H.name not in $ASKED], ...)

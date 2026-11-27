@@ -1,0 +1,29 @@
+x-swarm-env: &swarm-env
+  # ruleid: compose-stack-shell-modes
+  AGENTIHOOKS_DEPLOYMENT: ${AGENTIHOOKS_DEPLOYMENT:-compose}
+  # ruleid: compose-stack-shell-modes
+  AGENTIHOOKS_SCHEDULER_STATE_BACKEND: ${AGENTIHOOKS_SCHEDULER_STATE_BACKEND:-bus}
+  # ruleid: compose-stack-shell-modes
+  AGENTIHOOKS_DEPLOYMENT_MODE: ${AGENTIHOOKS_DEPLOYMENT}
+  # ruleid: compose-stack-shell-modes
+  SCHEDULER: $AGENTIHOOKS_SCHEDULER_STATE_BACKEND
+
+services:
+  controller:
+    command:
+      - sh
+      - -c
+      # ok: compose-stack-shell-modes
+      - echo "$${AGENTIHOOKS_DEPLOYMENT} $$AGENTIHOOKS_SCHEDULER_STATE_BACKEND"
+    environment:
+      <<: *swarm-env
+      # ok: compose-stack-shell-modes
+      AGENTIHOOKS_DEPLOYMENT: ${SWARM_DEPLOYMENT:-compose}
+      # ok: compose-stack-shell-modes
+      AGENTIHOOKS_SCHEDULER_STATE_BACKEND: ${SWARM_SCHEDULER_STATE_BACKEND:-bus}
+  swarm:
+    environment:
+      # ok: compose-stack-shell-modes
+      AGENTIHOOKS_DEPLOYMENT: local
+      # ok: compose-stack-shell-modes
+      AGENTIHOOKS_DEPLOYMENT_ID: ${AGENTIHOOKS_DEPLOYMENT_ID:-one}

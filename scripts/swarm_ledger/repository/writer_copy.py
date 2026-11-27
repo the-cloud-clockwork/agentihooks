@@ -1,7 +1,9 @@
-from . import refresh
+from typing import cast
+
+from . import refresh, tracked
 from .entry import thawed
 from .events import read_events
-from .fragments import Fragment, document
+from .fragments import Fragment, document, replaced
 
 
 def written(state: dict, previous: Fragment | None) -> tuple[Fragment, dict]:
@@ -28,15 +30,21 @@ def detached(fragment: Fragment, previous: Fragment | None, value: object) -> tu
     if fragment is previous:
         return fragment, value
     if fragment.parts is None:
-        return Fragment(thawed(fragment.value), signature=fragment.signature), thawed(fragment.value)
+        if tracked.held(value) is fragment:
+            return fragment, value
+        stored = Fragment(thawed(fragment.value), signature=fragment.signature)
+        return stored, tracked.bound(stored)
     old = previous.parts if previous is not None and type(previous.parts) is type(fragment.parts) else None
     if isinstance(fragment.parts, dict):
-        known = old or {}
-        pairs = {key: detached(part, known.get(key), value[key]) for key, part in fragment.parts.items()}
-        parts = {key: pair[0] for key, pair in pairs.items()}
-        return Fragment({key: part.value for key, part in parts.items()}, parts), {
-            key: pair[1] for key, pair in pairs.items()
-        }
+        own = cast(dict[str, Fragment], fragment.parts)
+        known = cast(dict[str, Fragment], old or {})
+        held = cast(dict[str, object], value)
+        changed = replaced(own, known)
+        parts, values, writer = dict(own), dict(cast(dict[str, object], fragment.value)), dict(held)
+        for key in list(own) if changed is None else changed:
+            part, writer[key] = detached(parts[key], known.get(key), held[key])
+            parts[key], values[key] = part, part.value
+        return Fragment(values, parts), writer
     known = old or ()
     pairs = [
         detached(part, known[index] if index < len(known) else None, item)

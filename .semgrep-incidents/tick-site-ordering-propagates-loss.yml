@@ -1,0 +1,32 @@
+rules:
+  - id: tick-site-ordering-propagates-loss
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Site barrier needs order steps but must not propagate drops, cuts or held
+      exceptions. Use registry.failure_needs for failure propagation.
+    paths:
+      include:
+        - /scripts/tick/engine.py
+        - /scripts/tick/steps/__init__.py
+        - tick-site-ordering-propagates-loss.py
+    pattern-either:
+      - pattern: $STEP.needs & dropped
+      - pattern: $STEP.needs & gone
+      - pattern: $STEP.needs & cut
+      - pattern: fallen.isdisjoint($STEP.needs)
+  - id: tick-site-handoff-propagates-ordering-loss
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A handed off step waits for every ordering predecessor but only declared
+      dependencies may drop it. Pass required failure needs to ended.
+    paths:
+      include:
+        - /scripts/tick/engine.py
+        - tick-site-ordering-propagates-loss.py
+    patterns:
+      - pattern-inside: |
+          def _after(...):
+              ...
+      - pattern: $PASS.ended($EARLIER, $TIMEOUT)

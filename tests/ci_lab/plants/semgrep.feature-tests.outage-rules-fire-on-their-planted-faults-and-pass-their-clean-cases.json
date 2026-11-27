@@ -1,0 +1,11 @@
+{
+  "gate": "semgrep/feature-tests/outage-rules-fire-on-their-planted-faults-and-pass-their-clean-cases",
+  "reason": "abandon-at-lane-expiry: an outage fixture line its rule matches is marked ok",
+  "edits": [
+    {
+      "path": ".semgrep-incidents/abandon-at-lane-expiry.py",
+      "before": "            # ruleid: abandon-at-lane-expiry\n            _abandoned(step)\n",
+      "after": "            # ok: abandon-at-lane-expiry\n            _abandoned(step)\n"
+    }
+  ]
+}

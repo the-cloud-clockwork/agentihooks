@@ -21,7 +21,8 @@ Declarations = dict[str, dict[str, Any]]
 Wiring = TypedDict(
     "Wiring", {"not_gates": Declarations, "outside_gate": Declarations, "lab_gates": Declarations}, total=False
 )
-Lab = TypedDict("Lab", {"authoritative": list[str], "gate_required": bool}, total=False)
+LabQueue = TypedDict("LabQueue", {"authoritative": list[str], "full_suite_entries": int}, total=False)
+Lab = TypedDict("Lab", {"authoritative": list[str], "gate_required": bool, "queue": LabQueue}, total=False)
 EVENT_TERM = re.compile(r"""github\.event_name\s*(==|!=)\s*(['"])(\w+)\2""")
 EXPRESSION = re.compile(r"\$\{\{(.*)\}\}", re.DOTALL)
 
@@ -97,7 +98,12 @@ def _outside_problems(
     jobs = [
         f"{file}/{job_id}"
         for file, workflow in workflows.items()
-        if file != gate_file and any(event in triggers(workflow) for event in PULL_REQUEST_EVENTS)
+        if file != gate_file
+        and any(
+            event != "pull_request_target" or config.get("types") != ["dequeued"]
+            for event, config in triggers(workflow).items()
+            if event in PULL_REQUEST_EVENTS
+        )
         for job_id, job in (workflow.get("jobs") or cast(dict[str, Any], {})).items()
         if on_pull_requests(job)
     ]
@@ -135,9 +141,14 @@ def _lab_problems(workflows: dict[str, dict[Any, Any]], declared: dict[str, dict
         for key, entry in declared.items()
         if entry.get("replaces") and entry["replaces"] not in jobs
     ]
+    listed = {
+        "lab.authoritative": lab.get("authoritative", []),
+        "lab.queue.authoritative": lab.get("queue", {}).get("authoritative", []),
+    }
     return problems + [
-        f"lab.authoritative names {gate}, but {CONFIG} declares no {LAB_PREFIX}{gate} lab gate."
-        for gate in lab.get("authoritative", ())
+        f"{key} names {gate}, but {CONFIG} declares no {LAB_PREFIX}{gate} lab gate."
+        for key, gates in listed.items()
+        for gate in gates
         if f"{LAB_PREFIX}{gate}" not in declared
     ]
 

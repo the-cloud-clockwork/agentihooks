@@ -1,0 +1,16 @@
+{
+  "gate": "lint/check-every-pull-request-job-is-a-need-of-gate-required",
+  "reason": "runs on pull requests but is not a need of Gate: a job that runs on pull requests is added outside the needs of Gate \u2014 Required",
+  "edits": [
+    {
+      "path": ".github/workflows/test.yml",
+      "before": "  gate-required:\n",
+      "after": "  plant-outside-gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n\n  gate-required:\n"
+    },
+    {
+      "path": ".github/runner-classes.json",
+      "before": "  \"test.yml/mutation-stats-seed\": \"light\",\n  \"test.yml/promotion-ready\": \"hosted\",\n",
+      "after": "  \"test.yml/mutation-stats-seed\": \"light\",\n  \"test.yml/plant-outside-gate\": \"light\",\n  \"test.yml/promotion-ready\": \"hosted\",\n"
+    }
+  ]
+}

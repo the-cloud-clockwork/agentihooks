@@ -1,9 +1,12 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+
+from tests.test_ci_smoke_image_reuse import runtime_images
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
@@ -431,8 +434,10 @@ def test_swarm_smoke_loads_saved_runtime_images_before_any_pull_reuses_them() ->
     assert save["with"]["key"] == steps[names.index("Restore the runtime images saved on dev")]["with"]["key"]
 
 
-@pytest.mark.parametrize("failure", ["", "redis:7", "redis:7-alpine", "nats:2.15.1-alpine", "build"])
-def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path, failure):
+@pytest.mark.parametrize("failure", ["", *runtime_images(), "build"])
+def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path: Path, failure: str) -> None:
+    images = runtime_images()
+    assert images
     log = tmp_path / "docker.log"
     tools = tools_with(
         tmp_path,
@@ -455,11 +460,14 @@ if [[ "$1" == pull ]]; then
   if [[ -n "$FAILURE" && "$image" == *"$FAILURE" ]]; then exit 17; fi
 elif [[ "$1" == build ]]; then
   touch "$SYNC/build"
+  pulls_started() {
+    for runtime in $RUNTIME_IMAGES; do [[ -e "$SYNC/$runtime" ]] || return 1; done
+  }
   for _ in {1..200}; do
-    if [[ -e "$SYNC/redis:7" && -e "$SYNC/redis:7-alpine" ]]; then break; fi
+    if pulls_started; then break; fi
     /bin/sleep 0.01
   done
-  [[ -e "$SYNC/redis:7" && -e "$SYNC/redis:7-alpine" ]] || exit 19
+  pulls_started || exit 19
   if [[ "$FAILURE" == build ]]; then exit 23; fi
 fi
 """,
@@ -478,6 +486,7 @@ fi
             "WAITS": str(tmp_path / "waits.log"),
             "SYNC": str(sync),
             "FAILURE": failure,
+            "RUNTIME_IMAGES": " ".join(images),
         },
         text=True,
         capture_output=True,
@@ -486,14 +495,68 @@ fi
     assert result.returncode == (23 if failure == "build" else 17 if failure else 0), result.stderr
     calls = log.read_text().splitlines()
     assert sum(call.startswith("build ") for call in calls) == 1
-    assert (sync / "redis:7").exists()
-    assert (sync / "redis:7-alpine").exists()
-    assert (sync / "nats:2.15.1-alpine").exists()
+    for image in images:
+        assert (sync / image).exists()
     assert {call.split()[1] for call in calls if call.startswith("tag ")} == {
-        f"public.ecr.aws/docker/library/{image}"
-        for image in ("redis:7", "redis:7-alpine", "nats:2.15.1-alpine")
-        if image != failure
+        f"public.ecr.aws/docker/library/{image}" for image in images if image != failure
     }
+
+
+def test_the_ready_list_reuses_every_runtime_image_the_parallel_smokes_pull(tmp_path: Path) -> None:
+    """Every image a parallel smoke always pulls is pre pulled by the build step and reused with no pull or tag."""
+    steps = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]["smoke"]["steps"]
+    parallel = next(
+        step for step in steps if step.get("run", "").startswith("bash scripts/packaging/swarm-smoke-parallel.sh ")
+    )
+    assert parallel["env"]["SWARM_SMOKE_RUNTIME_IMAGES_READY"] == "true"
+    build = next(step["run"] for step in steps if step.get("name") == "Build the swarm image")
+    pulled: set[str] = set()
+    for script in parallel["run"].split()[2:]:
+        text = (ROOT / script).read_text()
+        names = dict(re.findall(r"^(\w+)=(\S+)$", text, re.M))
+        block = ""
+        for line in text.splitlines():
+            if line in ('if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then', "require_image() {"):
+                block = line
+            elif block and line in ("else", "fi", "}"):
+                block = "else" if line == "else" else ""
+            elif found := re.fullmatch(r"(?:bash scripts/packaging/pull-runtime-image\.sh|require_image) (\S+)", line):
+                pulled.add(names.get(found[1].strip('"$'), found[1]))
+            elif re.search(r"pull-runtime-image\.sh|require_image", line):
+                assert block in ("else", "require_image() {"), (script, line)
+    assert pulled
+    assert pulled <= set(re.findall(r"docker tag \S+ (mirror\.gcr\.io/library/\S+)", build)), pulled
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+if [[ "$1" == --host ]]; then shift 2; fi
+if [[ "$1" == image && "$2" == inspect ]]; then
+  echo amd64
+  exit 0
+fi
+exit 17
+""",
+    )
+    for image in sorted(pulled):
+        log = tmp_path / f"{image.rsplit('/', 1)[1]}.log"
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts/packaging/pull-runtime-image.sh"), image],
+            env={
+                **os.environ,
+                "PATH": f"{tools}:{os.environ['PATH']}",
+                "PULL_LOG": str(log),
+                "SWARM_SMOKE_RUNTIME_IMAGES_READY": "true",
+            },
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, (image, result.stderr)
+        calls = log.read_text().splitlines()
+        assert len(calls) == 1, (image, calls)
+        assert " image inspect " in f" {calls[0]} " and calls[0].endswith(image)
 
 
 def dockerfile_bases():
@@ -604,6 +667,14 @@ def test_compose_smoke_jobs_pull_every_dockerfile_base_before_building(job, scri
         assert pull < build
         assert "if" not in steps[pull]
         assert "continue-on-error" not in steps[pull]
+
+
+def test_hive_join_job_pulls_every_dockerfile_base_before_building() -> None:
+    steps = yaml.safe_load((ROOT / ".github/workflows/hive-join.yml").read_text())["jobs"]["smoke"]["steps"]
+    runs = [step.get("run", "") for step in steps]
+    build = next(i for i, run in enumerate(runs) if "docker build " in run)
+    for base in dockerfile_bases():
+        assert runs.index(f"bash scripts/packaging/pull-runtime-image.sh {base}") < build
 
 
 def test_hive_launch_pulls_the_worker_base_and_never_retries_the_launch(tmp_path):

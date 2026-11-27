@@ -5,7 +5,7 @@ from typing import Any
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import launch_check, master_start, reaper, seat_spawn
+from scripts.swarm import launch_check, master_refusals, master_start, reaper, seat_spawn
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import master_seat_alarm, masters
 from scripts.swarm_v2.masters_channel import SWARM
@@ -37,10 +37,10 @@ def run(
         if refused := seat_spawn.placed_elsewhere(
             runtime, MASTER, {"id": seat_name, "seat": seat_address(slug, seat_name)}
         ):
-            actions.append(refused)
+            actions += master_refusals.record(store, slug, seat_name, refused, now_ms)
             continue
         if refused := seat_spawn.no_slot(config, runtime, MASTER):
-            return [*actions, refused]
+            return [*actions, *master_refusals.record(store, slug, seat_name, refused, now_ms)]
         actions.append(_place(slug, config, store, runtime, seat_name, now_ms, doc))
     return actions
 

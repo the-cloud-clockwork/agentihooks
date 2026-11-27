@@ -10,7 +10,7 @@ delay="${PULL_RETRY_SECONDS:-10}"
 if [[ ${PULL_REUSE_LOCAL:-} == true ||
       ( ${SWARM_SMOKE_RUNTIME_IMAGES_READY:-} == true &&
         ( "$image" == mirror.gcr.io/library/redis:7 || "$image" == mirror.gcr.io/library/redis:7-alpine ||
-          "$image" == mirror.gcr.io/library/nats:2.15.1-alpine ) ) ]] &&
+          "$image" == mirror.gcr.io/library/nats:2.15.1-alpine || "$image" == mirror.gcr.io/library/nginx:1.27-alpine ) ) ]] &&
    [[ "$(timeout "$limit" docker --host "$docker_host" image inspect --format '{{.Architecture}}' "$image" 2>/dev/null)" == amd64 ]]; then
   exit 0
 fi
@@ -31,7 +31,7 @@ print(next(manifest["digest"] for manifest in index["manifests"]
            and manifest["platform"].get("architecture") == "amd64"))
 ' <<<"$manifest")" && timeout "$limit" docker --host "$docker_host" pull "$source@$digest"
 }
-for attempt in $(seq "$attempts"); do
+for ((attempt = 1; attempt <= attempts; attempt++)); do
   source="$image"
   if (( attempt % 2 == 0 )); then source="$fallback"; fi
   if acquire "$@"; then

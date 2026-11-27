@@ -59,6 +59,10 @@ def enforce(store):
     store.update(SLUG, gates={"nightwatch": "enforce"})
 
 
+def observe(store: RedisStore) -> None:
+    store.update(SLUG, gates={"nightwatch": "observe"})
+
+
 class Rig:
     def __init__(self, refused="", respawns=("respawned the master",)):
         self.ledger, self.runtime, self.respawned, self.mailed, self.envs = Ledger(), Runtime(), [], [], []
@@ -93,11 +97,22 @@ def kinds(store):
     return [finding.kind for finding in night_watch.findings(store, SLUG)]
 
 
-def test_the_night_watch_gate_defaults_to_log_only():
-    assert catalog.defaults()["nightwatch"] == "observe"
+@pytest.mark.feature("night-watch-gate-defaults-to-deny")
+def test_the_night_watch_gate_defaults_to_deny() -> None:
+    assert catalog.defaults()["nightwatch"] == "enforce"
+
+
+@pytest.mark.feature("night-watch-gate-defaults-to-deny")
+def test_a_swarm_with_no_night_watch_gate_respawns_its_empty_front_door_seat_at_ten_minutes(store: RedisStore) -> None:
+    assert "nightwatch" not in store.config(SLUG).gates
+    rig = Rig()
+    until(store, rig, NOW, NOW + 10 * MINUTE)
+    assert rig.respawned == [NOW + 10 * MINUTE]
+    assert [source for source, _ in rig.ledger.alerts] == ["seat"]
 
 
 def test_an_empty_front_door_seat_logs_a_respawn_at_ten_minutes_in_log_only_mode(store, tmp_path):
+    observe(store)
     rig = Rig()
     assert until(store, rig, NOW, NOW + 10 * MINUTE - 1) == []
     assert kinds(store) == []
@@ -137,6 +152,7 @@ def test_the_watch_respawns_an_empty_seat_at_most_three_times_an_hour(store):
 
 
 def test_the_log_counts_would_be_respawns_against_the_same_cap(store, tmp_path):
+    observe(store)
     rig = Rig()
     until(store, rig, NOW, NOW + 60 * MINUTE)
     assert [row["tool"] for row in gate_log.recent(SLUG, None, tmp_path)].count("respawn") == 3
@@ -163,6 +179,7 @@ def test_a_merge_observation_outage_keeps_the_open_merge_alert(store, monkeypatc
 
 
 def test_an_episode_logged_before_the_gate_moves_to_deny_raises_its_alert_then(store):
+    observe(store)
     rig = Rig()
     until(store, rig, NOW, NOW + 10 * MINUTE)
     assert rig.ledger.alerts == []
@@ -286,6 +303,7 @@ def test_ready_work_held_by_host_room_raises_a_finding_naming_it_at_thirty_minut
 
 
 def test_ready_work_held_at_the_lane_cap_names_the_cap(store, monkeypatch):
+    observe(store)
     rig = Rig()
     held_master(store, rig.runtime)
     store.put_agent(SLUG, AgentRecord("e1", "eng", "engineer", state="working", started_at=NOW - MINUTE))
@@ -537,6 +555,7 @@ def test_a_second_merge_trigger_in_the_same_episode_replaces_the_alert(store, mo
 
 
 def test_a_logged_merge_stall_sends_no_email(store, monkeypatch, tmp_path):
+    observe(store)
     rig = Rig()
     held_master(store, rig.runtime)
     stalled(monkeypatch)
@@ -640,7 +659,7 @@ def test_the_tick_respawns_the_front_door_past_spent_retries(store, monkeypatch)
     monkeypatch.setattr(night_watch, "run", run_watch)
     tick._night_watch(SLUG, store, Ledger(), Runtime(), {"tasks": []}, NOW, False)
     assert seen["respawn"] == ["launched"]
-    assert called == [{}]
+    assert called == [{"forced": True}]
     assert not store.redis.exists(store.key(SLUG, "master-start"))
 
 
@@ -784,6 +803,17 @@ def test_a_held_master_spawn_names_why_the_seat_stays_empty(store):
     until(store, rig, NOW, NOW + 10 * MINUTE)
     (finding,) = night_watch.findings(store, SLUG)
     assert finding.evidence == ("Why it stays empty: holding the master spawn: host full",)
+
+
+@pytest.mark.feature("swarm-master-placement-refusals-kept")
+def test_a_kept_master_placement_refusal_names_why_the_seat_stays_empty(store):
+    from scripts.swarm import master_refusals
+
+    master_refusals.record(store, SLUG, "master", "no live hive takes master", NOW)
+    until(store, Rig(), NOW, NOW + 10 * MINUTE)
+    (finding,) = night_watch.findings(store, SLUG)
+    why = "master placement last refused 10 minutes ago, at 08:00 UTC: no live hive takes master"
+    assert finding.evidence == (f"Why it stays empty: {why}",)
 
 
 def test_a_refused_respawn_is_reported_with_its_cause(store):

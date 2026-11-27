@@ -11,9 +11,12 @@ on:
 permissions:
   contents: read
 
+env:
+  EIO_BACKEND: posix
+
 jobs:
   scan:
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 5
     env:
       GIT_CONFIG_COUNT: "1"
@@ -35,9 +38,12 @@ jobs:
           SEMGREP_VERSION: "1.177.0"
         run: |
           if [[ "$(semgrep --version 2>/dev/null)" != "$SEMGREP_VERSION" ]]; then
-            python -m pip install "semgrep==$SEMGREP_VERSION"
+            python -m pip install --constraint .github/ci-tools/semgrep.lock "semgrep==$SEMGREP_VERSION"
           fi
           test "$(semgrep --version)" = "$SEMGREP_VERSION"
+
+      - name: Install PyYAML
+        run: python -m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2
 
       - name: Check out the protected grader
         env:
@@ -54,8 +60,29 @@ jobs:
           copy="$(mktemp -d -p "$RUNNER_TEMP")"
           cp -r "$RULES" "$copy/rules"
           : > "$copy/.semgrepignore"
-          (cd "$copy" && semgrep --metrics off --test --config rules rules)
-          semgrep scan --error --strict --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .
+          (cd "$copy" && semgrep --metrics off --test --strict --config rules rules)
+          semgrep scan --error --strict --timeout 30 --metrics off --config "$RUNNER_TEMP/grader/$RULES" --config "$RULES" .
+
+      - name: Outage rules for tests hold on every test file
+        env:
+          RULES: .semgrep-incidents/ledger-client-swapped-for-a-function.yml .semgrep-incidents/parametrize-id-carries-interpreter-path.yml .semgrep-incidents/fake-server-close-read-ignores-reset.yml .semgrep-incidents/chart-grader-copy-keeps-source-modes.yml
+        run: |
+          args=()
+          for rule in $RULES; do
+            args+=(--config "$rule")
+            if [[ -e "$RUNNER_TEMP/grader/$rule" ]]; then args+=(--config "$RUNNER_TEMP/grader/$rule"); fi
+          done
+          semgrep scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files "${args[@]}" tests
+
+      - name: New test waits keep a bound of ten seconds or more
+        env:
+          BASE: ${{ inputs.base }}
+          RULE: .semgrep-incidents/test-wait-bound-under-ten-seconds.yml
+        run: |
+          args=(--config "$RULE")
+          if [[ -e "$RUNNER_TEMP/grader/$RULE" ]]; then args+=(--config "$RUNNER_TEMP/grader/$RULE"); fi
+          baseline="$(git merge-base "$BASE" HEAD)"
+          semgrep scan --error --strict --timeout 30 --metrics off --x-ignore-semgrepignore-files "${args[@]}" --baseline-commit "$baseline" tests
 
       - name: Rule exceptions only shrink
         env:
@@ -81,6 +108,61 @@ jobs:
           print(f"{os.environ['LIST']} exceptions: {len(current)} of {len(previous)}")
           PY
           done
+          baseline="$(git merge-base "$BASE" HEAD)"
+          BASELINE="$baseline" python - <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          import yaml
+
+
+          def git(*args: str) -> str:
+              return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
+
+
+          def negations(node: object) -> int:
+              if isinstance(node, dict):
+                  return sum(str(key).startswith("pattern-not") + negations(value) for key, value in node.items())
+              if isinstance(node, list):
+                  return sum(negations(item) for item in node)
+              return 0
+
+
+          def exceptions(revision: str) -> dict[str, list[int]]:
+              found: dict[str, list[int]] = {}
+              for path in git("ls-tree", "-r", "-z", "--name-only", revision).split("\0"):
+                  folder, _, name = path.partition("/")
+                  if not folder.startswith(".semgrep") or not name.endswith((".yml", ".yaml")):
+                      continue
+                  if name.endswith((".test.yml", ".test.yaml")):
+                      continue
+                  for rule in yaml.safe_load(git("show", f"{revision}:{path}"))["rules"]:
+                      counts = found.setdefault(rule["id"], [0, 0])
+                      counts[0] += negations(rule)
+                      counts[1] += len(rule.get("paths", {}).get("exclude", []))
+              return found
+
+
+          previous = exceptions(os.environ["BASELINE"])
+          current = exceptions("HEAD")
+          if not current:
+              sys.exit("No own Semgrep rule under a .semgrep folder; the check graded nothing")
+          grown = [
+              f"{rule} {kind} grew from {old} to {new}"
+              for rule in sorted(current.keys() & previous.keys())
+              for kind, old, new in zip(("pattern-not entries", "path excludes"), previous[rule], current[rule])
+              if new > old
+          ]
+          print(
+              f"Own rule exceptions: {sum(nots for nots, _ in current.values())} pattern-not entries and "
+              f"{sum(excludes for _, excludes in current.values())} path excludes in {len(current)} rules; "
+              f"the merge base holds {sum(nots for nots, _ in previous.values())} and "
+              f"{sum(excludes for _, excludes in previous.values())} in {len(previous)} rules"
+          )
+          if grown:
+              sys.exit("\n".join(grown))
+          PY
 
       - name: Resolve the merge base of the head and the base
         id: baseline
@@ -136,12 +218,12 @@ jobs:
           SEMGREP_VERSION: "1.177.0"
         run: |
           if [[ "$(semgrep --version 2>/dev/null)" != "$SEMGREP_VERSION" ]]; then
-            python -m pip install "semgrep==$SEMGREP_VERSION"
+            python -m pip install --constraint .github/ci-tools/semgrep.lock "semgrep==$SEMGREP_VERSION"
           fi
           test "$(semgrep --version)" = "$SEMGREP_VERSION"
 
       - name: Operator feature regressions and passing fixtures
-        run: semgrep --metrics off --test .semgrep/features
+        run: semgrep --metrics off --test --strict .semgrep/features
 
       # Each rule matches a pattern behind an outage; the scan job fails only instances new against the base.
       - name: Outage rules fire on their planted faults and pass their clean cases
@@ -149,7 +231,7 @@ jobs:
           copy="$(mktemp -d -p "$RUNNER_TEMP")"
           cp -r .semgrep-incidents "$copy/rules"
           : > "$copy/.semgrepignore"
-          (cd "$copy" && semgrep --metrics off --test --config rules rules)
+          (cd "$copy" && semgrep --metrics off --test --strict --config rules rules)
 
   charts:
     concurrency:
@@ -177,9 +259,9 @@ jobs:
           SEMGREP_VERSION: "1.177.0"
         run: |
           if [[ "$(semgrep --version 2>/dev/null)" == "$SEMGREP_VERSION" ]]; then
-            python -m pip install pyyaml==6.0.2
+            python -m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2
           else
-            python -m pip install pyyaml==6.0.2 "semgrep==$SEMGREP_VERSION"
+            python -m pip install --constraint .github/ci-tools/semgrep.lock pyyaml==6.0.2 "semgrep==$SEMGREP_VERSION"
           fi
           test "$(semgrep --version)" = "$SEMGREP_VERSION"
 
@@ -209,10 +291,20 @@ jobs:
       - name: A chart version bump leaves every pod template unchanged
         run: |
           script=tests/ci_charts/chart_pod_templates.py
+          empty="$(mktemp -d -p "$RUNNER_TEMP")"
+          if [[ "$(python "$RUNNER_TEMP/grader/$script" --root "$empty" 2>&1)" != *"No chart found under deploy"* ]]; then
+            echo "::error::The protected grader's copy of $script does not grade the tree --root names, so nothing trusted can grade the head's charts."
+            exit 1
+          fi
           python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"
 
       # The timer guard reads source only, so a CronJob a chart template renders is checked on the rendered manifests.
       - name: Charts render no CronJob outside the scheduler
         run: |
           script=tests/ci_charts/chart_timers.py
+          empty="$(mktemp -d -p "$RUNNER_TEMP")"
+          if [[ "$(python "$RUNNER_TEMP/grader/$script" --root "$empty" 2>&1)" != *"No chart found under deploy"* ]]; then
+            echo "::error::The protected grader's copy of $script does not grade the tree --root names, so nothing trusted can grade the head's charts."
+            exit 1
+          fi
           python "$RUNNER_TEMP/grader/$script" --root "$GITHUB_WORKSPACE"

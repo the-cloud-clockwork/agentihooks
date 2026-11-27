@@ -75,8 +75,8 @@ jobs:
 
         '
     - name: Save the test environment from dev
-      if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref ==
-        'refs/heads/dev'
+      if: env.UNIT_SOURCE == '' && steps.venv.outcome == 'success' && steps.venv.outputs.cache-hit != 'true' && github.event_name ==
+        'push' && github.ref == 'refs/heads/dev'
       uses: actions/cache/save@v4
       with:
         path: ~/venv

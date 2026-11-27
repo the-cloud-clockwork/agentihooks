@@ -9,7 +9,7 @@ argument-hint: "[LEDGER] [stop] [--quote WORDS] [--max-eng-agents N] [--max-ci-a
 1. Run the script with the operator's arguments. Resolve this skill's directory
    from the loaded SKILL.md. Use the Python interpreter that has agentihooks
    installed; requires Python, agentihooks, git, authenticated gh, and a linked
-   bundle. Install agentihooks with `uv tool install agentihooks`. Run
+   bundle. Install agentihooks with `uv tool install "agentihooks[nats]"`. Run
    `agentihooks deps check` for missing git or gh; their system installation
    requires operator approval. Authenticate gh with `gh auth login`.
 

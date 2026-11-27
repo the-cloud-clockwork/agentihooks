@@ -1,7 +1,7 @@
-"""The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself unless fleet panic holds
-or the task pull request's checks run with none red, which passes the stop naming the checks as the wait, then
+"""The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself unless its swarm's panic
+holds or the task pull request's checks run with none red, which passes the stop naming the checks as the wait, then
 refuses the stop over uncommitted changes, a push origin refused, or pushed work with no pull request and no
-ledger line since the push, unless any declared wait during fleet panic, a checked wait on another task not yet done,
+ledger line since the push, unless any declared wait during that panic, a checked wait on another task not yet done,
 or one on the merge of a pull request still open, holds it."""
 
 import os
@@ -24,10 +24,10 @@ if TYPE_CHECKING:
 
     from scripts.swarm.ledger_events import PullRequest
 
-WORKERS = frozenset({"eng", "ci"})
+WORKERS = frozenset({"eng", "ci", "review"})
 TEMPLATE = (
     "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull request. "
-    "If not, update the issue and the pull request and record progress on the ledger."
+    "If not, update the issue and the pull request and record progress through the swarm API."
 )
 PROGRESS = (
     "Pushed work has no recorded progress since the push. "
@@ -56,7 +56,7 @@ GATE_LATE = (
     "Run python -m scripts.ci_prepush there and commit."
 )
 PUSH_LATE = "The stop hook had too little time left to push {path}, so it did not push it. Push it yourself."
-PANIC_HELD = "Fleet panic holds, so the stop hook pushes nothing and did not push {path}."
+PANIC_HELD = "Swarm panic holds, so the stop hook pushes nothing and did not push {path}."
 CHECKS = (
     "Checks still run on {url} and none is red, so the stop hook did not push: a push now cancels them. "
     "Wait with agentihooks swarm {swarm} wait --on checks {url}, then push once they resolve."
@@ -241,7 +241,7 @@ class PushStop:
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
         store, progress, failed, found = self.connect(), False, [], trees(self.root(), who.name)
-        frozen, reviewing = self.frozen(store), self.reviewing(call.session)
+        frozen, reviewing = self.frozen(store, who.swarm), self.reviewing(call.session)
         holding = [tree for tree in found if tree.unpushed and own_pull(tree, task)]
         checks = self.checks(task) if holding else ""
         held = holding if checks else []
@@ -284,14 +284,14 @@ class PushStop:
     def on_origin(self, tree):
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0
 
-    def frozen(self, store: Any) -> bool:
-        """Whether fleet panic holds, which denies every push but the fix; a Redis error reads as no panic."""
+    def frozen(self, store: Any, slug: str) -> bool:
+        """Whether the swarm's panic holds, which denies every push but the fix; a Redis error reads as no panic."""
         from redis.exceptions import RedisError
 
         from scripts.swarm import panic
 
         try:
-            return panic.state(store) is not None
+            return panic.state(store, slug) is not None
         except RedisError:
             return False
 
@@ -304,8 +304,8 @@ class PushStop:
 
     def waiting(self, store: Any, who: Any, doc: Any, task: Any, dirty: bool, frozen: bool) -> bool:
         """Whether a live checked wait holds the stop, so a refused push never deadlocks: any declared wait while
-        fleet panic holds, one on another unfinished task, or one on the merge of a pull request still open, which a
-        push would drop from the queue, while every change is committed."""
+        the swarm's panic holds, one on another unfinished task, or one on the merge of a pull request still open,
+        which a push would drop from the queue, while every change is committed."""
         from scripts.swarm import idle, waits
 
         held = idle.wait(store.redis, who.swarm, who.name)

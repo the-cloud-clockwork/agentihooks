@@ -1,10 +1,12 @@
 """The lab-verdict job: the base branch's lab authority and the lab App's verdict on each authoritative gate.
 
 `authority` reads the gates the lab grades from the protected grader's delivery.yaml, so a pull request head can
-never widen them, and AGENTIHOOKS_LAB_OFF empties them; off pull request events it publishes nothing. `verdict` waits
-for the head's completed `lab/<gate>` check run from the lab App named by AGENTIHOOKS_LAB_APP and publishes
-`lab_<gate>` for each authoritative gate: success or skipped as posted, so the lab marks a gate this pull request does
-not run as skipped, and failure for any other conclusion or a verdict absent or pending at the deadline.
+never widen them, and AGENTIHOOKS_LAB_OFF empties them: lab.authoritative on pull requests, lab.queue.authoritative on
+merge groups and nothing on any other event. `verdict` waits for the head's completed `lab/<gate>` check run from the
+lab App named by AGENTIHOOKS_LAB_APP and publishes `lab_<gate>` for each authoritative gate: success or skipped as
+posted, so the lab marks a gate this pull request does not run as skipped, and failure for any other conclusion or a
+verdict absent or pending at the deadline. A check the lab completed as neutral lost a unit and holds no verdict: its
+gate fails like any other and the step prints an error that names the check and the rerequest that grades it again.
 """
 
 import json
@@ -18,14 +20,17 @@ from typing import Any, cast
 from urllib.parse import quote
 
 import scripts.ci_budget.rate_limit
-from scripts.ci_lab.delivery import OUTPUT, cutover, lab
+from scripts.ci_lab.delivery import OUTPUT, cutover, lab, queue_cutover
 
 gh_api = cast("Callable[..., subprocess.CompletedProcess[str]]", scripts.ci_budget.rate_limit.gh_api)
 
 PULL_REQUEST = "pull_request"
+MERGE_GROUP = "merge_group"
 COMPLETED = "completed"
 PASSED = ("success", "skipped")
 FAILURE = "failure"
+NEUTRAL = "neutral"
+LOST = "::error::The lab lost a unit of {check} and posted no verdict: rerequest the {check} check to grade it again."
 POLL_S = 15.0
 WAIT_S = 1200.0
 TIMEOUT_S = 30.0
@@ -34,10 +39,19 @@ Fetch = Callable[[str], list[dict[str, Any]]]
 
 
 def authority(grader_root: Path, event: str, environ: Mapping[str, str]) -> dict[str, str]:
-    """Return the authoritative output: the base's gates as a JSON object on pull requests, nothing elsewhere."""
-    if event != PULL_REQUEST:
+    """Return the authoritative output: the base's gates as a JSON object on pull requests and merge groups, nothing
+    elsewhere."""
+    readers = {PULL_REQUEST: cutover, MERGE_GROUP: queue_cutover}
+    if event not in readers:
         return {}
-    return {"authoritative": json.dumps({gate: True for gate in cutover(grader_root, environ)}, sort_keys=True)}
+    gates = readers[event](grader_root, environ)
+    return {"authoritative": json.dumps({gate: True for gate in gates}, sort_keys=True)}
+
+
+def _newest(runs: Sequence[Mapping[str, Any]], app: str) -> Mapping[str, Any] | None:
+    """Return the newest run of the trusted App, None when it has none."""
+    trusted = [run for run in runs if run["app"]["slug"] == app]
+    return max(trusted, key=lambda run: run["id"]) if trusted else None
 
 
 def conclusion(runs: Sequence[Mapping[str, Any]], app: str) -> str | None:
@@ -45,13 +59,29 @@ def conclusion(runs: Sequence[Mapping[str, Any]], app: str) -> str | None:
 
     None while no run of that App exists or the newest one has not completed.
     """
-    trusted = [run for run in runs if run["app"]["slug"] == app]
-    if not trusted:
-        return None
-    newest = max(trusted, key=lambda run: run["id"])
-    if newest["status"] != COMPLETED:
+    newest = _newest(runs, app)
+    if newest is None or newest["status"] != COMPLETED:
         return None
     return newest["conclusion"] if newest["conclusion"] in PASSED else FAILURE
+
+
+def lost(listings: Mapping[str, Sequence[Mapping[str, Any]]], app: str) -> list[str]:
+    """Return the checks whose newest run of the trusted App completed neutral: the lab lost a unit of the gate and
+    holds no verdict for it."""
+    newest = {check: _newest(runs, app) for check, runs in listings.items()}
+    ended = (COMPLETED, NEUTRAL)
+    return [check for check, run in newest.items() if run is not None and (run["status"], run["conclusion"]) == ended]
+
+
+def remembering(fetch: Fetch, seen: dict[str, list[dict[str, Any]]]) -> Fetch:
+    """Return a fetch that keeps the last listing it read for each check in seen."""
+
+    def remembered(check: str) -> list[dict[str, Any]]:
+        """Return the listing of the check and keep it."""
+        seen[check] = fetch(check)
+        return seen[check]
+
+    return remembered
 
 
 def verdicts(
@@ -108,8 +138,10 @@ def publish(outputs: Mapping[str, str], environ: Mapping[str, str]) -> None:
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str] = os.environ) -> int:
-    """Run `authority <grader root> <event>` or `verdict <grader root> <authoritative> <repo> <sha> <app>`."""
+    """Run `authority <grader root> <event>` or `verdict <grader root> <authoritative> <repo> <sha> <app>`; the
+    verdict step ends with one error line for each check the lab left neutral."""
     step, grader, *rest = argv
+    notes: list[str] = []
     if step == "authority":
         [event] = rest
         outputs = authority(Path(grader), event, environ)
@@ -117,10 +149,14 @@ def main(argv: Sequence[str], environ: Mapping[str, str] = os.environ) -> int:
         authoritative, repo, sha, app = rest
         if not app:
             raise ValueError("no lab App is named; set AGENTIHOOKS_LAB_APP to the lab App slug")
-        outputs = lab_outputs(Path(grader), authoritative, fetcher(repo, sha), app, WAIT_S)
+        seen: dict[str, list[dict[str, Any]]] = {}
+        outputs = lab_outputs(Path(grader), authoritative, remembering(fetcher(repo, sha), seen), app, WAIT_S)
+        notes = [LOST.format(check=check) for check in lost(seen, app)]
     else:
         raise ValueError(f"unknown step {step!r}; expected authority or verdict")
     publish(outputs, environ)
+    for note in notes:
+        print(note)
     return 0
 
 

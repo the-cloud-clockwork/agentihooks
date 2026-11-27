@@ -60,6 +60,13 @@ def test_work_for_another_lane_is_withdrawn():
     assert workstation.MasterTasks(Mock()).request(master_event(lane="eng")) is None
 
 
+def test_a_dead_lettered_master_offer_asks_nothing_of_the_hub() -> None:
+    configs = Mock()
+
+    assert workstation.MasterTasks(configs).dead_lettered(master_event()) is None
+    configs.assert_not_called()
+
+
 def test_the_workstation_runs_one_master_spoke_per_swarm_as_this_hive():
     slugs = ["a", "b"]
     store = SimpleNamespace(slugs=lambda: list(slugs), config=lambda slug: SimpleNamespace(slug=slug))

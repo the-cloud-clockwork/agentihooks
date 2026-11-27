@@ -306,6 +306,7 @@ the caller's environment, so only an explicit `--home` skips the render.
 | `missing profile home` | The home was removed between prepare and launch. Launch again. |
 | `mounted profile canary did not validate before timeout: the <harness> agent reported no canary within <N>s` | The session started but did not run the canary command within its [canary deadline](#canary-deadline). Check the session pane for a stalled first turn or a refused command; the home it mounted is in its `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. When the agent is slow but healthy, relaunch with a larger `--canary-timeout`. |
 | `the 270s launch deadline ran out in the profile canary wait after ...` | Earlier waits used most of the launch deadline, so the canary wait got less than its harness default. The seconds each wait spent are listed; investigate the longest one first. |
+| `Codex app server exited with status <N> before the profile canary validated` | A Codex `app_server` launch's supervised server ended before the session ran the canary, so the launch failed on the next canary poll instead of at the deadline. See [App server exit before the canary](codex-managed-terminal.md#app-server-exit-before-the-canary). |
 
 See [`agentihooks init-agent`](cli-commands.md#agentihooks-init-agent) and
 [`agentihooks select-profile`](cli-commands.md#agentihooks-select-profile) for

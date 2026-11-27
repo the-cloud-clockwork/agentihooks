@@ -14,10 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from scripts import dep_manifest
 from scripts.ci_lab import open_capture
 from scripts.ci_lab.expand_tests import PYTEST_INVOCATION
+from scripts.ci_lab.outcomes import FAILED, PASSED
 from scripts.ci_lab.sandbox import PortAllocator, Sandbox
-from tests import dep_manifest
 
 __all__ = ["COVERAGE", "Attempt", "Lab", "Verdict", "flake_rows", "outside", "run"]
 
@@ -63,7 +64,8 @@ class Attempt:
 @dataclass(frozen=True)
 class Verdict:
     """A batch's verdict: passed or failed, whether a retry passed it, the repository files it opened outside its
-    manifest, the final attempt's durations, log and coverage data, and how many attempts ran."""
+    manifest, the final attempt's durations, log and coverage data, how many attempts ran, and the flake ledger rows
+    of a batch a retry passed."""
 
     outcome: str
     flaky: bool
@@ -72,6 +74,7 @@ class Verdict:
     attempts: int
     log: Path
     coverage: Path
+    flakes: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def broad(self) -> bool:
@@ -130,8 +133,9 @@ def _durations(attempt: Attempt) -> dict[str, float]:
 
 
 def outside(opened: set[str], batch: Sequence[str], tree: Path, manifest: Mapping[str, Any]) -> tuple[str, ...]:
-    """Return the tree files the batch opened that neither its manifest records nor the inputs every test shares hold."""
-    listed = {path for test in batch for path in manifest["tests"][test]["files"]}
+    """Return the tree files the batch opened that neither its manifest records nor the inputs every test shares hold;
+    a batch member the manifest does not list, such as a test module path, records none."""
+    listed = {path for test in batch for path in manifest["tests"].get(test, {}).get("files", ())}
     found = (path for path in opened if path not in listed and not _shared(path) and (tree / path).is_file())
     return tuple(sorted(found))
 
@@ -155,16 +159,18 @@ def run(batch: Sequence[str], tree: Path, venv: Path, slots: int, lab: Lab) -> V
         attempts.append(_attempt(batch, tree, venv, slots, lab))
     final = attempts[-1]
     flaky = final.code == 0 and len(attempts) == 2
+    rows = flake_rows(attempts[0], batch) if flaky else []
     if flaky:
         with lab.flakes.open("a") as ledger:
-            ledger.writelines(json.dumps(row) + "\n" for row in flake_rows(attempts[0], batch))
+            ledger.writelines(json.dumps(row) + "\n" for row in rows)
     opened = {path for attempt in attempts for path in _opened(attempt)}
     return Verdict(
-        outcome="passed" if final.code == 0 else "failed",
+        outcome=PASSED if final.code == 0 else FAILED,
         flaky=flaky,
         outside=outside(opened, batch, tree, lab.manifest),
         durations=_durations(final),
         attempts=len(attempts),
         log=final.log,
         coverage=final.folder / ".coverage",
+        flakes=tuple(rows),
     )

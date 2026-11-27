@@ -5,6 +5,7 @@ from functools import partial
 from typing import Any, Unpack, cast
 
 from scripts.swarm import (
+    autoscaler_watch,
     dev_red,
     dispatcher,
     fleet_red,
@@ -95,16 +96,6 @@ def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
         except (Exception, SystemExit) as exc:
             hold(box, exc)
             return []
-
-    return run
-
-
-def placing(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
-    """Wrap ``call`` to run holding the host placement lock, so placements of the swarms on a host never overlap."""
-
-    def run(tick: Any, get: Get) -> Any:
-        with tick.PLACING:
-            return call(tick, get)
 
     return run
 
@@ -370,10 +361,13 @@ class WriteStep:
         lane: Lane = CallStep.lane,
         **declared: Unpack[Declared],
     ) -> None:
-        """Take the name, group, lane, budgets, needs, domains, effects and feature of the call step running ``call``."""
+        """Take the name, group, lane, budgets, needs, domains, effects, feature, kept and placing flags of the call
+        step running ``call``."""
         base = CallStep(name, group, call, needs, reads, writes, lane, **declared)
         self.effects = base.effects
         self.feature = base.feature
+        self.kept = base.kept
+        self.placing = base.placing
         self.name = base.name
         self.group = base.group
         self.call = base.call
@@ -390,9 +384,12 @@ class WriteStep:
         return budgets.floored(self.name, self.floor_s)
 
     def run(self, ctx: Context) -> Result:
-        """Run the call against the pass state, returning its actions and its writes."""
+        """Run the call against the pass state, holding the host placement lock when the step is placing, returning its
+        actions and its writes."""
         reader = partial(steps.declared_read, ctx, self.name, steps.declared_keys(self.reads | self.writes))
-        found: list[object] = list(self.call(steps.import_module("scripts.swarm.tick"), reader) or [])
+        tick = steps.import_module("scripts.swarm.tick")
+        with steps.placed(tick, self.placing):
+            found: list[object] = list(self.call(tick, reader) or [])
         writes = tuple(item for item in found if isinstance(item, Write))
         lines = [item for item in found if not isinstance(item, Write)]
         return Result((Write(actions_of(self.name), self.name, lines), *writes))
@@ -569,3 +566,24 @@ STEPS = (
 
 for _step in STEPS:
     registry.register(_step)
+
+
+def _autoscaler_alert(tick: Any, get: Callable[[str], Any]) -> list[str]:
+    """Return the actions of the autoscaler alert step, given the tick module and a reader of the pass state."""
+    keys = ("slug", "store", "ledger", "doc")
+    return tick.skip_refused(autoscaler_watch.alert_pass, *map(get, keys))
+
+
+registry.register(
+    CallStep(
+        "autoscaler alert",
+        "reopen passes",
+        held(_autoscaler_alert),
+        needs=RESUMED,
+        reads=DOC,
+        writes=frozenset(),
+        lane=Lane("slow"),
+        effects=frozenset(),
+        feature="swarm-autoscaler-scale-up-alert",
+    )
+)

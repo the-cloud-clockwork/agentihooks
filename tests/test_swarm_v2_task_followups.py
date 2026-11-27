@@ -258,8 +258,10 @@ def test_its_notice_goes_to_the_tasks_owning_master(world):
     inbox = InboxStore(world.redis)
     ledger_events.event_pass(inbox, world.store, SLUG, world.doc(), None, 0)
     add(world, task="t2")
-    ledger_events.event_pass(inbox, world.store, SLUG, world.doc(), None, 0)
-    ref = f"{SLUG}:event:{ON_TASK}"
+    doc = world.doc()
+    ledger_events.event_pass(inbox, world.store, SLUG, doc, None, 0)
+    rev = next(e["rev"] for e in doc["_meta"]["events"] if e.get("target") == ON_TASK)
+    ref = f"{SLUG}:event:{ON_TASK}:{rev}"
     assert [item.address for item in inbox.mailbox(SECOND_NAME) if item.ref == ref] == [SECOND]
     assert [item for item in inbox.mailbox(LEAD_NAME) if item.ref == ref] == []
 

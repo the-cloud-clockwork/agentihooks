@@ -219,7 +219,7 @@ def test_swarm_autonomy_reads_the_swarm_config(monkeypatch):
 def test_the_master_prompt_names_answer_only_at_delegate_and_full(monkeypatch):
     monkeypatch.setattr(prompt, "summary_lines", lambda slug: [])
     line = (
-        f"- Answer an agent's question you can decide with agentihooks ledger --slug demo --as {MASTER} answer "
+        f"- Answer an agent's question you can decide with agentihooks api --slug demo --as {MASTER} answer "
         'questions/<id> "<answer>": it is recorded as yours and leaves the operator\'s Priorities. Raise the rest '
         "to the operator."
     )

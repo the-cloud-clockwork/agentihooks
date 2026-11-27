@@ -16,6 +16,8 @@ from scripts.swarm.keyspace import ROOT
 PREFIX = f"{ROOT}:seat"
 OCCUPY_ATTEMPTS = 5
 SCAN_PAGE = 1000
+LEARNED_RESCAN_S = 3600  # pragma: no mutate
+LEARNED_CLAIM_S = 60  # pragma: no mutate
 MEMORY_KINDS = ("history", "recaps", "learned")
 MATURITIES = ("data", "note", "insight", "canon")
 DEFAULT_MATURITY = "note"
@@ -196,13 +198,57 @@ class SeatMemory:
     def recaps(self, address):
         return [json.loads(entry) for entry in reversed(self.redis.lrange(self.key(address, "recaps"), 0, -1))]
 
-    def learn(self, address, occupant, text, at, maturity=DEFAULT_MATURITY):
+    def learn(self, address: str, occupant: str, text: str, at: int, maturity: str = DEFAULT_MATURITY) -> None:
         _known(maturity)
         entry = {"occupant": occupant, "text": text, "at": at, "maturity": maturity}
-        self.redis.rpush(self.key(address, "learned"), json.dumps(entry))
+        with self.redis.pipeline() as pipe:
+            pipe.rpush(self.key(address, "learned"), json.dumps(entry))
+            pipe.sadd(self.learned_index(address.rpartition("@")[2]), address)
+            pipe.execute()
 
-    def learned(self, address):
+    def learned_index(self, slug: str) -> str:
+        """The set of the swarm's seat addresses that hold a learned list."""
+        return f"{PREFIX}-learned:{slug}"
+
+    def learned_listed(self, slug: str) -> str:
+        """The key marking that a keyspace scan added the swarm's learned seats to its index; without it the next
+        scoped read claims that scan again."""
+        return f"{self.learned_index(slug)}:listed"
+
+    def learned(self, address: str) -> list[dict[str, Any]]:
         return [_entry(raw) for raw in self.redis.lrange(self.key(address, "learned"), 0, -1)]
+
+    def scoped(self, slug: str, address: str, *, all_seats: bool = False) -> list[dict[str, Any]]:
+        selected: list[dict[str, Any]] = []
+        learned = re.compile(rf"{re.escape(PREFIX)}:([^:@]+@{re.escape(slug)}):learned")
+        keys = [self.key(seat, "learned") for seat in self._learned_seats(slug)]
+        seats = {match.group(1) for key in keys if (match := learned.fullmatch(key))}
+        for seat in sorted(seats):
+            for number, note in enumerate(self.learned(seat), 1):
+                if "retired" not in note and (all_seats or seat == address or note["maturity"] in (CANON, "insight")):
+                    selected.append({**note, "seat": seat, "number": number})
+        return selected
+
+    def _learned_seats(self, slug: str) -> set[str]:
+        """The addresses learn recorded for the swarm, with the seats a keyspace scan finds; one caller per rescan
+        window claims that scan, marks the index listed and releases the claim only once its seats are added, so a
+        failed scan is retried after the claim lapses and notes a writer of an older release adds without the index
+        still load."""
+        index = self.learned_index(slug)
+        listed = self.learned_listed(slug)
+        claim = f"{index}:claim"
+        if not self.redis.exists(listed) and self.redis.set(claim, 1, nx=True, ex=LEARNED_CLAIM_S):
+            pattern = f"{PREFIX}:*@{slug}:learned"
+            found: list[str] = list(self.redis.scan_iter(match=pattern, count=SCAN_PAGE))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            seats = [key[len(PREFIX) + 1 : -len(":learned")] for key in found]
+            if seats:
+                self.redis.sadd(index, *seats)
+            with self.redis.pipeline() as pipe:
+                pipe.set(listed, 1, ex=LEARNED_RESCAN_S)
+                pipe.delete(claim)
+                pipe.execute()
+        members: set[str] = self.redis.smembers(index)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        return members
 
     def promote(self, address, number, maturity, by, reason, at):
         """Raise learned note `number` (1 based) on the seat to a higher maturity, keeping who and why."""

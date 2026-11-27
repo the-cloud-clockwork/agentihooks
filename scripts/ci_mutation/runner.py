@@ -1,4 +1,5 @@
 import ast
+import contextlib
 import json
 import os
 import shutil
@@ -36,9 +37,11 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
         try:
             return process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.wait()
             return None
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
 
 
 def failing_tests(log: Path) -> list[str]:
@@ -250,6 +253,8 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         "docs",
         ".github",
         ".semgrep",
+        ".semgrep-incidents",
+        "feature-map.d",
         "evidence",
         "observability",
         "docker/swarm-node",
@@ -292,6 +297,8 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "docs/",
             ".github/",
             ".semgrep/",
+            ".semgrep-incidents/",
+            "feature-map.d/",
             "evidence/",
             "observability/",
             "docker/swarm-node/",

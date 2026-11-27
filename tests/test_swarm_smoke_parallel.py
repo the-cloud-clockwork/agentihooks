@@ -13,6 +13,7 @@ SCENARIOS = [
     "scripts/packaging/compose-hive-smoke.sh",
     "scripts/packaging/compose-task-smoke.sh",
     "scripts/packaging/compose-recovery-drill.sh",
+    "scripts/packaging/compose-master-drill.sh",
     "scripts/packaging/swarm-init-smoke.sh",
     "scripts/packaging/stability-smoke.sh",
 ]
@@ -106,7 +107,13 @@ def test_the_compose_install_scenario_leaves_the_default_ports_to_swarm_init():
     script = (ROOT / "scripts/packaging/swarm-smoke.sh").read_text()
     compose = (ROOT / "compose.yaml").read_text()
     taken = set()
-    for other in ("compose-hive-smoke.sh", "compose-task-smoke.sh", "compose-recovery-drill.sh", "stability-smoke.sh"):
+    for other in (
+        "compose-hive-smoke.sh",
+        "compose-task-smoke.sh",
+        "compose-recovery-drill.sh",
+        "compose-master-drill.sh",
+        "stability-smoke.sh",
+    ):
         taken |= set(
             re.findall(r'SWARM_\w*PORT="\$\{SWARM_\w*PORT:-(\d+)\}"', (ROOT / "scripts/packaging" / other).read_text())
         )

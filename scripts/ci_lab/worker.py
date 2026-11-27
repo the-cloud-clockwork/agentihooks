@@ -9,9 +9,12 @@ lease and requeues it once.
 
 import contextlib
 import functools
+import http.client
 import json
 import sys
+import tempfile
 import threading
+import traceback
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -22,7 +25,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 from scripts import ci_cpu_quota
-from scripts.ci_lab import contract
+from scripts.ci_lab import contract, worktrees
+from scripts.ci_lab.outcomes import COMPLETED
 from scripts.ci_lab.units import Unit
 from scripts.scheduler.process_interval import Interval
 
@@ -30,6 +34,7 @@ __all__ = [
     "CAPABILITIES",
     "GRACE_SECONDS",
     "HEARTBEAT_SECONDS",
+    "UNIT_TIMEOUT_SECONDS",
     "Client",
     "Executor",
     "Finished",
@@ -43,16 +48,23 @@ __all__ = [
 
 CAPABILITIES = frozenset({"net", "browser"})
 LEASE_WAIT_MS = 5_000
+BACKOFF_SECONDS = 1.0
+BACKOFF_CAP_SECONDS = 10.0
 HEARTBEAT_SECONDS = 10.0
-GRACE_SECONDS = 20.0
+UNIT_TIMEOUT_SECONDS = 1_800.0
 TIMEOUT_SECONDS = 60.0
+DELIVERY_CALLS = 5
+GRACE_SECONDS = UNIT_TIMEOUT_SECONDS + DELIVERY_CALLS * TIMEOUT_SECONDS
 REFUSED = 403
+RESTART = 426
+SERVER_ERROR = 500
 REDIS = "REDIS"
 
 
 @dataclass(frozen=True)
 class Lease:
-    """One leased unit: its job, the lease token, the head it grades, the unit, its slots and the lease expiry."""
+    """One leased unit: its job, the lease token, the head it grades, the unit, its slots, the lease expiry and the base
+    and grader revision its grade reads."""
 
     job: str
     token: str
@@ -60,6 +72,8 @@ class Lease:
     unit: Unit
     slots: int
     expires_ms: int
+    base: str = ""
+    grader: str = ""
 
 
 @dataclass(frozen=True)
@@ -70,8 +84,13 @@ class Finished:
     report: Path
     log: Path
 
+    def __post_init__(self) -> None:
+        """Refuse an outcome the leases refuse, so an executor answering one raises and its lease is reaped."""
+        if self.outcome not in COMPLETED:
+            raise ValueError(f"unknown lab unit outcome {self.outcome!r}")
 
-Executor = Callable[[Lease], Finished]
+
+Executor = Callable[[Lease, Path], Finished]
 
 
 class Refused(RuntimeError):
@@ -84,8 +103,23 @@ class Lost(RuntimeError):
 
 def _lease(grant: Mapping[str, Any]) -> Lease:
     """Read one grant of the lease API's POST /lease reply."""
-    unit = Unit(kind=grant["kind"], key=grant["key"], members=tuple(grant["members"]))
-    return Lease(grant["job"], grant["token"], grant["head"], unit, grant["slots"], grant["expires_ms"])
+    unit = Unit(
+        kind=grant["kind"],
+        key=grant["key"],
+        members=tuple(grant["members"]),
+        manifest=grant.get("manifest", ""),
+        manifest_digest=grant.get("manifest_digest", ""),
+    )
+    return Lease(
+        grant["job"],
+        grant["token"],
+        grant["head"],
+        unit,
+        grant["slots"],
+        grant["expires_ms"],
+        grant["base"],
+        grant["grader"],
+    )
 
 
 @dataclass(frozen=True)
@@ -144,6 +178,7 @@ class Worker:
     executors: Mapping[str, Executor]
     name: str
     slots: int
+    runs: Path
     capabilities: frozenset[str] = CAPABILITIES
     wait_ms: int = LEASE_WAIT_MS
     heartbeat_s: float = HEARTBEAT_SECONDS
@@ -152,30 +187,54 @@ class Worker:
     abandoned: threading.Event = field(default_factory=threading.Event)
     running: dict[Future[None], Lease] = field(default_factory=dict[Future[None], Lease])
     pool: ThreadPoolExecutor = field(init=False)
+    backoff_s: float = field(default=BACKOFF_SECONDS, init=False)
 
     def __post_init__(self) -> None:
         """Give every slot a thread to run a unit on."""
         self.pool = ThreadPoolExecutor(max_workers=self.slots)
 
     def free(self) -> int:
-        """Return the slots no running unit holds, after reporting each unit that crashed since the last look."""
+        """Return the slots no running unit holds, after reporting each unit that crashed since the last look with
+        the exception's traceback."""
         for future in [future for future in self.running if future.done()]:
             lease = self.running.pop(future)
             if (error := future.exception()) is not None:
                 print(f"ci-lab worker: unit {lease.job} crashed: {error!r}", file=sys.stderr)
+                traceback.print_exception(error)
         return self.slots - sum(lease.slots for lease in self.running.values())
 
     def run_once(self) -> list[Lease]:
         """Lease units into the free slots and start each on its executor, or wait for a running unit to end while
-        every slot is busy; return the leases started."""
+        every slot is busy; return the leases started. A lease call the scheduler does not answer, or answers with a
+        server error, starts nothing and waits out its backoff; a restart answer stops the worker without raising or
+        backing off, since the lab wants another image; any other error answer raises."""
         free = self.free()
         if free <= 0:
             wait(list(self.running), return_when=FIRST_COMPLETED)
             return []
-        leases = self.client.lease(self.name, free, self.capabilities, self.wait_ms)
+        try:
+            leases = self.client.lease(self.name, free, self.capabilities, self.wait_ms)
+        except (OSError, http.client.HTTPException) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code == RESTART:
+                print("ci-lab worker: the lab wants another image, restarting", file=sys.stderr)
+                self.stop()
+                return []
+            if isinstance(error, urllib.error.HTTPError) and error.code < SERVER_ERROR:
+                raise
+            self._back_off(error)
+            return []
+        self.backoff_s = BACKOFF_SECONDS
         for lease in leases:
             self.running[self.pool.submit(self._unit, lease)] = lease
         return leases
+
+    def _back_off(self, error: OSError | http.client.HTTPException) -> None:
+        """Report a lease call the scheduler did not answer and wait out its backoff, which doubles with each such call
+        in a row up to BACKOFF_CAP_SECONDS; stop ends the wait at once."""
+        delay = self.backoff_s
+        self.backoff_s = min(delay * 2, BACKOFF_CAP_SECONDS)
+        print(f"ci-lab worker: lease call failed, retrying in {delay:g}s: {error!r}", file=sys.stderr)
+        self.stopping.wait(delay)
 
     def stop(self) -> None:
         """Lease no more units; run then lets the running ones finish within the termination grace."""
@@ -197,25 +256,36 @@ class Worker:
         return list(self.running.values())
 
     def _unit(self, lease: Lease) -> None:
-        """Run one unit while its lease heartbeats, then deliver it unless its lease was lost or run abandoned it; an
-        executor that raises leaves it to reap, and a heartbeat that hangs only ends the heartbeats."""
+        """Run one unit in its own fresh folder under runs while its lease heartbeats, then deliver it unless its
+        lease was lost or run abandoned it; an executor that raises leaves it to reap, and a heartbeat that hangs
+        only ends the heartbeats. The folder is cut before the first heartbeat, so a unit whose folder cannot be cut
+        sends none and reaps. The folder is removed once the unit ends, delivered or not, after its report and log
+        are read, read only folders inside it included; a folder that resists removal is left for the next
+        restart's wipe."""
+        root = Path(tempfile.mkdtemp(dir=self.runs))
         lost = threading.Event()
         beat = Interval(functools.partial(self._beat, lease, lost), every=self.heartbeat_s)
         beat.start()
         try:
-            finished = self.executors[lease.unit.kind](lease)
+            try:
+                finished = self.executors[lease.unit.kind](lease, root)
+            finally:
+                with contextlib.suppress(RuntimeError):
+                    beat.close()
+            if not (lost.is_set() or self.abandoned.is_set()):
+                self._deliver(lease, finished)
         finally:
-            with contextlib.suppress(RuntimeError):
-                beat.close()
-        if not (lost.is_set() or self.abandoned.is_set()):
-            self._deliver(lease, finished)
+            with contextlib.suppress(OSError):
+                worktrees.empty(root)
+                root.rmdir()
 
     def _beat(self, lease: Lease, lost: threading.Event) -> None:
-        """Heartbeat the lease, skipping a beat that cannot reach the scheduler; raise Lost to end its heartbeats once
-        run abandoned the unit, or mark the lease lost first when the scheduler refuses the token."""
+        """Heartbeat the lease, skipping a beat that cannot reach the scheduler or whose reply is cut short; raise Lost
+        to end its heartbeats once run abandoned the unit, or mark the lease lost first when the scheduler refuses the
+        token."""
         if self.abandoned.is_set():
             raise Lost
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(OSError, http.client.HTTPException):
             if self.client.heartbeat(lease.job, lease.token) is None:
                 lost.set()
                 raise Lost
@@ -249,8 +319,13 @@ def slots(environ: Mapping[str, str], cpus: int, quota: float | None) -> int:
 
 
 def build(
-    environ: Mapping[str, str], executors: Mapping[str, Executor], name: str, cpus: int, quota: float | None
+    environ: Mapping[str, str],
+    executors: Mapping[str, Executor],
+    name: str,
+    cpus: int,
+    quota: float | None,
+    runs: Path,
 ) -> Worker:
     """Return the pod's worker over the scheduler URL its environment names, with its slots from the CPU quota."""
     allowed = environment(environ)
-    return Worker(Client(allowed[contract.SCHEDULER_URL]), executors, name, slots(allowed, cpus, quota))
+    return Worker(Client(allowed[contract.SCHEDULER_URL]), executors, name, slots(allowed, cpus, quota), runs)

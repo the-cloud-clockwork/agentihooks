@@ -95,6 +95,16 @@ response header carries the fable window.
    5% or less of its five hour window left, or with no upcoming week reset, sorts
    after every account that has one. Remaining ties go by harness, then account
    name.
+6. In a swarm, a new eng or ci agent that may run on either harness goes to
+   Codex while Codex holds under thirty percent of the live and already placed
+   eng and ci agents and an open Codex account has a free seat. Without a free
+   Codex seat, or when pinned Codex work reserves every free one, it goes to
+   Claude. A lane or task harness pin, a Claude only profile, a relaunch that
+   keeps its earlier harness, a profile with its own harness order and the plan
+   lane keep their own choice. A lane pinned to one harness raises a
+   `harness pin` finding in swarm status while the other harness has free
+   seats and ready lane tasks wait below the lane cap; see
+   [Harness pin findings](swarm.md#harness-pin-findings).
 
 When no account has a free place a swarm or hive slot launch fails. A launch
 outside both, such as the operator's own `agenti`, then takes the open account
@@ -109,7 +119,7 @@ from both taking the last free place.
 `agenti --route <slug>` skips all of this and uses `AH_CC_TOKEN_<slug>`.
 `agenti --route claude-ai` skips it too and runs on a stored claude ai login
 instead of a token; see
-[Standalone sessions on a claude ai login](../reference/account-login.md#standalone-sessions-on-a-claude-ai-login).
+[Live sessions on a claude ai login](../reference/account-login.md#live-sessions-on-a-claude-ai-login).
 
 ```text
 [agenti] account=work routing_left=62% 5h_left=80% 7d_left=62% sessions=1/6 source=cached
@@ -538,8 +548,8 @@ record noted `balance` showing that account `CLOSED` for workers with 39% of
 its week left and workers stopping at 60%. The agent then handed off through
 `init-agent --handoff` into an unseated session. Pull request
 [#5044](https://github.com/the-cloud-clockwork/agentihooks/pull/5044) added
-the stored closure and the seat handoff directive; its red Mutation
-preflight run 39357837089 failed the four new cases and Tests run
+the stored closure and the seat handoff directive; its red mutation
+run 39357837089 failed the four new cases and Tests run
 39363775886 passed on the final pull request head. Cases live in
 `tests/swarm/test_reserved_latch.py` and `tests/context/test_quota_policy.py`.
 
@@ -674,7 +684,7 @@ waits or stops.
 | Directive | What the agent does | Enforcement |
 |---|---|---|
 | `QUOTA HANDOFF REQUIRED` | Writes a handoff document, runs `agentihooks init-agent --handoff`, reports where the work moved, stops; a swarm session instead writes its Handoff v2, runs `agentihooks swarm <slug> handoff DOC --reason quota` and stops, keeping its seat | Injected on every tool call until done |
-| `QUOTA WAIT` | Creates a one-shot `CronCreate` job for the 5h reset, tells the operator, stops | Injected as an alert on every tool call; no tool is blocked |
+| `QUOTA WAIT` | In a swarm, runs `agentihooks swarm <slug> wait <minutes> --reason "quota reset at <time>"`, at most 60 minutes, repeating until reset. Outside a swarm, creates a scheduler timer with `agentihooks timer add --at <time> --session <session id> <prompt>`. Both keep the two minute reset buffer. Tells the operator, stops | Injected as an alert on every tool call; no tool is blocked |
 | `QUOTA STOP` | Tells the operator to add another account or say "keep pushing" | Injected as an alert on every tool call; no tool is blocked |
 | `QUOTA PUSH` | Continues on this account until 100% | The operator typed "keep pushing" (or "push to 100") this session |
 
@@ -800,6 +810,11 @@ Codex and the profile has no required Claude only plugin. With no eligible
 account, successor placement fails; it does not launch on a draining account.
 Under the deployed controller, hive placement applies the same rule to every
 launch: see [closed and draining accounts get no hive agent](hives.md#closed-and-draining-accounts-get-no-hive-agent).
+On a hive spoke launch the selected or saved account is only a preference: it
+routes the launch only while the hub's account slot has a worker seat on it for
+the launching execution, and otherwise the launch picks its account by
+[launch routing](#launch-routing); see
+[saved account on a hive launch](hives.md#saved-account-on-a-hive-launch).
 
 ### Worked example
 

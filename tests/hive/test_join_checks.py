@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.swarm.client_class import client_class
+
 
 def test_redis_probes_use_disposable_claim_and_verdict_fields():
     from fakeredis import FakeRedis
@@ -243,7 +245,9 @@ def test_transcript_probe_needs_the_folder_itself(tmp_path):
 
 
 @pytest.mark.parametrize("joined,written", [(False, False), (True, False), (False, True), (True, True)])
-def test_ledger_checks_retry_only_unproven_capabilities(monkeypatch, joined, written):
+def test_ledger_checks_retry_only_unproven_capabilities(
+    monkeypatch: pytest.MonkeyPatch, joined: bool, written: bool
+) -> None:
     from types import SimpleNamespace
 
     from scripts.hive import join_checks
@@ -263,7 +267,7 @@ def test_ledger_checks_retry_only_unproven_capabilities(monkeypatch, joined, wri
         calls.append("write")
         return {"applied": True}
 
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: SimpleNamespace(join=join, _call=write))
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(SimpleNamespace(join=join, _call=write)))
     report = {"slug": "swarm", "agent": "engineer", "checks": {"ledger_join": joined, "ledger_write": written}}
     assert join_checks.ledger_checks(report) == {"ledger_join": True, "ledger_write": True}
     assert calls == (["join"] if not joined else []) + (["write"] if not written else [])

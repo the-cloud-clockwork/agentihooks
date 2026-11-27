@@ -7,6 +7,7 @@ from typing import Any
 from scripts.gates import progress, quiet
 from scripts.swarm import (
     bottleneck_status,
+    commands,
     dispatcher,
     doc_items,
     doc_report,
@@ -235,8 +236,12 @@ def early_end(store: Any, slug: str, missing: KeyError, left: list[str]) -> list
 
 
 def _status_publish(cli: Any, get: Get) -> None:
-    """Publish the tick status with the health findings this pass already found, when the health step found them."""
+    """Publish the tick status with the health findings this pass found. A passing pass whose health step stored none
+    publishes those of the last published status, so the closing lane never rebuilds them under its own budget; a
+    failed pass, or a swarm with no published findings yet, leaves them for the report to build."""
     found = get("box").get("found")
+    if found is None and get("failure") is None:
+        found = commands.published_findings(get("store"), get("slug"))
     cli._publish_tick_status(get("store"), get("slug"), get("doc"), get("view"), get("failure"), found)
 
 
@@ -341,6 +346,7 @@ STEPS = (
         pass_domains("found", "view") | DOC,
         lane=CLOSING,
         kept=True,
+        feature="tick-status-publish-last-findings",
     ),
 )
 

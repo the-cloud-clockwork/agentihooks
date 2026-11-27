@@ -1,0 +1,6 @@
+{
+  "scripts/ci_lab/webhooks.py:scripts.ci_lab.webhooks.x_pull_lane:58defc32078ca90e4faf6bf06a617491f288fdddea867ae0e070dc73e5d1d294": {
+    "reader": "standards_reader",
+    "reason": "The base label has the same form, its branch a ref name and its owner a login, so rpartition on the base label returns the same owner as partition."
+  }
+}

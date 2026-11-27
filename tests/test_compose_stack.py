@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -28,8 +29,8 @@ def test_controller_reads_unhealthy_once_a_swarm_lease_goes_stale():
 def test_the_controller_and_hive_keep_scheduler_state_in_the_nats_bucket():
     for name in ("controller", "hive"):
         environment = SERVICES[name]["environment"]
-        assert environment["AGENTIHOOKS_SCHEDULER_STATE_BACKEND"] == "${AGENTIHOOKS_SCHEDULER_STATE_BACKEND:-bus}"
-        assert environment["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}"
+        assert environment["AGENTIHOOKS_SCHEDULER_STATE_BACKEND"] == "${SWARM_SCHEDULER_STATE_BACKEND:-bus}"
+        assert environment["AGENTIHOOKS_BUS_URL"] == "${SWARM_BUS_URL:-nats://nats:4222}"
         assert SERVICES[name]["depends_on"]["nats"]["condition"] == "service_healthy"
     assert "--jetstream" in SERVICES["nats"]["command"]
 
@@ -55,7 +56,7 @@ def test_swarm_auth_mode_is_removed():
 
 def test_env_example_selects_compose_deployment():
     lines = (ROOT / "deploy/compose/.env.example").read_text().splitlines()
-    assert "AGENTIHOOKS_DEPLOYMENT=compose" in lines
+    assert "SWARM_DEPLOYMENT=compose" in lines
 
 
 def test_swarm_smoke_runs_the_compose_hive_proof():
@@ -71,7 +72,7 @@ def test_hive_join_retries_the_redis_mirror_pull_before_starting_redis():
     start = 'docker run --pull never -d --name "$run-redis"'
     retry = (ROOT / "scripts/packaging/pull-runtime-image.sh").read_text()
     assert "attempts=3" in retry
-    assert 'for attempt in $(seq "$attempts"); do' in retry
+    assert "for ((attempt = 1; attempt <= attempts; attempt++)); do" in retry
     assert 'if acquire "$@"; then' in retry
     assert 'if (( attempt == attempts )); then\n    exit "$status"\n  fi' in retry
     assert 'delay="${PULL_RETRY_SECONDS:-10}"' in retry
@@ -124,13 +125,81 @@ def test_nats_service_runs_the_pinned_server_with_jetstream_on_a_volume():
 
 def test_swarm_services_reach_nats_through_the_bus_setting():
     shared = COMPOSE["x-swarm-env"]
-    assert shared["AGENTIHOOKS_BUS"] == "${AGENTIHOOKS_BUS:-nats}"
-    assert shared["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}"
+    assert shared["AGENTIHOOKS_BUS"] == "${SWARM_BUS:-nats}"
+    assert shared["AGENTIHOOKS_BUS_URL"] == "${SWARM_BUS_URL:-nats://nats:4222}"
     for name in ("swarm", "controller", "hive"):
         service = SERVICES[name]
-        assert service["environment"]["AGENTIHOOKS_BUS"] == "${AGENTIHOOKS_BUS:-nats}", name
-        assert service["environment"]["AGENTIHOOKS_BUS_URL"] == "${AGENTIHOOKS_BUS_URL:-nats://nats:4222}", name
+        assert service["environment"]["AGENTIHOOKS_BUS"] == "${SWARM_BUS:-nats}", name
+        assert service["environment"]["AGENTIHOOKS_BUS_URL"] == "${SWARM_BUS_URL:-nats://nats:4222}", name
         assert service["depends_on"]["nats"]["condition"] == "service_healthy", name
+
+
+@pytest.mark.feature("compose-stack-own-bus")
+@pytest.mark.parametrize(
+    "compose_file",
+    sorted(
+        str(path.relative_to(ROOT))
+        for path in [ROOT / "compose.yaml", *(ROOT / "scripts/swarm/stack").rglob("*.yaml")]
+        if path.is_file()
+    ),
+)
+def test_the_stack_never_reads_the_bus_settings_of_the_shell_that_runs_compose(compose_file: str) -> None:
+    text = (ROOT / compose_file).read_text()
+    assert "${AGENTIHOOKS_BUS" not in text, compose_file
+
+
+@pytest.mark.feature("compose-stack-own-bus")
+def test_an_agent_shell_on_the_anton_bus_leaves_the_controller_on_the_stack_nats() -> None:
+    shell = {
+        "AGENTIHOOKS_BUS": "memory",
+        "AGENTIHOOKS_BUS_URL": "tls://swarm-internal.homeofanton.com:4222",
+        "AGENTIHOOKS_BUS_CREDENTIALS": "/home/agent/.agentihooks/hive/bus.creds",
+    }
+    environment = SERVICES["controller"]["environment"]
+    resolved = {key: _interpolate(str(environment[key]), shell) for key in ("AGENTIHOOKS_BUS", "AGENTIHOOKS_BUS_URL")}
+    assert resolved == {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://nats:4222"}
+    assert "AGENTIHOOKS_BUS_CREDENTIALS" not in environment
+
+
+@pytest.mark.feature("compose-stack-own-modes")
+@pytest.mark.parametrize(
+    "compose_file",
+    sorted(
+        str(path.relative_to(ROOT))
+        for path in [ROOT / "compose.yaml", *(ROOT / "scripts/swarm/stack").rglob("*.yaml")]
+        if path.is_file()
+    ),
+)
+def test_the_stack_never_reads_the_deployment_or_scheduler_backend_of_the_shell(compose_file: str) -> None:
+    text = (ROOT / compose_file).read_text()
+    assert not re.search(r"(?<!\$)\$\{?AGENTIHOOKS_(DEPLOYMENT|SCHEDULER_STATE_BACKEND)\b", text), compose_file
+
+
+@pytest.mark.feature("compose-stack-own-modes")
+@pytest.mark.parametrize(
+    ("service", "deployment"),
+    [("swarm", "local"), ("api", "local"), ("controller", "compose"), ("hive", "compose")],
+)
+def test_the_stack_renders_one_deployment_and_scheduler_backend_from_any_shell(service: str, deployment: str) -> None:
+    keys = ("AGENTIHOOKS_DEPLOYMENT", "AGENTIHOOKS_SCHEDULER_STATE_BACKEND")
+    environment = SERVICES[service]["environment"]
+    agent = {"AGENTIHOOKS_DEPLOYMENT": "distributed", "AGENTIHOOKS_SCHEDULER_STATE_BACKEND": "redis"}
+    unset = {key: _interpolate(str(environment[key]), {}) for key in keys}
+    from_agent = {key: _interpolate(str(environment[key]), agent) for key in keys}
+    assert unset == from_agent == {"AGENTIHOOKS_DEPLOYMENT": deployment, "AGENTIHOOKS_SCHEDULER_STATE_BACKEND": "bus"}
+    stack = {"SWARM_DEPLOYMENT": "local", "SWARM_SCHEDULER_STATE_BACKEND": "redis"}
+    assert {key: _interpolate(str(environment[key]), stack) for key in keys} == {
+        "AGENTIHOOKS_DEPLOYMENT": "local",
+        "AGENTIHOOKS_SCHEDULER_STATE_BACKEND": "redis",
+    }
+
+
+def _interpolate(value: str, shell: dict[str, str]) -> str:
+    """Resolve a Compose ${NAME:-default} value the way Compose does against the calling shell."""
+    match = re.fullmatch(r"\$\{(\w+):-([^}]*)\}", value)
+    if not match:
+        return value
+    return shell.get(match.group(1)) or match.group(2)
 
 
 def test_swarm_init_smoke_pulls_nats_and_reads_the_four_service_ready_line():
@@ -158,9 +227,37 @@ def test_the_front_routes_reads_to_the_ledger_and_writes_to_the_api() -> None:
     assert front["depends_on"]["swarm"]["condition"] == "service_healthy"
     assert front["depends_on"]["api"]["condition"] == "service_healthy"
     conf = (ROOT / "deploy/compose/ledger-front.conf").read_text()
-    assert "http://swarm:8765" in conf
+    assert "${SWARM_LEDGER_SCHEME}://swarm:8765" in conf
     assert "http://api:8766" in conf
     assert "GET|HEAD" in conf
+
+
+def test_the_front_proxies_reads_with_the_scheme_the_swarm_serves() -> None:
+    front = SERVICES["front"]
+    assert front["environment"] == {"SWARM_LEDGER_SCHEME": "${SWARM_LEDGER_SCHEME:-http}"}
+    assert front["volumes"] == ["./deploy/compose/ledger-front.conf:/etc/nginx/templates/default.conf.template:ro"]
+    smoke = (ROOT / "scripts/packaging/stability-smoke.sh").read_text()
+    override = yaml.safe_load(smoke.split("<<'YAML'\n", 1)[1].split("\nYAML\n", 1)[0])["services"]
+    assert override["swarm"]["environment"]["LEDGER_TLS_CERT"] == "/tls/cert.pem"
+    assert override["front"]["environment"] == {"SWARM_LEDGER_SCHEME": "https"}
+    read = smoke.split("if ! python3 - \"$slug\" <<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+    assert "http://127.0.0.1:{os.environ['SWARM_PORT']}" in read
+    assert 'for route in ("/healthz", "/api/v1/ledgers", f"/{slug}"):' in read
+    assert smoke.index(read) < smoke.index('docker run -d --name "$run-member"')
+
+
+@pytest.mark.feature("compose-front-ready-before-wait")
+@pytest.mark.parametrize("compose_file", ["compose.yaml", "scripts/swarm/stack/compose.yaml"])
+def test_the_front_reads_healthy_only_once_nginx_serves_the_ledger_health_route(compose_file: str) -> None:
+    front = yaml.safe_load((ROOT / compose_file).read_text())["services"]["front"]
+    assert front["healthcheck"] == {
+        "test": ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8765/healthz"],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 5,
+        "start_period": "30s",
+        "start_interval": "1s",
+    }
 
 
 @pytest.mark.feature("compose-api-health-and-front-proxy")
@@ -184,6 +281,6 @@ def test_the_front_forwards_the_host_the_client_sent_with_its_port(conf: str) ->
 )
 def test_the_front_resolves_the_swarm_and_api_names_through_the_compose_dns_at_request_time(conf: str) -> None:
     text = (ROOT / conf).read_text()
-    assert "set $upstream http://swarm:8765;" in text
+    assert "set $upstream ${SWARM_LEDGER_SCHEME}://swarm:8765;" in text
     assert "set $upstream http://api:8766;" in text
     assert "resolver 127.0.0.11 valid=1s;" in text

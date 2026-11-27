@@ -1,10 +1,22 @@
 import json
+import os
 import subprocess
+import sys
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from scripts.swarm import provider_probe
+from tests.helpers import service_path
+
+INTERPRETER = [sys.executable, "-P", "-m", "scripts.install"]
+
+
+def user_folders(path: str) -> str:
+    """The PATH a claude check runs with: the user bin folder and this interpreter's folder ahead of the given one."""
+    return os.pathsep.join([str(Path.home() / ".local" / "bin"), str(Path(sys.executable).parent), path])
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +30,7 @@ def _codex_account(monkeypatch):
 
 @pytest.mark.parametrize("harness", ["claude", "codex", "copilot"])
 @pytest.mark.parametrize("model", ["", "chosen-model"])
-def test_native_request_disables_tools_and_session_persistence(tmp_path, harness, model):
+def test_native_request_disables_tools_and_session_persistence(tmp_path: Path, harness: str, model: str) -> None:
     account = "default" if harness == "copilot" else "alpha"
     calls = []
 
@@ -30,7 +42,7 @@ def test_native_request_disables_tools_and_session_persistence(tmp_path, harness
     selected = ["--model", model] if model else []
     if harness == "claude":
         expected = [
-            "agentihooks",
+            *INTERPRETER,
             "claude",
             "--route",
             "alpha",
@@ -85,7 +97,9 @@ def test_native_request_disables_tools_and_session_persistence(tmp_path, harness
     assert calls == [expected]
 
 
-def test_probe_environment_keeps_account_route_and_removes_parent_identity(tmp_path, monkeypatch):
+def test_probe_environment_keeps_account_route_and_removes_parent_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from hooks.context.account_sessions import INTERNAL_RUN
 
     values = {
@@ -109,7 +123,12 @@ def test_probe_environment_keeps_account_route_and_removes_parent_identity(tmp_p
         safe_values = {
             name: child_env.get(name) for name in ["PATH", "LANG", "AGENTIHOOKS_CLASSIFIER_CHILD", INTERNAL_RUN]
         }
-        assert safe_values == {"PATH": "route-bin", "LANG": "C", "AGENTIHOOKS_CLASSIFIER_CHILD": "1", INTERNAL_RUN: "1"}
+        assert safe_values == {
+            "PATH": user_folders("route-bin"),
+            "LANG": "C",
+            "AGENTIHOOKS_CLASSIFIER_CHILD": "1",
+            INTERNAL_RUN: "1",
+        }
         calls.append(kwargs)
         return subprocess.CompletedProcess(args, 0, '{"type":"result","result":"OK"}', "")
 
@@ -172,7 +191,9 @@ def test_codex_requires_both_a_completed_turn_and_a_completed_model_answer(tmp_p
 
 
 @pytest.mark.parametrize("timeout", [False, True])
-def test_transport_pipe_contract_and_timeout_result(tmp_path, monkeypatch, timeout):
+def test_transport_pipe_contract_and_timeout_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, timeout: bool
+) -> None:
     import signal
 
     child = MagicMock()
@@ -186,7 +207,7 @@ def test_transport_pipe_contract_and_timeout_result(tmp_path, monkeypatch, timeo
     monkeypatch.setattr(provider_probe.subprocess, "Popen", popen)
     monkeypatch.setattr(provider_probe.os, "killpg", kill)
     result = provider_probe.check(provider_probe.Target("claude", "alpha", ""), tmp_path)
-    assert popen.call_args.args[0][:4] == ["agentihooks", "claude", "--route", "alpha"]
+    assert popen.call_args.args[0][:7] == [*INTERPRETER, "claude", "--route", "alpha"]
     options = popen.call_args.kwargs
     assert options["stdin"] == subprocess.PIPE
     assert options["stdout"] == subprocess.PIPE
@@ -242,3 +263,35 @@ def test_codex_valid_answer_survives_an_unrelated_completed_item(tmp_path):
     )
     run = MagicMock(return_value=subprocess.CompletedProcess([], 0, output, ""))
     assert provider_probe.check(provider_probe.Target("codex", "alpha", ""), tmp_path, run).ok is True
+
+
+@pytest.mark.feature("service-commands-run-through-interpreter")
+def test_a_claude_check_runs_the_agentihooks_claude_command_under_the_systemd_default_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tools = Path.home() / ".local" / "bin"
+    tools.mkdir(parents=True, exist_ok=True)
+    claude = tools / "claude"
+    claude.write_text('#!/usr/bin/env bash\necho \'{"type":"result","is_error":false,"result":"OK"}\'\n')
+    claude.chmod(0o755)
+    monkeypatch.setenv("PATH", service_path.service_path())
+    monkeypatch.setenv("AH_CC_TOKEN_acct", "fixture-token")
+
+    result = provider_probe.check(provider_probe.Target("claude", "acct", ""), tmp_path / "requests")
+
+    assert result.evidence == "Provider request succeeded"
+    assert result.ok is True
+
+
+def test_a_claude_check_without_a_service_path_runs_on_the_user_folders_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("PATH")
+    paths: list[str] = []
+
+    def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        paths.append(kwargs["env"]["PATH"])
+        return subprocess.CompletedProcess(args, 0, '{"type":"result","result":"OK"}', "")
+
+    assert provider_probe.check(provider_probe.Target("claude", "alpha", ""), tmp_path, run).ok is True
+    assert paths == [os.pathsep.join([str(Path.home() / ".local" / "bin"), str(Path(sys.executable).parent)])]

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/fragments.py:scripts.swarm_ledger.repository.fragments.x_meta_part:df75b20870fd161b26d740ceeecc18f375d6ef8a91716bd98ed89cf7131aaded": {
+    "reader": "standards_reader",
+    "reason": "typing.cast(typ, val) is defined as return val and ignores typ, so the mutant's cast(None, value) returns the same object as the original for every input, and the mutated expression has no side effects."
+  }
+}

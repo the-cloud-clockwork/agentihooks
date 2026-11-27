@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/fragments.py:scripts.swarm_ledger.repository.fragments.x_meta_part:0a7d97eb295d2bb52bbb379af1eb424885e97edec1552fca674402127011e3db": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: typing.cast(typ, val) returns val unchanged and never reads typ, so replacing the type argument with None changes only the static type seen by the type checker, not any runtime value or branch. fragments.py:118 (meta_part): equivalent, the type argument is discarded at runtime and the value passed to stamps is identical."
+  }
+}

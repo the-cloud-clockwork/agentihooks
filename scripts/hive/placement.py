@@ -5,6 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from packaging.version import InvalidVersion, Version
+
 from scripts.hive.registry import LIVE_MS, MASTER_NAME, UI_ROLES, live
 from scripts.master_claude_login import ROUTE as MASTER_LOGIN
 from scripts.routing.slots import account_key
@@ -26,6 +28,8 @@ NEEDS_TOGETHER = "the task needs a hive with {needs}, and no single hive declare
 UNRANKED = math.inf
 SPREAD = "spread"
 PLACED = "placed"
+FIRST_RELEASE: dict[str, str] = {"expert": "2.17.1181"}
+OUTDATED = "it runs release {release}, older than {floor}, the first release that hosts {role}"
 
 
 @dataclass(frozen=True)
@@ -58,8 +62,36 @@ class Choice:
     spill: Spill | None = None
 
 
-def hosts(role: str, hive: dict, aliases: tuple[str, ...] = ()) -> bool:
-    return hive.get("draining") != YES and not {role, *aliases} & set(hive["excluded"])
+def release(text: object) -> Version | None:
+    """The release a hive reports, as one that can be compared; a pre-release sorts before its release. None when it
+    reports none, a text that is no version, or a development or local build, which carries no release number of
+    its own."""
+    try:
+        found = Version(str(text))
+    except InvalidVersion:
+        return None
+    return None if found.is_devrelease or found.local else found
+
+
+def outdated(role: str, hive: dict[str, Any], aliases: tuple[str, ...] = ()) -> str:
+    """The first release that hosts the role or one of its aliases when the hive reports an older one, else empty.
+    A hive whose release cannot be judged is not held to it."""
+    floors = [FIRST_RELEASE[name] for name in (role, *aliases) if name in FIRST_RELEASE]
+    reported = release(hive.get("version"))
+    if not floors or reported is None:
+        return ""
+    floor = max(floors, key=Version)
+    return floor if reported < Version(floor) else ""
+
+
+def hosts(role: str, hive: dict[str, Any], aliases: tuple[str, ...] = ()) -> bool:
+    """Whether the hive may be given the role: it is not draining, excludes neither the role nor an alias of it,
+    and reports no release older than the first one that hosts the role."""
+    return (
+        hive.get("draining") != YES
+        and not {role, *aliases} & set(hive["excluded"])
+        and not outdated(role, hive, aliases)
+    )
 
 
 def repository(hive: dict[str, Any], repo: str) -> str:
@@ -142,14 +174,22 @@ def _holds(logins: dict[str, Any], harness: str, key: str) -> bool:
     return harness in logins and account_key(logins[harness]) == key
 
 
+def master_accounts(hive: dict[str, Any], harness: str) -> list[str]:
+    if hive.get("master_logins"):
+        return [item["account"] for item in hive["master_logins"] if item["harness"] == harness]
+    account = hive["master_login"].get(harness)
+    return [account] if account else []
+
+
 def _checks(
     role: str, harness: str, slot: str, route_kind: str, repo: str, kind: str = HIVE
 ) -> list[tuple[Callable[[dict[str, Any]], bool], str]]:
     key = account_key(slot)
     return [
         (
-            lambda hive: any(
-                item["harness"] == harness and account_key(item["account"]) == key for item in hive["slots"]
+            lambda hive: (
+                (role == MASTER and route_kind == MASTER_LOGIN)
+                or any(item["harness"] == harness and account_key(item["account"]) == key for item in hive["slots"])
             ),
             f"no {kind} for {role} advertises the {harness} slot {slot}",
         ),
@@ -160,7 +200,10 @@ def _checks(
             f"no {kind} for {role} holds the {harness} login for {slot}",
         ),
         (
-            lambda hive: route_kind != MASTER_LOGIN or _holds(hive["master_login"], harness, key),
+            lambda hive: (
+                route_kind != MASTER_LOGIN
+                or any(account_key(account) == key for account in master_accounts(hive, harness))
+            ),
             f"no {kind} for {role} holds the {harness} master login for {slot}",
         ),
     ]
@@ -191,7 +234,7 @@ def _pick(
     return Choice(min(candidates, key=_order(role))["id"], spill=spill)
 
 
-def unhosted(role: str, hives: list[dict], now: int, aliases: tuple[str, ...] = ()) -> Spill | None:
+def unhosted(role: str, hives: list[dict[str, Any]], now: int, aliases: tuple[str, ...] = ()) -> Spill | None:
     ranked = [hive for hive in hives if SPREAD not in hive and role in hive["prefer"]]
     if not ranked:
         return None
@@ -200,8 +243,10 @@ def unhosted(role: str, hives: list[dict], now: int, aliases: tuple[str, ...] = 
         return Spill(preferred["id"], f"its heartbeat is older than {LIVE_MS // 1000} seconds")
     if preferred.get("draining") == YES:
         return Spill(preferred["id"], "it is draining")
-    if not hosts(role, preferred, aliases):
+    if {role, *aliases} & set(preferred["excluded"]):
         return Spill(preferred["id"], f"it excludes {role}")
+    if floor := outdated(role, preferred, aliases):
+        return Spill(preferred["id"], OUTDATED.format(release=preferred.get("version"), floor=floor, role=role))
     return None
 
 
@@ -255,9 +300,20 @@ def local_full(waited: Wait, local_agents: int, local_max: int, reserved: int) -
     return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents{kept}")
 
 
-def _private_master(hive: dict, harness: str, front: bool) -> bool:
+def _private_master(hive: dict[str, Any], harness: str, front: bool) -> bool:
     return front and (
-        bool(hive["master_login"].get(harness)) or (harness == "claude" and hive.get("master_login_enabled") == YES)
+        bool(master_accounts(hive, harness)) or (harness == "claude" and hive.get("master_login_enabled") == YES)
+    )
+
+
+def _open_master_login(hive: dict[str, Any], harness: str, login: str, closed: frozenset[str]) -> str | None:
+    return next(
+        (
+            account
+            for account in master_accounts(hive, harness) or [""]
+            if login in ("", account) and account_key(account) not in closed
+        ),
+        None,
     )
 
 
@@ -280,10 +336,10 @@ def place_master(
     candidates = []
     for hive in listing:
         headless = hive["ui"] != YES
-        account = hive["master_login"].get(harness, "")
         forced = _private_master(hive, harness, front)
         if forced:
-            if login in ("", account) and account_key(account) not in closed:
+            account = _open_master_login(hive, harness, login, closed)
+            if account is not None:
                 placed = MasterPlacement(hive["id"], account, MASTER_LOGIN, False)
                 candidates.append((headless, not bool(account), _order(MASTER)(hive), account, placed))
             continue

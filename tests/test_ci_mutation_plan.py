@@ -3,6 +3,7 @@ import re
 import subprocess
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -418,18 +419,18 @@ def test_a_plan_whose_estimate_exceeds_the_shard_budget_at_the_limit_gets_more_s
     monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
     assert SHARD_SETUP_SECONDS == 180.0
     assert shard_capacity(3, 1080) == 3 * (1080 - 180) == 2700
-    costs = {f"scripts.sample.x__mutmut_{index}": 160.0 for index in range(240)}
+    costs = {f"scripts.sample.x__mutmut_{index}": 160.0 for index in range(176)}
     planned = plan_shards(costs, limit=10, budget=1080)
-    assert planned["shards"] == 15
+    assert planned["shards"] == 11
     assert max(planned["shard_worker_seconds"]) == 2560 <= 3 * (1080 - 180)
-    assert plan_shards({str(index): 5000 for index in range(20)}, budget=1080)["shards"] == 20
-    assert plan_shards({str(index): 5000 for index in range(90)}, budget=1080)["shards"] == SHARD_CEILING == 24
+    assert plan_shards({str(index): 5000 for index in range(11)}, budget=1080)["shards"] == 11
+    assert plan_shards({str(index): 5000 for index in range(90)}, budget=1080)["shards"] == SHARD_CEILING == 12
     assert plan_shards({"a": 5000, "b": 5000}, budget=1080)["shards"] == 2
-    assert plan.shard_count(3 * 900 * 15, 500, 120, 10) == 15
-    assert plan.shard_count(3 * 900 * 15 + 1, 500, 120, 10) == 16
+    assert plan.shard_count(3 * 900 * 11, 500, 120, 10) == 11
+    assert plan.shard_count(3 * 900 * 11 + 1, 500, 120, 10) == 12
     assert plan.shard_count(3 * 900 * 15, 12, 120, 10) == 12
     assert plan.shard_count(3 * 1080 * 100, 500, 120, 10) == SHARD_CEILING
-    assert plan.shard_count(3 * 900 * 20, 500, 120, 10) == 20
+    assert plan.shard_count(3 * 900 * 20, 500, 120, 10) == 12
     assert plan.shard_count(3 * 120 * 4, 500, 120, 10) == 4
     assert plan_shards({"a": 3241, "b": 1}, target=10**6, limit=1)["shards"] == 2
     assert plan_shards({"a": 2700, "b": 1, "c": 1}, target=10**6, limit=1)["shards"] == 2
@@ -445,14 +446,24 @@ def test_a_plan_over_the_runner_pool_grades_every_mutant_in_a_second_wave(monkey
     from scripts.ci_mutation.measured import BATCH_RUNNERS, budget_overrun, plan_shards, shard_capacity
 
     monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", "3")
-    costs = {f"scripts.sample.x__mutmut_{index}": 170.0 for index in range(204)}
+    costs = {f"scripts.sample.x__mutmut_{index}": 170.0 for index in range(180)}
     planned = plan_shards(costs, budget=1080)
-    assert planned["estimated_worker_seconds"] == 34680 > BATCH_RUNNERS * shard_capacity(3, 1080) == 32400
-    assert planned["shards"] == 14 > BATCH_RUNNERS
+    assert planned["estimated_worker_seconds"] == 30600 > BATCH_RUNNERS * shard_capacity(3, 1080) == 16200
+    assert planned["shards"] == 12 > BATCH_RUNNERS
     assert sorted(planned["assignments"]) == sorted(costs)
-    assert set(planned["assignments"].values()) == set(range(14))
+    assert set(planned["assignments"].values()) == set(range(12))
     assert max(planned["shard_worker_seconds"]) == 2550
     assert budget_overrun(planned, 1080) == ""
+
+
+@pytest.mark.feature("mutation-planner-batch-runner-pool")
+def test_the_planner_sizes_shards_and_waves_by_the_batch_runner_pool() -> None:
+    from scripts.ci_mutation import measured
+
+    assert plan.SHARD_CEILING == plan.RUNNER_WAVES * plan.BATCH_RUNNERS
+    assert measured.stage_wall(plan.BATCH_RUNNERS, [0.0]) == plan.SHARD_SETUP_SECONDS
+    assert measured.stage_wall(plan.BATCH_RUNNERS + 1, [0.0]) == 2 * plan.SHARD_SETUP_SECONDS
+    assert plan.shard_count(10**9, 10**6, 240, 10) == plan.SHARD_CEILING
 
 
 def test_a_mutant_whose_tests_outlast_one_slice_runs_the_fast_head_with_each_slice_on_its_own_shard():
@@ -625,6 +636,23 @@ def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mu
     assert measured_plan([])["shards"] == 1
 
 
+@pytest.mark.feature("mutation-replan-names-untested-functions")
+def test_the_measured_plan_lists_each_function_no_test_calls_in_process_once_in_name_order() -> None:
+    from scripts.ci_mutation.measured import measured_plan
+
+    sample = [{"tests": {"scripts.sample.x_f": ["tests/test_sample.py::t"]}, "durations": {}}]
+    other = [{"tests": {"scripts.other.x_g": ["tests/test_other.py::t"]}, "durations": {}}]
+    names = [
+        "scripts.sample.x_z__mutmut_1",
+        "scripts.sample.x_f__mutmut_1",
+        "scripts.sample.x_a__mutmut_2",
+        "scripts.sample.x_a__mutmut_1",
+    ]
+    groups = [(names, sample), (["scripts.other.x_h__mutmut_1", "scripts.other.x_g__mutmut_1"], other)]
+    assert measured_plan(groups)["untested"] == ["scripts.other.x_h", "scripts.sample.x_a", "scripts.sample.x_z"]
+    assert measured_plan([(names[1:2], sample)])["untested"] == []
+
+
 def test_each_unit_runs_the_head_and_its_own_slice_and_only_on_its_shard(tmp_path, monkeypatch):
     from scripts.ci_mutation.mutant_shards import (
         shard_names,
@@ -761,8 +789,8 @@ def test_measured_cli_fails_at_plan_time_when_the_shard_ceiling_cannot_fit_the_b
     assert (
         "::error title=Mutation plan over budget::The slowest mutation shard needs 31000 worker seconds,"
         " 10333 seconds on 3 workers, against the 1080 second shard budget less 180 seconds of setup. The change"
-        " needs 310000 worker seconds and 24 shards in 2 waves of 12 runners hold at most 64800, so split it into"
-        " at least 5 pull requests." in text
+        " needs 310000 worker seconds and 12 shards in 2 waves of 6 runners hold at most 32400, so split it into"
+        " at least 10 pull requests." in text
     )
 
 
@@ -820,12 +848,43 @@ def test_a_split_mutant_overruns_alone_only_when_one_of_its_units_outgrows_a_sha
     }
     split = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2000.0, 1000.0]}}, 1080)
     assert split.startswith("The slowest mutation shard needs 2800 worker seconds")
-    assert split.endswith("hold at most 64800, so split it into at least 2 pull requests.")
+    assert split.endswith("hold at most 32400, so split it into at least 2 pull requests.")
     fits = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2700.0, 300.0]}}, 1080)
     assert fits.startswith("The slowest mutation shard needs 2800 worker seconds")
     whole = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2701.0, 299.0]}}, 1080)
     assert whole.startswith("Mutant scripts.sample.x__mutmut_1 alone needs 2701 worker seconds on one shard")
     assert budget_overrun(planned, 1080).startswith("Mutant scripts.sample.x__mutmut_1 alone needs 3000")
+
+
+@pytest.mark.feature("mutation-replan-names-untested-functions")
+def test_a_refusal_names_the_functions_no_test_calls_in_process_with_their_mutants_and_worker_seconds() -> None:
+    from scripts.ci_mutation.measured import budget_overrun
+
+    planned = {
+        "costs": {
+            "scripts.sample.x__mutmut_1": 3000.0,
+            "scripts.sample.y__mutmut_1": 100.0,
+            "scripts.sample.y__mutmut_2": 50.4,
+            "scripts.sample.z__mutmut_1": 25.0,
+            "scripts.sample.w__mutmut_1": 5.0,
+        },
+        "estimated_worker_seconds": 3180.4,
+        "shard_worker_seconds": [2800.0, 380.4],
+        "workers": 3,
+        "untested": ["scripts.sample.y", "scripts.sample.z"],
+    }
+    named = (
+        " Functions no test calls in process hold 3 of the change's 5 mutants and 175 of its 3180 worker seconds:"
+        " scripts.sample.y, scripts.sample.z."
+    )
+    alone = budget_overrun(planned, 1080)
+    assert alone.startswith("Mutant scripts.sample.x__mutmut_1 alone needs 3000 worker seconds on one shard")
+    assert alone.endswith("shorten or split the tests that cover it." + named)
+    split = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2000.0, 1000.0]}}, 1080)
+    assert split.startswith("The slowest mutation shard needs 2800 worker seconds")
+    assert split.endswith("so split it into at least 2 pull requests." + named)
+    assert budget_overrun({**planned, "untested": []}, 1080).endswith("shorten or split the tests that cover it.")
+    assert budget_overrun({**planned, "shard_worker_seconds": [2700.0, 480.4]}, 1080) == ""
 
 
 @pytest.mark.feature("mutation-replan-all-killed-plan")
@@ -1131,7 +1190,7 @@ def test_a_shard_grades_its_whole_mutants_and_hands_split_units_to_the_merge(tmp
         (4800, 3, 3),
         (36000, 10**4, 10),
         (36001, 10**4, 11),
-        (10**6, 10**4, 24),
+        (10**6, 10**4, 12),
     ],
 )
 def test_shard_count_fills_each_shard_to_its_target_within_the_limit_unless_the_budget_needs_more(
@@ -1494,13 +1553,9 @@ def test_planning_refuses_an_unmatched_module_before_publishing_statistics(tmp_p
     ],
 )
 def test_planning_checks_selected_test_collection_and_worker_contracts(
-    tmp_path, monkeypatch, imports, grouped, refused
-):
-    from tests import test_collection_imports as contracts
-
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, imports: str, grouped: bool, refused: bool
+) -> None:
     _project(tmp_path, {})
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
     group = 'pytestmark = pytest.mark.xdist_group("mcp-sdk")\n' if grouped else ""
     (tmp_path / "tests/test_sample.py").write_text("from scripts.sample import f\n" + group + imports)
     (tmp_path / "tests/test_unrelated.py").write_text("import mcp\n")
@@ -1520,11 +1575,7 @@ def test_planning_checks_selected_test_collection_and_worker_contracts(
         assert "stats_parts=" in output.read_text()
 
 
-def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_path, monkeypatch):
-    from tests import test_collection_imports as contracts
-
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_path: Path) -> None:
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "scripts/lazy.py").write_text("def load():\n    import mcp\n")
@@ -1536,11 +1587,11 @@ def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_p
         plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
 
 
-def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(tmp_path, monkeypatch):
-    from tests import test_collection_imports as contracts
+def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import collection_imports
 
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "scripts/leaf.py").write_text("")
@@ -1548,25 +1599,22 @@ def test_a_module_a_clean_run_walk_visited_is_not_walked_again_for_a_later_test(
     (tmp_path / "tests/test_a.py").write_text("from scripts.clean import run\n")
     (tmp_path / "tests/test_b.py").write_text("from scripts.clean import run\n")
     walks = []
-    loads_heavy = contracts.loads_heavy
+    loads_heavy = collection_imports.loads_heavy
 
-    def counted(name, seen):
+    def counted(root: Path, name: str, seen: set[str]) -> bool:
         if name not in seen:
             walks.append(name)
-        return loads_heavy(name, seen)
+        return loads_heavy(root, name, seen)
 
-    monkeypatch.setattr(contracts, "loads_heavy", counted)
+    monkeypatch.setattr(collection_imports, "loads_heavy", counted)
+    monkeypatch.setattr(plan, "loads_heavy", counted)
     plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
     assert walks.count("scripts.leaf") == 1
 
 
-def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
-    from tests import test_collection_imports as contracts
-
+def test_planning_follows_selected_test_package_imports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _project(tmp_path, {})
     (tmp_path / "tests/__init__.py").write_text("import mcp\n")
-    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
-    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.argv", ["plan"])
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
@@ -1582,7 +1630,7 @@ def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
         (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0]"),
         (480, {"a": 1}, "[0]", "[0]"),
         (481, {"a": 1}, "[0, 1]", "[0]"),
-        (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(24))), json.dumps(list(range(10)))),
+        (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(12))), json.dumps(list(range(10)))),
     ],
 )
 def test_main_defaults_to_origin_dev_a_two_minute_target_a_one_minute_stats_bucket_and_the_shard_budget(
@@ -1737,6 +1785,34 @@ def test_narrowing_keeps_the_covering_tests_of_a_fully_recorded_file_and_whole_o
         "tests/test_stale.py",
     ]
     assert plan.narrow(tmp_path, ["tests/test_recorded.py"], set(), recorded, set()) == ["tests/test_recorded.py"]
+
+
+def _outside_manifest() -> dict[str, Any]:
+    tests = {
+        "tests/test_a.py::test_one": {"units": [], "files": [], "outside": ["docs/a.md"]},
+        "tests/test_b.py::test_two": {"units": [], "files": ["docs/b.md"]},
+        "tests/test_c.py::test_three": {"units": []},
+    }
+    return {"commit": "recorded", "units": [], "tests": tests, "lines": {test: {} for test in tests}}
+
+
+@pytest.mark.feature("selectors-read-outside-files")
+def test_a_drifted_file_a_test_opened_outside_its_record_selects_that_test() -> None:
+    manifest = _outside_manifest()
+    assert plan.covering_tests(manifest, set(), {"docs/a.md"}) == {"tests/test_a.py::test_one"}
+    assert plan.covering_tests(manifest, set(), {"docs/b.md"}) == {"tests/test_b.py::test_two"}
+    assert plan.covering_tests(manifest, set(), {"docs/other.md"}) == set()
+
+
+@pytest.mark.feature("selectors-read-outside-files")
+def test_a_drifted_file_a_test_opened_outside_its_record_selects_that_test_by_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _outside_manifest()
+    monkeypatch.setattr(plan, "recorded_changes", lambda *args: [])
+    assert plan.line_covering_tests(tmp_path, manifest, {}, {"docs/a.md"}) == {"tests/test_a.py::test_one"}
+    assert plan.line_covering_tests(tmp_path, manifest, {}, {"docs/b.md"}) == {"tests/test_b.py::test_two"}
+    assert plan.line_covering_tests(tmp_path, manifest, {}, {"docs/other.md"}) == set()
 
 
 def test_defined_tests_name_test_functions_and_methods_but_not_their_nested_helpers(tmp_path):

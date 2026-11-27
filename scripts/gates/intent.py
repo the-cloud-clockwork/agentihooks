@@ -22,7 +22,7 @@ from scripts.gates import intent_history, lift, log
 from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
-from scripts.swarm import timing
+from scripts.swarm import tick_activity
 from scripts.swarm_ledger import ledger_splits, plan_read
 
 NAME = "intent"
@@ -990,7 +990,7 @@ class Check:
         if judgment is None:
             return []
         actions = self._check(task, judgment, verdicts)
-        timing.keep()
+        tick_activity.renew_now()
         return actions
 
     def _judge(self, doc: dict[str, Any], task: dict[str, Any], unmoved: dict[str, Any] | None) -> _Judgment | None:

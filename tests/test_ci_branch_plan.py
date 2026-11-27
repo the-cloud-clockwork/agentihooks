@@ -6,8 +6,7 @@ import zipfile
 
 import pytest
 
-from scripts import ci_branch_plan
-from tests import dep_manifest
+from scripts import ci_branch_plan, dep_manifest
 
 pytestmark = pytest.mark.unit
 

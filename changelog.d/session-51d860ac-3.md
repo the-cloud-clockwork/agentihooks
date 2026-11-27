@@ -1,0 +1,3 @@
+### Changed
+
+- A master seat change carries the operator's open orders by code. The handoff envelope of a master lists one line per open order (`unknown` when the ledger could not be read), whether the master hands off through `agentihooks swarm handoff` or the stall pass recycles it, and the successor's opening prompt shows those lines before the handoff document. The master refocus block lists the open phases under an order first. The master loop seat cron reads `agentihooks api get orders` every loop; a seat cron the code owns whose text changed is replaced at the next swarm start or front door join, and a cron a master added by hand stays adopted.

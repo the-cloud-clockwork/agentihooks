@@ -37,6 +37,12 @@ TESTS_GROUPS = tuple(
     + promotion
     + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
     for promotion in ("", " || github.event_name == 'push' && " + LANE.replace("hosted-lane", "promotion-dev"))
+) + (
+    "${{ github.event_name == 'workflow_dispatch' && "
+    + LANE.replace("hosted-lane", "tests-dispatch-lane")
+    + " || github.event_name == 'push' && "
+    + LANE.replace("hosted-lane", "promotion-dev")
+    + " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}",
 )
 PATH_FILTERS = ("paths", "paths-ignore")
 DEV_PUSH = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
@@ -128,26 +134,60 @@ def without_path_filters(workflow: dict[Any, Any]) -> dict[Any, Any]:
     return {key: unfiltered(value) if key in ("on", True) else value for key, value in workflow.items()}
 
 
-def dedicated_chart_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
-    return (
-        trusted.get("name") == "Helm chart release"
-        and events(trusted) == [{"workflow_run": {"workflows": ["Swarm worker image"], "types": ["completed"]}}]
-        and name in {"package", "kind", "publish"}
-        and job == (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name)
-        and block == {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
-    )
+def only_concurrency_changed(name: str, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
+    baseline = mapping(mapping(trusted.get("jobs")).get(name))
+    return bool(baseline) and {key: value for key, value in job.items() if key != "concurrency"} == {
+        key: value for key, value in baseline.items() if key != "concurrency"
+    }
 
 
 def flake_history_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
-    baseline = (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name)
     return (
         trusted.get("name") == "Tests"
         and name == "flake-budget"
-        and isinstance(baseline, dict)
-        and {key: value for key, value in job.items() if key != "concurrency"}
-        == {key: value for key, value in cast(dict[Any, Any], baseline).items() if key != "concurrency"}
+        and only_concurrency_changed(name, job, trusted)
         and block == {"group": "flake-history", "queue": "max", "cancel-in-progress": False}
     )
+
+
+def hive_release_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
+    return (
+        trusted.get("name") == "Swarm worker image"
+        and name == "hive"
+        and only_concurrency_changed(name, job, trusted)
+        and block == {"group": "hive-worker-release", "queue": "max", "cancel-in-progress": False}
+    )
+
+
+def gate_required_status_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
+    return (
+        trusted.get("name") == "Gate Required status"
+        and name == "report"
+        and only_concurrency_changed(name, job, trusted)
+        and block
+        == {
+            "group": "${{ format('gate-required-status-{0}', github.event.workflow_run.head_sha) }}",
+            "queue": "max",
+            "cancel-in-progress": False,
+        }
+    )
+
+
+def dispatched_proofs(workflow: object) -> bool:
+    found = events(mapping(workflow))
+    return (
+        mapping(workflow).get("name") == "Proofs"
+        and len(found) == 1
+        and set(mapping(found[0])) == {"workflow_dispatch"}
+    )
+
+
+def focused_proof_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
+    return dispatched_proofs(trusted) and block == {
+        "group": "${{ format('focused-proof-{0}', github.run_id) }}",
+        "queue": "max",
+        "cancel-in-progress": False,
+    }
 
 
 def mapping(value: object) -> dict[Any, Any]:
@@ -187,6 +227,7 @@ def dev_push_group(block: object, workflow: object) -> bool:
 
 
 def problems(workflow: object, baseline: object = None, ancestor: object = None) -> list[str]:
+    proofs: dict[Any, Any] = mapping(baseline) if dispatched_proofs(workflow) else {}
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
     jobs = cast(dict[Any, Any], workflow).get("jobs") or cast(dict[Any, Any], {})
@@ -215,7 +256,12 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
         block = job.get("concurrency", cast(dict[Any, Any], workflow).get("concurrency"))
         base_job = (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name, cast(dict[Any, Any], {}))
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
-        if dedicated_chart_group(name, block, job, trusted) or flake_history_group(name, block, job, trusted):
+        if (
+            flake_history_group(name, block, job, trusted)
+            or hive_release_group(name, block, job, trusted)
+            or gate_required_status_group(name, block, job, trusted)
+            or focused_proof_group(name, block, job, proofs)
+        ):
             continue
         if dev_push_group(block, cast(dict[Any, Any], workflow)):  # pragma: no mutate
             continue

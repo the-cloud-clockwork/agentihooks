@@ -1,4 +1,8 @@
+import importlib.util
+import sys
 from pathlib import Path
+from subprocess import CompletedProcess
+from types import ModuleType
 
 import pytest
 import yaml
@@ -6,6 +10,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 CHART = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm"
+SMOKE = CHART / "ci" / "kind-smoke.sh"
 
 
 def test_api_values_default_disabled_with_its_own_resources_and_public_route() -> None:
@@ -19,6 +24,13 @@ def test_api_values_default_disabled_with_its_own_resources_and_public_route() -
     assert api["publicRoute"]["host"] == ""
     assert "resources" in api
     assert "podDisruptionBudget" in api
+
+
+def test_the_kind_proof_renders_the_api_service_before_any_cluster_starts() -> None:
+    script = SMOKE.read_text()
+
+    assert 'python3 tests/chart_api.py "$chart"' in script
+    assert script.index("python3 tests/chart_api.py") < script.index("kind create cluster")
 
 
 def test_api_deployment_mirrors_the_ledgers_env_and_settings() -> None:
@@ -117,3 +129,59 @@ def test_api_network_policy_admits_the_same_sources_as_the_ledger() -> None:
 
     assert "networkPolicy.ingressFrom" in section
     assert "port: http" in section
+
+
+def _load_chart_checker(name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(f"{name}.py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.feature("api-private-ledger-home")
+@pytest.mark.parametrize("missing_database", [False, True])
+def test_api_mirrors_the_database_but_not_the_ledgers_private_home(
+    monkeypatch: pytest.MonkeyPatch, missing_database: bool
+) -> None:
+    dependency = _load_chart_checker("chart_ledger_rollout")
+    monkeypatch.setitem(sys.modules, "chart_ledger_rollout", dependency)
+    chart_api = _load_chart_checker("chart_api")
+    database = {"name": "AGENTIHOOKS_SWARM_DATABASE_URL", "value": "postgresql://ledger"}
+    server_rows = [database, {"name": "AGENTIHOOKS_HOME", "value": "/run/agentihooks"}]
+    api_rows = [*chart_api.API_ROWS, *([] if missing_database else [database])]
+    selector = {"matchLabels": {"role": "api"}}
+    docs = [
+        {
+            "kind": "Deployment",
+            "metadata": {"name": chart_api.API},
+            "spec": {
+                "selector": selector,
+                "template": {"spec": {"containers": [{"env": api_rows}]}},
+            },
+        },
+        {
+            "kind": "StatefulSet",
+            "metadata": {"name": chart_api.LEDGER},
+            "spec": {"template": {"spec": {"containers": [{"env": server_rows}]}}},
+        },
+        *[
+            {
+                "kind": "NetworkPolicy",
+                "metadata": {"name": name},
+                "spec": {"podSelector": selector, "ingress": []},
+            }
+            for name in [chart_api.API, chart_api.LEDGER]
+        ],
+    ]
+
+    def rendered(*args: str) -> CompletedProcess[str]:
+        return CompletedProcess(args, 0, yaml.safe_dump_all(docs), "")
+
+    monkeypatch.setattr(chart_api, "render", rendered)
+    found = chart_api.mirror_problems("chart")
+
+    if missing_database:
+        assert any("AGENTIHOOKS_SWARM_DATABASE_URL" in problem for problem in found)
+    else:
+        assert found == []

@@ -3,9 +3,10 @@
 
 Usage: watch_ledger.py <slug> [--as NAME] [--since-rev N] [--interval 3] [--all]
 
-Follows the ledger server's event stream, one snapshot then only changes, and prints each event logged after
+Follows the ledger server's event stream, reading the ledger in process when it opens or names a newer revision, and prints each event logged after
 rev N (default: the rev at start; --as NAME: only those the owner rule gives NAME; --all: every event, agents'
-too). A dropped stream reconnects after --interval seconds and replays from its cursor:
+too). A dropped stream reconnects after --interval seconds and replays from its cursor. On a remote host, such
+as a hive worker, it reads the ledger in process every --interval seconds instead:
 
   OPERATOR rev=12 comment added on phases/p1 [c-1a2b]: "text"
   OPERATOR rev=13 comment edited on phases/p1 [c-1a2b] diff: "-old line\\n+new line"
@@ -29,6 +30,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Generator, Iterator
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(1, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -42,16 +45,28 @@ from scripts.swarm_ledger.events import Expired, patch  # noqa: E402
 from scripts.swarm_ledger.events import stream as events_stream  # noqa: E402
 
 STREAM_TIMEOUT_S = 3 * events_stream.HEARTBEAT_S
+IN_PROCESS = "in-process"
+EXPORTS: dict[Any, Any] = {}
 
 
-def credentials(slug):
+def credentials(slug: str) -> dict[str, str]:
+    """The credential headers the ledger server's event stream needs; none on a remote host, such as a hive worker,
+    which reads the ledger in process and so never fetches an agent token."""
+    if remote(slug):
+        return {}
     import ledger
 
     return ledger.credentials(slug)
 
 
-def stream(slug, cursor=None, headers=None):
-    """Yield (event, data, cursor) from the ledger server's event stream; Expired when the cursor is gone."""
+def stream(
+    slug: str, cursor: str | None = None, headers: dict[str, str] | None = None
+) -> Generator[tuple[str, Any, str | None]]:
+    """Yield (event, data, cursor) from the ledger: one snapshot read in process on a remote host, such as a hive
+    worker, else the ledger server's event stream; Expired when the cursor is gone."""
+    if remote(slug):
+        yield from polled(slug)
+        return
     url, headers = request(slug, cursor, credentials(slug) if headers is None else headers)
     try:
         response = ledger_link.urlopen(urllib.request.Request(url, headers=headers), STREAM_TIMEOUT_S)
@@ -69,6 +84,19 @@ def request(slug, cursor, headers):
     if cursor:
         headers["Last-Event-ID"] = cursor
     return f"{ledger_link.base()}/api/v1/ledgers/{urllib.parse.quote(slug, safe='')}/events", headers
+
+
+def polled(slug: str) -> Iterator[tuple[str, dict[str, Any], None]]:
+    """Yield the ledger once as a snapshot read in process over the shared database, as every other non browser read
+    is; EXPORTS holds the last export, so each later read takes only the changes since it."""
+    from scripts.tick.adapters import database_ledger
+
+    yield "snapshot", {"ledger": database_ledger.client(IN_PROCESS, STREAM_TIMEOUT_S).export(slug, EXPORTS)}, None
+
+
+def remote(slug: str) -> bool:
+    """Whether this host reaches the ledger as a remote client, such as a hive worker."""
+    return ledger_link.remote(slug=slug)
 
 
 def say(text):
@@ -112,11 +140,17 @@ class Watch:
             say(f"WARNING {message}")
         self.warned = meta.get("warnings") or []
 
-    def take(self, name, data):
+    def take(self, name: str, data: dict[str, Any]) -> None:
         if name == "snapshot":
             self.show(data["ledger"])
-        elif name == "ledger":
+        elif name == "ledger" and "from" not in data:
             self.show(patch.apply(self.state, data["patch"]))
+        elif name in ("open", "ledger") and self.behind(data.get("rev")):
+            for _, read, _ in polled(self.args.slug):
+                self.show(read["ledger"])
+
+    def behind(self, rev: int | None) -> bool:
+        return self.state is None or rev is None or rev > self.state["_meta"]["rev"]
 
 
 def line(event, rules=""):
@@ -151,7 +185,7 @@ def alive(beat):
         beat.touch()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("slug")
     parser.add_argument("--interval", type=float, default=3.0)

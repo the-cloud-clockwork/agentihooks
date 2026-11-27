@@ -1,0 +1,16 @@
+rules:
+  - id: quick-master-force-return
+    languages: [python]
+    severity: ERROR
+    message: Forced quick master replacement must end and relaunch the seat through the existing lifecycle.
+    paths:
+      include:
+        - /scripts/quick/launch.py
+        - quick-master-force-return.py
+    patterns:
+      - pattern-inside: |
+          def force(...):
+              ...
+      - pattern: |
+          if $SEAT.seat == MASTER:
+              return "master"

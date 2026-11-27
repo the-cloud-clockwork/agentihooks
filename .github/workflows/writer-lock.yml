@@ -23,6 +23,7 @@ jobs:
       tick: ${{ steps.tick.outputs.due }}
       events: ${{ steps.events.outputs.due }}
       features: ${{ steps.features.outputs.due }}
+      lab_sandbox: ${{ steps.lab-sandbox.outputs.due }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -132,6 +133,28 @@ jobs:
           done < "$RUNNER_TEMP/features-changed"
           echo "due=$due" >> "$GITHUB_OUTPUT"
 
+      - name: Select lab sandbox inputs
+        id: lab-sandbox
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: origin/${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          LAB_SANDBOX_INPUTS: >-
+            scripts/ci_lab/sandbox.py scripts/ci_lab/run_static.py scripts/ci_lab/run_tests.py
+            tests/ci_lab/test_sandbox.py tests/ci_lab/test_run_static.py tests/ci_lab/test_run_tests.py
+            .github/workflows/writer-lock.yml
+        run: |
+          base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          git diff --no-ext-diff --no-renames --name-only -z "$base" "$PR_HEAD" > "$RUNNER_TEMP/lab-sandbox-changed"
+          due=false
+          read -r -a inputs <<< "$LAB_SANDBOX_INPUTS"
+          while IFS= read -r -d '' path; do
+            for input in "${inputs[@]}"; do
+              if [[ "$path" == "$input" ]]; then due=true; fi
+            done
+          done < "$RUNNER_TEMP/lab-sandbox-changed"
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+
   events:
     needs: [inputs]
     if: github.event_name == 'pull_request' && needs.inputs.outputs.events == 'true'
@@ -151,6 +174,54 @@ jobs:
     needs: [inputs]
     if: github.event_name == 'pull_request' && needs.inputs.outputs.features == 'true'
     uses: ./.github/workflows/feature-suite.yml
+
+  lab-sandbox:
+    needs: [inputs]
+    if: (github.event_name == 'pull_request' && needs.inputs.outputs.lab_sandbox == 'true') || github.workflow == 'Writer lock'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+
+      - name: Let bubblewrap create user and network namespaces
+        shell: bash
+        run: |
+          if ! command -v bwrap >/dev/null; then
+            archive=/etc/apt/sources.list.d/ubuntu.sources
+            [[ -f "$archive" ]] || archive=/etc/apt/sources.list
+            only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)
+            sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete; installing bubblewrap from the indexes that loaded"
+            sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" bubblewrap
+          fi
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --dev-bind / / --unshare-net true
+
+      - name: Install dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS: 0.dev${{ github.run_number }}
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+
+      - name: Run the lab sandbox tests under real bubblewrap
+        shell: bash
+        run: |
+          python -m pytest tests/ci_lab/test_sandbox.py tests/ci_lab/test_run_static.py tests/ci_lab/test_run_tests.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/lab-sandbox.log"
+          if grep -q SKIPPED "$RUNNER_TEMP/lab-sandbox.log"; then
+            echo '::error::A lab sandbox test skipped, so bubblewrap did not isolate it on this runner.'
+            exit 1
+          fi
 
   scenario:
     needs: [inputs]
@@ -203,7 +274,9 @@ jobs:
         shell: bash
         run: |
           python -m pytest tests/swarm_ledger/test_postgres_writer_lock.py tests/swarm_ledger/test_postgres_outbox.py tests/swarm_ledger/test_postgres_writer_floor.py tests/swarm_ledger/test_postgres_repository.py tests/test_memory_postgres_parity.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/writer-lock.log"
-          grep -q ' 23 passed' "$RUNNER_TEMP/writer-lock.log" || { echo '::error::The writer lock, outbox, writer floor, repository and session memory parity scenarios did not run.'; exit 1; }
+          grep -q ' 38 passed' "$RUNNER_TEMP/writer-lock.log" || { echo '::error::The writer lock, outbox, writer floor, repository and session memory parity scenarios did not run.'; exit 1; }
+          python -m pytest tests/swarm_ledger/test_warm_writer_parity.py -n 0 -v -rs --tb=short | tee "$RUNNER_TEMP/warm-writer-parity.log"
+          grep -q ' 25 passed' "$RUNNER_TEMP/warm-writer-parity.log" || { echo '::error::The warm writer parity scenarios on SQLite and Postgres did not all run.'; exit 1; }
 
       - name: Save the passed input key
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'

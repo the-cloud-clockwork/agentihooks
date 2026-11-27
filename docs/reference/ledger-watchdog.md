@@ -118,5 +118,5 @@ the reason, target and caller, and that an unwritable log prevents signalling.
 The delivery records a failing tests-only
 [proof run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39091440883)
 and a passing
-[mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39091642390).
+[mutation run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39091642390).
 The reload behavior above describes the current implementation.

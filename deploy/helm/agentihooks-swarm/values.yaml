@@ -62,6 +62,8 @@ ledger:
   persistence:
     size: 1Gi
     storageClassName: ""
+  cache:
+    sizeLimit: 512Mi
   env: {}
   # Secret env only the ledger container reads, such as the shared database URL workers must never hold.
   secretEnv: []
@@ -71,7 +73,7 @@ ledger:
       memory: 512Mi
       ephemeral-storage: 64Mi
     limits:
-      memory: 2Gi
+      memory: 2560Mi
       ephemeral-storage: 256Mi
 
 api:
@@ -232,13 +234,15 @@ controller:
       limits:
         memory: 128Mi
         ephemeral-storage: 64Mi
+  cache:
+    sizeLimit: 512Mi
   resources:
     requests:
       cpu: 250m
-      memory: 128Mi
+      memory: 384Mi
       ephemeral-storage: 64Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
       ephemeral-storage: 256Mi
 
 # Event hub: reactors on the swarm event bus. Two replicas share each reactor's durable consumer; a singleton
@@ -259,17 +263,20 @@ hub:
                 operator: DoesNotExist
   tolerations: []
   terminationGracePeriodSeconds: 30
+  servingFile: /tmp/hub.serving
   env: {}
   # Secret keys as hub env, such as AGENTIHOOKS_BUS_CREDENTIALS for a NATS that signs its users:
   # [{name, secretName, key, optional}].
   secretEnv: []
+  cache:
+    sizeLimit: 512Mi
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 384Mi
       ephemeral-storage: 64Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
       ephemeral-storage: 256Mi
 
 # Auth service: issues signed tokens other services verify with AGENTIHOOKS_AUTH_KEY, a secret of at least 32 bytes
@@ -328,6 +335,9 @@ nats:
 workers:
   replicas: 0
   maxAgents: 20
+  sandboxProfiles:
+    seccomp: ""
+    apparmor: ""
   # A stopping hive takes no new agents and waits this long for its agents to finish before it exits.
   drainSeconds: 3600
   rollout:
@@ -335,7 +345,7 @@ workers:
     namespace: default
     leaseName: agentihooks-hive-rollout
     drainSeconds: 1200
-    # Optional pod stamp; each new value rolls the hives one at a time.
+    # Pod stamp; each new value rolls the hives one at a time. Empty takes the release chart's version when the worker tag is release.
     release: ""
   excluded: [master]
   # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.
@@ -344,6 +354,8 @@ workers:
   prefer: ""
   # Capabilities this hive declares at every start, such as anton; a hive placement need names one to steer a run here.
   capabilities: []
+  # True for a hive pinned to one release: the hub keeps admitting it after the hub moves to a newer release.
+  pinned: false
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
     tag: dev

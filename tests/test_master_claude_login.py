@@ -1196,6 +1196,44 @@ def _spare_slot(rendered: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(reservation, "primary_reserved", lambda *_: False)
 
 
+@pytest.mark.feature("operator-master-up-resume-master-login")
+@pytest.mark.parametrize(("used", "number"), [(97.9, 1), (98.0, 2), (100.0, 2)])
+def test_a_drained_login_cannot_outrank_a_failed_login_with_room(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, used: float, number: int
+) -> None:
+    from scripts import master_logins
+
+    _spare_slot(rendered, monkeypatch)
+    login.mark_failed(2)
+    monkeypatch.setattr(
+        master_logins, "usage", lambda account, now: (0.0, used if account == "masteratexample_com" else 5.0, now)
+    )
+    monkeypatch.setattr(
+        master_logins, "week_left", lambda account, now: 100.0 - (used if account == "masteratexample_com" else 5.0)
+    )
+    target, found = login.prepare(_environ(rendered), tmp_path)
+    assert (target, found) == (login.home(number), "masteratexample_com" if number == 1 else "spareatexample_com")
+    assert login.holders(login.root(number)) == {"master@a-1": os.getpid()}
+    assert login.holders(login.root(3 - number)) == {}
+
+
+@pytest.mark.feature("operator-master-up-resume-master-login")
+def test_a_single_drained_login_is_not_claimed(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import master_logins
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, 100.0, now))
+    monkeypatch.setattr(master_logins, "week_left", lambda account, now: 0.0)
+    monkeypatch.setattr(reservation, "primary_reserved", lambda *_: False)
+    with pytest.raises(login.LoginRefused) as refused:
+        login.prepare(_environ(rendered), tmp_path)
+    assert str(refused.value) == login.ALL_HELD.format(held="masteratexample_com drained")
+    assert login.holders(login.root()) == {}
+
+
 @pytest.mark.feature("master-login-limit-recovery")
 def test_launch_moves_to_the_next_stored_slot_when_the_taken_login_fails_its_check(
     ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1879,3 +1917,37 @@ def test_a_master_token_launch_into_a_new_folder_trusts_it_in_the_token_home(
     projects = json.loads((Path(homes[0]) / login.CONFIG).read_text())["projects"]
     assert projects[str(scratch.resolve())] == {"hasTrustDialogAccepted": True}
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("forced-master-start")
+def test_a_forced_token_launch_asks_the_forced_credential_after_a_refusal(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from collections.abc import Mapping
+
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer as router
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(account_sessions, "sessions_by_account", dict)
+    refusal = router.RoutingError("no Claude account has a free session under its quota band")
+    decision = router.RouteDecision(router.Credential("AH_CC_TOKEN_workeratexample_com", "x"), None, "forced master")
+    picked: list[tuple[router.RoutingError, tuple[str, ...]]] = []
+
+    def refuse(environ: Mapping[str, str], **options: object) -> router.RouteDecision:
+        raise refusal
+
+    def forced(environ: Mapping[str, str], refused: router.RoutingError, exclude: tuple[str, ...]) -> object:
+        picked.append((refused, exclude))
+        return decision
+
+    monkeypatch.setattr(router, "select_master_credential", refuse)
+    monkeypatch.setattr(router, "forced_credential", forced)
+    monkeypatch.setattr(account_slots, "execute", lambda *args, **kwargs: None)
+    login.launch_token("/opt/claude", [], _environ(rendered), "", forced=True)
+    assert picked == [(refusal, (router.API_ACCOUNT,))]
+    with pytest.raises(router.RoutingError) as raised:
+        login.launch_token("/opt/claude", [], _environ(rendered), "")
+    assert (raised.value, len(picked)) == (refusal, 1)

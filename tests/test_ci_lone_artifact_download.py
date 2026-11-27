@@ -21,27 +21,23 @@ GREEN = {"files": [], "not_mutated": [], "failed": False}
 MUTATION = ("workflows/test.yml", "mutation", "mutation-report-*")
 REPLAY = ("workflows/mutation-replay.yml", "verify", "mutation-replay-grade-*")
 LONE_FOLDER = {MUTATION, REPLAY}
-ROOT_READ = {
-    ("workflows/test.yml", "test-summary", "durations-3.*"),
-    ("workflows/test.yml", "test-summary", "flakes-3.*"),
-    (
-        "workflows/test.yml",
-        "sonar",
-        "${{ needs.select.outputs.scope == 'selected' && '{coverage,branch-coverage}-3.12-*' || 'coverage-3.12-*' }}",
-    ),
-}
+ROOT_READ = {("workflows/test.yml", "test-summary", "{durations,flakes}-3.*")}
+REUSED_PLAN = ("workflows/test.yml", "sonar", "{reused-branch,reused}-3.12")
 UNAFFECTED = {
     ("workflows/hierarchy-cpu.yml", "grade", "load-pair-*"),
     ("workflows/hierarchy-cpu.yml", "grade", "hierarchy-pair-*"),
     ("workflows/ledger-load.yml", "compare-grade", "compare-pair-*"),
     ("workflows/test.yml", "shard-check", "{durations,flakes}-${{ matrix.python-version }}-*"),
-    ("workflows/test.yml", "sonar", "{reused-branch,reused}-3.12"),
+    ("workflows/test.yml", "unit", "{durations,flakes,coverage}-${{ matrix.python-version }}-*"),
+    ("workflows/test.yml", "unit-rerun", "{durations,flakes,coverage}-${{ matrix.python-version }}-*"),
+    REUSED_PLAN,
+    ("workflows/test.yml", "sonar-after-unit", "{reused-branch,reused}-3.12"),
     ("workflows/test.yml", "dep-manifest", "coverage-3.12-*"),
     ("workflows/test.yml", "coverage-ratchet", "executed-lines-3.12-*"),
     ("workflows/test.yml", "coverage-ratchet", "coverage-3.12-*"),
     ("workflows/test.yml", "refresh-durations", "durations-3.*"),
     ("workflows/test.yml", "flake-budget", "flakes-3.*"),
-    ("workflows/test.yml", "coverage-baseline", "coverage-3.12-*"),
+    ("workflows/test.yml", "coverage-baseline", "executed-lines-3.12-*"),
 }
 
 
@@ -75,6 +71,35 @@ def _steps(file: str, job: str) -> dict[str, dict[str, Any]]:
     return {step["name"]: step for step in steps if "name" in step}
 
 
+def _matches(name: str, pattern: str) -> bool:
+    """Return whether an artifact name matches a download pattern, expanding brace groups as minimatch does."""
+    braces = re.fullmatch(r"([^{]*)\{([^{}]*)\}(.*)", pattern)
+    if braces is None:
+        return fnmatch(name, pattern)
+    head, options, tail = braces.groups()
+    return any(_matches(name, head + option + tail) for option in options.split(","))
+
+
+def _waits_on(jobs: dict[str, Any], job: str) -> set[str]:
+    """Return every job a job waits on, directly or through the jobs it needs."""
+    needs = jobs[job].get("needs") or []
+    direct = {needs} if isinstance(needs, str) else set(needs)
+    return direct.union(*(_waits_on(jobs, need) for need in direct))
+
+
+def _uploaders(file: str, pattern: str) -> set[str]:
+    """Return the jobs with an upload step whose artifact name, on Python 3.12, a download pattern matches."""
+    found: set[str] = set()
+    for job, steps in _jobs(GITHUB / file):
+        for step in steps:
+            uses = str(step.get("uses", ""))
+            upload = uses.startswith("actions/upload-artifact@") or uses.endswith("/retry-upload")
+            name = str((step.get("with") or {}).get("name", "")).replace("${{ matrix.python-version }}", "3.12")
+            if upload and _matches(name, pattern):
+                found.add(job)
+    return found
+
+
 def _download(
     step: dict[str, Any], artifacts: dict[str, dict[str, str]], workspace: Path, contexts: dict[str, str]
 ) -> None:
@@ -86,7 +111,7 @@ def _download(
     assert step["uses"] == "actions/download-artifact@v8.0.2"
     settings = step["with"]
     path = workspace / interpolate(settings["path"], contexts)
-    matched = [name for name in sorted(artifacts) if fnmatch(name, settings["pattern"])]
+    matched = [name for name in sorted(artifacts) if _matches(name, settings["pattern"])]
     for name in matched:
         folder = path if len(matched) == 1 or settings.get("merge-multiple") is True else path / name
         for relative, text in artifacts[name].items():
@@ -176,3 +201,26 @@ def test_the_gate_summary_counts_every_leg_however_many_legs_ran(tmp_path: Path,
         _download(downloads[key], reports, tmp_path, {})
     folder = shlex.split(_steps("workflows/test.yml", "test-summary")["Summarize this run's tests"]["run"])[2]
     assert ci_gate_summary.counts(tmp_path / folder) == {"ran": 2 * legs, "flaky": legs, "failed": 0}
+
+
+@pytest.mark.feature("pattern-downloads-keep-a-lone-artifact-where-its-reader-looks")
+def test_the_gate_summary_counts_a_lone_report_that_lands_at_the_folder_root(tmp_path: Path) -> None:
+    reports = {"durations-3.12-1": {"durations.json": json.dumps({"test_ok": 1})}}
+    downloads = _pattern_downloads()
+    for key in sorted(ROOT_READ):
+        _download(downloads[key], reports, tmp_path, {})
+    folder = shlex.split(_steps("workflows/test.yml", "test-summary")["Summarize this run's tests"]["run"])[2]
+    assert (tmp_path / folder / "durations.json").is_file()
+    assert ci_gate_summary.counts(tmp_path / folder) == {"ran": 1, "flaky": 0, "failed": 0}
+
+
+@pytest.mark.feature("sonar-reads-the-reused-plan-after-test-count-uploads-it")
+def test_sonar_lists_the_reused_test_plan_only_after_every_job_that_uploads_it_finished() -> None:
+    file, job, _ = REUSED_PLAN
+    jobs = yaml.safe_load((GITHUB / file).read_text())["jobs"]
+    downloads = [key for key in _pattern_downloads() if key[:2] == (file, job)]
+    assert REUSED_PLAN in downloads
+    for _, _, pattern in downloads:
+        uploaders = _uploaders(file, pattern)
+        assert uploaders, f"no job in {file} uploads {pattern}"
+        assert uploaders <= _waits_on(jobs, job), f"{job} can list {pattern} before {sorted(uploaders)} uploads it"

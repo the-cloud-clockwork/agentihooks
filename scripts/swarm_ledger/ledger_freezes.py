@@ -7,6 +7,7 @@ from typing import Any
 from scripts.swarm_ledger import ports
 from scripts.swarm_ledger.ledger_kinds import KINDS
 from scripts.swarm_ledger.ledger_tasks import LANES
+from scripts.swarm_ledger.op_context import OpContext
 from scripts.swarm_ledger.repository.hierarchy import project
 
 OPS = ("freeze_set", "freeze_clear")
@@ -63,7 +64,7 @@ def autonomy(slug: str) -> str:
         return ""
 
 
-def author(op, ctx) -> tuple[str, str] | None:
+def author(op: dict, ctx: OpContext) -> tuple[str, str] | None:
     """(writer, the operator's quoted words) when the op may write freezes, else None."""
     import ledger_relay
 
@@ -82,7 +83,7 @@ def author(op, ctx) -> tuple[str, str] | None:
     return by, words
 
 
-def _set(doc: dict[str, Any], op: dict[str, Any], ctx: Any, by: str, words: str) -> bool:
+def _set(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext, by: str, words: str) -> bool:
     target: str = op["target"]
     graph = project(doc)[0]
     if not selector(target) and target not in graph:
@@ -125,10 +126,13 @@ def _above(node: str, graph: dict[str, Any], below: tuple[str, ...] = ()) -> tup
     return _above(up, graph, (*below, up))
 
 
-def _clear(doc, op, ctx, by):
-    target = op["target"]
-    rows = doc.get("freezes", [])
+def _clear(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext, by: str) -> bool:
+    target: str = op["target"]
+    rows: list[dict[str, Any]] = doc.get("freezes", [])
     gone = [row for row in rows if row["target"] == target]
+    if not gone and not selector(target) and target not in project(doc)[0]:
+        ctx.refused.append(f"{op['op']} refused: target {target} does not exist")
+        return False
     if gone:
         doc["freezes"] = [row for row in rows if row["target"] != target]
         cleared = [row["target"] for row in gone]
@@ -137,7 +141,7 @@ def _clear(doc, op, ctx, by):
     return True
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     found = author(op, ctx)
     if found is None:
         return False

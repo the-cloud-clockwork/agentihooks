@@ -1,0 +1,6 @@
+{
+  "scripts/reused_coverage.py:scripts.reused_coverage.x_keep:0ca6e98a5a76a625a09d4aaf7a82e77133d65a4e3452249457e967e41902d55c": {
+    "reader": "standards-reader",
+    "reason": "SQLite keywords and unquoted identifiers, including the temp table name and its column, resolve case insensitively, so the uppercased create defines the same table that later statements read."
+  }
+}

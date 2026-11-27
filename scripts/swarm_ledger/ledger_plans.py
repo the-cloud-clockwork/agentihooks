@@ -1,7 +1,8 @@
 """Plans and slices: the ledger resources a phase and a task name as their parents."""
 
 import re
-from typing import Any
+
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("plan_add", "slice_add")
 PLAN_RE = re.compile(r"^[A-Za-z][\w-]{0,63}$")
@@ -222,7 +223,7 @@ def _follow(task: dict, held: dict, fresh: dict) -> dict:
     return {**task, "slice": f"slices/{row['id']}", "plan_lines": row["lines"]}
 
 
-def settle(doc: dict, view: dict, by: str, ctx) -> None:
+def settle(doc: dict, view: dict, by: str, ctx: OpContext) -> None:
     before = {task["id"]: task.get("slice") for task in doc["tasks"]}
     doc.update(view)
     for task in view.get("tasks", []):
@@ -231,7 +232,7 @@ def settle(doc: dict, view: dict, by: str, ctx) -> None:
             ctx.record(by, kind, f"tasks/{task['id']}")
 
 
-def drop_unused(doc: dict, address: object, ctx) -> None:
+def drop_unused(doc: dict, address: object, ctx: OpContext) -> None:
     added = [event for event in ctx.events if event["kind"] == "added" and event["target"] == address]
     if not added or any(phase.get("plan") == address for phase in doc["phases"]):
         return
@@ -239,7 +240,7 @@ def drop_unused(doc: dict, address: object, ctx) -> None:
     ctx.events[:] = [event for event in ctx.events if event not in added]
 
 
-def drop_refused(doc: dict, ops: list[dict], rejected: list[str], ctx) -> None:
+def drop_refused(doc: dict, ops: list[dict], rejected: list[str], ctx: OpContext) -> None:
     for op in ops:
         if op["op"] in ("phase_add", "phase_update") and op["id"] in rejected:
             drop_unused(doc, op.get("fields", op).get("plan"), ctx)
@@ -254,7 +255,7 @@ def resliced(before: list[dict], after: list[dict]) -> dict:
     }
 
 
-def apply(doc: dict, op: dict, ctx) -> bool:
+def apply(doc: dict, op: dict, ctx: OpContext) -> bool:
     if op["op"] == "plan_add":
         refusal = add_plan(doc, op, ctx)
     else:
@@ -264,7 +265,7 @@ def apply(doc: dict, op: dict, ctx) -> bool:
     return not refusal
 
 
-def add_plan(doc: dict, op: dict, ctx: Any) -> str:
+def add_plan(doc: dict, op: dict, ctx: OpContext) -> str:
     plans = doc.setdefault("plans", [])
     plan = {
         "id": op["plan"],
@@ -279,7 +280,7 @@ def add_plan(doc: dict, op: dict, ctx: Any) -> str:
     return ""
 
 
-def add_slice(doc: dict, op: dict, ctx) -> str:
+def add_slice(doc: dict, op: dict, ctx: OpContext) -> str:
     if refusal := parent_refusal(doc, f"slice {op['anchor']}", op["phase"], "phases"):
         return refusal
     phase = find(doc, op["phase"])

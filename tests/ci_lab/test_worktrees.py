@@ -1,13 +1,17 @@
+import base64
+import errno
 import os
 import stat
 import subprocess
 from collections import OrderedDict
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.ci_lab import worktrees
-from tests.dep_manifest import _git
+from scripts.dep_manifest import _git
 
 WRITE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
 
@@ -73,10 +77,153 @@ def test_fetch_takes_only_the_objects_the_node_mirror_lacks(
     assert capfd.readouterr() == ("", "")
 
 
+@pytest.mark.feature("lab-store-incremental-fetch")
+@pytest.mark.parametrize("fallback", [False, True])
+def test_fetch_without_a_node_mirror_keeps_heads_and_takes_only_new_objects(
+    tmp_path: Path, origin: Path, fallback: bool
+) -> None:
+    base = _commit(origin, "a", "\n".join(str(number) for number in range(10000)))
+    store = tmp_path / "store"
+    _git(tmp_path, "init", "-q", "--bare", str(store))
+    _git(store, "config", "fetch.unpackLimit", "1")
+    remote = f"file://{origin}"
+    mirror = worktrees.Mirror(
+        node=tmp_path / "absent",
+        store=store,
+        remote=f"file://{tmp_path / 'unreachable'}" if fallback else remote,
+        lab=worktrees.Lab(remote, "") if fallback else None,
+        repository=remote,
+    )
+    assert mirror.fetch(base) is True
+    before = set((store / "objects/pack").glob("*.idx"))
+    head = _commit(origin, "b", "b")
+    assert mirror.fetch(head) is True
+    added = set((store / "objects/pack").glob("*.idx")) - before
+    assert len(added) == 1
+    packed = _git(store, "verify-pack", "-v", str(added.pop()))
+    assert f"{head} commit" in packed
+    assert f"{base} commit" not in packed
+    assert set(_git(store, "for-each-ref", "--format=%(objectname)", "refs/lab/").splitlines()) == {base, head}
+    assert mirror.fetch(base) is False
+    assert mirror.fetch(head) is False
+    assert not (store / "FETCH_HEAD").exists()
+
+
+@pytest.mark.feature("lab-store-incremental-fetch")
+@pytest.mark.parametrize("node_exists", [False, True])
+def test_fetch_never_names_a_missing_node_objects_directory_in_alternates(
+    tmp_path: Path, origin: Path, node_exists: bool, capfd: pytest.CaptureFixture[str]
+) -> None:
+    head = _commit(origin, "a", "a")
+    node = tmp_path / "node"
+    if node_exists:
+        node.mkdir()
+    mirror = worktrees.Mirror(node=node, store=tmp_path / "store", remote=f"file://{origin}")
+    assert mirror.fetch(head) is True
+    assert not (mirror.store / "objects/info/alternates").exists()
+    assert _git(mirror.store, "cat-file", "-t", head) == "commit\n"
+    assert "alternate" not in capfd.readouterr().err
+
+
 def test_fetch_of_an_unknown_sha_raises(tmp_path: Path, origin: Path) -> None:
     mirror = _mirror(tmp_path, origin, _commit(origin, "a", "a"))
     with pytest.raises(subprocess.CalledProcessError):
         mirror.fetch("1" * 40)
+
+
+def _graded(tmp_path: Path, origin: Path, lab: Path) -> str:
+    _git(tmp_path, "init", "-q", "--bare", str(lab))
+    side = tmp_path / "side"
+    _git(tmp_path, "clone", "-q", str(origin), str(side))
+    head = _commit(side, "b", "b")
+    _git(side, "push", "-q", f"file://{lab}", f"{head}:refs/grade/t1")
+    return head
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_fetch_takes_a_sha_only_the_lab_remote_holds_from_the_lab_remote(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    lab = tmp_path / "lab" / "origin.git"
+    head = _graded(tmp_path, origin, lab)
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab(f"file://{lab}", "lab-token"))
+    assert mirror.fetch(head) is True
+    assert _git(mirror.store, "cat-file", "-t", head) == "commit\n"
+    assert mirror.fetch(head) is False
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_fetch_never_asks_a_lab_remote_of_another_repository(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    lab = tmp_path / "lab" / "widgets.git"
+    head = _graded(tmp_path, origin, lab)
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab(f"file://{lab}", "lab-token"))
+    with pytest.raises(subprocess.CalledProcessError):
+        mirror.fetch(head)
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_a_lab_fetch_sends_the_token_as_the_lab_user_s_basic_password_for_the_lab_url_only(
+    tmp_path: Path, origin: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _commit(origin, "a", "a")
+    mirror = replace(_mirror(tmp_path, origin, base), lab=worktrees.Lab("https://lab.example/origin.git", "lab-token"))
+    assert mirror.fetch(base) is False
+    calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, kwargs.get("env")))
+        if "fetch" in argv and len(calls) == 2:
+            raise subprocess.CalledProcessError(128, argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(worktrees.subprocess, "run", run)
+    assert mirror.fetch("1" * 40) is True
+    store = str(mirror.store)
+    assert [argv for argv, _ in calls[1:]] == [
+        [
+            "git",
+            "-C",
+            store,
+            "fetch",
+            "--quiet",
+            "--no-write-fetch-head",
+            f"file://{origin}",
+            f"{'1' * 40}:refs/lab/{'1' * 40}",
+        ],
+        [
+            "git",
+            "-C",
+            store,
+            "fetch",
+            "--quiet",
+            "--no-write-fetch-head",
+            "https://lab.example/origin.git",
+            f"{'1' * 40}:refs/lab/{'1' * 40}",
+        ],
+    ]
+    assert calls[1][1] is None
+    assert calls[2][1] == {
+        **os.environ,
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.https://lab.example/origin.git.extraheader",
+        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {base64.b64encode(b'lab:lab-token').decode()}",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+
+@pytest.mark.feature("lab-remote-heads")
+def test_the_lab_remote_comes_from_the_environment_and_never_shows_its_token() -> None:
+    environ = {
+        "AGENTIHOOKS_LAB_REMOTE": "https://lab.example/git/origin.git",
+        "AGENTIHOOKS_LAB_REMOTE_TOKEN": "lab-token",
+    }
+    found = worktrees.lab(environ)
+    assert found == worktrees.Lab("https://lab.example/git/origin.git", "lab-token")
+    assert "lab-token" not in repr(found)
+    assert worktrees.lab({"AGENTIHOOKS_LAB_REMOTE_TOKEN": "lab-token"}) is None
+    assert worktrees.lab({"AGENTIHOOKS_LAB_REMOTE": "https://lab.example/git/origin.git"}) == worktrees.Lab(
+        "https://lab.example/git/origin.git", ""
+    )
 
 
 def test_a_second_lease_of_the_same_head_reuses_the_tree(
@@ -84,9 +231,10 @@ def test_a_second_lease_of_the_same_head_reuses_the_tree(
 ) -> None:
     head = _commit(origin, "a", "a")
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=2)
-    first = trees.lease(head)
-    second = trees.lease(head)
+    first, cut = trees.lease(head)
+    second, reused = trees.lease(head)
     assert first == second == tmp_path / "trees" / head
+    assert (cut, reused) == (False, False)
     assert trees.live == OrderedDict({head: 2})
     assert _registered(trees.mirror.store) == [str(first)]
     assert (first / "a").read_text() == "a"
@@ -108,7 +256,7 @@ def test_a_leased_tree_is_read_only_and_leaves_symlink_targets_alone(tmp_path: P
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "trees", capacity=1)
     umask = os.umask(0)
     try:
-        tree = trees.lease(head)
+        tree, _ = trees.lease(head)
     finally:
         os.umask(umask)
     assert _writable(tree) == ["dirlink", "sub/link"]
@@ -162,7 +310,7 @@ def test_a_tree_with_live_units_is_never_evicted(tmp_path: Path, origin: Path) -
     trees.release(first)
     assert trees.live == OrderedDict({second: 1})
     assert not (tmp_path / "trees" / first).exists()
-    assert trees.lease(first) == tmp_path / "trees" / first
+    assert trees.lease(first) == (tmp_path / "trees" / first, False)
     assert (tmp_path / "trees" / first / "a").read_text() == "a"
 
 
@@ -180,7 +328,7 @@ def test_a_restarted_worker_recuts_a_tree_its_predecessor_left(tmp_path: Path, o
     mirror = _mirror(tmp_path, origin, head)
     worktrees.Worktrees(mirror=mirror, root=tmp_path / "trees", capacity=1).lease(head)
     trees = worktrees.Worktrees(mirror=mirror, root=tmp_path / "trees", capacity=1)
-    tree = trees.lease(head)
+    tree, _ = trees.lease(head)
     assert trees.live == OrderedDict({head: 1})
     assert (tree / "a").read_text() == "a"
     assert _writable(tree) == []
@@ -193,7 +341,7 @@ def test_a_lease_replaces_an_unregistered_directory_at_the_head_path(tmp_path: P
     (tmp_path / "trees" / head / "deep").mkdir(parents=True)
     (tmp_path / "trees" / head / "deep" / "left").write_text("left")
     (tmp_path / "trees" / head / "deep").chmod(0o500)
-    tree = trees.lease(head)
+    tree, _ = trees.lease(head)
     assert sorted(path.name for path in tree.iterdir()) == [".git", "a"]
     assert _registered(trees.mirror.store) == [str(tree)]
 
@@ -203,9 +351,9 @@ def test_a_mutation_unit_gets_its_own_writable_copy(
 ) -> None:
     head = _commit(origin, "a", "a")
     trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=tmp_path / "pod" / "trees", capacity=1)
-    own = trees.own(head)
-    shared = trees.lease(head)
-    other = trees.own(head)
+    own, _ = trees.own(head, head)
+    shared, _ = trees.lease(head)
+    other, _ = trees.own(head, head)
     assert len({shared, own, other}) == 3
     assert own.parent == tmp_path / "pod" / "trees"
     assert own.name.startswith(f"{head}.")
@@ -218,3 +366,161 @@ def test_a_mutation_unit_gets_its_own_writable_copy(
     assert not own.exists()
     assert _registered(trees.mirror.store) == sorted([str(shared), str(other)])
     assert capfd.readouterr() == ("", "")
+
+
+@pytest.mark.feature("lab-scheduler-metrics")
+def test_a_lease_and_an_own_copy_report_whether_the_store_fetched_their_head(tmp_path: Path, origin: Path) -> None:
+    base = _commit(origin, "a", "a")
+    head = _commit(origin, "b", "b")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, base), root=tmp_path / "trees", capacity=2)
+    assert trees.lease(base) == (tmp_path / "trees" / base, False)
+    assert trees.lease(head) == (tmp_path / "trees" / head, True)
+    assert trees.lease(head) == (tmp_path / "trees" / head, False)
+    assert trees.own(head, base)[1] is False
+    later = _commit(origin, "c", "c")
+    owned, fetched = trees.own(later, head)
+    assert fetched is True
+    assert _git(owned, "rev-parse", "HEAD").strip() == later
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_empty_removes_sealed_trees_locked_folders_files_and_symlinks_but_keeps_the_folder(
+    tmp_path: Path, origin: Path
+) -> None:
+    head = _commit(origin, "a", "a")
+    folder = tmp_path / "root"
+    folder.mkdir()
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, head), root=folder / "trees", capacity=1)
+    trees.lease(head)
+    locked = folder / "locked"
+    locked.mkdir()
+    (locked / "inner").write_text("x")
+    locked.chmod(locked.stat().st_mode & ~(stat.S_IWUSR | stat.S_IXUSR))
+    (folder / "plain.txt").write_text("y")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("kept")
+    (folder / "link").symlink_to(outside)
+    kept_dir = tmp_path / "kept-dir"
+    kept_dir.mkdir()
+    (kept_dir / "file").write_text("kept too")
+    (folder / "dirlink").symlink_to(kept_dir)
+
+    worktrees.empty(folder)
+
+    assert folder.exists()
+    assert list(folder.iterdir()) == []
+    assert outside.read_text() == "kept"
+    assert (kept_dir / "file").read_text() == "kept too"
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_empty_of_a_missing_folder_is_not_an_error(tmp_path: Path) -> None:
+    worktrees.empty(tmp_path / "absent")
+
+
+def _recorded_chmod(monkeypatch: pytest.MonkeyPatch, refused: Path | None = None) -> list[tuple[Path, int]]:
+    changed: list[tuple[Path, int]] = []
+    chmod = Path.chmod
+
+    def record(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        if path == refused:
+            raise PermissionError(errno.EPERM, "Operation not permitted", str(path))
+        changed.append((path, stat.S_IMODE(mode)))
+        chmod(path, mode, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "chmod", record)
+    return changed
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_empty_removes_every_entry_of_an_open_folder_whose_mode_change_the_system_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "root"
+    sealed = folder / "trees" / "head"
+    sealed.mkdir(parents=True)
+    (sealed / "file").write_text("x")
+    sealed.chmod(0o555)
+    locked = folder / "locked"
+    locked.mkdir()
+    (locked / "inner").write_text("y")
+    locked.chmod(0)
+    (folder / "plain.txt").write_text("z")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("kept")
+    (folder / "link").symlink_to(outside)
+    folder.chmod(0o777)
+    _recorded_chmod(monkeypatch, refused=folder)
+
+    worktrees.empty(folder)
+
+    assert list(folder.iterdir()) == []
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o777
+    assert outside.read_text() == "kept"
+
+
+@pytest.mark.feature("lab-worker-empties-a-root-it-does-not-own")
+def test_empty_changes_the_mode_only_of_a_folder_that_lacks_an_owner_bit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "root"
+    open_folder = folder / "open"
+    open_folder.mkdir(parents=True)
+    modes = {"no-read": 0o355, "no-write": 0o555, "no-search": 0o655, "none": 0}
+    for name, mode in modes.items():
+        (folder / name).mkdir()
+        (folder / name).chmod(mode)
+    folder.chmod(0o700)
+    changed = _recorded_chmod(monkeypatch)
+
+    worktrees.empty(folder)
+
+    assert list(folder.iterdir()) == []
+    assert sorted(changed) == [
+        (folder / "no-read", 0o755),
+        (folder / "no-search", 0o755),
+        (folder / "no-write", 0o755),
+        (folder / "none", 0o700),
+    ]
+
+
+@pytest.mark.feature("lab-mutation-units-work-on-the-change")
+def test_an_own_copy_holds_the_base_its_unit_compares_it_against(tmp_path: Path, origin: Path) -> None:
+    fork = _commit(origin, "a", "a")
+    mirror = _mirror(tmp_path, origin, fork)
+    _git(origin, "switch", "-q", "-c", "side")
+    base = _commit(origin, "b", "b")
+    _git(origin, "switch", "-q", "main")
+    head = _commit(origin, "c", "c")
+    trees = worktrees.Worktrees(mirror=mirror, root=tmp_path / "trees", capacity=1)
+    tree, fetched = trees.own(head, base)
+    assert fetched is True
+    assert _git(tree, "merge-base", base, head).strip() == fork
+    _git(origin, "switch", "-q", "side")
+    later = _commit(origin, "d", "d")
+    known, fetched = trees.own(head, later)
+    assert fetched is False
+    assert _git(known, "merge-base", later, head).strip() == fork
+
+
+@pytest.mark.feature("lab-static-baseline-gate-own-tree")
+def test_an_own_copy_takes_a_hard_reset_to_its_base_and_back_while_the_leased_tree_stays_sealed(
+    tmp_path: Path, origin: Path
+) -> None:
+    base = _commit(origin, "a", "a")
+    _commit(origin, "a", "changed")
+    head = _commit(origin, "b", "new")
+    trees = worktrees.Worktrees(mirror=_mirror(tmp_path, origin, base), root=tmp_path / "trees", capacity=1)
+    shared, _ = trees.lease(head)
+    own, _ = trees.own(head, base)
+
+    _git(own, "reset", "-q", "--hard", base)
+    assert (own / "a").read_text() == "a"
+    assert not (own / "b").exists()
+    _git(own, "reset", "-q", "--hard", head)
+
+    assert ((own / "a").read_text(), (own / "b").read_text()) == ("changed", "new")
+    assert _git(own, "status", "--porcelain") == ""
+    assert ((shared / "a").read_text(), (shared / "b").read_text()) == ("changed", "new")
+    assert _git(shared, "rev-parse", "HEAD").strip() == head
+    assert _writable(shared) == []

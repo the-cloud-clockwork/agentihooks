@@ -24,8 +24,6 @@ jobs:
   image:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 60
-    outputs:
-      latest: ${{ steps.main.outputs.latest }}
     permissions:
       contents: read
       packages: write
@@ -163,16 +161,6 @@ jobs:
         run: |
           digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"
           docker buildx imagetools create --tag "$REPOSITORY:dev" "$REPOSITORY@$digest"
-      - name: Tag the release version and move the release tag when it is the newest
-        if: github.event_name == 'release'
-        env:
-          RELEASE: ${{ github.event.release.tag_name }}
-          LATEST: ${{ steps.main.outputs.latest }}
-        run: |
-          digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"
-          tags=(--tag "$REPOSITORY:${RELEASE#v}")
-          if [[ "$LATEST" == true ]]; then tags+=(--tag "$REPOSITORY:release"); fi
-          docker buildx imagetools create "${tags[@]}" "$REPOSITORY@$digest"
       - name: Keep the qualified candidate layers
         if: steps.layers.outputs.cache-hit != 'true'
         run: |
@@ -196,13 +184,18 @@ jobs:
   hive:
     if: github.event_name == 'release'
     needs: image
+    concurrency:
+      group: hive-worker-release
+      queue: max
+      cancel-in-progress: false
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
     env:
       IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
+      WORKER: ghcr.io/the-cloud-clockwork/agentihooks-worker
       RELEASE: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v4
@@ -213,8 +206,43 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish the hive worker once per release version
-        env:
-          LATEST: ${{ needs.image.outputs.latest }}
+      - name: Tag the worker release and move the release tag unless a newer release already published
         run: |
-          bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$LATEST" "$GITHUB_SHA"
+          bash docker/swarm-node/release.sh "$WORKER" "$RELEASE" "$GITHUB_SHA"
+      - name: Publish the hive worker once per release version
+        run: |
+          bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$GITHUB_SHA"
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.18.6
+      - name: Package the release chart
+        run: |
+          version="${RELEASE#v}"
+          sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
+          helm package deploy/helm/agentihooks-swarm --version "$version" --app-version "$version" --destination "$RUNNER_TEMP/chart"
+      - name: Install kind
+        env:
+          KIND_VERSION: v0.33.0
+        run: |
+          if ! kind version; then
+            curl -fsSLo kind-linux-amd64 "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
+            curl -fsSLo kind.sha256sum "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64.sha256sum"
+            sha256sum -c kind.sha256sum
+            mv kind-linux-amd64 kind
+            sudo install -m 0755 kind /usr/local/bin/kind
+            kind version
+          fi
+          helm version --short
+          kubectl version --client
+      - name: Install the packaged release chart in kind
+        env:
+          KIND_NODE_IMAGE: mirror.gcr.io/kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+          CHART_DIR: ${{ runner.temp }}/chart
+        run: bash deploy/helm/agentihooks-swarm/ci/kind-published.sh "$RELEASE"
+      - name: Publish the release chart that kind installed
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${RELEASE#v}"
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          helm push "$RUNNER_TEMP/chart/agentihooks-swarm-$version.tgz" "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"

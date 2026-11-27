@@ -15,6 +15,11 @@ def _publish():
     return yaml.safe_load(path.read_text())["jobs"]["publish"]
 
 
+def _release_runner() -> str:
+    path = Path(__file__).resolve().parents[1] / ".github/workflows/swarm-image.yml"
+    return yaml.safe_load(path.read_text())["jobs"]["release"]["runs-on"]
+
+
 @pytest.mark.parametrize(
     "actor,triggering_actor,runner",
     [
@@ -31,6 +36,29 @@ def _publish():
 def test_swarm_publish_uses_the_public_docker_runner_only_for_trusted_actors(actor, triggering_actor, runner):
     github = {"event_name": "push", "ref": "refs/heads/dev", "actor": actor, "triggering_actor": triggering_actor}
     assert resolve(_publish()["runs-on"], **github) == runner
+
+
+@pytest.mark.feature("swarm-release-retag-runs-on-the-light-pool")
+@pytest.mark.parametrize(
+    "actor,triggering_actor,runner",
+    [
+        ("nestorcolt", "nestorcolt", "anton-oss-light"),
+        ("agenticore-app[bot]", "agenticore-app[bot]", "anton-oss-light"),
+        ("tcc-main-ci[bot]", "tcc-main-ci[bot]", "anton-oss-light"),
+        ("outsider", "agenticore-app[bot]", "ubuntu-latest"),
+        ("agenticore-app[bot]", "outsider", "ubuntu-latest"),
+    ],
+)
+def test_swarm_release_retags_on_the_light_runner_only_for_trusted_actors(
+    actor: str, triggering_actor: str, runner: str
+) -> None:
+    github = {
+        "event_name": "release",
+        "ref": "refs/tags/v2.17.1229",
+        "actor": actor,
+        "triggering_actor": triggering_actor,
+    }
+    assert resolve(_release_runner(), **github) == runner
 
 
 def test_swarm_publish_builds_locally_and_pushes_the_existing_tags_and_cache(tmp_path):

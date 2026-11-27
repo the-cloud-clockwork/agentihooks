@@ -1,0 +1,24 @@
+rules:
+  - id: merge-priority-request-holds-on-head-run
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A merge priority request held behind the head merge group's Tests run waits until that run ends, when GitHub
+      has already started building the next waiting entry, so the pull request always misses the next merge group.
+      The move dequeues only waiting entries, which never sit ahead of a building group, so it cancels no run: apply
+      the priority at once.
+    paths:
+      include:
+        - /scripts/swarm/queue_priority.py
+        - merge-priority-request-holds-on-head-run.py
+    patterns:
+      - pattern-inside: |
+          def $REQUEST(...):
+              ...
+      - metavariable-regex:
+          metavariable: $REQUEST
+          regex: ^request($|_)
+      - pattern-either:
+          - pattern: blocking(...)
+          - pattern: $STORE.redis.hset($STORE.key($SLUG, PENDING), ...)
+          - pattern: $JOURNAL.write("priority-deferred", ...)

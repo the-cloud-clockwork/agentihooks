@@ -1,0 +1,12 @@
+rules:
+  - id: receiver-pulls-without-unscoped-index
+    languages: [python]
+    severity: ERROR
+    message: Pass the receiver's unscoped index bus to LazyPulls, because a receiver on a scoped bus that does not provision opened the hub-github repository index on that bus, NatsBus.state refused it, and every GitHub delivery answered 503.
+    pattern-either:
+      - pattern: LazyPulls($BUS)
+      - pattern: $MODULE.LazyPulls($BUS)
+    paths:
+      include:
+        - /scripts/hub/
+        - receiver-pulls-without-unscoped-index.py

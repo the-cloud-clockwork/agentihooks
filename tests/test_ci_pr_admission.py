@@ -1,7 +1,12 @@
+import os
+import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
+
+from scripts.size_limits import RUFF_VERSION
 
 pytestmark = pytest.mark.unit
 
@@ -53,3 +58,60 @@ def test_pull_request_selection_clones_the_repository_once(jobs):
     assert head["if"] == "github.event_name == 'pull_request'"
     assert steps.index(clones[0]) < steps.index(head)
     assert 'worktree add --detach "$GITHUB_WORKSPACE" "$GITHUB_SHA"' in head["run"]
+
+
+OTHER_RUFF = "0.0.1"
+RUFF_PYTHON_STUB = (
+    "#!/usr/bin/env bash\n"
+    'if [[ "$*" == "-I -m ruff --version" ]]; then\n'
+    '  [[ -f "$STUBS/version" ]] || exit 1\n'
+    '  exec cat "$STUBS/version"\n'
+    "fi\n"
+    'echo "$*" >> "$STUBS/calls"\n'
+    'if [[ "$*" == *ruff==* ]]; then echo "ruff $PIP_GIVES" > "$STUBS/version"; fi\n'
+)
+
+
+def _install_ruff(
+    jobs: dict[str, Any], tmp_path: Path, installed: str, pip_gives: str = RUFF_VERSION
+) -> tuple[int, list[str], str]:
+    step = next(step for step in jobs["select"]["steps"] if step.get("name") == "Install admission ruff")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    python = bin_dir / "python"
+    python.write_text(RUFF_PYTHON_STUB)
+    python.chmod(0o755)
+    if installed:
+        (tmp_path / "version").write_text(f"ruff {installed}\n")
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "STUBS": str(tmp_path), "PIP_GIVES": pip_gives}
+    done = subprocess.run(["bash", "-eo", "pipefail", "-c", step["run"]], env=env, capture_output=True, text=True)
+    calls = tmp_path / "calls"
+    return done.returncode, calls.read_text().splitlines() if calls.exists() else [], done.stdout
+
+
+def test_selection_takes_ruff_from_the_runner_image_when_it_carries_the_pin(
+    jobs: dict[str, Any], tmp_path: Path
+) -> None:
+    code, calls, out = _install_ruff(jobs, tmp_path, RUFF_VERSION)
+    assert (code, calls) == (0, [])
+    assert f"ruff {RUFF_VERSION} comes from the runner image" in out
+
+
+@pytest.mark.parametrize("installed", ["", OTHER_RUFF])
+def test_selection_installs_the_pinned_ruff_without_a_matching_runner_copy(
+    jobs: dict[str, Any], tmp_path: Path, installed: str
+) -> None:
+    code, calls, _ = _install_ruff(jobs, tmp_path, installed)
+    assert (code, calls) == (0, [f"-m pip install --constraint .github/ci-tools/lint-tools.lock ruff=={RUFF_VERSION}"])
+
+
+def test_selection_fails_when_its_ruff_differs_from_the_pinned_lint_version(
+    jobs: dict[str, Any], tmp_path: Path
+) -> None:
+    code, calls, _ = _install_ruff(jobs, tmp_path, "", pip_gives=OTHER_RUFF)
+    assert (code, calls) == (1, [f"-m pip install --constraint .github/ci-tools/lint-tools.lock ruff=={RUFF_VERSION}"])
+
+
+def test_the_lock_the_runner_image_smoke_reads_pins_the_lint_ruff() -> None:
+    lock = Path(__file__).resolve().parents[1] / ".github/test-requirements.lock"
+    assert f"ruff=={RUFF_VERSION}" in lock.read_text().splitlines()

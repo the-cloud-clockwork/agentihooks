@@ -1,0 +1,40 @@
+rules:
+  - id: exit-trap-unguarded-command
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      Under errexit a command that fails inside an EXIT trap ends the script with its own status, replacing the status
+      the script was exiting with, so a passed run reports a failure. A failed kind cluster delete in the cleanup trap
+      of the worker hive pod proof turned three passed proofs red until pull request 11697 guarded it. Guard each
+      cleanup command with || true, or with || echo naming what was left behind.
+    paths:
+      include:
+        - '*.sh'
+        - '*.bash'
+    patterns:
+      - pattern-regex: (?ms)\A(?=.*^[ \t]*set[ \t]+(?!--)(?:[^\n;#]*?[ \t])?(?:-[a-zA-Z]*e[a-zA-Z]*|-o[ \t]+errexit)\b).*
+      - pattern-either:
+          - pattern-regex: (?ms)^([ \t]*)(?|function[ \t]+(\w+)(?:[ \t]*\(\))?|(\w+)[ \t]*\(\))\s*\{(?P<HANDLER>(?:[ \t]*$.*?^\1)|[^\n]*)\}(?=.*^[ \t]*trap[ \t]+(?:--[ \t]+)?(['"]?)\2\4[ \t]+(?:\w+[ \t]+)*EXIT\b)
+          - pattern-regex: (?ms)^[ \t]*trap[ \t]+(?:--[ \t]+)?(['"]?)(\w+)\1[ \t]+(?:\w+[ \t]+)*EXIT\b.*?^([ \t]*)(?:function[ \t]+\2(?:[ \t]*\(\))?|\2[ \t]*\(\))\s*\{(?P<HANDLER>(?:[ \t]*$.*?^\3)|[^\n]*)\}
+          - pattern-regex: (?m)^[ \t]*trap[ \t]+(?:--[ \t]+)?'(?P<HANDLER>(?![ \t]*\w+[ \t]*')[^']*)'[ \t]+(?:\w+[ \t]+)*EXIT\b
+          - pattern-regex: (?m)^[ \t]*trap[ \t]+(?:--[ \t]+)?"(?P<HANDLER>(?![ \t]*\w+[ \t]*")(?:[^"\\]|\\.)*)"[ \t]+(?:\w+[ \t]+)*EXIT\b
+      - metavariable-pattern:
+          metavariable: $HANDLER
+          language: bash
+          patterns:
+            - pattern: $CMD ...
+            - pattern-not-inside: ... || $ALTERNATIVE ...
+            - pattern-not-regex: (?m)^[ \t]*(?:(?:el)?if|while|until)[ \t]+[^;\n]*(?:;|\n)[ \t]*(?:then|do)\b
+            - pattern-not-inside: |
+                set +e
+                ...
+            - pattern-not-inside: |
+                set +o errexit
+                ...
+            - pattern-not: echo ...
+            - pattern-not: printf ...
+            - pattern-not: exit ...
+            - pattern-not: return ...
+            - pattern-not: local ...
+            - pattern-not: done
+      - focus-metavariable: $CMD

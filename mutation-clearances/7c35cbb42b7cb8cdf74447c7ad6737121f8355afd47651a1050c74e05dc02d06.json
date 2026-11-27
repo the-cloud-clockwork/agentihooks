@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stall_watch.py:scripts.swarm.stall_watch.x__alert:761428cb6a5127d727bd0736ce5b549a3cc8c5363ec2549299eff964c26d9c37": {
+    "reader": "standards_reader",
+    "reason": "At runtime typing.cast returns its second argument and never reads its type argument, and scripts/swarm/stall_watch.py imports cast from typing (line 16) with no local definition or shadowing (checked with grep), so mutant x__alert__mutmut_8 changes no value, stored row, ledger write or sent item and no test can kill it."
+  }
+}

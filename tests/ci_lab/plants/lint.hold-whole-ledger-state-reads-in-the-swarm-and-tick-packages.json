@@ -1,0 +1,11 @@
+{
+  "gate": "lint/hold-whole-ledger-state-reads-in-the-swarm-and-tick-packages",
+  "reason": "reads the whole ledger state: a new whole ledger state read in the tick package",
+  "edits": [
+    {
+      "path": "scripts/tick/catalogue.py",
+      "before": "    \"\"\"Every module of the step package, discovered from its path.\"\"\"\n",
+      "after": "    \"\"\"Every module of the step package, discovered from its path.\"\"\"\n    ledger = None\n    if ledger is not None:\n        ledger.state(\"catalogue\")\n"
+    }
+  ]
+}

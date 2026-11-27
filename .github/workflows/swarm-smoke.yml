@@ -28,7 +28,7 @@ jobs:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
         with:
           path: ${{ runner.temp }}/swarm-smoke-runtime-images
-          key: swarm-smoke-runtime-images-v1
+          key: swarm-smoke-runtime-images-v2
       - name: Load the saved runtime images
         run: |
           archive="$RUNNER_TEMP/swarm-smoke-runtime-images/images.tar"
@@ -38,7 +38,7 @@ jobs:
       - name: Pull the Python base with bounded retries
         env:
           PULL_REUSE_LOCAL: "true"
-        run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
+        run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12.12-slim-bookworm
       - name: Restore the swarm smoke layers
         id: layers
         uses: actions/cache/restore@v4
@@ -68,17 +68,21 @@ jobs:
           bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nats:2.15.1-alpine &&
             docker tag public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine &
           nats=$!
+          bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/nginx:1.27-alpine &&
+            docker tag public.ecr.aws/docker/library/nginx:1.27-alpine mirror.gcr.io/library/nginx:1.27-alpine &
+          nginx=$!
           bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
             docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
           wait "$redis" || status=$?
           wait "$nats" || status=$?
+          wait "$nginx" || status=$?
           wait "$build" || status=$?
           exit "$status"
       - uses: actions/setup-python@v5
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
           python-version: '3.12'
-      - name: Run the hive launch, Compose install, hive join, Compose hive, Compose task, recovery drill, swarm init and stability scenarios in parallel
+      - name: Run the hive launch, Compose install, hive join, Compose hive, Compose task, recovery drill, master drill, swarm init and stability scenarios in parallel
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           SWARM_SMOKE_RUNTIME_IMAGES_READY: 'true'
@@ -90,6 +94,7 @@ jobs:
           scripts/packaging/compose-hive-smoke.sh
           scripts/packaging/compose-task-smoke.sh
           scripts/packaging/compose-recovery-drill.sh
+          scripts/packaging/compose-master-drill.sh
           scripts/packaging/swarm-init-smoke.sh
           scripts/packaging/stability-smoke.sh
       - name: Prove image pulls tolerate an absent attestation
@@ -98,6 +103,11 @@ jobs:
       - name: Run the pinned herdr and ssh clients inside the swarm image
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check
+      - name: Import the lab scheduler's modules inside the swarm image
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          docker run --rm --network none --entrypoint python local/agentihooks-swarm:clients-check
+          -c 'import importlib, pkgutil, scripts.ci_lab; modules = sorted(module.name for module in pkgutil.walk_packages(scripts.ci_lab.__path__, scripts.ci_lab.__name__ + ".")); [importlib.import_module(module) for module in modules]; import scripts.ci_test_plan; print("lab modules imported:", ", ".join(modules))'
       - name: Keep the swarm smoke layers
         if: steps.layers.outputs.cache-hit != 'true'
         run: |
@@ -114,7 +124,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/swarm-smoke-runtime-images"
           docker save -o "$RUNNER_TEMP/swarm-smoke-runtime-images/images.tar" \
-            mirror.gcr.io/library/python:3.12-slim-bookworm \
+            mirror.gcr.io/library/python:3.12.12-slim-bookworm \
             public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 \
             public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine \
             public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine
@@ -123,4 +133,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/swarm-smoke-runtime-images
-          key: swarm-smoke-runtime-images-v1
+          key: swarm-smoke-runtime-images-v2

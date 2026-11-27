@@ -50,10 +50,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ $host }}
-  {{- with $tls }}
   annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    {{- with $tls }}
     secret.reloader.stakater.com/reload: {{ . | quote }}
-  {{- end }}
+    {{- end }}
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: api

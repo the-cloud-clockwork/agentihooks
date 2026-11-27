@@ -1,5 +1,9 @@
 import json
+import subprocess
+import sys
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -158,6 +162,28 @@ def test_hive_heartbeat_keeps_beating_when_the_account_slot_publish_fails(redis,
     publish_config.assert_called_once_with(redis, "machine", [])
     close_dead_tabs.assert_called_once_with({"kept"})
     assert "account slot heartbeat failed" in capsys.readouterr().err
+
+
+@pytest.mark.feature("hive-resume-start-failure")
+def test_a_beat_whose_resume_order_process_cannot_start_still_heartbeats_to_its_end(
+    redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import join_report, orders
+
+    order = orders.CommandOrder("resume:x:1:1", "resume", "rig", "engineer", "x", 1, "continue", 5, "pane")
+    orders.Orders(redis).command("machine", order)
+    report = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    heartbeat, finished = Mock(), Mock()
+    monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
+    monkeypatch.setattr(daemon, "execution_report", lambda *args: {"executions": {}, "names": []})
+    monkeypatch.setattr(orders.subprocess, "Popen", Mock(side_effect=OSError(11, "Resource temporarily unavailable")))
+    monkeypatch.setattr(join_report, "heartbeat", heartbeat)
+    monkeypatch.setattr(registry, "finished", finished)
+    daemon.beat(redis, "machine")
+    assert heartbeat.call_args.args[:2] == (redis, "machine")
+    assert finished.call_args.args[:2] == (redis, "machine")
+    receipt = orders.Orders(redis).command_receipt("machine", order.id)
+    assert json.loads(redis.hget(receipt, "ack"))["failure"] == "error: BlockingIOError"
 
 
 def test_cold_native_accounts_use_their_own_fresh_quota_before_the_first_launch(monkeypatch):
@@ -348,6 +374,25 @@ def _quiet_quota(monkeypatch):
     monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
 
 
+def _polling_revision(root: Path | str) -> str:
+    """Return a fixed revision after the millisecond sleep the subprocess wait inside the real read makes."""
+    time.sleep(0.001)
+    return "loaded"
+
+
+def _daemon_sleeps(monkeypatch: pytest.MonkeyPatch, sleep: Callable[[float], object]) -> None:
+    """Hand each sleep the daemon module makes to sleep and let every other caller, in any thread, sleep for real."""
+    real = time.sleep
+
+    def route(seconds: float) -> None:
+        if sys._getframe(1).f_globals.get("__name__") == daemon.__name__:
+            sleep(seconds)
+        else:
+            real(seconds)
+
+    monkeypatch.setattr(daemon.time, "sleep", route)
+
+
 def test_run_beats_immediately_then_waits_a_beat_less_the_wake_slack(monkeypatch):
     events = []
     connection = object()
@@ -414,6 +459,60 @@ def test_rollout_readiness_is_published_only_after_a_successful_beat(monkeypatch
     with pytest.raises(RuntimeError if fails else KeyboardInterrupt):
         daemon.run(lambda: (object(), object()))
     assert marker.exists() is not fails
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_run_gives_hive_checkouts_the_lab_remote_once_the_operator_env_is_loaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[object] = []
+
+    def refresh(environ: object) -> None:
+        events.append("quota")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(daemon, "fill_operator_env", lambda: events.append("env"))
+    monkeypatch.setattr(daemon, "carry_lab", lambda environ: events.append(("lab", environ)))
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", refresh)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(lambda: pytest.fail("connected before the lab remote"))
+    assert events == ["env", ("lab", daemon.os.environ), "quota"]
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+def test_carry_lab_gives_each_checkout_the_lab_serves_the_lab_remote(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    lab = "http://10.10.30.208/agentihooks.git"
+    for name, origin in (
+        ("agentihooks", "git@github.com:o/agentihooks.git"),
+        ("antoncore", "git@github.com:o/antoncore"),
+    ):
+        subprocess.run(["git", "init", "-q", str(tmp_path / name)], check=True)
+        subprocess.run(["git", "-C", str(tmp_path / name), "remote", "add", "origin", origin], check=True)
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
+    assert daemon.carry_lab({"AGENTIHOOKS_LAB_REMOTE": lab}) == [tmp_path / "agentihooks"]
+    remotes = [
+        subprocess.run(["git", "-C", str(tmp_path / name), "remote"], capture_output=True, text=True).stdout.split()
+        for name in ("agentihooks", "antoncore")
+    ]
+    assert remotes == [["lab", "origin"], ["origin"]]
+
+
+@pytest.mark.feature("lab-remote-in-workspaces")
+@pytest.mark.parametrize("failure", [subprocess.TimeoutExpired("git", 60), FileNotFoundError("git")])
+def test_carry_lab_skips_a_checkout_whose_git_fails_and_says_so(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], failure: Exception
+) -> None:
+    (tmp_path / "agentihooks" / ".git").mkdir(parents=True)
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
+
+    def carry(git: object, environ: object) -> bool:
+        raise failure
+
+    monkeypatch.setattr(daemon.checkout, "carry", carry)
+    assert daemon.carry_lab({"AGENTIHOOKS_LAB_REMOTE": "http://lab.invalid/agentihooks.git"}) == []
+    assert capsys.readouterr().err == f"hive: the lab remote was not set in {tmp_path / 'agentihooks'}: {failure}\n"
 
 
 def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
@@ -946,7 +1045,7 @@ def test_each_beat_restarts_only_the_helper_threads_that_ended(monkeypatch):
     assert started[3:] == [(daemon.publish_herdr_stats, args, True)]
 
 
-def test_install_writes_the_service_and_enables_it(tmp_path):
+def test_install_writes_the_service_and_enables_it(tmp_path: Path) -> None:
     run = Mock(return_value=Mock(returncode=0))
     assert daemon.install("/bin/agentihooks", tmp_path, run)
     service = tmp_path / "agentihooks-hive.service"
@@ -958,7 +1057,60 @@ def test_install_writes_the_service_and_enables_it(tmp_path):
     assert run.call_args_list[1].args[0] == ["systemctl", "--user", "enable", "--now", "agentihooks-hive.service"]
     run.reset_mock()
     daemon.install("/bin/agentihooks", tmp_path, run)
-    assert run.call_count == 1
+    assert run.call_count == 2
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_writer_unit_uses_the_installed_binary_and_restarts_after_every_exit() -> None:
+    from scripts.swarm import timer
+
+    text = timer.units("/installed/bin/agentihooks")["agentihooks-ledger-writer.service"]
+    assert text == (
+        "[Unit]\nDescription=agentihooks warm ledger writer\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        "EnvironmentFile=-%h/.agentihooks/hive.env\n"
+        "Environment=MALLOC_ARENA_MAX=2\n"
+        'ExecStart="/installed/bin/agentihooks" ledger writer serve\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+    assert "agentihooks-ledger-writer.service" not in timer.ENGINE
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_hive_install_enables_the_shared_writer_unit(tmp_path: Path) -> None:
+    from scripts.swarm import timer
+
+    run = Mock(return_value=Mock(returncode=0))
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    writer = "agentihooks-ledger-writer.service"
+    assert (tmp_path / writer).read_text() == timer.units("/bin/agentihooks")[writer]
+    assert run.call_args_list[-1].args[0] == ["systemctl", "--user", "enable", "--now", writer]
+    assert [call.args[0] for call in run.call_args_list].count(["systemctl", "--user", "daemon-reload"]) == 1
+    run.reset_mock()
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    assert run.call_count == 2
+    assert all(call.args[0][2] == "enable" for call in run.call_args_list)
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_hive_install_reports_writer_enable_failure(tmp_path: Path) -> None:
+    run = Mock(side_effect=[Mock(returncode=0), Mock(returncode=0), Mock(returncode=1)])
+    assert daemon.install("/bin/agentihooks", tmp_path, run) is False
+
+
+@pytest.mark.feature("ledger-writer-hosts")
+def test_hive_install_reloads_a_changed_writer_unit(tmp_path: Path) -> None:
+    run = Mock(return_value=Mock(returncode=0))
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    writer = tmp_path / "agentihooks-ledger-writer.service"
+    writer.write_text("old")
+    run.reset_mock()
+    assert daemon.install("/bin/agentihooks", tmp_path, run)
+    assert run.call_args_list[0].args[0] == ["systemctl", "--user", "daemon-reload"]
+    assert "ledger writer serve\n" in writer.read_text()
 
 
 def test_install_reports_enable_failure(tmp_path):
@@ -1186,6 +1338,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
         "master_login": {"claude": ""},
+        "master_logins": [],
         "master_login_enabled": "no",
         "repos": [],
         "capabilities": [],
@@ -1227,7 +1380,7 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     sleep.assert_called_once_with(0, state=connection, timeout=0)
 
 
-def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch):
+def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch: pytest.MonkeyPatch) -> None:
     import fakeredis
 
     server = fakeredis.FakeServer()
@@ -1259,7 +1412,7 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
     monkeypatch.setattr(daemon.time, "time", lambda: now[0])
-    monkeypatch.setattr(daemon.time, "sleep", backoff)
+    _daemon_sleeps(monkeypatch, backoff)
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connect)
@@ -1270,7 +1423,9 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
     assert "invalid_order" in clients[-1].hget(f"{stream}:acks", queued[0])
 
 
-def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypatch, capsys):
+def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     outcomes = iter([ConnectionError] * 6 + [None, None, TimeoutError, None])
@@ -1300,7 +1455,8 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypat
     _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", beat)
-    monkeypatch.setattr(daemon.time, "sleep", sleeps.append)
+    monkeypatch.setattr(daemon, "revision", _polling_revision)
+    _daemon_sleeps(monkeypatch, sleeps.append)
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connect)
@@ -1311,11 +1467,11 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypat
     assert len(connections) == 10
 
 
-def test_run_lets_errors_other_than_a_lost_connection_escape(monkeypatch):
+def test_run_lets_errors_other_than_a_lost_connection_escape(monkeypatch: pytest.MonkeyPatch) -> None:
     _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", Mock(side_effect=ValueError("bad report")))
-    monkeypatch.setattr(daemon.time, "sleep", Mock(side_effect=AssertionError("retried")))
+    _daemon_sleeps(monkeypatch, Mock(side_effect=AssertionError("retried")))
     with pytest.raises(ValueError, match="bad report"):
         daemon.run(_once(object()))
 
@@ -1351,11 +1507,13 @@ def test_clients_set_timeouts_keepalive_health_checks_and_no_retries(monkeypatch
     assert (daemon.CONNECT_TIMEOUT_S, daemon.READ_TIMEOUT_S, daemon.WAKE_SLACK_S) == (3, 5, 2)
 
 
-def test_back_off_logs_the_cause_and_sleeps_the_capped_delay(monkeypatch, capsys):
+def test_back_off_logs_the_cause_and_sleeps_the_capped_delay(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from redis.exceptions import TimeoutError
 
     sleep = Mock()
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    _daemon_sleeps(monkeypatch, sleep)
     daemon._back_off(TimeoutError("lost"), 2)
     daemon._back_off(TimeoutError("lost"), 99)
     captured = capsys.readouterr()
@@ -1384,26 +1542,27 @@ def test_clients_keep_the_source_connection_class():
         }
 
 
-def _stall_run(monkeypatch, connect, beat):
-    import time
-
+def _stall_run(
+    monkeypatch: pytest.MonkeyPatch, connect: Callable[[], tuple[Any, Any]], beat: Callable[[Any, str], None]
+) -> tuple[float, Mock]:
     monkeypatch.setattr(daemon, "BEAT_SECONDS", 0.5)
     monkeypatch.setattr(daemon, "READ_TIMEOUT_S", 0.1)
     monkeypatch.setattr(daemon, "WAKE_SLACK_S", 0.1)
     _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", beat)
-    monkeypatch.setattr(daemon.time, "sleep", Mock())
+    sleep = Mock()
+    _daemon_sleeps(monkeypatch, sleep)
     started = time.monotonic()
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connect)
-    return started
+    return started, sleep
 
 
 @pytest.mark.wall_clock
-def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(monkeypatch, capsys, stalled):
-    import time
-
+def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], stalled: Callable[[], Any]
+) -> None:
     import fakeredis
 
     healthy = fakeredis.FakeRedis(decode_responses=True)
@@ -1420,7 +1579,7 @@ def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(mon
         beaten_at.append(time.monotonic())
 
     monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=KeyboardInterrupt))
-    started = _stall_run(monkeypatch, connect, beat)
+    started, sleep = _stall_run(monkeypatch, connect, beat)
     assert clients[1] is healthy
     assert beaten_at[0] - started < daemon.BEAT_SECONDS
     assert healthy.get("beat") == "local"
@@ -1428,7 +1587,7 @@ def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(mon
     assert err.startswith("hive Redis connection lost (")
     assert "TimeoutError" in err
     assert err.endswith("); reconnecting in 1s\n")
-    daemon.time.sleep.assert_called_once_with(1)
+    sleep.assert_called_once_with(1)
 
 
 @pytest.mark.wall_clock
@@ -1522,11 +1681,11 @@ def test_install_refuses_a_missing_executable(monkeypatch, tmp_path):
     assert str(caught.value) == "agentihooks executable not found"
 
 
-def test_install_reloads_a_changed_service(tmp_path):
+def test_install_reloads_a_changed_service(tmp_path: Path) -> None:
     (tmp_path / "agentihooks-hive.service").write_text("old")
     run = Mock(return_value=Mock(returncode=0))
     assert daemon.install("/bin/agentihooks", tmp_path, run)
-    assert run.call_count == 2
+    assert run.call_count == 3
     assert (tmp_path / "agentihooks-hive.service").read_text() == daemon.unit("/bin/agentihooks")
 
 
@@ -2088,6 +2247,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
     monkeypatch.setattr(process, "local_namespace", lambda: "hive-namespace")
     monkeypatch.setattr(process, "started_ms", lambda: 100000)
     monkeypatch.setattr(daemon.time, "time", lambda: 123)
+    monkeypatch.setattr("socket.gethostname", lambda: "machine-host")
     herdr.observe.return_value = PaneObservation("idle", typed="half")
     herdr.reported.return_value = True
     consumer = Mock(runtime=Mock(herdr=herdr))
@@ -2115,7 +2275,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
                 "name": here.name,
                 "generation": here.generation,
                 "reported": True,
-                "binding": {"process": False},
+                "binding": {"process": False, "observer": "machine-host"},
                 "pane": {
                     "state": "idle",
                     "prompt_title": "",

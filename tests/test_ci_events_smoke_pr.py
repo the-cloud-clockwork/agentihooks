@@ -17,6 +17,8 @@ SEAMS = {
     "test_a_hive_at_its_max_agents_takes_no_admission_and_a_hive_below_it_takes_the_offer",
     "test_no_legacy_launch_path_runs_while_the_spoke_launches_the_work",
     "test_the_hub_stops_a_seated_execution_and_its_hive_reaps_it_and_publishes_the_exit",
+    "test_a_hub_admitted_agent_bound_to_another_account_is_retired_stopped_on_its_hive_and_refunded",
+    "test_a_hub_admitted_agent_idle_for_the_kill_time_is_retired_stopped_on_its_hive_and_refunded",
 }
 
 

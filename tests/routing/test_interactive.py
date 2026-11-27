@@ -179,14 +179,16 @@ def test_init_agent_explicit_interactive_auth_routes_the_selected_harness(tmp_pa
     assert command[command.index("--route") + 1] == "interactive"
 
 
-def test_init_agent_auth_option_accepts_only_interactive():
+def test_init_agent_auth_option_accepts_interactive_and_explicit_native_modes() -> None:
     from scripts import init_agent
 
     parser = init_agent._parser()
     assert parser.parse_args([]).auth == ""
+    for value in ("interactive", "default", "named:alpha"):
+        assert parser.parse_args(["--auth", value]).auth == value
     with pytest.raises(SystemExit):
         parser.parse_args(["--auth", "token"])
-    assert "{interactive} Use the declared interactive login --profile" in " ".join(parser.format_help().split())
+    assert "interactive, default or named:reference authentication" in " ".join(parser.format_help().split())
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])

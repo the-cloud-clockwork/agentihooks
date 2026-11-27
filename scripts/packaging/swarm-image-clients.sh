@@ -28,6 +28,17 @@ version="$(docker run --rm --entrypoint /usr/bin/ssh "$image" -V 2>&1)" || {
   exit 1
 }
 printf 'swarm image ssh client: openssh-client %s, the version the worker lock pins (%s)\n' "$observed" "$version"
+expected="$(locked shell_packages git)"
+observed="$(docker run --rm --entrypoint dpkg-query "$image" -W -f '${Version}' git 2>&1)" || true
+if [[ $observed != "$expected" ]]; then
+  printf 'the swarm image git package is %s; the worker lock pins %s\n' "$observed" "$expected" >&2
+  exit 1
+fi
+version="$(docker run --rm --entrypoint git "$image" --version 2>&1)" || {
+  printf 'the swarm image git client did not run: %s\n' "$version" >&2
+  exit 1
+}
+printf 'swarm image git client: git %s, the version the worker lock pins (%s)\n' "$observed" "$version"
 auth="$(docker run --rm --entrypoint /opt/venv/bin/python3 "$image" -P -c 'import scripts.github_app_cli' 2>&1)" || {
   printf 'the swarm image GitHub client wrapper cannot import its GitHub App token module: %s\n' "$auth" >&2
   exit 1

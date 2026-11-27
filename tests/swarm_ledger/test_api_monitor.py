@@ -317,6 +317,18 @@ def test_only_a_hive_whose_name_another_shares_is_shown_by_its_sorted_member_nam
         {"id": "a", "name": "twin", "ui": "no", "members": {"vm-b": beat, "vm-a": beat}},
         {"id": "b", "name": "twin", "ui": "no"},
         {"id": "c", "name": "solo", "ui": "no", "members": {"pod-c": beat}},
-        {"id": "d", "name": "desk", "ui": "yes"},
+        {"id": "d", "name": "swarm-master", "ui": "yes"},
     ]
     assert monitor.labels(live) == {"a": "vm-a, vm-b", "b": "twin", "c": "solo", "d": "swarm-master"}
+
+
+@pytest.mark.feature("monitor-hive-names-match-registry")
+def test_each_live_hive_row_reads_the_registry_name_hive_list_prints() -> None:
+    live = [
+        {"id": "root", "name": "swarm-master", "ui": "yes"},
+        {"id": "vm", "name": "swarm-master-2", "ui": "yes"},
+        {"id": "pod", "name": "swarm-hive-003", "ui": "no"},
+    ]
+    assert monitor.labels(live) == {"root": "swarm-master", "vm": "swarm-master-2", "pod": "swarm-hive-003"}
+    machines = [(hive["id"], name, {}) for hive, name in zip(live, monitor.labels(live).values(), strict=True)]
+    assert [row["name"] for row in monitor.tally(machines)[1]] == ["swarm-master", "swarm-hive-003", "swarm-master-2"]

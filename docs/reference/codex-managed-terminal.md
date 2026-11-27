@@ -312,6 +312,143 @@ A failure while copying the home (an `OSError` from the copy) refuses no
 request: the report stays `pending`, and `init-agent` fails with
 `mounted profile canary did not validate before timeout`.
 
+### App server exit before the canary
+
+Once the server is up, the supervisor (`scripts.codex_session serve`) starts
+the inbox pump and checks the app server every 0.25 seconds (`POLL_S`) for as
+long as the pump runs. When the app server exits first, the supervisor:
+
+1. Fails a still `pending` launch report with the server's exit status:
+
+   ```text
+   Codex app server exited with status 1 before the profile canary validated
+   ```
+
+2. Stops the pump and the server, marks the execution's transport record
+   `exited`, releases its account slot and removes the execution folder.
+3. Exits with the server's status.
+
+`init-agent` polls the report every 0.25 seconds during its canary wait, so it
+reads the `failed` state on its next poll and fails the launch at once. It
+prints its launch report on stdout ending with `profile_validation=failed`,
+prints the reason on stderr and exits 3:
+
+```text
+agentihooks init-agent: Codex app server exited with status 1 before the profile canary validated
+```
+
+Before pull request 11266 the supervisor only left its loop, the report stayed
+`pending`, and the canary wait ran until `--canary-timeout` or the 270 second
+[launch deadline](#launch-waits-and-the-spawn-timeout) ran out.
+
+The launcher's own exit recorder does not cover this case. For a pane launch,
+`scripts.session_exit` runs after the agent command and fails a pending report
+with `the <harness> agent exited with status <N> before it reported its
+canary`. An `app_server` launch's pane runs only the viewer, so `init-agent`
+passes `--viewer` to that recorder: it records the viewer's exit and leaves the
+canary alone. The supervisor is the only process that sees the server exit.
+
+| Case | Launch report afterwards | Supervisor exit status |
+|---|---|---|
+| The server exits with status N before the canary validated | `failed`, with the reason above | N |
+| The server exits with status 0 before the canary validated | `failed`, reason `... exited with status 0 ...` | 0 |
+| The server exits after the canary validated | Unchanged, `validated` | The server's status |
+| The launch environment names no report (`AGENTIHOOKS_PROFILE_REPORT` unset) | No report is written | The server's status |
+
+A clean server exit before the canary is still a failed launch. Judge the
+launch by the report or by `init-agent`'s exit status, never by the
+supervisor's exit status alone. The supervisor changes only a `pending`
+report, so a report already `validated` or `failed` keeps its state and
+reason. A server ended by a signal reports the negative signal number, as
+Python's `Popen` does, such as `status -9`.
+
+Reasons that fail an `app_server` canary before its deadline:
+
+| Reason in the report | Written when |
+|---|---|
+| A reason listed under [Refusals](#refusals) | The execution home's evidence cannot be confirmed |
+| `codex-session launch refused: app-server exited with status <N> before it answered` | The server exits during startup, before the supervisor connects to it; the supervisor exits 3 |
+| The provider's error message, verbatim with no prefix, or its `codexErrorInfo` value when the message is empty | The opening turn fails on an account refusal; the supervisor exits 3 |
+| `the opening Codex turn failed on a provider error: <message>` | The opening turn fails on another provider error; the supervisor exits 3 |
+| `the opening Codex turn ended twice on a provider capacity error: <message>` | Both opening turn attempts end on a capacity error; the supervisor exits 3 |
+| `codex-session launch refused: <error>` | Any other failure while the supervisor launches the server and its thread, before it starts the pump; the supervisor exits 3. A failure to prepare the launch exits 2 and writes its error to the route report that `init-agent` waits on before the canary (`--route-timeout`), not to the profile report |
+| `Codex provider refused the routed account` | The inbox pump exits with status 4 (`REFUSED_EXIT`); the supervisor exits 4 |
+| `Codex app server exited with status <N> before the profile canary validated` | The app server exits while the pump still runs; the supervisor exits N |
+
+The first reason written wins, because a report that already reads `failed`
+is never rewritten.
+
+A launch run with `--defer-canary` has already returned
+`profile_validation=pending` before the canary wait, so the failure reaches
+only the profile report at `profile_report=<path>`: its `state` reads
+`failed` and its `reason` holds the text above.
+
+In a swarm the reason is written to the swarm timer journal as
+`spawn failed for <task>: <reason>`, or with `task <task> reopened` when the
+spawn reopens the task; see [When the deadline cuts a wait](#when-the-deadline-cuts-a-wait).
+
+#### Find the cause
+
+The report records the exit status and no server output. The server's own
+output is in the serve log. `init-agent` prints the launcher as
+`launcher=<path>.sh`, and the serve log is `<path>.serve.log` beside it. The
+supervisor writes its launch line there:
+
+```text
+[agentihooks codex-session] execution=<id> thread=<id> endpoint=unix://<path> state=<state>
+```
+
+The app server inherits the supervisor's output, so what the server printed
+before it exited follows that line.
+
+Count these failures for one UTC day from the swarm timer journal:
+
+```bash
+day=2026-11-18
+TZ=UTC journalctl --user -u agentihooks-swarm.service \
+  --since "$day 00:00" --until "$day 23:59:59" --no-pager -o cat \
+  | grep -c "before the profile canary validated"
+```
+
+#### Limits
+
+- Every inbox pump exit prints `agentihooks codex-session: inbox pump exited
+  with status <N>; stopping the app server` to the serve log and stops the
+  server. The supervisor exits with the pump's status, and with 3 when the
+  pump exited 0. Only status 4 fails the report. Any other status leaves it
+  `pending`, so `init-agent` still waits out the canary deadline.
+- A supervisor stopped by `SIGTERM` or `SIGHUP` while it supervises the server
+  stops the pump and the server and exits with 128 plus the signal number. It
+  leaves the report `pending` as well.
+
+#### Guards
+
+- `tests/codex_session/test_serve.py::test_an_app_server_exit_after_launch_fails_the_pending_canary_at_once`
+  runs the supervisor with a server that exits with status 1 and with status
+  0. It checks that the supervisor returns that status and that `init-agent`'s
+  canary read raises the reason without sleeping.
+- `tests/codex_session/test_serve.py::test_an_app_server_exit_after_a_validated_canary_keeps_the_report`
+  checks that a server exit after a validated canary leaves the report
+  unchanged.
+- Feature map entry `codex-server-exit-canary`.
+- Semgrep incident rule `codex-server-exit-canary`, in
+  `.semgrep-incidents/codex-server-exit-canary.yml` with its fixtures in
+  `.semgrep-incidents/codex-server-exit-canary.py`. It flags a supervision
+  loop that leaves on a server exit without passing the exit status on to
+  fail the report. Check a file against it with:
+
+  ```bash
+  semgrep --config .semgrep-incidents/codex-server-exit-canary.yml \
+    scripts/codex_session/serve.py
+  ```
+
+Delivered in
+[pull request 11266](https://github.com/the-cloud-clockwork/agentihooks/pull/11266).
+In the [Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/43628094591)
+of its test only commit, both exit status cases failed with `Failed:
+init-agent waited on an exited app server`, while the validated case passed.
+That run was later cancelled.
+
 ### Read the result
 
 From inside the agent session:
@@ -483,6 +620,8 @@ The live qualification also recorded these viewer limits:
 | Launch fails with `ModuleNotFoundError: No module named 'websockets'` | The launching tool environment lacks its runtime dependency. Update the checkout to a revision containing the dependency fix, reinstall the tool using the installation instructions, and repeat the tool Python import check before retrying an admitted launch. Installing development extras in another venv does not fix this environment. |
 | Profile check fails with `live process binding changed since validation` on an `app_server` execution | The report records a home other than the execution home. A revision without the execution home re-record step produces this on every launch; update to one that contains it. See [Profile check in the execution home](#profile-check-in-the-execution-home). |
 | Launch fails with `execution home canary differs from the launch request` | The profile was rendered again between the launch request and the execution home. Relaunch; the new request records the current canary. |
+| Launch fails at once with `Codex app server exited with status <N> before the profile canary validated` | The supervised server ended after launch and before the session ran its canary. Read the server's output in the launch's serve log; see [App server exit before the canary](#app-server-exit-before-the-canary). |
+| An `app_server` launch fails with `mounted profile canary did not validate before timeout` after the serve log shows `inbox pump exited with status <N>` | The pump ended with a status other than 4, which leaves the canary pending until its deadline. See [Limits](#limits) under App server exit before the canary. |
 | Attach reports `failed` or `exited` | The recorded app-server ended; there is no live thread to attach through that transport. Inspect execution status before attempting recovery. |
 | Attach times out without a connected thread | Startup has not produced a connected thread within the timeout. Check the managed server's launch result and serve log; increasing the timeout alone does not repair a failed launch. |
 | Reopen reports no connected thread | The immediate reopen command requires an already connected thread. Use the waiting attach helper during startup. |

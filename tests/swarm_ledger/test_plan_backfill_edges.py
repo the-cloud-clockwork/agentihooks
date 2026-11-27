@@ -1,6 +1,7 @@
 import io
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -12,7 +13,7 @@ legacy = test_plan_backfill.legacy
 plan_ledger = test_plan_backfill.plan_ledger
 
 
-def context():
+def context() -> Any:
     return SimpleNamespace(
         meta={}, refused=[], dirty=False, record=lambda *args, **kwargs: None, stamp=lambda *args: None
     )

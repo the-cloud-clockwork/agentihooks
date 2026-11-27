@@ -1,7 +1,7 @@
 import json
 from typing import TYPE_CHECKING, Any, cast
 
-from scripts.hive.placement import HAS_ROOM, HIVE, NEEDS_WORKSTATION, NO_UI_HIVE
+from scripts.hive.placement import HAS_ROOM, HIVE, MASTER, NEEDS_WORKSTATION, NO_UI_HIVE
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import RedisStore
 
@@ -62,10 +62,12 @@ def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now
                 continue
 
 
-def prune(store: RedisStore, slug: str, tasks: list[dict]) -> None:
+def prune(store: RedisStore, slug: str, tasks: list[dict[str, Any]], now: int) -> None:
+    """Drop the waits of tasks no longer active; a master seat's wait stays while the tick still sees it refused."""
     active = {task["id"] for task in tasks if task.get("state") not in ("done", "cancelled")}
-    for task in read(store, slug).keys() - active:
-        store.redis.hdel(store.key(slug, WAITS), task)
+    for task, row in read(store, slug).items():
+        if task not in active and not (row["lane"] == MASTER and now - row["seen_at"] < FRESH_MS):
+            store.redis.hdel(store.key(slug, WAITS), task)
 
 
 def workstation_waiting(store: RedisStore, machine: str, now: int) -> int:

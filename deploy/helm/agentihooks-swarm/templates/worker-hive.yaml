@@ -1,6 +1,12 @@
 {{- define "swarm.workerHive" }}
 {{- $root := .root }}
 {{- $workers := deepCopy .workers }}
+{{- $security := include "swarm.podSecurity" $root | fromYaml }}
+{{- $sandbox := $workers.sandboxProfiles | default dict }}
+{{- if or $sandbox.seccomp $sandbox.apparmor }}
+{{- $_ := set $security.securityContext "seccompProfile" (dict "type" "Localhost" "localhostProfile" (required "workers.sandboxProfiles.seccomp is required with apparmor" $sandbox.seccomp)) }}
+{{- $_ := set $security.securityContext "appArmorProfile" (dict "type" "Localhost" "localhostProfile" (required "workers.sandboxProfiles.apparmor is required with seccomp" $sandbox.apparmor)) }}
+{{- end }}
 {{- $drain := int $workers.drainSeconds }}
 {{- if $root.Values.workers.rollout.enabled }}
 {{- $drain = int $root.Values.workers.rollout.drainSeconds }}
@@ -106,12 +112,16 @@ spec:
       annotations:
         checksum/worktrees: {{ toJson $worktrees | sha256sum }}
         {{- if $root.Values.workers.rollout.enabled }}
-        {{- with $root.Values.workers.rollout.release }}
+        {{- $release := $root.Values.workers.rollout.release }}
+        {{- if and (not $release) (eq (toString $workers.image.tag) "release") (regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+$" (toString $root.Chart.AppVersion)) }}
+        {{- $release = toString $root.Chart.AppVersion }}
+        {{- end }}
+        {{- with $release }}
         agentihooks.io/release: {{ . | quote }}
         {{- end }}
         {{- end }}
     spec:
-      {{- include "swarm.podSecurity" $root | nindent 6 }}
+      {{- toYaml $security | nindent 6 }}
       {{- with $workers.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -194,6 +204,8 @@ spec:
               value: {{ $workers.prefer | default "" | quote }}
             - name: HIVE_CAPABILITIES
               value: {{ join "," ($workers.capabilities | default list) | quote }}
+            - name: HIVE_PINNED
+              value: {{ ternary "yes" "no" (eq (toString $workers.pinned) "true") | quote }}
             - name: HIVE_REPOSITORIES
               value: {{ $workers.repositories | toJson | quote }}
             - name: HIVE_CREDENTIAL_FILE

@@ -137,11 +137,12 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
     watching = threads[0].pop("kwargs")["stopping"]
     assert watching.is_set()
     assert threads[0]["target"].__wrapped__ is server.watch_ledgers
-    assert [{**t, "args": tuple(type(a) for a in t["args"])} for t in threads] == [
+    assert [{**t, "args": tuple(type(a) for a in t["args"])} for t in threads[:3]] == [
         {"target": threads[0]["target"], "args": (Server,), "daemon": True},
         {"target": server.answer_reloads, "args": (Server,), "daemon": True},
         {"target": server.refresh_streams, "args": (list,), "daemon": True},
     ]
+    assert [(t["target"].__wrapped__, t["daemon"]) for t in threads[3:]] == [(server.follow_shared, True)]
     assert steps == [
         "bind",
         "activate",
@@ -219,7 +220,7 @@ def test_a_drained_server_writes_the_carry_its_successor_asked_for(
 def test_the_ledger_watch_sleeps_two_seconds_between_passes(monkeypatch):
     slept = []
 
-    def sleep(seconds):
+    def sleep(seconds: float, timeout: float | None = None) -> None:
         slept.append(seconds)
         raise StopIteration
 
@@ -301,7 +302,7 @@ def test_the_shared_follow_reads_every_watched_ledger_each_quarter_second(monkey
         if slug == "broken":
             raise ValueError("unreadable")
 
-    def sleep(seconds):
+    def sleep(seconds: float, timeout: float | None = None) -> None:
         slept.append(seconds)
         raise StopIteration
 
@@ -319,7 +320,7 @@ def test_the_shared_follow_reads_every_watched_ledger_each_quarter_second(monkey
 def test_the_shared_follow_skips_its_pass_while_a_write_holds_the_ledger_lock(monkeypatch):
     read, slept = [], []
 
-    def sleep(seconds):
+    def sleep(seconds: float, timeout: float | None = None) -> None:
         slept.append(seconds)
         raise StopIteration
 

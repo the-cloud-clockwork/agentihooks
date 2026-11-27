@@ -16,20 +16,23 @@ from pathlib import Path
 from typing import Any, cast
 
 import scripts.ci_budget.jobs
+from scripts import dep_manifest
 from scripts.ci_budget import rate_limit
-from tests import dep_manifest
 
 read_jobs = cast("Callable[..., list[dict[str, Any]]]", scripts.ci_budget.jobs.read_jobs)
 gh_api = cast("Callable[..., subprocess.CompletedProcess[Any]]", rate_limit.gh_api)
 
 UNIT_JOBS = frozenset(f"unit (3.12, {shard})" for shard in range(1, 21))
+COPY_JOB = "unit (3.12, copy)"
 # Full scope runs carry these into their own coverage for the tests they reuse.
 COVERAGE = frozenset(f"coverage-3.12-{shard}" for shard in range(1, 21))
 PACKED = "dep-manifest-packed"
 PACKED_FILE = "packed.json"
 CANDIDATES = 10
 REQUESTS = 100
-PAGE_REQUESTS = 1 + 3 * CANDIDATES
+ARTIFACT_PAGE = 100
+ARTIFACT_PAGES = 2
+PAGE_REQUESTS = 1 + (ARTIFACT_PAGES + 2) * CANDIDATES
 JOB_PAGE = 100
 SERVER_ERROR = re.compile(r"HTTP 5\d\d")
 SERVER_ATTEMPTS = 3
@@ -118,23 +121,36 @@ def _recorded(run: dict[str, Any], repository: str) -> bool:
     )
 
 
+def _artifacts(endpoint: str) -> tuple[list[dict[str, Any]], int]:
+    found: list[dict[str, Any]] = []
+    for page in range(1, ARTIFACT_PAGES + 1):
+        listed = json.loads(_api(f"{endpoint}?per_page={ARTIFACT_PAGE}&page={page}"))["artifacts"]
+        found += listed
+        if len(listed) < ARTIFACT_PAGE:
+            return found, page
+    return found, ARTIFACT_PAGES
+
+
 def _usable(
     pool: ThreadPoolExecutor, actions: str, runs: list[dict[str, Any]], tally: Counter[str]
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    listings = [pool.submit(_api, f"{actions}/runs/{run['id']}/artifacts?per_page=100") for run in runs]
-    tally["requests"] += len(runs)
+    listings = [pool.submit(_artifacts, f"{actions}/runs/{run['id']}/artifacts") for run in runs]
     for run, listing in zip(runs, listings):
         tally["searched"] += 1
-        artifacts = cast(list[dict[str, Any]], json.loads(listing.result())["artifacts"])
+        artifacts, pages = listing.result()
+        tally["requests"] += pages
         live = {item["name"]: item for item in artifacts if not item["expired"]}
         kept = [live[name] for name in (PACKED, "dep-manifest") if name in live]
         if not kept or any(name not in live for name in COVERAGE):
+            if len(artifacts) == ARTIFACT_PAGES * ARTIFACT_PAGE:
+                print(f"Dev run {run['id']} fills the {ARTIFACT_PAGES} artifact pages the planner reads")
             tally["unavailable"] += 1
             continue
         jobs = pool.submit(read_jobs, f"{actions}/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", JOB_PAGE)
         download = pool.submit(_api, f"{actions}/artifacts/{kept[0]['id']}/zip")
         tally["requests"] += 2
-        if not UNIT_JOBS <= {job["name"] for job in jobs.result() if job["conclusion"] == "success"}:
+        passed = {job["name"] for job in jobs.result() if job["conclusion"] == "success"}
+        if not (UNIT_JOBS <= passed or COPY_JOB in passed):
             tally["failed"] += 1
             continue
         try:

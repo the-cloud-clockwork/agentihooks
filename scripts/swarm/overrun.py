@@ -98,5 +98,5 @@ def _report(watch: Watch, mail: Mail, agent: AgentRecord, minutes: int) -> str:
         task=agent.task,
         steps=_steps(mail, agent.task),
     )
-    mail.inbox.send(SENDER, address, text, ref=f"{watch.slug}:{KEY}:{agent.task}", task=agent.task)
+    mail.inbox.send(SENDER, address, text, ref=f"{watch.slug}:{KEY}:{agent.task}:{agent.started_at}", task=agent.task)
     return f"overrun: told {address} that {agent.name} has run {minutes} minutes on task {agent.task}"

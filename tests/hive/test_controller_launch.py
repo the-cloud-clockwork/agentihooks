@@ -1084,6 +1084,26 @@ def test_a_live_acknowledgement_releases_its_admission_reservation(setup: Simple
     assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == []
 
 
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_a_live_acknowledgement_records_the_hive_holding_the_task_work_folder(setup: SimpleNamespace) -> None:
+    _, order, ack = live_order(setup)
+    pointer = setup.store.key("fixture", "work-folder", order.task)
+    assert setup.store.redis.get(pointer) is None
+    assert setup.launcher.complete(order, ack).ok
+    assert setup.store.redis.get(pointer) == order.hive == "remote"
+
+
+@pytest.mark.feature("work-folder-readers-and-launch-pointers")
+def test_a_failed_launch_leaves_the_task_work_folder_pointer_alone(setup: SimpleNamespace) -> None:
+    from scripts.hive.orders import Ack
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("failed", {}, "prompt"))
+    assert not setup.launcher.wait(order).ok
+    assert setup.store.redis.get(setup.store.key("fixture", "work-folder", order.task)) is None
+
+
 @pytest.mark.parametrize(
     "bad", ["target", "pane", "host", "generation", "state", "missing occupant", "replaced occupant"]
 )
@@ -1369,6 +1389,29 @@ def test_legacy_launch_ending_allows_replacement_before_projection_catches_up(se
     assert admitted.generation == previous.generation + 1
     assert admitted.name == next_request.name
     assert admitted.profile_decision == selected.profile.record()
+
+
+@pytest.mark.feature("codex-adopt-refusal-fields")
+def test_an_adoption_refusal_does_not_allow_replacing_a_live_hive_execution(setup: SimpleNamespace) -> None:
+    from scripts.codex_session import supervisor
+    from scripts.swarm.store import APP_SERVER_TRANSPORT, SwarmError
+
+    request = request_for(setup)
+    request = replace(request, config=replace(request.config, codex_inbox_transport=APP_SERVER_TRANSPORT))
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    selected = replace(selected, account=replace(selected.account, harness="codex"))
+    admitted = setup.launcher.admit(request, selected)
+    current = replace(admitted, state="working")
+    setup.store.put_agent("fixture", current)
+    spec = supervisor.Launch("fixture", current, ".", "fixture", {}, execution_id=current.execution_id)
+
+    with pytest.raises(supervisor.LaunchFailure):
+        supervisor.adopt(setup.store, spec, APP_SERVER_TRANSPORT, current.hive)
+
+    with pytest.raises(SwarmError, match="replacement does not match the current execution"):
+        setup.launcher.admit(request_for(setup), selected)
+
+    assert setup.store.execution("fixture", current.execution_id) == current
 
 
 def test_unavailable_placement_does_not_admit_or_reserve(setup):
@@ -2198,13 +2241,27 @@ def test_swarm_health_reports_missing_hive_and_removes_completed_waits(setup, mo
     assert placement_waits.read(setup.store, setup.config.slug) == {}
 
 
+def test_swarm_health_keeps_a_master_wait_the_tick_still_sees_and_removes_a_stale_one(setup, monkeypatch):
+    from scripts.hive import placement, placement_waits
+    from scripts.swarm import status
+
+    placement_waits.observe(setup.store, setup.config.slug, placement.MASTER, placement.MASTER, "refused", 1000)
+    monkeypatch.setattr(status.activity, "counts", lambda slug: {})
+    monkeypatch.setattr(status, "now_ms", lambda: 1000 + placement_waits.FRESH_MS - 1)
+    status.findings(setup.store, setup.config.slug, setup.config, [], [])
+    assert list(placement_waits.read(setup.store, setup.config.slug)) == [placement.MASTER]
+    monkeypatch.setattr(status, "now_ms", lambda: 1000 + placement_waits.FRESH_MS)
+    status.findings(setup.store, setup.config.slug, setup.config, [], [])
+    assert placement_waits.read(setup.store, setup.config.slug) == {}
+
+
 @pytest.mark.parametrize("state", ["done", "cancelled"])
 def test_wait_pruning_keeps_active_tasks_and_drops_removed_tasks(setup, state):
     from scripts.hive import placement, placement_waits
 
     for task in ("active", "settled", "removed"):
         placement_waits.observe(setup.store, setup.config.slug, "eng", task, placement.NO_UI_HIVE, 1000)
-    placement_waits.prune(setup.store, setup.config.slug, [{"id": "active"}, {"id": "settled", "state": state}])
+    placement_waits.prune(setup.store, setup.config.slug, [{"id": "active"}, {"id": "settled", "state": state}], 1000)
     assert list(placement_waits.read(setup.store, setup.config.slug)) == ["active"]
 
 

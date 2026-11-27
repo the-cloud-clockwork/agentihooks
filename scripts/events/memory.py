@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, replace
 from typing import cast
 
-from .bus import Bus, Delivery, EventLog, StateConflict, StateEntry, WorkQueue
+from .bus import Bus, Delivery, EventLog, PayloadTooLarge, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import dead_letter
 from .envelope import Envelope
@@ -20,6 +20,10 @@ def _monotonic_ms() -> int:
     return time.monotonic_ns() // 1_000_000
 
 
+def _wall_ms() -> int:
+    return time.time_ns() // 1_000_000
+
+
 def subject_matches(pattern: str, subject: str) -> bool:
     want, have = pattern.split("."), subject.split(".")
     for index, token in enumerate(want):
@@ -31,8 +35,9 @@ def subject_matches(pattern: str, subject: str) -> bool:
 
 
 class _Runtime:
-    def __init__(self, clock: Clock):
+    def __init__(self, clock: Clock, wall: Clock = _wall_ms) -> None:
         self.clock = clock
+        self.wall = wall
         self.cond = threading.Condition()
         self.closed = False
         self.handlers: list[tuple[str, Callable[[str, bytes], bytes]]] = []
@@ -171,12 +176,13 @@ class _Pending:
 
 
 class MemoryConsumer:
-    def __init__(self, log: "MemoryEventLog", subject: str, policy: QueuePolicy, durable: str):
+    def __init__(self, log: "MemoryEventLog", subject: str, policy: QueuePolicy, durable: str) -> None:
         self.subject = subject
         self.policy = policy
         self._log = log
         self._cursor = 0
         self._pending = _Pending(log.runtime, policy, self._pull, log.dead, f"events.{durable}")
+        self.created: int | None = log.runtime.wall()
 
     def fetch(self, batch: int, timeout_ms: int) -> list[MemoryDelivery]:
         return self._pending.take(batch, timeout_ms)
@@ -292,10 +298,17 @@ class MemoryStateStore:
 
 
 class MemoryBus:
-    def __init__(self, config: BusConfig, clock: Clock, runtime: _Runtime | None = None, swarm: str | None = None):
+    def __init__(
+        self,
+        config: BusConfig,
+        clock: Clock,
+        runtime: _Runtime | None = None,
+        swarm: str | None = None,
+        wall: Clock = _wall_ms,
+    ) -> None:
         self._config, self._swarm = config, swarm
         self._owned = runtime is None
-        self._runtime = runtime if runtime is not None else _Runtime(clock)
+        self._runtime = runtime if runtime is not None else _Runtime(clock, wall)
         self._views: dict[str, Bus] = {}
         raw_dead = MemoryEventLog(self._runtime, config, None)
         self._legacy_dead = raw_dead
@@ -363,7 +376,12 @@ class MemoryBus:
             return self._buckets.setdefault(bucket, MemoryStateStore(self._runtime))
 
     def serve(
-        self, subject: str, queue: str, handler: Callable[[str, bytes], bytes], wait_ms: int | None = None
+        self,
+        subject: str,
+        queue: str,
+        handler: Callable[[str, bytes], bytes],
+        wait_ms: int | None = None,
+        refusal: Callable[[str, bytes, PayloadTooLarge], bytes] | None = None,
     ) -> None:
         with self._runtime.cond:
             self._runtime.require_open()
@@ -386,5 +404,5 @@ class MemoryBus:
                 self._runtime.cond.notify_all()
 
 
-def open_bus(config: BusConfig, clock: Clock = _monotonic_ms) -> MemoryBus:
-    return MemoryBus(config, clock)
+def open_bus(config: BusConfig, clock: Clock = _monotonic_ms, wall: Clock = _wall_ms) -> MemoryBus:
+    return MemoryBus(config, clock, wall=wall)

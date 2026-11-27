@@ -13,11 +13,11 @@ if TYPE_CHECKING:
     from scripts.gates.verdicts import Verdicts
     from scripts.swarm.store import RedisStore
 
-WORKERS = frozenset({"eng", "ci"})
+WORKERS = frozenset({"eng", "ci", "review"})
 ACTIVE = frozenset({"claimed", "pr"})
 STREAK = 3
 CHECKS_WAIT_MS = 12 * 60 * 60_000
-KEPT = frozenset({"reply", "task"})
+KEPT = frozenset({"reply", "task", "merge"})
 PLAIN = {
     "merged": "its pull request had merged and the task stayed open",
     "red": "its checks had failed and nothing was pushed",

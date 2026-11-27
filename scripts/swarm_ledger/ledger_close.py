@@ -1,6 +1,9 @@
 """Closing a ledger: a Summary section built from the ledger itself, written into the overview, and when it closed."""
 
 import re
+from typing import Any
+
+from scripts.swarm_ledger.op_context import OpContext
 
 OPS = ("summary_set", "close", "reopen")
 HEAD = "Summary"
@@ -17,7 +20,7 @@ def check(op):
         raise ValueError(f"note must be text of at most {MAX_NOTE} characters")
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: OpContext) -> bool:
     if op["op"] in ("close", "reopen"):
         doc["closed_at"] = ctx.at if op["op"] == "close" else None
         ctx.stamp("closed_at", op["by"])

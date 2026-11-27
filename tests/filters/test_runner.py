@@ -1,4 +1,7 @@
 import threading
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -200,13 +203,13 @@ def test_flag_allows_and_adds_the_findings_as_context(filters_dir, stub):
     assert effect.contexts == ['[condition pre-write-ids.filter.yaml]\nfilter flagged:\n- "task flt1": names a task id']
 
 
-def test_strip_rewrites_the_input_without_the_confirmed_spans(filters_dir, stub):
+def test_strip_rewrites_the_input_without_the_confirmed_spans(filters_dir: Path, stub: Callable[..., Any]) -> None:
     (filters_dir / "pre-write-ids.filter.yaml").write_text(FILTER + "action: strip\n")
     stub(yes=True)
     effect = conditions.pre_effect(_write_call("see task flt1 and task flt2 now", mode="bypassPermissions"))
     assert effect.block is None
     assert effect.rewrite == {"file_path": "/repo/page.py", "content": "see  and  now"}
-    assert effect.decision == "allow"
+    assert effect.decision is None
     assert (
         '[condition pre-write-ids.filter.yaml]\nfilter stripped:\n- "task flt1": names a task id' in effect.contexts[0]
     )

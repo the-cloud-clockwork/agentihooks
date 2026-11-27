@@ -1,0 +1,24 @@
+{
+  "id": "lab-grade-required-list-regrade",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-grade-release-fold",
+  "behaviour": "A grade keeps its planned required jobs and is graded again when a release changes them, without posting a failure for an unplanned job.",
+  "seam": "scheduler.frame, Scheduler._start, Scheduler.tick, scheduler._parse, relay and compact",
+  "tests": [
+    "tests/ci_lab/test_scheduler_required_frame.py::test_the_plan_keeps_only_the_jobs_its_tier_requires",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_a_started_grade_stores_its_planned_required_list",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_a_release_regrades_a_live_frame_without_posting_failed_required",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_a_release_reuses_queued_work",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_a_stale_superseded_grade_closes_after_its_first_posts_were_held",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_stale_intake_regrades_once_and_reuses_the_matching_replacement",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_a_legacy_grade_derives_required_from_its_stored_gates",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_a_matching_frame_keeps_existing_grade_reuse_and_success",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_compaction_round_trips_the_stored_required_frame",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_relay_parses_the_frame_and_ignores_a_superseded_grade",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_a_matching_scoped_grade_stays_quiet_without_parsing_its_document",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_matching_full_scope_intake_keeps_its_grade_live",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_stale_intake_does_not_reuse_another_heads_lane_grade",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_a_replacement_carries_only_unfinished_admitted_jobs",
+    "tests/ci_lab/test_scheduler_required_frame.py::test_a_release_reuses_cached_failed_verdicts_without_bypassing_them"
+  ]
+}

@@ -123,7 +123,7 @@ def test_trace_plan_params_carry_each_piece_ruling():
         trace_plan.Piece("tests", ("tests/test_a.py",), "proof"),
         trace_plan.Piece("clear", ("mutation-clearances/a.json",), "none"),
     ]
-    assert trace_plan._params(fresh, 1, False, ["c-1"]) == {
+    assert trace_plan._params(fresh, 1, False, ["c-1"], "") == {
         "pieces": [
             {"slot": 1, "number": 2, "what": "tests", "ruling": False},
             {"slot": 2, "number": 3, "what": "clear", "ruling": True},
@@ -142,4 +142,4 @@ def test_trace_plan_keeps_a_piece_its_authorization_covers():
 
 def test_trace_plan_params_number_every_covered_piece():
     fresh = [trace_plan.Piece("a", ("src/a.py",), "x"), trace_plan.Piece("b", ("src/b.py",), "y")]
-    assert [c["number"] for c in trace_plan._params(fresh, 3, True, ["c-1"])["covers"]] == [4, 5]
+    assert [c["number"] for c in trace_plan._params(fresh, 3, True, ["c-1"], "")["covers"]] == [4, 5]

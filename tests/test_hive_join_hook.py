@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from hooks.context import voice_output
+from tests.swarm.client_class import client_class
 from tests.test_hook_manager import quiet_session_start as quiet_session_start
 
 
@@ -278,7 +279,7 @@ def test_hive_hook_reports_defaults_for_the_named_agent_once(monkeypatch):
     assert len(calls) == 1
 
 
-def test_failed_startup_ledger_checks_recover_in_the_same_agent_session(monkeypatch):
+def test_failed_startup_ledger_checks_recover_in_the_same_agent_session(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import Mock
 
     from fakeredis import FakeRedis
@@ -307,7 +308,7 @@ def test_failed_startup_ledger_checks_recover_in_the_same_agent_session(monkeypa
     ledger = Mock()
     ledger.join.side_effect = [RuntimeError("temporary refusal"), None]
     ledger._call.side_effect = [RuntimeError("temporary refusal"), {"applied": True}]
-    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(ledger_client, "LedgerClient", client_class(ledger))
     payload = {"session_id": "session"}
     hive_join.run(payload, "start")
     before = join_report.read(client.redis, agent)

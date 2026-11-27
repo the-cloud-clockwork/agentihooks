@@ -7,7 +7,6 @@ exit
 
 import argparse
 import contextlib
-import fcntl
 import json
 import os
 import re
@@ -26,7 +25,7 @@ from urllib.request import url2pathname
 
 import yaml
 
-from scripts import balance_cli, runtime_env
+from scripts import balance_cli, platform_compat, runtime_env
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
 from scripts.cli_delegates import delegated_cli
@@ -92,10 +91,10 @@ def _resolve_claude_home() -> Path:
 CLAUDE_HOME = _resolve_claude_home()
 ROUTE_LAUNCHERS = {
     "interactive": "scripts.routing.interactive",
+    "native-default": "scripts.routing.native_default",
     "master-login": "scripts.master_claude_login",
     "claude-ai": "scripts.routing.claude_ai",
 }
-
 # Persistent state directory for user-level agentihooks configuration.
 # Overridable via AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
 AGENTIHOOKS_STATE_DIR = Path(os.environ.get("AGENTIHOOKS_HOME", str(Path.home() / ".agentihooks")))
@@ -704,13 +703,13 @@ def _register_target_global(profile: str, settings_profile: str = "", target: st
     """Record the global install for *target* in state.json (per-target record)."""
     state = _load_state()
     adapter_home = CLAUDE_HOME if target == DEFAULT_TARGET else get_adapter(target).home()
-    entry = {
+    entry: dict[str, Any] = {
         "path": str(adapter_home),
         "profile": profile,
         "installed_at": datetime.now(timezone.utc).isoformat(),
+        **({"settings_profile": settings_profile} if settings_profile else {}),
+        **{key: value for key, value in _global_record(state, target).items() if key == "managed_mcp"},
     }
-    if settings_profile:
-        entry["settings_profile"] = settings_profile
     state.setdefault("targets", {}).setdefault("global", {})[target] = entry
     # Last-used target, consulted only as the interactive TTY prompt's
     # default. It is NOT scoped to a target's own record and is never
@@ -748,15 +747,8 @@ def _sync_lock(*, blocking: bool = True):
 
     Default ``blocking=True`` waits for any concurrent install to finish.
     """
-    _SYNC_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fd = open(_SYNC_LOCK_FILE, "w")  # noqa: SIM115
-    try:
-        flags = fcntl.LOCK_EX if blocking else (fcntl.LOCK_EX | fcntl.LOCK_NB)
-        fcntl.flock(fd, flags)
+    with platform_compat.file_lock(_SYNC_LOCK_FILE, blocking=blocking):
         yield
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        fd.close()
 
 
 # ---------------------------------------------------------------------------
@@ -809,19 +801,33 @@ def _get_shared_bundle_path() -> Path | None:
     return shared_bundle_path(_load_state(), os.environ)
 
 
-def _bundle_roots() -> list[tuple[str, Path]]:
+def _bundle_roots(layer: bool = False) -> list[tuple[str, Path]]:
     from hooks.context.profile_chain import bundle_roots
 
     found = (("bundle", _get_bundle_path()), ("shared_bundle", _get_shared_bundle_path()))
     found += (("user_bundle", _get_user_bundle_path()),)
-    return bundle_roots({key: {"path": str(path)} for key, path in found if path})
+    return bundle_roots({key: {"path": str(path)} for key, path in found if path}, layer)
 
 
-def _bundle_feature_layers(subdir: str, label: str) -> list[tuple[str, Path]]:
+def _codex_native_skill_layers(
+    subdir: str, install_target: str, content_dirs: list[tuple[str, Path]], chain_len: int
+) -> list[tuple[str, Path]]:
+    if subdir != "skills" or install_target != "codex":
+        return []
+    native = _TARGET_SUBDIR["codex"]
+    extra = _bundle_feature_layers(subdir, "skill", native)
+    for pname, pdir in content_dirs:
+        root = pdir / native / subdir
+        if root.is_dir():
+            extra.append((f"profile({pname}) codex skill" if chain_len > 1 else "profile codex skill", root))
+    return extra
+
+
+def _bundle_feature_layers(subdir: str, label: str, subdir_root: str = _CLAUDE_SUBDIR) -> list[tuple[str, Path]]:
     return [
-        (f"{_BUNDLE_LABELS[kind]} {label}", root / _CLAUDE_SUBDIR / subdir)
-        for kind, root in _bundle_roots()
-        if (root / _CLAUDE_SUBDIR / subdir).is_dir()
+        (f"{_BUNDLE_LABELS[kind]} {label}", root / subdir_root / subdir)
+        for kind, root in _bundle_roots(True)
+        if (root / subdir_root / subdir).is_dir()
     ]
 
 
@@ -2831,26 +2837,22 @@ def _install_global_inner(args: argparse.Namespace) -> None:
     bundle_dir = _get_bundle_path()
     user_dir = _get_user_bundle_path()
     shared_dir = _get_shared_bundle_path()
+    from hooks.context.profile_chain import package_layer, unlayered
 
+    content_dirs = unlayered(profile_dirs, (bundle_dir, shared_dir, user_dir))
     for subdir, label, filter_fn in [
         ("skills", "skill", _skill_dir_filter()),
         ("agents", "agent", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ("commands", "command", lambda p: p.suffix == ".md" and p.name != "README.md"),
         ("rules", "rule", lambda p: p.suffix == ".md" and p.name != "README.md"),
     ]:
-        # Layer resolution is target-agnostic; what happens to each layer
-        # (symlink, translate, compile into persona, skip) is the adapter's call.
-        layers: list[tuple[str, Path]] = []
-        # Layer 1: agentihooks built-in (packaged under profiles/package/, the
-        # emulated .claude tree — shipped in the wheel, unlike the old repo-root .claude/)
-        layers.append((label, PACKAGE_FEATURES_DIR / subdir))
-        # Layer 2: bundle top-level .claude/ (inherits to all profiles)
+        layers = package_layer(profile_dirs, (label, PACKAGE_FEATURES_DIR / subdir))
         layers.extend(_bundle_feature_layers(subdir, label))
-        # Layer 3+: each profile in chain (later profiles override earlier for same-name files)
-        for pname, pdir in profile_dirs:
+        for pname, pdir in content_dirs:
             if (pdir / _CLAUDE_SUBDIR / subdir).is_dir():
                 chain_label = f"profile({pname}) {label}" if len(profile_chain) > 1 else f"profile {label}"
                 layers.append((chain_label, pdir / _CLAUDE_SUBDIR / subdir))
+        layers.extend(_codex_native_skill_layers(subdir, install_target, content_dirs, len(profile_chain)))
         adapter.install_features(subdir, layers, filter_fn)
 
     # --- 5 + 5a + 5b. Persona install (target-specific writer) ---
@@ -2902,11 +2904,11 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             _cprint(f"  [WARN] Could not read {path}: {exc}")
 
     # Layer 2: bundle — always installed; profile MCPs layer on top (override per-name)
-    for kind, root in _bundle_roots():
+    for kind, root in _bundle_roots(True):
         _register_mcp_layer(root, _BUNDLE_LABELS[kind].capitalize())
 
     # Layer 3+: each profile (chained)
-    for pname, pdir in profile_dirs:
+    for pname, pdir in content_dirs:
         chain_label = f"Profile({pname})" if len(profile_chain) > 1 else "Profile"
         _register_mcp_layer(pdir, chain_label)
 
@@ -3643,16 +3645,14 @@ def _reseed_managed_mcp_sources() -> None:
             _cprint(f"  [WARN] Could not reseed the agentihooks MCP server: {exc}")
 
     # Layer 2: bundle .mcp.json, root, shared, then user
-    for kind, bundle_dir in _bundle_roots():
-        for candidate in (bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME):
-            if candidate.exists():
-                try:
-                    servers = load_json(candidate).get("mcpServers", {})
-                    if servers:
-                        _merge_mcp_to_user_scope(servers)
-                except (json.JSONDecodeError, OSError) as exc:
-                    _cprint(f"  [WARN] Could not reseed {kind} bundle .mcp.json: {exc}")
-                break
+    for kind, bundle_dir in _bundle_roots(True):
+        if candidate := _native_layer_path(bundle_dir, "claude", _NATIVE_MCP_NAME):
+            try:
+                servers = load_json(candidate).get("mcpServers", {})
+                if servers:
+                    _merge_mcp_to_user_scope(servers)
+            except (json.JSONDecodeError, OSError) as exc:
+                _cprint(f"  [WARN] Could not reseed {kind} bundle .mcp.json: {exc}")
 
     # Layer 3: active profile .mcp.json (full chain — see collector note)
     if profile_name:
@@ -3844,15 +3844,11 @@ def _cmd_mcp_lib(lib_path: Path | None) -> None:
     print("Restart Claude Code for the changes to take effect.")
 
 
-# ---------------------------------------------------------------------------
-# CLI tool install (uv tool install --editable .)
-# ---------------------------------------------------------------------------
-
 _CLI_NAME = "agentihooks"
 
 
 def _install_cli_tool() -> None:
-    """Install the agentihooks CLI globally via ``uv tool install --editable .``."""
+    """Install the agentihooks CLI globally via ``uv tool install --editable .[nats]``."""
     import subprocess
 
     if not _is_source_checkout():
@@ -3865,8 +3861,8 @@ def _install_cli_tool() -> None:
         print("       Then re-run: uv run agentihooks init")
         return
 
-    cmd = [uv, "tool", "install", "--editable", "--force", "."]
-    label = "uv tool install --editable ."
+    cmd = [uv, "tool", "install", "--editable", "--force", ".[nats]"]
+    label = "uv tool install --editable .[nats]"
     result = subprocess.run(cmd, cwd=str(AGENTIHOOKS_ROOT), capture_output=True, text=True)
     if result.returncode == 0:
         _cprint(f"  [OK] CLI installed via: {label}")
@@ -3889,7 +3885,7 @@ def _link_cli_tool() -> None:
         return
     link.parent.mkdir(parents=True, exist_ok=True)
     link.unlink(missing_ok=True)
-    link.symlink_to(target)
+    platform_compat.make_link(target, link)
     _cprint(f"  [OK] CLI linked: {link} -> {target}")
 
 
@@ -4030,13 +4026,13 @@ def _link_item(item: Path, link: Path, label: str) -> tuple[Path, Path, str] | N
             _cprint(f"  [--] {label} '{item.name}' already linked → {item}")
         else:
             link.unlink()
-            link.symlink_to(item)
+            platform_compat.make_link(item, link)
             _cprint(f"  [OK] Re-linked {label} '{item.name}' → {item}")
         return (link, item, kind)
     if link.exists():
         _cprint(f"  [!!] {label} '{item.name}' exists at {link} and is not a symlink – skipping (remove manually)")
         return None
-    link.symlink_to(item)
+    platform_compat.make_link(item, link)
     _cprint(f"  [OK] Linked {label} '{item.name}' → {item}")
     return (link, item, kind)
 
@@ -4356,8 +4352,10 @@ def _prepend_bundle_claude_md(
     had_block = _BUNDLE_CLAUDE_MD_BEGIN in current and _BUNDLE_CLAUDE_MD_END in current
 
     sections = []
+    from hooks.context.profile_chain import layer_root
+
     for directory in (bundle_dir, shared_dir, user_dir):
-        bundle_md = (directory / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME) if directory else None
+        bundle_md = (layer_root(directory) / _CLAUDE_SUBDIR / _CLAUDE_MD_NAME) if directory else None
         if bundle_md and bundle_md.exists() and (text := bundle_md.read_text().strip()):
             sections.append((bundle_md, text))
     body = "\n\n".join(text for _, text in sections)
@@ -4570,14 +4568,12 @@ def _collect_all_managed_mcp_servers() -> dict:
     merged.update(mcp_config["mcpServers"])
 
     # --- 2. Bundle .mcp.json, root, shared, then user ---
-    for _kind, bundle_dir in _bundle_roots():
-        for candidate in [bundle_dir / _CLAUDE_SUBDIR / _MCP_JSON_NAME, bundle_dir / _MCP_JSON_NAME]:
-            if candidate.exists():
-                try:
-                    merged.update(load_json(candidate).get("mcpServers", {}))
-                except (json.JSONDecodeError, OSError):
-                    pass
-                break
+    for _kind, bundle_dir in _bundle_roots(True):
+        if candidate := _native_layer_path(bundle_dir, "claude", _NATIVE_MCP_NAME):
+            try:
+                merged.update(load_json(candidate).get("mcpServers", {}))
+            except (json.JSONDecodeError, OSError):
+                pass
 
     # --- 3. Profile .mcp.json (full chain) ---
     # NOTE: the active profile is a comma-joined chain (e.g. "anton,brain").
@@ -5259,7 +5255,7 @@ def _load_claude_runtime_env(*, shell_wins: bool = False) -> None:
     if env_file.is_file():
         from dotenv import dotenv_values
 
-        shell = set(os.environ) if shell_wins else set()
+        shell = set(os.environ) if shell_wins else runtime_env.shell_kept(os.environ)
         companions = [f for f in sorted(env_file.parent.glob("*.env")) if f != env_file]
         for f in [env_file, *companions]:
             for k, v in dotenv_values(f).items():
@@ -6139,10 +6135,10 @@ def main() -> None:
         from scripts.serena_router_daemon import main as serena_main
 
         raise SystemExit(serena_main(_argv[1:]))
-    if _argv and _argv[0] == "ledger":
+    if _argv and _argv[0] in ("ledger", "api"):
         from scripts.swarm_ledger import run as ledger_run
 
-        raise SystemExit(ledger_run(_argv[1:]))
+        raise SystemExit(ledger_run(_argv[1:], prog=_argv[0]))
     if _argv and _argv[0] in ("swarm", "controller"):
         from scripts.swarm import cli, controller
 
@@ -6327,7 +6323,7 @@ def main() -> None:
     sub.add_parser("quota", help="One table for every Claude and Codex account")
     sub.add_parser("skill", help="Run skill evaluations with quota routed Claude authentication: eval -- <command>")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
-    sub.add_parser("ledger", help="Swarm ledger: agent CLI, or new|serve|watch|chat <args>")
+    sub.add_parser("ledger", help="Swarm ledger page: read only; agentihooks api is the write agent CLI")
     sub.add_parser(
         "swarm",
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",

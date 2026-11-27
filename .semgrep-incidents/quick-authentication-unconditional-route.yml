@@ -1,0 +1,33 @@
+rules:
+  - id: quick-authentication-unconditional-route
+    languages: [python]
+    severity: ERROR
+    message: Quick launch must choose its routing arguments from the saved seat authentication.
+    paths:
+      include:
+        - /scripts/quick/launch.py
+        - quick-authentication-unconditional-route.py
+    patterns:
+      - pattern-inside: |
+          def argv(...):
+              ...
+      - pattern: return [..., "--routed-only", ...]
+  - id: quick-initial-native-launch-without-take
+    languages: [python]
+    severity: ERROR
+    message: Take the initial native seat into launching before starting its process.
+    paths:
+      include:
+        - /scripts/quick/launch.py
+        - quick-authentication-unconditional-route.py
+    patterns:
+      - pattern-inside: |
+          def start_all(...):
+              ...
+      - pattern-not-inside: |
+          def start_all(...):
+              ...
+              if registry.take(...) is None:
+                  ...
+              ...
+      - pattern: subprocess.Popen(...)

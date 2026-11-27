@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import fencing
+from scripts.swarm import execution, fencing
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
@@ -135,6 +135,21 @@ def test_conflicts_refuse_without_changing_identity(store, agent, fault):
         "runtime_backend": "unsupported runtime target identity field",
     }
     assert str(error.value) == messages.get(fault, "stale or changed execution identity")
+
+
+@pytest.mark.feature("swarm-tick-step-conflict-detail")
+def test_a_step_refused_by_an_identity_conflict_records_the_conflict_message(
+    store: RedisStore, agent: AgentRecord, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm import timing
+
+    first = store.start_execution("fixture", agent)
+    store.start_execution("fixture", replace(agent, started_at=456), first.execution_id)
+    with pytest.raises(SwarmError), timing.tick("fixture"), timing.step("session models"):
+        store.put_agent("fixture", replace(first, model="claude-opus-5-5"))
+    rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if line.startswith("{")]
+    finished = [row for row in rows if row.get("step") == "session models" and row["phase"] == "finished"]
+    assert [(row["outcome"], row["detail"]) for row in finished] == [("error", "stale or changed execution identity")]
 
 
 @pytest.mark.parametrize("repeat", range(2))
@@ -352,6 +367,97 @@ def test_uuid_collision_preserves_all_attempts(store, agent, monkeypatch):
         store.start_execution("fixture", agent, first.execution_id)
     assert str(error.value) == "execution identity already exists"
     assert protected(store) == before
+
+
+@pytest.mark.feature("registry-update-skips-ended-execution")
+def test_a_write_onto_a_dropped_execution_leaves_it_ended_and_unlisted(store: RedisStore, agent: AgentRecord) -> None:
+    current = store.start_execution("fixture", agent)
+    store.drop_agent("fixture", agent.name, at=10)
+    dropped = store.execution("fixture", current.execution_id)
+    assert dropped.state == "ended"
+    store.put_agent("fixture", replace(current, idle_ticks=1))
+    assert store.execution("fixture", current.execution_id) == dropped
+    assert store.agents("fixture") == []
+    assert store.redis.llen(store.key("fixture", "history")) == 1
+
+
+@pytest.mark.feature("registry-update-skips-ended-execution")
+def test_an_explicit_revival_lands_on_an_ended_execution(store: RedisStore, agent: AgentRecord) -> None:
+    current = store.start_execution("fixture", agent)
+    store.drop_agent("fixture", agent.name, at=10)
+    revived = replace(current, pane_id="w9:p1", idle_ticks=0)
+    store.revive_agent("fixture", revived)
+    assert store.execution("fixture", current.execution_id) == revived
+    assert [a.name for a in store.agents("fixture")] == [agent.name]
+
+
+@pytest.mark.feature("registry-update-skips-ended-execution")
+def test_a_revival_onto_a_finished_head_keeps_finished(store: RedisStore, agent: AgentRecord) -> None:
+    current = store.start_execution("fixture", agent)
+    store.execution_registry.update("fixture", replace(current, state="finished"))
+    store.revive_agent("fixture", replace(current, pane_id="w9:p1", state="working"))
+    landed = store.execution("fixture", current.execution_id)
+    assert landed.state == "finished"
+    assert landed.pane_id == "w9:p1"
+
+
+@pytest.mark.feature("registry-update-skips-ended-execution")
+def test_an_ordinary_write_with_a_different_pane_onto_an_ended_execution_stays_skipped(
+    store: RedisStore, agent: AgentRecord
+) -> None:
+    current = store.start_execution("fixture", agent)
+    store.drop_agent("fixture", agent.name, at=10)
+    dropped = store.execution("fixture", current.execution_id)
+    store.put_agent("fixture", replace(current, pane_id="w9:p1"))
+    assert store.execution("fixture", current.execution_id) == dropped
+    assert store.agents("fixture") == []
+
+
+def test_a_revival_of_a_name_moved_to_archive_is_refused_through_revive(store: RedisStore, agent: AgentRecord) -> None:
+    first = store.start_execution("fixture", agent)
+    store.drop_agent("fixture", agent.name)
+    store.start_execution("fixture", replace(agent, name=store.next_name("fixture", "eng")), first.execution_id)
+    store.execution_registry.archive("fixture")
+    assert not store.execution_registry.named("fixture", agent.name)
+    assert store.execution_registry.managed("fixture", agent.name)
+    with pytest.raises(SwarmError) as error:
+        store.revive_agent("fixture", agent)
+    assert str(error.value) == "stale or changed execution identity"
+
+
+def test_revive_dispatch_declines_a_legacy_write_while_the_name_is_live(store: RedisStore, agent: AgentRecord) -> None:
+    store.start_execution("fixture", agent)
+    with pytest.raises(SwarmError) as error:
+        store.execution_registry._revive_dispatch("fixture", agent, False)
+    assert str(error.value) == "stale or changed execution identity"
+
+
+def test_revive_locks_writes_under_the_swarm_slug(store: RedisStore, agent: AgentRecord) -> None:
+    before = set(execution.WRITES)
+    store.revive_agent("fixture", agent)
+    assert set(execution.WRITES) - before <= {"fixture"}
+    assert None not in execution.WRITES
+
+
+def test_an_explicit_revival_with_a_changed_identity_is_refused(store: RedisStore, agent: AgentRecord) -> None:
+    current = store.start_execution("fixture", agent)
+    before = protected(store)
+    with pytest.raises(SwarmError) as error:
+        store.revive_agent("fixture", replace(current, generation=99))
+    assert str(error.value) == "stale or changed execution identity"
+    assert protected(store) == before
+    assert store.execution_identity_conflicts_total("fixture") == 1
+
+
+def test_a_revived_runtime_target_conflict_bumps_the_revived_slugs_counter(
+    store: RedisStore, agent: AgentRecord
+) -> None:
+    current = store.start_execution(
+        "fixture", replace(agent, runtime_backend="kubernetes", runtime_target=target("pod-one"))
+    )
+    with pytest.raises(SwarmError, match="immutable after binding"):
+        store.revive_agent("fixture", replace(current, runtime_target=target("pod-two")))
+    assert store.execution_identity_conflicts_total("fixture") == 1
 
 
 def test_updates_preserve_status_timestamp_until_status_changes(store, agent, monkeypatch):

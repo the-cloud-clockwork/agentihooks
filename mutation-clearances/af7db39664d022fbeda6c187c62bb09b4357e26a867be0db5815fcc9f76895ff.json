@@ -1,0 +1,6 @@
+{
+  "scripts/dep_manifest.py:scripts.dep_manifest.x_deselect:566beaa9d130006f607c0f60ab1c099bbea46573fde35304d5cd0285b003b7e5": {
+    "reader": "standards_reader",
+    "reason": "split(\"::\", 2)[0] is the same as split(\"::\", 1)[0]."
+  }
+}
