@@ -167,7 +167,13 @@ print(json.dumps({'split': split, 'key': split_key(split), 'workers': workers, '
 
     traced_tests = sum(len(bucket["durations"]) for bucket in part["results"])
     traced_seconds = sum(sum(bucket["durations"].values()) for bucket in part["results"])
-    comparison = {"before_tests": inputs["baseline_traced_tests"], "after_tests": traced_tests, "before_traced_seconds": inputs["baseline_traced_seconds"], "after_traced_seconds": traced_seconds, "mapping_equal": measured == expected}
+    comparison = {
+        "before_tests": inputs["baseline_traced_tests"],
+        "after_tests": traced_tests,
+        "before_traced_seconds": inputs["baseline_traced_seconds"],
+        "after_traced_seconds": traced_seconds,
+        "mapping_equal": measured == expected,
+    }
     (reports / "comparison.json").write_text(json.dumps(comparison, indent=2))
     print(json.dumps(comparison), flush=True)
     assert traced_tests < inputs["baseline_traced_tests"]
