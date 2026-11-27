@@ -7,6 +7,7 @@ import json
 import subprocess
 import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -382,7 +383,7 @@ def test_ensure_graded_writes_the_fetched_bundle_with_the_tree_lock_held(
     real_run = subprocess.run
     locked: list[bool] = []
 
-    def recording_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def recording_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if "fetch" in argv and "--no-write-fetch-head" in argv:
             locked.append(pod.trees.lock.locked())
         return real_run(argv, **kwargs)

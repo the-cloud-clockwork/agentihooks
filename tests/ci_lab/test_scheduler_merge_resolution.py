@@ -10,6 +10,7 @@ from collections.abc import Callable
 from concurrent.futures import wait as wait_futures
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -557,7 +558,7 @@ def test_bundle_answers_two_requests_for_one_commit_at_once(
     second_created = threading.Event()
     real_run = scheduler.subprocess.run
 
-    def paced_run(argv: list[str], **kwargs: object) -> scheduler.subprocess.CompletedProcess[bytes]:
+    def paced_run(argv: list[str], **kwargs: Any) -> scheduler.subprocess.CompletedProcess[bytes]:
         result = real_run(argv, **kwargs)
         if "update-ref" in argv and "-d" not in argv:
             if not first_created.is_set():
