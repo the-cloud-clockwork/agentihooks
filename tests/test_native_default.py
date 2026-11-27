@@ -368,7 +368,8 @@ def test_codex_native_default_rebases_hook_trust_without_other_byte_changes(tmp_
     child = native_default.prepare("codex", {"HOME": str(tmp_path)})
     home = Path(child["CODEX_HOME"])
     copied = (home / "config.toml").read_bytes()
-    expected = original.replace(f"'{key}'".encode(), f"'{home / 'hooks.json'}:SessionStart:0:0'".encode())
+    expected_layout = layouts[layout].replace(f"'{key}'", f"'{home / 'hooks.json'}:SessionStart:0:0'")
+    expected = (header + expected_layout + foreign).encode()
     assert copied == expected
     state = tomllib.loads(copied.decode())["hooks"]["state"]
     assert state[f"{home / 'hooks.json'}:SessionStart:0:0"] == {"trusted_hash": "hash-one", "enabled": False}
