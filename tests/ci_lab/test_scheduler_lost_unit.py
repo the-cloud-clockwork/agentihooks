@@ -26,9 +26,9 @@ def opened(lab: Callable[..., Run], gates: dict[str, tuple[Unit, ...]], head: st
     return run
 
 
-def shown(run: Run, gate: str) -> Output:
-    """Return the output of the last check run posted for the gate."""
-    return [post[4] for post in run.lab.poster.posts if post[1] == gate][-1]
+def shown(run: Run, gate: str, head: str = HEAD_A) -> Output:
+    """Return the output of the last check run posted for the gate on the head."""
+    return [post[4] for post in run.lab.poster.posts if post[:2] == (head, gate)][-1]
 
 
 def last(run: Run, gate: str, head: str = HEAD_A) -> tuple[str, str | None]:
@@ -234,8 +234,10 @@ def test_a_superseded_grade_is_cancelled_whatever_its_units_lost(lab: Callable[.
 
     run.tick(1100)
 
+    assert run.grade(HEAD_A).units[ref(lost)].outcome == outcomes.LOST
     assert last(run, "lint") == ("completed", "cancelled")
     assert last(run, scheduler.REQUIRED) == ("completed", "cancelled")
+    assert shown(run, "lint").summary == f"1 units of lint on {HEAD_A} against {BASE}"
 
 
 def test_the_shadow_report_reads_a_neutral_lab_check_as_no_verdict() -> None:

@@ -49,7 +49,7 @@ from scripts.ci_lab.intake import GradeRequest
 from scripts.ci_lab.leases import Grant, Leases
 from scripts.ci_lab.manifests import Actions, Fetcher, FetchRefused, FetchUnanswered
 from scripts.ci_lab.objects import LocalObjects, flakes_path, manifest_folder, unit_path, upload_path
-from scripts.ci_lab.outcomes import CRASH
+from scripts.ci_lab.outcomes import CANNOT_RUN, CRASH
 from scripts.ci_lab.retry import Policy
 from scripts.ci_lab.static_gates import StaticGate
 from scripts.ci_lab.store import Store, Verdict
@@ -579,7 +579,7 @@ def test_a_unit_that_cannot_run_leaves_the_grade_without_a_verdict_and_stores_no
     run = lab({HEAD_A: plan({"lint": (item,)})})
     run.push(HEAD_A)
     run.tick(1000)
-    run.finish(run.lease()[0], scheduler.CANNOT_RUN, {"error": "bwrap is not installed"})
+    run.finish(run.lease()[0], CANNOT_RUN, {"error": "bwrap is not installed"})
     run.tick(1100)
     assert run.grade(HEAD_A).conclusion == "neutral"
     assert run.lab.poster.moves(HEAD_A, scheduler.REQUIRED)[-1] == ("completed", "neutral")

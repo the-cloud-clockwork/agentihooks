@@ -164,20 +164,28 @@ def test_main_verdict_fails_a_gate_the_lab_lost_a_unit_of_and_names_the_rereques
 ) -> None:
     grader = tree(tmp_path / "grader", ["lint", "type-gate"])
     output = tmp_path / "output"
-    listings = {"lab/lint": [run(1, "completed", "neutral")], "lab/type-gate": [run(2, "completed", "success")]}
+    listings = {
+        "lab/lint": [run(1, "completed", "neutral")],
+        "lab/test-count": [run(3, "completed", "neutral")],
+        "lab/type-gate": [run(2, "completed", "success")],
+    }
 
     def fetcher(repo: str, sha: str) -> Callable[[str], list[dict[str, Any]]]:
         return lambda check: listings[check]
 
     monkeypatch.setattr(verdict, "fetcher", fetcher)
-    args = ["verdict", str(grader), '{"lint": true, "type-gate": true}', "org/repo", "abc", LAB]
+    authoritative = '{"lint": true, "test-count": true, "type-gate": true}'
+    args = ["verdict", str(grader), authoritative, "org/repo", "abc", LAB]
 
     assert verdict.main(args, {"GITHUB_OUTPUT": str(output)}) == 0
 
-    assert output.read_text() == "lab_lint=failure\nlab_type-gate=success\n"
-    assert capsys.readouterr().out.splitlines()[-1] == (
+    published = "lab_lint=failure\nlab_test-count=failure\nlab_type-gate=success\n"
+    assert output.read_text() == published
+    assert capsys.readouterr().out == published + (
         "::error::The lab lost a unit of lab/lint and posted no verdict: "
-        "rerequest the lab/lint check to grade it again."
+        "rerequest the lab/lint check to grade it again.\n"
+        "::error::The lab lost a unit of lab/test-count and posted no verdict: "
+        "rerequest the lab/test-count check to grade it again.\n"
     )
 
 
