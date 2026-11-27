@@ -336,6 +336,12 @@ def test_mounted_literal_canary_is_exempt(command: str) -> None:
         CANARY_HEAD + "\"'\\'$(id)'\"" + CANARY_TAIL,
         "python -c \"import sys; sys.path.insert(0, '$(id)'); from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))\" --canary abc123",
         "/opt/ven\\v/bin/python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "/op?/venv/bin/python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "~/venv/bin/python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        f'await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)} + "$(id)"}});',
+        f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, ...extra}});",
+        f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, cmd: other}});",
+        f'await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); await tools.exec_command({{cmd: "pwd"}});',
     ],
 )
 def test_canary_with_shell_expansion_requires_brief(command: str) -> None:
