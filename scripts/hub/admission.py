@@ -527,7 +527,7 @@ class Admission:
         key = self._key(slug, request)
         admitted = self._held(key)
         if admitted and admitted["hive"] == request["hive"]:
-            agents: list[AgentRecord] = cast(Any, self.store).agents(slug)
+            agents = self.store.execution_registry.agents(slug)
             if agent := next((each for each in agents if each.name == admitted["name"]), None):
                 self.free(slug, agent)
             cast(Any, self.store).redis.delete(key)
