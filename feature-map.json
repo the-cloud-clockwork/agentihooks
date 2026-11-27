@@ -6589,7 +6589,9 @@
         "tests/inbox/test_execution_bound_orders.py::test_an_order_does_not_cross_executions_with_the_same_agent_name",
         "tests/inbox/test_execution_bound_orders.py::test_a_bound_order_with_no_current_recipient_is_closed",
         "tests/inbox/test_execution_bound_orders.py::test_a_seat_change_between_read_and_claim_does_not_deliver_the_old_order",
-        "tests/inbox/test_execution_bound_orders.py::test_a_claimant_recipient_uses_the_current_execution_identity"
+        "tests/inbox/test_execution_bound_orders.py::test_a_claimant_recipient_uses_the_current_execution_identity",
+        "tests/inbox/test_execution_bound_orders.py::test_the_sweep_closes_generic_bound_seat_orders_after_a_recorded_departure",
+        "tests/inbox/test_execution_bound_orders.py::test_redirecting_a_live_bound_order_never_delivers_it_to_another_agent"
       ],
       "rules": ["agent-order-recipient-execution"]
     },

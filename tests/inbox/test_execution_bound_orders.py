@@ -1,15 +1,16 @@
-import fakeredis
 import pytest
 
 from scripts.hive import handoff_order, remove
 from scripts.inbox import bound, exits, seen
 from scripts.inbox.dispatch import Dispatcher
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 
 @pytest.fixture
 def store() -> RedisStore:
+    import fakeredis
+
     redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
     result = RedisStore(redis)
     result.create(SwarmConfig("sw", "agentihooks", 1, 0))
@@ -176,4 +177,30 @@ def test_a_claimant_recipient_uses_the_current_execution_identity(store: RedisSt
     recipient = bound.recipient_for(store, agent.name)
     assert (recipient.name, recipient.execution) == (agent.name, agent.execution_id)
     unknown = bound.recipient_for(store, "unregistered")
-    assert (unknown.name, unknown.execution) == ("unregistered", "")
+    with pytest.raises(InboxError, match="recipient execution"):
+        InboxStore(store.redis).send("operator", unknown, "Finish this step")
+
+
+@pytest.mark.feature("inbox-execution-bound-orders")
+@pytest.mark.parametrize("lane", ["master", "eng"])
+def test_the_sweep_closes_generic_bound_seat_orders_after_a_recorded_departure(store: RedisStore, lane: str) -> None:
+    agent = life(store, lane)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("swarm", bound.Recipient(agent.seat, agent.execution_id), "Finish this step")
+    store.seats.record_exit(agent.name, agent.seat, "left its seat")
+    assert store.drop_agent("sw", agent.name, expected=agent)
+    exits.sweep(inbox, "sw", store, dict)
+    assert inbox.get(item.id).state == "done"
+
+
+@pytest.mark.feature("inbox-execution-bound-orders")
+@pytest.mark.parametrize("address", ["name", "seat"])
+def test_redirecting_a_live_bound_order_never_delivers_it_to_another_agent(store: RedisStore, address: str) -> None:
+    intended = life(store, "eng")
+    other = life(store, "master")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", bound.Recipient(intended.name, intended.execution_id), "Finish this step")
+    target = other.name if address == "name" else other.seat
+    inbox.redirect(item.id, "operator", target, "changed recipient", intended.name)
+    assert inbox.pending_mail(other.name) == []
+    assert inbox.get(item.id).state == "done"
