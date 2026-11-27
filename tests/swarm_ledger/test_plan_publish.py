@@ -651,6 +651,9 @@ def test_publish_plan_with_neither_a_phase_nor_a_task_is_refused_naming_both(cap
     assert "not allowed with argument" in capsys.readouterr().err
     args = parser.parse_args(["--slug", "s", "--as", "planner", "publish-plan", "plan.md", "--task", "t1"])
     assert (args.task, args.phase) == ("t1", None)
+    commands = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
+    helps = {a.dest: a.help for a in commands["publish-plan"]._actions}
+    assert helps["task"] == "id of one task with no phase the plan fills; the plan carries one slice marker"
 
 
 @pytest.mark.feature("plan-publish-task")
@@ -703,6 +706,8 @@ def test_phaseless_tasks_share_a_slice_only_on_the_same_plan_and_phase_tasks_on_
             {"id": "c", "phase": "", "plan_lines": "3-5", "plan_url": f"{PLAN}/a"},
             {"id": "d", "phase": "p1", "plan_lines": "3-5", "plan_url": f"{PLAN}/a"},
             {"id": "e", "phase": "p1", "plan_lines": "3-5"},
+            {"id": "f", "phase": "", "plan_lines": "6-9", "plan_url": f"{PLAN}/a"},
+            {"id": "g", "phase": "p1", "plan_lines": "6-9"},
         ]
     }
     assert plan_read.sharers(doc, doc["tasks"][0]) == ["c"]
@@ -780,10 +785,11 @@ def test_a_refused_task_publish_closes_its_issue_unless_a_plan_links_it(tmp_path
     monkeypatch.setattr(ledger.ledger_publish, "publish", publish)
     plan = tmp_path / "plan.md"
     plan.write_text("<!-- slice: docs -->\n## Docs\nWrite\n", encoding="utf-8")
-    rows = {"tasks/doc": {"id": "doc", "title": "Write the docs", "phase": ""}}
-    monkeypatch.setattr(
-        ledger, "resource", lambda slug, path, collection=False: list(plans) if collection else rows[path]
-    )
+    rows = {
+        ("s", "tasks/doc", False): {"id": "doc", "title": "Write the docs", "phase": ""},
+        ("s", "plans", True): list(plans),
+    }
+    monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: rows[(slug, path, collection)])
     sent = []
     refused = {"rejected": ["x"], "_meta": {"warnings": ["task refused"]}}
     monkeypatch.setattr(ledger, "call", lambda slug, ops=None: sent.append(ops) or refused)
@@ -800,6 +806,60 @@ def test_a_refused_task_publish_closes_its_issue_unless_a_plan_links_it(tmp_path
     assert [o["op"] for o in ops] == ["artifact_add", "plan_add", "task_update"]
     assert (ops[2]["item"], ops[2]["fields"]) == ("tasks/doc", {"plan_url": stored, "plan_slice": "docs"})
     assert (ops[1]["artifact"], ops[1]["url"], ops[1]["title"]) == (stored, PLAN, "Write the docs")
+
+
+def test_a_task_publish_reads_utf8_names_its_repo_and_a_refused_op_without_a_reason(monkeypatch):
+    reads = []
+    repos = []
+
+    class PlanFile:
+        def __init__(self, path):
+            self.path = path
+
+        def read_text(self, encoding):
+            reads.append((self.path, encoding))
+            return "<!-- slice: docs -->\n## Docs\n"
+
+    def publish(path, title, repo, artifact, issue_title):
+        repos.append((path, repo))
+        return artifact(path, title), "artifact"
+
+    monkeypatch.setattr(ledger, "Path", PlanFile)
+    stub_publish(monkeypatch, [])
+    monkeypatch.setattr(ledger.ledger_publish, "publish", publish)
+    task_row = {"id": "doc", "title": "Write the docs", "phase": ""}
+    monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: task_row)
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: {"rejected": [ops[2]["id"]]})
+    args = ledger.build_parser().parse_args(
+        ["--slug", "s", "--as", "planner", "publish-plan", "plan.md", "--task", "doc", "--repo", "acme/app"]
+    )
+    with pytest.raises(SystemExit) as raised:
+        ledger.cmd_publish_plan(args)
+    assert raised.value.code == (
+        "task_update on the ledger refused without a reason from the server: "
+        "check that the entry exists, that you may change it and that its text is not empty"
+    )
+    assert reads == [("plan.md", "utf-8")]
+    assert repos == [("plan.md", "acme/app")]
+
+
+def test_a_task_publish_exits_with_the_publish_failure(tmp_path, monkeypatch):
+    plan = tmp_path / "plan.md"
+    plan.write_text("<!-- slice: docs -->\n## Docs\n", encoding="utf-8")
+
+    def publish(path, title, repo, artifact, issue_title):
+        raise ledger.ledger_publish.PublishError("gh issue create failed: rate limited")
+
+    monkeypatch.setattr(ledger.ledger_publish, "publish", publish)
+    task_row = {"id": "doc", "title": "Write the docs", "phase": ""}
+    monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: task_row)
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: pytest.fail("sent"))
+    args = ledger.build_parser().parse_args(
+        ["--slug", "s", "--as", "planner", "publish-plan", str(plan), "--task", "doc"]
+    )
+    with pytest.raises(SystemExit) as raised:
+        ledger.cmd_publish_plan(args)
+    assert raised.value.code == "gh issue create failed: rate limited"
 
 
 def test_task_cli_passes_an_explicit_plan_link(monkeypatch, capsys):

@@ -109,7 +109,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -607,7 +607,7 @@ def withdraw_issue(url: str) -> None:
 
 def plan_target(slug: str, task_id: str) -> dict[str, Any]:
     try:
-        task = cast(dict[str, Any], resource(slug, f"tasks/{task_id}"))
+        task: dict[str, Any] = resource(slug, f"tasks/{task_id}")  # pyright: ignore[reportAssignmentType]
     except urllib.error.HTTPError as exc:
         if exc.code != 404:
             raise
@@ -620,7 +620,8 @@ def plan_target(slug: str, task_id: str) -> dict[str, Any]:
 
 
 def plan_links(slug: str) -> set[str]:
-    return {str(row.get("url")) for row in cast(list[dict[str, Any]], resource(slug, "plans", collection=True))}
+    rows: list[dict[str, Any]] = resource(slug, "plans", collection=True)  # pyright: ignore[reportAssignmentType]
+    return {str(row.get("url")) for row in rows}
 
 
 def publish_task_plan(args: argparse.Namespace) -> None:
@@ -628,7 +629,7 @@ def publish_task_plan(args: argparse.Namespace) -> None:
 
     target = plan_target(args.slug, args.task)
     text = Path(args.path).read_text(encoding="utf-8")
-    anchors = plan_ranges.slice_anchors(text, f"1-{max(len(text.splitlines()), 1)}")
+    anchors = [found[1] for _, _, line in plan_ranges.sections(text) if (found := plan_ranges.ANCHOR.fullmatch(line))]
     if len(anchors) != 1:
         sys.exit(
             "publish-plan --task needs exactly one slice marker, <!-- slice: name --> on its own line above the "

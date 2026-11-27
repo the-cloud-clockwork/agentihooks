@@ -111,10 +111,8 @@ def sharers(doc: dict, task: dict) -> list[str]:
     ]
 
 
-def _region(task: dict[str, Any]) -> tuple[Any, ...]:
-    if task.get("phase"):
-        return task.get("phase"), task.get("plan_lines")
-    return task.get("phase"), task.get("plan_url"), task.get("plan_lines")
+def _region(task: dict[str, Any]) -> tuple[Any, Any]:
+    return task.get("phase") or task.get("plan_url"), task.get("plan_lines")
 
 
 def own_rows(text: str, lines: str, task: dict) -> list[tuple[int, str]]:
