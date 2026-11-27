@@ -829,7 +829,7 @@ def test_a_task_publish_reads_utf8_names_its_repo_and_a_refused_op_without_a_rea
     monkeypatch.setattr(ledger.ledger_publish, "publish", publish)
     task_row = {"id": "doc", "title": "Write the docs", "phase": ""}
     monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: task_row)
-    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: {"rejected": [ops[2]["id"]]})
+    monkeypatch.setattr(ledger, "call", lambda slug, ops: {"rejected": [ops[2]["id"]]})
     args = ledger.build_parser().parse_args(
         ["--slug", "s", "--as", "planner", "publish-plan", "plan.md", "--task", "doc", "--repo", "acme/app"]
     )
