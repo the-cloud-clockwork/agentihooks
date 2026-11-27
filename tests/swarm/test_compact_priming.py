@@ -101,6 +101,14 @@ def test_compact_transfer_keeps_exact_confirmation_without_the_document() -> Non
 
 
 @pytest.mark.feature("seat-brief")
+def test_a_seatless_transfer_without_a_handoff_reads_as_no_history() -> None:
+    assert prompt.priming_lines({"id": "p", "transfer": {"avoid_harness": "codex"}}) == [
+        "Your seat has no history yet: no handoff document, no recap and no learned notes.",
+        prompt.SEAT_BRIEF,
+    ]
+
+
+@pytest.mark.feature("seat-brief")
 def test_deferred_bodies_are_not_traced_as_delivered_inline() -> None:
     task = _task("eng", "claude")
     assert priming_trace.rows("sw", task) == []

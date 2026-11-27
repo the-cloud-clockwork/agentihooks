@@ -439,17 +439,18 @@ def artifact_line(led):
 
 def priming_lines(task: dict[str, Any]) -> list[str]:
     seat = f"Your seat {task['seat']}" if task.get("seat") else "Your seat"
-    history = any(task.get(key) for key in ("handoff", "culture", "recaps", "learned", "transfer"))
+    transfer = task.get("transfer") if (task.get("transfer") or {}).get("handoff") else None
+    history = transfer or any(task.get(key) for key in ("handoff", "culture", "recaps", "learned"))
     lines = [
         f"{seat} carries what earlier occupants left."
         if history
         else f"{seat} has no history yet: no handoff document, no recap and no learned notes."
     ]
-    if task.get("transfer"):
+    if transfer:
         from scripts.handoff import transfers
 
-        lines.append(transfers.priming(task["seat"].rsplit("@", 1)[1], task["transfer"]))
-    if task.get("handoff") or task.get("handoff_envelope") or task.get("transfer"):
+        lines.append(transfers.priming(task["seat"].rsplit("@", 1)[1], transfer))
+    if task.get("handoff") or task.get("handoff_envelope") or transfer:
         lines += handoff_lines(task)
     return [*lines, SEAT_BRIEF]
 
