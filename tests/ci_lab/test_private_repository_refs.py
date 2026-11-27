@@ -17,7 +17,7 @@ from scripts.github_app import GitAuthRefused
 from tests.ci_lab.test_scheduler import Run
 from tests.ci_lab.test_scheduler import lab as lab
 from tests.ci_lab.test_scheduler import origin as origin
-from tests.ci_lab.test_scheduler_retire import REPO, _listing, _queued, unit
+from tests.ci_lab.test_scheduler_retire import REPO, _queued, unit
 from tests.ci_lab.test_scheduler_uncarried import ACTOR, FakeKube, Inbox, Poster, _git, _no_tests, _unknown, fake_redis
 
 PRIVATE = "https://github.com/the-cloud-clockwork/antoncore"
@@ -194,7 +194,7 @@ def test_a_private_pull_starts_grading_without_an_expansion_refusal(
     actions = engine.tick(1000)
     assert any(action.startswith("grading ") for action in actions)
     assert not any("cannot expand" in action for action in actions)
-    assert not any(post[4].title == "grade cannot expand" for post in poster.posts)
+    assert not any(post[4].title == "pull_request grade cannot expand" for post in poster.posts)
     assert private_git.calls
 
 
@@ -221,7 +221,7 @@ def test_a_token_refusal_is_visible_to_the_waiting_pass_without_logging_the_toke
     actions = engine.tick(1000)
     assert any("cannot expand" in action and "repository contents read denied" in action for action in actions)
     assert TOKEN not in str(actions)
-    assert any(post[4].title == "grade cannot expand" for post in poster.posts)
+    assert any(post[4].title == "pull_request grade cannot expand" for post in poster.posts)
     assert private_git.calls == []
 
 
@@ -264,8 +264,10 @@ def test_a_read_token_refusal_preserves_live_merge_groups(
     run = _queued(lab, unit(1))
     live = {grade.run for grade in run.grades()}
     pending = run.engine.queue.pending()
+    assert live
+    assert pending
     error = GitAuthRefused("repository contents read denied")
-    monkeypatch.setattr(_listing(run), "groups", Mock(side_effect=error))
+    monkeypatch.setattr(run.lab.expander, "groups", Mock(side_effect=error))
     assert run.tick(1100) == [f"cannot list the merge groups of {REPO}: {error}"]
     assert run.lab.client.smembers(scheduler.LIVE) == live
     assert run.engine.queue.pending() == pending
