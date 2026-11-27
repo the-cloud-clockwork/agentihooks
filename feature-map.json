@@ -8257,7 +8257,8 @@
       "seam": "scripts.swarm_ledger.plan_ranges invalid_tasks, called by the ledger_tasks slice refusal when a plan task moves to done",
       "tests": [
         "tests/swarm_ledger/test_plan_ranges.py::test_a_plan_task_without_a_phase_grades_a_slice_task_by_its_own_plan_url",
-        "tests/swarm_ledger/test_plan_ranges.py::test_a_phase_plan_url_grades_a_slice_task_without_its_own"
+        "tests/swarm_ledger/test_plan_ranges.py::test_a_phase_plan_url_grades_a_slice_task_without_its_own",
+        "tests/swarm_ledger/test_plan_ranges.py::test_a_task_linked_to_an_earlier_phase_plan_still_takes_its_lines_from_the_phase_plan"
       ]
     },
     {
