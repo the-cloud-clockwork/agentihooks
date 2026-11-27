@@ -15489,6 +15489,8 @@
       "tests": [
         "tests/swarm/test_expert_seat_transfer.py::test_first_expert_needs_no_transfer",
         "tests/swarm/test_expert_seat_transfer.py::test_newest_pending_transfer_uses_timestamp_then_identifier",
+        "tests/swarm/test_expert_seat_transfer.py::test_selected_transfer_supplies_the_runtime_handoff",
+        "tests/swarm/test_expert_seat_transfer.py::test_failed_retry_stays_newest_when_the_clock_does_not_advance",
         "tests/swarm/test_expert_seat_transfer.py::test_foreign_transfer_cannot_replace_the_current_seat_handoff",
         "tests/swarm/test_expert_seat_transfer.py::test_lost_successor_ignores_obsolete_pending_history",
         "tests/swarm/test_expert_seat_transfer.py::test_foreign_history_alone_does_not_suppress_recovery",

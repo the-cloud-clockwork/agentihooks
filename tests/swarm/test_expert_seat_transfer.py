@@ -56,6 +56,58 @@ def test_newest_pending_transfer_uses_timestamp_then_identifier(store: RedisStor
 
 
 @pytest.mark.feature("expert-newest-seat-transfer")
+@pytest.mark.parametrize("tied", [False, True])
+def test_selected_transfer_supplies_the_runtime_handoff(store: RedisStore, tied: bool) -> None:
+    started(store)
+    runtime = FakeRuntime()
+    first = launched(store, runtime)
+    current = pending(store, first, "z-current", NOW)
+    stored_text = HANDOFF.replace("Finish slice two", "Inspect the older document")
+    obsolete = handed_off(store, first, stored_text, NOW if tied else NOW - 1)
+    assert obsolete["next"] != NEXT
+    successor = launched(store, runtime, NOW + MINUTE)
+    task = runtime.tasks[-1]
+    assert task["handoff"] == task["transfer"]["handoff"] == HANDOFF
+    assert (task["generation"], task["transfer"]["id"], task["transfer"]["next"]) == (2, current["id"], NEXT)
+    assert task["transfer"]["seat"] == task["seat"] == successor.seat
+    assert task["transfer"]["generation"] == store.seats.occupant(successor.seat).generation
+    assert transfers.get(store, "sw", obsolete["id"]) == obsolete
+    assert transfers.confirm(store, "sw", current["id"], successor, NEXT, NOW + MINUTE)["continuity"] == {
+        "state": "confirmed",
+        "at": NOW + MINUTE,
+        "by": successor.name,
+        "next": NEXT,
+    }
+
+
+@pytest.mark.feature("expert-newest-seat-transfer")
+@pytest.mark.parametrize(("clock_offset", "retry_offset"), [(-1, 1), (0, 1), (2, 2)])
+def test_failed_retry_stays_newest_when_the_clock_does_not_advance(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, clock_offset: int, retry_offset: int
+) -> None:
+    started(store)
+    runtime = FakeRuntime()
+    first = launched(store, runtime)
+    with patch.object(transfers, "uuid4", return_value=SimpleNamespace(hex="z-current")):
+        current = handed_off(store, first)
+    monkeypatch.setattr(transfers, "now_ms", lambda: NOW + clock_offset)
+    with patch.object(transfers, "uuid4", return_value=SimpleNamespace(hex="a-retry")):
+        assert go(store, FakeRuntime(fail=True), NOW + MINUTE) == [
+            "expert spawn failed on lineage expert-1: herdr down"
+        ]
+    failed = transfers.get(store, "sw", current["id"])
+    retry = transfers.get(store, "sw", "a-retry")
+    assert failed["binding"]["at"] == NOW + clock_offset
+    assert retry["retry_of"] == current["id"]
+    successor = launched(store, runtime, NOW + 2 * MINUTE)
+    task = runtime.tasks[-1]
+    assert (task["transfer"]["id"], task["transfer"]["next"], task["handoff"]) == (retry["id"], NEXT, HANDOFF)
+    assert task["transfer"]["successor"] == successor.name
+    assert retry["at"] == NOW + retry_offset
+    assert transfers.get(store, "sw", current["id"]) == failed
+
+
+@pytest.mark.feature("expert-newest-seat-transfer")
 def test_foreign_transfer_cannot_replace_the_current_seat_handoff(store: RedisStore) -> None:
     lineage, runtime = started(store), FakeRuntime()
     first = launched(store, runtime)
