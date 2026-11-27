@@ -7,6 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from scripts.events.bus import StateStore
 from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
 from scripts.hive import account_slots
@@ -2453,6 +2454,10 @@ def _advertise_seats(rig: SimpleNamespace, slots: list[dict[str, Any]], hive: st
     registry.beat(rig.store.redis, hive, {"heartbeat_at": 6_000, "slots": slots})
 
 
+def _account_value(state: StateStore, key: str, value: dict[str, Any]) -> None:
+    state.create(key, json.dumps(value).encode())
+
+
 @pytest.mark.feature("hub-admission-hive-account-seat")
 def test_full_hive_accounts_hold_without_spending_a_claim_or_writing(rig: SimpleNamespace, seat_bus: Any) -> None:
     advertised = [
@@ -2465,7 +2470,7 @@ def test_full_hive_accounts_hold_without_spending_a_claim_or_writing(rig: Simple
         {"holders": {}, "hives": {"hive-a": {"sessions": 2, "observed": [], "expires_ms": 7_001}}},
     ]
     for slot, value in zip(advertised, values, strict=True):
-        seat_bus.bucket.put(account_slots.key(slot["harness"], slot["account"]), value)
+        _account_value(seat_bus.bucket, account_slots.key(slot["harness"], slot["account"]), value)
     before = dict(rig.rows["t1"])
 
     answered = rig.admitter.admit(SLUG, ask())
@@ -2479,7 +2484,7 @@ def test_full_hive_accounts_hold_without_spending_a_claim_or_writing(rig: Simple
     assert rig.ledger.writes == []
     assert rig.admitter._held(rig.admitter._key(SLUG, ask())) is None
     for slot, value in zip(advertised, values, strict=True):
-        assert seat_bus.bucket.get(account_slots.key(slot["harness"], slot["account"])).value == value
+        assert json.loads(seat_bus.bucket.get(account_slots.key(slot["harness"], slot["account"])).value) == value
 
 
 @pytest.mark.feature("hub-admission-hive-account-seat")
@@ -2490,7 +2495,8 @@ def test_a_later_free_account_on_the_hive_allows_admission(rig: SimpleNamespace,
     ]
     _advertise_seats(rig, advertised)
     for account in ("a", "b"):
-        seat_bus.bucket.put(
+        _account_value(
+            seat_bus.bucket,
             account_slots.key("claude", account),
             {"holders": {"busy": {"hive": "hive-a", "expires_ms": 7_001}}, "hives": {}},
         )
@@ -2509,7 +2515,8 @@ def test_a_codex_lane_ignores_free_claude_seats(rig: SimpleNamespace, seat_bus: 
         rig,
         [{"harness": "claude", "account": "a", "cap": 1}, {"harness": "codex", "account": "b", "cap": 1}],
     )
-    seat_bus.bucket.put(
+    _account_value(
+        seat_bus.bucket,
         account_slots.key("codex", "b"),
         {"holders": {"busy": {"hive": "hive-a", "expires_ms": 7_001}}, "hives": {}},
     )
@@ -2601,14 +2608,14 @@ def test_hive_account_occupancy_counts_only_live_local_workers(
 ) -> None:
     key = account_slots.key("claude", "a")
     value = {"holders": holders, "hives": hives}
-    seat_bus.bucket.put(key, value)
+    _account_value(seat_bus.bucket, key, value)
 
     assert (
         admission_seats.available("hive-a", [{"harness": "claude", "account": "a", "cap": cap}], ("claude",), 7_000)
         is free
     )
 
-    assert seat_bus.bucket.get(key).value == value
+    assert json.loads(seat_bus.bucket.get(key).value) == value
 
 
 @pytest.mark.feature("hub-admission-hive-account-seat")
@@ -2629,7 +2636,8 @@ def test_a_seatless_hive_leaves_the_queued_offer_for_a_second_hive(
     advertised = [{"harness": "claude", "account": "a", "cap": 1}]
     _advertise_seats(rig, advertised)
     _advertise_seats(rig, advertised, "hive-b")
-    seat_bus.bucket.put(
+    _account_value(
+        seat_bus.bucket,
         account_slots.key("claude", "a"),
         {"holders": {"busy": {"hive": "hive-a", "expires_ms": 7_001}}, "hives": {}},
     )
