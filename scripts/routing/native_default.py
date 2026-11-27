@@ -138,4 +138,11 @@ def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], repo
         raise RoutingError(str(error)) from error
     _write_route_report(report, status="routed", account="default", placement="forced")
     print("[agenti] account=default route=default", flush=True)
-    execute("claude", "default", child, lambda env: os.execvpe(binary, _claude_command(binary, args), env))
+    from scripts.quick.recipe import execute_native
+
+    execute(
+        "claude",
+        "default",
+        child,
+        lambda env: execute_native("claude", _claude_command(binary, args), env, execvpe=os.execvpe),
+    )
