@@ -343,3 +343,95 @@ def test_claude_native_default_checks_and_launches_the_isolated_login(
         "placement": "forced",
     }
     assert stream.getvalue() == "[agenti] account=default route=default\n"
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+@pytest.mark.parametrize("layout", ["table", "inline", "dotted"])
+def test_codex_native_default_rebases_hook_trust_without_other_byte_changes(tmp_path: Path, layout: str) -> None:
+    import tomllib
+
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    (source / "hooks.json").write_text("{}")
+    hook = source / "hooks.json"
+    key = f"{hook}:SessionStart:0:0"
+    header = f"# keep formatting\r\nmodel = 'native'\r\npath = '{key}'\r\n"
+    layouts = {
+        "table": f"[ hooks.state.'{key}' ]\r\ntrusted_hash  = 'hash-one' # retained\r\nenabled = false\r\n",
+        "inline": f"[hooks.state]\r\n'{key}'  = {{ trusted_hash = 'hash-one', enabled = false }} # retained\r\n",
+        "dotted": f"hooks.state.'{key}'.trusted_hash  = 'hash-one' # retained\r\nhooks.state.'{key}'.enabled = false\r\n",
+    }
+    foreign = "[hooks.state.'foreign:SessionStart:0:0']\r\ntrusted_hash = 'foreign-hash'\r\n"
+    original = (header + layouts[layout] + foreign).encode()
+    (source / "config.toml").write_bytes(original)
+    child = native_default.prepare("codex", {"HOME": str(tmp_path)})
+    home = Path(child["CODEX_HOME"])
+    copied = (home / "config.toml").read_bytes()
+    expected = original.replace(f"'{key}'".encode(), f"'{home / 'hooks.json'}:SessionStart:0:0'".encode())
+    assert copied == expected
+    state = tomllib.loads(copied.decode())["hooks"]["state"]
+    assert state[f"{home / 'hooks.json'}:SessionStart:0:0"] == {"trusted_hash": "hash-one", "enabled": False}
+    assert state["foreign:SessionStart:0:0"] == {"trusted_hash": "foreign-hash"}
+    assert (source / "config.toml").read_bytes() == original
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+def test_codex_native_default_rebases_both_symlink_hook_spellings(tmp_path: Path) -> None:
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    hooks = tmp_path / "shared-hooks.json"
+    hooks.write_text("{}")
+    (source / "hooks.json").symlink_to(hooks)
+    original = (
+        f'[hooks.state."{source / "hooks.json"}:SessionStart:0:0"]\ntrusted_hash = "source"\n'
+        f'[hooks.state."{hooks}:Stop:0:0"]\ntrusted_hash = "resolved"\n'
+        f'[hooks.state."{source / "hooks.json"}.other:Stop:0:0"]\ntrusted_hash = "similar"\n'
+    ).encode()
+    (source / "config.toml").write_bytes(original)
+    child = native_default.prepare("codex", {"HOME": str(tmp_path)})
+    home = Path(child["CODEX_HOME"])
+    expected = original.replace(f'"{source / "hooks.json"}:'.encode(), f'"{home / "hooks.json"}:'.encode())
+    expected = expected.replace(f'"{hooks}:'.encode(), f'"{home / "hooks.json"}:'.encode())
+    assert (home / "config.toml").read_bytes() == expected
+    assert (home / "hooks.json").read_bytes() == hooks.read_bytes()
+    assert not (home / "hooks.json").is_symlink()
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+def test_claude_native_default_preserves_codex_looking_configuration_bytes(tmp_path: Path) -> None:
+    source = tmp_path / ".claude"
+    source.mkdir()
+    (source / ".credentials.json").write_bytes(b"native-login-fixture")
+    original = f'# untouched\r\n[ hooks.state."{source / "hooks.json"}:Stop:0:0" ]\r\ntrusted_hash="same"\r\n'.encode()
+    (source / "config.toml").write_bytes(original)
+    child = native_default.prepare("claude", {"HOME": str(tmp_path)})
+    assert (Path(child["CLAUDE_CONFIG_DIR"]) / "config.toml").read_bytes() == original
+
+
+@pytest.mark.feature("native-default-codex-hook-trust")
+@pytest.mark.parametrize(
+    "config",
+    [
+        None,
+        b"# no hooks\r\nmodel='native'\r\n",
+        b"[hooks]\r\nenabled=true\r\n",
+        b'[hooks.state."foreign:Stop:0:0"]\r\ntrusted_hash="same"\r\n',
+    ],
+    ids=["absent-config", "absent-hooks", "absent-state", "foreign-state"],
+)
+def test_codex_native_default_preserves_configuration_without_matching_trust(
+    tmp_path: Path, config: bytes | None
+) -> None:
+    source = tmp_path / ".codex"
+    source.mkdir()
+    (source / "auth.json").write_bytes(b"native-login-fixture")
+    if config is not None:
+        (source / "config.toml").write_bytes(config)
+    child = native_default.prepare("codex", {"HOME": str(tmp_path)})
+    target = Path(child["CODEX_HOME"]) / "config.toml"
+    if config is None:
+        assert not target.exists()
+    else:
+        assert target.read_bytes() == config

@@ -1,0 +1,13 @@
+{
+  "id": "native-default-codex-hook-trust",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-native-codex-hook-trust-rebase",
+  "behaviour": "Native default Codex execution homes retain trusted hook hashes with rebased hook paths and preserve all other configuration bytes.",
+  "seam": "scripts.routing.native_default.prepare",
+  "tests": [
+    "tests/test_native_default.py::test_codex_native_default_rebases_hook_trust_without_other_byte_changes",
+    "tests/test_native_default.py::test_codex_native_default_rebases_both_symlink_hook_spellings",
+    "tests/test_native_default.py::test_claude_native_default_preserves_codex_looking_configuration_bytes",
+    "tests/test_native_default.py::test_codex_native_default_preserves_configuration_without_matching_trust"
+  ]
+}
