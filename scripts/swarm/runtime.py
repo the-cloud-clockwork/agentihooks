@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -70,13 +71,22 @@ REPO_VARIABLE = "AGENTIHOOKS_SWARM_REPO"
 
 
 def codex_plan_mode(environ: Mapping[str, str], checkout: str) -> list[str]:
+    from scripts.hive import daemon
+
     home = Path(environ.get("HOME") or Path.home())
     ledger = Path(environ.get("LEDGER_DIR") or home / "development-ledger").expanduser()
     exports = Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "ledger-exports"
-    grants = ", ".join(
-        f'{json.dumps(str(root))}="write"'
-        for root in (ledger, home / ".agentihooks" / "swarm", home / "scratchpad", exports)
+    worktrees = Path(environ.get("WORKTREE_ROOT") or home / "dev" / "worktrees")
+    roots = (
+        ledger,
+        home / ".agentihooks" / "swarm",
+        home / "scratchpad",
+        exports,
+        daemon.common_gitdir(Path(checkout)).resolve(),
+        worktrees,
+        Path(tempfile.gettempdir()),
     )
+    grants = ", ".join(f'{json.dumps(str(root))}="write"' for root in roots)
     return [
         "-c",
         f'permissions.planner={{extends=":read-only", network={{enabled=true}}, filesystem={{{grants}}}}}',
