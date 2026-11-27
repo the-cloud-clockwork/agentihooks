@@ -143,7 +143,7 @@ def test_compaction_round_trips_the_stored_required_frame(lab: Callable[..., Run
     key = scheduler.GRADES + grade.run
     document = json.loads(run.lab.client.get(key))
     document["required"] = list(scheduler.PULL_REQUIRED)
-    next(iter(document["units"].values()))["manifest"] = {"example": "kept"}
+    next(iter(document["units"].values()))["manifest"] = json.dumps({"example": "kept"})
     run.lab.client.set(key, json.dumps(document))
     counts: Counter[str] = Counter()
     compact._grade(run.lab.client, run.lab.objects, key, set(), defaultdict(dict), counts)
