@@ -1511,9 +1511,10 @@ class Scheduler:
 
     def _supersede(self, request: GradeRequest, lane: str) -> dict[str, str]:
         """Drop the pending and held units of the lane's older head, or of its own older grade once a newer merge
-        resolved for the same head and the required frame did not otherwise change, carrying nothing forward from
-        a grade of a different merge since it graded a different tree; return the dropped head's unfinished jobs
-        by unit."""
+        resolved for the same head and the required frame did not otherwise change. A same head's older grade on a
+        different merge is superseded exactly like a different head's: every unit keeps its unfinished job by its
+        own content key, so one whose tree did not change runs on under the job already leased for it. Return the
+        dropped grade's unfinished jobs by unit."""
         previous = self.client.get(f"{LANES}{request.repo}|{lane}|{int(request.tier)}")
         old = None if previous is None else self.grade(previous)
         if old is None:
@@ -1528,8 +1529,6 @@ class Scheduler:
             if slot.held:
                 slot.held, slot.outcome = False, DROPPED
         self.save(old)
-        if old.head == request.head:
-            return {}
         return {
             ref: slot.job
             for ref, slot in old.units.items()
