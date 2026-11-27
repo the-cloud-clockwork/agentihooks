@@ -7,13 +7,14 @@ the next failure retries.
 """
 
 import json
-import os
 import sys
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+from typing import cast
 
 from scripts.gates import log
 from scripts.gates.base import Who
@@ -23,7 +24,9 @@ HOUR_MS = 3_600_000
 TIMEOUT = 2.0
 STAMPS = "import-alerts.json"
 ITEM = "gate-import-"
-SEND_ERRORS = (ImportError, LookupError, OSError, RuntimeError, SystemExit, ValueError)
+LOCK_TRIES = 20
+LOCK_PAUSE = 0.05
+SEND_ERRORS = (ImportError, LookupError, OSError, RuntimeError, SystemExit, TypeError, ValueError)
 
 
 @dataclass(frozen=True)
@@ -46,7 +49,7 @@ class Failure:
 
 
 def report(failure: Failure, environ: Mapping[str, str] | None = None, home: Path | str | None = None) -> None:
-    """Write the fail-open row of a swarm member's failed gate import and send the gate's alert when its hour is free."""
+    """Write the fail-open row of a swarm member's failed gate import, then alert when the gate's hour is free."""
     who: Who = Who.from_env(environ)  # pyright: ignore[reportUnknownMemberType]
     if not who.swarm:
         return
@@ -72,24 +75,40 @@ def alert(who: Who, failure: Failure, home: Path | str | None, now_ms: int) -> N
 
 def claim(slug: str, gate: str, now_ms: int, home: Path | str | None = None) -> bool:
     """Take the gate's alert hour from now_ms unless a stamp younger than an hour holds it."""
-    path = _stamps(slug, home)
-    with file_lock(path.with_suffix(".lock")):
-        stamps = {name: at for name, at in _read(path).items() if now_ms - at < HOUR_MS}
-        taken = gate not in stamps
-        if taken:
-            stamps[gate] = now_ms
-        _write(path, stamps)
-    return taken
+    return _locked(_stamps(slug, home), partial(_take, gate=gate, now_ms=now_ms))
 
 
 def release(slug: str, gate: str, stamp_ms: int, home: Path | str | None = None) -> None:
     """Drop the gate's stamp when it is still the one stamp_ms claimed."""
-    path = _stamps(slug, home)
-    with file_lock(path.with_suffix(".lock")):
-        stamps = _read(path)
-        if stamps.get(gate) == stamp_ms:
-            del stamps[gate]
-            _write(path, stamps)
+    _locked(_stamps(slug, home), partial(_drop, gate=gate, stamp_ms=stamp_ms))
+
+
+def _take(stamps: dict[str, int], gate: str, now_ms: int) -> bool:
+    for name in [name for name, at in stamps.items() if now_ms - at >= HOUR_MS]:
+        del stamps[name]
+    if gate in stamps:
+        return False
+    stamps[gate] = now_ms
+    return True
+
+
+def _drop(stamps: dict[str, int], gate: str, stamp_ms: int) -> None:
+    if stamps.get(gate) == stamp_ms:
+        del stamps[gate]
+
+
+def _locked[T](path: Path, change: Callable[[dict[str, int]], T]) -> T:
+    """Apply change to the stamps under their lock, tried LOCK_TRIES times LOCK_PAUSE apart, else TimeoutError."""
+    for _ in range(LOCK_TRIES):
+        try:
+            with file_lock(path.with_suffix(".lock"), blocking=False):
+                stamps = _read(path)
+                changed = change(stamps)
+                _write(path, stamps)
+                return changed
+        except BlockingIOError:
+            time.sleep(LOCK_PAUSE)
+    raise TimeoutError(f"the gate alert stamps at {path} stayed locked")
 
 
 def _claimed(slug: str, failure: Failure, home: Path | str | None, now_ms: int) -> bool:
@@ -128,15 +147,18 @@ def _stamps(slug: str, home: Path | str | None) -> Path:
 
 def _read(path: Path) -> dict[str, int]:
     try:
-        return json.loads(path.read_text())
+        held: object = json.loads(path.read_text())
     except (FileNotFoundError, ValueError):
         return {}
+    if not isinstance(held, dict):
+        return {}
+    return {str(name): at for name, at in cast("dict[object, object]", held).items() if isinstance(at, int)}
 
 
 def _write(path: Path, stamps: dict[str, int]) -> None:
     spare = path.with_suffix(".tmp")
     spare.write_text(json.dumps(stamps))
-    os.replace(spare, path)
+    spare.replace(path)
 
 
 def _note(what: str, failure: Failure, exc: BaseException) -> None:

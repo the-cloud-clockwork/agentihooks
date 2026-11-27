@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -52,7 +53,9 @@ def hook(tmp_path):
         "AGENTIHOOKS_SWARM_TASK": "t1",
     }
 
-    def run(event, extra=None, gate="identity", shim=SHIM, **fields):
+    def run(
+        event: str, extra: dict[str, str] | None = None, gate: str = "identity", shim: str = SHIM, **fields: object
+    ) -> subprocess.CompletedProcess[str]:
         (conditions / f"pre-bash-{gate}.py").write_text(shim)
         payload = {
             "hook_event_name": event,
@@ -135,10 +138,13 @@ def test_a_lift_of_an_unknown_gate_arms_nothing(hook):
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_a_shim_that_cannot_import_the_gates_lets_the_call_through_and_its_hook_reports_it(hook, tmp_path):
+def test_a_shim_that_cannot_import_the_gates_lets_the_call_through_and_its_hook_reports_it(
+    hook: Any, tmp_path: Path
+) -> None:
     broken = tmp_path / "broken" / "scripts"
-    broken.mkdir(parents=True)
+    (broken / "gates").mkdir(parents=True)
     (broken / "__init__.py").write_text("")
+    (broken / "gates" / "__init__.py").write_text("import a_dependency_lost_with_the_worktree\n")
     shim = f'from {PACKAGE}.entry import main\n\nraise SystemExit(main(["reruns"]))\n'
     proc = hook("PreToolUse", {"PYTHONPATH": str(broken.parent)}, gate="rerun_budget", shim=shim)
     assert proc.returncode == 0, proc.stderr
@@ -146,11 +152,12 @@ def test_a_shim_that_cannot_import_the_gates_lets_the_call_through_and_its_hook_
     assert decided.get("permissionDecision") != "deny" and "updatedInput" not in decided
     rows = hook.rows()
     assert kinds(rows) == [("reruns", "fail-open", ME, "t1", "Bash")]
-    assert f"No module named '{PACKAGE}'" in rows[0]["reason"] and sys.executable in rows[0]["reason"]
+    reason = rows[0]["reason"]
+    assert "No module named 'a_dependency_lost_with_the_worktree'" in reason and sys.executable in reason
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_a_gate_module_the_entry_cannot_import_is_reported_once_by_the_child(hook):
+def test_a_gate_module_the_entry_cannot_import_is_reported_once_by_the_child(hook: Any) -> None:
     shim = (
         "import importlib\n\n"
         f"entry = importlib.import_module({PACKAGE + '.entry'!r})\n"

@@ -12,7 +12,10 @@ from typing import Any
 NAMED = re.compile(r"""\bmain\(\s*\[\s*["']([\w-]+)["']\s*\]\s*\)""")
 LAUNCHED = re.compile(r"-m\s+scripts\.gates\s+([\w-]+)")
 RAISED = re.compile(r"(?:ModuleNotFoundError|ImportError): .+")
-LAUNCHER = re.compile(r"(\S+): ((?:No module named|Error while finding module specification for) .+)")
+IMPORTING = re.compile(
+    r"^\s+(?:from\s+scripts\.gates[\w.]*\s+import\s|import\s+scripts\.gates\b)|, in _get_module_details$", re.MULTILINE
+)
+LAUNCHER = re.compile(r"(\S+): ((?:No module named|Error while finding module specification for) '?scripts\b.*)")
 
 
 def gate_name(path: Path) -> str:
@@ -26,9 +29,9 @@ def gate_name(path: Path) -> str:
 
 
 def import_failure(stderr: str, ext: str) -> tuple[str, str] | None:
-    """The import error a child ended on and the interpreter that hit it, or None when it ended on anything else."""
+    """The import error of a child that died importing the gates package and the interpreter that hit it, else None."""
     last = stderr.rstrip().rpartition("\n")[2].strip()
-    if RAISED.fullmatch(last):
+    if RAISED.fullmatch(last) and IMPORTING.search(stderr):
         return last, sys.executable if ext == ".py" else "an unknown interpreter"
     if launched := LAUNCHER.fullmatch(last):
         return launched[2], launched[1]

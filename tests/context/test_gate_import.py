@@ -22,6 +22,28 @@ IDENTITY = next(ROLE.glob("pre-*-identity_pin.py"))
 SLUG, ME, TASK = "sw", "engineer@1-2", "t2"
 START, HOUR = 1_800_000_000.0, 3600
 IMPORTED = 'from scripts.gates.entry import main\n\nraise SystemExit(main(["reruns"]))\n'
+SHIM_LINE = "    from scripts.gates.entry import main"
+LOST = "a_dependency_lost_with_the_worktree"
+RUNPY = '  File "<frozen runpy>", line 112, in _get_module_details'
+CHILD = """import json
+from importlib import import_module
+
+from scripts.gates import entry
+from scripts.swarm_ledger import ledger
+from scripts.swarm_ledger.api.client import ResourceClient
+
+
+def transport(slug, path, body):
+    if body is not None:
+        with open({sent!r}, "a") as out:
+            out.write(json.dumps(body["ops"][0]) + "\\n")
+    return {{"revision": 1}}
+
+
+ledger.client = lambda slug, timeout=10: ResourceClient("http://ledger.invalid", {{}}, timeout, transport)
+entry.GATES["absent"] = (lambda: import_module("scripts.gates.absent_gate_module"),)
+raise SystemExit(entry.main(["absent"]))
+"""
 
 
 class World:
@@ -76,8 +98,9 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
         json.dumps({"bundle": {"path": str(bundle)}, "targets": {"global": {"claude": {"profile": "alpha"}}}})
     )
     broken = tmp_path / "broken" / "scripts"
-    broken.mkdir(parents=True)
+    (broken / "gates").mkdir(parents=True)
     (broken / "__init__.py").write_text("")
+    (broken / "gates" / "__init__.py").write_text(f"import {LOST}\n")
     for name, value in {
         "AGENTIHOOKS_TARGET": "claude",
         "PYTHONPATH": str(broken.parent),
@@ -96,7 +119,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_a_rerun_budget_shim_that_cannot_import_the_gates_is_reported_once_per_hour(world):
+def test_a_rerun_budget_shim_that_cannot_import_the_gates_is_reported_once_per_hour(world: World) -> None:
     world.place(RERUNS)
     result = world.run("gh run rerun 7")
     assert result.decision is None and result.input_patch == {}
@@ -105,7 +128,7 @@ def test_a_rerun_budget_shim_that_cannot_import_the_gates_is_reported_once_per_h
     assert [(row["gate"], row["kind"], row["agent"], row["task"], row["tool"]) for row in rows] == [
         ("reruns", "fail-open", ME, TASK, "Bash")
     ]
-    assert "ModuleNotFoundError: No module named 'scripts.gates'" in rows[0]["reason"]
+    assert f"ModuleNotFoundError: No module named '{LOST}'" in rows[0]["reason"]
     assert sys.executable in rows[0]["reason"]
     assert [(op["op"], op["by"], op["source"], op["item"]) for op in world.sent] == [
         ("alert_raise", ME, "setup", "gate-import-reruns")
@@ -120,7 +143,7 @@ def test_a_rerun_budget_shim_that_cannot_import_the_gates_is_reported_once_per_h
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_the_identity_pin_shim_is_reported_as_the_identity_gate(world):
+def test_the_identity_pin_shim_is_reported_as_the_identity_gate(world: World) -> None:
     world.place(IDENTITY)
     assert world.run("agentihooks ledger --slug sw get tasks/t2").decision is None
     assert [(row["gate"], row["kind"]) for row in world.rows()] == [("identity", "fail-open")]
@@ -128,12 +151,16 @@ def test_the_identity_pin_shim_is_reported_as_the_identity_gate(world):
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_a_module_launched_gate_names_the_interpreter_from_its_error_line(world, tmp_path):
+def test_a_module_launched_gate_is_reported_from_its_launch_traceback(world: World, tmp_path: Path) -> None:
     world.write("pre-bash-quiet_claim.sh", f"exec {sys.executable} -P -m scripts.gates quiet\n")
-    assert world.run("ls").decision is None
+    result = world.run("ls")
+    assert result.decision is None and LOST in " ".join(result.contexts)
     rows = world.rows()
     assert [(row["gate"], row["kind"]) for row in rows] == [("quiet", "fail-open")]
-    assert f"import failed under {sys.executable}: No module named scripts.gates" == rows[0]["reason"]
+    assert (
+        rows[0]["reason"]
+        == f"import failed under an unknown interpreter: ModuleNotFoundError: No module named '{LOST}'"
+    )
     assert world.items() == ["gate-import-quiet"]
 
 
@@ -142,11 +169,12 @@ def test_a_module_launched_gate_names_the_interpreter_from_its_error_line(world,
     "name, body",
     [
         ("pre-bash-lint_helper.py", "import a_module_that_is_not_installed\n"),
+        ("pre-bash-rerun_budget.py", "import a_module_that_is_not_installed\n" + IMPORTED),
         ("pre-bash-rerun_budget.py", "import sys\nsys.exit('broken differently')\n" + IMPORTED),
         ("pre-bash-mystery.py", 'from scripts.gates.entry import main\n\nraise SystemExit(main(["not-a-gate"]))\n'),
     ],
 )
-def test_other_condition_failures_keep_the_plain_failed_path(world, name, body):
+def test_other_condition_failures_keep_the_plain_failed_path(world: World, name: str, body: str) -> None:
     world.write(name, body)
     result = world.run("ls")
     assert result.decision is None and "failed" in result.contexts[0]
@@ -154,7 +182,9 @@ def test_other_condition_failures_keep_the_plain_failed_path(world, name, body):
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_a_gate_condition_whose_interpreter_cannot_start_is_not_an_import_failure(world, monkeypatch, tmp_path):
+def test_a_gate_condition_whose_interpreter_cannot_start_is_not_an_import_failure(
+    world: World, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     world.write("pre-bash-rerun_budget.py", IMPORTED)
     monkeypatch.setitem(conditions._RUNNERS, ".py", [str(tmp_path / "no-such-python")])
     result = world.run("ls")
@@ -163,7 +193,7 @@ def test_a_gate_condition_whose_interpreter_cannot_start_is_not_an_import_failur
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_another_condition_still_denies_beside_a_reported_import_failure(world):
+def test_another_condition_still_denies_beside_a_reported_import_failure(world: World) -> None:
     world.write("pre-bash-rerun_budget.py", IMPORTED)
     world.write("pre-bash-refuse.sh", "echo refused >&2\nexit 2\n")
     result = world.run("ls")
@@ -172,7 +202,9 @@ def test_another_condition_still_denies_beside_a_reported_import_failure(world):
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_an_unreachable_ledger_keeps_the_call_allowed_and_the_next_failure_retries(world, monkeypatch):
+def test_an_unreachable_ledger_keeps_the_call_allowed_and_the_next_failure_retries(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
     world.write("pre-bash-rerun_budget.py", IMPORTED)
 
     def down(slug: str, path: str, body: dict | None) -> dict:
@@ -191,7 +223,7 @@ def test_an_unreachable_ledger_keeps_the_call_allowed_and_the_next_failure_retri
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_a_host_gate_shim_is_reported_under_its_host_gate_name(world):
+def test_a_host_gate_shim_is_reported_under_its_host_gate_name(world: World) -> None:
     world.write(
         "pre-bash-prompt_guard.py", 'from scripts.gates.entry import main\n\nraise SystemExit(main(["prompts"]))\n'
     )
@@ -200,7 +232,9 @@ def test_a_host_gate_shim_is_reported_under_its_host_gate_name(world):
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_a_parent_that_cannot_load_the_reporter_names_the_miss_and_keeps_the_call(world, monkeypatch, capsys):
+def test_a_parent_that_cannot_load_the_reporter_names_the_miss_and_keeps_the_call(
+    world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     import scripts.gates
 
     monkeypatch.delattr(scripts.gates, "import_failure", raising=False)
@@ -222,14 +256,14 @@ def test_a_parent_that_cannot_load_the_reporter_names_the_miss_and_keeps_the_cal
         ("print('no gate here')\n", ""),
     ],
 )
-def test_a_condition_names_its_gate_only_when_it_runs_exactly_one(tmp_path, body, gate):
+def test_a_condition_names_its_gate_only_when_it_runs_exactly_one(tmp_path: Path, body: str, gate: str) -> None:
     path = tmp_path / "condition"
     path.write_text(body)
     assert gate_import.gate_name(path) == gate
 
 
 @pytest.mark.feature("gate-import-failure-alerts")
-def test_an_unreadable_condition_names_no_gate(tmp_path):
+def test_an_unreadable_condition_names_no_gate(tmp_path: Path) -> None:
     assert gate_import.gate_name(tmp_path / "missing.py") == ""
 
 
@@ -237,13 +271,36 @@ def test_an_unreadable_condition_names_no_gate(tmp_path):
 @pytest.mark.parametrize(
     "stderr, ext, found",
     [
-        ("Traceback\n  File x\nModuleNotFoundError: No module named 'scripts'\n\n", ".py", sys.executable),
-        ("ImportError: cannot import name 'main'", ".sh", "an unknown interpreter"),
-        ("/usr/bin/python3: No module named scripts.gates\n", ".sh", "/usr/bin/python3"),
-        ("ModuleNotFoundError: No module named 'scripts'\nRuntimeError: later\n", ".py", None),
+        (f"Traceback\n  File x\n{SHIM_LINE}\nModuleNotFoundError: No module named 'scripts'\n\n", ".py", "runner"),
+        (f"Traceback\n{SHIM_LINE}\nImportError: cannot import name 'main'", ".sh", "an unknown interpreter"),
+        ("/opt/python/bin/python3: No module named scripts.gates\n", ".sh", "/opt/python/bin/python3"),
+        (f"Traceback\n{RUNPY}\nModuleNotFoundError: No module named '{LOST}'\n", ".sh", "an unknown interpreter"),
+        ("Traceback\n  File x, line 198, in _run_code\nModuleNotFoundError: No module named 'hooks.x'\n", ".sh", None),
+        (f"Traceback\n{SHIM_LINE}\nModuleNotFoundError: No module named 'scripts'\nRuntimeError: later\n", ".py", None),
+        (
+            "Traceback\n    raise SystemExit(main(['brain']))\nModuleNotFoundError: No module named 'hooks.x'\n",
+            ".py",
+            None,
+        ),
+        ("Traceback\n    import requests\nModuleNotFoundError: No module named 'requests'\n", ".py", None),
+        ("/opt/python/bin/python3: No module named requests\n", ".sh", None),
         ("", ".py", None),
     ],
 )
-def test_only_a_last_line_import_failure_counts(stderr, ext, found):
+def test_only_a_child_that_died_importing_the_gates_counts(stderr: str, ext: str, found: str | None) -> None:
     failed = gate_import.import_failure(stderr, ext)
-    assert (failed[1] if failed else None) == found
+    assert (failed[1] if failed else None) == (sys.executable if found == "runner" else found)
+
+
+@pytest.mark.feature("gate-import-failure-alerts")
+def test_a_failure_the_child_reports_is_not_reported_again_by_the_hook(
+    world: World, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PYTHONPATH", str(ROOT))
+    sent = tmp_path / "child-sent.jsonl"
+    world.write("pre-bash-absent_gate.py", CHILD.format(sent=str(sent)))
+    result = world.run("ls")
+    assert result.decision is None and result.contexts == []
+    assert [(row["gate"], row["kind"]) for row in world.rows()] == [("absent", "fail-open")]
+    assert [json.loads(line)["item"] for line in sent.read_text().splitlines()] == ["gate-import-absent"]
+    assert world.sent == []
