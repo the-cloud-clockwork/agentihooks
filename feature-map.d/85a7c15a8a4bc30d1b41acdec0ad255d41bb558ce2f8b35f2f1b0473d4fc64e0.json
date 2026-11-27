@@ -1,0 +1,12 @@
+{
+  "id": "lab-scheduler-regrade-opens-new-check-runs",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-lab-static-gates-live-proof",
+  "behaviour": "A grade that the CI lab scheduler starts under the run name of a grade it forgot earlier in the same process, as after a pull request is closed and reopened on the same head and base, posts its check runs as new check runs and the pass goes on to its end, exactly as a restarted scheduler does. The grade state is the record of what a grade posted: before the post of a check the state holds no check run id for, the scheduler tells the repository's poster to forget what it remembers under that head, check name and run name, so the forward only guard starts afresh for that check run alone. A check the grade state holds is still seeded and advanced in place, and every other check run keeps its status and its guard.",
+  "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store with one real scripts.ci_lab.checks.Checks on mocked requests kept for the whole case, a pull request opened, closed and reopened on one head and base, and scripts.ci_lab.checks.Checks.forget over mocked requests",
+  "tests": [
+    "tests/ci_lab/test_scheduler_stale_heads.py::test_a_head_graded_again_after_its_grade_was_forgotten_opens_new_check_runs",
+    "tests/ci_lab/test_scheduler_posts.py::test_a_live_grade_advances_the_check_runs_it_created_in_place_within_one_process",
+    "tests/ci_lab/test_checks.py::test_a_forgotten_check_run_is_created_again_and_every_other_keeps_its_status"
+  ]
+}

@@ -2556,7 +2556,12 @@ key; the builders are pure and read no file, clock or network.
    first pass for every gate the base's `lab.authoritative` lists that it runs no unit of. A completed
    check run never moves again. The grade state keeps each check run's id, and the scheduler seeds
    its poster with that id and the last status it posted before the next move, so a restarted
-   scheduler advances the same check run instead of opening a second one. A grade of a head pushed
+   scheduler advances the same check run instead of opening a second one. A check run the grade
+   state keeps no id of is unknown to the poster, whatever the poster remembers: the scheduler has
+   it forget that head, check name and run name before the post. A grade started again under the
+   run name of a grade the scheduler forgot, as after a pull request is closed and reopened on the
+   same head and base, therefore opens new check runs, as a restarted scheduler does, and the
+   check runs of the forgotten grade keep their last status. A grade of a head pushed
    to a `refs/grade/*` ref records the same moves and posts none, leaving its check runs to the
    relay. A gate that the grader revision's `delivery.yaml` lists as authoritative for the grade's
    class posts as `lab/<gate>`, the check run the lab-verdict job waits for: `lab.authoritative`
