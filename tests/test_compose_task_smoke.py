@@ -1,10 +1,11 @@
-import ast
 import inspect
 from pathlib import Path
 
+import pytest
 import yaml
 
 from scripts.hive import spoke
+from tests.helpers import stand_in
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = "scripts/packaging/compose-task-smoke.sh"
@@ -12,13 +13,6 @@ SCRIPT = "scripts/packaging/compose-task-smoke.sh"
 
 def smoke():
     return (ROOT / SCRIPT).read_text()
-
-
-def stand_in(script: str) -> dict[str, list[str]]:
-    """Each method of the stand in task client in the script's first embedded Python, with its parameter names."""
-    source = script.split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
-    client = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "Tasks")
-    return {node.name: [arg.arg for arg in node.args.args] for node in client.body if isinstance(node, ast.FunctionDef)}
 
 
 def test_the_swarm_image_job_runs_the_compose_task_smoke_on_the_built_image():
@@ -54,9 +48,10 @@ def test_the_compose_task_smoke_settles_one_task_to_done_through_the_hub_on_nats
     assert script.index(gate) < script.index("printf 'Compose task smoke passed")
 
 
+@pytest.mark.feature("compose-smoke-launch-report")
 def test_the_compose_task_smoke_stand_in_takes_the_launch_report_of_its_one_launch() -> None:
     script = smoke()
-    assert stand_in(script)["launched"] == list(inspect.signature(spoke.Tasks.launched).parameters)
+    assert stand_in.methods(script).get("launched") == list(inspect.signature(spoke.Tasks.launched).parameters)
     gate = 'assert reported == [["t1", "claude"]]'
     assert script.index("outcomes.append(spoke.poll(1_000))") < script.index(gate)
     assert script.index(gate) < script.index("printf 'Compose task smoke passed")
