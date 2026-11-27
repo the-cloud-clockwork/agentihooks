@@ -2776,7 +2776,7 @@ each held under `merges.Background` and reused until `FRESH_S` (30) seconds afte
 a rerequest asking again inside that window grades that same merge instead of reading GitHub again; an absent
 answer or a failed resolution is read once and forgotten, so the next pass that asks always reads GitHub again.
 A resolution still waiting for one of the `merges.WORKERS` (4) threads has read nothing, so its head stays held
-as while it runs and spends no try, and the bound of a resolution runs from when a thread began it. A head whose merge GitHub has not
+and spends no try, and the bound of a resolution runs from when a thread began it. A head whose merge GitHub has not
 built yet, whose read was refused or unanswered, whose fetch of the merge or its parents failed, or whose
 resolution ran past `merges.BOUND_S` (45) seconds, waits out its quiet window again with the try counted in its
 waiting entry, under the `UNMERGED_TRIES` (4) one; at that one the lab gives up on asking for a merge of the
