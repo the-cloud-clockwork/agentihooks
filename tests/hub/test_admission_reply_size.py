@@ -19,7 +19,6 @@ from scripts.swarm import prompt
 from tests.hub.test_admission import SLUG, ask
 from tests.hub.test_admission import rig as rig
 
-FEATURE = "hub-admission-reply-fits-bus"
 SEAT = f"eng-1@{SLUG}"
 REFUSAL = r"the admission answer cannot cross the bus, reply\.subject: payload \d+ exceeds server limit 200"
 
@@ -61,7 +60,7 @@ def offer(rig: SimpleNamespace) -> str | None:
     return rig.store.redis.get(rig.store.key(SLUG, admission.ADMITTED, "t1", "0"))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hub-admission-reply-fits-bus")
 def test_an_admission_carries_only_the_recaps_and_learned_notes_its_prompt_shows(rig: SimpleNamespace) -> None:
     for number in range(1, 10):
         rig.store.memory.add_recap(SEAT, f"{SLUG}-eng-{number}", "t1", f"recap {number}", number)
@@ -76,7 +75,7 @@ def test_an_admission_carries_only_the_recaps_and_learned_notes_its_prompt_shows
     assert "5 older recaps are kept on the seat and not shown." in prompt.priming_lines(task)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hub-admission-reply-fits-bus")
 def test_an_admission_over_the_bus_limit_reaches_the_hive_compressed(rig: SimpleNamespace) -> None:
     admitted = rig.admitter.admit(SLUG, ask())
     whole = json.dumps({"ok": True, "result": admitted}).encode()
@@ -90,7 +89,7 @@ def test_an_admission_over_the_bus_limit_reaches_the_hive_compressed(rig: Simple
     assert rig.store.claimant(SLUG, "t1") == admitted["name"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hub-admission-reply-fits-bus")
 def test_an_admission_that_cannot_cross_the_bus_releases_its_claim_with_a_named_refusal(
     rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -106,7 +105,7 @@ def test_an_admission_that_cannot_cross_the_bus_releases_its_claim_with_a_named_
     assert f"hub: events admission swarm={SLUG} task=t1 hive=hive-a refused: {reason}" in capsys.readouterr().err
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hub-admission-reply-fits-bus")
 def test_an_admission_whose_held_answer_cannot_cross_the_bus_releases_its_claim_and_sends_nothing(
     rig: SimpleNamespace, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -124,7 +123,7 @@ def test_an_admission_whose_held_answer_cannot_cross_the_bus_releases_its_claim_
     assert offer(rig) is None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hub-admission-reply-fits-bus")
 def test_an_unsent_admission_of_another_hive_releases_nothing(
     rig: SimpleNamespace, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -139,7 +138,7 @@ def test_an_unsent_admission_of_another_hive_releases_nothing(
     assert "task=t1 hive=hive-b refused: the admission answer cannot cross the bus" in capsys.readouterr().err
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hub-admission-reply-fits-bus")
 def test_another_slot_operation_that_cannot_cross_the_bus_answers_its_error(rig: SimpleNamespace) -> None:
     error = PayloadTooLarge("reply.subject: payload 9 exceeds server limit 8")
     request = json.dumps({"op": "launched", **ask()}).encode()

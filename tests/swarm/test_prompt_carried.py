@@ -6,7 +6,6 @@ import pytest
 
 from scripts.swarm import priming_trace, prompt
 
-FEATURE = "hub-admission-reply-fits-bus"
 SEAT = "eng-1@sw"
 
 
@@ -23,7 +22,7 @@ def whole(count: int = 9) -> dict[str, Any]:
     return {"id": "t1", "seat": SEAT, "culture": "one culture line", "recaps": recaps, "learned": learned}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hub-admission-reply-fits-bus")
 def test_a_carried_task_renders_the_same_prompt_and_trace_as_the_whole_task() -> None:
     task = whole()
 
@@ -35,12 +34,12 @@ def test_a_carried_task_renders_the_same_prompt_and_trace_as_the_whole_task() ->
     assert priming_trace.rows("sw", carried) == priming_trace.rows("sw", task)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hub-admission-reply-fits-bus")
 def test_a_carried_task_keeps_only_the_learned_notes_its_prompt_counts() -> None:
     assert [note["text"] for note in prompt.carried(whole())["learned"]] == ["canon note", "data note", "plain note"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hub-admission-reply-fits-bus")
 def test_a_seat_with_only_the_shown_recaps_counts_none_kept() -> None:
     lines = prompt.priming_lines(prompt.carried(whole(1 + prompt.OLDER_RECAPS)))
 
