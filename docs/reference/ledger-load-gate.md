@@ -304,7 +304,7 @@ The current workflow grades as follows:
 |---|---|
 | Load pairs | A five job matrix, `pair: [1, 2, 3, 4, 5]`. Each job starts one base and one head gate side by side on its own runner, base first on odd pairs and head first on even pairs |
 | Load measures | Write p50 and the busiest CPU window, summed over every ledger server process the side started: the ledger API service and the read only ledger server on a revision with the API service, the one ledger server on a revision before the write cutover such as `726353637`. Write p95 stays an absolute budget inside each gate run |
-| Load evidence | Each pair uploads `load-pair-N` holding `base.log`, `head.log` and every server log of each side: `server.log`, and `server-read.log` from the read only ledger server |
+| Load evidence | Each pair uploads `load-pair-N` holding `base.log`, `head.log` and every server log of each side: `server.log` and `server-read.log`, including logs under `repeat/` when a write breach repeats the window |
 | Load ratio | Per pair head over base ratios, combined as the geometric mean of the base first median and the head first median, so launch order cancels out |
 | Load margin | `SAME_CODE_MARGIN: '1.25'` in the grade job |
 | Hierarchy pairs | A four job matrix of hierarchy probes graded by `tests.ledger_load.hierarchy_paired` at `HIERARCHY_SAME_CODE_MARGIN: '1.3'`, described under [Hierarchy CPU grading](#hierarchy-cpu-grading) |

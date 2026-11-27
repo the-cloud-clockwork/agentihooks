@@ -215,7 +215,7 @@ jobs:
           name: load-pair-${{ matrix.pair }}
           path: |
             load-evidence/*.log
-            load-evidence/*/*.log
+            load-evidence/**/*.log
           if-no-files-found: error
           retention-days: 7
 

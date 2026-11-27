@@ -80,6 +80,7 @@ def test_paired_load_preserves_both_logs_when_a_write_breach_repeats(
 def test_paired_load_keeps_the_log_of_every_ledger_server_and_no_other_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    output = tmp_path / "evidence"
     logs = {"server.log": "api service measurement\n", "server-read.log": "read only ledger server measurement\n"}
 
     def run(folder: Path) -> tuple[list[str], float]:
@@ -90,6 +91,6 @@ def test_paired_load_keeps_the_log_of_every_ledger_server_and_no_other_file(
 
     monkeypatch.setattr(gate, "stop_server", lambda process: None)
     monkeypatch.setattr(gate, "run", run)
-    monkeypatch.setattr(gate, "main", lambda: len(gate.run(tmp_path)[0]))
+    monkeypatch.setattr(gate, "main", lambda: len(gate.run(output)[0]))
     assert memory.main() == 0
-    assert {path.name: path.read_text() for path in tmp_path.iterdir()} == logs
+    assert {path.name: path.read_text() for path in output.iterdir()} == logs
