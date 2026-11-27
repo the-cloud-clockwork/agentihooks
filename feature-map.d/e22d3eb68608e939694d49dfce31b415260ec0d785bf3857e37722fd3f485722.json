@@ -1,0 +1,16 @@
+{
+  "id": "mutation-shard-failure-upload-set",
+  "origin": "regression",
+  "ledger_item": "ledger:rig-grade-swarm/tasks/t-mutation-report-payload",
+  "behaviour": "A mutation shard that fails or is cancelled uploads in its mutation report only report.json and each group's run log, report log, results, kill memory and mutmut records, never the workspace every shard copies from the same commit, and the merged verdict from those folders equals the verdict from the full ones.",
+  "seam": "mutation_evidence.main in the workflow helper scripts and the Keep only this shard's own mutation evidence step before each mutation report upload of mutation-plan, mutation-stats and mutation-shard",
+  "tests": [
+    "tests/test_ci_mutation_shard_evidence.py::test_each_group_folder_keeps_only_the_files_its_own_run_wrote",
+    "tests/test_ci_mutation_shard_evidence.py::test_a_link_in_a_group_folder_is_removed_and_never_followed",
+    "tests/test_ci_mutation_shard_evidence.py::test_a_file_named_like_the_kill_memory_folder_is_workspace",
+    "tests/test_ci_mutation_shard_evidence.py::test_a_missing_folder_keeps_and_removes_nothing",
+    "tests/test_ci_mutation_shard_evidence.py::test_refuses_a_call_without_exactly_one_folder",
+    "tests/test_ci_mutation_shard_evidence.py::test_the_merged_verdict_is_the_same_from_the_kept_evidence",
+    "tests/test_ci_mutation_shard_evidence.py::test_a_failed_shard_keeps_only_its_own_evidence_right_before_its_upload"
+  ]
+}
