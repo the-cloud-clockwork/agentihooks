@@ -540,6 +540,8 @@ HANDOFF_MARGIN: int = int(os.getenv("AGENTIHOOKS_HANDOFF_MARGIN", "50"))
 CLAUDE_MD_SANITY_CHECK = _env_bool("AGENTIHOOKS_CLAUDE_MD_SANITY_CHECK", "true")
 CLAUDE_MD_MAXLINES = int(os.getenv("AGENTIHOOKS_CLAUDE_MD_MAXLINES", "200"))
 
+CODEREVIEW_FILELIMIT: int = int(os.getenv("AGENTIHOOKS_CODEREVIEW_FILELIMIT", "20"))
+
 
 _VALID_COMPRESSION_MODES = frozenset({"off", "light", "standard", "aggressive"})
 _raw_compression = os.getenv("CONTEXT_REFRESH_COMPRESSION", "standard").lower().strip()

@@ -308,6 +308,8 @@ The swarm runs at full autonomy.
 The tick woke you because its deterministic passes could not settle these triggers:
 - The priority on tasks/t5 is unresolved after 15 minutes: Pick the release day
 Your seat dispatcher@{SLUG} has no history yet: no handoff document, no recap and no learned notes.
+Run agentihooks seat brief before your first command: it prints your seat's handoff, culture, latest recap and \
+learned notes from the store that keeps them.
 
 Before anything else, run once: {LED} join. Read each trigger's item through the ledger API with \
 agentihooks ledger --slug {SLUG} get <item> (priorities/<id>, tasks/<id> or followups/<id>).

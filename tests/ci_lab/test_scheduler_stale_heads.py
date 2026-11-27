@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 import requests
 
-from scripts.ci_lab import budget, intake, scheduler, stale_heads, webhooks
+from scripts.ci_lab import budget, checks, intake, scheduler, stale_heads, webhooks
 from scripts.ci_lab.checks import API
 from scripts.ci_lab.objects import LocalObjects
 from scripts.ci_lab.retry import Policy
@@ -26,6 +26,7 @@ from tests.ci_lab.test_scheduler import (
     ACTOR,
     APP_SETTINGS,
     BASE,
+    CHECK_RUNS,
     HEAD_A,
     HEAD_B,
     REPO,
@@ -34,11 +35,14 @@ from tests.ci_lab.test_scheduler import (
     Delivery,
     Expander,
     FakeKube,
+    FixtureToken,
     Inbox,
     Lab,
     Run,
     fake_redis,
+    github,
     plan,
+    restarted,
     unit,
 )
 
@@ -274,6 +278,36 @@ def test_a_closed_pull_request_drops_its_pending_units_and_forgets_its_run(lab: 
     assert run.lab.client.hgetall(scheduler.ORIGINS) == {}
     assert len(run.lab.poster.posts) == posts
     assert run.tick(1200) == []
+
+
+@pytest.mark.feature("lab-scheduler-regrade-opens-new-check-runs")
+@pytest.mark.parametrize(("stored", "status"), [(True, "completed"), (False, "queued")])
+def test_a_head_graded_again_after_its_grade_was_forgotten_opens_new_check_runs(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch, stored: bool, status: str
+) -> None:
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(requests, "request", github(calls))
+    gates = {"lint": (unit(1),), "types": (unit(2),)}
+    run = restarted(lab({HEAD_A: plan(gates)}), checks.Checks(SLUG, FixtureToken()))
+    if stored:
+        run.cache(unit(1))
+    posts = [
+        f"posted lint {status} on {HEAD_A}",
+        f"posted types queued on {HEAD_A}",
+        f"posted {scheduler.REQUIRED} queued on {HEAD_A}",
+    ]
+    _deliver(run, _pull("opened", HEAD_A))
+    assert [action for action in run.tick(1000) if action.startswith("posted")] == posts
+    forgotten = run.grade(HEAD_A).run
+    _deliver(run, _pull("closed", HEAD_A))
+    run.tick(1100)
+    assert run.lab.client.get(scheduler.GRADES + forgotten) is None
+    _deliver(run, _pull("reopened", HEAD_A))
+    assert [action for action in run.tick(1200) if action.startswith("posted")] == posts
+    again = run.grade(HEAD_A)
+    assert (again.run, again.runs) == (forgotten, {"lint": 4, "types": 5, scheduler.REQUIRED: 6})
+    assert calls == [("POST", CHECK_RUNS)] * 6
+    assert run.lab.client.hgetall(scheduler.WAITING) == {}
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")

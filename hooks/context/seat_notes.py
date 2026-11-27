@@ -1,10 +1,11 @@
-"""The one line a swarm seated session gets on every user prompt: read the seat's learned notes before discovery."""
+"""The one line a swarm seated session gets on every user prompt: read the seat brief before discovery."""
 
 import os
 from collections.abc import Mapping
 
 REMINDER = (
-    "SEAT NOTES: run `agentihooks swarm {slug} learned` before any tool call for context your seat may already hold."
+    "SEAT NOTES: run `agentihooks seat brief` before your first command: it prints the handoff, culture, latest "
+    "recap and learned notes your seat holds."
 )
 
 
@@ -15,7 +16,7 @@ def reminder(env: Mapping[str, str]) -> str:
     slug = env.get("AGENTIHOOKS_SWARM")
     if not slug or not naming.lane_of(str(env.get("AGENTIHOOKS_AGENT_NAME"))):
         return ""
-    return REMINDER.format(slug=slug)
+    return REMINDER
 
 
 def inject() -> None:

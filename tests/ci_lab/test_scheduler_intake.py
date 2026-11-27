@@ -19,6 +19,7 @@ class Pages:
     step: float = 1.0
     now: float = 100.0
     fail_after: int | None = None
+    created: int | None = None
 
     def fetch(self, batch: int, timeout_ms: int) -> list[bus.Delivery]:
         if self.fail_after == len(self.asked):

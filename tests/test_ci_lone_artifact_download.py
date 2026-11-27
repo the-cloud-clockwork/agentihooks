@@ -31,6 +31,7 @@ UNAFFECTED = {
     ("workflows/test.yml", "unit", "{durations,flakes,coverage}-${{ matrix.python-version }}-*"),
     ("workflows/test.yml", "unit-rerun", "{durations,flakes,coverage}-${{ matrix.python-version }}-*"),
     REUSED_PLAN,
+    ("workflows/test.yml", "sonar-after-unit", "{reused-branch,reused}-3.12"),
     ("workflows/test.yml", "dep-manifest", "coverage-3.12-*"),
     ("workflows/test.yml", "coverage-ratchet", "executed-lines-3.12-*"),
     ("workflows/test.yml", "coverage-ratchet", "coverage-3.12-*"),
