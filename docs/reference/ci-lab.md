@@ -2514,9 +2514,9 @@ key; the builders are pure and read no file, clock or network.
    rest is held for the budget.
 5. Held units are enqueued as `scripts.ci_lab.budget.admits` lets them in, the most urgent grade first.
    Every unit of a class the day's core budget does not shed is enqueued; a shed class enqueues nothing
-   until the budget resets the next UTC day, and no lease takes its units already in the queue until then:
-   a lease poll stops at the first pending unit of the most urgent shed class, since every unit after it
-   is of that class, a less urgent one or unranked, and running units finish. Backfill
+   until the budget resets the next UTC day, and no lease takes its units already in the queue until then.
+   A lease poll stops at the first pending unit of the most urgent shed class, since every unit after it
+   is of that class, a less urgent one or unranked; running units finish. Backfill
    takes only the slots workers offered free on a lease poll within the ready window after the units
    already waiting in the queue. A newer head of the lane drops the older head's held units. Each
    unit is enqueued under the class of its grade, and workers lease the most urgent class first, in

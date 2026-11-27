@@ -15,7 +15,7 @@ from scripts.ci_lab.leases import Leases
 from tests.ci_lab.test_scheduler import APP_SETTINGS, Expander, Inbox, Poster, RelayBuilds, fake_redis
 
 
-def started(
+def run_main(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, port: Any, image: dict[str, str], shed: dict[str, float]
 ) -> tuple[Leases, budget.Budget]:
     """Run scheduler main with its services faked, the given pods port and a runtime budget of 600 core minutes that
@@ -26,16 +26,17 @@ def started(
     from scripts.events import config, factory
 
     client = fake_redis()
-    captured: dict[str, Any] = {}
+    listened: dict[str, Leases] = {}
+    spent: dict[str, budget.Budget] = {}
     bus = SimpleNamespace(lab_heads=SimpleNamespace(consumer=lambda durable, subject: "consumer"))
 
     def build(environ: Any, redis_client: Any, objects: Any, consumer: Any, spending: Any) -> scheduler.Scheduler:
-        captured["budget"] = spending
+        spent["budget"] = spending
         ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], port)
         return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()), spending)
 
     def listen(found: Any, leases: Leases, *rest: Any) -> list[Any]:
-        captured["leases"] = leases
+        listened["leases"] = leases
         return []
 
     runtime = tmp_path / "runtime.yaml"
@@ -75,7 +76,7 @@ def started(
     monkeypatch.setattr(relay, "build", RelayBuilds())
 
     assert scheduler.main([], environ) == 7
-    return captured["leases"], captured["budget"]
+    return listened["leases"], spent["budget"]
 
 
 @pytest.mark.feature("lab-worker-seat-keeping-restart")
@@ -85,7 +86,7 @@ def test_main_builds_leases_with_the_wanted_image_and_the_pods_port_image_reader
     kube = pods.KubePods("https://api:6443", "ci-lab", tmp_path / "token", ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT))
 
     wanted = {scheduler.IMAGE: "ghcr.io/lab-worker@sha256:wanted"}
-    leases, _ = started(tmp_path, monkeypatch, kube, wanted, {"backfill": 0.5})
+    leases, _ = run_main(tmp_path, monkeypatch, kube, wanted, {"backfill": 0.5})
 
     assert leases.image == "ghcr.io/lab-worker@sha256:wanted"
     assert leases.images == kube.images
@@ -95,7 +96,7 @@ def test_main_builds_leases_with_the_wanted_image_and_the_pods_port_image_reader
 def test_main_gives_leases_the_unmanaged_image_reader_outside_a_cluster(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    leases, _ = started(tmp_path, monkeypatch, pods.unmanaged, {}, {"backfill": 0.5})
+    leases, _ = run_main(tmp_path, monkeypatch, pods.unmanaged, {}, {"backfill": 0.5})
 
     assert leases.image == ""
     assert leases.images is pods.unread
@@ -105,7 +106,7 @@ def test_main_gives_leases_the_unmanaged_image_reader_outside_a_cluster(
 def test_main_gives_leases_the_classes_its_daily_core_budget_sheds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    leases, spending = started(tmp_path, monkeypatch, pods.unmanaged, {}, {"backfill": 0.5, "promotion": 0.75})
+    leases, spending = run_main(tmp_path, monkeypatch, pods.unmanaged, {}, {"backfill": 0.5, "promotion": 0.75})
 
     assert tuple(leases.shed()) == ()
     spending.charge(1, 300 * 60)

@@ -83,9 +83,9 @@ class Leases:
 
     def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[Grant]:
         """Grant fitting pending jobs of the classes the shed port leaves out, polling until some are granted or the
-        wait ends; the worker's offer is its free slots while it waits and what its grants leave once it returns, and a poll that grants marks its pod busy. A
-        worker that holds a solo unit is granted no other one, so its memory never holds two; the test reads the unit
-        when the lease is taken, whenever the job was enqueued."""
+        wait ends; the worker's offer is its free slots while it waits and what its grants leave once it returns,
+        and a poll that grants marks its pod busy. A worker that holds a solo unit is granted no other one, so its
+        memory never holds two; the test reads the unit when the lease is taken, whenever the job was enqueued."""
         self.queue.offer(worker, free_slots, self.clock())
         grants = self._poll(worker, free_slots, capabilities, wait_ms)
         self.queue.offer(worker, free_slots - sum(grant.slots for grant in grants), self.clock())
