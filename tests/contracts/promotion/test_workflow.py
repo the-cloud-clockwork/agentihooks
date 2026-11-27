@@ -179,6 +179,7 @@ def _graded_needs(promote: dict[str, Any], analysis: str = "A1") -> dict[str, Si
         "hierarchy-cpu",
         "tick-scale",
         "tick-pattern-tree",
+        "type-gate-tree",
     ],
 )
 def test_a_red_or_cancelled_promotion_dependency_prevents_all_promotion_writes(job, result):
@@ -253,6 +254,7 @@ def test_promotion_requires_a_clean_whole_tree_tick_pattern(result: str) -> None
         assert enabled(jobs[consumer]["if"], "push", needs) == (result == "success")
 
 
+@pytest.mark.feature("type-gate-split-by-tier")
 @pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
 def test_promotion_requires_a_clean_whole_tree_type_check(result: str) -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]

@@ -36,6 +36,7 @@ def _fake_checker(monkeypatch: pytest.MonkeyPatch, diagnostics: list[dict[str, s
     monkeypatch.setattr(type_gate.subprocess, "run", run)
 
 
+@pytest.mark.feature("type-gate-split-by-tier")
 def test_a_file_above_its_tree_baseline_entry_is_red(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

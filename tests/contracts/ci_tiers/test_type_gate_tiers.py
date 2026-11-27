@@ -20,6 +20,7 @@ def _jobs() -> dict[str, Any]:
     return yaml.safe_load(WORKFLOW.read_text())["jobs"]
 
 
+@pytest.mark.feature("type-gate-split-by-tier")
 def test_the_type_gate_grading_step_sets_direct_importers_on_itself_not_the_job() -> None:
     jobs = _jobs()
     grade = next(step for step in jobs["type-gate"]["steps"] if step.get("name") == GRADING_STEP)
@@ -27,6 +28,7 @@ def test_the_type_gate_grading_step_sets_direct_importers_on_itself_not_the_job(
     assert "TYPE_GATE_DIRECT_IMPORTERS" not in jobs["type-gate"].get("env", {})
 
 
+@pytest.mark.feature("type-gate-split-by-tier")
 def test_the_lab_discovers_the_same_direct_importers_scope_from_the_grading_step() -> None:
     gates = static_gates.discover(WORKFLOW.read_text())
     gate = next(gate for gate in gates if gate.job == "type-gate" and gate.step == GRADING_STEP)

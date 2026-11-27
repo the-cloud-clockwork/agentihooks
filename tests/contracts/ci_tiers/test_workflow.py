@@ -81,6 +81,7 @@ PROMOTION = (
     "hierarchy-cpu",
     "tick-scale",
     "tick-pattern-tree",
+    "type-gate-tree",
     "launch-hotfix",
     "kind-due",
     "helm-kind",
