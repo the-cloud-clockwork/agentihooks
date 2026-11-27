@@ -311,6 +311,9 @@ class Checks:
         """Remember a check run posted before this poster existed, so its next post advances it in place."""
         self.runs[(head, name(gate, shadow), run)] = (run_id, status)
 
+    def forget(self, head: str, gate: str, run: str, shadow: bool) -> None:
+        """Drop what is remembered of one check run, so its next post creates it again from any status."""
+
     def post(self, head: str, gate: str, status: str, conclusion: str | None, output: Output, shadow: bool) -> int:
         """Create the check run on its first transition, else advance it in place; return its id."""
         key = (head, name(gate, shadow), output.run)
