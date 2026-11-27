@@ -60,20 +60,27 @@ port, `SourceControl.open_changes`, with a 60 second deadline (`SECONDS`).
 and passes `deadline.child(SECONDS)`, so the listing ends at the caller's
 expiry or after 60 seconds, whichever comes first. Without a caller deadline
 it passes a fresh `Deadline.after(SECONDS)`. The GitHub adapter checks the
-deadline before its first GraphQL call and asks for open pull requests with
-each head commit's check rollup:
+deadline before its first GraphQL call, lists the open pull request numbers,
+then reads each head commit's check rollup by number:
 
 | Setting | Value |
 | --- | --- |
-| Page size | 25 pull requests (`first: 25` in the adapter's open query) |
-| Pages | At most 8 (`_OPEN_PAGES`), so at most 200 pull requests |
-| Stop | The first page whose `hasNextPage` is false |
+| Number page size | 100 pull request numbers (`first: 100` in `_NUMBERS`) |
+| Number pages | At most 2 (`_NUMBER_PAGES`), so at most 200 pull requests |
+| Stop | The first number page whose `hasNextPage` is false |
+| Rollup batch | 25 pull requests per document, one `pN: pullRequest(number: N)` alias each (`_BATCH`) |
+| Readers | 4 threads (`_READERS`), each batch under the same deadline |
+
+The listing holds the same pull requests, in the same order, with the same
+checks as a paged listing. A batch whose only errors hide check rollups from
+the App lists those pull requests with no checks; any other failed batch
+fails the whole listing and drops the batches not yet started.
 
 Pages of one hundred pull requests with their check rollups made GitHub answer
 with a gateway timeout after about eleven seconds, so every tick pass spent
-about thirteen seconds in the notice step and held nothing. Pages of
-twenty five return within the deadline and keep the same two hundred pull
-request ceiling.
+about thirteen seconds in the notice step and held nothing. Sequential pages
+of twenty five took 41 seconds for 179 pull requests, past the step's 30
+second budget; batches of twenty five on four threads read them in about 20.
 
 ## The listing cache
 
@@ -239,7 +246,8 @@ GitHub on a miss, once per repository.
 | `WINDOW_MS` | `scripts.swarm.fleet_red` | 6 hours | How recent a check must be for its pull request to count |
 | `SECONDS` | `scripts.swarm.fleet_red` | 60 | Deadline of one listing |
 | `TTL` | `scripts.swarm.fleet_red` | 600 | Seconds a listing, or a failed one, stays cached |
-| `_OPEN_PAGES` and `first:` | `scripts.tick.adapters.github` | 8 pages of 25 | Listing page size and ceiling |
+| `_NUMBER_PAGES` and `first:` | `scripts.tick.adapters.github` | 2 pages of 100 | Number listing page size and ceiling |
+| `_BATCH` and `_READERS` | `scripts.tick.adapters.github` | 25 per batch, 4 readers | Rollup batch size and reader threads |
 | `AGENTIHOOKS_SWARM_KEY_PREFIX` | Environment | `agentihooks` | Root of every swarm Redis key, the cache key included |
 
 The constants are code: change them through a pull request.
@@ -281,7 +289,8 @@ The constants are code: change them through a pull request.
 | `tests/tick/test_apply_fleet_red.py` | The notice step's guarded hold writes and lifted write, the applier posting while the task stays open and unclaimed, dropping a hold whose task moved or a seat claimed, forgetting a failed notice, and a claimed hold dropped then posted on the next pass |
 | `tests/tick/test_tasks.py` | The notice step in lane `slow` with its measured budget, and a `WriteStep` keeping the lane it is given |
 | `tests/tick/test_abandoned_writes.py` | A write step abandoned at its budget or at an expired lane journaling one `swarm_tick_step_abandoned` line with its sorted write domains |
-| `tests/tick/test_source_control.py` | The GitHub open listing: one page when there is no next page, and the stop after eight pages of twenty five |
+| `tests/tick/test_source_control.py` | The GitHub open listing: one number page when there is no next page, the stop after two pages of one hundred, batches of twenty five in listing order, hidden rollups in a batch |
+| `tests/tick/test_open_listing_batches.py` | A recorded agentihooks listing served to the paged and batched queries gives the same listing and verdicts; rollup reads overlap |
 
 Related: [Tick engine steps](tick-engine-steps.md), [Tick adapters](tick-adapters.md),
 [Tick load budget](tick-load-budget.md).

@@ -3,7 +3,9 @@
 import json
 import subprocess
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
@@ -50,23 +52,25 @@ _QUEUE = """query($owner: String!, $name: String!, $base: String!) {
   }
 }"""
 
-_OPEN = """query($owner: String!, $name: String!, $after: String) {
+_NUMBERS = """query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
-    pullRequests(states: OPEN, first: 25, after: $after) {
+    pullRequests(states: OPEN, first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes {
-        url
-        commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
-          __typename
-          ... on CheckRun { name conclusion startedAt completedAt }
-          ... on StatusContext { context state createdAt }
-        } } } } } }
-      }
+      nodes { number }
     }
   }
 }"""
 
-_OPEN_PAGES = 8
+_ROLLUP = """url
+      commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+        __typename
+        ... on CheckRun { name conclusion startedAt completedAt }
+        ... on StatusContext { context state createdAt }
+      } } } } } }"""
+
+_NUMBER_PAGES = 2
+_BATCH = 25
+_READERS = 4
 
 Git = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -101,8 +105,21 @@ def _open_change(node: dict[str, Any]) -> OpenChange:
     return OpenChange(node["url"], tuple(_rollup_check(context) for context in contexts))
 
 
+def _rollups(numbers: Sequence[int]) -> str:
+    """Return one document reading the full check rollup of each numbered pull request under its own alias."""
+    fields = "\n".join(
+        f"    p{number}: pullRequest(number: {number}) {{\n      {_ROLLUP}\n    }}" for number in numbers
+    )
+    return f"query($owner: String!, $name: String!) {{\n  repository(owner: $owner, name: $name) {{\n{fields}\n  }}\n}}"
+
+
+def _batches(numbers: Sequence[int]) -> list[Sequence[int]]:
+    """Split the pull request numbers, in order, into batches of twenty five."""
+    return [numbers[start : start + _BATCH] for start in range(0, len(numbers), _BATCH)]
+
+
 def _hidden_rollups(refused: subprocess.CalledProcessError) -> Any:
-    """Return the data of a refused open listing whose only errors hide check rollups from the App, else re-raise."""
+    """Return the data of a refused rollup batch whose only errors hide check rollups from the App, else re-raise."""
     try:
         body: Any = json.loads(refused.stdout)
     except (TypeError, ValueError):
@@ -111,21 +128,16 @@ def _hidden_rollups(refused: subprocess.CalledProcessError) -> Any:
     found = _items(reply.get("errors"))
     hidden = bool(found) and all(_rollup_refusal(error) for error in found)
     listing = _object(reply.get("data") if hidden else None)
-    repository = _object(listing.get("repository"))
-    if not isinstance(repository.get("pullRequests"), dict):
+    if not _object(listing.get("repository")):
         raise refused
     return listing
 
 
 def _rollup_refusal(error: Any) -> bool:
-    """Say whether one GraphQL error is the App refused read of an open pull request's check rollup."""
+    """Say whether one GraphQL error is the App refused read of a numbered pull request's check rollup."""
     entry = _object(error)
     steps = _items(entry.get("path"))
-    return (
-        entry.get("type") == "FORBIDDEN"
-        and steps[:2] == ["repository", "pullRequests"]
-        and steps[-1:] == ["statusCheckRollup"]
-    )
+    return entry.get("type") == "FORBIDDEN" and steps[:1] == ["repository"] and steps[-1:] == ["statusCheckRollup"]
 
 
 def _object(value: Any) -> dict[str, Any]:
@@ -352,25 +364,43 @@ class GitHubSourceControl:
         return next((row["merged_at"] for row in rows if row["merged_at"]), None)
 
     def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]:
-        """List the repository's open pull requests with their check rollups, at most eight pages of twenty five.
+        """List the repository's open pull requests with their check rollups, at most two pages of one hundred.
 
-        A pull request whose check rollup the App may not read is listed with no checks.
+        The open numbers are listed first, then the rollups are read by number in batches of twenty five on four
+        threads under the deadline. A pull request whose check rollup the App may not read is listed with no checks;
+        any other failed batch fails the listing and the batches not yet started are dropped.
         """
         deadline.live()
+        batches = _batches(self._open_numbers(deadline))
+        readers = ThreadPoolExecutor(_READERS)
+        try:
+            reads = [readers.submit(copy_context().run, self._open_batch, batch, deadline) for batch in batches]
+            return tuple(change for read in reads for change in read.result())
+        finally:
+            readers.shutdown(cancel_futures=True)
+
+    def _open_numbers(self, deadline: Deadline) -> list[int]:
+        """List the numbers of the repository's open pull requests, at most two pages of one hundred."""
         owner, name = self.repository.split("/")
         variables: dict[str, str | int] = {"owner": owner, "name": name}
-        changes: list[OpenChange] = []
-        for _ in range(_OPEN_PAGES):
-            try:
-                data = self._graphql(_OPEN, variables, deadline)
-            except subprocess.CalledProcessError as refused:
-                data = _hidden_rollups(refused)
-            pulls = data["repository"]["pullRequests"]
-            changes.extend(_open_change(node) for node in pulls["nodes"])
+        numbers: list[int] = []
+        for _ in range(_NUMBER_PAGES):
+            pulls = self._graphql(_NUMBERS, variables, deadline)["repository"]["pullRequests"]
+            numbers.extend(node["number"] for node in pulls["nodes"])
             if not pulls["pageInfo"]["hasNextPage"]:
                 break
             variables = {**variables, "after": pulls["pageInfo"]["endCursor"]}
-        return tuple(changes)
+        return numbers
+
+    def _open_batch(self, numbers: Sequence[int], deadline: Deadline) -> list[OpenChange]:
+        """Read the check rollup of each numbered open pull request in one document, in the order given."""
+        owner, name = self.repository.split("/")
+        try:
+            data = self._graphql(_rollups(numbers), {"owner": owner, "name": name}, deadline)
+        except subprocess.CalledProcessError as refused:
+            data = _hidden_rollups(refused)
+        repository = data["repository"]
+        return [_open_change(repository[f"p{number}"]) for number in numbers]
 
     def workflow_runs(
         self, workflow: str, event: str, conclusion: str, since: str, *, deadline: Deadline

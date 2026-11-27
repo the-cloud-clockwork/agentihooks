@@ -1,5 +1,7 @@
 import json
+import re
 import subprocess
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -410,13 +412,54 @@ def test_github_merged_at_reads_the_first_merged_change_carrying_a_commit(
     ]
 
 
-def _open_page(urls: list[str], contexts: list[dict[str, str | None]], cursor: str | None) -> dict[str, object]:
-    nodes = [
-        {"url": url, "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": contexts}}}}]}}
-        for url in urls
-    ]
+def _number_page(numbers: list[int], cursor: str | None) -> dict[str, object]:
+    """Return one page of the open pull request number listing, with a next page when a cursor is given."""
     info = {"hasNextPage": cursor is not None, "endCursor": cursor}
+    nodes = [{"number": number} for number in numbers]
     return {"data": {"repository": {"pullRequests": {"pageInfo": info, "nodes": nodes}}}}
+
+
+def _pull(number: int, rollup: object) -> dict[str, object]:
+    """Return the aliased node of one numbered pull request with its newest commit's rollup."""
+    commits = {"nodes": [{"commit": {"statusCheckRollup": rollup}}]}
+    return {"url": f"https://github.com/owner/project/pull/{number}", "commits": commits}
+
+
+def _batch(rollups: dict[int, object]) -> dict[str, object]:
+    """Return the answer to one numbered rollup batch, an alias per pull request number."""
+    return {"data": {"repository": {f"p{number}": _pull(number, rollup) for number, rollup in rollups.items()}}}
+
+
+def _url(number: int) -> str:
+    return f"https://github.com/owner/project/pull/{number}"
+
+
+TESTS = {"__typename": "CheckRun", "name": "Tests", "conclusion": "FAILURE", "startedAt": "s", "completedAt": "c"}
+SHOWN = {"contexts": {"nodes": [TESTS]}}
+ROLLUP_TAIL = ["commits", "nodes", 0, "commit", "statusCheckRollup"]
+
+
+def _listing(
+    numbers: list[int], hidden: frozenset[int] = frozenset()
+) -> tuple[Callable[..., subprocess.CompletedProcess[str]], list[list[int]]]:
+    """Return a rest stand in listing ``numbers`` on one page and answering each rollup batch by its aliases, with
+    the batches it read; a hidden number's rollup is refused the way GitHub refuses the App."""
+    batches: list[list[int]] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        query = args[3]
+        if "statusCheckRollup" not in query:
+            return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(_number_page(numbers, None)), "")
+        asked = [int(number) for number in re.findall(r"pullRequest\(number: (\d+)\)", query)]
+        batches.append(asked)
+        body = _batch({number: None if number in hidden else SHOWN for number in asked})
+        errors = [{"type": "FORBIDDEN", "path": ["repository", f"p{n}", *ROLLUP_TAIL]} for n in asked if n in hidden]
+        if errors:
+            refusal = json.dumps({**body, "errors": errors})
+            raise subprocess.CalledProcessError(1, ["gh", *args], refusal, "gh: Resource not accessible by integration")
+        return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(body), "")
+
+    return rest, batches
 
 
 @pytest.mark.feature("swarm-tick-source-control-port")
@@ -428,113 +471,160 @@ def test_github_open_changes_reads_each_open_pull_request_check_rollup(
         {"__typename": "CheckRun", "name": "Lint", "conclusion": None, "startedAt": "s", "completedAt": None},
         {"__typename": "StatusContext", "context": "Gate", "state": "PENDING", "createdAt": "g"},
     ]
-    first = _open_page(["https://github.com/owner/project/pull/1"], contexts, "next")
-    bare = {
-        "url": "https://github.com/owner/project/pull/2",
-        "commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]},
-    }
-    second = {
-        "data": {
-            "repository": {"pullRequests": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [bare]}}
-        }
-    }
-    provider, recorder = _provider(monkeypatch, tmp_path, [first, second])
+    answers: list[object] = [
+        _number_page([1], "next"),
+        _number_page([2], None),
+        _batch({1: {"contexts": {"nodes": contexts}}, 2: None}),
+    ]
+    provider, recorder = _provider(monkeypatch, tmp_path, answers)
 
     assert provider.open_changes(deadline=_deadline()) == (
         port.OpenChange(
-            "https://github.com/owner/project/pull/1",
+            _url(1),
             (
                 port.RollupCheck("Tests", "FAILURE", "c"),
                 port.RollupCheck("Lint", None, "s"),
                 port.RollupCheck("Gate", "PENDING", "g"),
             ),
         ),
-        port.OpenChange("https://github.com/owner/project/pull/2", ()),
+        port.OpenChange(_url(2), ()),
     )
-    query = ["api", "graphql", "-f", f"query={github._OPEN}", "-f", "owner=owner", "-f", "name=project"]
+    numbers = ["api", "graphql", "-f", f"query={github._NUMBERS}", "-f", "owner=owner", "-f", "name=project"]
+    rollups = ["api", "graphql", "-f", f"query={github._rollups([1, 2])}", "-f", "owner=owner", "-f", "name=project"]
     assert recorder.calls == [
-        (github.CALLER, query, {"cwd": tmp_path, "timeout": 9, **REST}),
-        (github.CALLER, [*query, "-f", "after=next"], {"cwd": tmp_path, "timeout": 9, **REST}),
+        (github.CALLER, numbers, {"cwd": tmp_path, "timeout": 9, **REST}),
+        (github.CALLER, [*numbers, "-f", "after=next"], {"cwd": tmp_path, "timeout": 9, **REST}),
+        (github.CALLER, rollups, {"cwd": tmp_path, "timeout": 9, **REST}),
     ]
 
 
-def test_github_open_changes_reads_one_page_when_no_next_page(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    provider, recorder = _provider(monkeypatch, tmp_path, [_open_page(["u0"], [], None)])
+def test_github_open_changes_names_each_pull_request_rollup_under_its_number() -> None:
+    document = github._rollups([4, 17])
 
-    assert provider.open_changes(deadline=_deadline()) == (port.OpenChange("u0", ()),)
+    assert document.startswith("query($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {")
+    assert document.count("pullRequest(number: ") == 2
+    assert f"    p4: pullRequest(number: 4) {{\n      {github._ROLLUP}\n    }}" in document
+    assert f"    p17: pullRequest(number: 17) {{\n      {github._ROLLUP}\n    }}" in document
+    assert document.index("p4:") < document.index("p17:")
+    assert "statusCheckRollup { contexts(first: 100)" in github._ROLLUP
+
+
+def test_github_open_changes_reads_one_page_when_no_next_page(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    provider, recorder = _provider(monkeypatch, tmp_path, [_number_page([7], None), _batch({7: None})])
+
+    assert provider.open_changes(deadline=_deadline()) == (port.OpenChange(_url(7), ()),)
+    assert len(recorder.calls) == 2
+
+
+def test_github_open_changes_reads_no_rollup_when_no_pull_request_is_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider, recorder = _provider(monkeypatch, tmp_path, [_number_page([], None)])
+
+    assert provider.open_changes(deadline=_deadline()) == ()
     assert len(recorder.calls) == 1
 
 
-def test_github_open_changes_stops_after_two_hundred_pull_requests_in_pages_of_twenty_five(
+def test_github_open_changes_lists_at_most_two_pages_of_one_hundred_numbers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    pages: list[object] = [_open_page([f"u{n}"], [], f"c{n}") for n in range(9)]
-    provider, recorder = _provider(monkeypatch, tmp_path, pages)
+    pages: list[object] = [_number_page([1], "c1"), _number_page([2], "c2"), _number_page([3], None)]
+    provider, recorder = _provider(monkeypatch, tmp_path, [*pages[:2], _batch({1: None, 2: None})])
 
-    assert provider.open_changes(deadline=_deadline()) == tuple(port.OpenChange(f"u{n}", ()) for n in range(8))
-    assert len(recorder.calls) == 8
-    assert "pullRequests(states: OPEN, first: 25, after: $after)" in github._OPEN
+    assert provider.open_changes(deadline=_deadline()) == (port.OpenChange(_url(1), ()), port.OpenChange(_url(2), ()))
+    assert len(recorder.calls) == 3
+    assert "pullRequests(states: OPEN, first: 100, after: $after)" in github._NUMBERS
 
 
-def _refused(errors: object) -> Callable[..., subprocess.CompletedProcess[str]]:
-    """Return a rest stand in that raises a CalledProcessError carrying a partial open listing body and the errors."""
-    tests = {"__typename": "CheckRun", "name": "Tests", "conclusion": "FAILURE", "startedAt": "s", "completedAt": "c"}
-    rollup = {"contexts": {"nodes": [tests]}}
-    shown = {"url": "u0", "commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]}}
-    hidden = {"url": "u1", "commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]}}
-    info = {"hasNextPage": False, "endCursor": None}
-    data = {"repository": {"pullRequests": {"pageInfo": info, "nodes": [shown, hidden]}}}
-    body = json.dumps({"data": data, "errors": errors})
+def test_github_open_changes_reads_rollups_in_batches_of_twenty_five_and_keeps_the_listing_order(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    numbers = list(range(60, 0, -1))
+    rest, batches = _listing(numbers)
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    listed = provider.open_changes(deadline=_deadline())
+
+    assert [change.url for change in listed] == [_url(number) for number in numbers]
+    assert sorted(batches) == sorted([numbers[:25], numbers[25:50], numbers[50:]])
+
+
+@pytest.mark.feature("fleet-red-open-listing-batches")
+def test_github_open_changes_drops_the_batches_not_started_once_a_batch_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    numbers = list(range(1, 201))
+    read: list[int] = []
 
     def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
-        raise subprocess.CalledProcessError(1, ["gh", *args], body, "gh: Resource not accessible by integration")
+        if "statusCheckRollup" not in args[3]:
+            return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(_number_page(numbers, None)), "")
+        asked = [int(number) for number in re.findall(r"pullRequest\(number: (\d+)\)", args[3])]
+        read.append(asked[0])
+        if asked[0] == 1:
+            raise subprocess.CalledProcessError(1, ["gh", *args], "", "gh: HTTP 502")
+        threading.Event().wait(0.5)
+        return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(_batch({number: None for number in asked})), "")
 
-    return rest
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
 
-
-ROLLUP_PATH = ["repository", "pullRequests", "nodes", 1, "commits", "nodes", 0, "commit", "statusCheckRollup"]
+    with pytest.raises(subprocess.CalledProcessError):
+        provider.open_changes(deadline=_deadline())
+    assert 1 in read
+    assert len(read) <= 5
 
 
 def test_github_open_changes_reads_a_pull_request_whose_rollup_the_app_cannot_read_as_unchecked(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    forbidden = [{"type": "FORBIDDEN", "path": ROLLUP_PATH, "message": "Resource not accessible by integration"}]
-    monkeypatch.setattr(github.github_reads, "rest", _refused(forbidden))
-    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
-
-    shown = port.OpenChange("u0", (port.RollupCheck("Tests", "FAILURE", "c"),))
-    assert provider.open_changes(deadline=_deadline()) == (shown, port.OpenChange("u1", ()))
-
-
-def test_github_open_changes_pages_on_after_a_page_with_hidden_rollups(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    hidden = {"url": "u0", "commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]}}
-    info = {"hasNextPage": True, "endCursor": "next"}
-    first = {
-        "data": {"repository": {"pullRequests": {"pageInfo": info, "nodes": [hidden]}}},
-        "errors": [{"type": "FORBIDDEN", "path": ROLLUP_PATH}],
-    }
-    calls: list[list[str]] = []
-
-    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        if len(calls) == 1:
-            raise subprocess.CalledProcessError(1, ["gh", *args], json.dumps(first), "gh: Resource not accessible")
-        return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(_open_page(["u1"], [], None)), "")
-
+    rest, _ = _listing([1, 2], frozenset({2}))
     monkeypatch.setattr(github.github_reads, "rest", rest)
     provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
 
-    assert provider.open_changes(deadline=_deadline()) == (port.OpenChange("u0", ()), port.OpenChange("u1", ()))
-    assert calls[1][-2:] == ["-f", "after=next"]
+    shown = port.OpenChange(_url(1), (port.RollupCheck("Tests", "FAILURE", "c"),))
+    assert provider.open_changes(deadline=_deadline()) == (shown, port.OpenChange(_url(2), ()))
+
+
+def test_github_open_changes_reads_every_batch_beside_a_batch_with_hidden_rollups(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    numbers = list(range(1, 31))
+    rest, batches = _listing(numbers, frozenset({3}))
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    listed = provider.open_changes(deadline=_deadline())
+
+    assert [change.url for change in listed] == [_url(number) for number in numbers]
+    assert [change.url for change in listed if not change.checks] == [_url(3)]
+    assert len(batches) == 2
+
+
+ROLLUP_PATH = ["repository", "p2", *ROLLUP_TAIL]
+
+
+def _refused(errors: object) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Return a rest stand in listing two numbers, then refusing their rollup batch with a partial body and the
+    errors."""
+    hidden = {"commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]}}
+    data = {"repository": {"p1": _pull(1, SHOWN), "p2": {"url": _url(2), **hidden}}}
+    body = json.dumps({"data": data, "errors": errors})
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        if "statusCheckRollup" not in args[3]:
+            return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(_number_page([1, 2], None)), "")
+        raise subprocess.CalledProcessError(1, ["gh", *args], body, "gh: Resource not accessible by integration")
+
+    return rest
 
 
 @pytest.mark.parametrize(
     "errors",
     [
         [{"type": "NOT_FOUND", "path": ROLLUP_PATH, "message": "gone"}],
-        [{"type": "FORBIDDEN", "path": ["repository", "pullRequests"], "message": "no"}],
+        [{"type": "FORBIDDEN", "path": ["repository", "p2"], "message": "no"}],
         [{"type": "FORBIDDEN", "message": "no path"}],
         [{"type": "FORBIDDEN", "path": ["viewer", "statusCheckRollup"], "message": "elsewhere"}],
         [
@@ -564,6 +654,7 @@ def test_github_open_changes_raises_any_other_listing_refusal(
         "not json",
         json.dumps(["FORBIDDEN"]),
         json.dumps({"data": {"repository": None}, "errors": [{"type": "FORBIDDEN", "path": ROLLUP_PATH}]}),
+        json.dumps({"data": {"repository": {}}, "errors": [{"type": "FORBIDDEN", "path": ROLLUP_PATH}]}),
         json.dumps({"data": None, "errors": [{"type": "FORBIDDEN", "path": ROLLUP_PATH}]}),
     ],
 )
@@ -571,7 +662,20 @@ def test_github_open_changes_raises_a_refusal_with_no_listing_body(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stdout: str | None
 ) -> None:
     def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        if "statusCheckRollup" not in args[3]:
+            return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(_number_page([1], None)), "")
         raise subprocess.CalledProcessError(1, ["gh", *args], stdout, "gh: HTTP 502")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        provider.open_changes(deadline=_deadline())
+
+
+def test_github_open_changes_raises_a_refused_number_listing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(1, ["gh", *args], "", "gh: HTTP 502")
 
     monkeypatch.setattr(github.github_reads, "rest", rest)
     provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
