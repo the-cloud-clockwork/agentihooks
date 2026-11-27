@@ -473,16 +473,28 @@ def test_command_lookup_is_saved_from_the_selected_directory_and_path(tmp_path: 
 
 
 @pytest.mark.feature("quick-local-command")
-def test_master_context_reports_command_identity_and_capabilities(tmp_path: Path) -> None:
-    swarm = _swarm(tmp_path, (TOOL, "--private-argument"))
+@pytest.mark.parametrize(
+    ("harness", "expected"),
+    [
+        (
+            "program",
+            "outside automatic tiers; program env; agent hooks unavailable, automatic handoff unavailable, prompt typing unavailable",
+        ),
+        (
+            "claude",
+            "automatic tiers; wrapper env; agent hooks available, automatic handoff available, prompt typing available",
+        ),
+        (
+            "codex",
+            "automatic tiers; wrapper env; agent hooks available, automatic handoff available, prompt typing available",
+        ),
+    ],
+)
+def test_master_context_reports_command_identity_and_capabilities(tmp_path: Path, harness: str, expected: str) -> None:
+    swarm = _swarm(tmp_path, (TOOL, "--private-argument"), harness)
     text = seeds.opening(member.Member(tmp_path, swarm, swarm.seats[0]))
     assert "--private-argument" not in text
-    assert "program env" in text
-    assert "agent hooks unavailable" in text
-    assert "automatic handoff unavailable" in text
-    assert "prompt typing unavailable" in text
-    assert "outside automatic tiers" in text
-    assert ", automatic tiers" not in text
+    assert f"authentication routed, {expected}" in text
 
 
 @pytest.mark.feature("quick-local-command")
@@ -831,9 +843,22 @@ def test_native_routing_executes_the_saved_wrapper_after_account_admission(
         admitted.append((kind, account))
         run(environ)
 
+    native_execute = recipe.execute_native
+
+    def delegate(
+        kind: str,
+        command: list[str],
+        environ: Mapping[str, str],
+        *,
+        execvpe: Callable[[str, list[str], Mapping[str, str]], object],
+    ) -> None:
+        assert execvpe is execute
+        native_execute(kind, command, environ, execvpe=execvpe)
+
     def unavailable(*args: object, **kwargs: object) -> None:
         raise claude_quota_balancer.RoutingError("unavailable")
 
+    monkeypatch.setattr(recipe, "execute_native", delegate)
     monkeypatch.setattr(account_slots, "execute", admit)
     monkeypatch.setattr(install.os, "execvpe", execute)
     monkeypatch.setattr(install.shutil, "which", lambda name: f"native-{name}")
