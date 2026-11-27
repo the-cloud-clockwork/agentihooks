@@ -146,6 +146,41 @@ def test_named_app_is_the_only_trusted_one() -> None:
     assert verdict.conclusion(runs, "") is None
 
 
+@pytest.mark.feature("lab-lost-unit-leaves-gate-neutral")
+def test_a_check_whose_newest_trusted_run_completed_neutral_is_named_as_lost() -> None:
+    listings = {
+        "lab/lint": [run(1, "completed", "failure"), run(2, "completed", "neutral")],
+        "lab/type-gate": [run(3, "completed", "success")],
+        "lab/test-count": [run(4, "completed", "neutral"), run(5, "in_progress")],
+        "lab/docs": [run(6, "completed", "neutral", app="another-app")],
+        "lab/semgrep": [],
+    }
+    assert verdict.lost(listings, LAB) == ["lab/lint"]
+
+
+@pytest.mark.feature("lab-lost-unit-leaves-gate-neutral")
+def test_main_verdict_fails_a_gate_the_lab_lost_a_unit_of_and_names_the_rerequest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    grader = tree(tmp_path / "grader", ["lint", "type-gate"])
+    output = tmp_path / "output"
+    listings = {"lab/lint": [run(1, "completed", "neutral")], "lab/type-gate": [run(2, "completed", "success")]}
+
+    def fetcher(repo: str, sha: str) -> Callable[[str], list[dict[str, Any]]]:
+        return lambda check: listings[check]
+
+    monkeypatch.setattr(verdict, "fetcher", fetcher)
+    args = ["verdict", str(grader), '{"lint": true, "type-gate": true}', "org/repo", "abc", LAB]
+
+    assert verdict.main(args, {"GITHUB_OUTPUT": str(output)}) == 0
+
+    assert output.read_text() == "lab_lint=failure\nlab_type-gate=success\n"
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "::error::The lab lost a unit of lab/lint and posted no verdict: "
+        "rerequest the lab/lint check to grade it again."
+    )
+
+
 def test_pending_then_success_polls_until_complete() -> None:
     clock = Clock()
     fetch, asked = scripted(

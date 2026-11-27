@@ -59,6 +59,12 @@ def conclusion(runs: Sequence[Mapping[str, Any]], app: str) -> str | None:
     return newest["conclusion"] if newest["conclusion"] in PASSED else FAILURE
 
 
+def lost(listings: Mapping[str, Sequence[Mapping[str, Any]]], app: str) -> list[str]:
+    """Return the checks whose newest run of the trusted App completed neutral; none is named yet."""
+    del listings, app
+    return []
+
+
 def verdicts(
     checks: Mapping[str, str],
     fetch: Fetch,
