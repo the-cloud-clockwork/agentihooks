@@ -280,7 +280,7 @@ class Reach:
                 elif (
                     name not in self.fields[owner]
                     or isinstance(self.nodes[owner], ast.ClassDef)
-                    and self.nodes[owner].bases
+                    and cast(ast.ClassDef, self.nodes[owner]).bases
                 ):
                     result.update(self.missing_attribute(owner, name))
             else:
