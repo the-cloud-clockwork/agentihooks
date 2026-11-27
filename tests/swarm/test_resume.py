@@ -213,6 +213,32 @@ def test_a_resumed_agent_is_told_it_was_restored_and_must_reread_its_task_folder
     assert "Before acting, re-read" in text
 
 
+@pytest.mark.feature("seat-brief")
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_a_resume_adds_one_brief_and_confirmation_without_repeating_the_handoff(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str
+) -> None:
+    from scripts.swarm import prompt
+
+    action = "Read the saved task proof."
+    handoff = f"# Handoff v2\n## Done\nresume-body-sentinel\n## Next\n1. {action}\n"
+    saved(store, tmp_path, harness=harness)
+
+    def read_handoff(slug: str, task: str) -> str:
+        assert (slug, task) == ("sw", "t1")
+        return handoff
+
+    monkeypatch.setattr(store, "handoff", read_handoff)
+    runtime = ResumingRuntime()
+    restore(store, runtime)
+    text = runtime.resumed[0][2]
+    assert text.startswith(resume.restored_text("sw", agent(seat="eng-1@sw"), snapshot.ledger_source("sw")))
+    assert text.count(prompt.SEAT_BRIEF) == 1
+    assert "resume-body-sentinel" not in text
+    assert "agentihooks swarm sw confirm-handoff " in text
+    assert f"--next '{action}'" in text
+
+
 def test_a_resumed_agent_record_takes_the_model_effort_and_source_its_relaunch_reports(store, tmp_path):
     saved(store, tmp_path, model="sonnet", effort="low", model_source="luna", model_confidence=0.99)
     restore(store, ResumingRuntime())
