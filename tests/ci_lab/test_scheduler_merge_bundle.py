@@ -98,18 +98,34 @@ def test_bundle_returns_the_commit_with_its_parent_excluded_past_an_unrelated_st
     _store(tmp_path, root, "a-store")
     store_b = _store(tmp_path, root, "b-store")
     parent = _commit(store_b, {"a.txt": "1\n"})
+    satisfied = tmp_path / "satisfied"
+    _git(tmp_path, "clone", "-q", str(store_b), str(satisfied))
     sha = _commit(store_b, {"a.txt": "2\n"})
     expander = _expander(tmp_path, root)
 
     found = expander.bundle(sha)
 
     assert found is not None
-    (tmp_path / "out.bundle").write_bytes(found)
-    clone = tmp_path / "clone"
-    _git(tmp_path, "clone", "-q", "--bare", str(tmp_path / "out.bundle"), str(clone))
-    assert _git(clone, "cat-file", "-t", sha).strip() == "commit"
-    excluded = subprocess.run(["git", "-C", str(clone), "cat-file", "-e", parent], capture_output=True)
-    assert excluded.returncode != 0
+    bundle_path = tmp_path / "out.bundle"
+    bundle_path.write_bytes(found)
+    bundle_sha, bundle_ref = _git(store_b, "bundle", "list-heads", str(bundle_path)).split()
+    assert bundle_sha == sha
+
+    # the parent is excluded as a prerequisite: a repository that lacks it refuses the bundle's own ref, naming it
+    empty = tmp_path / "empty"
+    _git(tmp_path, "init", "-q", "--bare", str(empty))
+    refused = subprocess.run(
+        ["git", "-C", str(empty), "fetch", str(bundle_path), f"{bundle_ref}:{bundle_ref}"],
+        capture_output=True,
+        text=True,
+    )
+    assert refused.returncode != 0
+    assert parent in refused.stderr
+
+    # the commit itself is in the bundle: a repository that already holds the excluded parent takes it from no
+    # more than the bundle alone
+    _git(satisfied, "fetch", "-q", str(bundle_path), f"{bundle_ref}:{bundle_ref}")
+    assert _git(satisfied, "cat-file", "-t", sha).strip() == "commit"
     assert _git(store_b, "for-each-ref", "refs/lab-bundle/").strip() == ""
 
 
