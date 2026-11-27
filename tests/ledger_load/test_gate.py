@@ -372,15 +372,17 @@ def test_the_sampler_sums_the_cpu_threads_and_rss_of_every_ledger_server_process
     cores: float,
 ) -> None:
     clock = iter([0.0, 10.0, 20.0])
-    counters = {1: iter([2.0, 3.0, 4.0]), 2: iter([3.5, 13.5, 33.5])}
+    values = {1: [2.0, 3.0, 4.0], 2: [3.5, 13.5, 33.5]}
+    counters = {pid: iter(used) for pid, used in values.items()}
     slept: list[float] = []
     monkeypatch.setattr(ledger_load, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=slept.append))
     monkeypatch.setattr(ledger_load, "cpu_seconds", lambda pid: next(counters[pid]))
     monkeypatch.setattr(ledger_load, "server_resources", {1: (4, 80_000), 2: (6, 90_000)}.__getitem__)
-    results: dict[str, list[Any]] = {"cpu": [], "resources": [], "errors": []}
+    results: dict[str, list[Any]] = {"cpu": [], "server_cpu": [], "resources": [], "errors": []}
     ledger_load.sample_cpu(pids, 20.0, results)
     assert results == {
         "cpu": list(zip([0.0, 10.0, 20.0], cpu)),
+        "server_cpu": [(at, [values[pid][n] for pid in pids]) for n, at in enumerate((0.0, 10.0, 20.0))],
         "resources": [(at, *resources) for at in (0.0, 10.0, 20.0)],
         "errors": [],
     }
