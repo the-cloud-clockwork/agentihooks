@@ -5,7 +5,7 @@ rules:
     message: >-
       The unit copy layout copies a queue leg coverage folder into a push leg without
       copy_function=os.link. Every copy writes the coverage databases again, and on 26 November the
-      twenty push legs filled the 6Gi anton-oss work folder of the reusing dev push copy job.
+      twenty push legs filled the 6Gi runner work folder of the reusing dev push copy job.
     paths:
       include:
         - /scripts/ci_unit_copy.py

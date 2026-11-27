@@ -184,6 +184,7 @@ def test_the_summary_readers_leave_the_shared_coverage_database_unchanged(tmp_pa
     ci_unit_copy.layout(queue, _mapped(4), out)
     stamped = _stamps(queue, out)
     shared = [out / f"coverage-3.12-{leg}" / ".coverage" for leg in (1, 17)]
+    assert all(path.samefile(database) for path in shared)
     assert [coverage_check.problem(path) for path in shared] == [None, None]
     summary = tmp_path / "executed-lines.json"
     coverage_summary.write(shared, summary)
