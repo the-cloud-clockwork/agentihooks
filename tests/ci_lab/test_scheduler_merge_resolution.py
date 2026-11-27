@@ -5,6 +5,7 @@ only when its second parent is the head. While GitHub has none yet, the head is 
 `UNMERGED_TRIES`th try the lab gives up and grades the bare head against its event base, as it always did.
 """
 
+import threading
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -76,7 +77,7 @@ def test_a_pending_merge_resolution_holds_the_head_for_a_later_pass(lab: Callabl
     run.engine.ports = replace(run.engine.ports, merges=port)
     _push(run, HEAD_A, 41)
     held = run.tick(1000)
-    assert held[0].startswith(f"holding {HEAD_A}: still resolving")
+    assert held[-1].startswith(f"holding {HEAD_A}: still resolving")
     assert run.grades() == []
     assert run.tick(1000)[0].startswith("grading ")
     assert run.grade(HEAD_A).graded_commit == MERGE
@@ -88,8 +89,9 @@ def test_a_required_frame_regrade_of_a_resolved_merge_resolves_the_merge_again(
     lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     gates = {"lint": (unit(1),)}
+    other_merge, other_parent = "7" * 40, "6" * 40
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
-    port = Mock(return_value=(MERGE, PARENT))
+    port = Mock(side_effect=[(MERGE, PARENT), (other_merge, other_parent)])
     run.engine.ports = replace(run.engine.ports, merges=port)
     _push(run, HEAD_A, 41)
     run.tick(1000)
@@ -100,8 +102,34 @@ def test_a_required_frame_regrade_of_a_resolved_merge_resolves_the_merge_again(
     assert any(action.startswith("grading ") for action in actions)
     replacement = next(grade for grade in run.grades() if grade.run != old.run)
     assert replacement.pull_number == 41
-    assert replacement.graded_commit == MERGE
+    assert replacement.graded_commit == other_merge
+    assert replacement.graded_commit != old.graded_commit
+    assert [grade.run for grade in run.grades() if not grade.superseded] == [replacement.run]
     assert port.call_count == 2
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_required_frame_regrade_with_no_merge_yet_holds_then_falls_back_at_the_bound(
+    lab: Callable[..., Run], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gates = {"lint": (unit(1),)}
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
+    port = Mock(return_value=(MERGE, PARENT))
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    _push(run, HEAD_A, 41)
+    run.tick(1000)
+    old = run.grade(HEAD_A)
+    monkeypatch.setattr(scheduler, "PULL_REQUIRED", (*scheduler.PULL_REQUIRED, "release-job"))
+    port.return_value = None
+    for i in range(scheduler.UNMERGED_TRIES):
+        actions = run.tick(2000 + i * 1000)
+        assert any("holding the required-frame regrade" in action for action in actions)
+        assert run.grade(HEAD_A).run == old.run
+    actions = run.tick(2000 + scheduler.UNMERGED_TRIES * 1000)
+    assert any(action.startswith("grading ") for action in actions)
+    replacement = next(grade for grade in run.grades() if grade.run != old.run)
+    assert replacement.merge_fallback is True
+    assert replacement.graded_commit == ""
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")
@@ -113,10 +141,10 @@ def test_a_head_with_no_merge_yet_waits_out_the_window_then_falls_back_at_the_bo
     _push(run, HEAD_A, 41)
     for _ in range(scheduler.UNMERGED_TRIES):
         actions = run.tick(1000)
-        assert actions[0].startswith(f"holding {HEAD_A}: GitHub has resolved no merge")
+        assert actions[-1].startswith(f"holding {HEAD_A}: GitHub has resolved no merge")
         assert run.grades() == []
     actions = run.tick(1000)
-    assert actions[0].startswith("grading ")
+    assert actions[-1].startswith("grading ")
     grade = run.grade(HEAD_A)
     assert grade.graded_commit == ""
     assert grade.merge_fallback is True
@@ -179,7 +207,7 @@ def test_superseding_a_lane_with_a_resolved_merge_still_drops_the_older_heads_un
     run.tick(1000)
     _push(run, HEAD_B, 41, lane="feature")
     run.tick(1000)
-    assert run.engine.queue.pending() == []
+    assert run.engine.queue.pending() == [scheduler.job_id(HEAD_B, unit(1))]
     assert run.grade(HEAD_B).graded_commit == MERGE
 
 
@@ -208,8 +236,29 @@ def test_a_pull_request_grade_with_no_pull_number_resolves_no_merge(lab: Callabl
     assert run.grade(HEAD_A).graded_commit == ""
 
 
-def _synthetic_merge(repo: Path, base: str, head: str) -> str:
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_a_promotion_grade_resolves_no_merge_and_closes_with_no_fallback(lab: Callable[..., Run]) -> None:
+    item = unit(1)
+    run = lab({HEAD_A: scheduler.Plan(TREE, BASE, {"lint": (item,)})})
+    port = Mock(return_value=(MERGE, PARENT))
+    run.engine.ports = replace(run.engine.ports, merges=port)
+    run.cache(item)
+    run.push(HEAD_A)
+    run.tick(1000)
+    port.assert_not_called()
+    grade = run.grade(HEAD_A)
+    assert grade.graded_commit == ""
+    assert grade.merge_fallback is False
+    assert grade.conclusion == "success"
+    assert scheduler.summary(grade)["graded_commit"] is None
+    assert scheduler.summary(grade)["merge_fallback"] is False
+
+
+def _synthetic_merge(repo: Path, base: str, head: str, monkeypatch: pytest.MonkeyPatch) -> str:
     """A commit whose tree is the head's own and whose parents are base then head, as GitHub builds a test merge."""
+    for name, value in (("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t")):
+        monkeypatch.setenv(name, value)
+        monkeypatch.setenv(name.replace("AUTHOR", "COMMITTER"), value)
     tree = _git(repo, "rev-parse", f"{head}^{{tree}}").strip()
     return _git(repo, "commit-tree", tree, "-p", base, "-p", head, "-m", "merge").strip()
 
@@ -219,7 +268,7 @@ def test_expand_reads_the_tree_and_diffs_against_the_first_parent_of_a_resolved_
     tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, fork, head = origin
-    merge = _synthetic_merge(repo, fork, head)
+    merge = _synthetic_merge(repo, fork, head, monkeypatch)
     request = GradeRequest(f"file://{repo}", head, fork, Priority.PULL_REQUEST, ACTOR, False, graded_commit=merge)
     found = _expander(tmp_path, monkeypatch).expand(request)
     assert found.graded_commit == merge
@@ -232,7 +281,7 @@ def test_bundle_answers_a_bundle_of_the_commit_fetchable_once_its_two_parents_ar
     tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, base, head = origin
-    merge = _synthetic_merge(repo, base, head)
+    merge = _synthetic_merge(repo, base, head, monkeypatch)
     expander = _expander(tmp_path, monkeypatch)
     mirror = expander.mirror(f"file://{repo}")
     mirror.fetch(base)
@@ -247,6 +296,35 @@ def test_bundle_answers_a_bundle_of_the_commit_fetchable_once_its_two_parents_ar
     bundle_file.write_bytes(found)
     _git(target, "fetch", "--quiet", str(bundle_file), f"{merge}:refs/heads/merge")
     assert _git(target, "rev-parse", "refs/heads/merge").strip() == merge
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_bundle_answers_two_requests_for_one_commit_at_once(
+    tmp_path: Path, origin: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, base, head = origin
+    merge = _synthetic_merge(repo, base, head, monkeypatch)
+    expander = _expander(tmp_path, monkeypatch)
+    mirror = expander.mirror(f"file://{repo}")
+    mirror.fetch(base)
+    mirror.fetch(head)
+    mirror.fetch(merge)
+    found: list[bytes | None] = [None, None]
+    errors: list[BaseException] = []
+
+    def ask(slot: int) -> None:
+        try:
+            found[slot] = expander.bundle(merge)
+        except BaseException as error:
+            errors.append(error)
+
+    threads = [threading.Thread(target=ask, args=(0,)), threading.Thread(target=ask, args=(1,))]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    assert found[0] is not None and found[1] is not None
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")

@@ -1130,6 +1130,8 @@ def test_the_grades_of_a_commit_are_its_live_grades_and_the_closed_ones_its_evid
         "superseded": False,
         "units": {"total": 1, "final": 1},
         "checks": {"lint": done, scheduler.REQUIRED: done},
+        "graded_commit": None,
+        "merge_fallback": False,
     }
     queued = {"status": "queued", "conclusion": None}
     assert scheduler.summary(live) == {

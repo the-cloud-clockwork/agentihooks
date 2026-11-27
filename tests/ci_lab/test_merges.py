@@ -167,6 +167,7 @@ def test_background_raises_the_resolutions_own_error_once_on_a_later_ask() -> No
     background = merges.Background(held, clock=clock)
     with pytest.raises(merges.MergePending):
         background("example/repo", 41, HEAD)
+    assert held.started.acquire(timeout=WAIT_S)
     held.release.set()
     _finished(background.resolutions)
     with pytest.raises(merges.MergeUnanswered, match="answered 500"):
@@ -176,4 +177,18 @@ def test_background_raises_the_resolutions_own_error_once_on_a_later_ask() -> No
         background("example/repo", 41, HEAD)
     assert held.started.acquire(timeout=WAIT_S)
     assert held.asked == [("example/repo", 41, HEAD), ("example/repo", 41, HEAD)]
+    held.release.set()
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_background_raises_unanswered_once_a_resolution_runs_past_its_bound() -> None:
+    held = Held({("example/repo", 41, HEAD): (MERGE, BASE)})
+    clock = Clock()
+    background = merges.Background(held, clock=clock, bound_s=5.0)
+    with pytest.raises(merges.MergePending):
+        background("example/repo", 41, HEAD)
+    assert held.started.acquire(timeout=WAIT_S)
+    clock.now = 5.0
+    with pytest.raises(merges.MergeUnanswered, match="did not resolve within 5s"):
+        background("example/repo", 41, HEAD)
     held.release.set()

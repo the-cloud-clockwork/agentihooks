@@ -800,6 +800,15 @@ def test_the_client_speaks_the_lease_api_and_reads_a_refused_token_as_none(
     assert found(jobs, lease.job).outcome == "passed"
 
 
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_client_reads_the_bundle_routes_404_and_refused_token_as_none(scheduler: str, jobs: queue.Queue) -> None:
+    jobs.enqueue([UNIT_A], "h1", {}, "b1", "g1", graded_commit="m" * 40)
+    client = worker.Client(scheduler)
+    [lease] = client.lease("pod-1", 1, CAPABILITIES, 0)
+    assert client.bundle(lease.job, "wrong", "m" * 40) is None
+    assert client.bundle(lease.job, lease.token, "m" * 40) is None
+
+
 @pytest.mark.feature("lab-worker-pod-loop")
 def test_the_lease_request_body_carries_exactly_worker_free_slots_capabilities_and_wait_ms() -> None:
     seen: list[bytes] = []

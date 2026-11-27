@@ -2,6 +2,7 @@
 13890: the tree and the two commit fields a static unit's lease and context read.
 """
 
+import hashlib
 import json
 import subprocess
 import types
@@ -11,6 +12,7 @@ import pytest
 
 from scripts.ci_lab import executors, lease_api, leases, queue, static_gates
 from scripts.ci_lab.leases import Grant
+from scripts.ci_lab.outcomes import PASSED
 from scripts.ci_lab.units import Unit
 from scripts.ci_lab.worker import Client, Lease, _lease
 from scripts.dep_manifest import _git
@@ -107,6 +109,79 @@ def test_static_cuts_its_shared_tree_from_the_graded_commit_when_the_lease_names
     assert ("lease", MERGE) in trees.calls
     assert ("lease", "h1") not in trees.calls
     assert trees.mirror.fetched == [MERGE]
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_tests_runs_its_batch_on_the_graded_commit_when_the_lease_names_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.ci_lab import run_tests
+
+    merged = folder(tmp_path, "merged", {".github/test-requirements.lock": "lock-m"})
+    manifest = {"tests": {"tests/a.py::t": {"files": ["scripts/a.py"]}}}
+    suite = executors.Suite(
+        folder(tmp_path, "in", {"manifest.json": json.dumps(manifest)}) / "manifest.json", tmp_path / "flakes.jsonl"
+    )
+    verdict = run_tests.Verdict(PASSED, False, (), {}, 1, tmp_path / "log.txt", tmp_path / "cov")
+
+    def ran(*_args: object) -> run_tests.Verdict:
+        return verdict
+
+    monkeypatch.setattr(executors.run_tests, "run", ran)
+    monkeypatch.setattr(executors.venvs, "venv_for", lambda *_a, **_kw: (tmp_path / "venv", False))
+    trees = FakeWorktrees({MERGE: merged}, mirror=FakeMirror())
+    pod = pod_of(tmp_path, trees)
+    lease = Lease(
+        "job",
+        "tok",
+        "h1",
+        Unit(
+            "test",
+            "k",
+            ("tests/a.py::t",),
+            json.dumps(manifest),
+            hashlib.sha256(json.dumps(manifest).encode()).hexdigest(),
+        ),
+        1,
+        1500,
+        "b1",
+        "g1",
+        MERGE,
+    )
+
+    executors.tests(pod, suite, lease, pod.runs)
+
+    assert ("lease", MERGE) in trees.calls
+    assert ("lease", "h1") not in trees.calls
+    assert trees.mirror.fetched == [MERGE]
+
+
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_ensure_graded_asks_the_bundler_outside_the_tree_lock(tmp_path: Path) -> None:
+    trees = FakeWorktrees({}, mirror=FakeMirror(fails=True))
+    base_pod = pod_of(tmp_path, trees)
+    acquired: list[bool] = []
+
+    def bundler(job: str, token: str, sha: str) -> bytes | None:
+        free = base_pod.trees.lock.acquire(blocking=False)
+        acquired.append(free)
+        if free:
+            base_pod.trees.lock.release()
+        return None
+
+    pod = executors.Pod(
+        base_pod.trees,
+        base_pod.root,
+        base_pod.ports,
+        base_pod.whitelist,
+        base_pod.timeout,
+        base_pod.clock,
+        bundler=bundler,
+    )
+    lease = Lease("job", "tok", "h1", Unit("static", "k", ("lint",)), 1, 1500, "b1", "g1", MERGE)
+    with pytest.raises(subprocess.CalledProcessError):
+        executors._ensure_graded(pod, lease)
+    assert acquired == [True]
 
 
 @pytest.mark.feature("lab-grades-the-pull-request-merge")

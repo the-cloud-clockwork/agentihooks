@@ -755,6 +755,23 @@ def test_the_first_pass_retires_the_pull_request_grades_whose_head_nothing_wants
 
 
 @pytest.mark.feature("lab-retire-stale-pull-request-heads")
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
+def test_the_first_pass_retires_a_resolved_merge_grade_by_its_head(lab: Callable[..., Run]) -> None:
+    merge, parent = "9" * 40, "8" * 40
+    run = lab({HEAD_A: replace(plan({"lint": (unit(1),)}), merge_base=parent, graded_commit=merge)})
+    run.engine.ports = replace(run.engine.ports, merges=lambda repo, number, head: (merge, parent))
+    event = HeadEvent("pull_request", REPO, HEAD_A, BASE, ACTOR, "opened", HEAD_A, 41)
+    run.lab.inbox.pending.append(scheduler.Head(event, HEAD_A))
+    run.tick(1000)
+    stale = run.grade(HEAD_A).run
+    assert run.grade(HEAD_A).graded_commit == merge
+    _wanted(run).heads[REPO] = set()
+    again = _restarted(run)
+    assert again.tick(1100)[0] == _retired(stale, HEAD_A, 1)
+    assert again.lab.client.get(scheduler.GRADES + stale) is None
+
+
+@pytest.mark.feature("lab-retire-stale-pull-request-heads")
 def test_the_stale_grades_of_one_pass_are_retired_in_run_order_and_counted(lab: Callable[..., Run]) -> None:
     run = lab({HEAD_A: plan({"lint": (unit(1), unit(3))}), HEAD_B: plan({"lint": (unit(2),)})})
     _opened(run, HEAD_A)
