@@ -12,19 +12,7 @@ from scripts.ci_lab.pods import PodImages, Pods, unmanaged, unread
 from scripts.ci_lab.queue import Queue
 from scripts.ci_lab.units import Unit
 
-__all__ = [
-    "REQUEUES",
-    "SOLO",
-    "Grant",
-    "Leases",
-    "Manifests",
-    "Shed",
-    "release",
-    "shed_rank",
-    "solo",
-    "unshed",
-    "unstored",
-]
+__all__ = ["REQUEUES", "SOLO", "Grant", "Leases", "Manifests", "release", "solo", "unstored"]
 
 REQUEUES = 1
 
@@ -42,7 +30,7 @@ def unshed() -> tuple[str, ...]:
     return ()
 
 
-def shed_rank(shed: Collection[str]) -> float:
+def _shed_rank(shed: Collection[str]) -> float:
     """The first rank a lease may not take: that of the most urgent class the budget sheds, or none at all when
     nothing sheds. The budget sheds the least urgent classes first and the pending order is rank first, so every job
     from that rank on is shed work, an unranked job included since it sorts after backfill."""
@@ -94,9 +82,8 @@ class Leases:
         return not found.running.endswith(f"@{wanted}")
 
     def lease(self, worker: str, free_slots: int, capabilities: frozenset[str], wait_ms: int) -> list[Grant]:
-        """Grant fitting pending jobs of the classes the shed port does not name, polling until some are granted or the
-        wait ends, so a shed class's queued units wait for the budget to reset; the worker's offer is its free
-        slots while it waits and what its grants leave once it returns, and a poll that grants marks its pod busy. A
+        """Grant fitting pending jobs of the classes the shed port leaves out, polling until some are granted or the
+        wait ends; the worker's offer is its free slots while it waits and what its grants leave once it returns, and a poll that grants marks its pod busy. A
         worker that holds a solo unit is granted no other one, so its memory never holds two; the test reads the unit
         when the lease is taken, whenever the job was enqueued."""
         self.queue.offer(worker, free_slots, self.clock())
@@ -120,12 +107,12 @@ class Leases:
         if free_slots <= 0:
             return grants
         held: bool | None = None
-        stop = shed_rank(self.shed())
+        first_shed_rank = _shed_rank(self.shed())
         for job_id in self.queue.ordered():
             job = self.queue.job(job_id)
             if job is None:
                 continue
-            if job.rank >= stop:
+            if job.rank >= first_shed_rank:
                 break
             if job.requirement.slots > free_slots:
                 continue

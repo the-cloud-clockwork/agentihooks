@@ -15,26 +15,27 @@ from scripts.ci_lab.leases import Leases
 from tests.ci_lab.test_scheduler import APP_SETTINGS, Expander, Inbox, Poster, RelayBuilds, fake_redis
 
 
-@pytest.mark.feature("lab-worker-seat-keeping-restart")
-def test_main_builds_leases_with_the_wanted_image_and_the_pods_port_image_reader(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, port: Any, image: dict[str, str], shed: dict[str, float]
+) -> tuple[Leases, budget.Budget]:
+    """Run scheduler main with its services faked, the given pods port and a runtime budget of 600 core minutes that
+    sheds at the given fractions; return the leases main hands listen and the budget it hands build."""
     import boto3  # pyright: ignore[reportMissingTypeStubs]
     import redis
 
     from scripts.events import config, factory
 
     client = fake_redis()
-    kube = pods.KubePods("https://api:6443", "ci-lab", tmp_path / "token", ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT))
-    listened: dict[str, Leases] = {}
+    captured: dict[str, Any] = {}
     bus = SimpleNamespace(lab_heads=SimpleNamespace(consumer=lambda durable, subject: "consumer"))
 
     def build(environ: Any, redis_client: Any, objects: Any, consumer: Any, spending: Any) -> scheduler.Scheduler:
-        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], kube)
+        captured["budget"] = spending
+        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], port)
         return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()), spending)
 
     def listen(found: Any, leases: Leases, *rest: Any) -> list[Any]:
-        listened["leases"] = leases
+        captured["leases"] = leases
         return []
 
     runtime = tmp_path / "runtime.yaml"
@@ -42,141 +43,24 @@ def test_main_builds_leases_with_the_wanted_image_and_the_pods_port_image_reader
         yaml.safe_dump(
             {
                 "classes": list(CLASSES),
-                "budget": {"coreMinutesPerDay": 600, "shed": {"backfill": 0.5}},
+                "budget": {"coreMinutesPerDay": 600, "shed": shed},
                 "backfill": {"auditShare": 0.1, "moduleSweeps": False},
             }
         )
     )
-    environ = {
-        scheduler.contract.REDIS_URL: "redis://lab",
-        scheduler.contract.RUNTIME_CONFIG: str(runtime),
-        scheduler.MINIO_ENDPOINT: "endpoint",
-        scheduler.MINIO_ACCESS_KEY: "access",
-        scheduler.MINIO_SECRET_KEY: "secret",
-        scheduler.MINIO_BUCKET: "bucket",
-        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
-        scheduler.IMAGE: "ghcr.io/lab-worker@sha256:wanted",
-    } | APP_SETTINGS
-    bound = config.BusConfig(backend="nats", url="nats://lab", provision=False)
-    monkeypatch.setattr(redis.Redis, "from_url", lambda url, **options: client)
-    monkeypatch.setattr(boto3, "client", lambda name, **options: "s3 client")
-    monkeypatch.setattr(
-        config.BusConfig, "from_environ", classmethod(lambda cls, found: config.BusConfig("nats", "nats://lab"))
+    environ = (
+        {
+            scheduler.contract.REDIS_URL: "redis://lab",
+            scheduler.contract.RUNTIME_CONFIG: str(runtime),
+            scheduler.MINIO_ENDPOINT: "endpoint",
+            scheduler.MINIO_ACCESS_KEY: "access",
+            scheduler.MINIO_SECRET_KEY: "secret",
+            scheduler.MINIO_BUCKET: "bucket",
+            scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
+        }
+        | image
+        | APP_SETTINGS
     )
-    monkeypatch.setattr(factory, "open_bus", lambda found: bus if found == bound else None)
-    monkeypatch.setattr(scheduler, "build", build)
-    monkeypatch.setattr(scheduler, "listen", listen)
-    monkeypatch.setattr(scheduler, "serve", lambda *args: 7)
-    monkeypatch.setattr(relay, "build", RelayBuilds())
-
-    assert scheduler.main([], environ) == 7
-
-    leases = listened["leases"]
-    assert leases.image == "ghcr.io/lab-worker@sha256:wanted"
-    assert leases.images == kube.images
-
-
-@pytest.mark.feature("lab-worker-seat-keeping-restart")
-def test_main_gives_leases_the_unmanaged_image_reader_outside_a_cluster(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import boto3  # pyright: ignore[reportMissingTypeStubs]
-    import redis
-
-    from scripts.events import config, factory
-
-    client = fake_redis()
-    listened: dict[str, Leases] = {}
-    bus = SimpleNamespace(lab_heads=SimpleNamespace(consumer=lambda durable, subject: "consumer"))
-
-    def build(environ: Any, redis_client: Any, objects: Any, consumer: Any, spending: Any) -> scheduler.Scheduler:
-        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], pods.unmanaged)
-        return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()), spending)
-
-    def listen(found: Any, leases: Leases, *rest: Any) -> list[Any]:
-        listened["leases"] = leases
-        return []
-
-    runtime = tmp_path / "runtime.yaml"
-    runtime.write_text(
-        yaml.safe_dump(
-            {
-                "classes": list(CLASSES),
-                "budget": {"coreMinutesPerDay": 600, "shed": {"backfill": 0.5}},
-                "backfill": {"auditShare": 0.1, "moduleSweeps": False},
-            }
-        )
-    )
-    environ = {
-        scheduler.contract.REDIS_URL: "redis://lab",
-        scheduler.contract.RUNTIME_CONFIG: str(runtime),
-        scheduler.MINIO_ENDPOINT: "endpoint",
-        scheduler.MINIO_ACCESS_KEY: "access",
-        scheduler.MINIO_SECRET_KEY: "secret",
-        scheduler.MINIO_BUCKET: "bucket",
-        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
-    } | APP_SETTINGS
-    bound = config.BusConfig(backend="nats", url="nats://lab", provision=False)
-    monkeypatch.setattr(redis.Redis, "from_url", lambda url, **options: client)
-    monkeypatch.setattr(boto3, "client", lambda name, **options: "s3 client")
-    monkeypatch.setattr(
-        config.BusConfig, "from_environ", classmethod(lambda cls, found: config.BusConfig("nats", "nats://lab"))
-    )
-    monkeypatch.setattr(factory, "open_bus", lambda found: bus if found == bound else None)
-    monkeypatch.setattr(scheduler, "build", build)
-    monkeypatch.setattr(scheduler, "listen", listen)
-    monkeypatch.setattr(scheduler, "serve", lambda *args: 7)
-    monkeypatch.setattr(relay, "build", RelayBuilds())
-
-    assert scheduler.main([], environ) == 7
-
-    leases = listened["leases"]
-    assert leases.image == ""
-    assert leases.images is pods.unread
-
-
-@pytest.mark.feature("lab-lease-shed-class")
-def test_main_gives_leases_the_classes_its_daily_core_budget_sheds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import boto3  # pyright: ignore[reportMissingTypeStubs]
-    import redis
-
-    from scripts.events import config, factory
-
-    client = fake_redis()
-    listened: dict[str, Leases] = {}
-    spent: dict[str, budget.Budget] = {}
-    bus = SimpleNamespace(lab_heads=SimpleNamespace(consumer=lambda durable, subject: "consumer"))
-
-    def build(environ: Any, redis_client: Any, objects: Any, consumer: Any, spending: Any) -> scheduler.Scheduler:
-        spent["budget"] = spending
-        ports = scheduler.Ports(Inbox(), Expander({}), lambda repo: Poster(), frozenset[str], pods.unmanaged)
-        return scheduler.Scheduler(redis_client, objects, ports, scheduler.Settings(frozenset()), spending)
-
-    def listen(found: Any, leases: Leases, *rest: Any) -> list[Any]:
-        listened["leases"] = leases
-        return []
-
-    runtime = tmp_path / "runtime.yaml"
-    runtime.write_text(
-        yaml.safe_dump(
-            {
-                "classes": list(CLASSES),
-                "budget": {"coreMinutesPerDay": 600, "shed": {"backfill": 0.5, "promotion": 0.75}},
-                "backfill": {"auditShare": 0.1, "moduleSweeps": False},
-            }
-        )
-    )
-    environ = {
-        scheduler.contract.REDIS_URL: "redis://lab",
-        scheduler.contract.RUNTIME_CONFIG: str(runtime),
-        scheduler.MINIO_ENDPOINT: "endpoint",
-        scheduler.MINIO_ACCESS_KEY: "access",
-        scheduler.MINIO_SECRET_KEY: "secret",
-        scheduler.MINIO_BUCKET: "bucket",
-        scheduler.contract.GIT_MIRROR: str(tmp_path / "node"),
-    } | APP_SETTINGS
     bound = config.BusConfig(backend="nats", url="nats://lab", provision=False)
     monkeypatch.setattr(redis.Redis, "from_url", lambda url, **options: client)
     monkeypatch.setattr(boto3, "client", lambda name, **options: "s3 client")
@@ -191,10 +75,40 @@ def test_main_gives_leases_the_classes_its_daily_core_budget_sheds(
     monkeypatch.setattr(relay, "build", RelayBuilds())
 
     assert scheduler.main([], environ) == 7
+    return captured["leases"], captured["budget"]
 
-    leases = listened["leases"]
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_main_builds_leases_with_the_wanted_image_and_the_pods_port_image_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kube = pods.KubePods("https://api:6443", "ci-lab", tmp_path / "token", ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT))
+
+    wanted = {scheduler.IMAGE: "ghcr.io/lab-worker@sha256:wanted"}
+    leases, _ = started(tmp_path, monkeypatch, kube, wanted, {"backfill": 0.5})
+
+    assert leases.image == "ghcr.io/lab-worker@sha256:wanted"
+    assert leases.images == kube.images
+
+
+@pytest.mark.feature("lab-worker-seat-keeping-restart")
+def test_main_gives_leases_the_unmanaged_image_reader_outside_a_cluster(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    leases, _ = started(tmp_path, monkeypatch, pods.unmanaged, {}, {"backfill": 0.5})
+
+    assert leases.image == ""
+    assert leases.images is pods.unread
+
+
+@pytest.mark.feature("lab-lease-shed-class")
+def test_main_gives_leases_the_classes_its_daily_core_budget_sheds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    leases, spending = started(tmp_path, monkeypatch, pods.unmanaged, {}, {"backfill": 0.5, "promotion": 0.75})
+
     assert tuple(leases.shed()) == ()
-    spent["budget"].charge(1, 300 * 60)
+    spending.charge(1, 300 * 60)
     assert tuple(leases.shed()) == ("backfill",)
-    spent["budget"].charge(1, 150 * 60)
+    spending.charge(1, 150 * 60)
     assert tuple(leases.shed()) == ("backfill", "promotion")
