@@ -314,6 +314,7 @@ MODULES = (
     "scripts.tick.steps.experts",
     "scripts.tick.steps.review",
     "scripts.tick.steps.thin",
+    "scripts.tick.steps.master_loop",
 )
 
 for _module in MODULES:

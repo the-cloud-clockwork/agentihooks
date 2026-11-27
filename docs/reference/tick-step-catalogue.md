@@ -81,6 +81,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | findings pass | wrapper events | slow | 2 | 60 | health findings | none | none |
 | health findings | wrapper events | slow | 8 | 60 | tick view | none | none |
 | ledger event pass | wrapper events | slow | 2 | 60 | tick view | none | none |
+| master loop | wrapper events | tick | 2 | 120 | none | coordination, inbox | master-loop-seat-inbox |
 | merge pass | wrapper events | tick | 2 | 60 | tick view | none | none |
 | overrun pass | wrapper events | tick | 2 | 60 | stall watch | none | none |
 | priorities sweep | wrapper events | slow | 2 | 60 | tick view | none | none |
