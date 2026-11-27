@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import datetime
+import functools
 import hashlib
 import logging
 import sys
@@ -28,7 +29,17 @@ from nats.js.errors import (
 from nats.js.kv import KeyValue
 
 from . import nats_batch, nats_payload, nats_replicas, nkey
-from .bus import SERVE_WAITED_MS, Bus, Delivery, EventLog, NoStream, StateConflict, StateEntry, WorkQueue
+from .bus import (
+    SERVE_WAITED_MS,
+    Bus,
+    Delivery,
+    EventLog,
+    NoStream,
+    PayloadTooLarge,
+    StateConflict,
+    StateEntry,
+    WorkQueue,
+)
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
@@ -802,12 +813,19 @@ class NatsBus:
             return store
 
     def serve(
-        self, subject: str, queue: str, handler: Callable[[str, bytes], bytes], wait_ms: int | None = None
+        self,
+        subject: str,
+        queue: str,
+        handler: Callable[[str, bytes], bytes],
+        wait_ms: int | None = None,
+        refusal: Callable[[str, bytes, PayloadTooLarge], bytes] | None = None,
     ) -> None:
         """Answer each request on one of the bus's SERVE_WORKERS serve threads, because nats-py awaits the callbacks of
         one subscription one at a time and an awaited handler would hold every later request on the subject behind a
         slow one; with wait_ms, a request that waited that long since it arrived is dropped unanswered, because its
-        requester stopped waiting and its handler would claim for nobody."""
+        requester stopped waiting and its handler would claim for nobody. A reply over the server limit goes
+        compressed, and one that does not fit even so is answered by refusal with the request's subject and data, or
+        logged and dropped with no refusal."""
 
         def answer(msg: Msg, received_ns: int) -> None:
             waited = (time.monotonic_ns() - received_ns) // 1_000_000
@@ -822,8 +840,8 @@ class NatsBus:
                 token = SERVE_WAITED_MS.set(waited)
                 try:
                     reply = handler(msg.subject, msg.data)
-                    nats_payload.validate(self._nc, msg.reply, reply)
-                    self._loop.run(msg.respond(reply))
+                    refused = functools.partial(refusal, msg.subject, msg.data) if refusal else None
+                    self._loop.run(msg.respond(nats_payload.fitted(self._nc, msg.reply, reply, refused)))
                 except Exception as error:
                     self._loop.run(_unreported(error))
                 finally:
@@ -838,7 +856,9 @@ class NatsBus:
     def request(self, subject: str, data: bytes, timeout_ms: int) -> bytes:
         nats_payload.validate(self._nc, subject, data)
         try:
-            return self._loop.run(self._nc.request(subject, data, timeout=_seconds(timeout_ms))).data
+            return nats_payload.expanded(
+                self._loop.run(self._nc.request(subject, data, timeout=_seconds(timeout_ms))).data
+            )
         except NoRespondersError:
             raise TimeoutError(f"no responders for {subject!r}") from None
         except FetchTimeout:

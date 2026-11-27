@@ -93,6 +93,17 @@ def test_each_shards_coverage_is_taken_as_it_lands_and_the_wait_ends_at_the_last
     assert (tmp_path / "shards/coverage-3.12-1/.coverage").read_text() == "coverage-3.12-1"
 
 
+@pytest.mark.feature("dev-push-sonar-analyses-after-every-unit-leg")
+def test_every_shard_listed_on_the_first_poll_arrives_without_a_pause(tmp_path: Path) -> None:
+    listing = {f"{kind}-3.12-{shard}": str(shard) for shard in range(1, 21) for kind in ("coverage", "flakes")}
+    service = Service([listing])
+    left, clock = _arrive(tmp_path, service, 20)
+    assert left == []
+    assert service.listings == 1
+    assert clock.pauses == []
+    assert sorted(service.fetched) == sorted(f"coverage-3.12-{shard}" for shard in range(1, 21))
+
+
 def test_a_shard_whose_flake_report_lands_without_coverage_has_ended(tmp_path: Path) -> None:
     service = Service([{"coverage-3.12-1": "1", "flakes-3.12-1": "2", "flakes-3.12-2": "3"}])
     left, _ = _arrive(tmp_path, service, 2)

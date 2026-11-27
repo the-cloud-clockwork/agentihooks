@@ -13,9 +13,7 @@ and dropped. A relay whose App token GitHub refuses is named held, stays pending
 repository for the scheduler's post hold.
 """
 
-import base64
 import json
-import os
 import subprocess
 import time
 from collections import defaultdict
@@ -28,7 +26,7 @@ from urllib.parse import urlsplit
 
 import requests
 
-from scripts.ci_lab import contract, evidence, worktrees
+from scripts.ci_lab import contract, evidence, git_auth, worktrees
 from scripts.ci_lab.checks import API, HEADERS, Dispatches, Key, Output, PostRefused, Token, name
 from scripts.ci_lab.delivery import CLASSES
 from scripts.ci_lab.outcomes import PASSED
@@ -287,14 +285,7 @@ class GitPusher:
         """Make the sha present in the mirror's store and push it to the branch, never forced, with the token passed
         through git's environment config; raise RelayRefused with git's reason on a refusal."""
         self.mirror.fetch(sha)
-        secret = base64.b64encode(f"x-access-token:{self.auth.get_token()}".encode()).decode()
-        environ = {
-            **os.environ,
-            "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": f"http.{GITHUB}.extraheader",
-            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {secret}",
-            "GIT_TERMINAL_PROMPT": "0",
-        }
+        environ = git_auth.environ(self.auth)
         argv = ["git", "-C", str(self.mirror.store), "push", f"{GITHUB}{self.slug}.git", f"{sha}:refs/heads/{branch}"]
         done = subprocess.run(argv, env=environ, capture_output=True, text=True, check=False)
         if done.returncode != 0:

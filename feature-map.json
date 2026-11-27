@@ -2,6 +2,16 @@
   "fragments": true,
   "features": [
     {
+      "id": "manifest-build-storage",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-45904106858-0",
+      "behaviour": "The dependency manifest promotion job releases obsolete coverage databases while preserving dependency input reports, unrelated files and both complete manifest artifacts, including records from duplicate and reused shards.",
+      "seam": "The dependency manifest workflow build step with real coverage shard databases and dependency input reports",
+      "tests": [
+        "tests/test_dep_manifest.py::test_the_manifest_job_preserves_records_and_releases_coverage"
+      ]
+    },
+    {
       "id": "lab-scheduler-access-log-query-redaction",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2855",
@@ -2615,6 +2625,22 @@
       ]
     },
     {
+      "id": "codex-scan-survives-a-vanishing-process",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2913",
+      "behaviour": "Codex session and managed execution detection judge a process from one read of its command line and answer no session for an empty one, so a Codex process that exits while the hive daemon beat walks local processes no longer raises and ends the daemon with every agent on the hive.",
+      "seam": "hooks.context.account_sessions._codex_argv, _is_codex_session, _managed_execution and local_processes",
+      "tests": [
+        "tests/context/test_account_sessions.py::test_codex_session_detection_reads_the_command_line_once",
+        "tests/context/test_account_sessions.py::test_a_codex_process_with_an_empty_command_line_is_no_session",
+        "tests/context/test_account_sessions.py::test_the_local_process_scan_survives_a_codex_process_that_exits_mid_read",
+        "tests/context/test_account_sessions.py::test_a_managed_execution_is_judged_from_one_command_line_read"
+      ],
+      "rules": [
+        "codex-session-second-cmdline-read"
+      ]
+    },
+    {
       "id": "legacy-state-migration-command",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-migrate-legacy-state-cmd",
@@ -2748,6 +2774,21 @@
       ],
       "rules": [
         "preempt-holder-scoped-suppression"
+      ]
+    },
+    {
+      "id": "hub-preemption-victim-rotation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-preempt-victim-rotation",
+      "behaviour": "Preemption skips a victim task for thirty minutes across successor holders, new waiting tasks and store reconstruction. It asks another eligible holder or nobody when only recent victims remain. At exactly thirty minutes the task is eligible again; remaining holders keep their rank and newest start order, and urgent and focused holders stay exempt.",
+      "seam": "preempt.step through the hub relaunch fixture; victim task history; thirty minute boundary",
+      "tests": [
+        "tests/hub/test_preemption_relaunch.py::test_recent_victim_task_rotates_to_other_holder",
+        "tests/hub/test_preemption_relaunch.py::test_recent_victim_task_waits_for_thirty_minutes",
+        "tests/hub/test_preemption_relaunch.py::test_victim_task_history_survives_claim_refund_and_expires"
+      ],
+      "rules": [
+        "preempt-repeated-victim-task"
       ]
     },
     {
@@ -13343,13 +13384,13 @@
       "id": "lab-scheduler-grade",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/lab-scheduler",
-      "behaviour": "The CI lab scheduler grades an admitted head in passes of Scheduler.tick: a head whose every unit the verdict store answers enqueues nothing and completes its check runs at once; a newer head of the same lane drops the older head's pending units, carries its running jobs and reuses its stored verdicts; an expired lease requeues once and a second loss makes the grade red; a unit that cannot run makes the grade red and stores no verdict; and the grade's conclusion folds the gates by the Gate Required rules of the test workflow, matching every recorded case.",
+      "behaviour": "The CI lab scheduler grades an admitted head in passes of Scheduler.tick: a head whose every unit the verdict store answers enqueues nothing and completes its check runs at once; a newer head of the same lane drops the older head's pending units, carries its running jobs and reuses its stored verdicts; an expired lease requeues once and a second loss leaves the grade neutral, without a verdict; a unit that cannot run leaves the grade neutral and stores no verdict; and the grade's conclusion folds the gates by the Gate Required rules of the test workflow, matching every recorded case.",
       "seam": "scripts.ci_lab.scheduler.Scheduler.tick over fakeredis and the local object store, and scripts.ci_lab.scheduler.fold against the recorded cases in tests/fixtures/ci_lab/gate_required.json",
       "tests": [
         "tests/ci_lab/test_scheduler.py::test_a_fully_cached_head_enqueues_nothing_and_completes_at_once",
         "tests/ci_lab/test_scheduler.py::test_a_newer_head_drops_pending_units_and_reuses_carried_verdicts",
-        "tests/ci_lab/test_scheduler.py::test_a_lost_worker_requeues_once_then_its_unit_makes_the_grade_red",
-        "tests/ci_lab/test_scheduler.py::test_a_unit_that_cannot_run_makes_the_grade_red_and_stores_no_verdict",
+        "tests/ci_lab/test_scheduler.py::test_a_lost_worker_requeues_once_then_its_unit_leaves_the_grade_without_a_verdict",
+        "tests/ci_lab/test_scheduler.py::test_a_unit_that_cannot_run_leaves_the_grade_without_a_verdict_and_stores_none",
         "tests/ci_lab/test_scheduler.py::test_the_fold_reproduces_gate_required_on_recorded_fixtures"
       ]
     },
@@ -13382,12 +13423,12 @@
       "id": "lab-scheduler-test-units",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2629",
-      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. An ordinary pull request or hotfix head gets none; a plant pull request runs the listed batches and unlisted module units for the test modules it adds or changes. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A merge group head also runs one unit per test module its entries change that the head holds and the manifest lists no test of, its member the module path, keyed as a broad test over the measured and test trees, whether the rule chose a unit set or the whole suite; the test executor grades such a member, which the manifest records no files for. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it makes the grade red.",
+      "behaviour": "The CI lab scheduler expands test units, one per batch of dependency manifest tests keyed by their fingerprints on the head tree. An ordinary pull request or hotfix head gets none; a plant pull request runs the listed batches and unlisted module units for the test modules it adds or changes. A merge group head runs the interaction rule over its entries with the entry limit of the grader's delivery.yaml and the batches the verdict store holds, and runs only the batches holding an invalidated test unless a clause sends it to the whole suite. A merge group head also runs one unit per test module its entries change that the head holds and the manifest lists no test of, its member the module path, keyed as a broad test over the measured and test trees, whether the rule chose a unit set or the whole suite; the test executor grades such a member, which the manifest records no files for. A promotion or backfill head runs every batch. A head that needs test units and has no stored manifest cannot expand. A finished unit whose outcome the retry policy allows another run goes back to pending with one more attempt, so a crashed worker's unit reruns once before it leaves the grade neutral, without a verdict.",
       "seam": "scripts.ci_lab.scheduler.MirrorExpander.expand over a git origin fixture, scripts.ci_lab.scheduler.StoredManifests over the local object store, scripts.ci_lab.expand_tests.units, scripts.ci_lab.expand_tests.unlisted_units, scripts.ci_lab.run_tests.outside, scripts.ci_lab.queue.Queue.retry and scripts.ci_lab.scheduler.Scheduler.tick over fakeredis",
       "tests": [
         "tests/ci_lab/test_expand_tests.py::test_each_batch_is_one_test_unit_keyed_by_its_fingerprints_opened_files_and_toolchain",
         "tests/ci_lab/test_queue.py::test_retry_moves_a_finished_job_back_to_pending_with_one_more_attempt",
-        "tests/ci_lab/test_scheduler.py::test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_makes_the_grade_red",
+        "tests/ci_lab/test_scheduler.py::test_a_crashed_unit_reruns_while_the_lost_retries_allow_then_leaves_the_grade_without_a_verdict",
         "tests/ci_lab/test_scheduler.py::test_a_failed_unit_reruns_while_the_failed_retries_allow_and_its_pass_is_stored",
         "tests/ci_lab/test_scheduler.py::test_a_pull_request_or_hotfix_head_expands_no_test_units",
         "tests/ci_lab/test_scheduler.py::test_a_merge_group_head_runs_only_the_batches_its_entries_invalidate",
@@ -13871,8 +13912,8 @@
       "id": "lab-shadow-acceptance-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/cut-shadow-report",
-      "behaviour": "python -m scripts.ci_lab shadow report --gate GATE reads the newest completed Tests runs of the event, pull_request unless --event merge_group, and joins each distinct head's github-actions jobs of the gate with its lab-shadow check run from the lab App named by --app or AGENTIHOOKS_LAB_APP, never the lab/<gate> check run of a listed gate, refusing to run without one; a head whose jobs of the gate were cancelled, still run or never graded leaves the window, a unit job the workflow reran after a lost runner counts by its rerun, and the report prints one row per head with each verdict, whether the lab verdict completed first and whether the two disagree, then the counts, and exits 0 only when the window holds the asked heads, no mismatch, a lab verdict on 48 and a lab verdict first on 45 of every 50, rounded up.",
-      "seam": "scripts.ci_lab.shadow_report actions, lab, head, rule, tally, holds, render, collect, claims and main through python -m scripts.ci_lab shadow report --gate",
+      "behaviour": "python -m scripts.ci_lab shadow report --gate GATE reads the newest completed Tests runs of the event, pull_request unless --event merge_group, and joins each distinct head's github-actions jobs of the gate with its lab-shadow check run from the lab App named by --app or AGENTIHOOKS_LAB_APP, never the lab/<gate> check run of a listed gate, refusing to run without one; a head whose jobs of the gate were cancelled, still run or never graded leaves the window, a unit job the workflow reran after a lost runner counts by its rerun, and the report prints one row per head with each verdict, whether the lab verdict completed first and whether the two disagree, then the counts, and exits 0 only when the window holds the asked heads, no mismatch, a lab verdict on 48 and a lab verdict first on 45 of every 50, rounded up. For the pull_request event each head also keeps when its newest github-actions lab-verdict job started, a lab verdict is inside the wait when it completed no later than the wait of that job after its start, each row ends with the seconds from that start to the lab verdict, and the rule also asks for a lab verdict inside the wait on 48 of every 50, rounded up; the merge_group report keeps three counts and five columns.",
+      "seam": "scripts.ci_lab.shadow_report actions, lab, head, inside, rule, tally, holds, render, collect, claims and main through python -m scripts.ci_lab shadow report --gate",
       "tests": [
         "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_that_disagrees_with_actions_is_a_mismatch_that_fails_the_rule",
         "tests/ci_lab/test_shadow_report.py::test_a_head_without_a_lab_verdict_counts_against_presence",
@@ -13885,7 +13926,14 @@
         "tests/ci_lab/test_shadow_report.py::test_the_report_command_reads_live_heads_through_the_github_api",
         "tests/ci_lab/test_shadow_report.py::test_the_report_command_names_its_repository_and_refuses_an_empty_window",
         "tests/ci_lab/test_shadow_report.py::test_only_a_report_with_a_gate_is_the_acceptance_rule_report",
-        "tests/ci_lab/test_shadow_report.py::test_a_paged_list_stops_at_a_short_page_or_after_ten_pages"
+        "tests/ci_lab/test_shadow_report.py::test_a_paged_list_stops_at_a_short_page_or_after_ten_pages",
+        "tests/ci_lab/test_shadow_report.py::test_a_head_keeps_when_its_newest_lab_verdict_job_started",
+        "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_job_whose_check_run_names_no_start_leaves_the_head_readable",
+        "tests/ci_lab/test_shadow_report.py::test_a_lab_verdict_is_inside_the_wait_up_to_its_last_second",
+        "tests/ci_lab/test_shadow_report.py::test_the_pull_request_rule_asks_for_lab_verdicts_inside_the_wait_on_48_of_every_50_heads",
+        "tests/ci_lab/test_shadow_report.py::test_the_pull_request_report_prints_the_count_inside_the_wait_and_the_seconds_each_head_took",
+        "tests/ci_lab/test_shadow_report.py::test_the_merge_group_report_keeps_three_counts_and_five_columns",
+        "tests/ci_lab/test_shadow_report.py::test_the_pull_request_command_fails_a_window_whose_verdicts_are_first_yet_late_for_the_wait"
       ]
     },
     {
@@ -17067,6 +17115,20 @@
       ]
     },
     {
+      "id": "swarm-gates-platform-invocation",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-claim-watch-flake",
+      "behaviour": "Swarm guards skip Windows and enforce Linux claim ownership before context recycling at each call, regardless of the platform during the first import.",
+      "seam": "hooks.context.swarm_gates.pretool",
+      "rules": [
+        "platform-chosen-at-import"
+      ],
+      "tests": [
+        "tests/test_claim_watch.py::test_swarm_gates_choose_the_platform_at_each_call",
+        "tests/test_claim_watch.py::test_windows_runs_neither_swarm_gate_at_the_call"
+      ]
+    },
+    {
       "id": "hub-tracks-pull-requests",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2910",
@@ -17087,6 +17149,46 @@
         "tests/hub/test_pulls.py::test_a_task_change_published_mid_sweep_is_tracked_within_one_slice",
         "tests/hub/test_pulls.py::test_the_poll_records_the_track_delay_and_the_sweep_length",
         "tests/hub/test_pulls.py::test_a_poll_slice_records_the_track_delay_before_its_sweep_ends"
+      ]
+    },
+    {
+      "id": "quick-native-authentication",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2900",
+      "behaviour": "Native Claude and Codex launchers retain explicit local or named authentication independently of automatic selection and persist safe Seat policy fields.",
+      "seam": "init-agent native authentication, saved Seat policy and isolated execution homes",
+      "tests": [
+        "tests/quick/test_registry.py::test_legacy_registry_and_saved_authentication_survive_state_changes",
+        "tests/quick/test_authentication.py::test_common_and_per_engineer_native_authentication_resolve_safe_references",
+        "tests/quick/test_authentication.py::test_invalid_native_authentication_reports_the_exact_refusal",
+        "tests/test_init_agent.py::test_native_init_keeps_explicit_authentication_without_automatic_selection",
+        "tests/test_init_agent.py::test_native_authentication_parser_reports_exact_values",
+        "tests/test_init_agent.py::test_native_authentication_help_names_the_supported_modes",
+        "tests/test_init_agent.py::test_native_authentication_request_resolves_the_selected_harness",
+        "tests/test_init_agent.py::test_native_authentication_request_refuses_contradictory_routing",
+        "tests/test_init_agent.py::test_legacy_authentication_keeps_routed_only_compatibility",
+        "tests/test_init_agent.py::test_native_authentication_keeps_routed_refusal_scoped_to_explicit_modes",
+        "tests/test_named_native_authentication.py::test_missing_claude_named_reference_never_selects_another_account",
+        "tests/test_named_native_authentication.py::test_codex_named_reference_preserves_expiry_validation",
+        "tests/test_named_native_authentication.py::test_empty_codex_named_reference_never_enters_automatic_selection",
+        "tests/test_native_default.py::test_native_default_configuration_omits_logins_and_preserves_plan_links",
+        "tests/test_native_default.py::test_native_default_binding_requires_profile_and_rendered_evidence",
+        "tests/test_native_default.py::test_claude_native_default_preserves_preparation_failures",
+        "tests/test_native_default.py::test_codex_native_default_refuses_failures_without_starting_an_agent",
+        "tests/test_native_default.py::test_native_default_isolates_local_login_from_master_and_routed_credentials",
+        "tests/test_native_default.py::test_codex_native_default_bypasses_automatic_account_enumeration",
+        "tests/test_native_default.py::test_native_default_preserves_and_repins_rendered_profile_binding",
+        "tests/test_native_default.py::test_native_default_missing_local_login_never_uses_the_master",
+        "tests/test_native_default.py::test_claude_native_default_checks_and_launches_the_isolated_login",
+        "tests/test_named_native_authentication.py::test_named_native_selection_keeps_an_explicit_alias_of_the_same_login",
+        "tests/test_named_native_authentication.py::test_claude_named_execution_keeps_the_exact_reference_without_automatic_deduplication",
+        "tests/test_named_native_authentication.py::test_codex_named_execution_never_enumerates_or_reads_automatic_tiers",
+        "tests/test_named_native_authentication.py::test_missing_named_default_reference_never_falls_back_to_codex_local_login"
+      ],
+      "rules": [
+        "native-default-shared-login",
+        "native-named-route-stripped",
+        "native-named-route-empty"
       ]
     }
   ],

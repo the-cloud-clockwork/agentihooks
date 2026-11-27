@@ -59,7 +59,7 @@ def test_status_uses_new_names_in_modes_and_decisions(
     else:
         lines = output.splitlines()
         assert lines[1] == (
-            "gate modes  identity=deny  watch=log only  subagents=deny  reruns=deny  intent=log only  "
+            "gate modes  first-read=log only  identity=deny  watch=log only  subagents=deny  reruns=deny  intent=log only  "
             "recon=log only  "
             "build=log only  claim-stop=deny  expert-stop=deny  push-stop=deny  quiet=deny  one-push=deny  brain=log only  "
             "claims=deny  "

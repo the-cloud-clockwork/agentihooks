@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.ci_lab import queue
@@ -72,6 +74,59 @@ def test_enqueue_skips_jobs_already_known(jobs: queue.Queue) -> None:
     assert jobs.enqueue([unit("a"), unit("b")], "h1", {}) == ["h1:test:b"]
     assert jobs.pending() == ["h1:test:b"]
     assert found(jobs, "h1:test:a").state == "leased"
+
+
+@pytest.mark.feature("lab-lost-unit-leaves-gate-neutral")
+def test_enqueue_starts_a_lost_job_again_as_a_fresh_pending_job(jobs: queue.Queue, client: Any) -> None:
+    record = f"{queue.PREFIX}job:h1:test:a"
+    jobs.enqueue([unit("a")], "h1", {})
+    assert take(jobs, "h1:test:a", expires_ms=100)
+    assert jobs.reap(found(jobs, "h1:test:a"), 100, 0) == "lost"
+    assert jobs.tally(found(jobs, "h1:test:a")) is True
+    assert client.pttl(record) > 0
+
+    assert jobs.enqueue([unit("a")], "h1", {}, base="b2", grader="g2", rank=1) == ["h1:test:a"]
+
+    job = found(jobs, "h1:test:a")
+    assert (job.state, job.attempts, job.outcome, job.worker) == ("pending", 0, "", "")
+    assert (job.base, job.grader, job.rank) == ("b2", "g2", 1)
+    assert jobs.pending() == ["h1:test:a"]
+    assert jobs.members("h1", "pending") == {"h1:test:a"}
+    assert jobs.members("h1", "done") == set()
+    assert client.pttl(record) == -1
+    assert jobs.tally(job) is True
+
+
+@pytest.mark.feature("lab-lost-unit-leaves-gate-neutral")
+@pytest.mark.parametrize("outcome", ["crash", "cannot_run"])
+def test_enqueue_starts_a_job_its_worker_ended_without_a_verdict_again(
+    jobs: queue.Queue, client: Any, outcome: str
+) -> None:
+    jobs.enqueue([unit("a")], "h1", {})
+    assert take(jobs, "h1:test:a")
+    assert jobs.finish(found(jobs, "h1:test:a"), "tok", outcome)
+
+    assert jobs.enqueue([unit("a")], "h1", {}) == ["h1:test:a"]
+
+    job = found(jobs, "h1:test:a")
+    assert (job.state, job.attempts, job.outcome) == ("pending", 0, "")
+    assert jobs.pending() == ["h1:test:a"]
+    assert jobs.members("h1", "done") == set()
+    assert client.pttl(f"{queue.PREFIX}job:h1:test:a") == -1
+
+
+@pytest.mark.parametrize("outcome", ["passed", "failed", "gate_failed", "survived"])
+def test_enqueue_leaves_a_job_that_ended_with_a_verdict_as_it_is(jobs: queue.Queue, outcome: str) -> None:
+    jobs.enqueue([unit("a")], "h1", {})
+    assert take(jobs, "h1:test:a")
+    assert jobs.finish(found(jobs, "h1:test:a"), "tok", outcome)
+    before = found(jobs, "h1:test:a")
+
+    assert jobs.enqueue([unit("a")], "h1", {}, rank=0) == []
+
+    assert found(jobs, "h1:test:a") == before
+    assert jobs.pending() == []
+    assert jobs.members("h1", "done") == {"h1:test:a"}
 
 
 def test_same_unit_on_two_heads_is_two_jobs(jobs: queue.Queue) -> None:
@@ -367,7 +422,7 @@ def test_a_more_urgent_enqueue_moves_a_pending_job_and_leaves_a_leased_one(jobs:
 def test_a_more_urgent_enqueue_leaves_a_finished_job_alone(jobs: queue.Queue) -> None:
     jobs.enqueue([unit("a")], "h1", {}, rank=3)
     assert take(jobs, "h1:test:a")
-    assert jobs.finish(found(jobs, "h1:test:a"), "tok", "crash")
+    assert jobs.finish(found(jobs, "h1:test:a"), "tok", "failed")
 
     assert jobs.enqueue([unit("a")], "h1", {}, rank=1) == []
 

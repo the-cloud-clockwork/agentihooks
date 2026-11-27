@@ -7,7 +7,7 @@ from itertools import batched
 from typing import Any
 
 from scripts.ci_lab.delivery import CLASSES
-from scripts.ci_lab.outcomes import LOST
+from scripts.ci_lab.outcomes import LOST, UNGRADED
 from scripts.ci_lab.units import Unit
 
 __all__ = ["BAND", "PAGE", "PREFIX", "RANKS", "RETENTION_MS", "UNRANKED", "Job", "Queue", "Requirement"]
@@ -51,18 +51,26 @@ local function rank_of(job) return tonumber(redis.call('HGET', job, 'rank') or {
 local function score(counter, rank) return counter - ({RANKS} - rank) * {BAND} end
 """
 
+RESTARTED = ", ".join(f"{outcome} = true" for outcome in sorted(UNGRADED))
+
 ENQUEUE = (
     SCORE
-    + """
+    + f"""
+local ungraded = {{{RESTARTED}}}
 local rank = tonumber(ARGV[3])
 if redis.call('HSETNX', KEYS[1], 'head', ARGV[2]) == 0 then
-  local placed = redis.call('ZSCORE', KEYS[2], ARGV[1])
-  local held = rank_of(KEYS[1])
-  if placed and rank < held then
-    redis.call('HSET', KEYS[1], 'rank', rank)
-    redis.call('ZADD', KEYS[2], score(tonumber(placed), rank) - score(0, held), ARGV[1])
+  if not ungraded[redis.call('HGET', KEYS[1], 'outcome')] then
+    local placed = redis.call('ZSCORE', KEYS[2], ARGV[1])
+    local held = rank_of(KEYS[1])
+    if placed and rank < held then
+      redis.call('HSET', KEYS[1], 'rank', rank)
+      redis.call('ZADD', KEYS[2], score(tonumber(placed), rank) - score(0, held), ARGV[1])
+    end
+    return 0
   end
-  return 0
+  redis.call('DEL', KEYS[1])
+  redis.call('SREM', KEYS[5], ARGV[1])
+  redis.call('HSET', KEYS[1], 'head', ARGV[2])
 end
 for index = 4, #ARGV, 2 do redis.call('HSET', KEYS[1], ARGV[index], ARGV[index + 1]) end
 redis.call('ZADD', KEYS[2], score(redis.call('INCR', KEYS[3]), rank), ARGV[1])
@@ -231,7 +239,10 @@ class Queue:
         """Add each unit of the head as a pending job, with the base and grader revision its grade reads, unless that
         job is already known. The pending order is the rank first, the most urgent class lowest, then the order of
         enqueue; a job with no rank sorts after every ranked one, as every job enqueued before ranks existed does. A
-        known job still pending under a less urgent rank moves to this one and keeps its place by enqueue order."""
+        known job still pending under a less urgent rank moves to this one and keeps its place by enqueue order. A
+        known job that ended without a verdict, lost, crashed or unable to run, is replaced in the same step by a
+        fresh pending job that has used none of its attempts and holds no expiry, so a grade that needs the unit runs
+        it again."""
         added: list[str] = []
         for unit in units:
             job = f"{head}:{unit.kind}:{unit.key}"
@@ -252,7 +263,7 @@ class Queue:
                 "rank": rank,
             }
             fields = [item for pair in record.items() for item in pair]
-            keys = [_job(job), _key("pending"), _key("seq"), _head(head, "pending")]
+            keys = [_job(job), _key("pending"), _key("seq"), _head(head, "pending"), _head(head, "done")]
             if self._enqueue(keys=keys, args=[job, head, rank, *fields]):
                 added.append(job)
         return added

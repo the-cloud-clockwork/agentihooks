@@ -67,6 +67,7 @@ PROMOTION = (
     "coverage-ratchet",
     "coverage-baseline",
     "dep-manifest",
+    "sonar-after-unit",
     "promote",
     "promotion-ready",
     "refresh-durations",

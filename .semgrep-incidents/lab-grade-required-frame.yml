@@ -1,0 +1,22 @@
+rules:
+  - id: lab-grade-required-frame
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Check the stored required job list before folding a grade against release rules.
+      A release can add a job the old grade never planned.
+    paths:
+      include:
+        - /scripts/ci_lab/
+        - lab-grade-required-frame.py
+    patterns:
+      - pattern: fold(EVENTS[$STATE.tier], _needs($STATE), $STATE.flags)
+      - pattern-inside: |
+          def $FUNC(...):
+              ...
+      - pattern-not-inside: |
+          def $FUNC(...):
+              ...
+              if <... $STATE.required ...>:
+                  ...
+              ...

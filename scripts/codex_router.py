@@ -707,6 +707,14 @@ def _report(path: str, **fields: str) -> None:
 
 def _route(environ: Mapping[str, str], route: str, run: Callable, exclude: str) -> tuple[CodexAccount, str, int, str]:
     sessions = codex_sessions_by_account()
+    if route.startswith("named:"):
+        reference = route.removeprefix("named:").removeprefix(CODEX_TOKEN_PREFIX)
+        if not reference:
+            raise RoutingError("named Codex authentication reference is empty")
+        name = f"{CODEX_TOKEN_PREFIX}{reference}"
+        pool = token_accounts({key: value for key, value in environ.items() if key == name})
+        account, placement, _ = select(pool, {}, sessions, time.time(), reference, environ)
+        return account, placement, sessions.get(account.name, 0), "?"
     if route == API_ACCOUNT:
         return api_account(environ), "forced", sessions.get(API_ACCOUNT, 0), "?"
     source = CodexAccountSource(run, refresh=not route)
@@ -765,6 +773,16 @@ def main(
 
             declared = interactive.account("codex", active, run)
             account, placement, live, cap = CodexAccount(declared.slug), "forced", 0, "?"
+        elif route == "native-default":
+            from scripts.routing import native_default
+
+            try:
+                active = native_default.prepare("codex", active)
+            except (OSError, ValueError) as error:
+                raise RoutingError(str(error)) from error
+            if not default_signed_in(active, run):
+                raise RoutingError("native default login is unavailable")
+            account, placement, live, cap = CodexAccount(CODEX_DEFAULT), "forced", 0, "?"
         else:
             account, placement, live, cap = _route(active, route, run, exclude)
             account = credential(account, active)

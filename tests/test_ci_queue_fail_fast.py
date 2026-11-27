@@ -165,6 +165,7 @@ def test_every_merge_queue_job_but_the_watcher_is_graded() -> None:
         "coverage-baseline",
         "coverage-ratchet",
         "dep-manifest",
+        "sonar-after-unit",
         "stage-budget",
         "kind-due",
         "worker-image",
