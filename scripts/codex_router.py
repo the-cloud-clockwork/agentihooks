@@ -803,7 +803,13 @@ def main(
         else child_environment(account, active)
     )
     from scripts.hive.account_slots import execute
+    from scripts.quick.recipe import execute_native
 
-    execute("codex", account.name, child, lambda env: execvpe(codex_bin, command(account, codex_bin, args), env))
+    execute(
+        "codex",
+        account.name,
+        child,
+        lambda env: execute_native("codex", command(account, codex_bin, args), env, execvpe=execvpe),
+    )
     lock.close()
     return 0

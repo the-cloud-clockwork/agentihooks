@@ -1,0 +1,6 @@
+{
+  "scripts/gates/import_failure.py:scripts.gates.import_failure.x__locked:15aa3b325b4ac3e1e4619492b71ca1f17e360ab9bd65078a6643e1b69d599daf": {
+    "reader": "standards-reader",
+    "reason": "scripts.platform_compat.file_lock uses blocking only as a truthiness condition. False and None both select LOCK_EX | LOCK_NB. On platforms without fcntl neither value affects execution. Lock acquisition, retry bounds and fail open behavior therefore remain identical."
+  }
+}

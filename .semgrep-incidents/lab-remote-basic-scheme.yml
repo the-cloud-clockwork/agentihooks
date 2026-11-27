@@ -1,0 +1,26 @@
+rules:
+  - id: lab-remote-basic-scheme
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The lab remote compares the whole Authorization header byte for byte with `Basic <base64 lab:token>` or
+      `Bearer <token>`. A basic scheme spelled any other way is refused with a 401, so a head pushed only to the lab
+      remote never expands or grades. Send `Authorization: Basic <base64 lab:token>`.
+    paths:
+      include:
+        - /scripts/ci_lab/worktrees.py
+        - /scripts/ci_lab/remote/
+        - lab-remote-basic-scheme.py
+    pattern-either:
+      - pattern-regex: (?i:authorization)\s*:\s*(?!Basic\b)(?i:basic)\b
+      - patterns:
+          - pattern-either:
+              - pattern: '{..., "$KEY": $VALUE, ...}'
+              - pattern: '$HEADERS["$KEY"] = $VALUE'
+              - pattern: '("$KEY", $VALUE)'
+          - metavariable-regex:
+              metavariable: $KEY
+              regex: (?i)^authorization$
+          - metavariable-regex:
+              metavariable: $VALUE
+              regex: ^f?["'](?!Basic\b)(?i:basic)\b

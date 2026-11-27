@@ -18,13 +18,13 @@ PROBE = (
 )
 
 
-def _fresh_process(tmp_path: Path, limit: str | None) -> list[str]:
+def _fresh_process(tmp_path: Path, limit: str | None, probe: str = PROBE) -> list[str]:
     env = {key: value for key, value in os.environ.items() if key != "AGENTIHOOKS_CODEREVIEW_FILELIMIT"}
     env["AGENTIHOOKS_HOME"] = str(tmp_path)
     if limit is not None:
         env["AGENTIHOOKS_CODEREVIEW_FILELIMIT"] = limit
     run = subprocess.run(
-        [sys.executable, "-c", PROBE], cwd=ROOT, env=env, capture_output=True, text=True, check=True, timeout=60
+        [sys.executable, "-c", probe], cwd=ROOT, env=env, capture_output=True, text=True, check=True, timeout=60
     )
     return run.stdout.splitlines()
 
@@ -79,3 +79,25 @@ def test_a_full_session_start_budget_keeps_the_summary(
     emitter.flush("SessionStart")
 
     assert delivery_requirements.summary() in capsys.readouterr().out
+
+
+@pytest.mark.feature("delivery-requirements-summary")
+def test_a_first_import_under_a_replaced_injector_uses_the_restored_injector(tmp_path: Path) -> None:
+    probe = """import os
+from unittest.mock import patch
+
+os.environ["AGENTIHOOKS_TARGET"] = "claude"
+from hooks import common
+
+with patch.object(common, "inject_context"):
+    from hooks.context import delivery_requirements
+
+from hooks.targets import emitter
+emitter._buffer = []
+emitter._forced = True
+emitter._plain = True
+delivery_requirements.inject_on_session_start()
+emitter.flush("SessionStart")
+"""
+    output = "\n".join(_fresh_process(tmp_path, None, probe))
+    assert delivery_requirements.summary() in output

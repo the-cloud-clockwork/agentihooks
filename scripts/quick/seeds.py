@@ -2,7 +2,7 @@
 
 import re
 
-from scripts.quick import paths, room
+from scripts.quick import paths, recipe, room
 from scripts.quick.layout import MASTER
 from scripts.quick.member import Member
 from scripts.quick.registry import Seat
@@ -36,7 +36,24 @@ def _reach(sender: Seat, receiver: Seat) -> str:
 
 def _engineer_line(found: Member, seat: Seat) -> str:
     folder = paths.seat_dir(found.folder, seat.seat)
-    return f"- {seat.seat} in pane {seat.position} ({seat.harness}, session {seat.name}); seat folder {folder}"
+    authentication = f"named:{seat.account}" if seat.auth == "named" else seat.auth
+    tiers = (
+        "automatic tiers"
+        if seat.auth == "routed" and recipe.kind(seat) != recipe.PROGRAM
+        else "outside automatic tiers"
+    )
+    command = ""
+    if seat.command:
+        identity = recipe.identity(seat)
+        states = [
+            f"{name.replace('_', ' ')} {'available' if enabled else 'unavailable'}"
+            for name, enabled in recipe.capabilities(seat).items()
+        ]
+        command = f"; {identity['kind']} {identity['program']}; {', '.join(states)}"
+    return (
+        f"- {seat.seat} in pane {seat.position} ({seat.harness}, session {seat.name}); seat folder {folder}"
+        f"; authentication {authentication}, {tiers}{command}"
+    )
 
 
 def _master(found: Member) -> str:

@@ -1,10 +1,12 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from scripts.gates import entry, first_read
 from scripts.gates.base import Call, Who
+from scripts.profiles import binding
 
 ME = Who(name="engineer@123-456", swarm="proof", lane="eng")
 
@@ -290,3 +292,129 @@ def test_registry_identity_is_a_member(monkeypatch: pytest.MonkeyPatch) -> None:
         }
     )
     assert first_read.marker_path("registry").read_text() == "1"
+
+
+CANARY_HEAD = "python -c 'import sys; sys.path.insert(0, "
+CANARY_TAIL = "); from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123"
+MOUNTED_CANARY = (
+    "/opt/venv/bin/python -c 'import sys; sys.path.insert(0, '\"'\"'/opt/venv/lib/python3.12/site-packages'\"'\"');"
+    " from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary 0123456789abcdef01234567"
+)
+
+
+def _bootstrap(command: str) -> bool:
+    return (
+        first_read.FirstRead().decide(Call(tool="Bash", tool_input={"command": command}, session="s"), ME, None).allowed
+    )
+
+
+@pytest.mark.feature("first-read-canary-literal")
+def test_profile_binding_canary_is_exempt() -> None:
+    found = re.search(r"execute `(.+)` through your shell tool", binding.persona("profile"))
+    assert found
+    assert _bootstrap(found.group(1))
+
+
+@pytest.mark.feature("first-read-canary-literal")
+@pytest.mark.parametrize(
+    "command",
+    [
+        MOUNTED_CANARY,
+        f"const r = await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); text(r);",
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, max_output_tokens: 4000, yield_time_ms: 10000}}));",
+        f'const r = await tools.exec_command({{"cmd": {json.dumps(MOUNTED_CANARY)}, "yield_time_ms": 1000}}); text(r);',
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)},}}));",
+    ],
+)
+def test_mounted_literal_canary_is_exempt(command: str) -> None:
+    assert _bootstrap(command)
+
+
+@pytest.mark.feature("first-read-canary-literal")
+@pytest.mark.parametrize(
+    "pragma",
+    [
+        '// @exec: {"yield_time_ms": 10000, "max_output_tokens": 1000}\n',
+        ' \t// @exec: {"yield_time_ms": 1000}\r\n',
+    ],
+    ids=["lf", "indented-crlf"],
+)
+@pytest.mark.parametrize(
+    "program",
+    [
+        f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}});",
+        f"const r = await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); text(r);",
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, max_output_tokens: 4000, yield_time_ms: 10000}}));",
+    ],
+    ids=["bare", "bound", "text"],
+)
+def test_exec_pragma_canary_is_exempt(pragma: str, program: str) -> None:
+    assert _bootstrap(pragma + program)
+
+
+@pytest.mark.feature("first-read-canary-literal")
+@pytest.mark.parametrize(
+    "program",
+    [
+        f"// @exec: {{}}\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}})); fetch(1);",
+        f"// @exec: {{}}\nfetch(1); text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f'// @exec: {{}}\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}})); await tools.exec_command({{cmd: "pwd"}});',
+        f"// @exec: {{}}\r\nconst r = await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); text(r); fetch(r);",
+        f"// @exec: {{}}\n// @exec: {{}}\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"// @exec: {{}}text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"// @exec: {{}}\u2028fetch(1);\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"// @exec: {{}}\u2029fetch(1);\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+        f"// other comment\ntext(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}));",
+    ],
+    ids=[
+        "suffix",
+        "prefix",
+        "second-call",
+        "crlf-suffix",
+        "two-pragmas",
+        "no-newline",
+        "line-separator",
+        "paragraph-separator",
+        "foreign-comment",
+    ],
+)
+def test_exec_pragma_cannot_hide_other_work(program: str) -> None:
+    decision = first_read.FirstRead().decide(Call(tool="Bash", tool_input={"command": program}, session="s"), ME, None)
+    assert decision.allowed is False
+    assert "agentihooks seat brief" in decision.reason
+
+
+@pytest.mark.feature("first-read-canary-literal")
+@pytest.mark.parametrize(
+    "command",
+    [
+        CANARY_HEAD + '"\'"$(id)"\'"' + CANARY_TAIL,
+        CANARY_HEAD + '"\'"\u0060id\u0060"\'"' + CANARY_TAIL,
+        CANARY_HEAD + "\"'\"'$(id)'\"'\"" + CANARY_TAIL,
+        CANARY_HEAD + "\"'$(id)'\"" + CANARY_TAIL,
+        CANARY_HEAD + "\"'<(id)'\"" + CANARY_TAIL,
+        CANARY_HEAD + "\"'\\'$(id)'\"" + CANARY_TAIL,
+        "python -c \"import sys; sys.path.insert(0, '$(id)'); from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))\" --canary abc123",
+        "/opt/ven\\v/bin/python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "/op?/venv/bin/python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        "~/venv/bin/python -c 'import sys; from scripts.profiles.binding import main; sys.exit(main(sys.argv[2]))' --canary abc123",
+        f'await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)} + "$(id)"}});',
+        f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, ...extra}});",
+        f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, cmd: other}});",
+        f'require("child_process").execSync("id"); await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}});',
+        f"const r = await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); text(r); fetch(r);",
+        f'await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, shell: "/home/worker/x/evil"}});',
+        f"await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}, evil);",
+        f'text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, workdir: "/home/worker/x"}}));',
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, max_output_tokens: limit}}));",
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, max_output_tokens: }}));",
+        f"text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}})); fetch(1);",
+        f'text(await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}, cmd: "pwd"}}));',
+        f'await tools.exec_command({{cmd: {json.dumps(MOUNTED_CANARY)}}}); await tools.exec_command({{cmd: "pwd"}});',
+    ],
+)
+def test_canary_with_shell_expansion_requires_brief(command: str) -> None:
+    decision = first_read.FirstRead().decide(Call(tool="Bash", tool_input={"command": command}, session="s"), ME, None)
+    assert decision.allowed is False
+    assert "agentihooks seat brief" in decision.reason

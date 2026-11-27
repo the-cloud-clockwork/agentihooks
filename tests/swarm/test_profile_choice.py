@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
-from scripts.swarm import profile_choice, runtime, store, tick
+from scripts.swarm import profile_choice, prompt, runtime, store, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm_ledger import legacy_page
 
@@ -522,7 +522,10 @@ def test_runtime_spawns_a_handoff_with_an_empty_launch_identity_fresh_with_its_t
     argv = calls[0]
     assert argv[argv.index("--profile") + 1] == "frontend"
     assert placed.profile_decision["source"] == "classifier"
-    assert "Go on from seam two" in Path(argv[argv.index("--prompt-file") + 1]).read_text()
+    text = Path(argv[argv.index("--prompt-file") + 1]).read_text()
+    assert "Go on from seam two" not in text
+    assert "Handoff runtime envelope:" in text.splitlines()
+    assert text.count(prompt.SEAT_BRIEF) == 1
 
 
 @pytest.mark.feature("hub-admission-carries-ledger-intent")

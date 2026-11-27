@@ -1,0 +1,6 @@
+{
+  "hooks/context/gate_import.py:hooks.context.gate_import.x_report:6b60f4859ac7b5b847fb0758ca5949d8903145bc1c5bf5ac2231df044f188524": {
+    "reader": "standards-reader",
+    "reason": "This fallback executes only when failed is false. Neither the empty string nor XXXX matches gate_names' main-call or scripts.gates-launch regex. report then returns at not failed before importing reporters or emitting any observable reporting output."
+  }
+}

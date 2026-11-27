@@ -105,6 +105,8 @@ def problems(chart: str) -> list[str]:
         or env.get("AGENTIHOOKS_HOME") != "/run/agentihooks"
     ):
         found.append("the controller no longer keeps its existing memory home")
+    if env.get("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES") != "0":
+        found.append("the controller takes automatic swarm snapshots into its container layer")
     if docs["Deployment"]["spec"].get("strategy", {}).get("type") != "Recreate":
         found.append("one controller replica no longer rolls out by Recreate")
     if "PodDisruptionBudget" in docs:

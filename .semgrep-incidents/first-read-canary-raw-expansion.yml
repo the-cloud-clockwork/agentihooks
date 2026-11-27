@@ -1,0 +1,25 @@
+rules:
+  - id: first-read-canary-raw-expansion
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A bootstrap exemption parses shell split words without first refusing shell expansion in the raw
+      command text. The quoted split drops the double quotes the shell still expands inside, so check the
+      raw text with _literal before the split.
+    paths:
+      include:
+        - scripts/gates/first_read.py
+        - '**/first-read-canary-raw-expansion*.py'
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              $WORDS = shlex.split(...)
+              ...
+          - pattern-inside: |
+              $WORDS = _words(...)
+              ...
+      - pattern: ast.parse($WORDS[$INDEX])
+      - pattern-not-inside: |
+          if <... _literal(...) ...>:
+              ...
+          ...

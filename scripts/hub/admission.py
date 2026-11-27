@@ -2,6 +2,7 @@
 or occupy a seat, and a remote hive makes no service ledger reads."""
 
 import json
+import os
 import sys
 import time
 import uuid
@@ -17,8 +18,8 @@ from scripts.events.bus import SERVE_WAITED_MS
 from scripts.handoff import envelope, transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
-from scripts.hub import branch_heads, lease
-from scripts.swarm import admission_view, readiness, run_window, successor_fill
+from scripts.hub import admission_seats, branch_heads, lease
+from scripts.swarm import admission_view, offer_quota, readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError, connect
@@ -30,6 +31,8 @@ ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
 TURN_MS, TURN_TRIES, TURN_WAIT_S = 30_000, 40, 0.05  # pragma: no mutate
 BUSY = "another admission for the hive is in progress"
+ACCOUNT_HOLD = "no permitted harness has a free account seat"
+NO_HARNESS = "the lane agent, required harness and profile permit no harness"
 
 
 def release_key(text: str) -> Version | None:
@@ -97,7 +100,7 @@ class Admission:
     def _key(self, slug: str, request: dict) -> str:
         return self.store.key(slug, ADMITTED, request["task"], str(request["generation"]))
 
-    def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
+    def admit(self, slug: str, request: dict[str, Any]) -> dict[str, Any] | None:
         begun = self.clock()
         queued_ms = SERVE_WAITED_MS.get()
         started = begun - queued_ms
@@ -127,19 +130,16 @@ class Admission:
         ):
             return self._withdrawn(slug, request, offer, withdrawn)
         timer.mark("withdrawal")
-        if unplaceable := self._unplaceable(view.rows[task_id], request["hive"]):
+        if unplaceable := self._unplaceable(view.rows[task_id], request["hive"]) or self._seatless(
+            slug, request, view.rows[task_id]
+        ):
             print(
                 f"hub: events placement swarm={slug} task={task_id} hive={request['hive']}: refused, {unplaceable}",
                 file=sys.stderr,
             )
             return {hive_admission.HELD: unplaceable}
         timer.mark("placement")
-        from scripts.swarm import tick
-
-        if reason := tick._lives_spent(slug, self.store, self.ledger, view.rows, view.rows[task_id]):
-            print(
-                f"hub: events claim cap swarm={slug} task={task_id} hive={request['hive']}: {reason}", file=sys.stderr
-            )
+        if self._unclaimable(slug, request, view.rows):
             return None
         timer.mark("cap")
         reserved = self._reserved(slug, view.rows[task_id], request["hive"])
@@ -147,7 +147,11 @@ class Admission:
             timer.mark("turn")
             if not busy and (kept := self._kept(slug, request, offer)):
                 return kept
-            if full := busy or self._full(request["hive"], reserved):
+            if (
+                full := busy
+                or self._full(request["hive"], reserved)
+                or self._account_hold(slug, lane, view.rows[task_id])
+            ):
                 refused(slug, request, full)
                 held: dict[str, str] = {hive_admission.HELD: full}
                 return held
@@ -158,6 +162,27 @@ class Admission:
             refused(slug, request, "another holder took the claim")
             return None
         return self._answered(slug, request, started, admitted, timer)
+
+    def _unclaimable(self, slug: str, request: dict[str, Any], rows: dict[str, Any]) -> bool:
+        """True, after printing why, when the task is refused before claim: its claim lives are spent, or its lane
+        agent, required harness and profile permit no harness."""
+        from scripts.swarm import tick
+
+        task_id = request["task"]
+        if reason := tick._lives_spent(slug, self.store, self.ledger, rows, rows[task_id]):
+            print(
+                f"hub: events claim cap swarm={slug} task={task_id} hive={request['hive']}: {reason}", file=sys.stderr
+            )
+            return True
+        if not offer_quota.permitted(self.store.config(slug), request["lane"], rows[task_id]):
+            refused(slug, request, NO_HARNESS)
+            return True
+        return False
+
+    def _account_hold(self, slug: str, lane: str, task: dict[str, Any]) -> str:
+        environ = dict(os.environ)
+        rows = offer_quota.accounts(environ, time.time(), redis=self.store.redis)  # pyright: ignore[reportUnknownMemberType]
+        return ACCOUNT_HOLD if not offer_quota.available(self.store.config(slug), lane, task, rows, environ) else ""
 
     def _held(self, offer: str) -> dict[str, Any] | None:
         """The admission kept for the offer, whichever hive asked for it; None when none is kept."""
@@ -239,6 +264,17 @@ class Admission:
         if not readiness.placeable(row, hive, readiness.declared(self.store, hive)):
             return "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
         return ""
+
+    def _seatless(self, slug: str, request: dict[str, Any], task: dict[str, Any]) -> str:
+        from scripts.hive import registry
+
+        record: Any = registry.show(self.store.redis, request["hive"])  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
+        if record is None:
+            return ""
+        harnesses = offer_quota.permitted(self.store.config(slug), request["lane"], task)
+        if admission_seats.available(request["hive"], record.get("slots"), harnesses, self.clock()):
+            return ""
+        return "no free account seat on the asking hive"
 
     def _reserved(self, slug: str, row: dict[str, Any], hive: str) -> int:
         """The root slots kept for the waiting tasks only the root hive takes of every events swarm, each read through

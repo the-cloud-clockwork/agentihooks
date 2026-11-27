@@ -131,10 +131,7 @@ def test_the_smoke_runs_the_self_test_and_the_image_checks_with_no_network(tmp_p
     assert "bwrap --version\n" in checks
     assert 'if [[ "$(cat /opt/agentihooks-venv/lockfile.sha256)" != "$LOCK_DIGEST" ]]; then\n' in checks
     assert "if [[ -e /etc/sudoers || -e /etc/sudoers.d ]]; then\n" in checks
-    assert (
-        "/opt/agentihooks-venv/bin/python -c 'import scripts.ci_lab.contract, scripts.ci_lab.executors, "
-        "scripts.ci_lab.run_tests, scripts.ci_lab.pricing, pytest, xdist"
-    ) in checks
+    assert "/opt/agentihooks-venv/bin/python -m scripts.ci_lab_smoke pytest xdist redis nats yaml boto3\n" in checks
 
 
 def test_the_image_checks_refuse_an_image_that_still_has_sudo(tmp_path: Path) -> None:

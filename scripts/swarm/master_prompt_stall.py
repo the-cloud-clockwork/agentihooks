@@ -18,6 +18,7 @@ from scripts.swarm.delivery import READY
 from scripts.swarm.health.findings import MINUTE_MS
 from scripts.swarm.pane import interrupted_prompt, login_limit
 from scripts.swarm.store import MASTER, AgentRecord
+from scripts.swarm_ledger import ledger_alerts
 
 TAIL_LINES = 40
 DAY_S = 86_400
@@ -33,7 +34,7 @@ LOGIN_LIMITED = "showed a Claude login that reached its time limit"
 LOGIN_RECYCLE_KEY = "master-login-recycle"
 LOGIN_RECYCLED = "the swarm recycled the master on a Claude login limit"
 LOGIN_ALERT_KEY = "master-login-alert"
-LOGIN_ALERT_SOURCE = "master-login"
+LOGIN_ALERT_SOURCE = ledger_alerts.SEAT
 LOGIN_ALERT = (
     "The master hit the Claude login limit again and no stored master login is left that passes its check; "
     "add a master login slot with agentihooks claude login --master so the master can run."

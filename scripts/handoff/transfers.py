@@ -48,6 +48,11 @@ def last_handoff(store, slug: str, task: str) -> str:
     return next((r["handoff"] for r in reversed(list_transfers(store, slug)) if r["task"] == task and r["handoff"]), "")
 
 
+def latest_for_seat(store: RedisStore, slug: str, task: str, seat: str) -> dict[str, Any] | None:
+    rows: list[dict[str, Any]] = list_transfers(store, slug)
+    return next((row for row in reversed(rows) if row["task"] == task and row["seat"] == seat), None)
+
+
 def get(store, slug: str, transfer: str) -> dict:
     raw = store.redis.hget(store.key(slug, "transfers"), transfer)
     if not raw:
@@ -74,13 +79,18 @@ def _change(store, slug, transfer, change, seat=""):
             raise SwarmError("The transfer changed; retry the command") from exc
 
 
-def attach(store, slug: str, agent) -> dict | None:
-    rows = [r for r in list_transfers(store, slug) if r["task"] == agent.task and not r["successor"]]
+def attach(store: RedisStore, slug: str, agent: AgentRecord, seat: str = "") -> dict[str, Any] | None:
+    rows: list[dict[str, Any]]
+    if seat:
+        current = latest_for_seat(store, slug, agent.task, seat)
+        rows = [current] if current and not current["successor"] else []
+    else:
+        rows = [r for r in list_transfers(store, slug) if r["task"] == agent.task and not r["successor"]]
     if not rows:
         return None
     occupancy = store.seats.occupant(agent.seat)
 
-    def change(row):
+    def change(row: dict[str, Any]) -> None:
         row.update(successor=agent.name, seat=agent.seat, generation=occupancy.generation, attached_at=now_ms())
 
     return _change(store, slug, rows[-1]["id"], change)
@@ -107,7 +117,7 @@ def failed(store: RedisStore, slug: str, agent: AgentRecord, reason: str = LAUNC
         retry = {
             **row,
             "id": uuid4().hex,
-            "at": at,
+            "at": max(at, row["at"] + 1),
             "successor": "",
             "continuity": {"state": "pending"} if row["handoff"] else row["continuity"],
             "binding": {"state": "pending"},
@@ -153,8 +163,19 @@ def observe(store: RedisStore, slug: str, live: set[str]) -> None:
         _change(store, slug, row["id"], change)
 
 
-def confirm(store, slug: str, transfer: str, agent, next_action: str, at: int) -> dict:
-    def change(row):
+def normalized_next(slug: str, agent: AgentRecord, action: str) -> str:
+    if agent.lane == "master" and agent.harness == "codex":
+        from scripts.profiles.codex_master import next_action
+        from scripts.swarm import capabilities
+
+        return next_action(action, slug, not capabilities.of_agent(agent).requires_foreground_inbox_wait)
+    return action
+
+
+def confirm(
+    store: RedisStore, slug: str, transfer: str, agent: AgentRecord, next_action: str, at: int
+) -> dict[str, Any]:
+    def change(row: dict[str, Any]) -> None:
         occupancy = store.seats.occupant(row["seat"])
         if (
             row["successor"] != agent.name
@@ -162,12 +183,7 @@ def confirm(store, slug: str, transfer: str, agent, next_action: str, at: int) -
             or occupancy.generation != row["generation"]
         ):
             raise SwarmError("Only the current successor occupant can confirm this handoff")
-        expected = row["next"]
-        if agent.lane == "master" and agent.harness == "codex":
-            from scripts.profiles.codex_master import next_action as codex_next
-            from scripts.swarm import capabilities
-
-            expected = codex_next(expected, slug, not capabilities.of_agent(agent).requires_foreground_inbox_wait)
+        expected = normalized_next(slug, agent, row["next"])
         if not expected or next_action.strip() != expected:
             raise SwarmError("Confirm the first Next action exactly as written in the handoff")
         row["continuity"] = {"state": "confirmed", "at": at, "by": agent.name, "next": next_action.strip()}
@@ -175,11 +191,19 @@ def confirm(store, slug: str, transfer: str, agent, next_action: str, at: int) -
     return _change(store, slug, transfer, change, agent.seat)
 
 
-def priming(slug: str, transfer: dict | None) -> str:
+def priming(slug: str, transfer: dict[str, Any] | None, *, seated: bool = True) -> str:
     if not transfer or not transfer["handoff"]:
         return ""
-    return (
-        "Read this handoff before continuing. Confirm you read it and will take its first Next action by running "
-        f"agentihooks swarm {slug} confirm-handoff {transfer['id']} --next "
-        f"{shlex.quote(transfer['next'])}\n{transfer['handoff']}"
+    instruction = (
+        "After reading the handoff in your seat brief, confirm you read it and will take its first Next action by running "
+        if seated
+        else "Read this handoff before continuing. Confirm you read it and will take its first Next action by running "
     )
+    text = (
+        instruction
+        + f"agentihooks swarm {slug} confirm-handoff {transfer['id']} --next "
+        + shlex.quote(transfer["next"])
+    )
+    if not seated:
+        text += f"\n{transfer['handoff']}"
+    return text
