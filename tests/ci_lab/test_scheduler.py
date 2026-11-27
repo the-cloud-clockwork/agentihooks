@@ -154,9 +154,6 @@ class Expander:
     def groups(self, repo: str) -> frozenset[str]:
         return frozenset(self.plans)
 
-    def bundle(self, sha: str) -> bytes | None:
-        return None
-
 
 @dataclass
 class Poster:

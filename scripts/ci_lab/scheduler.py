@@ -49,6 +49,7 @@ from scripts.ci_lab import (
     git_auth,
     interaction,
     lease_api,
+    merges,
     metrics,
     service,
     shadow,
@@ -97,6 +98,7 @@ __all__ = [
     "Settings",
     "StoredManifests",
     "UNIT_ESTIMATE_S",
+    "Unmerged",
     "authoritative_gates",
     "build",
     "fold",
@@ -104,6 +106,7 @@ __all__ = [
     "keep_manifests",
     "listen",
     "main",
+    "no_merges",
     "serve",
     "stage_grade",
     "storage",
@@ -171,6 +174,7 @@ STARTS_PER_PASS = 8
 LOOKED_AT_PER_PASS = 24
 DRAINED_PER_PASS = 500
 UNANSWERED_FETCHES = 10
+UNMERGED_TRIES = 4
 CUT_SHORT_STARTS = 5
 POST_HOLD_MS = 60_000
 INTERVAL_S = 2.0
@@ -355,8 +359,9 @@ class Plan:
     the job outputs and flags the `Gate — Required` rules read, the dev commit of the dependency manifest its test
     units are keyed on, empty when it keys none, the authoritative gates a hotfix or pull request grade runs no unit
     of, each posted as a skipped check, the gates the grader's delivery.yaml lists as authoritative for the head's
-    class, and the merge base of the head and its base that its static units diff against, empty when the base is
-    that merge base."""
+    class, the merge base of the head and its base that its static units diff against, empty when the base is
+    that merge base, and the test merge GitHub built for the pull request the plan grades, empty when the request
+    named none or none was resolved."""
 
     tree: str
     grader: str
@@ -368,6 +373,7 @@ class Plan:
     idle: frozenset[str] = frozenset()
     authoritative: frozenset[str] = frozenset()
     merge_base: str = ""
+    graded_commit: str = ""
 
 
 class Inbox(Protocol):
@@ -424,11 +430,19 @@ class Relaying(Protocol):
         ...
 
 
+def no_merges(repo: str, number: int, head: str) -> tuple[str, str] | None:
+    """The merges port of a scheduler built without one: every pull request grades its bare head, as before this
+    port existed."""
+    return None
+
+
 @dataclass(frozen=True)
 class Ports:
     """The scheduler's outside world: heads in, plans, check runs out per repository, the heads marked hotfix, the
-    worker pods whose deletion cost follows their leases and, when the service holds one, the listing of the heads a
-    repository still wants graded, which raises an OSError when it cannot name them all."""
+    worker pods whose deletion cost follows their leases, the test merge GitHub built for a pull request, when the
+    service holds one, the git bundle of a graded commit a worker asks for, when the service holds one, and, when
+    the service holds one, the listing of the heads a repository still wants graded, which raises an OSError when
+    it cannot name them all."""
 
     inbox: Inbox
     expander: Expander
@@ -436,6 +450,8 @@ class Ports:
     hotfixes: Callable[[], frozenset[str]]
     pods: Pods = unmanaged
     wanted: Callable[[str], frozenset[str]] | None = None
+    merges: Callable[[str, int, str], tuple[str, str] | None] = no_merges
+    bundle: Callable[[str], bytes | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -472,8 +488,10 @@ class State:
     id of each check run it posted, the grade ref a lab remote push wrote its head to, if any, the dev commit of the
     dependency manifest its test units are keyed on, if any, the authoritative gates it runs no unit of, the gates it
     posts as lab/<gate> rather than lab-shadow/<gate>, the clock before which it posts nothing after GitHub refused
-    one of its posts, and the merge base of its head and base that a worker checks out as its base, empty when the
-    base is that merge base."""
+    one of its posts, the merge base of its head and base that a worker checks out as its base, empty when the
+    base is that merge base, the test merge GitHub built for a pull request grade, empty when it named none or none
+    was resolved, and whether such a grade gave up waiting for one and graded the bare head against its event base
+    instead."""
 
     run: str
     repo: str
@@ -498,6 +516,8 @@ class State:
     authoritative: list[str] = field(default_factory=list[str])
     hold: int = 0
     merge_base: str = ""
+    graded_commit: str = ""
+    merge_fallback: bool = False
 
 
 def _parse(raw: str | bytes) -> State:
@@ -581,6 +601,7 @@ def _request(data: Mapping[str, Any]) -> GradeRequest:
         actor=str(data["actor"]),
         bypass_negative=bool(data["bypass_negative"]),
         plant=bool(data.get("plant", False)),
+        pull_number=int(data.get("pull_number", 0)),
     )
 
 
@@ -734,7 +755,8 @@ def _slug(repo: str) -> str:
 
 def summary(state: State) -> dict[str, Any]:
     """Return a grade as GET /grades/<sha> shows it: what it grades, its class and lane, how many of its units are
-    final, its conclusion once it closed and each check run's last post."""
+    final, its conclusion once it closed, each check run's last post, the test merge GitHub built for a pull
+    request grade, if resolved, and whether it gave up waiting for one and graded the bare head instead."""
     checks = {
         check: {"status": status, "conclusion": conclusion} for check, (status, conclusion) in state.posted.items()
     }
@@ -751,12 +773,18 @@ def summary(state: State) -> dict[str, Any]:
         "superseded": state.superseded,
         "units": {"total": len(state.units), "final": sum(1 for slot in state.units.values() if slot.outcome)},
         "checks": checks,
+        "graded_commit": state.graded_commit or None,
+        "merge_fallback": state.merge_fallback,
     }
 
 
 class CutShort(ValueError):
     """A head whose start was begun and not finished `CUT_SHORT_STARTS` times in a row, by a process stopped or
     killed while it checked or expanded the head."""
+
+
+class Unmerged(ValueError):
+    """GitHub has resolved no merge of a pull request with its head as that merge's second parent, yet."""
 
 
 class Scheduler:
@@ -1077,13 +1105,16 @@ class Scheduler:
         takes no place among those looked at, and the rest wait for a later pass, so every pass reaches admission.
         A head whose manifest fetch still runs off the pass keeps its place and its window for the next pass; one
         whose fetch GitHub never answered or answered with a server error waits out the window again, its count of
-        such fetches in a row kept in its waiting entry, until the `UNANSWERED_FETCHES`th one. Neither takes one of
-        the `STARTS_PER_PASS` places, only one of the `LOOKED_AT_PER_PASS` looked at, so the pass moves on to the
-        next waiting head instead of stalling on it. A head keeps its waiting entry while it is checked and
-        expanded, with the count of starts begun and not finished in it, so a pass stopped inside a start finds the
-        head again; a head that already counts `CUT_SHORT_STARTS` such starts is refused instead of started.
-        Starting a head, retiring it, refusing it or dropping it after its last expansion failure each take one of
-        those `STARTS_PER_PASS` places, since each is the pass's last word on that head."""
+        such fetches in a row kept in its waiting entry, until the `UNANSWERED_FETCHES`th one. A pull request or
+        hotfix head whose merge resolution still runs off the pass is held the same way; one GitHub answered with no
+        merge yet, or never answered or answered with a server error, waits out the window again, its count of such
+        tries kept in its waiting entry; at the `UNMERGED_TRIES`th the next start gives up and grades the bare head.
+        Neither takes one of the `STARTS_PER_PASS` places, only one of the `LOOKED_AT_PER_PASS` looked at, so the
+        pass moves on to the next waiting head instead of stalling on it. A head keeps its waiting entry while it is
+        checked and expanded, with the count of starts begun and not finished in it, so a pass stopped inside a
+        start finds the head again; a head that already counts `CUT_SHORT_STARTS` such starts is refused instead of
+        started. Starting a head, retiring it, refusing it or dropping it after its last expansion failure each take
+        one of those `STARTS_PER_PASS` places, since each is the pass's last word on that head."""
         actions: list[str] = []
         pauses = control.paused(self.client)
         started = 0
@@ -1099,6 +1130,7 @@ class Scheduler:
             looked_at += 1
             ref = held.get("ref", "")
             starts = held.get("starts", 0)
+            unmerged = held.get("unmerged", 0)
             if starts >= CUT_SHORT_STARTS:
                 started += 1
                 self.client.hdel(WAITING, name)
@@ -1108,9 +1140,10 @@ class Scheduler:
             else:
                 self.client.hset(WAITING, name, json.dumps({**held, "starts": starts + 1}))
                 try:
-                    actions.append(self._start(request, held["lane"], ref, now_ms, name))
+                    give_up = unmerged >= UNMERGED_TRIES
+                    actions.append(self._start(request, held["lane"], ref, now_ms, name, give_up))
                     started += 1
-                except FetchPending as error:
+                except (FetchPending, merges.MergePending) as error:
                     self.client.hset(WAITING, name, raw)
                     actions.append(f"holding {request.head}: {error}")
                 except FetchUnanswered as error:
@@ -1126,6 +1159,9 @@ class Scheduler:
                         )
                         actions.append(f"cannot expand {request.head}: {refusal}")
                         actions.extend(self._refuse(request, ref, refusal, now_ms))
+                except (Unmerged, merges.MergeUnanswered) as error:
+                    self.client.hset(WAITING, name, json.dumps({**held, "since": now_ms, "unmerged": unmerged + 1}))
+                    actions.append(f"holding {request.head}: {error}")
                 except (
                     subprocess.CalledProcessError,
                     ValueError,
@@ -1303,19 +1339,35 @@ class Scheduler:
             self._forget(run)
         return [stale_heads.unbranched(len(waiting), len(gone), dropped)] if waiting or gone else []
 
-    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int, name: str) -> str:
+    def _start(self, request: GradeRequest, lane: str, ref: str, now_ms: int, name: str, give_up: bool = False) -> str:
         """Open a grade of a head and the grade ref it was pushed to: supersede the lane's older head, place every unit
         and hold the store's misses for the budget; a request that bypasses negative verdicts grades again under a run
         of its own. A head no ref every node mirror fetches reaches is retired before expansion, unless it was pushed
-        to a grade ref, which the lab remote serves. The waiting field of `name` comes out of the hash only once this
-        start cannot be repeated: before the retirement, and right after the expansion returns, before the first
-        grade write."""
+        to a grade ref, which the lab remote serves. A pull request or hotfix request that is not a plant resolves
+        the test merge GitHub built for its pull request first, raising Unmerged while GitHub has none yet, unless
+        give_up says the bound of such tries is already spent, in which case it grades the bare head and the state
+        remembers the fallback. The waiting field of `name` comes out of the hash only once this start cannot be
+        repeated: before the retirement, and right after the expansion returns, before the first grade write."""
         if not ref.startswith(GRADE_REFS) and not self.ports.expander.reachable(request.repo, request.head):
             self.client.hdel(WAITING, name)
             return self._retire(request, now_ms)
+        fallback = False
+        if request.pull_number and not request.plant:
+            if give_up:
+                fallback = True
+            else:
+                resolved = self.ports.merges(request.repo, request.pull_number, request.head)
+                if resolved is None:
+                    raise Unmerged(
+                        f"GitHub has resolved no merge of {request.repo}#{request.pull_number} for "
+                        f"{request.head} with that head as its second parent, yet"
+                    )
+                request = replace(request, graded_commit=resolved[0])
         plan = self.ports.expander.expand(request)
         self.client.hdel(WAITING, name)
-        inputs = GradeInputs(request.repo, request.head, request.base, CLASSES[request.tier], plan.grader)
+        inputs = GradeInputs(
+            request.repo, request.head, request.base, CLASSES[request.tier], plan.grader, request.graded_commit
+        )
         run = grade_key(inputs)
         if self.client.exists(GRADES + run):
             if not request.bypass_negative:
@@ -1340,6 +1392,8 @@ class Scheduler:
             idle=sorted(plan.idle),
             authoritative=sorted(plan.authoritative),
             merge_base=plan.merge_base,
+            graded_commit=plan.graded_commit,
+            merge_fallback=fallback,
         )
         source = self._merge_group(request, plan.tree)
         misses: list[Unit] = []
@@ -1466,7 +1520,15 @@ class Scheduler:
                     )
                     waiting += DEFAULT.slots
             if admitted:
-                self.queue.enqueue(admitted, state.head, {}, state.merge_base or state.base, state.grader, state.tier)
+                self.queue.enqueue(
+                    admitted,
+                    state.head,
+                    {},
+                    state.merge_base or state.base,
+                    state.grader,
+                    state.tier,
+                    state.graded_commit,
+                )
                 self._keep(state)
                 actions.append(f"enqueued {len(admitted)} units of {state.run}")
         return actions
@@ -1682,7 +1744,9 @@ class BusInbox:
                     )
                     delivery.term()
                     continue
-                event = HeadEvent(*(str(data[name]) for name in HEAD_FIELDS))
+                event = HeadEvent(
+                    *(str(data[name]) for name in HEAD_FIELDS), pull_number=int(data.get("pull_number", 0))
+                )
                 lane = str(data.get("lane") or data.get("branch") or event.head)
                 heads.append(Head(event, lane, str(data.get("ref") or "")))
                 read.append(delivery)
@@ -1885,6 +1949,10 @@ class MirrorExpander:
             self.node, self.root / _slug(repo).replace("/", "--"), repo, self.lab, environ=self._environment(repo)
         )
 
+    def mirror(self, repo: str) -> Mirror:
+        """Return the repository's git mirror, the public port a merge resolver reads it through."""
+        return self._mirror(repo)
+
     def _git(self, mirror: Mirror, *argv: str) -> str:
         done = subprocess.run(["git", "-C", str(mirror.store), *argv], capture_output=True, text=True, check=True)
         return done.stdout
@@ -2001,14 +2069,20 @@ class MirrorExpander:
         units of a plant pull request, merge group, promotion or backfill head and the mutation stats and mutant units of a promotion or
         backfill head, framed by the request's tier with the authoritative gates of the grader's delivery.yaml for a
         hotfix or pull request head, with the dev commit of the manifest its test units are keyed on. The plan names
-        the merge base when it is not the base itself.
+        the merge base when it is not the base itself. A request that carries a resolved test merge reads the files,
+        tree and unit keys from that commit instead of the bare head, and its static units diff against the merge's
+        first parent instead of the merge base of head and base.
         """
         mirror = self._mirror(request.repo)
         grader = request.head if request.tier >= Priority.PROMOTION else request.base
-        for sha in dict.fromkeys((request.head, request.base, grader)):
+        reading = request.graded_commit or request.head
+        for sha in dict.fromkeys((reading, request.base, grader)):
             mirror.fetch(sha)
-        head, base = self._files(mirror, request.head), self._files(mirror, request.base)
-        merge_base, diffed = self._diffed(mirror, request, base)
+        head, base = self._files(mirror, reading), self._files(mirror, request.base)
+        if request.graded_commit:
+            merge_base, diffed = self._graded_base(mirror, request.graded_commit)
+        else:
+            merge_base, diffed = self._diffed(mirror, request, base)
         workflow = self._git(mirror, "show", f"{grader}:{WORKFLOW.as_posix()}")
         registry = json.loads(self._git(mirror, "show", f"{grader}:{REGISTRY.as_posix()}"))
         excluded = self._exclusions(mirror, grader, head if grader == request.head else base)
@@ -2035,7 +2109,7 @@ class MirrorExpander:
         if request.tier < Priority.PROMOTION:
             listed = authoritative_gates(_lab_block(self._git(mirror, "show", f"{grader}:{DELIVERY}")), request.tier)
             listed = frozenset(static_exclusions.authority(listed, excluded))
-        tree = self._git(mirror, "rev-parse", f"{request.head}^{{tree}}").strip()
+        tree = self._git(mirror, "rev-parse", f"{reading}^{{tree}}").strip()
         plan = frame(
             request.tier,
             tree,
@@ -2044,7 +2118,47 @@ class MirrorExpander:
             sorted(listed),
             request.plant,
         )
-        return replace(plan, manifest=commit, merge_base=merge_base)
+        return replace(plan, manifest=commit, merge_base=merge_base, graded_commit=request.graded_commit)
+
+    def _graded_base(self, mirror: Mirror, graded_commit: str) -> tuple[str, dict[str, str]]:
+        """Return the first parent of a resolved test merge, already fetched into the mirror, and its files, which
+        the merge's static units diff against."""
+        parents = self._git(mirror, "rev-list", "--parents", "-n", "1", graded_commit).split()[1:]
+        parent = parents[0] if parents else graded_commit
+        return parent, self._files(mirror, parent)
+
+    def bundle(self, sha: str) -> bytes | None:
+        """Return the git bundle of a commit prerequisite on its two parents, from whichever served repository's
+        store under root holds it, or None when none does."""
+        if not self.root.is_dir():
+            return None
+        for store in sorted(self.root.iterdir()):
+            found = subprocess.run(["git", "-C", str(store), "cat-file", "-t", sha], capture_output=True, text=True)
+            if found.stdout.strip() != "commit":
+                continue
+            parents = subprocess.run(
+                ["git", "-C", str(store), "rev-list", "--parents", "-n", "1", sha],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.split()[1:]
+            with tempfile.NamedTemporaryFile(suffix=".bundle") as handle:
+                subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(store),
+                        "bundle",
+                        "create",
+                        handle.name,
+                        sha,
+                        *(f"^{parent}" for parent in parents),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+                return Path(handle.name).read_bytes()
+        return None
 
     def _tests(
         self,
@@ -2217,7 +2331,8 @@ def build(
 
     inbox = BusInbox(consumer)
     hotfixes, pods = control.Priorities(client, _now_ms), worker_pods(environ)
-    ports = Ports(inbox, expander, poster, hotfixes, pods, stale_heads.OpenHeads())
+    resolve_merges = merges.Background(merges.Resolver(expander.mirror))
+    ports = Ports(inbox, expander, poster, hotfixes, pods, stale_heads.OpenHeads(), resolve_merges, expander.bundle)
     repository = environ[REPOSITORY]
     listed = served(environ.get(contract.SERVED_REPOSITORIES, ""), repository)
     settings = Settings(expander.trusted(repository), retries=expander.retries(repository), served=listed)
@@ -2292,7 +2407,8 @@ def listen(
         return None if built is None else built[0]
 
     api, steering, exposition = ports
-    lease = partial(lease_api.answer, leases, Uploads(scheduler.objects))
+    bundler = scheduler.ports.bundle if scheduler.ports.bundle is not None else lease_api.unbundled
+    lease = partial(lease_api.answer, leases, Uploads(scheduler.objects), bundler=bundler)
     port = service.Routes(lease, capacity, scheduler.grades_of)
     servers = (
         service.serve("", api, port),

@@ -2451,6 +2451,7 @@ key; the builders are pure and read no file, clock or network.
 | `grade` | `base` | Base commit sha |
 | `grade` | `tier` | Delivery tier: pull request, queue or promotion |
 | `grade` | `grader` | The protected grader revision |
+| `grade` | `graded_commit` | The test merge GitHub built for a resolved pull request, omitted from the key when none resolved |
 
 ### Rules the keys rely on
 
@@ -2747,9 +2748,17 @@ one that ended without one.
 Expansion keys one `static` unit per gate step of the static jobs of the grader revision's Tests
 workflow: `lint`, `type-gate`, `semgrep` and `test-count`, the jobs
 `scripts.ci_lab.static_gates.STATIC_JOBS` names. The grader revision is the head of a promotion or
-backfill grade and the base of every other grade. `scripts.ci_lab.scheduler.MirrorExpander.expand`
+backfill grade and the base of every other grade, whether or not the grade carries a graded commit.
+`scripts.ci_lab.scheduler.MirrorExpander.expand`
 reads three inputs at that revision from the git mirror and passes them to
 `scripts.ci_lab.static_gates.discover`:
+
+A pull request or hotfix head resolved against the test merge GitHub built for its pull request reads its static
+gate's head files and its tree from that merge commit instead of the bare head, and its units diff against the
+merge's first parent instead of the git merge base of head and base; the grader revision a gate's workflow,
+registry and delivery.yaml come from stays the event's own base regardless. `MirrorExpander.bundle` answers a
+worker's request for the graded commit's git bundle, prerequisite on its two parents, from whichever served
+repository's store under its root already holds it.
 
 | Input | Read with | Passed to `discover` as |
 |---|---|---|
@@ -2838,7 +2847,8 @@ The static executor supplies these names:
 | Name | Value |
 |---|---|
 | `inputs.base`, `github.event.pull_request.base.sha` | The lease's base revision |
-| `github.sha`, `github.event.pull_request.head.sha` | The lease's head |
+| `github.sha` | The lease's graded commit, the test merge GitHub built for a resolved pull request, when it names one, else the lease's head |
+| `github.event.pull_request.head.sha` | The lease's head, whether or not the lease names a graded commit |
 | `github.event_name` | `pull_request`, at every class, since a static unit's key holds no class |
 | `github.run_id` | The lease's job id |
 | `github.run_attempt`, `github.run_number` | `1` |
@@ -2957,7 +2967,9 @@ kubectl logs -n ci-lab deploy/ci-lab-scheduler | grep 'cannot expand'
 
 #### A head no node mirror can hold
 
-Each CI node's cache mirrors only the repository's `refs/heads/*` and `refs/pull/*/head` refs, so a
+Each CI node's cache mirrors only the repository's `refs/heads/*` and `refs/pull/*/head` refs, never the test
+merge `refs/pull/*/merge` GitHub builds and replaces, so a worker's lease API bundle request is the only path a
+graded commit reaches a node, and so a
 worker cannot fetch a commit no such ref reaches, such as the head of an ejected merge group whose
 `gh-readonly-queue` branch is gone. Before the scheduler expands a released head it asks
 `MirrorExpander.reachable`, which lists those refs with `git ls-remote` and accepts the head when a

@@ -11,7 +11,6 @@ REPO = "https://github.com/acme/widgets"
 HEAD = "a" * 40
 BASE = "b" * 40
 ACTOR = "nestorcolt"
-FEATURE = "lab-grades-the-pull-request-merge"
 
 
 def _pull_request(number: int = 41, pulls: bool = True) -> dict[str, Any]:
@@ -41,25 +40,28 @@ def _check_run(number: int = 41, pulls: bool = True) -> dict[str, Any]:
     }
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_pull_request_head_event_keeps_the_pull_request_number() -> None:
     [event] = webhooks.head_events("pull_request", _pull_request(41))
+    assert isinstance(event, HeadEvent)
     assert event.pull_number == 41
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_rerequested_check_run_naming_a_pull_request_keeps_its_number() -> None:
     [event] = webhooks.head_events("check_run", _check_run(41))
+    assert isinstance(event, HeadEvent)
     assert event.pull_number == 41
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_rerequested_check_run_naming_no_pull_request_keeps_no_number() -> None:
     [event] = webhooks.head_events("check_run", _check_run(pulls=False))
+    assert isinstance(event, HeadEvent)
     assert event.pull_number == 0
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_push_head_event_keeps_no_pull_request_number() -> None:
     payload = {
         "ref": "refs/heads/dev",
@@ -70,10 +72,11 @@ def test_a_push_head_event_keeps_no_pull_request_number() -> None:
         "sender": {"login": ACTOR},
     }
     [event] = webhooks.head_events("push", payload)
+    assert isinstance(event, HeadEvent)
     assert event.pull_number == 0
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_merge_group_head_event_keeps_no_pull_request_number() -> None:
     payload = {
         "action": "checks_requested",
@@ -82,10 +85,11 @@ def test_a_merge_group_head_event_keeps_no_pull_request_number() -> None:
         "merge_group": {"head_sha": HEAD, "base_sha": BASE, "head_ref": "refs/heads/gh-readonly-queue/dev/pr-7"},
     }
     [event] = webhooks.head_events("merge_group", payload)
+    assert isinstance(event, HeadEvent)
     assert event.pull_number == 0
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_head_data_carries_the_pull_request_number_when_it_is_set() -> None:
     event = HeadEvent("pull_request", REPO, HEAD, BASE, ACTOR, "opened", "feature", 41)
     assert webhooks.head_data(event) == {
@@ -100,7 +104,7 @@ def test_head_data_carries_the_pull_request_number_when_it_is_set() -> None:
     }
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_head_data_omits_the_pull_request_number_when_it_is_not_set() -> None:
     event = HeadEvent("pull_request", REPO, HEAD, BASE, ACTOR, "opened", "feature")
     assert webhooks.head_data(event) == {
@@ -114,14 +118,14 @@ def test_head_data_omits_the_pull_request_number_when_it_is_not_set() -> None:
     }
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_an_envelope_without_the_pull_request_number_keeps_the_id_a_head_without_the_field_would_have() -> None:
     with_default = HeadEvent("pull_request", REPO, HEAD, BASE, ACTOR, "opened", "feature")
     explicit_zero = HeadEvent("pull_request", REPO, HEAD, BASE, ACTOR, "opened", "feature", 0)
     assert webhooks.envelope(with_default).id == webhooks.envelope(explicit_zero).id
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_an_envelope_with_the_pull_request_number_gets_a_different_id() -> None:
     without = HeadEvent("pull_request", REPO, HEAD, BASE, ACTOR, "opened", "feature")
     with_number = HeadEvent("pull_request", REPO, HEAD, BASE, ACTOR, "opened", "feature", 41)

@@ -7,6 +7,7 @@ Redis variable. A unit whose executor raises stops heartbeating and is never com
 lease and requeues it once.
 """
 
+import base64
 import contextlib
 import functools
 import http.client
@@ -64,7 +65,8 @@ REDIS = "REDIS"
 @dataclass(frozen=True)
 class Lease:
     """One leased unit: its job, the lease token, the head it grades, the unit, its slots, the lease expiry and the base
-    and grader revision its grade reads."""
+    and grader revision its grade reads, and, for a static unit of a resolved pull request grade, the test merge
+    GitHub built, empty for every other lease."""
 
     job: str
     token: str
@@ -74,6 +76,7 @@ class Lease:
     expires_ms: int
     base: str = ""
     grader: str = ""
+    graded_commit: str = ""
 
 
 @dataclass(frozen=True)
@@ -119,6 +122,7 @@ def _lease(grant: Mapping[str, Any]) -> Lease:
         grant["expires_ms"],
         grant["base"],
         grant["grader"],
+        grant.get("graded_commit", ""),
     )
 
 
@@ -158,6 +162,12 @@ class Client:
         """Return the presigned URL of the job's report or log, or None when the token no longer holds the lease."""
         reply = self._held("/upload-url?" + urlencode({"job": job, "token": token, "name": name}), None)
         return None if reply is None else reply["url"]
+
+    def bundle(self, job: str, token: str, sha: str) -> bytes | None:
+        """Return the git bundle of the lease's graded commit, or None when the token no longer holds the lease or
+        no served repository's store holds the commit."""
+        reply = self._held("/bundle", {"job": job, "token": token, "sha": sha})
+        return None if reply is None or "bundle" not in reply else base64.b64decode(reply["bundle"])
 
     def complete(self, job: str, token: str, outcome: str) -> bool:
         """Record the job's outcome; False when the token no longer holds the lease."""

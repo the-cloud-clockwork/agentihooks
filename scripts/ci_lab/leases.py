@@ -49,6 +49,7 @@ class Grant:
     expires_ms: int
     base: str = ""
     grader: str = ""
+    graded_commit: str = ""
 
 
 @dataclass
@@ -121,7 +122,19 @@ class Leases:
             unit = replace(job.unit, manifest=self.manifests(job.unit))
             if not self.queue.claim(job, worker, token, expires_ms, now):
                 continue
-            grants.append(Grant(job_id, token, job.head, unit, job.requirement.slots, expires_ms, job.base, job.grader))
+            grants.append(
+                Grant(
+                    job_id,
+                    token,
+                    job.head,
+                    unit,
+                    job.requirement.slots,
+                    expires_ms,
+                    job.base,
+                    job.grader,
+                    job.graded_commit,
+                )
+            )
             held = True if solo(job.unit) else held
             free_slots -= job.requirement.slots
             if free_slots <= 0:

@@ -26,7 +26,6 @@ from tests.ci_lab.test_scheduler_merge_base import _expander, _tree
 
 MERGE = "9" * 40
 PARENT = "8" * 40
-FEATURE = "lab-grades-the-pull-request-merge"
 
 
 def _push(run: Run, head: str, number: int, lane: str = "", event: str = "pull_request") -> None:
@@ -34,7 +33,7 @@ def _push(run: Run, head: str, number: int, lane: str = "", event: str = "pull_r
     run.lab.inbox.pending.append(scheduler.Head(event_obj, lane or head))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_resolved_merge_grades_the_merge_commit_with_the_head_on_every_check_run(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
@@ -54,7 +53,7 @@ def test_a_resolved_merge_grades_the_merge_commit_with_the_head_on_every_check_r
     assert all(post[0] == HEAD_A for post in run.lab.poster.posts)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_pending_merge_resolution_holds_the_head_for_a_later_pass(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
@@ -69,7 +68,7 @@ def test_a_pending_merge_resolution_holds_the_head_for_a_later_pass(lab: Callabl
     assert port.call_count == 2
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_head_with_no_merge_yet_waits_out_the_window_then_falls_back_at_the_bound(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
@@ -88,7 +87,7 @@ def test_a_head_with_no_merge_yet_waits_out_the_window_then_falls_back_at_the_bo
     assert port.call_count == scheduler.UNMERGED_TRIES
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_github_erroring_on_every_pull_request_read_also_falls_back_at_the_bound(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
@@ -103,7 +102,7 @@ def test_github_erroring_on_every_pull_request_read_also_falls_back_at_the_bound
     assert port.call_count == scheduler.UNMERGED_TRIES
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 @pytest.mark.parametrize("event", ["merge_group", "push", "notice"])
 def test_a_merge_group_push_and_notice_grade_carries_no_pull_number_and_resolves_no_merge(
     lab: Callable[..., Run], event: str
@@ -118,7 +117,7 @@ def test_a_merge_group_push_and_notice_grade_carries_no_pull_number_and_resolves
     assert run.grade(HEAD_A).graded_commit == ""
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_plant_grade_resolves_no_merge_even_if_it_somehow_carried_a_pull_number(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})
@@ -130,7 +129,7 @@ def test_a_plant_grade_resolves_no_merge_even_if_it_somehow_carried_a_pull_numbe
     assert run.grade(HEAD_A).graded_commit == ""
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_superseding_a_lane_with_a_resolved_merge_still_drops_the_older_heads_units(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab(
@@ -148,7 +147,7 @@ def test_superseding_a_lane_with_a_resolved_merge_still_drops_the_older_heads_un
     assert run.grade(HEAD_B).graded_commit == MERGE
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_the_evidence_of_a_resolved_grade_names_its_head_and_graded_commit(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates, merge_base=PARENT, graded_commit=MERGE)})
@@ -161,7 +160,7 @@ def test_the_evidence_of_a_resolved_grade_names_its_head_and_graded_commit(lab: 
     assert found.inputs.graded_commit == MERGE
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_pull_request_grade_with_no_pull_number_resolves_no_merge(lab: Callable[..., Run]) -> None:
     gates = {"lint": (unit(1),)}
     run = lab({HEAD_A: scheduler.Plan(TREE, BASE, gates)})

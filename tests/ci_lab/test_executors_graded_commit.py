@@ -24,7 +24,6 @@ jobs = _jobs
 lab = _lab
 signer = _signer
 
-FEATURE = "lab-grades-the-pull-request-merge"
 MERGE = "m" * 40
 WORKFLOW = """
 on: pull_request
@@ -55,7 +54,7 @@ class FakeMirror:
         return False
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_the_context_of_a_lease_with_a_graded_commit_reads_github_sha_as_that_commit() -> None:
     lease = Lease("job", "tok", "h1", Unit("static", "k", ("lint",)), 1, 1500, "b1", "g1", MERGE)
     context = executors._context(lease, _gate(), {})
@@ -64,14 +63,14 @@ def test_the_context_of_a_lease_with_a_graded_commit_reads_github_sha_as_that_co
     assert context["github.event.pull_request.base.sha"] == "b1"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_the_context_of_a_lease_without_a_graded_commit_reads_github_sha_as_its_head() -> None:
     lease = Lease("job", "tok", "h1", Unit("static", "k", ("lint",)), 1, 1500, "b1", "g1")
     context = executors._context(lease, _gate(), {})
     assert context["github.sha"] == "h1"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_static_cuts_its_shared_tree_from_the_graded_commit_when_the_lease_names_one(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -88,8 +87,7 @@ def test_static_cuts_its_shared_tree_from_the_graded_commit_when_the_lease_names
             ".github/test-requirements.lock": "lock-g",
         },
     )
-    trees = FakeWorktrees({MERGE: merged, "b1": base, "g1": grader})
-    trees.mirror = FakeMirror()  # type: ignore[attr-defined]
+    trees = FakeWorktrees({MERGE: merged, "b1": base, "g1": grader}, mirror=FakeMirror())
     pod = pod_of(tmp_path, trees)
     name = _gate().name
     summary = folder(tmp_path, "run", {"summary.md": "ok\n"}) / "summary.md"
@@ -108,10 +106,9 @@ def test_static_cuts_its_shared_tree_from_the_graded_commit_when_the_lease_names
     assert trees.mirror.fetched == [MERGE]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_ensure_graded_asks_the_bundler_when_the_node_mirror_lacks_the_commit(tmp_path: Path) -> None:
-    trees = FakeWorktrees({})
-    trees.mirror = FakeMirror(fails=True)  # type: ignore[attr-defined]
+    trees = FakeWorktrees({}, mirror=FakeMirror(fails=True))
     base_pod = pod_of(tmp_path, trees)
     calls: list[tuple[str, str, str]] = []
 
@@ -134,7 +131,7 @@ def test_ensure_graded_asks_the_bundler_when_the_node_mirror_lacks_the_commit(tm
     assert calls == [("job", "tok", MERGE)]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_worker_lease_decodes_its_graded_commit_from_the_grant() -> None:
     grant = {
         "job": "j",
@@ -152,7 +149,7 @@ def test_a_worker_lease_decodes_its_graded_commit_from_the_grant() -> None:
     assert _lease(grant).graded_commit == MERGE
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_worker_lease_without_a_graded_commit_defaults_to_empty() -> None:
     grant = {
         "job": "j",
@@ -169,21 +166,21 @@ def test_a_worker_lease_without_a_graded_commit_defaults_to_empty() -> None:
     assert _lease(grant).graded_commit == ""
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_grant_with_a_graded_commit_carries_it_in_the_lease_api_reply() -> None:
     unit = Unit("static", "k", ("lint",))
     grant = Grant("j", "t", "h1", unit, 1, 1500, "b1", "g1", MERGE)
     assert lease_api._grant(grant)["graded_commit"] == MERGE
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_a_grant_without_a_graded_commit_omits_it_from_the_lease_api_reply() -> None:
     unit = Unit("static", "k", ("lint",))
     grant = Grant("j", "t", "h1", unit, 1, 1500, "b1", "g1")
     assert "graded_commit" not in lease_api._grant(grant)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_the_bundle_route_answers_a_base64_bundle_of_the_jobs_graded_commit(
     jobs: queue.Queue, lab: leases.Leases, signer: Signer
 ) -> None:
@@ -204,7 +201,7 @@ def test_the_bundle_route_answers_a_base64_bundle_of_the_jobs_graded_commit(
     assert base64.b64decode(body["bundle"]) == b"bundle-bytes"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_the_bundle_route_refuses_a_token_that_does_not_own_the_lease(lab: leases.Leases, signer: Signer) -> None:
     status, body = lease_api.respond(
         lab, signer, "POST", "/bundle", json.dumps({"job": "h1:static:a", "token": "wrong"}).encode()
@@ -212,7 +209,7 @@ def test_the_bundle_route_refuses_a_token_that_does_not_own_the_lease(lab: lease
     assert (status, body) == (403, {"error": "lease token refused"})
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("lab-grades-the-pull-request-merge")
 def test_the_bundle_route_answers_404_when_no_store_holds_the_commit(
     jobs: queue.Queue, lab: leases.Leases, signer: Signer
 ) -> None:
