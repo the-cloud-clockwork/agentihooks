@@ -97,7 +97,7 @@ class Spoke:
         heartbeat.check()
         if admission.room(self.measure()).room < 1:
             return recovered or "held"
-        fit = offer_quota.Fit(self.config.swarm, self.config.lane, self.config.fit)
+        fit = offer_quota.Fit(self.config.swarm, self.config.lane, self.config.fit, self.config.accounts)
         try:
             queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
             delivery = readiness.take(queue, self.view, timeout_ms, fit)

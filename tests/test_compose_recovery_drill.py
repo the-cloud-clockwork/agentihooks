@@ -125,7 +125,7 @@ def test_the_recovery_drill_take_stops_on_held_polls_and_names_them() -> None:
         "open_bus": lambda config: SimpleNamespace(close=lambda: None),
         "BusConfig": SimpleNamespace(from_environ=lambda: None),
         "Spoke": Held,
-        "SpokeConfig": lambda *args: None,
+        "SpokeConfig": lambda *args, **kwargs: None,
         "store": SimpleNamespace(config=lambda slug: None),
         "slug": "recovery-drill",
         "HIVE": "recovery-hive",

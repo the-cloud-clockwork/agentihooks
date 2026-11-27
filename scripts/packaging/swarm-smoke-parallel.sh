@@ -3,10 +3,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 logs="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
+limit="${SWARM_SMOKE_SCENARIO_SECONDS:-600}"
 scripts=("$@")
 scenario() {
   local start=$SECONDS status=0
-  bash "$1" >"$2" 2>&1 || status=$?
+  timeout --kill-after=60 "$limit" bash "$1" >"$2" 2>&1 || status=$?
   printf '%s %s\n' "$status" "$((SECONDS - start))" >"$2.result"
 }
 outcome() {
@@ -23,7 +24,10 @@ failed=0
 for i in "${!scripts[@]}"; do
   outcome "$i"
   verdict=passed
-  if [[ $status != 0 ]]; then
+  if [[ $status == 124 ]]; then
+    verdict="timed out after ${limit}s"
+    failed=1
+  elif [[ $status != 0 ]]; then
     verdict="failed with exit $status"
     failed=1
   fi
