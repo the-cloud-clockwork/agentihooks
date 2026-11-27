@@ -4,6 +4,7 @@ the ledger core, and over the Semgrep rule that holds the same shape."""
 import ast
 import fnmatch
 import importlib
+import importlib.util
 import inspect
 import sys
 from pathlib import Path
@@ -215,6 +216,8 @@ def test_op_modules_discovers_every_handed_family_behind_the_short_name_alias_of
         monkeypatch.delitem(sys.modules, name)
     aliases = [ShortNameAlias(ROOT, f"scripts/swarm_ledger/{name}.py") for name in HANDED_FAMILIES]
     monkeypatch.setattr(sys, "meta_path", [*aliases, *sys.meta_path])
+    answers = [importlib.util.find_spec(name) for name in HANDED_FAMILIES]
+    assert all(answer is not None and answer.origin is None for answer in answers)
     discovered = {found.__name__.rpartition(".")[2] for found in check.op_modules()}
     registered = {found.__name__.rpartition(".")[2] for found in core.EXTENSION_OPS.values()}
     assert discovered == registered | {"ledger_core", *HANDED_FAMILIES}
