@@ -93,6 +93,7 @@ class Reach:
         self.invalid: set[Key] = set()
         self.arguments: dict[Key, dict[str, set[Key]]] = defaultdict(dict)
         self.dirty: set[Key] = set()
+        self.fields: dict[Key, dict[str, list[tuple[Key, ast.AST]]]] = defaultdict(lambda: defaultdict(list))
 
     def module_path(self, module: str) -> str | None:
         parts = module.split(".")
@@ -155,9 +156,18 @@ class Reach:
             return
         if value is not None:
             for target in targets:
-                for name in ast.walk(target):
-                    if isinstance(name, ast.Name):
-                        self.bindings[scope].setdefault(name.id, []).append(value)
+                self.bind_target(scope, target, value)
+
+    def bind_target(self, scope: Key, target: ast.AST, value: ast.AST) -> None:
+        if isinstance(target, ast.Name):
+            self.bindings[scope].setdefault(target.id, []).append(value)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for item in target.elts:
+                self.bind_target(scope, item, value)
+        elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+            owner = self.parents.get(scope)
+            if owner is not None and isinstance(self.nodes[owner], ast.ClassDef) and target.value.id in ("self", "cls"):
+                self.fields[owner][target.attr].append((scope, value))
 
     def imports(self, scope: Key, node: ast.Import | ast.ImportFrom) -> None:
         package = scope[0].removesuffix(".py").split("/")[:-1]
@@ -201,6 +211,9 @@ class Reach:
         if name in self.arguments[scope]:
             return self.arguments[scope][name]
         node = self.nodes[scope]
+        owner = self.parents.get(scope)
+        if name in ("self", "cls") and owner is not None and isinstance(self.nodes[owner], ast.ClassDef):
+            return {owner}
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             arguments = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
             arguments.extend(value for value in (node.args.vararg, node.args.kwarg) if value is not None)
@@ -255,7 +268,9 @@ class Reach:
                 result.add(owner)
             elif owner[1] == 0 or isinstance(self.nodes[owner], ast.ClassDef):
                 members = self.bindings[owner].get(name)
-                if members:
+                if name in self.fields[owner]:
+                    result.update(self.field_value(owner, name))
+                elif members:
                     for member in members:
                         result.update(self.value(owner, member))
                 elif name in self.aliases[owner]:
@@ -264,6 +279,15 @@ class Reach:
                     result.update(self.missing_attribute(owner, name))
             else:
                 result.add(UNKNOWN)
+        return result
+
+    def field_value(self, owner: Key, name: str) -> set[Key]:
+        token = owner, f"<field:{name}>"
+        if token in self.active:
+            return {UNKNOWN}
+        self.active.add(token)
+        result = set[Key]().union(*(self.value(scope, value) for scope, value in self.fields[owner][name]))
+        self.active.remove(token)
         return result
 
     def missing_attribute(self, owner: Key, name: str) -> set[Key]:
@@ -413,11 +437,19 @@ class Reach:
             return self.call_value(key, node)
         if kind:
             return {UNKNOWN}
+        return self.callables(key, node) | self.patch_imports(key, node)
+
+    def callables(self, key: Key, node: ast.Call) -> set[Key]:
         functions = self.value(key, node.func)
+        for function in list(functions):
+            if function[0] and isinstance(self.nodes[function], ast.ClassDef):
+                functions.update(self.bindings_to_keys(function, "__init__"))
+                functions.update(self.bindings_to_keys(function, "__new__"))
         for function in functions:
-            if function[0] and isinstance(self.nodes[function], (ast.FunctionDef, ast.AsyncFunctionDef)):
-                self.associate(key, function, node)
-        return functions | self.patch_imports(key, node)
+            if function[0] and isinstance(definition := self.nodes[function], (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if definition.name not in ("__init__", "__new__"):
+                    self.associate(key, function, node)
+        return functions
 
     def patch_imports(self, key: Key, node: ast.Call) -> set[Key]:
         parts = dotted(node.func)

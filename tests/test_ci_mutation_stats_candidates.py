@@ -152,6 +152,16 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
             ["test_child_import"],
         ),
         (
+            "class Helper:\n"
+            "    def __init__(self):\n"
+            "        target(1)\n"
+            "def test_constructor():\n"
+            "    Helper()\n"
+            "def test_unrelated():\n"
+            "    assert True\n",
+            ["test_constructor"],
+        ),
+        (
             "from pathlib import Path\n"
             "def test_file_unrelated():\n"
             "    with Path('runs.txt').open('a') as stream:\n"
@@ -178,6 +188,7 @@ def select(pytester: pytest.Pytester, source: str, *, plugin: str = "") -> dict[
         "later-reassignment",
         "conditional-reassignment",
         "child-module-initialization",
+        "constructor-reach",
         "unrelated-file-methods",
     ],
 )
@@ -194,8 +205,15 @@ def test_statistics_candidates_preserve_indirect_reach_and_order(
     [
         "def pytest_pyfunc_call(pyfuncitem):\n    from app import target\n    target(1)\n",
         "def pytest_assertion_pass(item, lineno, orig, expl):\n    from app import target\n    target(1)\n",
+        "class Recorder:\n"
+        "    def __init__(self):\n        self.calls = {}\n"
+        "    def pytest_runtest_logreport(self, report):\n"
+        "        self.calls[report.nodeid] = report.passed or self.calls.get(report.nodeid, False)\n"
+        "        self.record()\n"
+        "    def record(self):\n        from app import target\n        target(1)\n"
+        "def pytest_configure(config):\n    config.pluginmanager.register(Recorder())\n",
     ],
-    ids=["function-call", "assertion-pass"],
+    ids=["function-call", "assertion-pass", "bound-method"],
 )
 def test_statistics_candidates_keep_runtime_hook_reach(pytester: pytest.Pytester, hook: str) -> None:
     result = select(
@@ -204,6 +222,20 @@ def test_statistics_candidates_keep_runtime_hook_reach(pytester: pytest.Pytester
         plugin=hook,
     )
     assert result["selected"] == ["test_first", "test_second"]
+
+
+@pytest.mark.feature("mutation-stats-trace-candidates")
+def test_statistics_candidates_ignore_unrelated_bound_hook_state(pytester: pytest.Pytester) -> None:
+    result = select(
+        pytester,
+        "def test_unrelated():\n    assert True\ndef test_reaches():\n    assert target(1) == 2\n",
+        plugin="class Recorder:\n"
+        "    def __init__(self):\n        self.calls = {}\n"
+        "    def pytest_runtest_logreport(self, report):\n"
+        "        self.calls[report.nodeid] = report.passed or self.calls.get(report.nodeid, False)\n"
+        "def pytest_configure(config):\n    config.pluginmanager.register(Recorder())\n",
+    )
+    assert result["selected"] == ["test_reaches"]
 
 
 @pytest.mark.feature("mutation-stats-trace-candidates")
