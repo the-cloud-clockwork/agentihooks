@@ -18,7 +18,7 @@ from scripts.events.bus import SERVE_WAITED_MS
 from scripts.handoff import envelope, transfers
 from scripts.hive import account_slots
 from scripts.hive import admission as hive_admission
-from scripts.hub import branch_heads, lease
+from scripts.hub import admission_seats, branch_heads, lease
 from scripts.swarm import admission_view, offer_quota, readiness, run_window, successor_fill
 from scripts.swarm.execution import TERMINAL_STATES
 from scripts.swarm.ledger_client import LedgerClient
@@ -137,6 +137,9 @@ class Admission:
             )
             return {hive_admission.HELD: unplaceable}
         timer.mark("placement")
+        if seatless := self._seatless(slug, request, view.rows[task_id]):
+            refused(slug, request, seatless)
+            return {hive_admission.HELD: seatless}
         if self._unclaimable(slug, request, view.rows):
             return None
         timer.mark("cap")
@@ -262,6 +265,17 @@ class Admission:
         if not readiness.placeable(row, hive, readiness.declared(self.store, hive)):
             return "the task is workstation off the root hive, pinned to another hive or needs what the hive lacks"
         return ""
+
+    def _seatless(self, slug: str, request: dict[str, Any], task: dict[str, Any]) -> str:
+        from scripts.hive import registry
+
+        record: Any = registry.show(self.store.redis, request["hive"])
+        if record is None:
+            return ""
+        harnesses = offer_quota.permitted(self.store.config(slug), request["lane"], task)
+        if admission_seats.available(request["hive"], record.get("slots"), harnesses, self.clock()):
+            return ""
+        return "no free account seat on the asking hive"
 
     def _reserved(self, slug: str, row: dict[str, Any], hive: str) -> int:
         """The root slots kept for the waiting tasks only the root hive takes of every events swarm, each read through

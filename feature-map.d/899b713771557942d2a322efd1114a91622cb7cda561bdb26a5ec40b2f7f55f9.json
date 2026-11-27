@@ -1,6 +1,7 @@
 {
   "id": "hub-admission-hive-account-seat",
   "origin": "regression",
+  "rules": ["hub-admission-skips-account-seats"],
   "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-admit-account-seat",
   "behaviour": "Hub admission holds before claiming when the asking hive has no free permitted account seat, preserves the offer for another hive, and accepts hives without slot records.",
   "seam": "Admission.admit and admission_seats.available over hive registry slots and account slot occupancy",

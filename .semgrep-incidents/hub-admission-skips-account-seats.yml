@@ -1,0 +1,21 @@
+rules:
+  - id: hub-admission-skips-account-seats
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Admission claimed an offer before checking the asking hive's account seats, so a later spawn refusal reopened
+      the claim and raised its generation. Hold the offer with self._seatless before self._claim when no permitted
+      account on that hive is below its cap.
+    paths:
+      include:
+        - /scripts/hub/admission.py
+        - hub-admission-skips-account-seats.py
+    patterns:
+      - pattern-inside: |
+          def admit(self, ...):
+              ...
+      - pattern: self._claim(...)
+      - pattern-not-inside: |
+          if <... self._seatless(...) ...>:
+              ...
+          ...
