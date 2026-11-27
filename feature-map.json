@@ -17083,6 +17083,7 @@
         "tests/test_init_agent.py::test_native_authentication_help_names_the_supported_modes",
         "tests/test_init_agent.py::test_native_authentication_request_resolves_the_selected_harness",
         "tests/test_init_agent.py::test_native_authentication_request_refuses_contradictory_routing",
+        "tests/test_init_agent.py::test_legacy_authentication_keeps_routed_only_compatibility",
         "tests/test_init_agent.py::test_native_authentication_keeps_routed_refusal_scoped_to_explicit_modes",
         "tests/test_named_native_authentication.py::test_missing_claude_named_reference_never_selects_another_account",
         "tests/test_named_native_authentication.py::test_codex_named_reference_preserves_expiry_validation",

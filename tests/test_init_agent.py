@@ -122,16 +122,32 @@ def test_native_authentication_request_resolves_the_selected_harness(
 
 
 @pytest.mark.feature("quick-native-authentication")
-def test_native_authentication_request_refuses_contradictory_routing(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("auth", ["default", "named:alpha"])
+def test_native_authentication_request_refuses_contradictory_routing(
+    auth: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import argparse
 
     from scripts.gates import entry
 
     monkeypatch.setattr(entry, "native", lambda *args, **kwargs: False)
-    args = argparse.Namespace(auth="default", routed_only=True, agent="claude")
+    args = argparse.Namespace(auth=auth, routed_only=True, agent="claude")
     with pytest.raises(ValueError) as error:
         init_agent._auth_request(args, {})
     assert str(error.value) == "explicit authentication cannot combine with --routed-only"
+
+
+@pytest.mark.feature("quick-native-authentication")
+@pytest.mark.parametrize("auth", ["", "interactive"])
+def test_legacy_authentication_keeps_routed_only_compatibility(auth: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    import argparse
+
+    from scripts.gates import entry
+
+    monkeypatch.setattr(entry, "native", lambda *args, **kwargs: False)
+    args = argparse.Namespace(auth=auth, routed_only=True, agent="claude")
+    init_agent._auth_request(args, {})
+    assert args.auth == auth
 
 
 @pytest.mark.feature("quick-native-authentication")
