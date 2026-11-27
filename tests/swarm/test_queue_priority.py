@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -380,7 +381,7 @@ def test_a_refused_requeue_alerts_the_ledger_and_still_marks_the_pull_retrying(
 ) -> None:
     p = priority
 
-    def graphql(query, variables, run):
+    def graphql(query: str, variables: dict[str, Any], run: Any) -> Any:
         if "enqueuePullRequest" in query:
             raise SwarmError("GitHub unavailable")
         return GRAPHQL(query, variables, p.queue.run)
