@@ -264,18 +264,24 @@ class Reach:
     def attribute(self, owners: set[Key], name: str) -> set[Key]:
         result: set[Key] = set()
         for owner in owners:
-            if not owner[0]:
+            if owner[0] and name in ("__name__", "__qualname__", "__module__", "__doc__", "__file__", "__package__"):
+                result.add(EXTERNAL)
+            elif not owner[0]:
                 result.add(owner)
             elif owner[1] == 0 or isinstance(self.nodes[owner], ast.ClassDef):
                 members = self.bindings[owner].get(name)
                 if name in self.fields[owner]:
                     result.update(self.field_value(owner, name))
-                elif members:
+                if members:
                     for member in members:
                         result.update(self.value(owner, member))
                 elif name in self.aliases[owner]:
                     result.update(self.binding(owner, name))
-                else:
+                elif (
+                    name not in self.fields[owner]
+                    or isinstance(self.nodes[owner], ast.ClassDef)
+                    and cast(ast.ClassDef, self.nodes[owner]).bases
+                ):
                     result.update(self.missing_attribute(owner, name))
             else:
                 result.add(UNKNOWN)
@@ -400,6 +406,10 @@ class Reach:
 
     def references(self, key: Key) -> set[Key]:
         result: set[Key] = set()
+        if isinstance(self.nodes[key], ast.ClassDef):
+            for name in self.bindings[key]:
+                if name.startswith("__") and name.endswith("__"):
+                    result.update(self.bindings_to_keys(key, name))
         nodes = self.executed(key)
         called = {id(node.func) for node in nodes if isinstance(node, ast.Call)}
         for node in nodes:
@@ -409,6 +419,8 @@ class Reach:
                 result.update(self.call_edges(key, node))
             elif isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Load):
                 values = self.value(key, node)
+                if isinstance(node, ast.Attribute) and UNKNOWN in values:
+                    result.add(UNKNOWN)
                 result.update(value for value in values if value[0] and value[1] != 0)
                 if id(node) not in called and self.lookup_kind(key, node) in (
                     "getfixturevalue",
@@ -542,6 +554,7 @@ class Reach:
                 pending.append(parent)
 
     def function_keys(self, function: Any) -> set[Key] | None:
+        owner = getattr(function, "__self__", None)
         try:
             function = inspect.unwrap(function)
             source = inspect.getsourcefile(function)
@@ -566,7 +579,37 @@ class Reach:
             <= code.co_firstlineno
             <= (node.end_lineno or node.lineno)
         }
+        if owner is not None:
+            origins = self.class_keys(owner)
+            for key in result:
+                definition = self.nodes[key]
+                if isinstance(definition, (ast.FunctionDef, ast.AsyncFunctionDef)) and definition.args.args:
+                    name = definition.args.args[0].arg
+                    previous = self.arguments[key].get(name, set())
+                    if not origins <= previous:
+                        self.arguments[key][name] = previous | origins
+                        self.dirty.add(key)
         return result or None
+
+    def class_keys(self, owner: Any) -> set[Key]:
+        kind = cast(type[Any], owner if inspect.isclass(owner) else type(owner))
+        try:
+            source = inspect.getsourcefile(kind)
+        except TypeError:
+            return {UNKNOWN}
+        if source is None:
+            return {UNKNOWN}
+        path = Path(source).resolve()
+        if not path.is_relative_to(self.root):
+            return {UNKNOWN}
+        parts = path.relative_to(self.root).parts
+        relative = Path(*(parts[1:] if parts[0] == "mutants" else parts)).as_posix()
+        self.read(relative)
+        return {
+            key
+            for key, node in self.nodes.items()
+            if key[0] == relative and isinstance(node, ast.ClassDef) and node.name == kind.__name__
+        } or {UNKNOWN}
 
     def reaches(self, function: Any) -> bool:
         keys = self.function_keys(function)
