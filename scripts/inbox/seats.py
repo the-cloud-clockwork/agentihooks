@@ -210,6 +210,11 @@ class SeatMemory:
         """The set of the swarm's seat addresses that hold a learned list."""
         return f"{PREFIX}-learned:{slug}"
 
+    def learned_listed(self, slug: str) -> str:
+        """The key marking that a keyspace scan added the swarm's learned seats to its index; without it the next
+        scoped read claims that scan again."""
+        return f"{self.learned_index(slug)}:listed"
+
     def learned(self, address: str) -> list[dict[str, Any]]:
         return [_entry(raw) for raw in self.redis.lrange(self.key(address, "learned"), 0, -1)]
 
@@ -226,17 +231,22 @@ class SeatMemory:
 
     def _learned_seats(self, slug: str) -> set[str]:
         """The addresses learn recorded for the swarm, with the seats a keyspace scan finds; one caller per rescan
-        window claims that scan and marks the index listed only once its seats are added, so a failed scan is retried
-        after the claim lapses and notes a writer of an older release adds without the index still load."""
+        window claims that scan, marks the index listed and releases the claim only once its seats are added, so a
+        failed scan is retried after the claim lapses and notes a writer of an older release adds without the index
+        still load."""
         index = self.learned_index(slug)
-        listed = f"{index}:listed"
-        if not self.redis.exists(listed) and self.redis.set(f"{index}:claim", 1, nx=True, ex=LEARNED_CLAIM_S):
+        listed = self.learned_listed(slug)
+        claim = f"{index}:claim"
+        if not self.redis.exists(listed) and self.redis.set(claim, 1, nx=True, ex=LEARNED_CLAIM_S):
             pattern = f"{PREFIX}:*@{slug}:learned"
             found: list[str] = list(self.redis.scan_iter(match=pattern, count=SCAN_PAGE))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             seats = [key[len(PREFIX) + 1 : -len(":learned")] for key in found]
             if seats:
                 self.redis.sadd(index, *seats)
-            self.redis.set(listed, 1, ex=LEARNED_RESCAN_S)
+            with self.redis.pipeline() as pipe:
+                pipe.set(listed, 1, ex=LEARNED_RESCAN_S)
+                pipe.delete(claim)
+                pipe.execute()
         members: set[str] = self.redis.smembers(index)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         return members
 

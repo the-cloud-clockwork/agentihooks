@@ -4808,6 +4808,7 @@
         "tests/swarm/test_learned_scope.py::test_notes_written_before_the_index_load_through_one_scan",
         "tests/swarm/test_learned_scope.py::test_an_expired_scan_marker_loads_notes_written_without_the_index",
         "tests/swarm/test_learned_scope.py::test_a_failed_scan_leaves_the_index_unlisted_and_a_held_claim_reads_the_index",
+        "tests/swarm/test_snapshot.py::test_a_restore_over_a_listed_swarm_loads_learned_notes_a_snapshot_left_out_of_the_index",
         "tests/swarm/test_learned_scope.py::test_learned_help_explains_the_explicit_full_listing"
       ]
     },

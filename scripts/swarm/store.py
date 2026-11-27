@@ -909,7 +909,7 @@ class RedisStore:
         seated = {address for address in held if address.endswith(f"@{slug}")}
         mail, addresses = InboxStore(self.redis), cast(list[str], sorted(named | seated))  # pragma: no mutate
         singles: list[tuple[list[str], dict[str, list[str]]]] = [
-            ([key], {}) for key in [*sorted(own), *seats, self.culture.key(slug)]
+            ([key], {}) for key in [*sorted(own), *seats, self.memory.learned_index(slug), self.culture.key(slug)]
         ]
         names: list[tuple[list[str], dict[str, list[str]]]] = [([key], {}) for key in self.names.swarm_keys(slug)]
         inboxes = [_inbox_group(mail, address) for address in addresses]
@@ -927,7 +927,7 @@ class RedisStore:
 
         with self.redis.pipeline() as pipe:
             pipe.delete(*self.redis.scan_iter(match=self.key(slug, "*")), *state["keys"])
-            pipe.delete(self.seats.legacy_listed(slug))
+            pipe.delete(self.seats.legacy_listed(slug), self.memory.learned_listed(slug))
             for key, entry in state["keys"].items():
                 _WRITE[entry["type"]](pipe, key, entry["value"])
                 if entry["ttl_ms"] > 0:

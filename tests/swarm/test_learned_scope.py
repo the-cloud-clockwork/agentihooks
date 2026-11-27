@@ -220,6 +220,7 @@ def test_notes_written_before_the_index_load_through_one_scan(
     assert scans == [{"match": f"{PREFIX}:*@sw:learned", "count": SCAN_PAGE}]
     assert store.redis.get(marker) == "1"
     assert 0 < store.redis.ttl(marker) <= LEARNED_RESCAN_S
+    assert not store.redis.exists(f"{memory.learned_index('sw')}:claim")
 
 
 @pytest.mark.feature("swarm-learned-scope")
