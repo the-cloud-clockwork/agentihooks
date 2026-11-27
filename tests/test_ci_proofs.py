@@ -62,14 +62,65 @@ def test_a_focused_proof_is_red_unless_every_test_path_is_on_one_line_under_test
     assert result.returncode == code, result.stdout + result.stderr
 
 
-def test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota():
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+@pytest.mark.parametrize(
+    ("replay", "quota", "expected"),
+    [(False, "3", "3"), (False, "7", "7"), (True, "7", "0")],
+    ids=["ordinary-three", "ordinary-seven", "serial-corpus"],
+)
+def test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota(
+    replay: bool, quota: str, expected: str, tmp_path: Path
+) -> None:
     step = next(s for s in _workflow()["jobs"]["tests"]["steps"] if s.get("name") == "Run selected tests")
-    lines = [line.strip() for line in step["run"].splitlines() if "workers" in line]
-    assert lines == [
-        "workers=$(python -m scripts.ci_cpu_quota)",
-        'python -m pytest "${paths[@]}" -v -n "$workers" '
-        '--dist loadgroup -p tests.flake_ledger --tb=short 2>&1 | tee "$log" || status=$?',
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "python"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'if [[ "$1 $2" == "-m scripts.ci_cpu_quota" ]]; then echo "$PROOF_QUOTA"; exit 0; fi\n'
+        'if [[ "$1 $2" == "-m pytest" ]]; then printf "%s\\n" "$@" > "$PROOF_ARGUMENTS"; '
+        'echo "=== 1 passed in 0.10s ==="; exit 0; fi\n'
+        f'exec "{sys.executable}" "$@"\n'
+    )
+    stub.chmod(0o755)
+    arguments = tmp_path / "arguments"
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "TEST_PATHS": "tests/test_a.py",
+            "RUNNER_TEMP": str(tmp_path),
+            "MANIFEST_REPLAY": str(replay).lower(),
+            "PROOF_QUOTA": quota,
+            "PROOF_ARGUMENTS": str(arguments),
+        },
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert arguments.read_text().splitlines() == [
+        "-m",
+        "pytest",
+        "tests/test_a.py",
+        "-v",
+        "-n",
+        expected,
+        "--dist",
+        "loadgroup",
+        "-p",
+        "tests.flake_ledger",
+        "--tb=short",
     ]
+
+
+@pytest.mark.feature("dep-manifest-raw-arrivals")
+def test_only_the_real_corpus_test_job_has_the_extended_bound() -> None:
+    jobs = _workflow()["jobs"]
+    assert jobs["tests"]["timeout-minutes"] == "${{ inputs.tests == 'tests/dep_manifest_replay.py' && 45 || 15 }}"
+    assert jobs["operations-receipts"]["timeout-minutes"] == 15
 
 
 @pytest.mark.parametrize(

@@ -15,6 +15,7 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 INTERVAL = 30
 BOUND = 55 * 60
@@ -50,6 +51,55 @@ def started(api: str, repo: str, run_id: str, attempt: str, token: str, prefix: 
     return True if not remaining else all(not queued(job) for job in remaining)
 
 
+def history(api: str, repo: str, run_id: str, token: str) -> list[dict[str, Any]] | None:
+    found = []
+    page = 1
+    while True:
+        request = urllib.request.Request(
+            f"{api}/repos/{repo}/actions/runs/{run_id}/jobs?filter=all&per_page=100&page={page}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+                payload = json.loads(response.read() or b"{}")
+        except (OSError, ValueError):
+            return None
+        jobs = payload.get("jobs") or []
+        found.extend(jobs)
+        if len(found) >= payload.get("total_count", len(found)):
+            return found
+        if not jobs:
+            return None
+        page += 1
+
+
+def raw_state(jobs: list[dict[str, Any]], attempt: int, prefix: str, shards: int) -> tuple[bool | None, bool, bool]:
+    numbered = {f"{prefix}3.12, {shard})" for shard in range(1, shards + 1)}
+    copy = f"{prefix}3.12, copy)"
+    latest = {
+        job["name"]: job
+        for job in sorted(jobs, key=lambda job: job["id"])
+        if job["name"] in numbered | {copy} and int(job["run_attempt"]) <= attempt
+    }
+    if not latest:
+        return None, False, False
+    newest = max(latest.values(), key=lambda job: (int(job["run_attempt"]), job["id"]))
+    expected = {copy} if newest["name"] == copy else numbered
+    selected = {name: job for name, job in latest.items() if name in expected}
+    upstream = any(
+        int(job["run_attempt"]) == attempt and job["name"] in {"select", "split", "reuse", "admission", "lab-verdict"}
+        for job in jobs
+    )
+    materialized = not upstream or all(int(job["run_attempt"]) == attempt for job in selected.values())
+    ended = set(selected) == expected and materialized and all(completed(job) for job in selected.values())
+    complete = ended and all(job.get("conclusion") == "success" for job in selected.values())
+    failed = ended and any(
+        int(job["run_attempt"]) == attempt and job.get("conclusion") != "success" for job in selected.values()
+    )
+    remaining = [job for job in selected.values() if not completed(job)]
+    return materialized and all(not queued(job) for job in remaining), complete, failed
+
+
 def main() -> int:
     """Poll this run attempt's shard jobs and keep STATE current until the bound runs out."""
     token = os.environ["GH_APP_TOKEN"]
@@ -58,9 +108,28 @@ def main() -> int:
     run_id = os.environ["GITHUB_RUN_ID"]
     attempt = os.environ["GITHUB_RUN_ATTEMPT"]
     prefix = sys.argv[1]
+    raw = os.environ.get("COVERAGE_RAW") == "true"
     deadline = time.monotonic() + BOUND
     while time.monotonic() < deadline:
-        state = started(api, repo, run_id, attempt, token, prefix)
+        if raw:
+            jobs = history(api, repo, run_id, token)
+            state, complete, failed = (
+                (None, False, False)
+                if jobs is None
+                else raw_state(jobs, int(attempt), prefix, int(os.environ["SHARDS"]))
+            )
+            Path(STATE + ".complete").write_text(
+                json.dumps(
+                    {
+                        "run": run_id,
+                        "attempt": int(attempt),
+                        "complete": complete,
+                        **({"failed": True} if failed else {}),
+                    }
+                )
+            )
+        else:
+            state = started(api, repo, run_id, attempt, token, prefix)
         if state is not None:
             Path(STATE).write_text("started" if state else "queued")
         time.sleep(INTERVAL)
