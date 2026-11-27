@@ -1599,15 +1599,15 @@ class Scheduler:
         return actions
 
     def _output(self, state: State, check: str, status: str) -> Output:
-        """Return a check run's output: its units, none for a skipped authoritative gate, the units a grade no newer
-        head superseded lost without a verdict, the grade run, the grader revision, the head's commit page and, on a
-        gate's check run, the stored log of each failed static unit."""
+        """Return a check run's output: its units, none for a skipped authoritative gate, the units a check that
+        concludes neutral lost without a verdict, the grade run, the grader revision, the head's commit page and, on
+        a gate's check run, the stored log of each failed static unit."""
         refs = list(state.units) if check == REQUIRED else state.gates.get(check, [])
         slots = [state.units[ref] for ref in refs]
         units = tuple(Unit(slot.kind, slot.key, tuple(slot.members)) for slot in slots)
         title = f"{CLASSES[state.tier]} grade {status}"
         summary = f"{len(units)} units of {check} on {state.head} against {state.base}"
-        if not state.superseded:
+        if _checks(state)[check][1] == NEUTRAL:
             summary += _lost(slots)
         logs = () if check == REQUIRED else self._logs(slots)
         return Output(title, summary, units, state.run, state.grader, f"{state.repo}/commit/{state.head}", logs)

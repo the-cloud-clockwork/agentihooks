@@ -241,7 +241,8 @@ class Queue:
         enqueue; a job with no rank sorts after every ranked one, as every job enqueued before ranks existed does. A
         known job still pending under a less urgent rank moves to this one and keeps its place by enqueue order. A
         known job that ended without a verdict, lost, crashed or unable to run, is replaced in the same step by a
-        fresh pending job with all its attempts and no expiry, so a grade that needs the unit runs it again."""
+        fresh pending job that has used none of its attempts and holds no expiry, so a grade that needs the unit runs
+        it again."""
         added: list[str] = []
         for unit in units:
             job = f"{head}:{unit.kind}:{unit.key}"
