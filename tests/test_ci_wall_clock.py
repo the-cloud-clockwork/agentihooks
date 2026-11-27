@@ -153,16 +153,22 @@ def test_refuses_an_empty_or_unparseable_test_tree(tmp_path, source):
     assert main(["--root", str(tmp_path)]) == 1
 
 
-def test_lint_checks_the_head_tree_with_the_protected_timing_grader():
+def test_lint_checks_the_head_tree_with_the_protected_timing_grader() -> None:
     import yaml
 
     root = Path(__file__).resolve().parents[1]
     workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
     lint = workflow["jobs"]["lint"]
-    step = next(step for step in lint["steps"] if step.get("name") == "Require wall clock markers on elapsed bounds")
+    step = next(step for step in lint["steps"] if "python -m scripts.ci_wall_clock --root" in step.get("run", ""))
     assert step["if"] == "${{ !cancelled() }}"
-    assert 'cd "$RUNNER_TEMP/grader"' in step["run"]
-    assert 'python -m scripts.ci_wall_clock --root "$GITHUB_WORKSPACE"' in step["run"]
+    assert (
+        'if [[ -f "$RUNNER_TEMP/grader/scripts/ci_wall_clock.py" ]]; then\n'
+        '  cd "$RUNNER_TEMP/grader"\n'
+        '  python -m scripts.ci_wall_clock --root "$GITHUB_WORKSPACE"\n'
+        "else\n"
+        "  python -m scripts.ci_wall_clock\n"
+        "fi\n"
+    ) in step["run"]
     assert "lint" in workflow["jobs"]["gate-required"]["needs"]
 
 

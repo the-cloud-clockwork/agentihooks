@@ -5,6 +5,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -17,8 +18,8 @@ LINT_CONTROLS = [
     "Check every pull request job is a need of Gate Required",
     "Hold the size and complexity limits",
     "Hold swallowed exceptions in hooks and gates",
-    "Hold dead code in hooks and scripts",
     "Hold the locked guard tests",
+    "Run the wall clock, dead code and feature map scans together",
     "Pin thresholds, floors and allowlists against the base",
 ]
 LINT_SETUP = [
@@ -38,6 +39,8 @@ ACTIONS_SETUP = [
     "Check out the base revision",
     "Check out the protected grader",
 ]
+LINT_SCANS = {"wall-clock": "ci_wall_clock", "dead-code": "dead_code", "feature-map": "feature_map"}
+COMBINED_SCANS = "Run the wall clock, dead code and feature map scans together"
 
 
 def _workflow():
@@ -188,6 +191,87 @@ def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_re
     step = _workflow()["jobs"][job]["steps"][names.index(control)]
     assert step["if"] == "${{ !cancelled() }}"
     assert max(names.index(name) for name in setup) < names.index(control)
+
+
+def _scan_steps() -> list[dict[str, Any]]:
+    commands = [f"python -m scripts.{module}" for module in LINT_SCANS.values()]
+    steps: list[dict[str, Any]] = _workflow()["jobs"]["lint"]["steps"]
+    return [step for step in steps if any(command in step.get("run", "") for command in commands)]
+
+
+def _scan_env(tmp_path: Path, failing: tuple[str, ...]) -> dict[str, str]:
+    scripts = tmp_path / "grader" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "__init__.py").write_text("")
+    quota = f'import sys\n\nprint("cpu quota read", file=sys.stderr)\nsys.exit({int("cpu-quota" in failing)})\n'
+    (scripts / "ci_cpu_quota.py").write_text(quota)
+    for scan, module in LINT_SCANS.items():
+        stub = f'import sys\n\nARGUMENT = "--base"\nprint("{scan} scanned")\nsys.exit({int(scan in failing)})\n'
+        (scripts / f"{module}.py").write_text(stub)
+    (tmp_path / "base").mkdir()
+    (tmp_path / "workspace").mkdir()
+    return {
+        **os.environ,
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_WORKSPACE": str(tmp_path / "workspace"),
+        "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+    }
+
+
+def _run_scan_step(step: dict[str, Any], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    assert step["if"] == "${{ !cancelled() }}"
+    return subprocess.run(
+        ["bash", "-e", "-c", step["run"]], env=env, cwd=env["RUNNER_TEMP"], capture_output=True, text=True, check=False
+    )
+
+
+@pytest.mark.parametrize("failing", sorted(LINT_SCANS))
+@pytest.mark.feature("lint-scans-run-together")
+def test_one_failing_lint_scan_turns_the_scans_red_while_every_scan_still_runs(tmp_path: Path, failing: str) -> None:
+    env = _scan_env(tmp_path, (failing,))
+    results = [_run_scan_step(step, env) for step in _scan_steps()]
+    output = "".join(result.stdout + result.stderr for result in results)
+    assert any(result.returncode != 0 for result in results)
+    assert [scan for scan in LINT_SCANS if f"{scan} scanned" in output] == list(LINT_SCANS)
+
+
+@pytest.mark.feature("lint-scans-run-together")
+def test_the_lint_scans_pass_when_every_scan_passes(tmp_path: Path) -> None:
+    env = _scan_env(tmp_path, ())
+    results = [_run_scan_step(step, env) for step in _scan_steps()]
+    output = "".join(result.stdout + result.stderr for result in results)
+    assert [result.returncode for result in results] == [0] * len(results), output
+    assert [scan for scan in LINT_SCANS if f"{scan} scanned" in output] == list(LINT_SCANS)
+    assert output.count("cpu quota read") == 1
+    assert "::error::" not in output
+
+
+@pytest.mark.feature("lint-scans-run-together")
+def test_one_lint_step_runs_each_scan_in_its_own_background_subshell() -> None:
+    [step] = _scan_steps()
+    assert step["name"] == COMBINED_SCANS
+    for scan in LINT_SCANS:
+        timed = f'(\nstart=$SECONDS\ntrap \'echo "$((SECONDS - start))" > "$logs/{scan}.seconds"\' EXIT\n'
+        assert timed in step["run"]
+        assert f') > "$logs/{scan}.log" 2>&1 < /dev/null &\npids+=("$!")\norder+=("{scan}")\n' in step["run"]
+    assert 'wait "${pids[$index]}" || failed="$failed ${order[$index]}"\n' in step["run"]
+
+
+@pytest.mark.parametrize(
+    "failing",
+    [("wall-clock",), ("dead-code",), ("feature-map",), ("wall-clock", "feature-map"), ("cpu-quota",)],
+    ids=["wall-clock", "dead-code", "feature-map", "wall-clock-and-feature-map", "cpu-quota"],
+)
+@pytest.mark.feature("lint-scans-run-together")
+def test_the_combined_lint_scans_step_names_every_failed_scan_and_no_other(
+    tmp_path: Path, failing: tuple[str, ...]
+) -> None:
+    step = next(step for step in _workflow()["jobs"]["lint"]["steps"] if step.get("name") == COMBINED_SCANS)
+    result = _run_scan_step(step, _scan_env(tmp_path, failing))
+    errors = [line for line in result.stdout.splitlines() if line.startswith("::error::")]
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert errors == [f"::error::Lint scans failed on {' '.join(failing)}"]
+    assert [scan for scan in LINT_SCANS if f"{scan} scanned" in result.stdout] == list(LINT_SCANS)
 
 
 def test_lint_actions_grades_dashboard_columns_with_the_antoncore_dev_checker() -> None:
