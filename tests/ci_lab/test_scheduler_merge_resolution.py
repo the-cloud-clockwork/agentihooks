@@ -388,7 +388,8 @@ def test_a_rerequested_check_run_after_dev_moved_grades_the_new_merge(lab: Calla
     assert [grade.head for grade in live] == [HEAD_A]
     assert live[0].graded_commit == other_merge
     assert live[0].run != old.run
-    assert live[0].units[ref(leased_unit)].held is True
+    assert live[0].units[ref(leased_unit)].started is True
+    assert live[0].units[ref(leased_unit)].held is False
     assert live[0].units[ref(leased_unit)].outcome == ""
     stale = run.engine.grade(old.run)
     assert stale is not None and stale.units[ref(held_unit)].outcome == DROPPED
